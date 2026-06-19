@@ -5,6 +5,8 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { RootStackScreenProps } from '../navigation/types';
 import { RadioGroup } from '../components/RadioGroup';
+import { SoundSelect } from '../components/SoundSelect';
+import { useSoundPref } from '../state/useSoundPref';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import {
   applyLanguageChoice,
@@ -27,6 +29,10 @@ export default function SettingsScreen({
   const styles = useThemedStyles(makeStyles);
   const [language, setLanguage] = useState<LanguageChoice>('system');
   const [weekStart, setWeekStart] = useState<WeekStart>(1);
+  // The global default reminder sound (§14.4 root). System/Silent only on mobile
+  // — Custom needs an asset store the host lacks; a custom value synced from
+  // desktop still round-trips and is shown read-only by SoundSelect.
+  const globalSound = useSoundPref('sound.global');
 
   // Reflect the stored choices whenever the screen is focused (they may have
   // been applied on launch — or changed on another device — before this screen
@@ -88,6 +94,23 @@ export default function SettingsScreen({
         </Text>
       </View>
 
+      <View style={styles.section}>
+        <Text style={styles.heading} accessibilityRole="header">
+          {t('dialogs.settings.notifications.heading')}
+        </Text>
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.settings.notifications.hint')}
+        </Text>
+        {!globalSound.loading && (
+          <SoundSelect
+            label={t('dialogs.settings.notifications.globalLabel')}
+            value={globalSound.value}
+            allowInherit={false}
+            onChange={(next) => void globalSound.save(next)}
+          />
+        )}
+      </View>
+
       <View style={styles.links}>
         <Pressable
           accessibilityRole="button"
@@ -139,6 +162,7 @@ const makeStyles = (c: ThemeColors) =>
     screen: { flex: 1, backgroundColor: c.background },
     content: { padding: 16, gap: 20 },
     section: { gap: 8 },
+    heading: { fontSize: 17, fontWeight: '700', color: c.textLabel },
     hint: { fontSize: 14, color: c.textSecondary, lineHeight: 20 },
     links: { gap: 12 },
     link: {

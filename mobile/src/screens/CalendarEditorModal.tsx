@@ -17,7 +17,9 @@ import { Calendar, deleteCalendar, listCalendars } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
 import { renameContainer, setContainerColorLabel } from '../api/containerColor';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
+import { SoundSelect } from '../components/SoundSelect';
 import type { RootStackScreenProps } from '../navigation/types';
+import { useSoundPref } from '../state/useSoundPref';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Manage a single calendar: rename it, bind a colour label, or (local only)
@@ -48,6 +50,10 @@ export default function CalendarEditorModal({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // This calendar's default reminder sound (§14.4 container level), host-local +
+  // inheritable. Offered for every calendar (local + external) since the sound
+  // pref applies to any container's reminders.
+  const sound = useSoundPref(`sound.calendar.${calendarId}`);
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
@@ -232,6 +238,18 @@ export default function CalendarEditorModal({
         onChange={(id) => void setColour(id)}
         disabled={busy}
       />
+
+      {/* Default reminder sound (§14.4 container level) — System / Silent / use
+          the global default. Host-local + inheritable. */}
+      {!sound.loading && (
+        <SoundSelect
+          label={t('reminders.sound.label')}
+          value={sound.value}
+          allowInherit
+          onChange={(next) => void sound.save(next)}
+          disabled={busy}
+        />
+      )}
 
       {/* Delete (its events cascade away) — local calendars only; an external
           calendar is provider-owned, so it can't be deleted from here. */}

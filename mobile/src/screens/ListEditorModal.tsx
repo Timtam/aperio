@@ -26,7 +26,9 @@ import {
 } from '../api/containerColor';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { RadioGroup } from '../components/RadioGroup';
+import { SoundSelect } from '../components/SoundSelect';
 import type { RootStackScreenProps } from '../navigation/types';
+import { useSoundPref } from '../state/useSoundPref';
 import { useTaskStore } from '../state/taskStoreContext';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -94,6 +96,10 @@ export default function ListEditorModal({
   const [editingColor, setEditingColor] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // This list's default reminder sound (§14.4 container level), host-local +
+  // inheritable. Offered for every list since the sound pref applies to any
+  // container's reminders.
+  const sound = useSoundPref(`sound.tasklist.${listId}`);
 
   // Index of the row currently being renamed, so SR focus can be restored to it
   // on Save/Cancel (a rename doesn't change the row count, so the focus
@@ -462,6 +468,18 @@ export default function ListEditorModal({
         onChange={(id) => void setColour(id)}
         disabled={busy}
       />
+
+      {/* Default reminder sound (§14.4 container level) — System / Silent / use
+          the global default. Host-local + inheritable. */}
+      {!sound.loading && (
+        <SoundSelect
+          label={t('reminders.sound.label')}
+          value={sound.value}
+          allowInherit
+          onChange={(next) => void sound.save(next)}
+          disabled={busy}
+        />
+      )}
 
       {/* Members / sharing — external lists whose adapter declares it (§9.7);
           opens the dedicated members manager. */}
