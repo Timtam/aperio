@@ -2,8 +2,10 @@ import * as Notifications from 'expo-notifications';
 import { useEffect } from 'react';
 import { AppState, Platform } from 'react-native';
 
+import CalFfi from '../../modules/cal-ffi';
 import i18n from '../../i18n';
-import { upcomingReminders } from '../api/reminders';
+import { UpcomingReminder, upcomingReminders } from '../api/reminders';
+import { customSoundPath } from '../api/sounds';
 
 // Mobile reminder delivery. The desktop fires reminders from a live tokio
 // worker that sleeps until the next trigger; iOS suspends background JS, so
@@ -27,6 +29,10 @@ const CHANNEL_ID = 'reminders';
  *  so a no-sound reminder needs its own LOW-importance channel rather than a
  *  per-notification flag. */
 const SILENT_CHANNEL_ID = 'reminders-silent';
+/** Per-custom-sound channel id prefix (`reminders-custom-<sha256>`). Android
+ *  binds a channel's sound at creation (immutable), so each custom sound gets
+ *  its own create-once channel pointing at the imported file. */
+const CUSTOM_CHANNEL_PREFIX = 'reminders-custom-';
 /** Debounce for the post-mutation reschedule — a burst of edits coalesces. */
 const DEBOUNCE_MS = 2500;
 
@@ -60,10 +66,32 @@ async function ensureAndroidChannel(): Promise<void> {
   channelEnsured = true;
 }
 
-/** Whether this reminder's effective sound is "silent" (visual only). Anything
- *  else (system, or a custom sound we can't bundle yet) plays the default. */
-function isSilent(r: { sound?: { source?: { type?: string } } }): boolean {
-  return r.sound?.source?.type === 'silent';
+/** Resolve a reminder's OS delivery — which Android channel + the per-notification
+ *  sound (iOS). "Silent" → the LOW silent channel / no sound. A CUSTOM sound on
+ *  Android → a per-sound channel whose sound is the imported file (native
+ *  ensureCustomSoundChannel over a FileProvider URI); if the file isn't on this
+ *  device, the channel can't be made, or we're on iOS (which can't use a runtime
+ *  file as a notification sound), it falls back to the default sound. Everything
+ *  else → the default channel + default sound. Never throws. */
+async function resolveDelivery(
+  r: UpcomingReminder,
+): Promise<{ channelId: string; sound: 'default' | false }> {
+  const src = r.sound?.source;
+  if (src?.type === 'silent') return { channelId: SILENT_CHANNEL_ID, sound: false };
+  if (src?.type === 'custom' && Platform.OS === 'android') {
+    try {
+      const path = await customSoundPath(src.sha256);
+      if (path != null) {
+        const channelId = `${CUSTOM_CHANNEL_PREFIX}${src.sha256}`;
+        await CalFfi.ensureCustomSoundChannel(channelId, path, i18n.t('reminders.label'));
+        return { channelId, sound: 'default' };
+      }
+    } catch {
+      // Fall through to the default channel/sound — a missing file or a failed
+      // native channel must never lose the reminder.
+    }
+  }
+  return { channelId: CHANNEL_ID, sound: 'default' };
 }
 
 async function ensurePermission(): Promise<boolean> {
@@ -94,23 +122,24 @@ export async function rescheduleReminders(): Promise<void> {
       .filter((r) => new Date(r.trigger_at).getTime() > now)
       .slice(0, MAX_SCHEDULED);
     for (const r of due) {
-      const silent = isSilent(r);
+      // §14.4: the channel carries the sound on Android (silent / custom / default);
+      // iOS has no channels, so the per-notification `sound` is what matters there
+      // (Silent → false, else the default — iOS can't play a runtime custom file).
+      // Per-notification VOLUME isn't an OS concept (notifications use the system
+      // volume), so SoundConfig.volume is N/A.
+      const { channelId, sound } = await resolveDelivery(r);
       await Notifications.scheduleNotificationAsync({
         content: {
           title: r.title,
           body: r.body,
-          // §14.4: "Silent" plays no sound (visual only); anything else uses the
-          // OS default. iOS honours this per-notification field; Android takes it
-          // from the channel (below). Per-notification VOLUME isn't an OS concept
-          // — notifications use the system volume — so SoundConfig.volume is N/A.
-          sound: silent ? false : 'default',
+          sound,
           // Carried so a tap can route to the item (wired in App).
           data: { itemId: r.item_id, itemKind: r.item_kind },
         },
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.DATE,
           date: new Date(r.trigger_at),
-          channelId: silent ? SILENT_CHANNEL_ID : CHANNEL_ID,
+          channelId,
         },
       });
     }

@@ -262,6 +262,13 @@ public class CalFfiModule: Module {
       try self.host.deleteCustomSound(sha256: sha256)
     }
 
+    // No-op on iOS: UNNotificationSound only plays sounds bundled into the app
+    // at build time, so a runtime-imported custom sound can't drive a
+    // notification here — the scheduler keeps the default sound. (Android creates
+    // a per-sound channel; this stub keeps the JS surface uniform.)
+    AsyncFunction("ensureCustomSoundChannel") { (_: String, _: String, _: String) in
+    }
+
     // ─── User preferences (generic key/value; synced-key whitelist) ───
     AsyncFunction("getUserPref") { (key: String) -> String? in
       try self.host.getUserPref(key: key)

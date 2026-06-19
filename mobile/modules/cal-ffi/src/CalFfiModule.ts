@@ -204,6 +204,16 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   customSoundPath(sha256: string): Promise<string | null>;
   /** Delete a custom sound by hash (idempotent). */
   deleteCustomSound(sha256: string): Promise<void>;
+  /** ANDROID: create (once) a NotificationChannel `channelId` whose sound is the
+   *  custom audio file at `soundPath` (a FileProvider content URI), so an OS
+   *  notification on that channel plays it. iOS: a no-op (the OS can't use a
+   *  runtime file as a notification sound). Best-effort — the caller falls back
+   *  to the default sound on rejection. */
+  ensureCustomSoundChannel(
+    channelId: string,
+    soundPath: string,
+    channelName: string,
+  ): Promise<void>;
 
   // ── User preferences (generic key/value; synced-key whitelist) ──
   /** Read a user preference (opaque string), or null when unset. */

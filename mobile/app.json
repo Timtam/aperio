@@ -42,7 +42,8 @@
           "photosPermission": "Aperio accesses your photo library so you can set a contact's photo."
         }
       ],
-      "expo-audio"
+      "expo-audio",
+      "./plugins/withReminderSoundProvider"
     ]
   }
 }

@@ -1,5 +1,12 @@
 package expo.modules.calffi
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.content.Intent
+import android.media.AudioAttributes
+import android.os.Build
+import androidx.core.content.FileProvider
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.File
@@ -284,6 +291,46 @@ class CalFfiModule : Module() {
 
     AsyncFunction("deleteCustomSound") { sha256: String ->
       host.deleteCustomSound(sha256)
+    }
+
+    // Create (once) a NotificationChannel whose sound is a user-imported custom
+    // audio file. expo-notifications resolves only build-time res/raw sounds, so
+    // a runtime file needs its own channel pointing at a FileProvider content://
+    // URI the system-UI process can read. The channel id is stable per sound (the
+    // sha), so this is create-once — Android makes the channel sound immutable
+    // after creation. NOT a Rust/UniFFI call: pure Android. Any failure throws →
+    // the JS scheduler catches it and falls back to the default sound. iOS can't
+    // do this (UNNotificationSound is build-time-bundled), so it's Android-only;
+    // the iOS module provides a harmless no-op.
+    AsyncFunction("ensureCustomSoundChannel") {
+        channelId: String, soundPath: String, channelName: String ->
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return@AsyncFunction
+      val context = appContext.reactContext?.applicationContext
+        ?: throw IllegalStateException("CalFfi: no Android context for the sound channel")
+      val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+      // The channel's sound can't change after creation; the per-sound id means
+      // we only need to create it once.
+      if (nm.getNotificationChannel(channelId) != null) return@AsyncFunction
+      val uri = FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.remindersounds",
+        File(soundPath),
+      )
+      // The system-UI process plays the channel sound — grant it read access to
+      // our not-exported provider's URI.
+      context.grantUriPermission(
+        "com.android.systemui",
+        uri,
+        Intent.FLAG_GRANT_READ_URI_PERMISSION,
+      )
+      val attrs = AudioAttributes.Builder()
+        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+        .build()
+      val channel =
+        NotificationChannel(channelId, channelName, NotificationManager.IMPORTANCE_HIGH)
+      channel.setSound(uri, attrs)
+      nm.createNotificationChannel(channel)
     }
 
     // ─── User preferences (generic key/value; synced-key whitelist) ───────────
