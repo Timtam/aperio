@@ -614,6 +614,12 @@ public protocol HostProtocol: AnyObject, Sendable {
     func changeSyncPassphraseJson(oldPassphrase: String, newPassphrase: String) throws 
     
     /**
+     * Drop every `sync_log` row (the "clear history" action — also useful
+     * before sharing a screen). Mirrors the desktop `clear_sync_log`.
+     */
+    func clearSyncLog() throws 
+    
+    /**
      * Complete a host-driven OAuth flow: exchange the redirect's `code` (+ the
      * `pkce_verifier`/`state` from [`Self::begin_oauth_json`]) for tokens via
      * the plugin (`phase:"exchange"`, the network step), then create the
@@ -948,6 +954,13 @@ public protocol HostProtocol: AnyObject, Sendable {
     func listSyncConflictsJson() throws  -> String
     
     /**
+     * Recent `sync_log` rows as a JSON `SyncLogEntry[]` (newest first), capped
+     * at `limit` (and the table's own retention cap). The mobile Protokoll
+     * viewer. Mirrors the desktop `list_sync_log_entries`.
+     */
+    func listSyncLogJson(limit: UInt32) throws  -> String
+    
+    /**
      * The currently-pinned SFTP fingerprint for `host_port`, or `None`. Lets the
      * UI show "Pinned: SHA256:…" + the forget gesture without probing the server.
      */
@@ -978,9 +991,11 @@ public protocol HostProtocol: AnyObject, Sendable {
     /**
      * Push the local pending logs without fetching (call from RN AppState
      * "background"). Returns the number of logs pushed. Records the outcome in
-     * the failure latch like `sync_now`.
+     * the failure latch AND a `sync_log` row, like `sync_now`. `trigger` is the
+     * wire SyncTrigger string (`"kick"` for the debounced push, `"app_exit"`
+     * for the background flush — unknown ⇒ `kick`).
      */
-    func pushNow() throws  -> UInt32
+    func pushNow(trigger: String) throws  -> UInt32
     
     /**
      * Rename an account's display name. Persists the row + syncs the change
@@ -1118,9 +1133,13 @@ public protocol HostProtocol: AnyObject, Sendable {
      * Run one sync round (push local pending logs, fetch + apply foreign ones,
      * compaction audit) and return the `SyncRoundReport` as JSON. Errors with
      * "not configured" until `configure_sync_adapter_json` has run. Records the
-     * round's outcome in the failure latch (success resets it).
+     * round's outcome in the failure latch (success resets it) AND appends a
+     * `sync_log` row (the desktop scheduler's job; mobile has no scheduler, so
+     * the round records itself here). `trigger` is the wire SyncTrigger string
+     * (`"manual"` for the Settings button, `"app_start"`/`"periodic"` for the
+     * launch/foreground rounds — unknown ⇒ `manual`).
      */
-    func syncNowJson() throws  -> String
+    func syncNowJson(trigger: String) throws  -> String
     
     /**
      * The orchestrator's status as JSON (the desktop `SyncStatus` shape:
@@ -1419,6 +1438,17 @@ open func changeSyncPassphraseJson(oldPassphrase: String, newPassphrase: String)
             self.uniffiCloneHandle(),
         FfiConverterString.lower(oldPassphrase),
         FfiConverterString.lower(newPassphrase),$0
+    )
+}
+}
+    
+    /**
+     * Drop every `sync_log` row (the "clear history" action — also useful
+     * before sharing a screen). Mirrors the desktop `clear_sync_log`.
+     */
+open func clearSyncLog()throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_clear_sync_log(
+            self.uniffiCloneHandle(),$0
     )
 }
 }
@@ -2021,6 +2051,20 @@ open func listSyncConflictsJson()throws  -> String  {
 }
     
     /**
+     * Recent `sync_log` rows as a JSON `SyncLogEntry[]` (newest first), capped
+     * at `limit` (and the table's own retention cap). The mobile Protokoll
+     * viewer. Mirrors the desktop `list_sync_log_entries`.
+     */
+open func listSyncLogJson(limit: UInt32)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_list_sync_log_json(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt32.lower(limit),$0
+    )
+})
+}
+    
+    /**
      * The currently-pinned SFTP fingerprint for `host_port`, or `None`. Lets the
      * UI show "Pinned: SHA256:…" + the forget gesture without probing the server.
      */
@@ -2072,12 +2116,15 @@ open func previewSyncTargetJson(configJson: String)throws  -> String  {
     /**
      * Push the local pending logs without fetching (call from RN AppState
      * "background"). Returns the number of logs pushed. Records the outcome in
-     * the failure latch like `sync_now`.
+     * the failure latch AND a `sync_log` row, like `sync_now`. `trigger` is the
+     * wire SyncTrigger string (`"kick"` for the debounced push, `"app_exit"`
+     * for the background flush — unknown ⇒ `kick`).
      */
-open func pushNow()throws  -> UInt32  {
+open func pushNow(trigger: String)throws  -> UInt32  {
     return try  FfiConverterUInt32.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_push_now(
-            self.uniffiCloneHandle(),$0
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(trigger),$0
     )
 })
 }
@@ -2329,12 +2376,17 @@ open func syncConflictCount()throws  -> UInt32  {
      * Run one sync round (push local pending logs, fetch + apply foreign ones,
      * compaction audit) and return the `SyncRoundReport` as JSON. Errors with
      * "not configured" until `configure_sync_adapter_json` has run. Records the
-     * round's outcome in the failure latch (success resets it).
+     * round's outcome in the failure latch (success resets it) AND appends a
+     * `sync_log` row (the desktop scheduler's job; mobile has no scheduler, so
+     * the round records itself here). `trigger` is the wire SyncTrigger string
+     * (`"manual"` for the Settings button, `"app_start"`/`"periodic"` for the
+     * launch/foreground rounds — unknown ⇒ `manual`).
      */
-open func syncNowJson()throws  -> String  {
+open func syncNowJson(trigger: String)throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_sync_now_json(
-            self.uniffiCloneHandle(),$0
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(trigger),$0
     )
 })
 }
@@ -5816,6 +5868,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_change_sync_passphrase_json() != 15380) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_clear_sync_log() != 18521) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_complete_oauth_json() != 7847) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -5930,6 +5985,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_list_sync_conflicts_json() != 46993) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_list_sync_log_json() != 60629) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_pinned_sftp_host_key() != 44107) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -5939,7 +5997,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_preview_sync_target_json() != 3107) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_push_now() != 48331) {
+    if (uniffi_cal_ffi_checksum_method_host_push_now() != 4483) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_rename_account_json() != 49761) {
@@ -5987,7 +6045,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_sync_conflict_count() != 12817) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_sync_now_json() != 8892) {
+    if (uniffi_cal_ffi_checksum_method_host_sync_now_json() != 5198) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_sync_status_json() != 5739) {

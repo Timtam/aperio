@@ -146,11 +146,17 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
    *  e2e_enabled / …). */
   syncStatusJson(): Promise<string>;
   /** Run one sync round (push + fetch + apply); returns the SyncRoundReport as
-   *  JSON. Rejects "not configured" until a target is set. */
-  syncNowJson(): Promise<string>;
+   *  JSON. Rejects "not configured" until a target is set. `trigger` is the wire
+   *  SyncTrigger ("manual"/"app_start"/"periodic"/…) recorded in the sync log. */
+  syncNowJson(trigger: string): Promise<string>;
   /** Push local pending logs without fetching (RN AppState background); returns
-   *  the number of logs pushed. */
-  pushNow(): Promise<number>;
+   *  the number of logs pushed. `trigger` ("kick"/"app_exit"/…) is logged. */
+  pushNow(trigger: string): Promise<number>;
+  /** Recent sync-log rows (newest first) as a JSON `SyncLogEntry[]`, capped at
+   *  `limit`. */
+  listSyncLogJson(limit: number): Promise<string>;
+  /** Drop every sync-log row. */
+  clearSyncLog(): Promise<void>;
   /** Count of unresolved sync conflicts (the badge). */
   syncConflictCount(): Promise<number>;
   /** Every unresolved conflict as a JSON `ConflictRecord[]`. */

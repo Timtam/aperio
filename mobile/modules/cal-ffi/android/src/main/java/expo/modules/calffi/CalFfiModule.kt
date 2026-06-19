@@ -189,12 +189,20 @@ class CalFfiModule : Module() {
       host.syncStatusJson()
     }
 
-    AsyncFunction("syncNowJson") {
-      host.syncNowJson()
+    AsyncFunction("syncNowJson") { trigger: String ->
+      host.syncNowJson(trigger)
     }
 
-    AsyncFunction("pushNow") {
-      host.pushNow().toInt()
+    AsyncFunction("pushNow") { trigger: String ->
+      host.pushNow(trigger).toInt()
+    }
+
+    AsyncFunction("listSyncLogJson") { limit: Int ->
+      host.listSyncLogJson(limit.toUInt())
+    }
+
+    AsyncFunction("clearSyncLog") {
+      host.clearSyncLog()
     }
 
     AsyncFunction("syncConflictCount") {

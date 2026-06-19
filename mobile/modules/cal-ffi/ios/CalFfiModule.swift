@@ -165,12 +165,20 @@ public class CalFfiModule: Module {
       try self.host.syncStatusJson()
     }
 
-    AsyncFunction("syncNowJson") { () -> String in
-      try self.host.syncNowJson()
+    AsyncFunction("syncNowJson") { (trigger: String) -> String in
+      try self.host.syncNowJson(trigger: trigger)
     }
 
-    AsyncFunction("pushNow") { () -> Int in
-      Int(try self.host.pushNow())
+    AsyncFunction("pushNow") { (trigger: String) -> Int in
+      Int(try self.host.pushNow(trigger: trigger))
+    }
+
+    AsyncFunction("listSyncLogJson") { (limit: Int) -> String in
+      try self.host.listSyncLogJson(limit: UInt32(limit))
+    }
+
+    AsyncFunction("clearSyncLog") {
+      try self.host.clearSyncLog()
     }
 
     AsyncFunction("syncConflictCount") { () -> Int in

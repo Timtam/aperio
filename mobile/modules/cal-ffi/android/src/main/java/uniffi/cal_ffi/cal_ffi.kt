@@ -736,6 +736,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_change_sync_passphrase_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_clear_sync_log(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_complete_oauth_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_complete_sync_oauth_json(
@@ -811,6 +813,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_cal_ffi_checksum_method_host_list_color_labels_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_list_sync_conflicts_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_list_sync_log_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_pinned_sftp_host_key(
     ): Short
@@ -971,6 +975,8 @@ external fun uniffi_cal_ffi_fn_method_host_begin_oauth_json(`ptr`: Long,`pluginI
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_change_sync_passphrase_json(`ptr`: Long,`oldPassphrase`: RustBuffer.ByValue,`newPassphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_clear_sync_log(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_complete_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_complete_sync_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1047,13 +1053,15 @@ external fun uniffi_cal_ffi_fn_method_host_list_color_labels_json(`ptr`: Long,un
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_sync_conflicts_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_list_sync_log_json(`ptr`: Long,`limit`: Int,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_pinned_sftp_host_key(`ptr`: Long,`hostPort`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_preview_sftp_host_key_json(`ptr`: Long,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_preview_sync_target_json(`ptr`: Long,`configJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-external fun uniffi_cal_ffi_fn_method_host_push_now(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_cal_ffi_fn_method_host_push_now(`ptr`: Long,`trigger`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
 external fun uniffi_cal_ffi_fn_method_host_rename_account_json(`ptr`: Long,`id`: RustBuffer.ByValue,`newName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1085,7 +1093,7 @@ external fun uniffi_cal_ffi_fn_method_host_set_user_pref(`ptr`: Long,`key`: Rust
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_sync_conflict_count(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
-external fun uniffi_cal_ffi_fn_method_host_sync_now_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_cal_ffi_fn_method_host_sync_now_json(`ptr`: Long,`trigger`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_sync_status_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1338,6 +1346,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_change_sync_passphrase_json() != 15380.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_clear_sync_log() != 18521.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_complete_oauth_json() != 7847.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1452,6 +1463,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_list_sync_conflicts_json() != 46993.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_list_sync_log_json() != 60629.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_pinned_sftp_host_key() != 44107.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1461,7 +1475,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_preview_sync_target_json() != 3107.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_push_now() != 48331.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_push_now() != 4483.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_rename_account_json() != 49761.toShort()) {
@@ -1509,7 +1523,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_sync_conflict_count() != 12817.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_sync_now_json() != 8892.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_sync_now_json() != 5198.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_sync_status_json() != 5739.toShort()) {
@@ -2072,6 +2086,12 @@ public interface HostInterface {
     fun `changeSyncPassphraseJson`(`oldPassphrase`: kotlin.String, `newPassphrase`: kotlin.String)
     
     /**
+     * Drop every `sync_log` row (the "clear history" action — also useful
+     * before sharing a screen). Mirrors the desktop `clear_sync_log`.
+     */
+    fun `clearSyncLog`()
+    
+    /**
      * Complete a host-driven OAuth flow: exchange the redirect's `code` (+ the
      * `pkce_verifier`/`state` from [`Self::begin_oauth_json`]) for tokens via
      * the plugin (`phase:"exchange"`, the network step), then create the
@@ -2406,6 +2426,13 @@ public interface HostInterface {
     fun `listSyncConflictsJson`(): kotlin.String
     
     /**
+     * Recent `sync_log` rows as a JSON `SyncLogEntry[]` (newest first), capped
+     * at `limit` (and the table's own retention cap). The mobile Protokoll
+     * viewer. Mirrors the desktop `list_sync_log_entries`.
+     */
+    fun `listSyncLogJson`(`limit`: kotlin.UInt): kotlin.String
+    
+    /**
      * The currently-pinned SFTP fingerprint for `host_port`, or `None`. Lets the
      * UI show "Pinned: SHA256:…" + the forget gesture without probing the server.
      */
@@ -2436,9 +2463,11 @@ public interface HostInterface {
     /**
      * Push the local pending logs without fetching (call from RN AppState
      * "background"). Returns the number of logs pushed. Records the outcome in
-     * the failure latch like `sync_now`.
+     * the failure latch AND a `sync_log` row, like `sync_now`. `trigger` is the
+     * wire SyncTrigger string (`"kick"` for the debounced push, `"app_exit"`
+     * for the background flush — unknown ⇒ `kick`).
      */
-    fun `pushNow`(): kotlin.UInt
+    fun `pushNow`(`trigger`: kotlin.String): kotlin.UInt
     
     /**
      * Rename an account's display name. Persists the row + syncs the change
@@ -2576,9 +2605,13 @@ public interface HostInterface {
      * Run one sync round (push local pending logs, fetch + apply foreign ones,
      * compaction audit) and return the `SyncRoundReport` as JSON. Errors with
      * "not configured" until `configure_sync_adapter_json` has run. Records the
-     * round's outcome in the failure latch (success resets it).
+     * round's outcome in the failure latch (success resets it) AND appends a
+     * `sync_log` row (the desktop scheduler's job; mobile has no scheduler, so
+     * the round records itself here). `trigger` is the wire SyncTrigger string
+     * (`"manual"` for the Settings button, `"app_start"`/`"periodic"` for the
+     * launch/foreground rounds — unknown ⇒ `manual`).
      */
-    fun `syncNowJson`(): kotlin.String
+    fun `syncNowJson`(`trigger`: kotlin.String): kotlin.String
     
     /**
      * The orchestrator's status as JSON (the desktop `SyncStatus` shape:
@@ -2931,6 +2964,23 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_change_sync_passphrase_json(
         it,
         FfiConverterString.lower(`oldPassphrase`),FfiConverterString.lower(`newPassphrase`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Drop every `sync_log` row (the "clear history" action — also useful
+     * before sharing a screen). Mirrors the desktop `clear_sync_log`.
+     */
+    @Throws(StoreException::class)override fun `clearSyncLog`()
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_clear_sync_log(
+        it,
+        _status)
 }
     }
     
@@ -3714,6 +3764,25 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Recent `sync_log` rows as a JSON `SyncLogEntry[]` (newest first), capped
+     * at `limit` (and the table's own retention cap). The mobile Protokoll
+     * viewer. Mirrors the desktop `list_sync_log_entries`.
+     */
+    @Throws(StoreException::class)override fun `listSyncLogJson`(`limit`: kotlin.UInt): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_list_sync_log_json(
+        it,
+        FfiConverterUInt.lower(`limit`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * The currently-pinned SFTP fingerprint for `host_port`, or `None`. Lets the
      * UI show "Pinned: SHA256:…" + the forget gesture without probing the server.
      */
@@ -3780,15 +3849,17 @@ open class Host: Disposable, AutoCloseable, HostInterface
     /**
      * Push the local pending logs without fetching (call from RN AppState
      * "background"). Returns the number of logs pushed. Records the outcome in
-     * the failure latch like `sync_now`.
+     * the failure latch AND a `sync_log` row, like `sync_now`. `trigger` is the
+     * wire SyncTrigger string (`"kick"` for the debounced push, `"app_exit"`
+     * for the background flush — unknown ⇒ `kick`).
      */
-    @Throws(StoreException::class)override fun `pushNow`(): kotlin.UInt {
+    @Throws(StoreException::class)override fun `pushNow`(`trigger`: kotlin.String): kotlin.UInt {
             return FfiConverterUInt.lift(
     callWithHandle {
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_method_host_push_now(
         it,
-        _status)
+        FfiConverterString.lower(`trigger`),_status)
 }
     }
     )
@@ -4104,15 +4175,19 @@ open class Host: Disposable, AutoCloseable, HostInterface
      * Run one sync round (push local pending logs, fetch + apply foreign ones,
      * compaction audit) and return the `SyncRoundReport` as JSON. Errors with
      * "not configured" until `configure_sync_adapter_json` has run. Records the
-     * round's outcome in the failure latch (success resets it).
+     * round's outcome in the failure latch (success resets it) AND appends a
+     * `sync_log` row (the desktop scheduler's job; mobile has no scheduler, so
+     * the round records itself here). `trigger` is the wire SyncTrigger string
+     * (`"manual"` for the Settings button, `"app_start"`/`"periodic"` for the
+     * launch/foreground rounds — unknown ⇒ `manual`).
      */
-    @Throws(StoreException::class)override fun `syncNowJson`(): kotlin.String {
+    @Throws(StoreException::class)override fun `syncNowJson`(`trigger`: kotlin.String): kotlin.String {
             return FfiConverterString.lift(
     callWithHandle {
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_method_host_sync_now_json(
         it,
-        _status)
+        FfiConverterString.lower(`trigger`),_status)
 }
     }
     )

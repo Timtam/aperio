@@ -149,13 +149,55 @@ export const configureSyncAdapter = (config: SyncAdapterConfig): Promise<void> =
 export const syncStatus = async (): Promise<SyncStatus> =>
   JSON.parse(await CalFfi.syncStatusJson()) as SyncStatus;
 
-/** Run one sync round (push + fetch + apply); rejects "not configured" until a
- *  target is set. */
-export const syncNow = async (): Promise<SyncRoundReport> =>
-  JSON.parse(await CalFfi.syncNowJson()) as SyncRoundReport;
+/** What kicked off a sync round — recorded in the sync log (the desktop
+ *  `SyncTrigger`). Mobile has no scheduler, so the caller tags the context:
+ *  `'manual'` (the Settings button), `'app_start'`/`'periodic'` (launch /
+ *  foreground full rounds), `'kick'` (debounced push after a mutation),
+ *  `'app_exit'` (the background flush). */
+export type SyncTrigger =
+  | 'manual'
+  | 'app_start'
+  | 'periodic'
+  | 'kick'
+  | 'app_exit';
 
-/** Push local pending logs without fetching (call on app background). */
-export const pushNow = (): Promise<number> => CalFfi.pushNow();
+/** Run one sync round (push + fetch + apply); rejects "not configured" until a
+ *  target is set. `trigger` (default `'manual'`) tags the round in the log. */
+export const syncNow = async (
+  trigger: SyncTrigger = 'manual',
+): Promise<SyncRoundReport> =>
+  JSON.parse(await CalFfi.syncNowJson(trigger)) as SyncRoundReport;
+
+/** Push local pending logs without fetching (call on app background). `trigger`
+ *  (default `'kick'`) tags the round in the log. */
+export const pushNow = (trigger: SyncTrigger = 'kick'): Promise<number> =>
+  CalFfi.pushNow(trigger);
+
+// ── Sync log (Protokoll) ──
+// Every sync round records a row (mobile has no scheduler, so sync_now/push_now
+// self-record). The viewer lists recent rounds; clearing scrubs the history.
+
+/** One recorded sync round (the desktop `SyncLogEntry` shape). Success rows
+ *  carry the counters; a failed row carries `error` instead. */
+export interface SyncLogEntry {
+  id: number;
+  recorded_at: string;
+  trigger: string;
+  success: boolean;
+  pushed_logs: number | null;
+  fetched_logs: number | null;
+  applied: number | null;
+  conflicts: number | null;
+  duration_ms: number | null;
+  error: string | null;
+}
+
+/** Recent sync-log rows (newest first), capped at `limit` (default 100). */
+export const listSyncLog = async (limit = 100): Promise<SyncLogEntry[]> =>
+  JSON.parse(await CalFfi.listSyncLogJson(limit)) as SyncLogEntry[];
+
+/** Clear the sync-log history. */
+export const clearSyncLog = (): Promise<void> => CalFfi.clearSyncLog();
 
 // ── Sync conflicts ──
 // Field-level conflicts the applier recorded (a field edited differently on two

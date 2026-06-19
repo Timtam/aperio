@@ -63,6 +63,7 @@ use host_core::overrides::{
 use host_core::registry::{AdapterRegistry, LOCAL_ID};
 use host_core::sftp_host_keys::UserPrefsHostKeyVerifier;
 use host_core::sync::build_orchestrator;
+use host_core::sync_log::{SyncLogCounters, SyncLogRepo, SyncTrigger};
 use host_core::user_prefs::UserPrefsRepo;
 use host_core::DbHandle;
 use plugin_core::manifest::TaskCapabilities;
@@ -596,6 +597,21 @@ impl Host {
         self.registry
             .account_for_calendar(calendar_id)
             .is_none_or(|a| a == LOCAL_ID)
+    }
+
+    /// Append one `sync_log` row (best-effort: a logging failure must never sink
+    /// a sync round, and cal-ffi has no logger, so the error is swallowed).
+    fn record_sync_round(
+        &self,
+        trigger: SyncTrigger,
+        success: bool,
+        counters: &SyncLogCounters,
+        duration_ms: Option<u64>,
+        error: Option<&str>,
+    ) {
+        let shared = self.db.shared();
+        let repo = SyncLogRepo::new(&shared);
+        let _ = repo.record(trigger, success, counters, duration_ms, error);
     }
 
     /// E2E gate for a freshly-built sync adapter, run between `test_connection`
@@ -3623,40 +3639,112 @@ impl Host {
     /// Run one sync round (push local pending logs, fetch + apply foreign ones,
     /// compaction audit) and return the `SyncRoundReport` as JSON. Errors with
     /// "not configured" until `configure_sync_adapter_json` has run. Records the
-    /// round's outcome in the failure latch (success resets it).
-    pub fn sync_now_json(&self) -> Result<String, StoreError> {
-        match self
+    /// round's outcome in the failure latch (success resets it) AND appends a
+    /// `sync_log` row (the desktop scheduler's job; mobile has no scheduler, so
+    /// the round records itself here). `trigger` is the wire SyncTrigger string
+    /// (`"manual"` for the Settings button, `"app_start"`/`"periodic"` for the
+    /// launch/foreground rounds — unknown ⇒ `manual`).
+    pub fn sync_now_json(&self, trigger: String) -> Result<String, StoreError> {
+        let started = std::time::Instant::now();
+        let result = self
             .runtime
-            .block_on(async { self.orchestrator.sync_now().await })
-        {
+            .block_on(async { self.orchestrator.sync_now().await });
+        let duration_ms = Some(started.elapsed().as_millis() as u64);
+        let trig = parse_sync_trigger(&trigger);
+        match result {
             Ok(report) => {
                 self.progress.record_success();
+                self.record_sync_round(
+                    trig,
+                    true,
+                    &SyncLogCounters {
+                        pushed_logs: Some(report.pushed_logs as u32),
+                        fetched_logs: Some(report.fetched_logs as u32),
+                        applied: Some(report.applied as u32),
+                        conflicts: Some(report.conflicts as u32),
+                    },
+                    duration_ms,
+                    None,
+                );
                 to_json(&report)
             }
             Err(e) => {
                 self.progress.record_failure(e.code());
-                Err(sync_err(e))
+                let err = sync_err(e);
+                self.record_sync_round(
+                    trig,
+                    false,
+                    &SyncLogCounters::default(),
+                    duration_ms,
+                    Some(&err.to_string()),
+                );
+                Err(err)
             }
         }
     }
 
     /// Push the local pending logs without fetching (call from RN AppState
     /// "background"). Returns the number of logs pushed. Records the outcome in
-    /// the failure latch like `sync_now`.
-    pub fn push_now(&self) -> Result<u32, StoreError> {
-        match self
+    /// the failure latch AND a `sync_log` row, like `sync_now`. `trigger` is the
+    /// wire SyncTrigger string (`"kick"` for the debounced push, `"app_exit"`
+    /// for the background flush — unknown ⇒ `kick`).
+    pub fn push_now(&self, trigger: String) -> Result<u32, StoreError> {
+        let started = std::time::Instant::now();
+        let result = self
             .runtime
-            .block_on(async { self.orchestrator.push_now().await })
-        {
+            .block_on(async { self.orchestrator.push_now().await });
+        let duration_ms = Some(started.elapsed().as_millis() as u64);
+        let trig = parse_push_trigger(&trigger);
+        match result {
             Ok(pushed) => {
                 self.progress.record_success();
+                self.record_sync_round(
+                    trig,
+                    true,
+                    &SyncLogCounters {
+                        pushed_logs: Some(pushed as u32),
+                        ..SyncLogCounters::default()
+                    },
+                    duration_ms,
+                    None,
+                );
                 Ok(pushed as u32)
             }
             Err(e) => {
                 self.progress.record_failure(e.code());
-                Err(sync_err(e))
+                let err = sync_err(e);
+                self.record_sync_round(
+                    trig,
+                    false,
+                    &SyncLogCounters::default(),
+                    duration_ms,
+                    Some(&err.to_string()),
+                );
+                Err(err)
             }
         }
+    }
+
+    /// Recent `sync_log` rows as a JSON `SyncLogEntry[]` (newest first), capped
+    /// at `limit` (and the table's own retention cap). The mobile Protokoll
+    /// viewer. Mirrors the desktop `list_sync_log_entries`.
+    pub fn list_sync_log_json(&self, limit: u32) -> Result<String, StoreError> {
+        let shared = self.db.shared();
+        let repo = SyncLogRepo::new(&shared);
+        let entries = repo.list(limit).map_err(|e| StoreError::Storage {
+            detail: e.to_string(),
+        })?;
+        to_json(&entries)
+    }
+
+    /// Drop every `sync_log` row (the "clear history" action — also useful
+    /// before sharing a screen). Mirrors the desktop `clear_sync_log`.
+    pub fn clear_sync_log(&self) -> Result<(), StoreError> {
+        let shared = self.db.shared();
+        let repo = SyncLogRepo::new(&shared);
+        repo.clear().map_err(|e| StoreError::Storage {
+            detail: e.to_string(),
+        })
     }
 
     // ─── Sync conflicts ────────────────────────────────────────────────────────
@@ -4663,6 +4751,29 @@ fn required_secret_slot(kind: host_core::accounts::AdapterKind) -> Option<Secret
     }
 }
 
+/// Parse a full-round trigger wire string → `SyncTrigger`. Unknown ⇒ `Manual`
+/// (the user-initiated default; the Settings "Sync now" button sends "manual").
+fn parse_sync_trigger(s: &str) -> SyncTrigger {
+    match s {
+        "app_start" => SyncTrigger::AppStart,
+        "periodic" => SyncTrigger::Periodic,
+        "kick" => SyncTrigger::Kick,
+        "app_exit" => SyncTrigger::AppExit,
+        _ => SyncTrigger::Manual,
+    }
+}
+
+/// Parse a push-only trigger wire string → `SyncTrigger`. Unknown ⇒ `Kick` (the
+/// debounced-after-mutation default, the most common push path on mobile).
+fn parse_push_trigger(s: &str) -> SyncTrigger {
+    match s {
+        "app_exit" => SyncTrigger::AppExit,
+        "manual" => SyncTrigger::Manual,
+        "periodic" => SyncTrigger::Periodic,
+        _ => SyncTrigger::Kick,
+    }
+}
+
 fn acc_err(e: host_core::accounts::AccountsError) -> StoreError {
     use host_core::accounts::AccountsError;
     match e {
@@ -5030,6 +5141,43 @@ mod tests {
                 .trim(),
             "null"
         );
+    }
+
+    #[test]
+    fn sync_now_records_a_sync_log_row_and_clear_empties_it() {
+        let remote = tempfile::tempdir().unwrap();
+        let cfg = format!(
+            r#"{{"kind":"local","path":{}}}"#,
+            serde_json::to_string(&remote.path().to_string_lossy()).unwrap()
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let host = open_named(&dir, "log");
+        host.configure_sync_adapter_json(cfg).unwrap();
+
+        // Empty to start.
+        let empty: serde_json::Value =
+            serde_json::from_str(&host.list_sync_log_json(50).unwrap()).unwrap();
+        assert!(empty.as_array().unwrap().is_empty());
+
+        // A manual round records exactly one row, tagged + timed.
+        host.sync_now_json("manual".to_string()).unwrap();
+        let entries: serde_json::Value =
+            serde_json::from_str(&host.list_sync_log_json(50).unwrap()).unwrap();
+        let arr = entries.as_array().unwrap();
+        assert_eq!(
+            arr.len(),
+            1,
+            "the manual round recorded one row; got {entries}"
+        );
+        assert_eq!(arr[0]["trigger"], "manual");
+        assert_eq!(arr[0]["success"], true);
+        assert!(arr[0]["duration_ms"].is_number());
+
+        // Clearing empties it.
+        host.clear_sync_log().unwrap();
+        let after: serde_json::Value =
+            serde_json::from_str(&host.list_sync_log_json(50).unwrap()).unwrap();
+        assert!(after.as_array().unwrap().is_empty());
     }
 
     #[test]
@@ -5442,8 +5590,8 @@ mod tests {
 
         // A pushes its pending logs to the shared target; B fetches + applies.
         wait_for_pending(&dir_a);
-        host_a.sync_now_json().unwrap();
-        host_b.sync_now_json().unwrap();
+        host_a.sync_now_json("manual".to_string()).unwrap();
+        host_b.sync_now_json("manual".to_string()).unwrap();
 
         // B now has the calendar (from CalendarCreated) + the event (from
         // EventCreated) — the core mobile↔mobile parity assertion. B'd never
@@ -5460,7 +5608,7 @@ mod tests {
         );
 
         // Idempotency: a second round on B applies nothing new (no panic, no dup).
-        host_b.sync_now_json().unwrap();
+        host_b.sync_now_json("manual".to_string()).unwrap();
         let again: serde_json::Value =
             serde_json::from_str(&host_b.get_events_json(covering_range(&cal)).unwrap()).unwrap();
         assert_eq!(
@@ -5512,8 +5660,8 @@ mod tests {
         // A pushes its pending logs; B fetches + applies (list before task, in
         // append order, so the task's FK to its list is satisfied).
         wait_for_pending(&dir_a);
-        host_a.sync_now_json().unwrap();
-        host_b.sync_now_json().unwrap();
+        host_a.sync_now_json("manual".to_string()).unwrap();
+        host_b.sync_now_json("manual".to_string()).unwrap();
 
         let lists: serde_json::Value =
             serde_json::from_str(&host_b.task_lists_json().unwrap()).unwrap();
@@ -5537,7 +5685,7 @@ mod tests {
         );
 
         // Idempotency: a repeat round adds no duplicate.
-        host_b.sync_now_json().unwrap();
+        host_b.sync_now_json("manual".to_string()).unwrap();
         let again: serde_json::Value =
             serde_json::from_str(&host_b.tasks_json(list_id).unwrap()).unwrap();
         assert_eq!(
@@ -5630,7 +5778,7 @@ mod tests {
                 serde_json::from_str(&host.sync_status_json().unwrap()).unwrap();
             assert_eq!(status["e2e_enabled"], serde_json::json!(true));
             wait_for_pending(&dir);
-            host.sync_now_json().unwrap();
+            host.sync_now_json("manual".to_string()).unwrap();
         }
 
         // Nothing the sync pushed may carry the event title in plaintext — every
@@ -5666,7 +5814,7 @@ mod tests {
         );
         assert_eq!(status2["e2e_enabled"], serde_json::json!(true));
         // Decrypts the previously-pushed (own) logs without error.
-        host2.sync_now_json().unwrap();
+        host2.sync_now_json("manual".to_string()).unwrap();
     }
 
     #[test]
@@ -5699,7 +5847,7 @@ mod tests {
         host.enable_sync_encryption_json("correct horse battery".to_string())
             .unwrap();
         wait_for_pending(&dir);
-        host.sync_now_json().unwrap();
+        host.sync_now_json("manual".to_string()).unwrap();
 
         // Re-point at the SAME (now-encrypted) target — the regression guard:
         // wrap_for_target must read the target meta, see it's E2E, and re-wrap
@@ -5718,7 +5866,7 @@ mod tests {
         host.create_event_json(new_event_json(&cal, TITLE2))
             .unwrap();
         wait_for_pending(&dir);
-        host.sync_now_json().unwrap();
+        host.sync_now_json("manual".to_string()).unwrap();
 
         fn collect(dir: &std::path::Path, out: &mut Vec<u8>) {
             for entry in fs::read_dir(dir).unwrap().flatten() {
@@ -5767,7 +5915,7 @@ mod tests {
         host.create_event_json(new_event_json(&cal, TITLE)).unwrap();
         // Sync FIRST → the event lands on the remote as PLAINTEXT.
         wait_for_pending(&dir);
-        host.sync_now_json().unwrap();
+        host.sync_now_json("manual".to_string()).unwrap();
 
         fn collect(dir: &std::path::Path, out: &mut Vec<u8>) {
             for entry in fs::read_dir(dir).unwrap().flatten() {
@@ -5839,7 +5987,7 @@ mod tests {
         host.enable_sync_encryption_json("correct horse battery".to_string())
             .unwrap();
         wait_for_pending(&dir);
-        host.sync_now_json().unwrap();
+        host.sync_now_json("manual".to_string()).unwrap();
 
         fn collect(dir: &std::path::Path, out: &mut Vec<u8>) {
             for entry in fs::read_dir(dir).unwrap().flatten() {
@@ -5883,7 +6031,7 @@ mod tests {
             "the title must be plaintext on the remote after disabling",
         );
         // A follow-up round still works on the now-plaintext dataset.
-        host.sync_now_json().unwrap();
+        host.sync_now_json("manual".to_string()).unwrap();
     }
 
     #[test]
@@ -5932,7 +6080,7 @@ mod tests {
         host.enable_sync_encryption_json("correct horse battery".to_string())
             .unwrap();
         wait_for_pending(&dir);
-        host.sync_now_json().unwrap();
+        host.sync_now_json("manual".to_string()).unwrap();
 
         // Now it previews as Existing + encrypted (side-effect-free probe).
         let pv2: serde_json::Value =
@@ -5970,7 +6118,7 @@ mod tests {
             .enable_sync_encryption_json(PASSPHRASE.to_string())
             .unwrap();
         wait_for_pending(&dir_a);
-        host_a.sync_now_json().unwrap();
+        host_a.sync_now_json("manual".to_string()).unwrap();
 
         // A wrong passphrase is rejected before any data is applied.
         let dir_wrong = tempfile::tempdir().unwrap();
@@ -6015,7 +6163,7 @@ mod tests {
             "Host B should see A's event after joining the encrypted dataset; got: {events}",
         );
         // A follow-up round decrypts its own + A's logs without error.
-        host_b.sync_now_json().unwrap();
+        host_b.sync_now_json("manual".to_string()).unwrap();
     }
 
     #[test]
@@ -6046,13 +6194,13 @@ mod tests {
             .to_string();
         host_a.enable_sync_encryption_json(OLD.to_string()).unwrap();
         wait_for_pending(&dir_a);
-        host_a.sync_now_json().unwrap();
+        host_a.sync_now_json("manual".to_string()).unwrap();
 
         // Rotate the passphrase; A keeps working (its keychain DEK is unchanged).
         host_a
             .change_sync_passphrase_json(OLD.to_string(), NEW.to_string())
             .unwrap();
-        host_a.sync_now_json().unwrap();
+        host_a.sync_now_json("manual".to_string()).unwrap();
 
         // The OLD passphrase no longer unwraps the (re-wrapped) key.
         let dir_old = tempfile::tempdir().unwrap();
@@ -6135,12 +6283,12 @@ mod tests {
             .enable_sync_encryption_json(PASS.to_string())
             .unwrap();
         wait_for_pending(&dir_a);
-        host_a.sync_now_json().unwrap();
+        host_a.sync_now_json("manual".to_string()).unwrap();
 
         // B's next round hits the encryption gate: the target is encrypted but B
         // is still plaintext → EncryptionRequired, latched as the error code.
         assert!(
-            host_b.sync_now_json().is_err(),
+            host_b.sync_now_json("manual".to_string()).is_err(),
             "a plaintext device must refuse a round against an encrypted target",
         );
         let status: serde_json::Value =
@@ -6156,7 +6304,7 @@ mod tests {
         host_b
             .adopt_remote_encryption_json(PASS.to_string())
             .unwrap();
-        host_b.sync_now_json().unwrap();
+        host_b.sync_now_json("manual".to_string()).unwrap();
         let after: serde_json::Value =
             serde_json::from_str(&host_b.sync_status_json().unwrap()).unwrap();
         assert_eq!(after["e2e_enabled"], serde_json::json!(true));
@@ -6692,8 +6840,8 @@ mod tests {
             .set_user_pref("sidebar.expansion".to_string(), "open".to_string())
             .unwrap();
         wait_for_pending(&dir_a);
-        host_a.sync_now_json().unwrap();
-        host_b.sync_now_json().unwrap();
+        host_a.sync_now_json("manual".to_string()).unwrap();
+        host_b.sync_now_json("manual".to_string()).unwrap();
 
         assert_eq!(
             host_b.get_user_pref("locale".to_string()).unwrap(),

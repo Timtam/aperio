@@ -25,12 +25,15 @@ import {
   previewSyncTarget,
   resumeStaleDevice,
   trustSftpHostKey,
+  clearSyncLog,
+  listSyncLog,
   syncConflictCount,
   syncNow,
   syncStatus,
   HostKeyPreview,
   SyncAdapterConfig,
   SyncDeviceSummary,
+  SyncLogEntry,
   SyncPreview,
   SyncStatus,
 } from '../api/sync';
@@ -60,6 +63,7 @@ export default function SyncScreen() {
 
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [conflictCount, setConflictCount] = useState(0);
+  const [syncLog, setSyncLog] = useState<SyncLogEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -148,6 +152,7 @@ export default function SyncScreen() {
     try {
       setStatus(await syncStatus());
       setConflictCount(await syncConflictCount().catch(() => 0));
+      setSyncLog(await listSyncLog(100).catch(() => []));
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -161,6 +166,35 @@ export default function SyncScreen() {
       void refresh();
     }, [refresh]),
   );
+
+  // Clear the diagnostic sync log (a confirm — it scrubs only the local history,
+  // never any sync data).
+  const clearLog = useCallback(() => {
+    Alert.alert(
+      t('dialogs.settings.sync.protocolClear'),
+      t('dialogs.settings.sync.protocolClearConfirm'),
+      [
+        { text: t('mobile.cancel'), style: 'cancel' },
+        {
+          text: t('dialogs.settings.sync.protocolClear'),
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              try {
+                await clearSyncLog();
+                await refresh();
+                announce(t('dialogs.settings.sync.protocolCleared'));
+              } catch (err) {
+                const message = errorMessage(err);
+                setError(message);
+                announce(t('mobile.error', { message }));
+              }
+            })();
+          },
+        },
+      ],
+    );
+  }, [announce, refresh, t]);
 
   // Move screen-reader focus onto the trust panel when it appears so the blind
   // user lands on the fingerprint they must verify (not stranded after the
@@ -1711,6 +1745,91 @@ export default function SyncScreen() {
           </Pressable>
         </>
       )}
+
+      {/* Protocol — recent sync rounds (newest first), the diagnostic log every
+          round self-records (mobile has no scheduler). A linear accessible list;
+          each row's trigger + outcome + counts + time fold into one SR label. */}
+      <View style={styles.protocolSection}>
+        <Text style={styles.label} accessibilityRole="header">
+          {t('dialogs.settings.sync.protocolTitle')}
+        </Text>
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.settings.sync.protocolBody')}
+        </Text>
+        {syncLog.length === 0 ? (
+          <Text style={styles.hint} accessibilityRole="text">
+            {t('dialogs.settings.sync.protocolEmpty')}
+          </Text>
+        ) : (
+          <View
+            accessibilityRole="list"
+            accessibilityLabel={t('dialogs.settings.sync.protocolListLabel')}
+            style={styles.protocolList}
+          >
+            {syncLog.map((entry) => {
+              const triggerLabel = t(
+                `dialogs.settings.sync.protocolTrigger${
+                  entry.trigger === 'app_start'
+                    ? 'AppStart'
+                    : entry.trigger === 'app_exit'
+                      ? 'AppExit'
+                      : entry.trigger.charAt(0).toUpperCase() + entry.trigger.slice(1)
+                }`,
+                entry.trigger,
+              );
+              const summary = entry.success
+                ? t('dialogs.settings.sync.protocolSummarySuccess', {
+                    pushed: entry.pushed_logs ?? 0,
+                    fetched: entry.fetched_logs ?? 0,
+                    applied: entry.applied ?? 0,
+                  })
+                : t('dialogs.settings.sync.protocolSummaryFailure', {
+                    error: entry.error ?? '',
+                  });
+              const when = new Date(entry.recorded_at).toLocaleString();
+              const duration =
+                entry.duration_ms != null
+                  ? t('dialogs.settings.sync.protocolDuration', { ms: entry.duration_ms })
+                  : '';
+              return (
+                <View
+                  key={entry.id}
+                  accessible
+                  accessibilityRole="text"
+                  accessibilityLabel={`${triggerLabel}, ${when}, ${summary}${duration ? `, ${duration}` : ''}`}
+                  style={styles.protocolRow}
+                >
+                  <Text style={styles.protocolRowHead} importantForAccessibility="no">
+                    {`${triggerLabel} · ${when}`}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.protocolRowSummary,
+                      !entry.success && styles.protocolRowError,
+                    ]}
+                    importantForAccessibility="no"
+                  >
+                    {summary}
+                    {duration ? ` · ${duration}` : ''}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
+        {syncLog.length > 0 && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('dialogs.settings.sync.protocolClear')}
+            onPress={clearLog}
+            style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.ghostButtonText}>
+              {t('dialogs.settings.sync.protocolClear')}
+            </Text>
+          </Pressable>
+        )}
+      </View>
     </ScrollView>
   );
 }
@@ -1723,6 +1842,19 @@ const makeStyles = (c: ThemeColors) =>
     field: { gap: 6 },
     label: { fontSize: 15, fontWeight: '600', color: c.textLabel },
     hint: { fontSize: 13, color: c.textSecondary },
+    protocolSection: { gap: 8, marginTop: 8 },
+    protocolList: { gap: 8 },
+    protocolRow: {
+      gap: 2,
+      padding: 12,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    protocolRowHead: { fontSize: 14, fontWeight: '600', color: c.textPrimary },
+    protocolRowSummary: { fontSize: 13, color: c.textSecondary },
+    protocolRowError: { color: c.danger },
     input: {
       fontSize: 17,
       color: c.textPrimary,

@@ -34,7 +34,8 @@ export function scheduleBackgroundPush(): void {
   if (pushTimer != null) clearTimeout(pushTimer);
   pushTimer = setTimeout(() => {
     pushTimer = null;
-    void pushNow().catch(() => undefined);
+    // The debounced post-mutation push — tagged 'kick' in the sync log.
+    void pushNow('kick').catch(() => undefined);
   }, MUTATION_PUSH_DEBOUNCE_MS);
   // A local mutation may have added/changed/removed a reminder — roll the
   // scheduled OS notifications forward too (debounced, best-effort).
@@ -48,7 +49,8 @@ function flushPendingPush(): void {
     clearTimeout(pushTimer);
     pushTimer = null;
   }
-  void pushNow().catch(() => undefined);
+  // The background flush before the OS suspends us — tagged 'app_exit'.
+  void pushNow('app_exit').catch(() => undefined);
 }
 
 /**
@@ -59,11 +61,12 @@ function flushPendingPush(): void {
 export function useSyncTriggers(): void {
   useEffect(() => {
     // Initial pull on launch (the Host opens lazily on the first bridge call).
-    void syncNow().catch(() => undefined);
+    void syncNow('app_start').catch(() => undefined);
 
     const onChange = (state: AppStateStatus) => {
       if (state === 'active') {
-        void syncNow().catch(() => undefined);
+        // Foreground-resume full round.
+        void syncNow('periodic').catch(() => undefined);
       } else if (state === 'background') {
         flushPendingPush();
       }
