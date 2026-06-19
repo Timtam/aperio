@@ -29,10 +29,22 @@ use cal_core::{Calendar, Contact, ContactList, DateRange, Event, Task, TaskList}
 
 use crate::db::{DbError, DbHandle, DbResult};
 
+mod observer;
+mod refresh;
 mod search;
+mod swr;
 
 #[cfg(test)]
 mod tests;
+
+pub use observer::{CacheObserver, CacheRefreshStatus};
+pub use refresh::{
+    CacheRefresher, PREF_CACHE_LAST_REFRESHED_AT, PREF_CACHE_REFRESH_INTERVAL_MINUTES,
+};
+pub use swr::{
+    has_snapshot, is_stale, refresh_contacts, refresh_events, refresh_tasks, spawn_item_refresh,
+    spawn_refresh, SWR_TTL_SECS,
+};
 
 /// The "unbounded" snapshot window recorded for folder-complete containers
 /// (their cache holds the WHOLE collection, so any view range is covered).

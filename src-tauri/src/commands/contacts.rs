@@ -25,8 +25,9 @@ use tauri::{AppHandle, Runtime, State};
 use tracing::warn;
 
 use super::cache_swr;
+use super::cache_swr::TauriCacheObserver;
 use super::{CommandError, CommandResult};
-use crate::cache::{CacheStore, RefreshCoordinator, SyncScope};
+use crate::cache::{CacheObserver, CacheStore, RefreshCoordinator, SyncScope};
 use crate::contact_sync::{
     ContactSyncScheduler, ContactsSyncStatus, PREF_INCLUDE_READ_ONLY_ON_SYNC, PREF_LAST_SYNCED_AT,
     PREF_SYNC_INTERVAL_MINUTES,
@@ -111,8 +112,10 @@ async fn external_contact_lists_swr(
             let adapter_bg = Arc::clone(&adapter);
             let reg = Arc::clone(registry);
             let acc = account.clone();
+            let rt = tauri::async_runtime::handle();
             cache_swr::spawn_refresh(
-                app.clone(),
+                rt.inner(),
+                Arc::new(TauriCacheObserver { app: app.clone() }) as Arc<dyn CacheObserver>,
                 Arc::clone(cache),
                 Arc::clone(coord),
                 SyncScope::ContactLists,
@@ -166,8 +169,10 @@ pub async fn get_contacts(
             let cache_bg = Arc::clone(&cache);
             let acc = account.clone();
             let list = list_id.clone();
+            let rt = tauri::async_runtime::handle();
             cache_swr::spawn_item_refresh(
-                app.clone(),
+                rt.inner(),
+                Arc::new(TauriCacheObserver { app: app.clone() }) as Arc<dyn CacheObserver>,
                 Arc::clone(&cache),
                 Arc::clone(&coord),
                 SyncScope::Contacts,
@@ -189,8 +194,10 @@ pub async fn get_contacts(
     let cache_bg = Arc::clone(&cache);
     let acc = account.clone();
     let list = list_id.clone();
+    let rt = tauri::async_runtime::handle();
     cache_swr::spawn_item_refresh(
-        app.clone(),
+        rt.inner(),
+        Arc::new(TauriCacheObserver { app: app.clone() }) as Arc<dyn CacheObserver>,
         Arc::clone(&cache),
         Arc::clone(&coord),
         SyncScope::Contacts,

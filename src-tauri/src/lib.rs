@@ -730,7 +730,7 @@ pub fn run() {
             // prefs-driven interval, deduplicated against the per-read
             // SWR path. Stored in State so `refresh_external_cache` can
             // drive a manual pass.
-            let cache_refresher = cache_refresh::CacheRefresher::spawn(
+            let cache_refresher = cache_refresh::spawn(
                 Arc::clone(&registry_for_cache_refresh),
                 Arc::clone(&cache_for_refresh),
                 Arc::clone(&coord_for_refresh),
