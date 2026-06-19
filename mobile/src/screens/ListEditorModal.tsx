@@ -28,9 +28,24 @@ import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { RadioGroup } from '../components/RadioGroup';
 import { SoundSelect } from '../components/SoundSelect';
 import type { RootStackScreenProps } from '../navigation/types';
+import {
+  readTaskBehaviour,
+  withListOverride,
+  writeListOverrides,
+  type CarryOverDefault,
+  type ListOverrides,
+} from '../state/taskBehaviour';
 import { useSoundPref } from '../state/useSoundPref';
 import { useTaskStore } from '../state/taskStoreContext';
 import { useThemedStyles, type ThemeColors } from '../theme';
+
+/** Tri-state mapping for a per-list boolean override: undefined = inherit the
+ *  global, true = on, false = off. */
+type TriState = 'inherit' | 'on' | 'off';
+const toTri = (v: boolean | undefined): TriState =>
+  v === undefined ? 'inherit' : v ? 'on' : 'off';
+const fromTri = (s: TriState): boolean | undefined =>
+  s === 'inherit' ? undefined : s === 'on';
 
 // Manage a single task list (the sub-5 piece of the tasks port): reparent it
 // (nest under another list / promote to top level), manage its sections (create
@@ -100,6 +115,10 @@ export default function ListEditorModal({
   // inheritable. Offered for every list since the sound pref applies to any
   // container's reminders.
   const sound = useSoundPref(`sound.tasklist.${listId}`);
+  // This list's task-behaviour override (§ Settings → Tasks per-list): the full
+  // synced map, of which this list's entry (or {} = inherit globals) is edited
+  // here. Read once on open; each change persists the whole map.
+  const [overrides, setOverrides] = useState<Record<string, ListOverrides>>({});
 
   // Index of the row currently being renamed, so SR focus can be restored to it
   // on Save/Cancel (a rename doesn't change the row count, so the focus
@@ -116,6 +135,27 @@ export default function ListEditorModal({
   useEffect(() => {
     void loadSections(listId).catch((err) => setError(errorMessage(err)));
   }, [listId, loadSections]);
+
+  // Load the per-list task-behaviour override map on open.
+  useEffect(() => {
+    void readTaskBehaviour().then((b) => setOverrides(b.listOverrides));
+  }, []);
+
+  // This list's current override entry (or {} = inherit globals).
+  const listOverride: ListOverrides = overrides[listId] ?? {};
+
+  // Patch one field of this list's override, persisting the whole synced map.
+  const patchOverride = useCallback(
+    (patch: ListOverrides) => {
+      setOverrides((prev) => {
+        const merged = { ...(prev[listId] ?? {}), ...patch };
+        const next = withListOverride(prev, listId, merged);
+        void writeListOverrides(next);
+        return next;
+      });
+    },
+    [listId],
+  );
 
   const isLocal = list?.account_id === 'local';
   const canReparent = isLocal;
@@ -480,6 +520,52 @@ export default function ListEditorModal({
           disabled={busy}
         />
       )}
+
+      {/* Per-list task-behaviour overrides (§ Settings → Tasks "Per task list"):
+          override the global status-coupling / auto-date / carry-over for THIS
+          list. "Global default" inherits. Applies to the check-off path + the
+          day-start checkers on every device (synced). */}
+      <Text style={styles.heading} accessibilityRole="header">
+        {t('dialogs.tasks.perList.heading')}
+      </Text>
+      <RadioGroup<TriState>
+        label={t('dialogs.tasks.perList.cascade')}
+        value={toTri(listOverride.cascade)}
+        options={[
+          { value: 'inherit', label: t('dialogs.tasks.perList.inherit') },
+          { value: 'on', label: t('dialogs.tasks.perList.on') },
+          { value: 'off', label: t('dialogs.tasks.perList.off') },
+        ]}
+        onChange={(v) => patchOverride({ cascade: fromTri(v) })}
+        disabled={busy}
+      />
+      <RadioGroup<TriState>
+        label={t('dialogs.tasks.perList.autoDate')}
+        value={toTri(listOverride.autoDate)}
+        options={[
+          { value: 'inherit', label: t('dialogs.tasks.perList.inherit') },
+          { value: 'on', label: t('dialogs.tasks.perList.on') },
+          { value: 'off', label: t('dialogs.tasks.perList.off') },
+        ]}
+        onChange={(v) => patchOverride({ autoDate: fromTri(v) })}
+        disabled={busy}
+      />
+      <RadioGroup<string>
+        label={t('dialogs.tasks.perList.carryOver')}
+        value={listOverride.carryOverDefault ?? 'inherit'}
+        options={[
+          { value: 'inherit', label: t('dialogs.tasks.perList.inherit') },
+          { value: 'ask', label: t('dialogs.tasks.carryOverDefault.options.ask') },
+          { value: 'today', label: t('dialogs.tasks.carryOverDefault.options.today') },
+          { value: 'backlog', label: t('dialogs.tasks.carryOverDefault.options.backlog') },
+        ]}
+        onChange={(v) =>
+          patchOverride({
+            carryOverDefault: v === 'inherit' ? undefined : (v as CarryOverDefault),
+          })
+        }
+        disabled={busy}
+      />
 
       {/* Members / sharing — external lists whose adapter declares it (§9.7);
           opens the dedicated members manager. */}
