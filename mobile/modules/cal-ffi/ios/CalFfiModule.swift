@@ -181,6 +181,18 @@ public class CalFfiModule: Module {
       try self.host.clearSyncLog()
     }
 
+    AsyncFunction("refreshExternalCache") {
+      self.host.refreshExternalCache()
+    }
+
+    AsyncFunction("getCacheRefreshStatusJson") { () -> String in
+      try self.host.getCacheRefreshStatusJson()
+    }
+
+    AsyncFunction("warmCacheOnForeground") {
+      self.host.warmCacheOnForeground()
+    }
+
     AsyncFunction("syncConflictCount") { () -> Int in
       Int(try self.host.syncConflictCount())
     }

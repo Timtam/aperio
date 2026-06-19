@@ -199,6 +199,35 @@ export const listSyncLog = async (limit = 100): Promise<SyncLogEntry[]> =>
 /** Clear the sync-log history. */
 export const clearSyncLog = (): Promise<void> => CalFfi.clearSyncLog();
 
+// ── External cache (SWR) controls ──
+// External reads already serve stale-while-revalidate + self-warm on a
+// cold/stale read; these are the explicit controls (the desktop's cache surface):
+// a manual "refresh now", a "last updated" status, and an on-foreground warm.
+
+/** The external-cache warm-pass status (the desktop `CacheRefreshStatus`). */
+export interface CacheRefreshStatus {
+  /** True while a warm pass is running. */
+  refreshing: boolean;
+  /** RFC3339 of the last completed pass, or null. */
+  last_refreshed_at: string | null;
+}
+
+/** Kick an immediate warm pass over every external account's containers (the
+ *  manual "refresh now"). Fire-and-forget — poll {@link cacheRefreshStatus} for
+ *  completion, or refocus the view to pick up the warmed data. */
+export const refreshExternalCache = (): Promise<void> =>
+  CalFfi.refreshExternalCache();
+
+/** The external-cache warm status — drives a "refreshing…" spinner + a "last
+ *  updated" line. */
+export const cacheRefreshStatus = async (): Promise<CacheRefreshStatus> =>
+  JSON.parse(await CalFfi.getCacheRefreshStatusJson()) as CacheRefreshStatus;
+
+/** Warm the external cache on app-foreground (the mobile stand-in for the
+ *  desktop periodic warm loop). Fire-and-forget. */
+export const warmCacheOnForeground = (): Promise<void> =>
+  CalFfi.warmCacheOnForeground();
+
 // ── Sync conflicts ──
 // Field-level conflicts the applier recorded (a field edited differently on two
 // devices). The values are JSON-encoded scalars — decode with JSON.parse for

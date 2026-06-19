@@ -52,7 +52,8 @@ use cal_core::{
 use host_core::accounts::{AccountsRepo, AdapterKind};
 use host_core::cache::{
     has_snapshot, is_stale, refresh_contacts, refresh_events, refresh_tasks, spawn_item_refresh,
-    spawn_refresh, CacheObserver, CacheStore, RefreshCoordinator, SyncScope, SWR_TTL_SECS,
+    spawn_refresh, CacheObserver, CacheRefresher, CacheStore, RefreshCoordinator, SyncScope,
+    SWR_TTL_SECS,
 };
 use host_core::conflicts::{
     ConflictKind, ConflictRecord, ConflictsError, ConflictsRepo, ResolutionChoice,
@@ -572,20 +573,75 @@ pub struct Host {
     cache: Arc<CacheStore>,
     /// Dedups concurrent background refreshes of the same container.
     coord: Arc<RefreshCoordinator>,
-    /// Where a finished background refresh reports "this container changed" so
-    /// the UI can re-read. A no-op until the JS layer registers its bridge (a
-    /// later step); the cache itself is populated regardless.
-    cache_observer: Arc<dyn CacheObserver>,
+    /// Where a finished background refresh / warm pass reports progress so the
+    /// UI can re-read. Swappable: a no-op until the JS layer registers its bridge
+    /// via [`Host::set_cache_observer`]; the cache populates regardless.
+    cache_observer: Arc<BridgeCacheObserver>,
+    /// Drives manual + on-foreground warm passes (the mobile stand-in for the
+    /// desktop periodic loop — constructed without `start_periodic`).
+    cache_refresher: Arc<host_core::cache::CacheRefresher>,
 }
 
-/// A `CacheObserver` that drops every notification — the Host's default until
-/// the JS layer registers a real bridge. Background refreshes still populate the
-/// cache; the UI just re-reads on its own focus/refetch until the push lands.
-struct NullCacheObserver;
+/// Foreign-side sink for cache-refresh progress (the mobile analogue of the
+/// desktop Tauri `cache-updated` / `cache-refresh-status` events). The JS layer
+/// implements this and registers it via [`Host::set_cache_observer`]; the
+/// payloads are JSON strings carrying the same shape as the desktop events, so
+/// the RN side can invalidate the matching view + render a refresh status.
+#[uniffi::export(with_foreign)]
+pub trait CacheObserverBridge: Send + Sync {
+    /// One container's snapshot changed (a background refresh wrote fresh data)
+    /// — the UI should re-read that view. `payload_json` is a `CacheUpdatedPayload`
+    /// (`{scope, account_id, container_id}`).
+    fn cache_updated(&self, payload_json: String);
+    /// A warm pass changed its running / last-completed state. `status_json` is
+    /// a `CacheRefreshStatus` (`{refreshing, last_refreshed_at}`).
+    fn refresh_status(&self, status_json: String);
+}
 
-impl CacheObserver for NullCacheObserver {
-    fn cache_updated(&self, _payload: &host_core::cache::CacheUpdatedPayload) {}
-    fn refresh_status(&self, _status: &host_core::cache::CacheRefreshStatus) {}
+/// Adapts a foreign [`CacheObserverBridge`] to the engine-side [`CacheObserver`]
+/// the SWR helpers + the refresher call. The bridge is installed AFTER
+/// construction (the JS layer registers it once it's ready), so it's held behind
+/// an `RwLock<Option<…>>`: the Host hands the same observer to background spawns
+/// made before registration, and every notification is a no-op until a bridge is
+/// set. Mirrors [`BridgeSecretStore`].
+struct BridgeCacheObserver {
+    bridge: std::sync::RwLock<Option<Arc<dyn CacheObserverBridge>>>,
+}
+
+impl BridgeCacheObserver {
+    fn new() -> Self {
+        Self {
+            bridge: std::sync::RwLock::new(None),
+        }
+    }
+
+    fn set(&self, bridge: Arc<dyn CacheObserverBridge>) {
+        if let Ok(mut guard) = self.bridge.write() {
+            *guard = Some(bridge);
+        }
+    }
+}
+
+impl CacheObserver for BridgeCacheObserver {
+    fn cache_updated(&self, payload: &host_core::cache::CacheUpdatedPayload) {
+        if let Ok(guard) = self.bridge.read() {
+            if let Some(bridge) = guard.as_ref() {
+                if let Ok(json) = serde_json::to_string(payload) {
+                    bridge.cache_updated(json);
+                }
+            }
+        }
+    }
+
+    fn refresh_status(&self, status: &host_core::cache::CacheRefreshStatus) {
+        if let Ok(guard) = self.bridge.read() {
+            if let Some(bridge) = guard.as_ref() {
+                if let Ok(json) = serde_json::to_string(status) {
+                    bridge.refresh_status(json);
+                }
+            }
+        }
+    }
 }
 
 impl Host {
@@ -621,6 +677,13 @@ impl Host {
         self.registry
             .account_for_calendar(calendar_id)
             .is_none_or(|a| a == LOCAL_ID)
+    }
+
+    /// The cache observer as the `dyn CacheObserver` the SWR spawns + the
+    /// refresher take (return-position unsizing coercion from the concrete
+    /// `Arc<BridgeCacheObserver>`).
+    fn observer(&self) -> Arc<dyn CacheObserver> {
+        self.cache_observer.clone()
     }
 
     /// Invalidate the events snapshot for `calendar_id` after a mutation, so the
@@ -1718,13 +1781,22 @@ impl Host {
             }
         }
 
-        // The external-adapter snapshot cache. Construct it (and the refresh
-        // dedup coordinator) here, mirroring the desktop lib.rs; the periodic
-        // warm loop is NOT started — mobile drives refreshes manually + on
-        // foreground (a later step). The observer is a no-op until the JS layer
+        // The external-adapter snapshot cache. Construct it (+ the refresh dedup
+        // coordinator + the swappable observer + the refresher), mirroring the
+        // desktop lib.rs. The periodic warm loop is NOT started — mobile drives
+        // warm passes manually + on foreground (refresh_external_cache /
+        // warm_cache_on_foreground). The observer is a no-op until the JS layer
         // registers its bridge; background refreshes populate the cache anyway.
         let cache = Arc::new(CacheStore::new(db.clone()));
         let coord = Arc::new(RefreshCoordinator::new());
+        let cache_observer = Arc::new(BridgeCacheObserver::new());
+        let cache_refresher = CacheRefresher::new(
+            Arc::clone(&registry),
+            Arc::clone(&cache),
+            Arc::clone(&coord),
+            db.shared(),
+            Arc::clone(&cache_observer) as Arc<dyn CacheObserver>,
+        );
 
         Ok(Arc::new(Self {
             db,
@@ -1739,7 +1811,8 @@ impl Host {
             progress: SyncProgressDriver::default(),
             cache,
             coord,
-            cache_observer: Arc::new(NullCacheObserver),
+            cache_observer,
+            cache_refresher,
         }))
     }
 
@@ -2015,7 +2088,7 @@ impl Host {
                     let acc = account.clone();
                     spawn_refresh(
                         self.runtime.handle(),
-                        Arc::clone(&self.cache_observer),
+                        self.observer(),
                         Arc::clone(&self.cache),
                         Arc::clone(&self.coord),
                         SyncScope::Calendars,
@@ -2209,7 +2282,7 @@ impl Host {
                     let cal = req.calendar_id.clone();
                     spawn_item_refresh(
                         self.runtime.handle(),
-                        Arc::clone(&self.cache_observer),
+                        self.observer(),
                         Arc::clone(&self.cache),
                         Arc::clone(&self.coord),
                         SyncScope::Events,
@@ -2633,7 +2706,7 @@ impl Host {
                     let acc = account.clone();
                     spawn_refresh(
                         self.runtime.handle(),
-                        Arc::clone(&self.cache_observer),
+                        self.observer(),
                         Arc::clone(&self.cache),
                         Arc::clone(&self.coord),
                         SyncScope::TaskLists,
@@ -2814,7 +2887,7 @@ impl Host {
                     let list = list_id.clone();
                     spawn_item_refresh(
                         self.runtime.handle(),
-                        Arc::clone(&self.cache_observer),
+                        self.observer(),
                         Arc::clone(&self.cache),
                         Arc::clone(&self.coord),
                         SyncScope::Tasks,
@@ -4069,6 +4142,48 @@ impl Host {
         })
     }
 
+    // ─── External cache (SWR) control ──────────────────────────────────────────
+    //
+    // The read paths above serve external containers stale-while-revalidate +
+    // self-warm on a cold/stale read; these expose the desktop's explicit cache
+    // controls: a JS observer (so a finished background refresh re-renders the
+    // open view live), a manual "refresh now", a "last updated" status, and an
+    // on-foreground warm (the mobile stand-in for the desktop periodic loop).
+
+    /// Register the JS-side cache observer. A finished background refresh / warm
+    /// pass then pushes `cache_updated` (the RN layer re-reads the matching view)
+    /// and `refresh_status` across the bridge. Until this is called the pushes
+    /// are dropped — the cache still populates; the UI just re-reads on its own
+    /// focus / periodic-sync until the live push is wired.
+    pub fn set_cache_observer(&self, observer: Arc<dyn CacheObserverBridge>) {
+        self.cache_observer.set(observer);
+    }
+
+    /// Kick an immediate warm pass over every external account's containers +
+    /// in-window events (the manual "refresh now"). Fire-and-forget on the Host
+    /// worker thread; per-container `cache_updated` + the `refresh_status`
+    /// transitions arrive via the observer. Mirrors the desktop
+    /// `refresh_external_cache`.
+    pub fn refresh_external_cache(&self) {
+        let refresher = Arc::clone(&self.cache_refresher);
+        self.runtime.handle().spawn(async move {
+            refresher.warm_all().await;
+        });
+    }
+
+    /// The warm-pass status (`{refreshing, last_refreshed_at}`) as JSON — the
+    /// "last updated" / spinner surface. Mirrors `get_cache_refresh_status`.
+    pub fn get_cache_refresh_status_json(&self) -> Result<String, StoreError> {
+        to_json(&self.cache_refresher.status())
+    }
+
+    /// Warm the cache when the app foregrounds — the mobile stand-in for a tick
+    /// of the desktop periodic warm loop (which mobile can't run while
+    /// backgrounded). Same fire-and-forget warm pass as the manual refresh.
+    pub fn warm_cache_on_foreground(&self) {
+        self.refresh_external_cache();
+    }
+
     // ─── Sync conflicts ────────────────────────────────────────────────────────
     //
     // Field-level conflicts the sync applier recorded (a field edited differently
@@ -4640,7 +4755,7 @@ impl Host {
                     let acc = account.clone();
                     spawn_refresh(
                         self.runtime.handle(),
-                        Arc::clone(&self.cache_observer),
+                        self.observer(),
                         Arc::clone(&self.cache),
                         Arc::clone(&self.coord),
                         SyncScope::ContactLists,
@@ -4740,7 +4855,7 @@ impl Host {
                     let list = list_id.clone();
                     spawn_item_refresh(
                         self.runtime.handle(),
-                        Arc::clone(&self.cache_observer),
+                        self.observer(),
                         Arc::clone(&self.cache),
                         Arc::clone(&self.coord),
                         SyncScope::Contacts,

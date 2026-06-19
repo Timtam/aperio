@@ -30,7 +30,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 
 import { refreshRemindersSoon } from '../reminders/scheduler';
 import { getUserPref } from './prefs';
-import { pushNow, syncNow } from './sync';
+import { pushNow, syncNow, warmCacheOnForeground } from './sync';
 
 /** Debounce window for the post-mutation push (matches the desktop scheduler's
  *  debounce: coalesce a rapid burst of edits into a single push). */
@@ -119,15 +119,20 @@ export function useSyncTriggers(): void {
     };
 
     // Initial pull on launch (the Host opens lazily on the first bridge call)
-    // + arm the foreground periodic timer (the app starts active).
+    // + a warm pass over the external SWR caches (the mobile stand-in for the
+    // desktop periodic warm loop) + arm the foreground periodic timer (the app
+    // starts active).
     void syncNow('app_start').catch(() => undefined);
+    void warmCacheOnForeground().catch(() => undefined);
     startPeriodic();
 
     const onChange = (state: AppStateStatus) => {
       if (state === 'active') {
-        // Foreground-resume full round + re-arm the periodic timer (the synced
-        // interval may have changed on another device while we were away).
+        // Foreground-resume full round + external-cache warm + re-arm the
+        // periodic timer (the synced interval may have changed on another
+        // device while we were away).
         void syncNow('periodic').catch(() => undefined);
+        void warmCacheOnForeground().catch(() => undefined);
         startPeriodic();
       } else {
         // Off-foreground: pause the periodic timer (no JS runs reliably anyway,

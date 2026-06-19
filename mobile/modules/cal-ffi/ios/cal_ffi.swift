@@ -539,6 +539,265 @@ fileprivate struct FfiConverterString: FfiConverter {
 
 
 /**
+ * Foreign-side sink for cache-refresh progress (the mobile analogue of the
+ * desktop Tauri `cache-updated` / `cache-refresh-status` events). The JS layer
+ * implements this and registers it via [`Host::set_cache_observer`]; the
+ * payloads are JSON strings carrying the same shape as the desktop events, so
+ * the RN side can invalidate the matching view + render a refresh status.
+ */
+public protocol CacheObserverBridge: AnyObject, Sendable {
+    
+    /**
+     * One container's snapshot changed (a background refresh wrote fresh data)
+     * — the UI should re-read that view. `payload_json` is a `CacheUpdatedPayload`
+     * (`{scope, account_id, container_id}`).
+     */
+    func cacheUpdated(payloadJson: String) 
+    
+    /**
+     * A warm pass changed its running / last-completed state. `status_json` is
+     * a `CacheRefreshStatus` (`{refreshing, last_refreshed_at}`).
+     */
+    func refreshStatus(statusJson: String) 
+    
+}
+/**
+ * Foreign-side sink for cache-refresh progress (the mobile analogue of the
+ * desktop Tauri `cache-updated` / `cache-refresh-status` events). The JS layer
+ * implements this and registers it via [`Host::set_cache_observer`]; the
+ * payloads are JSON strings carrying the same shape as the desktop events, so
+ * the RN side can invalidate the matching view + render a refresh status.
+ */
+open class CacheObserverBridgeImpl: CacheObserverBridge, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_cal_ffi_fn_clone_cacheobserverbridge(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_cal_ffi_fn_free_cacheobserverbridge(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * One container's snapshot changed (a background refresh wrote fresh data)
+     * — the UI should re-read that view. `payload_json` is a `CacheUpdatedPayload`
+     * (`{scope, account_id, container_id}`).
+     */
+open func cacheUpdated(payloadJson: String)  {try! rustCall() {
+    uniffi_cal_ffi_fn_method_cacheobserverbridge_cache_updated(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(payloadJson),$0
+    )
+}
+}
+    
+    /**
+     * A warm pass changed its running / last-completed state. `status_json` is
+     * a `CacheRefreshStatus` (`{refreshing, last_refreshed_at}`).
+     */
+open func refreshStatus(statusJson: String)  {try! rustCall() {
+    uniffi_cal_ffi_fn_method_cacheobserverbridge_refresh_status(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(statusJson),$0
+    )
+}
+}
+    
+
+    
+}
+
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceCacheObserverBridge {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // Store the vtable directly.
+    static let vtable: UniffiVTableCallbackInterfaceCacheObserverBridge = UniffiVTableCallbackInterfaceCacheObserverBridge(
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            do {
+                try FfiConverterTypeCacheObserverBridge.handleMap.remove(handle: uniffiHandle)
+            } catch {
+                print("Uniffi callback interface CacheObserverBridge: handle missing in uniffiFree")
+            }
+        },
+        uniffiClone: { (uniffiHandle: UInt64) -> UInt64 in
+            do {
+                return try FfiConverterTypeCacheObserverBridge.handleMap.clone(handle: uniffiHandle)
+            } catch {
+                fatalError("Uniffi callback interface CacheObserverBridge: handle missing in uniffiClone")
+            }
+        },
+        cacheUpdated: { (
+            uniffiHandle: UInt64,
+            payloadJson: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterTypeCacheObserverBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.cacheUpdated(
+                     payloadJson: try FfiConverterString.lift(payloadJson)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        refreshStatus: { (
+            uniffiHandle: UInt64,
+            statusJson: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterTypeCacheObserverBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.refreshStatus(
+                     statusJson: try FfiConverterString.lift(statusJson)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        }
+    )
+
+    // Rust stores this pointer for future callback invocations, so it must live
+    // for the process lifetime (not just for the init function call).
+    static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceCacheObserverBridge> = {
+        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceCacheObserverBridge>.allocate(capacity: 1)
+        ptr.initialize(to: vtable)
+        return UnsafePointer(ptr)
+    }()
+}
+
+private func uniffiCallbackInitCacheObserverBridge() {
+    uniffi_cal_ffi_fn_init_callback_vtable_cacheobserverbridge(UniffiCallbackInterfaceCacheObserverBridge.vtablePtr)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCacheObserverBridge: FfiConverter {
+    fileprivate static let handleMap = UniffiHandleMap<CacheObserverBridge>()
+
+    typealias FfiType = UInt64
+    typealias SwiftType = CacheObserverBridge
+
+    public static func lift(_ handle: UInt64) throws -> CacheObserverBridge {
+        if ((handle & 1) == 0) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return CacheObserverBridgeImpl(unsafeFromHandle: handle)
+        } else {
+            // Swift-generated handle, get the object from the handle map
+            return try handleMap.remove(handle: handle)
+        }
+    }
+
+    public static func lower(_ value: CacheObserverBridge) -> UInt64 {
+         if let rustImpl = value as? CacheObserverBridgeImpl {
+             // Rust-implemented object.  Clone the handle and return it
+            return rustImpl.uniffiCloneHandle()
+         } else {
+            // Swift object, generate a new vtable handle and return that.
+            return handleMap.insert(obj: value)
+         }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CacheObserverBridge {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: CacheObserverBridge, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCacheObserverBridge_lift(_ handle: UInt64) throws -> CacheObserverBridge {
+    return try FfiConverterTypeCacheObserverBridge.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCacheObserverBridge_lower(_ value: CacheObserverBridge) -> UInt64 {
+    return FfiConverterTypeCacheObserverBridge.lower(value)
+}
+
+
+
+
+
+
+/**
  * The mobile app's handle to the full on-device engine.
  */
 public protocol HostProtocol: AnyObject, Sendable {
@@ -878,6 +1137,12 @@ public protocol HostProtocol: AnyObject, Sendable {
     func forgetSftpHostKey(hostPort: String) throws 
     
     /**
+     * The warm-pass status (`{refreshing, last_refreshed_at}`) as JSON — the
+     * "last updated" / spinner surface. Mirrors `get_cache_refresh_status`.
+     */
+    func getCacheRefreshStatusJson() throws  -> String
+    
+    /**
      * A contact's avatar as JSON `Option<ContactPhoto>` — `{content_type,
      * data:<base64>}` or `null` when the contact has no photo — routed by the
      * optional `list_id` (omit → local). The listing's `has_photo` flag drives
@@ -998,6 +1263,15 @@ public protocol HostProtocol: AnyObject, Sendable {
     func pushNow(trigger: String) throws  -> UInt32
     
     /**
+     * Kick an immediate warm pass over every external account's containers +
+     * in-window events (the manual "refresh now"). Fire-and-forget on the Host
+     * worker thread; per-container `cache_updated` + the `refresh_status`
+     * transitions arrive via the observer. Mirrors the desktop
+     * `refresh_external_cache`.
+     */
+    func refreshExternalCache() 
+    
+    /**
      * Rename an account's display name. Persists the row + syncs the change
      * (non-secret metadata only). Mirrors the desktop `rename_account`.
      */
@@ -1077,6 +1351,15 @@ public protocol HostProtocol: AnyObject, Sendable {
      * Mirrors the desktop `set_account_secret`.
      */
     func setAccountSecret(accountId: String, secret: String) throws 
+    
+    /**
+     * Register the JS-side cache observer. A finished background refresh / warm
+     * pass then pushes `cache_updated` (the RN layer re-reads the matching view)
+     * and `refresh_status` across the bridge. Until this is called the pushes
+     * are dropped — the cache still populates; the UI just re-reads on its own
+     * focus / periodic-sync until the live push is wired.
+     */
+    func setCacheObserver(observer: CacheObserverBridge) 
     
     /**
      * Set (or replace) a contact's avatar from a JSON `ContactPhoto`
@@ -1255,6 +1538,13 @@ public protocol HostProtocol: AnyObject, Sendable {
      * assignment + on-demand next-instance spawn for external recurring tasks.
      */
     func updateTaskJson(taskJson: String, previousListId: String?) throws  -> String
+    
+    /**
+     * Warm the cache when the app foregrounds — the mobile stand-in for a tick
+     * of the desktop periodic warm loop (which mobile can't run while
+     * backgrounded). Same fire-and-forget warm pass as the manual refresh.
+     */
+    func warmCacheOnForeground() 
     
 }
 /**
@@ -1915,6 +2205,18 @@ open func forgetSftpHostKey(hostPort: String)throws   {try rustCallWithError(Ffi
 }
     
     /**
+     * The warm-pass status (`{refreshing, last_refreshed_at}`) as JSON — the
+     * "last updated" / spinner surface. Mirrors `get_cache_refresh_status`.
+     */
+open func getCacheRefreshStatusJson()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_get_cache_refresh_status_json(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
      * A contact's avatar as JSON `Option<ContactPhoto>` — `{content_type,
      * data:<base64>}` or `null` when the contact has no photo — routed by the
      * optional `list_id` (omit → local). The listing's `has_photo` flag drives
@@ -2130,6 +2432,20 @@ open func pushNow(trigger: String)throws  -> UInt32  {
 }
     
     /**
+     * Kick an immediate warm pass over every external account's containers +
+     * in-window events (the manual "refresh now"). Fire-and-forget on the Host
+     * worker thread; per-container `cache_updated` + the `refresh_status`
+     * transitions arrive via the observer. Mirrors the desktop
+     * `refresh_external_cache`.
+     */
+open func refreshExternalCache()  {try! rustCall() {
+    uniffi_cal_ffi_fn_method_host_refresh_external_cache(
+            self.uniffiCloneHandle(),$0
+    )
+}
+}
+    
+    /**
      * Rename an account's display name. Persists the row + syncs the change
      * (non-secret metadata only). Mirrors the desktop `rename_account`.
      */
@@ -2272,6 +2588,21 @@ open func setAccountSecret(accountId: String, secret: String)throws   {try rustC
             self.uniffiCloneHandle(),
         FfiConverterString.lower(accountId),
         FfiConverterString.lower(secret),$0
+    )
+}
+}
+    
+    /**
+     * Register the JS-side cache observer. A finished background refresh / warm
+     * pass then pushes `cache_updated` (the RN layer re-reads the matching view)
+     * and `refresh_status` across the bridge. Until this is called the pushes
+     * are dropped — the cache still populates; the UI just re-reads on its own
+     * focus / periodic-sync until the live push is wired.
+     */
+open func setCacheObserver(observer: CacheObserverBridge)  {try! rustCall() {
+    uniffi_cal_ffi_fn_method_host_set_cache_observer(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeCacheObserverBridge_lower(observer),$0
     )
 }
 }
@@ -2581,6 +2912,18 @@ open func updateTaskJson(taskJson: String, previousListId: String?)throws  -> St
         FfiConverterOptionString.lower(previousListId),$0
     )
 })
+}
+    
+    /**
+     * Warm the cache when the app foregrounds — the mobile stand-in for a tick
+     * of the desktop periodic warm loop (which mobile can't run while
+     * backgrounded). Same fire-and-forget warm pass as the manual refresh.
+     */
+open func warmCacheOnForeground()  {try! rustCall() {
+    uniffi_cal_ffi_fn_method_host_warm_cache_on_foreground(
+            self.uniffiCloneHandle(),$0
+    )
+}
 }
     
 
@@ -5850,6 +6193,12 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_localstore_update_task_json() != 53017) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_cacheobserverbridge_cache_updated() != 38470) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_cacheobserverbridge_refresh_status() != 42903) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json() != 45743) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -5958,6 +6307,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key() != 61915) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_get_cache_refresh_status_json() != 11899) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_get_contact_photo_json() != 13811) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -6000,6 +6352,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_push_now() != 4483) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_refresh_external_cache() != 5904) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_rename_account_json() != 49761) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -6025,6 +6380,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_set_account_secret() != 44502) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_set_cache_observer() != 36408) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_set_contact_photo_json() != 21774) {
@@ -6081,6 +6439,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_update_task_json() != 47251) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_warm_cache_on_foreground() != 9470) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_keychainbridge_store() != 54380) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -6100,6 +6461,7 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
 
+    uniffiCallbackInitCacheObserverBridge()
     uniffiCallbackInitKeychainBridge()
     return InitializationResult.ok
 }()

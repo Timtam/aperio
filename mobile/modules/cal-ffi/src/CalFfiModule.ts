@@ -157,6 +157,14 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
   listSyncLogJson(limit: number): Promise<string>;
   /** Drop every sync-log row. */
   clearSyncLog(): Promise<void>;
+  /** Kick an immediate warm pass over every external account's containers +
+   *  in-window events (the manual "refresh now"). Fire-and-forget. */
+  refreshExternalCache(): Promise<void>;
+  /** The external-cache warm-pass status as JSON `{refreshing, last_refreshed_at}`. */
+  getCacheRefreshStatusJson(): Promise<string>;
+  /** Warm the external cache on app-foreground (the mobile stand-in for the
+   *  desktop periodic warm loop). Fire-and-forget. */
+  warmCacheOnForeground(): Promise<void>;
   /** Count of unresolved sync conflicts (the badge). */
   syncConflictCount(): Promise<number>;
   /** Every unresolved conflict as a JSON `ConflictRecord[]`. */

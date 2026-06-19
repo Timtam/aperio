@@ -205,6 +205,18 @@ class CalFfiModule : Module() {
       host.clearSyncLog()
     }
 
+    AsyncFunction("refreshExternalCache") {
+      host.refreshExternalCache()
+    }
+
+    AsyncFunction("getCacheRefreshStatusJson") {
+      host.getCacheRefreshStatusJson()
+    }
+
+    AsyncFunction("warmCacheOnForeground") {
+      host.warmCacheOnForeground()
+    }
+
     AsyncFunction("syncConflictCount") {
       host.syncConflictCount().toInt()
     }
