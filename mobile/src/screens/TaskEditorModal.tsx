@@ -43,6 +43,7 @@ import { RadioGroup } from '../components/RadioGroup';
 import { RemindersEditor } from '../components/RemindersEditor';
 import { SegmentedSelect } from '../components/SegmentedSelect';
 import { SoundSelect } from '../components/SoundSelect';
+import { SubtaskSection } from '../components/SubtaskSection';
 import { TaskRecurrenceSelector } from '../components/TaskRecurrenceSelector';
 import { writeLastUsedTaskList } from '../state/lastUsedTaskList';
 import { useSoundPref } from '../state/useSoundPref';
@@ -194,6 +195,11 @@ export default function TaskEditorModal({
   // providers without sharing — the picker is then hidden (§9.7).
   const [members, setMembers] = useState<TaskUser[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  // Create mode only: subtask titles staged on the form, written right after the
+  // parent on Save (the parent has no id to reference yet). Edit mode manages
+  // real subtasks live via SubtaskSection instead.
+  const [draftSubtasks, setDraftSubtasks] = useState<string[]>([]);
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
   // Per-task sound OVERRIDE (§14.4 item level) — a host-local `sound.item.{id}`
   // pref, NOT the inline Task.sound (which the reminder resolver ignores).
   // Edit-only: a new task has no id to key the pref on yet, so it inherits the
@@ -299,6 +305,35 @@ export default function TaskEditorModal({
     [],
   );
 
+  // Whether the user has manually picked a status this session. When they
+  // haven't, the form's status FOLLOWS a subtask cascade (see syncParent) so
+  // ticking a child to completion and then saving the parent doesn't revert the
+  // derived status; once they pick a status explicitly, their choice is honoured.
+  const statusTouched = useRef(false);
+  const changeStatus = useCallback(
+    (value: TaskStatus) => {
+      statusTouched.current = true;
+      setForm((f) => ({ ...f, status: value }));
+    },
+    [],
+  );
+
+  // Adopt a subtask-cascade-updated parent: `loaded` (the persisted truth) takes
+  // the new status + completion stamp so Save's `...loaded` spread round-trips
+  // them; the form's status follows only when the user hasn't diverged. Stable
+  // (functional updates + a ref) so SubtaskSection's reload can't loop on it.
+  const syncParent = useCallback((parent: Task) => {
+    setLoaded((prev) =>
+      prev == null ||
+      (prev.status === parent.status && prev.completed_at === parent.completed_at)
+        ? prev
+        : { ...prev, status: parent.status, completed_at: parent.completed_at },
+    );
+    if (!statusTouched.current) {
+      setForm((f) => (f.status === parent.status ? f : { ...f, status: parent.status }));
+    }
+  }, []);
+
   const changeList = useCallback(
     (nextListId: string) => {
       setForm((f) => {
@@ -365,6 +400,43 @@ export default function TaskEditorModal({
   const isLocalList = useMemo(
     () => taskLists.find((l) => l.id === form.listId)?.account_id === 'local',
     [taskLists, form.listId],
+  );
+  // The loaded task's OWN list (its children live there) — for the live subtask
+  // editor's `supports_in_progress` + per-list cascade resolution.
+  const loadedList = useMemo(
+    () => (loaded ? taskLists.find((l) => l.id === loaded.list_id) : undefined),
+    [loaded, taskLists],
+  );
+  // Subtasks ride parent_id on the LOCAL store; mirror TasksScreen's gate
+  // (account_id === 'local'). Edit mode keys off the LOADED task's list (where
+  // its children actually live) so an unsaved list-picker change doesn't hide
+  // the live manager; create mode stages drafts against the form's chosen list
+  // (but not when creating a subtask — no nested-draft staging).
+  const showSubtaskEditor =
+    taskId != null && loaded != null && loadedList?.account_id === 'local';
+  const showDraftSubtasks = taskId == null && isLocalList && parentId == null;
+
+  const addDraftSubtask = useCallback(() => {
+    const trimmed = newSubtaskTitle.trim();
+    if (!trimmed) return;
+    setDraftSubtasks((d) => [...d, trimmed]);
+    setNewSubtaskTitle('');
+    AccessibilityInfo.announceForAccessibility(
+      t('dialogs.task.subtasks.added', { title: trimmed }),
+    );
+  }, [newSubtaskTitle, t]);
+
+  const removeDraftSubtask = useCallback(
+    (index: number) => {
+      const removed = draftSubtasks[index];
+      setDraftSubtasks((d) => d.filter((_, j) => j !== index));
+      if (removed) {
+        AccessibilityInfo.announceForAccessibility(
+          t('dialogs.task.deleted', { title: removed }),
+        );
+      }
+    },
+    [draftSubtasks, t],
   );
   const statusOptions = useMemo(
     () => [
@@ -453,6 +525,32 @@ export default function TaskEditorModal({
           assignees: form.assignees,
           sound: null,
         });
+        // Write any staged draft subtasks under the freshly-created parent (they
+        // default to open/medium and inherit the parent's section, matching the
+        // edit-mode add), then recompute the new parent's derived status.
+        if (draftSubtasks.length > 0) {
+          for (const subTitle of draftSubtasks) {
+            await createTask({
+              list_id: created.list_id,
+              title: subTitle,
+              description: null,
+              status: 'open',
+              priority: 'medium',
+              scheduled_date: null,
+              scheduled_time: null,
+              deadline_date: null,
+              deadline_time: null,
+              recurrence: null,
+              parent_id: created.id,
+              section_id: created.section_id,
+              color_label: null,
+              reminders: [],
+              assignees: [],
+              sound: null,
+            });
+          }
+          await recomputeAncestors(created.id, await getTasks(created.list_id));
+        }
         // Adding a subtask can change the parent's derived status (e.g. an open
         // child re-opens a completed parent). Recompute ancestors against the
         // owning list's post-create snapshot, honouring the coupling knob.
@@ -569,6 +667,7 @@ export default function TaskEditorModal({
     t,
     taskId,
     taskLists,
+    draftSubtasks,
   ]);
 
   return (
@@ -636,7 +735,7 @@ export default function TaskEditorModal({
         label={t('dialogs.task.fields.status')}
         value={form.status}
         options={statusOptions}
-        onChange={(v) => update('status', v)}
+        onChange={changeStatus}
       />
       {completedLine != null && (
         <Text style={styles.hint} accessibilityRole="text">
@@ -729,6 +828,78 @@ export default function TaskEditorModal({
           currentUserId={currentUserId}
           onChange={(next) => update('assignees', next)}
         />
+      )}
+
+      {/* Subtasks — edit mode manages real children live (mutations persist
+          immediately); create mode stages draft titles written on Save. */}
+      {showSubtaskEditor && loaded != null && (
+        <SubtaskSection
+          parentTask={loaded}
+          list={loadedList}
+          onChanged={invalidateData}
+          onParentSync={syncParent}
+        />
+      )}
+
+      {showDraftSubtasks && (
+        <View style={styles.field}>
+          <Text style={styles.legend} accessibilityRole="header">
+            {t('dialogs.task.subtasks.heading')}
+          </Text>
+          {draftSubtasks.length === 0 ? (
+            <Text style={styles.hint} accessibilityRole="text">
+              {t('dialogs.task.subtasks.empty')}
+            </Text>
+          ) : (
+            <View
+              accessibilityRole="list"
+              accessibilityLabel={t('dialogs.task.subtasks.heading')}
+              style={styles.draftList}
+            >
+              {draftSubtasks.map((title, i) => (
+                // Index-keyed: a staged-title list with no reordering.
+                <View key={`${i}-${title}`} style={styles.draftRow}>
+                  <Text
+                    style={styles.draftTitle}
+                    accessibilityRole="text"
+                    accessibilityLabel={title}
+                  >
+                    {title}
+                  </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('dialogs.task.subtasks.removeAria', { title })}
+                    onPress={() => removeDraftSubtask(i)}
+                    style={({ pressed }) => [styles.ghostButton, pressed && styles.ghostPressed]}
+                  >
+                    <Text style={styles.ghostButtonText}>{t('mobile.delete')}</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          )}
+          <View style={styles.subtaskAddRow}>
+            <TextInput
+              style={[styles.input, styles.subtaskInput]}
+              value={newSubtaskTitle}
+              onChangeText={setNewSubtaskTitle}
+              placeholder={t('dialogs.task.subtasks.placeholder')}
+              accessibilityLabel={t('dialogs.task.subtasks.newAria')}
+              returnKeyType="done"
+              onSubmitEditing={addDraftSubtask}
+            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('dialogs.task.subtasks.addButton')}
+              accessibilityState={{ disabled: newSubtaskTitle.trim() === '' }}
+              disabled={newSubtaskTitle.trim() === ''}
+              onPress={addDraftSubtask}
+              style={({ pressed }) => [styles.ghostButton, pressed && styles.ghostPressed]}
+            >
+              <Text style={styles.ghostButtonText}>{t('dialogs.task.subtasks.addButton')}</Text>
+            </Pressable>
+          </View>
+        </View>
       )}
 
       <View style={styles.buttons}>
@@ -856,6 +1027,21 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surface,
     },
     multiline: { minHeight: 96 },
+    draftList: { gap: 8 },
+    draftRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    draftTitle: { flex: 1, fontSize: 16, color: c.textPrimary },
+    subtaskAddRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
+    subtaskInput: { flex: 1 },
     buttons: { flexDirection: 'row', gap: 10, marginTop: 8 },
     button: {
       paddingVertical: 14,
