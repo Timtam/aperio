@@ -129,6 +129,59 @@ pub fn write_crash_report(logs_dir: &Path, report: &str) {
         .and_then(|mut f| f.write_all(report.as_bytes()));
 }
 
+/// Route Rust panics into the logs so a user hitting a hard crash has something
+/// to send. Writes a self-contained record (timestamp, thread, location,
+/// message, backtrace) **synchronously** to `<logs_dir>/aperio.log.crash` (which
+/// rides the normal log export via [`collect`]), emits a `tracing::error!`, and
+/// chains to the previously-installed hook so the default stderr message is
+/// preserved.
+///
+/// `version` is passed in (not `env!` here) so the report carries the *caller's*
+/// version — the desktop app on desktop, the cal-ffi engine on mobile — rather
+/// than host-core's. Catches Rust panics, the common case; a native fault
+/// (segfault / Java/Swift exception) bypasses the panic machinery and would need
+/// a separate handler. On mobile a panic inside a `#[uniffi::export]` method is
+/// caught by the scaffolding's `catch_unwind`, but this hook still fires first,
+/// so the crash is captured even though the app survives.
+///
+/// Install ONCE per process (the desktop calls it at startup; the mobile Host
+/// guards it behind a `Once`) — `set_hook` is global.
+pub fn install_panic_hook(logs_dir: PathBuf, version: &'static str) {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // Payload type is inferred here, dodging the PanicInfo/PanicHookInfo
+        // rename across Rust versions.
+        let message = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "<non-string panic payload>".to_string());
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "<unknown location>".to_string());
+        let thread = std::thread::current();
+        let thread_name = thread.name().unwrap_or("<unnamed>").to_string();
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let when = chrono::Utc::now().to_rfc3339();
+
+        let report = format_crash_report(
+            &when,
+            version,
+            &thread_name,
+            &location,
+            &message,
+            &backtrace.to_string(),
+        );
+        write_crash_report(&logs_dir, &report);
+
+        tracing::error!(target: "panic", %location, thread = %thread_name, "panic: {message}");
+
+        previous(info);
+    }));
+}
+
 // ── Read / export ─────────────────────────────────────────────────────────────
 
 /// Last `max_lines` lines of the newest log file, for the in-app viewer.

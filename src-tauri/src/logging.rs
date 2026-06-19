@@ -62,44 +62,9 @@ pub fn init(data_dir: &Path) -> LogState {
 }
 
 /// Route Rust panics into the logs so a user hitting a hard crash has something
-/// to send. Writes a self-contained record synchronously to
-/// `<logs_dir>/aperio.log.crash` (the format + write are shared with host-core),
-/// emits a `tracing::error!`, and chains to the previous hook so the standard
-/// stderr message is preserved. Catches Rust panics — a native fault bypasses
-/// the panic machinery.
+/// to send. Thin wrapper over [`host_core::logging::install_panic_hook`] —
+/// passes the desktop app's version (its own `CARGO_PKG_VERSION`) so the crash
+/// report is tagged with the right build.
 pub fn install_panic_hook(logs_dir: PathBuf) {
-    let previous = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        // Payload type is inferred here, dodging the PanicInfo/PanicHookInfo
-        // rename across Rust versions.
-        let message = info
-            .payload()
-            .downcast_ref::<&str>()
-            .map(|s| s.to_string())
-            .or_else(|| info.payload().downcast_ref::<String>().cloned())
-            .unwrap_or_else(|| "<non-string panic payload>".to_string());
-        let location = info
-            .location()
-            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
-            .unwrap_or_else(|| "<unknown location>".to_string());
-        let thread = std::thread::current();
-        let thread_name = thread.name().unwrap_or("<unnamed>").to_string();
-        let backtrace = std::backtrace::Backtrace::force_capture();
-        let when = chrono::Utc::now().to_rfc3339();
-        let version = env!("CARGO_PKG_VERSION");
-
-        let report = host_core::logging::format_crash_report(
-            &when,
-            version,
-            &thread_name,
-            &location,
-            &message,
-            &backtrace.to_string(),
-        );
-        host_core::logging::write_crash_report(&logs_dir, &report);
-
-        tracing::error!(target: "panic", %location, thread = %thread_name, "panic: {message}");
-
-        previous(info);
-    }));
+    host_core::logging::install_panic_hook(logs_dir, env!("CARGO_PKG_VERSION"));
 }

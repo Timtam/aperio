@@ -17,8 +17,8 @@ use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{fmt, prelude::*};
 
 use host_core::logging::{
-    build_file_appender, build_reloadable_filter, initial_directive, prepare_logs_dir,
-    reload_filter, ReloadHandle,
+    build_file_appender, build_reloadable_filter, initial_directive, install_panic_hook,
+    prepare_logs_dir, reload_filter, ReloadHandle,
 };
 
 struct MobileLogState {
@@ -46,6 +46,11 @@ pub fn init_mobile_logging(data_dir: &Path) {
             .with(filter_layer)
             .with(fmt::layer().with_ansi(false).with_writer(file_writer))
             .try_init();
+        // Capture Rust panics in the cal-ffi engine to <logs_dir>/aperio.log.crash
+        // so they ride the normal log export. A panic inside a #[uniffi::export]
+        // method is caught by the scaffolding (the app survives), but this hook
+        // fires first and records it. Once-guarded with the rest of init.
+        install_panic_hook(logs_dir.clone(), env!("CARGO_PKG_VERSION"));
         let _ = LOG_STATE.set(MobileLogState {
             logs_dir,
             handle,
