@@ -1,5 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { useThemedStyles, type ThemeColors } from '../theme';
+
 export interface RadioOption<T extends string | number> {
   value: T;
   label: string;
@@ -26,6 +28,7 @@ export function RadioGroup<T extends string | number>({
   onChange: (value: T) => void;
   disabled?: boolean;
 }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View accessibilityRole="radiogroup" accessibilityLabel={label} style={styles.group}>
       <Text style={styles.legend}>{label}</Text>
@@ -60,23 +63,24 @@ export function RadioGroup<T extends string | number>({
   );
 }
 
-const styles = StyleSheet.create({
-  group: { gap: 6 },
-  legend: { fontSize: 15, fontWeight: '600', color: '#2b3240' },
-  option: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  optionSelected: { borderColor: '#1d4ed8', backgroundColor: '#eaf0fd' },
-  optionPressed: { backgroundColor: '#e4ebf5' },
-  optionDisabled: { opacity: 0.5 },
-  marker: { fontSize: 18, width: 22, textAlign: 'center', color: '#10131a' },
-  optionLabel: { flex: 1, fontSize: 16, color: '#10131a' },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    group: { gap: 6 },
+    legend: { fontSize: 15, fontWeight: '600', color: c.textLabel },
+    option: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    optionSelected: { borderColor: c.accent, backgroundColor: c.surfaceSelected },
+    optionPressed: { backgroundColor: c.surfacePressed },
+    optionDisabled: { opacity: 0.5 },
+    marker: { fontSize: 18, width: 22, textAlign: 'center', color: c.textPrimary },
+    optionLabel: { flex: 1, fontSize: 16, color: c.textPrimary },
+  });

@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useSyncTriggers } from './api/syncTriggers';
+import { ThemeProvider, useTheme, navigationThemeFor } from './theme';
 import type { RootStackParamList, RootTabParamList } from './navigation/types';
 import { useReminderTriggers } from './reminders/scheduler';
 import { useStoredLanguage } from './settings/language';
@@ -212,7 +213,20 @@ function SettingsStackNav() {
 }
 
 export default function App() {
+  // ThemeProvider sits above everything that needs the OS-derived theme (the
+  // nav chrome, the status bar, every screen via useThemedStyles).
+  return (
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <AppContent />
+      </ThemeProvider>
+    </SafeAreaProvider>
+  );
+}
+
+function AppContent() {
   const { t } = useTranslation();
+  const theme = useTheme();
   // Apply the stored language override (if any) over the device-locale default.
   useStoredLanguage();
   // JS-driven sync: full round on launch + every foreground-resume, a push on
@@ -228,9 +242,11 @@ export default function App() {
   // schema-too-old) for screen-reader users. The data is already bridged.
   const sync = useSyncStatus();
   return (
-    <SafeAreaProvider>
-      <StatusBar style="auto" />
-      <NavigationContainer>
+    <>
+      {/* Dark status-bar glyphs on the light background, light glyphs on the
+          dark / high-contrast backgrounds. */}
+      <StatusBar style={theme.mode === 'light' ? 'dark' : 'light'} />
+      <NavigationContainer theme={navigationThemeFor(theme)}>
         <TaskStoreProvider>
           <Tab.Navigator initialRouteName="TasksTab">
             <Tab.Screen
@@ -267,6 +283,6 @@ export default function App() {
           </Tab.Navigator>
         </TaskStoreProvider>
       </NavigationContainer>
-    </SafeAreaProvider>
+    </>
   );
 }

@@ -5,6 +5,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { RootStackScreenProps } from '../navigation/types';
 import { RadioGroup } from '../components/RadioGroup';
+import { useThemedStyles, type ThemeColors } from '../theme';
 import {
   applyLanguageChoice,
   readLanguageChoice,
@@ -23,6 +24,7 @@ export default function SettingsScreen({
   navigation,
 }: RootStackScreenProps<'Settings'>) {
   const { t, i18n } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
   const [language, setLanguage] = useState<LanguageChoice>('system');
   const [weekStart, setWeekStart] = useState<WeekStart>(1);
 
@@ -132,20 +134,21 @@ export default function SettingsScreen({
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#ffffff' },
-  content: { padding: 16, gap: 20 },
-  section: { gap: 8 },
-  hint: { fontSize: 14, color: '#5b6573', lineHeight: 20 },
-  links: { gap: 12 },
-  link: {
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-  },
-  linkText: { fontSize: 16, fontWeight: '600', color: '#1d3a2f' },
-  pressed: { opacity: 0.7 },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.background },
+    content: { padding: 16, gap: 20 },
+    section: { gap: 8 },
+    hint: { fontSize: 14, color: c.textSecondary, lineHeight: 20 },
+    links: { gap: 12 },
+    link: {
+      paddingVertical: 14,
+      paddingHorizontal: 18,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    linkText: { fontSize: 16, fontWeight: '600', color: c.link },
+    pressed: { opacity: 0.7 },
+  });
