@@ -41,6 +41,7 @@ import {
   SyncPreview,
   SyncStatus,
 } from '../api/sync';
+import { listAccounts } from '../api/accounts';
 import { connectSyncOAuth } from '../api/oauth';
 import { setUserPref } from '../api/prefs';
 import { RadioGroup } from '../components/RadioGroup';
@@ -84,10 +85,19 @@ export default function SyncScreen() {
   // the "refreshing…" / "last updated" line + the manual refresh button. Loaded
   // on focus and updated live from the native `onCacheRefreshStatus` event.
   const [cacheStatus, setCacheStatus] = useState<CacheRefreshStatus | null>(null);
+  // The external SWR cache (the "External data" section below) warms EXTERNAL
+  // accounts (calendar/task/contact providers), independent of the sync target —
+  // so that section is shown only when at least one external (non-local) account
+  // exists; otherwise its "last synchronized" line misleads with nothing connected.
+  const [hasExternalAccounts, setHasExternalAccounts] = useState(false);
 
   // Which target to configure, plus the per-kind fields. `user`/`password` are
   // shared by WebDAV + FTP (only the active kind's fields are shown).
-  const [kind, setKind] = useState<SyncKind>('local');
+  // 'local' is intentionally NOT offered on mobile (see kindOptions): a
+  // device-local target only backs up into the app sandbox, which no other
+  // device can sync against. The SyncKind union + the dormant `kind === 'local'`
+  // branches stay so a 'local' config synced from desktop still round-trips.
+  const [kind, setKind] = useState<SyncKind>('webdav');
   const [path, setPath] = useState(''); // local
   const [url, setUrl] = useState(''); // webdav
   const [host, setHost] = useState(''); // ftp
@@ -215,6 +225,9 @@ export default function SyncScreen() {
       setConflictCount(await syncConflictCount().catch(() => 0));
       setSyncLog(await listSyncLog(100).catch(() => []));
       setCacheStatus(await cacheRefreshStatus().catch(() => null));
+      setHasExternalAccounts(
+        (await listAccounts().catch(() => [])).some((a) => a.adapter_kind !== 'local'),
+      );
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -300,7 +313,6 @@ export default function SyncScreen() {
 
   const kindOptions = useMemo(
     () => [
-      { value: 'local' as const, label: t('dialogs.settings.sync.adapterKindLocal') },
       { value: 'webdav' as const, label: t('dialogs.settings.sync.adapterKindWebdav') },
       { value: 'ftp' as const, label: t('dialogs.settings.sync.adapterKindFtp') },
       {
@@ -1886,28 +1898,30 @@ export default function SyncScreen() {
           plus a live status line. The list views (calendar/tasks/contacts)
           live-reload + announce on a warm pass via the root cache observer, so
           this section is the control point, not a duplicate announcer. */}
-      <View style={styles.protocolSection}>
-        <Text style={styles.label} accessibilityRole="header">
-          {t('cacheRefresh.label')}
-        </Text>
-        <Text
-          style={styles.hint}
-          accessibilityRole="text"
-          accessibilityLiveRegion="polite"
-        >
-          {cacheStatusLine}
-        </Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ disabled: cacheStatus?.refreshing === true }}
-          accessibilityLabel={t('cacheRefresh.refreshNow')}
-          disabled={cacheStatus?.refreshing === true}
-          onPress={() => void refreshCache()}
-          style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
-        >
-          <Text style={styles.ghostButtonText}>{t('cacheRefresh.refreshNow')}</Text>
-        </Pressable>
-      </View>
+      {hasExternalAccounts && (
+        <View style={styles.protocolSection}>
+          <Text style={styles.label} accessibilityRole="header">
+            {t('cacheRefresh.label')}
+          </Text>
+          <Text
+            style={styles.hint}
+            accessibilityRole="text"
+            accessibilityLiveRegion="polite"
+          >
+            {cacheStatusLine}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: cacheStatus?.refreshing === true }}
+            accessibilityLabel={t('cacheRefresh.refreshNow')}
+            disabled={cacheStatus?.refreshing === true}
+            onPress={() => void refreshCache()}
+            style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.ghostButtonText}>{t('cacheRefresh.refreshNow')}</Text>
+          </Pressable>
+        </View>
+      )}
 
       {/* Protocol — recent sync rounds (newest first), the diagnostic log every
           round self-records (mobile has no scheduler). A linear accessible list;
