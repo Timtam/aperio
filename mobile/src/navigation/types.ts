@@ -64,6 +64,8 @@ export type RootStackParamList = {
   Settings: undefined;
   TaskSettings: undefined;
   ColorLabels: undefined;
+  // Diagnostics: the rolling log — detail level, recent lines, redacted export.
+  Logs: undefined;
   Contacts: undefined;
   ContactLists: undefined;
   ContactEditor: { contactId: string | null; listId: string };

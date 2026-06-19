@@ -28,6 +28,7 @@ import EventEditorModal from './screens/EventEditorModal';
 import EventsScreen from './screens/EventsScreen';
 import ListEditorModal from './screens/ListEditorModal';
 import ListsScreen from './screens/ListsScreen';
+import LogsScreen from './screens/LogsScreen';
 import MonthScreen from './screens/MonthScreen';
 import QuickAddTaskModal from './screens/QuickAddTaskModal';
 import RemindersScreen from './screens/RemindersScreen';
@@ -231,6 +232,11 @@ function SettingsStackNav() {
         name="ColorLabels"
         component={ColorLabelsScreen}
         options={{ title: t('dialogs.colorLabels.title') }}
+      />
+      <SettingsStack.Screen
+        name="Logs"
+        component={LogsScreen}
+        options={{ title: t('dialogs.settings.tabs.logs') }}
       />
       <SettingsStack.Screen
         name="TaskSettings"
