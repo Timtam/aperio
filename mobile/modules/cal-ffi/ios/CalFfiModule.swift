@@ -537,6 +537,13 @@ public class CalFfiModule: Module {
         configJson: configJson, deviceName: deviceName, passphrase: passphrase)
     }
 
+    // adoptLocalDatasetJson initialises a FRESH dataset (the unified Connect
+    // button's empty-target path), optionally enabling E2E at creation.
+    AsyncFunction("adoptLocalDatasetJson") { (configJson: String, deviceName: String?, passphrase: String?) -> String in
+      try self.host.adoptLocalDatasetJson(
+        configJson: configJson, deviceName: deviceName, passphrase: passphrase)
+    }
+
     AsyncFunction("resumeStaleDeviceJson") { () -> String in
       try self.host.resumeStaleDeviceJson()
     }

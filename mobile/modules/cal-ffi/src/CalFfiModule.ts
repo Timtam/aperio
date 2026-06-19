@@ -474,6 +474,16 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
     deviceName: string | null,
     passphrase: string | null,
   ): Promise<string>;
+  /** "Start fresh" (§19.11): overwrite the target's meta.json so it names ONLY
+   *  this device, optionally minting E2E from `passphrase` (null/blank = a
+   *  plaintext fresh dataset), then activate + persist. The unified Connect
+   *  button uses it to INITIALISE an empty target. Returns the OnboardingReport
+   *  JSON. */
+  adoptLocalDatasetJson(
+    configJson: string,
+    deviceName: string | null,
+    passphrase: string | null,
+  ): Promise<string>;
   /** Resume a STALE device (§19.10): re-onboard from the configured target +
    *  clear the latched stale flag. Returns the OnboardingReport JSON. Rejects
    *  when no target is configured. */

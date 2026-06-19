@@ -8,6 +8,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -15,6 +16,7 @@ import {
 
 import {
   acceptRemoteDataset,
+  adoptLocalDataset,
   adoptRemoteEncryption,
   cacheRefreshStatus,
   changeSyncPassphrase,
@@ -131,6 +133,9 @@ export default function SyncScreen() {
   const [preview, setPreview] = useState<SyncPreview | null>(null);
   const [joinPassphrase, setJoinPassphrase] = useState(''); // join-existing E2E passphrase
   const [joinDeviceName, setJoinDeviceName] = useState(''); // optional name for meta.json
+  // The empty-target "enable E2E at creation" toggle — the unified Connect
+  // button's second-press option; reuses joinPassphrase as the passphrase draft.
+  const [createE2e, setCreateE2e] = useState(false);
   // Latest preview, readable inside the invalidation effect WITHOUT making
   // `preview` a dep (which would re-run + clear it in a loop). Lets the effect
   // announce "the check is now stale" only when one was actually showing.
@@ -140,6 +145,7 @@ export default function SyncScreen() {
   // the SFTP trust panel) so the blind user reaches the passphrase/Adopt controls
   // instead of being stranded on the "Check existing dataset" button.
   const joinPanelRef = useRef<Text>(null);
+  const emptyPanelRef = useRef<Text>(null);
   // When set, the §19.5 trust panel is showing the probed fingerprint awaiting
   // the user's explicit accept (first-use or key-change) before connect.
   const [pendingTrust, setPendingTrust] = useState<HostKeyPreview | null>(null);
@@ -387,23 +393,132 @@ export default function SyncScreen() {
     return password.length > 0 ? { ...base, password } : base;
   }, [kind, path, url, host, port, ftpPath, mode, user, password]);
 
-  const configure = useCallback(async () => {
+  // The unified §19.11 Connect — the mobile twin of the desktop `runConnect`.
+  // Probe the target, then JOIN an existing dataset or INITIALISE an empty one,
+  // replacing the old check/join/"use this folder" three-button dance. An empty
+  // target takes TWO presses (the first reveals the optional E2E setup, the
+  // second creates the dataset) so we never silently overwrite; an existing
+  // encrypted dataset reveals its passphrase field on the first press and joins
+  // on the next.
+  const onConnect = useCallback(async () => {
     const config = buildConfig();
-    if (config == null) return;
+    if (config == null) {
+      setError(t('mobile.syncFieldsRequired'));
+      announce(t('mobile.syncFieldsRequired'));
+      return;
+    }
+    const priorPreview = preview;
+    const device = joinDeviceName.trim().length > 0 ? joinDeviceName.trim() : null;
     setError(null);
     setBusy(true);
     try {
-      await configureSyncAdapter(config);
+      const p = await previewSyncTarget(config);
+      setPreview(p);
+      if (p.kind === 'existing') {
+        // This build can't apply a newer dataset (§19.9) — surface the warning
+        // (the panel also shows it) but never join.
+        if (p.compatibility.kind === 'app_too_old') {
+          setError(t('dialogs.settings.sync.errorSchemaTooOld'));
+          announce(t('dialogs.settings.sync.errorSchemaTooOld'));
+          return;
+        }
+        // Encrypted + no passphrase yet → reveal the field (rendered off
+        // preview.e2e_enabled) and wait for the next press.
+        if (p.e2e_enabled && joinPassphrase.trim().length === 0) {
+          setError(t('dialogs.settings.sync.e2eRemoteRequiresPassphrase'));
+          announce(t('dialogs.settings.sync.e2eRemoteRequiresPassphrase'));
+          return;
+        }
+        const report = await acceptRemoteDataset(
+          config,
+          device,
+          p.e2e_enabled ? joinPassphrase : null,
+        );
+        setPreview(null);
+        setJoinPassphrase('');
+        setCreateE2e(false);
+        await refresh();
+        announce(
+          t('dialogs.settings.sync.onboardingDone', { count: report.device_count }),
+        );
+        return;
+      }
+      // Empty target. The first press only REVEALS the optional E2E setup; only
+      // a second press (priorPreview already 'empty') initialises the dataset.
+      if (priorPreview?.kind !== 'empty') {
+        announce(t('dialogs.settings.sync.connectEmptyReveal'));
+        return;
+      }
+      if (createE2e && joinPassphrase.trim().length === 0) {
+        setError(t('dialogs.settings.sync.e2ePassphraseRequired'));
+        announce(t('dialogs.settings.sync.e2ePassphraseRequired'));
+        return;
+      }
+      await adoptLocalDataset(config, device, createE2e ? joinPassphrase : null);
+      setPreview(null);
+      setJoinPassphrase('');
+      setCreateE2e(false);
       await refresh();
-      announce(t('mobile.syncConfigured'));
+      announce(t('dialogs.settings.sync.onboardingFresh'));
     } catch (err) {
       const message = errorMessage(err);
       setError(message);
+      setPreview(null);
       announce(t('mobile.error', { message }));
     } finally {
       setBusy(false);
     }
-  }, [announce, buildConfig, refresh, t]);
+  }, [
+    announce,
+    buildConfig,
+    createE2e,
+    joinDeviceName,
+    joinPassphrase,
+    preview,
+    refresh,
+    t,
+  ]);
+
+  // Destructive "start fresh" over an EXISTING dataset — overwrites the remote
+  // meta.json, orphaning other devices' sync. Demoted behind an Alert confirm
+  // (the mobile twin of the desktop onOverwrite): a plaintext re-init
+  // (passphrase null); the user can enable E2E afterwards.
+  const confirmOverwrite = useCallback(() => {
+    const config = buildConfig();
+    if (config == null) return;
+    const device = joinDeviceName.trim().length > 0 ? joinDeviceName.trim() : null;
+    Alert.alert(
+      t('dialogs.settings.sync.previewAdoptButton'),
+      t('dialogs.settings.sync.previewAdoptConfirm'),
+      [
+        { text: t('mobile.cancel'), style: 'cancel' },
+        {
+          text: t('dialogs.settings.sync.previewAdoptButton'),
+          style: 'destructive',
+          onPress: () => {
+            setError(null);
+            setBusy(true);
+            void (async () => {
+              try {
+                await adoptLocalDataset(config, device, null);
+                setPreview(null);
+                setJoinPassphrase('');
+                setCreateE2e(false);
+                await refresh();
+                announce(t('dialogs.settings.sync.onboardingFresh'));
+              } catch (err) {
+                const message = errorMessage(err);
+                setError(message);
+                announce(t('mobile.error', { message }));
+              } finally {
+                setBusy(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  }, [announce, buildConfig, joinDeviceName, refresh, t]);
 
   // A stale preview would mislead — the join panel renders entirely from the
   // probed `preview`, but `joinTarget` joins the CURRENT `buildConfig()`. So
@@ -417,15 +532,23 @@ export default function SyncScreen() {
     }
     setPreview(null);
     setJoinPassphrase('');
-    setJoinDeviceName('');
+    setCreateE2e(false);
+    // joinDeviceName is intentionally kept — it names THIS device, not the
+    // target, so editing the connection fields shouldn't wipe it.
   }, [kind, path, url, host, port, ftpPath, mode, user, password, announce, t]);
 
   // Move SR focus onto the join panel when it appears (the §19.11 onboarding
   // twin of the trust-panel focus handling) so the blind user lands on the new
   // controls rather than hunting downward from the Check button.
   useEffect(() => {
-    if (preview?.kind !== 'existing') return;
-    const tag = joinPanelRef.current ? findNodeHandle(joinPanelRef.current) : null;
+    const ref =
+      preview?.kind === 'existing'
+        ? joinPanelRef
+        : preview?.kind === 'empty'
+          ? emptyPanelRef
+          : null;
+    if (ref == null) return;
+    const tag = ref.current ? findNodeHandle(ref.current) : null;
     if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
   }, [preview]);
 
@@ -442,72 +565,6 @@ export default function SyncScreen() {
         .join(', '),
     [t],
   );
-
-  // Probe the entered target WITHOUT committing (§19.11): Empty → "start fresh"
-  // is the only path; Existing → reveal the join panel (passphrase if encrypted).
-  const checkTarget = useCallback(async () => {
-    const config = buildConfig();
-    if (config == null) {
-      setError(t('mobile.syncFieldsRequired'));
-      announce(t('mobile.syncFieldsRequired'));
-      return;
-    }
-    setError(null);
-    setBusy(true);
-    try {
-      const result = await previewSyncTarget(config);
-      setPreview(result);
-      announce(
-        result.kind === 'empty'
-          ? t('dialogs.settings.sync.previewEmpty')
-          : t('dialogs.settings.sync.previewDevices', {
-              count: result.devices.length,
-              names: summariseDevices(result.devices),
-            }),
-      );
-    } catch (err) {
-      const message = errorMessage(err);
-      setError(message);
-      announce(t('mobile.error', { message }));
-    } finally {
-      setBusy(false);
-    }
-  }, [announce, buildConfig, summariseDevices, t]);
-
-  // Join the existing dataset (§19.11 "Adopt dataset"): pull + apply its
-  // snapshot + logs and register this device. Non-destructive to the remote —
-  // unlike "start fresh", which overwrites. A passphrase is required when the
-  // dataset is encrypted (it's how this fresh device derives the key).
-  const joinTarget = useCallback(async () => {
-    const config = buildConfig();
-    if (config == null || preview?.kind !== 'existing') return;
-    if (preview.e2e_enabled && joinPassphrase.trim().length === 0) {
-      setError(t('dialogs.settings.sync.e2ePassphraseRequired'));
-      announce(t('dialogs.settings.sync.e2ePassphraseRequired'));
-      return;
-    }
-    setError(null);
-    setBusy(true);
-    try {
-      const report = await acceptRemoteDataset(
-        config,
-        joinDeviceName.trim().length > 0 ? joinDeviceName.trim() : null,
-        preview.e2e_enabled ? joinPassphrase : null,
-      );
-      setPreview(null);
-      setJoinPassphrase('');
-      await refresh();
-      announce(
-        t('dialogs.settings.sync.onboardingDone', { count: report.device_count }),
-      );
-    } catch (err) {
-      const message = errorMessage(err);
-      setError(message);
-      announce(t('mobile.error', { message }));
-    } finally {
-      setBusy(false);
-    }
-  }, [announce, buildConfig, joinDeviceName, joinPassphrase, preview, refresh, t]);
 
   // Dropbox / Google Drive: sign in via the browser (begin → native auth session
   // → store the refresh token), then activate the target in one step.
@@ -1762,32 +1819,100 @@ export default function SyncScreen() {
         </Pressable>
       ) : (
         <>
-          {/* §19.11 onboarding: probe the target before committing, so an
-              existing (possibly encrypted) dataset can be JOINED rather than
-              silently overwritten. */}
+          {/* §19.11 onboarding — a SINGLE "Connect" button: probe the target,
+              then JOIN an existing dataset or INITIALISE an empty one (an empty
+              target needs a second press to confirm, so we never silently
+              overwrite). The device name (set before pressing) names THIS
+              device on the dataset. */}
+          <Text style={styles.label}>{t('dialogs.settings.sync.deviceName')}</Text>
+          <Text style={styles.hint} accessibilityRole="text">
+            {t('dialogs.settings.sync.deviceNameHint')}
+          </Text>
+          <TextInput
+            style={styles.input}
+            value={joinDeviceName}
+            onChangeText={setJoinDeviceName}
+            accessibilityLabel={t('dialogs.settings.sync.deviceName')}
+            autoCapitalize="words"
+            autoCorrect={false}
+          />
+
           <Pressable
             accessibilityRole="button"
-            accessibilityState={{ disabled: busy }}
-            accessibilityLabel={t('dialogs.settings.sync.previewButton')}
+            accessibilityState={{ disabled: busy, busy }}
+            accessibilityLabel={t('dialogs.settings.sync.adapterConfigure')}
             disabled={busy}
-            onPress={() => void checkTarget()}
-            style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+            onPress={() => void onConnect()}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              pressed && styles.primaryPressed,
+              busy && styles.primaryDisabled,
+            ]}
           >
-            <Text style={styles.ghostButtonText}>
-              {t('dialogs.settings.sync.previewButton')}
+            <Text style={styles.primaryButtonText}>
+              {busy
+                ? t('dialogs.settings.sync.adapterConnecting')
+                : t('dialogs.settings.sync.adapterConfigure')}
             </Text>
           </Pressable>
 
+          {/* EMPTY target, revealed after the FIRST Connect press: optional
+              end-to-end encryption. A SECOND Connect press creates the dataset. */}
           {preview?.kind === 'empty' && (
-            <Text
-              style={styles.hint}
-              accessibilityRole="text"
-              accessibilityLiveRegion="polite"
-            >
-              {t('dialogs.settings.sync.previewEmpty')}
-            </Text>
+            <View style={styles.field}>
+              <Text
+                ref={emptyPanelRef}
+                style={styles.label}
+                accessibilityRole="header"
+                accessibilityLiveRegion="polite"
+              >
+                {t('dialogs.settings.sync.connectEmptyReveal')}
+              </Text>
+              <Pressable
+                accessibilityRole="switch"
+                accessibilityState={{ checked: createE2e }}
+                accessibilityLabel={t('dialogs.settings.sync.e2eEnableLabel')}
+                onPress={() => setCreateE2e((prev) => !prev)}
+                style={({ pressed }) => [styles.switchRow, pressed && styles.pressed]}
+              >
+                <Text style={styles.switchLabel} importantForAccessibility="no">
+                  {t('dialogs.settings.sync.e2eEnableLabel')}
+                </Text>
+                <View pointerEvents="none">
+                  <Switch
+                    value={createE2e}
+                    importantForAccessibility="no"
+                    accessibilityElementsHidden
+                  />
+                </View>
+              </Pressable>
+              <Text style={styles.hint} accessibilityRole="text">
+                {t('dialogs.settings.sync.e2eEnableHint')}
+              </Text>
+              {createE2e && (
+                <>
+                  <Text style={styles.label}>
+                    {t('dialogs.settings.sync.e2ePassphrase')}
+                  </Text>
+                  <TextInput
+                    style={styles.input}
+                    value={joinPassphrase}
+                    onChangeText={setJoinPassphrase}
+                    accessibilityLabel={t('dialogs.settings.sync.e2ePassphrase')}
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                  <Text style={styles.warning} accessibilityRole="text">
+                    {t('dialogs.settings.sync.e2eIrreversibleWarning')}
+                  </Text>
+                </>
+              )}
+            </View>
           )}
 
+          {/* EXISTING target: the dataset details + passphrase (when encrypted).
+              The join fires on the NEXT Connect press, not a separate button. */}
           {preview?.kind === 'existing' && (
             <View style={styles.field}>
               <Text ref={joinPanelRef} style={styles.label} accessibilityRole="header">
@@ -1842,54 +1967,26 @@ export default function SyncScreen() {
                 </>
               )}
 
-              <Text style={styles.label}>
-                {t('dialogs.settings.sync.deviceName')}
-              </Text>
-              <Text style={styles.hint} accessibilityRole="text">
-                {t('dialogs.settings.sync.deviceNameHint')}
-              </Text>
-              <TextInput
-                style={styles.input}
-                value={joinDeviceName}
-                onChangeText={setJoinDeviceName}
-                accessibilityLabel={t('dialogs.settings.sync.deviceName')}
-                autoCapitalize="words"
-                autoCorrect={false}
-              />
-
+              {/* Destructive "start fresh" over THIS dataset — overwrites the
+                  remote (other devices lose their sync), so it sits behind a
+                  confirm and apart from the non-destructive Connect join. */}
               <Pressable
                 accessibilityRole="button"
-                accessibilityState={{
-                  disabled: busy || preview.compatibility.kind === 'app_too_old',
-                }}
-                accessibilityLabel={t('dialogs.settings.sync.previewAcceptButton')}
-                disabled={busy || preview.compatibility.kind === 'app_too_old'}
-                onPress={() => void joinTarget()}
+                accessibilityState={{ disabled: busy }}
+                accessibilityLabel={t('dialogs.settings.sync.previewAdoptButton')}
+                disabled={busy}
+                onPress={confirmOverwrite}
                 style={({ pressed }) => [
-                  styles.primaryButton,
-                  pressed && styles.primaryPressed,
-                  (busy || preview.compatibility.kind === 'app_too_old') &&
-                    styles.primaryDisabled,
+                  styles.conflictsButton,
+                  pressed && styles.pressed,
                 ]}
               >
-                <Text style={styles.primaryButtonText}>
-                  {t('dialogs.settings.sync.previewAcceptButton')}
+                <Text style={styles.conflictsButtonText}>
+                  {t('dialogs.settings.sync.previewAdoptButton')}
                 </Text>
               </Pressable>
             </View>
           )}
-
-          {/* "Start fresh / overwrite": the original configure path. */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ disabled: busy }}
-            accessibilityLabel={t('mobile.syncConfigure')}
-            disabled={busy}
-            onPress={() => void configure()}
-            style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
-          >
-            <Text style={styles.ghostButtonText}>{t('mobile.syncConfigure')}</Text>
-          </Pressable>
         </>
       )}
 
@@ -2093,4 +2190,17 @@ const makeStyles = (c: ThemeColors) =>
     // Monospace so the fingerprint reads character-by-character (and a SR user can
     // compare it exactly against the out-of-band value).
     trustField: { fontSize: 14, color: c.textPrimary, fontFamily: 'monospace' },
+    switchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    switchLabel: { flex: 1, fontSize: 16, color: c.textPrimary },
   });

@@ -407,3 +407,22 @@ export const acceptRemoteDataset = async (
       passphrase,
     ),
   ) as OnboardingReport;
+
+/** "Start fresh" (§19.11): overwrite the target's meta.json so it names ONLY
+ *  this device, optionally enabling end-to-end encryption from `passphrase`
+ *  (null/blank = a plaintext fresh dataset — the key is minted at creation when
+ *  a passphrase is given), then activate + persist. The unified Connect button
+ *  uses it to INITIALISE an empty target; the destructive "overwrite" action
+ *  (behind a confirm) uses it on an existing target with `passphrase = null`. */
+export const adoptLocalDataset = async (
+  config: SyncAdapterConfig,
+  deviceName: string | null,
+  passphrase: string | null = null,
+): Promise<OnboardingReport> =>
+  JSON.parse(
+    await CalFfi.adoptLocalDatasetJson(
+      JSON.stringify(config),
+      deviceName,
+      passphrase,
+    ),
+  ) as OnboardingReport;

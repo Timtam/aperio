@@ -623,6 +623,12 @@ class CalFfiModule : Module() {
       host.acceptRemoteDatasetJson(configJson, deviceName, passphrase)
     }
 
+    // adoptLocalDatasetJson initialises a FRESH dataset (the unified Connect
+    // button's empty-target path), optionally enabling E2E at creation.
+    AsyncFunction("adoptLocalDatasetJson") { configJson: String, deviceName: String?, passphrase: String? ->
+      host.adoptLocalDatasetJson(configJson, deviceName, passphrase)
+    }
+
     AsyncFunction("resumeStaleDeviceJson") {
       host.resumeStaleDeviceJson()
     }
