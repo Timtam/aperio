@@ -41,6 +41,7 @@ import {
   SyncStatus,
 } from '../api/sync';
 import { connectSyncOAuth } from '../api/oauth';
+import { setUserPref } from '../api/prefs';
 import { RadioGroup } from '../components/RadioGroup';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import CalFfi from '../../modules/cal-ffi';
@@ -55,6 +56,13 @@ import CalFfi from '../../modules/cal-ffi';
 type SyncKind = 'local' | 'webdav' | 'ftp' | 'dropbox' | 'googledrive' | 'sftp';
 type FtpMode = 'explicit' | 'implicit' | 'plain';
 type SftpAuth = 'password' | 'key';
+
+// The synced sync-interval pref (same key the foreground periodic timer reads in
+// syncTriggers) + the preset choices, mirroring the desktop SyncPanel. Writing
+// the pref is all mobile needs: there's no persistent scheduler to kick — the
+// foreground timer re-reads the pref on each resume.
+const PREF_SYNC_INTERVAL_MINUTES = 'sync.intervalMinutes';
+const INTERVAL_PRESETS: readonly number[] = [1, 5, 15, 30, 60, 240];
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -154,6 +162,31 @@ export default function SyncScreen() {
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
     [],
+  );
+
+  // Change the foreground periodic-sync interval: persist the synced pref (the
+  // timer re-reads it on the next resume) + re-read the status so the picker
+  // reflects the clamped value. Mirrors the desktop set_sync_interval path.
+  const onIntervalChange = useCallback(
+    async (minutes: number) => {
+      try {
+        await setUserPref(PREF_SYNC_INTERVAL_MINUTES, String(minutes));
+        setStatus(await syncStatus());
+        announce(t('dialogs.settings.sync.intervalChanged', { minutes }));
+      } catch (err) {
+        announce(t('mobile.error', { message: errorMessage(err) }));
+      }
+    },
+    [announce, t],
+  );
+
+  const intervalOptions = useMemo(
+    () =>
+      INTERVAL_PRESETS.map((min) => ({
+        value: min,
+        label: t('dialogs.settings.sync.intervalOption', { count: min, minutes: min }),
+      })),
+    [t],
   );
 
   const refresh = useCallback(async () => {
@@ -1022,6 +1055,20 @@ export default function SyncScreen() {
             {busy ? t('mobile.syncing') : t('mobile.syncNow')}
           </Text>
         </Pressable>
+      )}
+
+      {/* Foreground periodic-sync interval — only meaningful once a target is
+          configured (the timer only runs against a real target). */}
+      {status?.configured && (
+        <View style={styles.field}>
+          <RadioGroup<number>
+            label={t('dialogs.settings.sync.intervalLabel')}
+            value={status.interval_minutes}
+            options={intervalOptions}
+            onChange={(min) => void onIntervalChange(min)}
+            disabled={busy}
+          />
+        </View>
       )}
 
       {/* Unresolved sync conflicts → the resolution screen. Shown only when
