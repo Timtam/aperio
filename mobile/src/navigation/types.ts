@@ -37,6 +37,9 @@ export type RootStackParamList = {
   Week: { anchor?: string } | undefined;
   Month: { anchor?: string } | undefined;
   Agenda: { anchor?: string } | undefined;
+  // A ~12-month overview; each month opens the Month view. `anchor` (ISO) seeds
+  // the displayed year from the Day⇄…⇄Year switcher.
+  Year: { anchor?: string } | undefined;
   // `occurrence` (an RFC-3339 instant) marks that a single occurrence of a
   // recurring series was opened — the editor seeds its dates from it and offers
   // the "this occurrence vs whole series" edit scope.

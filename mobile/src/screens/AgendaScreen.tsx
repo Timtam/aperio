@@ -27,6 +27,7 @@ import {
 } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
+import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import { resolveEventColor } from '../intl/eventColor';
 import { useCacheReload } from '../state/cacheObserver';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
@@ -260,10 +261,7 @@ export default function AgendaScreen({
       <CalendarViewSwitcher
         active="agenda"
         onSelect={(v) =>
-          navigation.replace(
-            v === 'day' ? 'Events' : v === 'week' ? 'Week' : 'Month',
-            { anchor: anchor.toISOString() },
-          )
+          navigation.replace(CALENDAR_VIEW_ROUTE[v], { anchor: anchor.toISOString() })
         }
       />
 

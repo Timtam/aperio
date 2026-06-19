@@ -11,6 +11,7 @@ import {
 
 import { CalendarDayList } from '../components/CalendarDayList';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
+import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import { readWeekStart, type WeekStart } from '../settings/weekStart';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -124,10 +125,7 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
         // replace (not push): sibling views swap in place, keeping the stack
         // flat; the anchor rides along so the date survives the switch.
         onSelect={(v) =>
-          navigation.replace(
-            v === 'day' ? 'Events' : v === 'month' ? 'Month' : 'Agenda',
-            { anchor: anchor.toISOString() },
-          )
+          navigation.replace(CALENDAR_VIEW_ROUTE[v], { anchor: anchor.toISOString() })
         }
       />
 

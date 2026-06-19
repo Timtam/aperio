@@ -35,6 +35,7 @@ import TaskMembersScreen from './screens/TaskMembersScreen';
 import TaskSettingsScreen from './screens/TaskSettingsScreen';
 import TasksScreen from './screens/TasksScreen';
 import WeekScreen from './screens/WeekScreen';
+import YearScreen from './screens/YearScreen';
 import { TaskStoreProvider } from './state/taskStore';
 
 // Aperio mobile — navigation host (the faithful desktop port).
@@ -123,6 +124,11 @@ function CalendarStackNav() {
         name="Agenda"
         component={AgendaScreen}
         options={{ title: t('views.agenda.title') }}
+      />
+      <CalendarStack.Screen
+        name="Year"
+        component={YearScreen}
+        options={{ title: t('views.year.title') }}
       />
       <CalendarStack.Screen
         name="Calendars"

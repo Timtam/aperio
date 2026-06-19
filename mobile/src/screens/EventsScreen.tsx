@@ -22,6 +22,7 @@ import {
 } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
+import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import { resolveEventColor } from '../intl/eventColor';
 import { useCacheReload } from '../state/cacheObserver';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
@@ -242,12 +243,9 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
         // — keeps the stack flat (no duplicate back-stack entries) while the
         // fresh mount still picks up the anchor date from params. Pressing the
         // active view is suppressed by the switcher, so this only fires for
-        // Week / Month / Agenda.
+        // Week / Month / Agenda / Year.
         onSelect={(v) =>
-          navigation.replace(
-            v === 'week' ? 'Week' : v === 'month' ? 'Month' : 'Agenda',
-            { anchor: day.toISOString() },
-          )
+          navigation.replace(CALENDAR_VIEW_ROUTE[v], { anchor: day.toISOString() })
         }
       />
 

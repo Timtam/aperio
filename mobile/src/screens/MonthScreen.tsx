@@ -11,6 +11,7 @@ import {
 
 import { CalendarDayList } from '../components/CalendarDayList';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
+import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -85,10 +86,7 @@ export default function MonthScreen({ navigation, route }: RootStackScreenProps<
       <CalendarViewSwitcher
         active="month"
         onSelect={(v) =>
-          navigation.replace(
-            v === 'day' ? 'Events' : v === 'week' ? 'Week' : 'Agenda',
-            { anchor: anchor.toISOString() },
-          )
+          navigation.replace(CALENDAR_VIEW_ROUTE[v], { anchor: anchor.toISOString() })
         }
       />
 
