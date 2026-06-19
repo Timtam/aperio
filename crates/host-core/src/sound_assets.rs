@@ -406,6 +406,96 @@ pub fn local_sound_path(sounds_dir: &Path, hash: &str) -> Option<PathBuf> {
     local_hash_present(sounds_dir, hash).map(|ext| sounds_dir.join(format!("{hash}.{ext}")))
 }
 
+// ── Import (§14.4 / §19.2.2) ─────────────────────────────────────────────────
+//
+// The content-addressed importer that gets a user's audio file onto disk under
+// the `<sha256>.<ext>` convention the sync + resolution layers expect. Lives
+// here (not the desktop command layer) so the desktop backend AND the mobile
+// cal-ffi Host import through the same validation + hashing — one source of
+// truth for the size cap + the accepted formats.
+
+/// Max size of an imported sound (the §19.2.2 cap): large enough for any
+/// realistic notification chime, small enough that syncing the blob stays cheap.
+pub const MAX_SOUND_BYTES: u64 = 5 * 1024 * 1024;
+
+/// Audio container extensions accepted on import — the same set the fetch path
+/// probes (and the desktop player's decoders handle). Aliased to
+/// [`FETCH_EXTENSION_CANDIDATES`] so the import allowlist can never drift from
+/// what a second device will look for.
+pub const ALLOWED_IMPORT_EXTENSIONS: &[&str] = FETCH_EXTENSION_CANDIDATES;
+
+/// A custom sound on disk, identified by content hash + container extension.
+/// Callers persist only `sha256` (in a `SoundConfig`); `ext` is informational
+/// for the picker's list UI.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImportedSound {
+    pub sha256: String,
+    pub ext: String,
+}
+
+/// Why an import was rejected. The desktop maps this to a `CommandError`, the
+/// mobile cal-ffi Host to a `StoreError`.
+#[derive(Debug, thiserror::Error)]
+pub enum ImportSoundError {
+    #[error("unsupported sound format; allowed: {0}")]
+    UnsupportedFormat(String),
+    #[error("sound file too large ({size} bytes); limit is {limit} bytes")]
+    TooLarge { size: u64, limit: u64 },
+    #[error("{0}")]
+    Io(String),
+}
+
+/// Import an audio file at `src` into the content-addressed store under
+/// `<sounds_dir>/<sha256>.<ext>`. Enforces the extension + size limits,
+/// content-hashes the bytes, and writes (a no-op if identical bytes are already
+/// stored under any extension). Returns the hash + extension so the caller can
+/// write `SoundSource::Custom { sha256 }` into the relevant pref.
+pub fn import_sound(sounds_dir: &Path, src: &Path) -> Result<ImportedSound, ImportSoundError> {
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .filter(|e| ALLOWED_IMPORT_EXTENSIONS.contains(&e.as_str()))
+        .ok_or_else(|| ImportSoundError::UnsupportedFormat(ALLOWED_IMPORT_EXTENSIONS.join(", ")))?;
+
+    // Size-gate via metadata before reading the whole file into memory.
+    let meta = std::fs::metadata(src)
+        .map_err(|e| ImportSoundError::Io(format!("cannot read sound: {e}")))?;
+    if meta.len() > MAX_SOUND_BYTES {
+        return Err(ImportSoundError::TooLarge {
+            size: meta.len(),
+            limit: MAX_SOUND_BYTES,
+        });
+    }
+
+    let bytes =
+        std::fs::read(src).map_err(|e| ImportSoundError::Io(format!("cannot read sound: {e}")))?;
+    let sha256 = hex_digest(&bytes);
+
+    std::fs::create_dir_all(sounds_dir)
+        .map_err(|e| ImportSoundError::Io(format!("cannot create sounds dir: {e}")))?;
+    // Content-addressed: if these exact bytes are already stored under any
+    // extension, don't write a second copy.
+    if local_sound_path(sounds_dir, &sha256).is_none() {
+        let dest = sounds_dir.join(format!("{sha256}.{ext}"));
+        std::fs::write(&dest, &bytes)
+            .map_err(|e| ImportSoundError::Io(format!("cannot write sound: {e}")))?;
+    }
+    Ok(ImportedSound { sha256, ext })
+}
+
+/// Lowercase hex SHA-256 of `bytes`.
+fn hex_digest(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(bytes);
+    let mut out = String::with_capacity(64);
+    for b in digest {
+        use std::fmt::Write;
+        let _ = write!(out, "{b:02x}");
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -613,6 +703,63 @@ mod tests {
         );
         let other = "b".repeat(64);
         assert_eq!(local_hash_present(tmp.path(), &other), None);
+    }
+
+    #[test]
+    fn hex_digest_of_empty_is_known_sha256() {
+        // SHA-256("") = e3b0c442…b855.
+        assert_eq!(
+            hex_digest(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        );
+    }
+
+    #[test]
+    fn import_sound_writes_content_addressed_and_dedupes() {
+        let tmp = TempDir::new().unwrap();
+        let src = tmp.path().join("chime.mp3");
+        std::fs::write(&src, b"audio-bytes").unwrap();
+        let sounds = tmp.path().join("store");
+        let imported = import_sound(&sounds, &src).unwrap();
+        assert_eq!(imported.ext, "mp3");
+        assert_eq!(imported.sha256, hex_digest(b"audio-bytes"));
+        assert!(sounds.join(format!("{}.mp3", imported.sha256)).exists());
+        // Re-importing identical bytes from a differently-named source returns
+        // the same hash and doesn't write a second copy.
+        let src2 = tmp.path().join("other.mp3");
+        std::fs::write(&src2, b"audio-bytes").unwrap();
+        let again = import_sound(&sounds, &src2).unwrap();
+        assert_eq!(again.sha256, imported.sha256);
+        assert_eq!(list_local_sounds(&sounds).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn import_sound_rejects_unsupported_extension() {
+        let tmp = TempDir::new().unwrap();
+        let src = tmp.path().join("notaudio.txt");
+        std::fs::write(&src, b"x").unwrap();
+        assert!(matches!(
+            import_sound(&tmp.path().join("store"), &src),
+            Err(ImportSoundError::UnsupportedFormat(_)),
+        ));
+    }
+
+    #[test]
+    fn import_sound_rejects_oversized() {
+        let tmp = TempDir::new().unwrap();
+        let src = tmp.path().join("big.wav");
+        std::fs::write(&src, vec![0u8; (MAX_SOUND_BYTES + 1) as usize]).unwrap();
+        assert!(matches!(
+            import_sound(&tmp.path().join("store"), &src),
+            Err(ImportSoundError::TooLarge { .. }),
+        ));
+    }
+
+    #[test]
+    fn allowed_import_extensions_match_fetch_candidates() {
+        // The import allowlist must equal what a second device probes for on
+        // fetch — else an imported sound could never be fetched back.
+        assert_eq!(ALLOWED_IMPORT_EXTENSIONS, FETCH_EXTENSION_CANDIDATES);
     }
 
     #[test]

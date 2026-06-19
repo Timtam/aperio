@@ -24,6 +24,9 @@ serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
 tracing.workspace = true
+# Content-addressing for the custom-sound importer (sound_assets::import_sound):
+# files are stored as `<sha256>.<ext>` so identical audio dedupes.
+sha2.workspace = true
 # RRULE expansion for the reminder trigger enumeration (host_core::reminders).
 rrule.workspace = true
 # The event_log cluster: onboarding reads the pending dir via tokio::fs; the

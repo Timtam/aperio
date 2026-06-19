@@ -192,6 +192,19 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  sorted ascending — for scheduling ahead-of-time OS local notifications. */
   upcomingRemindersJson(horizonMinutes: number): Promise<string>;
 
+  // ── Custom reminder sounds (§14.4) ──
+  /** Import an audio file (local `path` from the document picker) into the
+   *  content-addressed store; returns JSON `{sha256, ext, path}`. Validates
+   *  format + size Rust-side. */
+  importSoundJson(path: string): Promise<string>;
+  /** Every custom sound as JSON `[{sha256, ext, path}]`. */
+  listCustomSoundsJson(): Promise<string>;
+  /** Absolute on-disk path of a custom sound by hash, or null when not present
+   *  locally (used for preview + the Android notification channel). */
+  customSoundPath(sha256: string): Promise<string | null>;
+  /** Delete a custom sound by hash (idempotent). */
+  deleteCustomSound(sha256: string): Promise<void>;
+
   // ── User preferences (generic key/value; synced-key whitelist) ──
   /** Read a user preference (opaque string), or null when unset. */
   getUserPref(key: string): Promise<string | null>;

@@ -265,6 +265,27 @@ class CalFfiModule : Module() {
       host.upcomingRemindersJson(horizonMinutes.toUInt())
     }
 
+    // ─── Custom reminder sounds (§14.4 / §19.2.2) ─────────────────────────────
+    // Content-addressed audio store behind SoundSource::Custom; the sync round
+    // push/fetches it already. Bytes don't cross the bridge — the JS plays +
+    // builds the Android notification channel from the on-disk path.
+
+    AsyncFunction("importSoundJson") { path: String ->
+      host.importSoundJson(path)
+    }
+
+    AsyncFunction("listCustomSoundsJson") { ->
+      host.listCustomSoundsJson()
+    }
+
+    AsyncFunction("customSoundPath") { sha256: String ->
+      host.customSoundPath(sha256)
+    }
+
+    AsyncFunction("deleteCustomSound") { sha256: String ->
+      host.deleteCustomSound(sha256)
+    }
+
     // ─── User preferences (generic key/value; synced-key whitelist) ───────────
     // Opaque string values; a whitelisted key change appends a SettingsUpdated
     // sync event Rust-side so it propagates across devices.

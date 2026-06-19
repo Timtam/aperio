@@ -705,257 +705,265 @@ internal object IntegrityCheckingUniffiLib {
         uniffiCheckApiChecksums(this)
     }
     external fun uniffi_cal_ffi_checksum_func_parse_attendee(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_func_rrule_to_task_recurrence(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_func_task_recurrence_to_rrule(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_localstore_create_section_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_localstore_create_task(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_localstore_create_task_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_localstore_create_task_list(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_localstore_create_task_list_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_localstore_delete_section(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_localstore_delete_task(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_localstore_delete_task_list(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_localstore_rename_task_list(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_localstore_reparent_task_list_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_localstore_sections_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_localstore_task(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_localstore_task_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_localstore_task_list(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_localstore_task_lists(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_localstore_task_lists_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_localstore_tasks(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_localstore_tasks_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_localstore_update_section_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_localstore_update_task(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_localstore_update_task_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_cacheobserverbridge_cache_updated(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_cacheobserverbridge_refresh_status(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_accounts_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_add_event_exdate_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_begin_oauth_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_calendar_current_user_email(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_change_sync_passphrase_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_clear_sync_log(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_complete_oauth_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_complete_oauth_reconnect_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_complete_sync_oauth_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_contact_lists_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_contacts_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_create_account_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_create_calendar_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_create_color_label_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_create_contact_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_create_contact_list_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_create_event_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_create_section_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_create_task_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_create_task_list_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_delete_account(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_delete_calendar(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_delete_color_label(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_delete_contact(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_delete_contact_list(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_delete_contact_photo(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_delete_event(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_delete_section(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_delete_task(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_delete_task_list(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_delete_user_pref(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_disable_sync_encryption_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_discover_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_enable_sync_encryption_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_get_cache_refresh_status_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_get_contact_photo_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_get_event_by_id_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_get_events_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_get_or_create_ad_hoc_color_label_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_get_user_pref(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_list_accounts_missing_credentials_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_list_calendars_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_list_color_labels_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_list_sync_conflicts_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_list_sync_log_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_pinned_sftp_host_key(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_preview_sftp_host_key_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_preview_sync_target_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_push_now(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_query_free_busy_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_refresh_external_cache(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_rename_account_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_rename_container(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_reparent_task_list_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_resolve_sync_conflict(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_respond_to_event(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_resume_stale_device_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_search_contacts_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_search_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_sections_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_set_account_secret(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_set_cache_observer(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_set_contact_photo_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_set_container_color_label(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_set_event_color(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_set_section_color(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_set_user_pref(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_sync_conflict_count(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_sync_now_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_sync_status_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_task_add_member(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_task_current_user_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_task_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_task_list_members_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_task_list_shares_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_task_lists_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_task_remove_member(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_task_search_users_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_task_set_member_right(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_tasks_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_trust_sftp_host_key(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_upcoming_reminders_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_update_color_label_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_update_contact_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_update_event_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_update_section_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_update_task_json(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_host_warm_cache_on_foreground(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_keychainbridge_store(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_keychainbridge_retrieve(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_keychainbridge_delete(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_method_keychainbridge_delete_all(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_constructor_localstore_open(
-    ): Short
-    external fun uniffi_cal_ffi_checksum_constructor_host_open(
-    ): Short
-    external fun ffi_cal_ffi_uniffi_contract_version(
-    ): Int
+): Short
+external fun uniffi_cal_ffi_checksum_func_rrule_to_task_recurrence(
+): Short
+external fun uniffi_cal_ffi_checksum_func_task_recurrence_to_rrule(
+): Short
+external fun uniffi_cal_ffi_checksum_method_localstore_create_section_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_localstore_create_task(
+): Short
+external fun uniffi_cal_ffi_checksum_method_localstore_create_task_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_localstore_create_task_list(
+): Short
+external fun uniffi_cal_ffi_checksum_method_localstore_create_task_list_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_localstore_delete_section(
+): Short
+external fun uniffi_cal_ffi_checksum_method_localstore_delete_task(
+): Short
+external fun uniffi_cal_ffi_checksum_method_localstore_delete_task_list(
+): Short
+external fun uniffi_cal_ffi_checksum_method_localstore_rename_task_list(
+): Short
+external fun uniffi_cal_ffi_checksum_method_localstore_reparent_task_list_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_localstore_sections_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_localstore_task(
+): Short
+external fun uniffi_cal_ffi_checksum_method_localstore_task_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_localstore_task_list(
+): Short
+external fun uniffi_cal_ffi_checksum_method_localstore_task_lists(
+): Short
+external fun uniffi_cal_ffi_checksum_method_localstore_task_lists_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_localstore_tasks(
+): Short
+external fun uniffi_cal_ffi_checksum_method_localstore_tasks_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_localstore_update_section_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_localstore_update_task(
+): Short
+external fun uniffi_cal_ffi_checksum_method_localstore_update_task_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_cacheobserverbridge_cache_updated(
+): Short
+external fun uniffi_cal_ffi_checksum_method_cacheobserverbridge_refresh_status(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_accounts_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_add_event_exdate_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_begin_oauth_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_calendar_current_user_email(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_change_sync_passphrase_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_clear_sync_log(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_complete_oauth_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_complete_oauth_reconnect_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_complete_sync_oauth_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_contact_lists_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_contacts_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_create_account_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_create_calendar_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_create_color_label_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_create_contact_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_create_contact_list_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_create_event_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_create_section_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_create_task_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_create_task_list_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_custom_sound_path(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_delete_account(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_delete_calendar(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_delete_color_label(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_delete_contact(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_delete_contact_list(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_delete_contact_photo(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_delete_custom_sound(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_delete_event(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_delete_section(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_delete_task(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_delete_task_list(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_delete_user_pref(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_disable_sync_encryption_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_discover_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_enable_sync_encryption_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_get_cache_refresh_status_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_get_contact_photo_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_get_event_by_id_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_get_events_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_get_or_create_ad_hoc_color_label_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_get_user_pref(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_import_sound_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_list_accounts_missing_credentials_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_list_calendars_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_list_color_labels_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_list_custom_sounds_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_list_sync_conflicts_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_list_sync_log_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_pinned_sftp_host_key(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_preview_sftp_host_key_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_preview_sync_target_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_push_now(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_query_free_busy_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_refresh_external_cache(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_rename_account_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_rename_container(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_reparent_task_list_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_resolve_sync_conflict(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_respond_to_event(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_resume_stale_device_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_search_contacts_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_search_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_sections_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_set_account_secret(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_set_cache_observer(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_set_contact_photo_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_set_container_color_label(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_set_event_color(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_set_section_color(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_set_user_pref(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_sync_conflict_count(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_sync_now_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_sync_status_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_task_add_member(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_task_current_user_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_task_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_task_list_members_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_task_list_shares_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_task_lists_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_task_remove_member(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_task_search_users_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_task_set_member_right(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_tasks_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_trust_sftp_host_key(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_upcoming_reminders_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_update_color_label_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_update_contact_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_update_event_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_update_section_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_update_task_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_warm_cache_on_foreground(
+): Short
+external fun uniffi_cal_ffi_checksum_method_keychainbridge_store(
+): Short
+external fun uniffi_cal_ffi_checksum_method_keychainbridge_retrieve(
+): Short
+external fun uniffi_cal_ffi_checksum_method_keychainbridge_delete(
+): Short
+external fun uniffi_cal_ffi_checksum_method_keychainbridge_delete_all(
+): Short
+external fun uniffi_cal_ffi_checksum_constructor_localstore_open(
+): Short
+external fun uniffi_cal_ffi_checksum_constructor_host_open(
+): Short
+external fun ffi_cal_ffi_uniffi_contract_version(
+): Int
 
-        
+    
 }
 
 internal object UniffiLib {
@@ -1082,6 +1090,8 @@ external fun uniffi_cal_ffi_fn_method_host_create_task_json(`ptr`: Long,`listId`
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_create_task_list_json(`ptr`: Long,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_custom_sound_path(`ptr`: Long,`sha256`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_delete_account(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_delete_calendar(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1093,6 +1103,8 @@ external fun uniffi_cal_ffi_fn_method_host_delete_contact(`ptr`: Long,`id`: Rust
 external fun uniffi_cal_ffi_fn_method_host_delete_contact_list(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_delete_contact_photo(`ptr`: Long,`id`: RustBuffer.ByValue,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_delete_custom_sound(`ptr`: Long,`sha256`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_delete_event(`ptr`: Long,`id`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,`sendCancellations`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -1124,11 +1136,15 @@ external fun uniffi_cal_ffi_fn_method_host_get_or_create_ad_hoc_color_label_json
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_get_user_pref(`ptr`: Long,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_import_sound_json(`ptr`: Long,`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_accounts_missing_credentials_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_calendars_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_color_labels_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_list_custom_sounds_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_sync_conflicts_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1506,6 +1522,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_create_task_list_json() != 25221.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_custom_sound_path() != 46939.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_delete_account() != 32623.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1522,6 +1541,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_delete_contact_photo() != 41374.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_delete_custom_sound() != 25636.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_delete_event() != 51601.toShort()) {
@@ -1569,6 +1591,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_get_user_pref() != 20426.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_import_sound_json() != 40673.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_list_accounts_missing_credentials_json() != 60783.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1576,6 +1601,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_list_color_labels_json() != 37435.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_list_custom_sounds_json() != 33288.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_list_sync_conflicts_json() != 46993.toShort()) {
@@ -2765,6 +2793,13 @@ public interface HostInterface {
     fun `createTaskListJson`(`name`: kotlin.String): kotlin.String
     
     /**
+     * The absolute on-disk path of a custom sound by hash, or `None` when it's
+     * not present locally (not yet synced / deleted) — the scheduler then falls
+     * back to the system sound. Drives preview + the Android channel sound.
+     */
+    fun `customSoundPath`(`sha256`: kotlin.String): kotlin.String?
+    
+    /**
      * Delete an account: unregister its adapter, clear its secrets, and
      * remove the row. The local account cannot be deleted
      * ([`StoreError::InvalidField`]).
@@ -2801,6 +2836,13 @@ public interface HostInterface {
      * optional `list_id`. Mirrors the desktop `delete_contact_photo`.
      */
     fun `deleteContactPhoto`(`id`: kotlin.String, `listId`: kotlin.String?)
+    
+    /**
+     * Delete a custom sound from the store by hash. Idempotent (a missing file
+     * is already-gone). Prefs still referencing it fall back to System at
+     * resolve time. Mirrors the desktop `delete_custom_sound`.
+     */
+    fun `deleteCustomSound`(`sha256`: kotlin.String)
     
     /**
      * Delete an event. `calendar_id` is routing-only (dropped before the
@@ -2940,6 +2982,14 @@ public interface HostInterface {
     fun `getUserPref`(`key`: kotlin.String): kotlin.String?
     
     /**
+     * Import an audio file into the custom-sound store (the JS picked it via
+     * expo-document-picker; `path` is its local path). Returns JSON
+     * `{sha256, ext, path}` (path = the stored asset's absolute path, for an
+     * immediate preview). Validates format + size via the shared importer.
+     */
+    fun `importSoundJson`(`path`: kotlin.String): kotlin.String
+    
+    /**
      * External accounts whose required keychain secret is absent — the data
      * behind the credential-repair banner. An account lands here when its
      * `required_secret_slot` is `Some` and the keychain has nothing in that
@@ -2966,6 +3016,11 @@ public interface HostInterface {
      * All colour labels (named + ad-hoc) as a JSON `ColorLabel[]`.
      */
     fun `listColorLabelsJson`(): kotlin.String
+    
+    /**
+     * Every custom sound in the store as JSON `[{sha256, ext, path}]`.
+     */
+    fun `listCustomSoundsJson`(): kotlin.String
     
     /**
      * Every unresolved conflict as a JSON `ConflictRecord[]` (the desktop
@@ -3976,6 +4031,25 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * The absolute on-disk path of a custom sound by hash, or `None` when it's
+     * not present locally (not yet synced / deleted) — the scheduler then falls
+     * back to the system sound. Drives preview + the Android channel sound.
+     */
+    @Throws(StoreException::class)override fun `customSoundPath`(`sha256`: kotlin.String): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_custom_sound_path(
+        it,
+        FfiConverterString.lower(`sha256`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Delete an account: unregister its adapter, clear its secrets, and
      * remove the row. The local account cannot be deleted
      * ([`StoreError::InvalidField`]).
@@ -4073,6 +4147,24 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_delete_contact_photo(
         it,
         FfiConverterString.lower(`id`),FfiConverterOptionalString.lower(`listId`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Delete a custom sound from the store by hash. Idempotent (a missing file
+     * is already-gone). Prefs still referencing it fall back to System at
+     * resolve time. Mirrors the desktop `delete_custom_sound`.
+     */
+    @Throws(StoreException::class)override fun `deleteCustomSound`(`sha256`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_delete_custom_sound(
+        it,
+        FfiConverterString.lower(`sha256`),_status)
 }
     }
     
@@ -4391,6 +4483,26 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Import an audio file into the custom-sound store (the JS picked it via
+     * expo-document-picker; `path` is its local path). Returns JSON
+     * `{sha256, ext, path}` (path = the stored asset's absolute path, for an
+     * immediate preview). Validates format + size via the shared importer.
+     */
+    @Throws(StoreException::class)override fun `importSoundJson`(`path`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_import_sound_json(
+        it,
+        FfiConverterString.lower(`path`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * External accounts whose required keychain secret is absent — the data
      * behind the credential-repair banner. An account lands here when its
      * `required_secret_slot` is `Some` and the keychain has nothing in that
@@ -4445,6 +4557,23 @@ open class Host: Disposable, AutoCloseable, HostInterface
     callWithHandle {
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_method_host_list_color_labels_json(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Every custom sound in the store as JSON `[{sha256, ext, path}]`.
+     */
+    @Throws(StoreException::class)override fun `listCustomSoundsJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_list_custom_sounds_json(
         it,
         _status)
 }

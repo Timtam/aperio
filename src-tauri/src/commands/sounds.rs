@@ -15,23 +15,12 @@
 
 use std::path::PathBuf;
 
-use sha2::{Digest, Sha256};
 use tauri::State;
 
 use super::{CommandError, CommandResult};
 use crate::audio::AudioPlayer;
-use crate::sound_assets::{list_local_sounds, local_sound_path};
-
-/// Max size of an imported sound. Mirrors the §19.2.2 cap — large
-/// enough for any realistic notification chime, small enough that
-/// syncing the blob across devices stays cheap.
-const MAX_SOUND_BYTES: u64 = 5 * 1024 * 1024;
-
-/// Audio container extensions we accept on import. Kept in sync with
-/// `sound_assets::FETCH_EXTENSION_CANDIDATES` (the formats the player's
-/// `symphonia-all` decoders handle); anything else is rejected up front
-/// rather than failing silently at play time.
-const ALLOWED_EXTENSIONS: &[&str] = &["mp3", "ogg", "wav", "m4a", "aac", "flac"];
+use crate::sound_assets::{import_sound as core_import_sound, ImportSoundError};
+use crate::sound_assets::{list_local_sounds, local_sound_path, ImportedSound};
 
 /// Newtype Tauri state carrying the resolved
 /// `<data_dir>/assets/sounds/` path, so the sound commands don't
@@ -40,78 +29,32 @@ const ALLOWED_EXTENSIONS: &[&str] = &["mp3", "ogg", "wav", "m4a", "aac", "flac"]
 #[derive(Clone)]
 pub struct SoundsDir(pub PathBuf);
 
-/// A custom sound on disk, identified by content hash + container
-/// extension. The frontend only persists `sha256` (in a `SoundConfig`);
-/// `ext` is informational for the picker's list UI.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct ImportedSound {
-    pub sha256: String,
-    pub ext: String,
+/// Map the shared importer's error onto the command layer's `CommandError`.
+fn map_import_err(err: ImportSoundError) -> CommandError {
+    match err {
+        ImportSoundError::UnsupportedFormat(_) | ImportSoundError::TooLarge { .. } => CommandError {
+            code: "invalid_input",
+            message: err.to_string(),
+        },
+        ImportSoundError::Io(_) => CommandError {
+            code: "internal",
+            message: err.to_string(),
+        },
+    }
 }
 
-/// Import an audio file into the custom-sound store. Reads the file at
-/// `path`, enforces the size + extension limits, content-hashes it, and
-/// copies it to `<sounds_dir>/<sha256>.<ext>` (a no-op if an identical
-/// file is already there). Returns the hash + extension so the caller
-/// can write `SoundSource::Custom { sha256 }` into the relevant pref.
+/// Import an audio file into the custom-sound store. Validates + content-hashes
+/// it and copies it to `<sounds_dir>/<sha256>.<ext>` (a no-op if an identical
+/// file is already there). Returns the hash + extension so the caller can write
+/// `SoundSource::Custom { sha256 }` into the relevant pref. The validation +
+/// hashing live in `host_core::sound_assets::import_sound` so the desktop and
+/// the mobile cal-ffi Host import through the same path.
 #[tauri::command]
 pub async fn import_sound(
     sounds_dir: State<'_, SoundsDir>,
     path: String,
 ) -> CommandResult<ImportedSound> {
-    let src = PathBuf::from(&path);
-
-    let ext = src
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase())
-        .filter(|e| ALLOWED_EXTENSIONS.contains(&e.as_str()))
-        .ok_or_else(|| CommandError {
-            code: "invalid_input",
-            message: format!(
-                "unsupported sound format; allowed: {}",
-                ALLOWED_EXTENSIONS.join(", ")
-            ),
-        })?;
-
-    // Size-gate before reading the whole file into memory.
-    let meta = std::fs::metadata(&src).map_err(|e| CommandError {
-        code: "invalid_input",
-        message: format!("cannot read sound file: {e}"),
-    })?;
-    if meta.len() > MAX_SOUND_BYTES {
-        return Err(CommandError {
-            code: "invalid_input",
-            message: format!(
-                "sound file too large ({} bytes); limit is {MAX_SOUND_BYTES} bytes",
-                meta.len()
-            ),
-        });
-    }
-
-    let bytes = std::fs::read(&src).map_err(|e| CommandError {
-        code: "invalid_input",
-        message: format!("cannot read sound file: {e}"),
-    })?;
-
-    let sha256 = hex_digest(&bytes);
-
-    let dir = sounds_dir.0.clone();
-    std::fs::create_dir_all(&dir).map_err(|e| CommandError {
-        code: "internal",
-        message: format!("cannot create sounds dir: {e}"),
-    })?;
-    let dest = dir.join(format!("{sha256}.{ext}"));
-    // Content-addressed: if the exact bytes are already stored under any
-    // extension, don't write a second copy.
-    if local_sound_path(&dir, &sha256).is_none() {
-        std::fs::write(&dest, &bytes).map_err(|e| CommandError {
-            code: "internal",
-            message: format!("cannot write sound file: {e}"),
-        })?;
-    }
-
-    Ok(ImportedSound { sha256, ext })
+    core_import_sound(&sounds_dir.0, &PathBuf::from(&path)).map_err(map_import_err)
 }
 
 /// List every custom sound currently in the store.
@@ -167,40 +110,4 @@ pub async fn delete_custom_sound(
         })?;
     }
     Ok(())
-}
-
-/// Lowercase hex SHA-256 of `bytes`.
-fn hex_digest(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    let digest = hasher.finalize();
-    let mut out = String::with_capacity(64);
-    for b in digest {
-        use std::fmt::Write;
-        let _ = write!(out, "{b:02x}");
-    }
-    out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn hex_digest_of_empty_is_known_sha256() {
-        // SHA-256("") = e3b0c442…b855.
-        assert_eq!(
-            hex_digest(b""),
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        );
-    }
-
-    #[test]
-    fn allowed_extensions_match_player_candidates() {
-        // Guards against the import allowlist drifting from the formats
-        // the playback layer can actually decode.
-        for ext in ALLOWED_EXTENSIONS {
-            assert!(crate::sound_assets::FETCH_EXTENSION_CANDIDATES.contains(ext));
-        }
-    }
 }

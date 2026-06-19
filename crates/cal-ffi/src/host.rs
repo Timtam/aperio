@@ -231,6 +231,20 @@ fn parse_attendee_status(s: &str) -> Result<cal_core::AttendeeStatus, StoreError
     })
 }
 
+/// Map the shared custom-sound importer's error onto the bridge `StoreError`:
+/// a rejected format/size is an `InvalidField`, an IO failure is `Storage`.
+fn map_import_err(err: host_core::sound_assets::ImportSoundError) -> StoreError {
+    use host_core::sound_assets::ImportSoundError as E;
+    let detail = err.to_string();
+    match err {
+        E::UnsupportedFormat(_) | E::TooLarge { .. } => StoreError::InvalidField {
+            field: "sound".to_string(),
+            detail,
+        },
+        E::Io(_) => StoreError::Storage { detail },
+    }
+}
+
 /// Parse a wire `MemberRight` (snake_case: "read" / "write" / "admin") into the
 /// core enum, via its serde rename.
 fn parse_member_right(s: &str) -> Result<cal_core::MemberRight, StoreError> {
@@ -613,6 +627,12 @@ pub struct Host {
     /// Drives manual + on-foreground warm passes (the mobile stand-in for the
     /// desktop periodic loop — constructed without `start_periodic`).
     cache_refresher: Arc<host_core::cache::CacheRefresher>,
+    /// `<data_dir>/assets/sounds/` — the content-addressed custom-sound store
+    /// (`<sha256>.<ext>`), the desktop `SoundsDir` twin. Imports write here, the
+    /// sync round push/fetches it (DesktopSyncRoundHooks, already wired via
+    /// build_orchestrator), and the reminder scheduler resolves a Custom sound's
+    /// hash to a file here for the native Android notification channel.
+    sounds_dir: std::path::PathBuf,
 }
 
 /// Foreign-side sink for cache-refresh progress (the mobile analogue of the
@@ -1828,6 +1848,10 @@ impl Host {
             .parent()
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| std::path::PathBuf::from("."));
+        // The content-addressed custom-sound store, same convention + location as
+        // the sync round (which already push/fetches it via build_orchestrator's
+        // DesktopSyncRoundHooks) and the desktop SoundsDir.
+        let sounds_dir = host_core::sound_assets::sounds_dir_under(&data_dir);
         let registry = Arc::new(AdapterRegistry::with_data_dir(
             Arc::clone(&plugin_manager),
             Arc::clone(&secret_store),
@@ -1914,6 +1938,7 @@ impl Host {
             coord,
             cache_observer,
             cache_refresher,
+            sounds_dir,
         }))
     }
 
@@ -4450,6 +4475,76 @@ impl Host {
             })
             .collect();
         to_json(&dtos)
+    }
+
+    // ── Custom reminder sounds (§14.4 / §19.2.2) ──────────────────────────────
+    //
+    // The content-addressed audio store behind SoundSource::Custom. Files live
+    // at `<data_dir>/assets/sounds/<sha256>.<ext>`; the sync round already
+    // push/fetches them (DesktopSyncRoundHooks via build_orchestrator), so a
+    // desktop-imported sound reaches this device and vice versa. These get a
+    // user's file into the store + let the UI list / preview / delete it. Bytes
+    // never cross UniFFI — the JS plays + builds the Android notification channel
+    // from the on-disk PATH. (iOS can't use a runtime file as a notification
+    // sound, so there it previews only.)
+
+    /// Import an audio file into the custom-sound store (the JS picked it via
+    /// expo-document-picker; `path` is its local path). Returns JSON
+    /// `{sha256, ext, path}` (path = the stored asset's absolute path, for an
+    /// immediate preview). Validates format + size via the shared importer.
+    pub fn import_sound_json(&self, path: String) -> Result<String, StoreError> {
+        let imported =
+            host_core::sound_assets::import_sound(&self.sounds_dir, std::path::Path::new(&path))
+                .map_err(map_import_err)?;
+        let abs = self
+            .sounds_dir
+            .join(format!("{}.{}", imported.sha256, imported.ext));
+        to_json(&serde_json::json!({
+            "sha256": imported.sha256,
+            "ext": imported.ext,
+            "path": abs.to_string_lossy(),
+        }))
+    }
+
+    /// Every custom sound in the store as JSON `[{sha256, ext, path}]`.
+    pub fn list_custom_sounds_json(&self) -> Result<String, StoreError> {
+        let list = host_core::sound_assets::list_local_sounds(&self.sounds_dir).map_err(|e| {
+            StoreError::Storage {
+                detail: e.to_string(),
+            }
+        })?;
+        let dtos: Vec<serde_json::Value> = list
+            .into_iter()
+            .map(|(sha256, ext)| {
+                let abs = self.sounds_dir.join(format!("{sha256}.{ext}"));
+                serde_json::json!({
+                    "sha256": sha256,
+                    "ext": ext,
+                    "path": abs.to_string_lossy(),
+                })
+            })
+            .collect();
+        to_json(&dtos)
+    }
+
+    /// The absolute on-disk path of a custom sound by hash, or `None` when it's
+    /// not present locally (not yet synced / deleted) — the scheduler then falls
+    /// back to the system sound. Drives preview + the Android channel sound.
+    pub fn custom_sound_path(&self, sha256: String) -> Result<Option<String>, StoreError> {
+        Ok(
+            host_core::sound_assets::local_sound_path(&self.sounds_dir, &sha256)
+                .map(|p| p.to_string_lossy().into_owned()),
+        )
+    }
+
+    /// Delete a custom sound from the store by hash. Idempotent (a missing file
+    /// is already-gone). Prefs still referencing it fall back to System at
+    /// resolve time. Mirrors the desktop `delete_custom_sound`.
+    pub fn delete_custom_sound(&self, sha256: String) -> Result<(), StoreError> {
+        if let Some(path) = host_core::sound_assets::local_sound_path(&self.sounds_dir, &sha256) {
+            std::fs::remove_file(&path).map_err(storage_err)?;
+        }
+        Ok(())
     }
 
     // ── Collaboration: RSVP (§7.3) + task-list members/sharing (§9.7) ─────────

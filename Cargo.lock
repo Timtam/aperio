@@ -2846,6 +2846,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "sync-adapter-local",
  "sync-core",
  "sync-engine",

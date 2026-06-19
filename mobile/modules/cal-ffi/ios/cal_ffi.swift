@@ -1034,6 +1034,13 @@ public protocol HostProtocol: AnyObject, Sendable {
     func createTaskListJson(name: String) throws  -> String
     
     /**
+     * The absolute on-disk path of a custom sound by hash, or `None` when it's
+     * not present locally (not yet synced / deleted) — the scheduler then falls
+     * back to the system sound. Drives preview + the Android channel sound.
+     */
+    func customSoundPath(sha256: String) throws  -> String?
+    
+    /**
      * Delete an account: unregister its adapter, clear its secrets, and
      * remove the row. The local account cannot be deleted
      * ([`StoreError::InvalidField`]).
@@ -1070,6 +1077,13 @@ public protocol HostProtocol: AnyObject, Sendable {
      * optional `list_id`. Mirrors the desktop `delete_contact_photo`.
      */
     func deleteContactPhoto(id: String, listId: String?) throws 
+    
+    /**
+     * Delete a custom sound from the store by hash. Idempotent (a missing file
+     * is already-gone). Prefs still referencing it fall back to System at
+     * resolve time. Mirrors the desktop `delete_custom_sound`.
+     */
+    func deleteCustomSound(sha256: String) throws 
     
     /**
      * Delete an event. `calendar_id` is routing-only (dropped before the
@@ -1209,6 +1223,14 @@ public protocol HostProtocol: AnyObject, Sendable {
     func getUserPref(key: String) throws  -> String?
     
     /**
+     * Import an audio file into the custom-sound store (the JS picked it via
+     * expo-document-picker; `path` is its local path). Returns JSON
+     * `{sha256, ext, path}` (path = the stored asset's absolute path, for an
+     * immediate preview). Validates format + size via the shared importer.
+     */
+    func importSoundJson(path: String) throws  -> String
+    
+    /**
      * External accounts whose required keychain secret is absent — the data
      * behind the credential-repair banner. An account lands here when its
      * `required_secret_slot` is `Some` and the keychain has nothing in that
@@ -1235,6 +1257,11 @@ public protocol HostProtocol: AnyObject, Sendable {
      * All colour labels (named + ad-hoc) as a JSON `ColorLabel[]`.
      */
     func listColorLabelsJson() throws  -> String
+    
+    /**
+     * Every custom sound in the store as JSON `[{sha256, ext, path}]`.
+     */
+    func listCustomSoundsJson() throws  -> String
     
     /**
      * Every unresolved conflict as a JSON `ConflictRecord[]` (the desktop
@@ -2112,6 +2139,20 @@ open func createTaskListJson(name: String)throws  -> String  {
 }
     
     /**
+     * The absolute on-disk path of a custom sound by hash, or `None` when it's
+     * not present locally (not yet synced / deleted) — the scheduler then falls
+     * back to the system sound. Drives preview + the Android channel sound.
+     */
+open func customSoundPath(sha256: String)throws  -> String?  {
+    return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_custom_sound_path(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(sha256),$0
+    )
+})
+}
+    
+    /**
      * Delete an account: unregister its adapter, clear its secrets, and
      * remove the row. The local account cannot be deleted
      * ([`StoreError::InvalidField`]).
@@ -2183,6 +2224,19 @@ open func deleteContactPhoto(id: String, listId: String?)throws   {try rustCallW
             self.uniffiCloneHandle(),
         FfiConverterString.lower(id),
         FfiConverterOptionString.lower(listId),$0
+    )
+}
+}
+    
+    /**
+     * Delete a custom sound from the store by hash. Idempotent (a missing file
+     * is already-gone). Prefs still referencing it fall back to System at
+     * resolve time. Mirrors the desktop `delete_custom_sound`.
+     */
+open func deleteCustomSound(sha256: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_delete_custom_sound(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(sha256),$0
     )
 }
 }
@@ -2430,6 +2484,21 @@ open func getUserPref(key: String)throws  -> String?  {
 }
     
     /**
+     * Import an audio file into the custom-sound store (the JS picked it via
+     * expo-document-picker; `path` is its local path). Returns JSON
+     * `{sha256, ext, path}` (path = the stored asset's absolute path, for an
+     * immediate preview). Validates format + size via the shared importer.
+     */
+open func importSoundJson(path: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_import_sound_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(path),$0
+    )
+})
+}
+    
+    /**
      * External accounts whose required keychain secret is absent — the data
      * behind the credential-repair banner. An account lands here when its
      * `required_secret_slot` is `Some` and the keychain has nothing in that
@@ -2470,6 +2539,17 @@ open func listCalendarsJson()throws  -> String  {
 open func listColorLabelsJson()throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_list_color_labels_json(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Every custom sound in the store as JSON `[{sha256, ext, path}]`.
+     */
+open func listCustomSoundsJson()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_list_custom_sounds_json(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -6541,6 +6621,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_create_task_list_json() != 25221) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_custom_sound_path() != 46939) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_delete_account() != 32623) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -6557,6 +6640,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_delete_contact_photo() != 41374) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_delete_custom_sound() != 25636) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_delete_event() != 51601) {
@@ -6604,6 +6690,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_get_user_pref() != 20426) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_import_sound_json() != 40673) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_list_accounts_missing_credentials_json() != 60783) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -6611,6 +6700,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_list_color_labels_json() != 37435) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_list_custom_sounds_json() != 33288) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_list_sync_conflicts_json() != 46993) {

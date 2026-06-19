@@ -242,6 +242,26 @@ public class CalFfiModule: Module {
       try self.host.upcomingRemindersJson(horizonMinutes: UInt32(horizonMinutes))
     }
 
+    // ─── Custom reminder sounds (§14.4 / §19.2.2) ─────────────────────────────
+    // iOS can't use a runtime file as a notification sound, so here these drive
+    // import + in-app preview + sync only; the notification falls back to default.
+
+    AsyncFunction("importSoundJson") { (path: String) -> String in
+      try self.host.importSoundJson(path: path)
+    }
+
+    AsyncFunction("listCustomSoundsJson") { () -> String in
+      try self.host.listCustomSoundsJson()
+    }
+
+    AsyncFunction("customSoundPath") { (sha256: String) -> String? in
+      try self.host.customSoundPath(sha256: sha256)
+    }
+
+    AsyncFunction("deleteCustomSound") { (sha256: String) in
+      try self.host.deleteCustomSound(sha256: sha256)
+    }
+
     // ─── User preferences (generic key/value; synced-key whitelist) ───
     AsyncFunction("getUserPref") { (key: String) -> String? in
       try self.host.getUserPref(key: key)
