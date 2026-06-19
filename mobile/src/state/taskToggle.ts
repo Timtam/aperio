@@ -60,6 +60,50 @@ export async function recomputeAncestors(
   await applyStatusWrites(writes, snapshot);
 }
 
+/** All descendants of `parentId` (children, grandchildren, …) in `all` — the
+ *  mobile twin of the desktop TaskDialog's collectDescendants. */
+export function collectDescendants(parentId: string, all: Task[]): Task[] {
+  const out: Task[] = [];
+  const stack: string[] = [parentId];
+  while (stack.length > 0) {
+    const id = stack.pop();
+    if (id == null) continue;
+    for (const tk of all) {
+      if (tk.parent_id === id) {
+        out.push(tk);
+        stack.push(tk.id);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Cascade a status change made via the task EDITOR to the family — the mobile
+ * twin of the desktop TaskDialog's planStatusCascade with the ROOT write
+ * FILTERED OUT (the editor already wrote the root with its full field set, so
+ * re-applying it from the snapshot would clobber the other edited fields).
+ * `snapshot` MUST reflect the root's NEW status (and any post-edit list moves)
+ * so the up/down cascade reads a coherent state. Honours the per-list cascade +
+ * auto-date knobs, like the check-off path.
+ */
+export async function cascadeEditorStatus(
+  taskId: string,
+  newStatus: TaskStatus,
+  listId: string,
+  list: TaskList | undefined,
+  snapshot: Task[],
+): Promise<void> {
+  const behaviour = await readTaskBehaviour();
+  const canInProgress = canStoreInProgress(list);
+  const eff = effectiveForList(behaviour, listId);
+  const writes = planStatusCascade(taskId, newStatus, snapshot, {
+    cascadeEnabled: eff.cascade,
+    ...(eff.autoDate && canInProgress ? { todayKey: todayIsoKey() } : {}),
+  }).filter((w) => w.taskId !== taskId);
+  await applyStatusWrites(writes, snapshot);
+}
+
 // The one shared check-off path for every task surface (TasksScreen + the
 // WeekScreen calendar chips) — the mobile twin of the desktop
 // useTaskStatusToggle. It reads the synced task-behaviour prefs fresh on each

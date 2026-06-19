@@ -47,7 +47,11 @@ import { TaskRecurrenceSelector } from '../components/TaskRecurrenceSelector';
 import { writeLastUsedTaskList } from '../state/lastUsedTaskList';
 import { useSoundPref } from '../state/useSoundPref';
 import { useTaskStore } from '../state/taskStoreContext';
-import { recomputeAncestors } from '../state/taskToggle';
+import {
+  cascadeEditorStatus,
+  collectDescendants,
+  recomputeAncestors,
+} from '../state/taskToggle';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -462,6 +466,15 @@ export default function TaskEditorModal({
           t('mobile.added', { title }),
         );
       } else if (loaded != null) {
+        // A status change, or a (non-subtask) list change, must cascade to the
+        // family — capture the list's pre-edit task set before writing the root.
+        const listChanged =
+          loaded.parent_id == null &&
+          parentId == null &&
+          form.listId !== loaded.list_id;
+        const statusChanged = form.status !== loaded.status;
+        const familyTasks =
+          listChanged || statusChanged ? await getTasks(loaded.list_id) : [];
         // Spread ...loaded so store-managed fields (series_id, resurface_date,
         // etag, created_at) AND the not-yet-editable ones (per-task sound)
         // round-trip untouched; the edited fields below (incl. assignees) win.
@@ -501,6 +514,38 @@ export default function TaskEditorModal({
           },
           loaded.list_id,
         );
+        // Mirror the desktop TaskDialog: a parent's list change drags its whole
+        // family along, and a status change made via the editor cascades through
+        // the family (the root was just written above with its full field set).
+        if (listChanged) {
+          for (const child of collectDescendants(loaded.id, familyTasks)) {
+            await updateTask({ ...child, list_id: form.listId }, child.list_id);
+          }
+        }
+        if (statusChanged) {
+          const moved = new Set(
+            listChanged
+              ? collectDescendants(loaded.id, familyTasks).map((c) => c.id)
+              : [],
+          );
+          // The cascade snapshot reflects the post-edit family (root's new
+          // status + new list, moved descendants' new list) so its writes never
+          // revert the list move.
+          const cascadeSnapshot = familyTasks.map((row) =>
+            row.id === loaded.id
+              ? { ...row, status: form.status, list_id: form.listId }
+              : moved.has(row.id)
+                ? { ...row, list_id: form.listId }
+                : row,
+          );
+          await cascadeEditorStatus(
+            loaded.id,
+            form.status,
+            form.listId,
+            taskLists.find((l) => l.id === form.listId),
+            cascadeSnapshot,
+          );
+        }
         AccessibilityInfo.announceForAccessibility(
           t('mobile.saved', { title }),
         );
@@ -513,7 +558,18 @@ export default function TaskEditorModal({
       setError(message);
       AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
     }
-  }, [canRecur, canSection, isLocalList, form, loaded, navigation, parentId, t, taskId]);
+  }, [
+    canRecur,
+    canSection,
+    isLocalList,
+    form,
+    loaded,
+    navigation,
+    parentId,
+    t,
+    taskId,
+    taskLists,
+  ]);
 
   return (
     <ScrollView
