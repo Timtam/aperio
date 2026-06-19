@@ -473,18 +473,20 @@ export default function AccountsScreen() {
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"
     >
-      {/* Existing accounts */}
-      <Text style={styles.heading} accessibilityRole="header">
-        {t('dialogs.accounts.existingHeading')}
-      </Text>
-
       {error != null && (
         <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="assertive">
           {error}
         </Text>
       )}
 
-      {loading ? (
+      {/* Existing accounts — hidden while the add flow is open so VoiceOver
+          can't swipe into the account rows behind the add form (issue #6). */}
+      {mode === 'list' && (
+        <>
+          <Text style={styles.heading} accessibilityRole="header">
+            {t('dialogs.accounts.existingHeading')}
+          </Text>
+          {loading ? (
         <Text style={styles.muted} accessibilityLabel={t('dialogs.accounts.loading')}>
           {t('dialogs.accounts.loading')}
         </Text>
@@ -651,6 +653,8 @@ export default function AccountsScreen() {
             );
           })}
         </View>
+      )}
+        </>
       )}
 
       {/* Add flow — "Add account" → a provider picker → the chosen provider's
