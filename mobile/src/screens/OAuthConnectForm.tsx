@@ -36,13 +36,19 @@ function errorMessage(err: unknown): string {
 interface OAuthConnectFormProps {
   /** A connect succeeded — the parent reloads the list, moves focus, announces. */
   onConnected: (account: Account) => void;
+  /** When set, the provider is fixed (the parent's picker already chose it), so
+   *  the in-form provider RadioGroup is hidden. */
+  lockedProvider?: OAuthProvider;
 }
 
-export default function OAuthConnectForm({ onConnected }: OAuthConnectFormProps) {
+export default function OAuthConnectForm({
+  onConnected,
+  lockedProvider,
+}: OAuthConnectFormProps) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
 
-  const [provider, setProvider] = useState<OAuthProvider>('google');
+  const [provider, setProvider] = useState<OAuthProvider>(lockedProvider ?? 'google');
   const [displayName, setDisplayName] = useState('');
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
@@ -52,6 +58,7 @@ export default function OAuthConnectForm({ onConnected }: OAuthConnectFormProps)
 
   const buttonRef = useRef<View>(null);
   const errorRef = useRef<Text>(null);
+  const headingRef = useRef<Text>(null);
 
   const isMicrosoft = provider === 'microsoft_graph';
 
@@ -63,6 +70,13 @@ export default function OAuthConnectForm({ onConnected }: OAuthConnectFormProps)
     const tag = errorRef.current ? findNodeHandle(errorRef.current) : null;
     if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
   }, [error]);
+
+  // When the form opens (the parent's picker chose this provider), land the
+  // screen reader on the heading so the user knows the provider dialog appeared.
+  useEffect(() => {
+    const tag = headingRef.current ? findNodeHandle(headingRef.current) : null;
+    if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+  }, []);
 
   const focusButton = useCallback(() => {
     const tag = buttonRef.current ? findNodeHandle(buttonRef.current) : null;
@@ -138,22 +152,24 @@ export default function OAuthConnectForm({ onConnected }: OAuthConnectFormProps)
 
   return (
     <View style={styles.section}>
-      <Text style={styles.heading} accessibilityRole="header">
+      <Text ref={headingRef} style={styles.heading} accessibilityRole="header">
         {t('mobile.oauthHeading')}
       </Text>
 
-      <RadioGroup<OAuthProvider>
-        label={t('mobile.oauthProviderLabel')}
-        value={provider}
-        options={[
-          { value: 'google', label: t('dialogs.accounts.kindName.google') },
-          {
-            value: 'microsoft_graph',
-            label: t('dialogs.accounts.kindName.microsoft_graph'),
-          },
-        ]}
-        onChange={onChangeProvider}
-      />
+      {lockedProvider == null && (
+        <RadioGroup<OAuthProvider>
+          label={t('mobile.oauthProviderLabel')}
+          value={provider}
+          options={[
+            { value: 'google', label: t('dialogs.accounts.kindName.google') },
+            {
+              value: 'microsoft_graph',
+              label: t('dialogs.accounts.kindName.microsoft_graph'),
+            },
+          ]}
+          onChange={onChangeProvider}
+        />
+      )}
 
       <View style={styles.field}>
         <Text style={styles.label}>{t('dialogs.accounts.nameLabel')}</Text>

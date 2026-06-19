@@ -11,7 +11,6 @@ import {
   View,
 } from 'react-native';
 
-import { RadioGroup } from '../components/RadioGroup';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import {
   Account,
@@ -25,7 +24,7 @@ import {
   setAccountSecret,
 } from '../api/accounts';
 import { getUserPref, setUserPref } from '../api/prefs';
-import { reconnectOAuthAccount } from '../api/oauth';
+import { reconnectOAuthAccount, type OAuthProvider } from '../api/oauth';
 import ContactsPrivacyNoticeModal from '../components/ContactsPrivacyNoticeModal';
 import OAuthConnectForm from './OAuthConnectForm';
 
@@ -94,6 +93,14 @@ const KIND_FORMS: Record<Exclude<AdapterKind, 'google' | 'microsoft_graph' | 'zo
 
 const OFFERED_KINDS = Object.keys(KIND_FORMS) as (keyof typeof KIND_FORMS)[];
 
+/** The providers the "Add account" picker offers — the credential kinds (minus
+ *  the implicit local account, which is added automatically) + the OAuth kinds. */
+const PICKER_KINDS: AdapterKind[] = [
+  ...OFFERED_KINDS.filter((k) => k !== 'local'),
+  'google',
+  'microsoft_graph',
+];
+
 /** OAuth kinds can't be repaired with a pasted secret — they re-run the
  *  provider sign-in (a separate reconnect flow), so the inline credential field
  *  is offered only for the password/token kinds. */
@@ -145,9 +152,17 @@ export default function AccountsScreen() {
   const [secret, setSecret] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [discovering, setDiscovering] = useState(false);
+  // Add flow: 'list' shows the connected accounts + an "Add account" button;
+  // 'picker' a provider menu; 'credential'/'oauth' the chosen provider's form —
+  // replacing the old always-mounted credential + OAuth forms (one long view).
+  const [mode, setMode] = useState<'list' | 'picker' | 'credential' | 'oauth'>(
+    'list',
+  );
+  const [pickedOAuth, setPickedOAuth] = useState<OAuthProvider | null>(null);
 
   const rowTags = useRef<Record<string, number | null>>({});
   const pendingFocusId = useRef<string | null>(null);
+  const sectionHeaderRef = useRef<Text>(null);
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
@@ -203,6 +218,16 @@ export default function AccountsScreen() {
     if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
   }, [accounts]);
 
+  // On entering the picker / credential form, land SR focus on its heading so
+  // the blind user knows the add flow opened (the OAuth form self-focuses).
+  useEffect(() => {
+    if (mode !== 'picker' && mode !== 'credential') return;
+    const tag = sectionHeaderRef.current
+      ? findNodeHandle(sectionHeaderRef.current)
+      : null;
+    if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+  }, [mode]);
+
   const form = KIND_FORMS[kind];
 
   const resetForm = useCallback(() => {
@@ -216,6 +241,29 @@ export default function AccountsScreen() {
     setConfig({});
     setSecret('');
   }, []);
+
+  // Picker → the chosen provider's form: OAuth kinds open the browser-sign-in
+  // form locked to that provider; the rest open the credential form.
+  const onPickProvider = useCallback(
+    (picked: AdapterKind) => {
+      setError(null);
+      if (isOAuthKind(picked)) {
+        setPickedOAuth(picked as OAuthProvider);
+        setMode('oauth');
+      } else {
+        onChangeKind(picked as keyof typeof KIND_FORMS);
+        setMode('credential');
+      }
+    },
+    [onChangeKind],
+  );
+
+  const cancelAdd = useCallback(() => {
+    resetForm();
+    setError(null);
+    setPickedOAuth(null);
+    setMode('list');
+  }, [resetForm]);
 
   const add = useCallback(async () => {
     const name = displayName.trim();
@@ -240,6 +288,7 @@ export default function AccountsScreen() {
         secret: form.secret && trimmedSecret.length > 0 ? trimmedSecret : null,
       });
       resetForm();
+      setMode('list');
       await load();
       pendingFocusId.current = created.id;
       announce(t('dialogs.accounts.created', { name }));
@@ -407,6 +456,8 @@ export default function AccountsScreen() {
   const onOAuthConnected = useCallback(
     async (account: Account) => {
       setError(null);
+      setMode('list');
+      setPickedOAuth(null);
       await load();
       pendingFocusId.current = account.id;
       announce(t('dialogs.accounts.created', { name: account.display_name }));
@@ -602,100 +653,185 @@ export default function AccountsScreen() {
         </View>
       )}
 
-      {/* Add an account */}
-      <Text style={[styles.heading, styles.addHeading]} accessibilityRole="header">
-        {t('dialogs.accounts.addHeading')}
-      </Text>
-
-      <RadioGroup<keyof typeof KIND_FORMS>
-        label={t('dialogs.accounts.kindLabel')}
-        value={kind}
-        options={OFFERED_KINDS.map((k) => ({
-          value: k,
-          label: t(`dialogs.accounts.kindName.${k}`),
-        }))}
-        onChange={onChangeKind}
-      />
-
-      <View style={styles.field}>
-        <Text style={styles.label}>{t('dialogs.accounts.nameLabel')}</Text>
-        <TextInput
-          style={styles.input}
-          value={displayName}
-          onChangeText={setDisplayName}
-          placeholder={t('dialogs.accounts.namePlaceholder')}
-          accessibilityLabel={t('dialogs.accounts.nameLabel')}
-        />
-      </View>
-
-      {form.configFields.map((field) => (
-        <View key={field.jsonKey} style={styles.field}>
-          <Text style={styles.label}>{t(field.labelKey)}</Text>
-          <TextInput
-            style={styles.input}
-            value={config[field.jsonKey] ?? ''}
-            onChangeText={(v) => setConfig((c) => ({ ...c, [field.jsonKey]: v }))}
-            accessibilityLabel={t(field.labelKey)}
-            autoCapitalize={field.autoCapitalizeNone ? 'none' : 'sentences'}
-            autoCorrect={!field.autoCapitalizeNone}
-          />
-        </View>
-      ))}
-
-      {form.secret != null && (
-        <View style={styles.field}>
-          <Text style={styles.label}>{t(form.secret.labelKey)}</Text>
-          <TextInput
-            style={styles.input}
-            value={secret}
-            onChangeText={setSecret}
-            accessibilityLabel={t(form.secret.labelKey)}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-        </View>
-      )}
-
-      {kind === 'ews' && (
+      {/* Add flow — "Add account" → a provider picker → the chosen provider's
+          form. Only one stage renders at a time; the old screen mounted both
+          the credential and OAuth add-forms inline, making it very long. */}
+      {mode === 'list' && (
         <Pressable
           accessibilityRole="button"
-          accessibilityState={{ disabled: discovering, busy: discovering }}
-          accessibilityLabel={t('dialogs.accounts.ewsDiscover')}
-          accessibilityHint={t('dialogs.accounts.ewsDiscoverSrHint')}
-          disabled={discovering}
-          onPress={() => void discover()}
+          accessibilityLabel={t('dialogs.accounts.addHeading')}
+          onPress={() => setMode('picker')}
           style={({ pressed }) => [
-            styles.discoverButton,
-            pressed && styles.pressed,
-            discovering && styles.discoverButtonDisabled,
+            styles.addButton,
+            styles.addHeading,
+            pressed && styles.addButtonPressed,
           ]}
         >
-          <Text style={styles.discoverButtonText}>
-            {discovering
-              ? t('dialogs.accounts.ewsDiscovering')
-              : t('dialogs.accounts.ewsDiscover')}
+          <Text style={styles.addButtonText}>
+            {t('dialogs.accounts.addHeading')}
           </Text>
         </Pressable>
       )}
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ disabled: submitting }}
-        accessibilityLabel={t('dialogs.accounts.add')}
-        disabled={submitting}
-        onPress={() => void add()}
-        style={({ pressed }) => [
-          styles.addButton,
-          pressed && styles.addButtonPressed,
-          submitting && styles.addButtonDisabled,
-        ]}
-      >
-        <Text style={styles.addButtonText}>{t('dialogs.accounts.add')}</Text>
-      </Pressable>
+      {mode === 'picker' && (
+        <View style={styles.addSection}>
+          <Text
+            ref={sectionHeaderRef}
+            style={[styles.heading, styles.addHeading]}
+            accessibilityRole="header"
+          >
+            {t('dialogs.accounts.addHeading')}
+          </Text>
+          {PICKER_KINDS.map((k) => (
+            <Pressable
+              key={k}
+              accessibilityRole="button"
+              accessibilityLabel={t(`dialogs.accounts.kindName.${k}`)}
+              onPress={() => onPickProvider(k)}
+              style={({ pressed }) => [
+                styles.secondaryButton,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={styles.secondaryButtonText}>
+                {t(`dialogs.accounts.kindName.${k}`)}
+              </Text>
+            </Pressable>
+          ))}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('mobile.cancel')}
+            onPress={cancelAdd}
+            style={({ pressed }) => [
+              styles.secondaryButton,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text style={styles.secondaryButtonText}>{t('mobile.cancel')}</Text>
+          </Pressable>
+        </View>
+      )}
 
-      {/* Connect a provider (browser sign-in) */}
-      <OAuthConnectForm onConnected={(account) => void onOAuthConnected(account)} />
+      {mode === 'credential' && (
+        <View style={styles.addSection}>
+          <Text
+            ref={sectionHeaderRef}
+            style={[styles.heading, styles.addHeading]}
+            accessibilityRole="header"
+          >
+            {t(`dialogs.accounts.kindName.${kind}`)}
+          </Text>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>{t('dialogs.accounts.nameLabel')}</Text>
+            <TextInput
+              style={styles.input}
+              value={displayName}
+              onChangeText={setDisplayName}
+              placeholder={t('dialogs.accounts.namePlaceholder')}
+              accessibilityLabel={t('dialogs.accounts.nameLabel')}
+            />
+          </View>
+
+          {form.configFields.map((field) => (
+            <View key={field.jsonKey} style={styles.field}>
+              <Text style={styles.label}>{t(field.labelKey)}</Text>
+              <TextInput
+                style={styles.input}
+                value={config[field.jsonKey] ?? ''}
+                onChangeText={(v) => setConfig((c) => ({ ...c, [field.jsonKey]: v }))}
+                accessibilityLabel={t(field.labelKey)}
+                autoCapitalize={field.autoCapitalizeNone ? 'none' : 'sentences'}
+                autoCorrect={!field.autoCapitalizeNone}
+              />
+            </View>
+          ))}
+
+          {form.secret != null && (
+            <View style={styles.field}>
+              <Text style={styles.label}>{t(form.secret.labelKey)}</Text>
+              <TextInput
+                style={styles.input}
+                value={secret}
+                onChangeText={setSecret}
+                accessibilityLabel={t(form.secret.labelKey)}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+          )}
+
+          {kind === 'ews' && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: discovering, busy: discovering }}
+              accessibilityLabel={t('dialogs.accounts.ewsDiscover')}
+              accessibilityHint={t('dialogs.accounts.ewsDiscoverSrHint')}
+              disabled={discovering}
+              onPress={() => void discover()}
+              style={({ pressed }) => [
+                styles.discoverButton,
+                pressed && styles.pressed,
+                discovering && styles.discoverButtonDisabled,
+              ]}
+            >
+              <Text style={styles.discoverButtonText}>
+                {discovering
+                  ? t('dialogs.accounts.ewsDiscovering')
+                  : t('dialogs.accounts.ewsDiscover')}
+              </Text>
+            </Pressable>
+          )}
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: submitting }}
+            accessibilityLabel={t('dialogs.accounts.add')}
+            disabled={submitting}
+            onPress={() => void add()}
+            style={({ pressed }) => [
+              styles.addButton,
+              pressed && styles.addButtonPressed,
+              submitting && styles.addButtonDisabled,
+            ]}
+          >
+            <Text style={styles.addButtonText}>{t('dialogs.accounts.add')}</Text>
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('mobile.cancel')}
+            onPress={cancelAdd}
+            style={({ pressed }) => [
+              styles.secondaryButton,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text style={styles.secondaryButtonText}>{t('mobile.cancel')}</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {mode === 'oauth' && pickedOAuth != null && (
+        <View style={styles.addSection}>
+          <OAuthConnectForm
+            lockedProvider={pickedOAuth}
+            onConnected={(account) => void onOAuthConnected(account)}
+          />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('mobile.cancel')}
+            onPress={cancelAdd}
+            style={({ pressed }) => [
+              styles.secondaryButton,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text style={styles.secondaryButtonText}>{t('mobile.cancel')}</Text>
+          </Pressable>
+        </View>
+      )}
     </ScrollView>
     {/* One-shot contacts privacy notice (app-modal; overlays the screen). */}
     <ContactsPrivacyNoticeModal
@@ -780,6 +916,17 @@ const makeStyles = (c: ThemeColors) =>
     addButtonPressed: { backgroundColor: c.accentPressed },
     addButtonDisabled: { backgroundColor: c.accentDisabled },
     addButtonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
+    addSection: { gap: 14 },
+    secondaryButton: {
+      paddingVertical: 14,
+      paddingHorizontal: 18,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+      alignItems: 'center',
+    },
+    secondaryButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
     discoverButton: {
       paddingVertical: 12,
       paddingHorizontal: 18,
