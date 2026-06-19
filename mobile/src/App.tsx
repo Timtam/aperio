@@ -28,6 +28,7 @@ import EventsScreen from './screens/EventsScreen';
 import ListEditorModal from './screens/ListEditorModal';
 import ListsScreen from './screens/ListsScreen';
 import MonthScreen from './screens/MonthScreen';
+import QuickAddTaskModal from './screens/QuickAddTaskModal';
 import RemindersScreen from './screens/RemindersScreen';
 import SearchScreen from './screens/SearchScreen';
 import SettingsScreen from './screens/SettingsScreen';
@@ -81,6 +82,11 @@ function TasksStackNav() {
         name="TaskMembers"
         component={TaskMembersScreen}
         options={{ title: t('mobile.manageList') }}
+      />
+      <TasksStack.Screen
+        name="QuickAdd"
+        component={QuickAddTaskModal}
+        options={{ presentation: 'modal', title: t('dialogs.quickAddTask.title') }}
       />
       <TasksStack.Screen
         name="TaskEditor"

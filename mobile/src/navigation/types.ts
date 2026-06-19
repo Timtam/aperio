@@ -22,8 +22,18 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 export type RootStackParamList = {
   Tasks: undefined;
   // `parentId` (when creating) nests the new task under that parent — its list
-  // is then locked to the parent's.
-  TaskEditor: { taskId: string | null; listId: string; parentId?: string | null };
+  // is then locked to the parent's. `initialTitle`/`initialScheduledDate` seed a
+  // fresh task with the values typed into the quick-add before "More details …".
+  TaskEditor: {
+    taskId: string | null;
+    listId: string;
+    parentId?: string | null;
+    initialTitle?: string;
+    initialScheduledDate?: string;
+  };
+  // One-tap task capture (title + optional day + list); "More details …" hands
+  // off to TaskEditor. The mobile twin of the desktop QuickAddTaskDialog.
+  QuickAdd: undefined;
   Lists: undefined;
   ListEditor: { listId: string };
   // Manage a shared list's membership (§9.7) — only reachable for lists whose

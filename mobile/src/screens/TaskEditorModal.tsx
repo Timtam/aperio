@@ -43,6 +43,7 @@ import { RadioGroup } from '../components/RadioGroup';
 import { RemindersEditor } from '../components/RemindersEditor';
 import { SoundSelect } from '../components/SoundSelect';
 import { TaskRecurrenceSelector } from '../components/TaskRecurrenceSelector';
+import { writeLastUsedTaskList } from '../state/lastUsedTaskList';
 import { useSoundPref } from '../state/useSoundPref';
 import { useTaskStore } from '../state/taskStoreContext';
 import { recomputeAncestors } from '../state/taskToggle';
@@ -74,15 +75,19 @@ interface FormState {
   assignees: TaskUser[]; // empty on local lists / providers without sharing
 }
 
-function buildInitialState(loaded: Task | null, listId: string): FormState {
+function buildInitialState(
+  loaded: Task | null,
+  listId: string,
+  seed?: { title?: string; scheduledDate?: string },
+): FormState {
   if (!loaded) {
     return {
-      title: '',
+      title: seed?.title ?? '',
       listId,
       sectionId: '',
       status: 'open',
       priority: 'medium',
-      scheduledDate: '',
+      scheduledDate: seed?.scheduledDate ?? '',
       scheduledTime: '',
       deadlineDate: '',
       deadlineTime: '',
@@ -166,12 +171,15 @@ export default function TaskEditorModal({
 }: RootStackScreenProps<'TaskEditor'>) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
-  const { taskId, listId, parentId } = route.params;
+  const { taskId, listId, parentId, initialTitle, initialScheduledDate } = route.params;
   const { taskLists, sectionsByList, loadSections, colorLabels, invalidateData } =
     useTaskStore();
 
   const [form, setForm] = useState<FormState>(() =>
-    buildInitialState(null, listId),
+    buildInitialState(null, listId, {
+      title: initialTitle,
+      scheduledDate: initialScheduledDate,
+    }),
   );
   const [loaded, setLoaded] = useState<Task | null>(null);
   const [loading, setLoading] = useState(taskId != null);
@@ -446,6 +454,9 @@ export default function TaskEditorModal({
         if (parentId != null) {
           await recomputeAncestors(parentId, await getTasks(created.list_id));
         }
+        // Remember the chosen list so the next quick-add / new-task defaults to
+        // it (a top-level create; a subtask's list is locked to its parent's).
+        if (parentId == null) await writeLastUsedTaskList(form.listId);
         AccessibilityInfo.announceForAccessibility(
           t('mobile.added', { title }),
         );

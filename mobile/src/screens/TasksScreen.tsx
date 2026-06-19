@@ -183,11 +183,14 @@ export default function TasksScreen({
   );
 
   const newTask = useCallback(() => {
+    // No list at all → send the user to create one first. Otherwise open the
+    // quick-add (it resolves its own default list — last-used, else first
+    // writable — and offers "More details …" for the full editor).
     if (targetListId == null) {
       navigation.navigate('Lists');
       return;
     }
-    navigation.navigate('TaskEditor', { taskId: null, listId: targetListId });
+    navigation.navigate('QuickAdd');
   }, [navigation, targetListId]);
 
   // Create a child task under `task` (same list, locked). buildEntries nests it
