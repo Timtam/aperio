@@ -108,6 +108,14 @@ public class CalFfiModule: Module {
       try self.host.renameAccountJson(id: id, newName: newName)
     }
 
+    AsyncFunction("listAccountsMissingCredentialsJson") { () -> String in
+      try self.host.listAccountsMissingCredentialsJson()
+    }
+
+    AsyncFunction("setAccountSecret") { (accountId: String, secret: String) in
+      try self.host.setAccountSecret(accountId: accountId, secret: secret)
+    }
+
     // ─── Calendars + events (local + external adapters) ───
     // JSON passthrough; routing happens Rust-side. Mirrors the Android module.
 

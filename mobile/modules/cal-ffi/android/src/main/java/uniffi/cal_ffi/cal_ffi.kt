@@ -800,6 +800,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_get_user_pref(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_list_accounts_missing_credentials_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_list_calendars_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_list_color_labels_json(
@@ -829,6 +831,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_cal_ffi_checksum_method_host_search_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_sections_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_set_account_secret(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_set_container_color_label(
     ): Short
@@ -1025,6 +1029,8 @@ external fun uniffi_cal_ffi_fn_method_host_get_or_create_ad_hoc_color_label_json
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_get_user_pref(`ptr`: Long,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_list_accounts_missing_credentials_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_calendars_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_color_labels_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1055,6 +1061,8 @@ external fun uniffi_cal_ffi_fn_method_host_search_json(`ptr`: Long,`query`: Rust
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_sections_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_set_account_secret(`ptr`: Long,`accountId`: RustBuffer.ByValue,`secret`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_set_container_color_label(`ptr`: Long,`containerId`: RustBuffer.ByValue,`kind`: RustBuffer.ByValue,`colorLabelId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_set_event_color(`ptr`: Long,`eventId`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,`colorLabelId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1414,6 +1422,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_get_user_pref() != 20426.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_list_accounts_missing_credentials_json() != 60783.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_list_calendars_json() != 49275.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1457,6 +1468,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_sections_json() != 56584.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_set_account_secret() != 44502.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_set_container_color_label() != 32220.toShort()) {
@@ -2325,6 +2339,17 @@ public interface HostInterface {
     fun `getUserPref`(`key`: kotlin.String): kotlin.String?
     
     /**
+     * External accounts whose required keychain secret is absent — the data
+     * behind the credential-repair banner. An account lands here when its
+     * `required_secret_slot` is `Some` and the keychain has nothing in that
+     * slot (a retrieve error, incl. NotFound, counts as missing so the wizard
+     * errs toward letting the user re-authenticate). The local account and
+     * secret-less kinds (iCal) are skipped. Returns a JSON `Account[]`.
+     * Mirrors the desktop `list_accounts_missing_credentials`.
+     */
+    fun `listAccountsMissingCredentialsJson`(): kotlin.String
+    
+    /**
      * All calendars (local + external) as a JSON `CalendarRow[]`, and — as a
      * side effect — primes the registry's calendar→account route map so the
      * event methods can route. Mirrors the desktop `list_calendars` minus the
@@ -2448,6 +2473,18 @@ public interface HostInterface {
      * list's owning account.
      */
     fun `sectionsJson`(`listId`: kotlin.String): kotlin.String
+    
+    /**
+     * (Re-)store the secret half of a NON-OAuth account's credentials — the
+     * CalDAV/EWS password or the Vikunja/Todoist API token — then re-register
+     * the adapter so it's live for the rest of the session without a restart.
+     * The keychain slot follows the account kind, matching what the registry
+     * reads back. OAuth accounts (Google/Microsoft Graph) are rejected: they
+     * must re-run the interactive OAuth flow, not paste a secret. Under E2E the
+     * secret also propagates to the user's other devices via the encrypted log.
+     * Mirrors the desktop `set_account_secret`.
+     */
+    fun `setAccountSecret`(`accountId`: kotlin.String, `secret`: kotlin.String)
     
     /**
      * Set or clear a container's bound colour label (DESIGN §8.2). Mirrors the
@@ -3517,6 +3554,29 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * External accounts whose required keychain secret is absent — the data
+     * behind the credential-repair banner. An account lands here when its
+     * `required_secret_slot` is `Some` and the keychain has nothing in that
+     * slot (a retrieve error, incl. NotFound, counts as missing so the wizard
+     * errs toward letting the user re-authenticate). The local account and
+     * secret-less kinds (iCal) are skipped. Returns a JSON `Account[]`.
+     * Mirrors the desktop `list_accounts_missing_credentials`.
+     */
+    @Throws(StoreException::class)override fun `listAccountsMissingCredentialsJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_list_accounts_missing_credentials_json(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * All calendars (local + external) as a JSON `CalendarRow[]`, and — as a
      * side effect — primes the registry's calendar→account route map so the
      * event methods can route. Mirrors the desktop `list_calendars` minus the
@@ -3816,6 +3876,29 @@ open class Host: Disposable, AutoCloseable, HostInterface
     }
     )
     }
+    
+
+    
+    /**
+     * (Re-)store the secret half of a NON-OAuth account's credentials — the
+     * CalDAV/EWS password or the Vikunja/Todoist API token — then re-register
+     * the adapter so it's live for the rest of the session without a restart.
+     * The keychain slot follows the account kind, matching what the registry
+     * reads back. OAuth accounts (Google/Microsoft Graph) are rejected: they
+     * must re-run the interactive OAuth flow, not paste a secret. Under E2E the
+     * secret also propagates to the user's other devices via the encrypted log.
+     * Mirrors the desktop `set_account_secret`.
+     */
+    @Throws(StoreException::class)override fun `setAccountSecret`(`accountId`: kotlin.String, `secret`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_set_account_secret(
+        it,
+        FfiConverterString.lower(`accountId`),FfiConverterString.lower(`secret`),_status)
+}
+    }
+    
     
 
     

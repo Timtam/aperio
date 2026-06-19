@@ -20,7 +20,9 @@ import {
   deleteAccount,
   discoverEwsEndpoint,
   listAccounts,
+  listAccountsMissingCredentials,
   renameAccount,
+  setAccountSecret,
 } from '../api/accounts';
 import OAuthConnectForm from './OAuthConnectForm';
 
@@ -89,6 +91,12 @@ const KIND_FORMS: Record<Exclude<AdapterKind, 'google' | 'microsoft_graph' | 'zo
 
 const OFFERED_KINDS = Object.keys(KIND_FORMS) as (keyof typeof KIND_FORMS)[];
 
+/** OAuth kinds can't be repaired with a pasted secret — they re-run the
+ *  provider sign-in (a separate reconnect flow), so the inline credential field
+ *  is offered only for the password/token kinds. */
+const isOAuthKind = (kind: AdapterKind): boolean =>
+  kind === 'google' || kind === 'microsoft_graph';
+
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -98,11 +106,18 @@ export default function AccountsScreen() {
   const styles = useThemedStyles(makeStyles);
 
   const [accounts, setAccounts] = useState<Account[]>([]);
+  // Ids of external accounts whose required keychain secret is absent — the
+  // credential-repair set (a token expired, or the row synced from another
+  // device without its device-local secret).
+  const [missingIds, setMissingIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Inline account rename (id being edited + its draft name).
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  // Inline credential repair (id being repaired + the new secret draft).
+  const [repairId, setRepairId] = useState<string | null>(null);
+  const [repairSecret, setRepairSecret] = useState('');
 
   // Add-form state.
   const [kind, setKind] = useState<keyof typeof KIND_FORMS>('caldav');
@@ -122,7 +137,12 @@ export default function AccountsScreen() {
 
   const load = useCallback(async () => {
     try {
-      setAccounts(await listAccounts());
+      const [accs, missing] = await Promise.all([
+        listAccounts(),
+        listAccountsMissingCredentials(),
+      ]);
+      setAccounts(accs);
+      setMissingIds(new Set(missing.map((a) => a.id)));
     } catch (err) {
       const message = errorMessage(err);
       setError(message);
@@ -280,6 +300,45 @@ export default function AccountsScreen() {
     [announce, editName, load, t],
   );
 
+  const startRepair = useCallback((account: Account) => {
+    setRepairId(account.id);
+    setRepairSecret('');
+  }, []);
+
+  const cancelRepair = useCallback(() => {
+    setRepairId(null);
+    setRepairSecret('');
+  }, []);
+
+  const saveRepair = useCallback(
+    async (account: Account) => {
+      const value = repairSecret.trim();
+      if (value.length === 0) {
+        setError(t('dialogs.accounts.newCredentialLabel'));
+        announce(t('dialogs.accounts.newCredentialLabel'));
+        return;
+      }
+      setError(null);
+      try {
+        await setAccountSecret(account.id, value);
+        setRepairId(null);
+        setRepairSecret('');
+        pendingFocusId.current = account.id;
+        await load();
+        announce(
+          t('dialogs.accounts.credentialUpdated', { name: account.display_name }),
+        );
+      } catch (err) {
+        // The secret stays in place on a registration failure — let the user
+        // retry without re-typing (the field is still open).
+        const message = errorMessage(err);
+        setError(message);
+        announce(t('mobile.error', { message }));
+      }
+    },
+    [announce, load, repairSecret, t],
+  );
+
   // OAuth (browser sign-in) success — the form owns the begin/exchange dance, its
   // own validation/error region, and the cancel announcement; the screen only
   // reloads the list, moves SR focus to the new row, and announces the result.
@@ -321,6 +380,50 @@ export default function AccountsScreen() {
           {accounts.map((account) => {
             const isLocal = account.adapter_kind === 'local';
             const kindName = t(`dialogs.accounts.kindName.${account.adapter_kind}`);
+            const missing = missingIds.has(account.id);
+            const oauth = isOAuthKind(account.adapter_kind);
+            // Fold the credential state into the row's single SR label; for an
+            // OAuth account (no inline repair) also speak the remove+reconnect
+            // guidance so the user knows the path forward.
+            const rowLabel = missing
+              ? oauth
+                ? `${account.display_name}, ${kindName}, ${t('dialogs.accounts.missingBadge')}. ${t('dialogs.accounts.oauthReconnectHint')}`
+                : `${account.display_name}, ${kindName}, ${t('dialogs.accounts.missingBadge')}`
+              : `${account.display_name}, ${kindName}`;
+            if (repairId === account.id) {
+              return (
+                <View key={account.id} style={styles.row}>
+                  <TextInput
+                    style={styles.editInput}
+                    value={repairSecret}
+                    onChangeText={setRepairSecret}
+                    accessibilityLabel={t('dialogs.accounts.newCredentialLabel')}
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    autoFocus
+                    returnKeyType="done"
+                    onSubmitEditing={() => void saveRepair(account)}
+                  />
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('mobile.save')}
+                    onPress={() => void saveRepair(account)}
+                    style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.smallButtonText}>{t('mobile.save')}</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('mobile.cancel')}
+                    onPress={cancelRepair}
+                    style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.smallButtonText}>{t('mobile.cancel')}</Text>
+                  </Pressable>
+                </View>
+              );
+            }
             if (editingId === account.id) {
               return (
                 <View key={account.id} style={styles.row}>
@@ -362,11 +465,14 @@ export default function AccountsScreen() {
                 }}
                 accessible
                 accessibilityRole="text"
-                accessibilityLabel={`${account.display_name}, ${kindName}`}
+                accessibilityLabel={rowLabel}
                 accessibilityActions={
                   isLocal
                     ? undefined
                     : [
+                        ...(missing && !oauth
+                          ? [{ name: 'reconnect', label: t('dialogs.accounts.reconnect') }]
+                          : []),
                         { name: 'rename', label: t('mobile.rename') },
                         { name: 'delete', label: t('dialogs.accounts.delete') },
                       ]
@@ -374,15 +480,38 @@ export default function AccountsScreen() {
                 onAccessibilityAction={(e) => {
                   if (e.nativeEvent.actionName === 'delete') void remove(account);
                   else if (e.nativeEvent.actionName === 'rename') startRename(account);
+                  else if (e.nativeEvent.actionName === 'reconnect') startRepair(account);
                 }}
                 style={styles.row}
               >
                 <View style={styles.rowText}>
                   <Text style={styles.accountName}>{account.display_name}</Text>
                   <Text style={styles.accountKind}>{kindName}</Text>
+                  {missing && (
+                    <Text style={styles.badge} importantForAccessibility="no">
+                      {t('dialogs.accounts.missingBadge')}
+                    </Text>
+                  )}
+                  {missing && oauth && (
+                    <Text style={styles.hint} importantForAccessibility="no">
+                      {t('dialogs.accounts.oauthReconnectHint')}
+                    </Text>
+                  )}
                 </View>
                 {!isLocal && (
                   <>
+                    {missing && !oauth && (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`${t('dialogs.accounts.reconnect')}: ${account.display_name}`}
+                        onPress={() => startRepair(account)}
+                        style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
+                      >
+                        <Text style={styles.smallButtonText}>
+                          {t('dialogs.accounts.reconnect')}
+                        </Text>
+                      </Pressable>
+                    )}
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={t('dialogs.accounts.renameLabel', {
@@ -527,6 +656,8 @@ const makeStyles = (c: ThemeColors) =>
     rowText: { flex: 1, gap: 2 },
     accountName: { fontSize: 18, color: c.textPrimary, fontWeight: '600' },
     accountKind: { fontSize: 14, color: c.textSecondary },
+    badge: { fontSize: 13, fontWeight: '700', color: c.danger },
+    hint: { fontSize: 13, color: c.textSecondary, lineHeight: 18 },
     deleteButton: {
       paddingVertical: 10,
       paddingHorizontal: 14,

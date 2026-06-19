@@ -127,6 +127,14 @@ class CalFfiModule : Module() {
       host.renameAccountJson(id, newName)
     }
 
+    AsyncFunction("listAccountsMissingCredentialsJson") {
+      host.listAccountsMissingCredentialsJson()
+    }
+
+    AsyncFunction("setAccountSecret") { accountId: String, secret: String ->
+      host.setAccountSecret(accountId, secret)
+    }
+
     // ─── Calendars + events (the on-device adapters, local + external) ───────
     // JSON passthrough in the cal_core/desktop wire shape. Routing (local vs
     // external account) happens Rust-side in the Host; a thrown StoreException

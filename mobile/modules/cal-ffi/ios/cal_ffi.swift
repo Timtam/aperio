@@ -902,6 +902,17 @@ public protocol HostProtocol: AnyObject, Sendable {
     func getUserPref(key: String) throws  -> String?
     
     /**
+     * External accounts whose required keychain secret is absent — the data
+     * behind the credential-repair banner. An account lands here when its
+     * `required_secret_slot` is `Some` and the keychain has nothing in that
+     * slot (a retrieve error, incl. NotFound, counts as missing so the wizard
+     * errs toward letting the user re-authenticate). The local account and
+     * secret-less kinds (iCal) are skipped. Returns a JSON `Account[]`.
+     * Mirrors the desktop `list_accounts_missing_credentials`.
+     */
+    func listAccountsMissingCredentialsJson() throws  -> String
+    
+    /**
      * All calendars (local + external) as a JSON `CalendarRow[]`, and — as a
      * side effect — primes the registry's calendar→account route map so the
      * event methods can route. Mirrors the desktop `list_calendars` minus the
@@ -1025,6 +1036,18 @@ public protocol HostProtocol: AnyObject, Sendable {
      * list's owning account.
      */
     func sectionsJson(listId: String) throws  -> String
+    
+    /**
+     * (Re-)store the secret half of a NON-OAuth account's credentials — the
+     * CalDAV/EWS password or the Vikunja/Todoist API token — then re-register
+     * the adapter so it's live for the rest of the session without a restart.
+     * The keychain slot follows the account kind, matching what the registry
+     * reads back. OAuth accounts (Google/Microsoft Graph) are rejected: they
+     * must re-run the interactive OAuth flow, not paste a secret. Under E2E the
+     * secret also propagates to the user's other devices via the encrypted log.
+     * Mirrors the desktop `set_account_secret`.
+     */
+    func setAccountSecret(accountId: String, secret: String) throws 
     
     /**
      * Set or clear a container's bound colour label (DESIGN §8.2). Mirrors the
@@ -1891,6 +1914,23 @@ open func getUserPref(key: String)throws  -> String?  {
 }
     
     /**
+     * External accounts whose required keychain secret is absent — the data
+     * behind the credential-repair banner. An account lands here when its
+     * `required_secret_slot` is `Some` and the keychain has nothing in that
+     * slot (a retrieve error, incl. NotFound, counts as missing so the wizard
+     * errs toward letting the user re-authenticate). The local account and
+     * secret-less kinds (iCal) are skipped. Returns a JSON `Account[]`.
+     * Mirrors the desktop `list_accounts_missing_credentials`.
+     */
+open func listAccountsMissingCredentialsJson()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_list_accounts_missing_credentials_json(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
      * All calendars (local + external) as a JSON `CalendarRow[]`, and — as a
      * side effect — primes the registry's calendar→account route map so the
      * event methods can route. Mirrors the desktop `list_calendars` minus the
@@ -2117,6 +2157,25 @@ open func sectionsJson(listId: String)throws  -> String  {
         FfiConverterString.lower(listId),$0
     )
 })
+}
+    
+    /**
+     * (Re-)store the secret half of a NON-OAuth account's credentials — the
+     * CalDAV/EWS password or the Vikunja/Todoist API token — then re-register
+     * the adapter so it's live for the rest of the session without a restart.
+     * The keychain slot follows the account kind, matching what the registry
+     * reads back. OAuth accounts (Google/Microsoft Graph) are rejected: they
+     * must re-run the interactive OAuth flow, not paste a secret. Under E2E the
+     * secret also propagates to the user's other devices via the encrypted log.
+     * Mirrors the desktop `set_account_secret`.
+     */
+open func setAccountSecret(accountId: String, secret: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_set_account_secret(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(accountId),
+        FfiConverterString.lower(secret),$0
+    )
+}
 }
     
     /**
@@ -5786,6 +5845,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_get_user_pref() != 20426) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_list_accounts_missing_credentials_json() != 60783) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_list_calendars_json() != 49275) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -5829,6 +5891,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_sections_json() != 56584) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_set_account_secret() != 44502) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_set_container_color_label() != 32220) {

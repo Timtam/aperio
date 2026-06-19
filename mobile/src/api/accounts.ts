@@ -86,6 +86,27 @@ export const renameAccount = async (
   return updated;
 };
 
+// ── Credential repair ────────────────────────────────────────────────────────
+
+/** External accounts whose required keychain secret is absent — a token that
+ *  expired, or a row synced from another device without its device-local
+ *  secret. The data behind the "reconnect" banner. (iCal feeds + the local
+ *  account are never flagged.) */
+export const listAccountsMissingCredentials = async (): Promise<Account[]> =>
+  JSON.parse(await CalFfi.listAccountsMissingCredentialsJson()) as Account[];
+
+/** (Re-)enter the secret for a NON-OAuth account — the CalDAV/EWS password or
+ *  the Vikunja/Todoist API token — then re-register its adapter so it's live
+ *  again without an app restart. Rejects the local account, OAuth accounts
+ *  (Google/Microsoft must reconnect via the OAuth flow), and an unknown id. */
+export const setAccountSecret = async (
+  accountId: string,
+  secret: string,
+): Promise<void> => {
+  await CalFfi.setAccountSecret(accountId, secret);
+  scheduleBackgroundPush();
+};
+
 // ── Discovery (EWS Autodiscover) ─────────────────────────────────────────────
 
 /** The EWS plugin id the Host drives discovery for. */

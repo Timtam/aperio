@@ -1760,6 +1760,93 @@ impl Host {
         to_json(&account)
     }
 
+    /// External accounts whose required keychain secret is absent — the data
+    /// behind the credential-repair banner. An account lands here when its
+    /// `required_secret_slot` is `Some` and the keychain has nothing in that
+    /// slot (a retrieve error, incl. NotFound, counts as missing so the wizard
+    /// errs toward letting the user re-authenticate). The local account and
+    /// secret-less kinds (iCal) are skipped. Returns a JSON `Account[]`.
+    /// Mirrors the desktop `list_accounts_missing_credentials`.
+    pub fn list_accounts_missing_credentials_json(&self) -> Result<String, StoreError> {
+        let shared = self.db.shared();
+        let repo = AccountsRepo::new(&shared);
+        let all = repo.list().map_err(acc_err)?;
+        let mut out = Vec::new();
+        for acc in all {
+            if acc.id == "local" || acc.adapter_kind == AdapterKind::Local {
+                continue;
+            }
+            let Some(slot) = required_secret_slot(acc.adapter_kind) else {
+                continue;
+            };
+            if self.secret_store.retrieve(&acc.id, slot).is_err() {
+                out.push(acc);
+            }
+        }
+        to_json(&out)
+    }
+
+    /// (Re-)store the secret half of a NON-OAuth account's credentials — the
+    /// CalDAV/EWS password or the Vikunja/Todoist API token — then re-register
+    /// the adapter so it's live for the rest of the session without a restart.
+    /// The keychain slot follows the account kind, matching what the registry
+    /// reads back. OAuth accounts (Google/Microsoft Graph) are rejected: they
+    /// must re-run the interactive OAuth flow, not paste a secret. Under E2E the
+    /// secret also propagates to the user's other devices via the encrypted log.
+    /// Mirrors the desktop `set_account_secret`.
+    pub fn set_account_secret(&self, account_id: String, secret: String) -> Result<(), StoreError> {
+        let shared = self.db.shared();
+        let repo = AccountsRepo::new(&shared);
+        let account = repo
+            .get(&account_id)
+            .map_err(acc_err)?
+            .ok_or(StoreError::NotFound)?;
+        if account.adapter_kind == AdapterKind::Local {
+            return Err(StoreError::InvalidField {
+                field: "account_id".to_string(),
+                detail: "the local account has no credential slot".to_string(),
+            });
+        }
+        if matches!(
+            account.adapter_kind,
+            AdapterKind::Google | AdapterKind::MicrosoftGraph
+        ) {
+            return Err(StoreError::InvalidField {
+                field: "account_id".to_string(),
+                detail: format!(
+                    "OAuth accounts (kind={}) must reconnect via the OAuth flow",
+                    account.adapter_kind.as_str()
+                ),
+            });
+        }
+        let slot = match account.adapter_kind {
+            AdapterKind::Vikunja | AdapterKind::Todoist => SecretSlot::ApiToken,
+            _ => SecretSlot::Password,
+        };
+        self.secret_store
+            .store(&account_id, slot, &secret)
+            .map_err(|err| StoreError::Storage {
+                detail: format!("failed to store credential: {err}"),
+            })?;
+        // E2E only: propagate the (re-)entered secret to the user's other
+        // devices (gated no-op when E2E is off — credentials stay device-local).
+        host_core::credential_sync::emit_credential_set(
+            &self.writer,
+            &shared,
+            &account_id,
+            slot,
+            &secret,
+        );
+        // Register so the adapter is live this session. A failure leaves the
+        // secret in place — the user can retry without re-typing it.
+        self.registry
+            .register(&account)
+            .map_err(|err| StoreError::Storage {
+                detail: format!("adapter registration failed: {err}"),
+            })?;
+        Ok(())
+    }
+
     // ─── Calendars ───────────────────────────────────────────────────────────
 
     /// All calendars (local + external) as a JSON `CalendarRow[]`, and — as a
@@ -4490,6 +4577,21 @@ struct CompleteSyncOAuthRequest {
 
 /// Map an accounts-repo error to the FFI store error, preserving the
 /// NotFound / forbidden-local-delete distinctions for the UI.
+/// Which keychain slot a fully-configured account of this kind must have
+/// populated, or `None` when the kind needs no secret (iCal feeds are usually
+/// public; an optional Basic-auth password fails open as a 401 on first fetch).
+/// Mirrors the desktop `required_secret_slot` — the credential-repair wizard
+/// uses it to decide which accounts to flag and which slot to rewrite.
+fn required_secret_slot(kind: host_core::accounts::AdapterKind) -> Option<SecretSlot> {
+    use host_core::accounts::AdapterKind;
+    match kind {
+        AdapterKind::Ical | AdapterKind::Local => None,
+        AdapterKind::Vikunja | AdapterKind::Todoist => Some(SecretSlot::ApiToken),
+        AdapterKind::Google | AdapterKind::MicrosoftGraph => Some(SecretSlot::RefreshToken),
+        _ => Some(SecretSlot::Password),
+    }
+}
+
 fn acc_err(e: host_core::accounts::AccountsError) -> StoreError {
     use host_core::accounts::AccountsError;
     match e {
@@ -4697,6 +4799,66 @@ mod tests {
         assert!(matches!(
             host.rename_account_json(account_id, "   ".to_string()).unwrap_err(),
             StoreError::InvalidField { ref field, .. } if field == "name"
+        ));
+    }
+
+    #[test]
+    fn missing_credentials_flags_a_lost_secret_and_set_account_secret_restores_it() {
+        let (_dir, host, kc) = open_host();
+        let req = r#"{
+            "adapter_kind": "caldav",
+            "display_name": "Work",
+            "config_json": "{\"server_url\":\"https://dav.example.invalid/\",\"username\":\"a\",\"auth_kind\":\"basic\"}",
+            "secret": "pw"
+        }"#;
+        let account_id = serde_json::from_str::<serde_json::Value>(
+            &host.create_account_json(req.to_string()).unwrap(),
+        )
+        .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // With its password present, the account is NOT flagged.
+        let missing: serde_json::Value =
+            serde_json::from_str(&host.list_accounts_missing_credentials_json().unwrap()).unwrap();
+        assert!(missing.as_array().unwrap().is_empty());
+
+        // Simulate the keychain losing the secret (token expiry / a row synced
+        // from another device without its device-local secret).
+        kc.map
+            .lock()
+            .unwrap()
+            .remove(&(account_id.clone(), "password".to_string()));
+        let missing: serde_json::Value =
+            serde_json::from_str(&host.list_accounts_missing_credentials_json().unwrap()).unwrap();
+        assert!(missing
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a["id"] == serde_json::json!(account_id)));
+
+        // Re-enter the credential → stored under the password slot + no longer flagged.
+        host.set_account_secret(account_id.clone(), "newpw".to_string())
+            .unwrap();
+        assert!(kc
+            .map
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|((acc, slot), v)| acc == &account_id && slot == "password" && v == "newpw"));
+        let missing: serde_json::Value =
+            serde_json::from_str(&host.list_accounts_missing_credentials_json().unwrap()).unwrap();
+        assert!(missing.as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn set_account_secret_rejects_an_unknown_account() {
+        let (_dir, host, _kc) = open_host();
+        assert!(matches!(
+            host.set_account_secret("nope".to_string(), "x".to_string())
+                .unwrap_err(),
+            StoreError::NotFound
         ));
     }
 

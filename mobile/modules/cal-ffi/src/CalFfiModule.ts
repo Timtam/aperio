@@ -82,6 +82,14 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
   /** Rename an account's display name; returns the updated `Account` as JSON.
    *  Rejects on an empty name / unknown id. */
   renameAccountJson(id: string, newName: string): Promise<string>;
+  /** External accounts whose required keychain secret is absent (the
+   *  credential-repair banner data), as a JSON `Account[]`. */
+  listAccountsMissingCredentialsJson(): Promise<string>;
+  /** (Re-)store the secret half of a NON-OAuth account's credentials (CalDAV/EWS
+   *  password or Vikunja/Todoist API token) and re-register its adapter. Rejects
+   *  the local account, OAuth accounts (they must reconnect via OAuth), and an
+   *  unknown id. */
+  setAccountSecret(accountId: string, secret: string): Promise<void>;
 
   // ── Calendars + events ──
   // JSON passthrough in the cal_core/desktop wire shape; routing (local vs
