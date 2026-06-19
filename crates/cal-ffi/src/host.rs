@@ -58,6 +58,7 @@ use host_core::cache::{
 use host_core::conflicts::{
     ConflictKind, ConflictRecord, ConflictsError, ConflictsRepo, ResolutionChoice,
 };
+use host_core::contact_sync::{ContactSyncCore, ContactSyncObserver, ContactsSyncedPayload};
 use host_core::db::SharedConn;
 use host_core::event_log::OnboardingService;
 use host_core::overrides::{
@@ -627,6 +628,14 @@ pub struct Host {
     /// Drives manual + on-foreground warm passes (the mobile stand-in for the
     /// desktop periodic loop — constructed without `start_periodic`).
     cache_refresher: Arc<host_core::cache::CacheRefresher>,
+    /// The contact-sync core (the same one the desktop wraps in a tokio loop).
+    /// Mobile drives `run_sync` from foreground triggers / the manual button —
+    /// no app-start loop. Shares the bootstrapped `registry`.
+    contact_sync: Arc<ContactSyncCore>,
+    /// Where a finished contact-sync pass reports so the UI can re-read + update
+    /// the "last synced" footer. A no-op until the JS layer registers its bridge
+    /// via [`Host::set_contact_sync_observer`]; passes run regardless.
+    contact_sync_observer: Arc<BridgeContactSyncObserver>,
     /// `<data_dir>/assets/sounds/` — the content-addressed custom-sound store
     /// (`<sha256>.<ext>`), the desktop `SoundsDir` twin. Imports write here, the
     /// sync round push/fetches it (DesktopSyncRoundHooks, already wired via
@@ -691,6 +700,53 @@ impl CacheObserver for BridgeCacheObserver {
             if let Some(bridge) = guard.as_ref() {
                 if let Ok(json) = serde_json::to_string(status) {
                     bridge.refresh_status(json);
+                }
+            }
+        }
+    }
+}
+
+/// Foreign-side sink for the "a contact-sync pass finished" broadcast (the
+/// mobile analogue of the desktop Tauri `contacts-synced` event). The JS layer
+/// implements this and registers it via [`Host::set_contact_sync_observer`]; the
+/// payload is a JSON string with the same shape the desktop event carries, so
+/// the RN side can update the "last synced" footer + re-read the contact views.
+#[uniffi::export(with_foreign)]
+pub trait ContactSyncObserverBridge: Send + Sync {
+    /// A contact-sync pass finished. `payload_json` is a `ContactsSyncedPayload`
+    /// (`{last_synced_at, succeeded_accounts, failed_accounts}`).
+    fn contacts_synced(&self, payload_json: String);
+}
+
+/// Adapts a foreign [`ContactSyncObserverBridge`] to the engine-side
+/// [`ContactSyncObserver`] the core calls. Installed AFTER construction (the JS
+/// layer registers it once ready), so it's held behind an `RwLock<Option<…>>`
+/// and every notification is a no-op until a bridge is set. Mirrors
+/// [`BridgeCacheObserver`].
+struct BridgeContactSyncObserver {
+    bridge: std::sync::RwLock<Option<Arc<dyn ContactSyncObserverBridge>>>,
+}
+
+impl BridgeContactSyncObserver {
+    fn new() -> Self {
+        Self {
+            bridge: std::sync::RwLock::new(None),
+        }
+    }
+
+    fn set(&self, bridge: Arc<dyn ContactSyncObserverBridge>) {
+        if let Ok(mut guard) = self.bridge.write() {
+            *guard = Some(bridge);
+        }
+    }
+}
+
+impl ContactSyncObserver for BridgeContactSyncObserver {
+    fn contacts_synced(&self, payload: &ContactsSyncedPayload) {
+        if let Ok(guard) = self.bridge.read() {
+            if let Some(bridge) = guard.as_ref() {
+                if let Ok(json) = serde_json::to_string(payload) {
+                    bridge.contacts_synced(json);
                 }
             }
         }
@@ -1923,6 +1979,13 @@ impl Host {
             Arc::clone(&cache_observer) as Arc<dyn CacheObserver>,
         );
 
+        // The contact-sync core, sharing the bootstrapped registry. No worker
+        // loop is started — mobile drives `run_sync` from the manual button /
+        // foreground triggers (the desktop's tokio loop has no mobile twin). The
+        // observer is a no-op until the JS layer registers its bridge.
+        let contact_sync_observer = Arc::new(BridgeContactSyncObserver::new());
+        let contact_sync = ContactSyncCore::new(Arc::clone(&registry), db.shared());
+
         Ok(Arc::new(Self {
             db,
             adapter,
@@ -1938,6 +2001,8 @@ impl Host {
             coord,
             cache_observer,
             cache_refresher,
+            contact_sync,
+            contact_sync_observer,
             sounds_dir,
         }))
     }
@@ -4441,6 +4506,91 @@ impl Host {
     /// backgrounded). Same fire-and-forget warm pass as the manual refresh.
     pub fn warm_cache_on_foreground(&self) {
         self.refresh_external_cache();
+    }
+
+    // ─── Contact sync (§10.5) ────────────────────────────────────────────────────
+    //
+    // The contact-sync core lives in host-core; mobile drives `run_sync` from the
+    // manual button / foreground (the desktop wraps it in a tokio loop). The
+    // observer delivers the "a pass finished" broadcast to JS; the interval +
+    // include-read-only prefs are written DEVICE-LOCAL (the desktop commands do
+    // too — they're a per-device cadence, not synced settings).
+
+    /// Register the JS-side contact-sync observer. A finished pass then pushes
+    /// `contacts_synced` (the RN layer updates the footer + re-reads contacts)
+    /// across the bridge. Until this is called the pushes are dropped — passes
+    /// still run; the UI just re-reads on its own.
+    pub fn set_contact_sync_observer(&self, observer: Arc<dyn ContactSyncObserverBridge>) {
+        self.contact_sync_observer.set(observer);
+    }
+
+    /// Run one contact-sync pass now — the mobile stand-in for the desktop tokio
+    /// loop, driven from a foreground trigger / the manual "Sync now" button.
+    /// `include_read_only`: `None` reads the persisted pref (matches the desktop
+    /// manual button); `Some(_)` overrides it. Returns `false` when a pass was
+    /// already in flight (the core dedupes).
+    pub fn sync_contacts_now(&self, include_read_only: Option<bool>) -> Result<bool, StoreError> {
+        let effective =
+            include_read_only.unwrap_or_else(|| self.contact_sync.read_include_read_only_on_sync());
+        let observer = Arc::clone(&self.contact_sync_observer);
+        Ok(self
+            .runtime
+            .block_on(async { self.contact_sync.run_sync(&*observer, effective).await }))
+    }
+
+    /// The contact-sync status (`{last_synced_at, interval_minutes, in_flight,
+    /// include_read_only_on_sync}`) as JSON — the footer + Settings seed.
+    pub fn get_contacts_sync_status_json(&self) -> Result<String, StoreError> {
+        to_json(&self.contact_sync.status())
+    }
+
+    /// Persist the periodic-sync interval (minutes), clamped to [1, 1440] like
+    /// the desktop command. Device-local; returns the clamped value the UI
+    /// echoes back.
+    pub fn set_contacts_sync_interval(&self, minutes: u32) -> Result<u32, StoreError> {
+        let clamped = minutes.clamp(1, 24 * 60);
+        let shared = self.db.shared();
+        UserPrefsRepo::new(&shared)
+            .set(
+                host_core::contact_sync::PREF_SYNC_INTERVAL_MINUTES,
+                &clamped.to_string(),
+            )
+            .map_err(storage_err)?;
+        Ok(clamped)
+    }
+
+    /// Persist the "also pull read-only directories" toggle (the literal
+    /// `"true"`/`"false"`, matching the desktop command). Device-local.
+    pub fn set_contacts_include_read_only_on_sync(&self, enabled: bool) -> Result<(), StoreError> {
+        let shared = self.db.shared();
+        UserPrefsRepo::new(&shared)
+            .set(
+                host_core::contact_sync::PREF_INCLUDE_READ_ONLY_ON_SYNC,
+                if enabled { "true" } else { "false" },
+            )
+            .map_err(storage_err)?;
+        Ok(())
+    }
+
+    /// Drop every external adapter's in-memory contact cache + reset
+    /// `contacts.lastSyncedAt` to "never" (the "Cache leeren" action). Returns
+    /// the number of accounts the invalidate succeeded against — partial success
+    /// is the right outcome when one account's server is unreachable. Per-adapter
+    /// errors are swallowed (cal-ffi has no logger), mirroring the desktop body
+    /// minus the warn. Distinct from the per-list SWR `invalidate_contacts_cache`.
+    pub fn clear_contacts_cache(&self) -> Result<u32, StoreError> {
+        let succeeded = self.runtime.block_on(async {
+            let mut n = 0u32;
+            for (_account, adapter) in self.registry.snapshot_contact_adapters() {
+                if adapter.invalidate_contacts_cache().await.is_ok() {
+                    n += 1;
+                }
+            }
+            n
+        });
+        let shared = self.db.shared();
+        let _ = UserPrefsRepo::new(&shared).delete(host_core::contact_sync::PREF_LAST_SYNCED_AT);
+        Ok(succeeded)
     }
 
     // ─── Sync conflicts ────────────────────────────────────────────────────────

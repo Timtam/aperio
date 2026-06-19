@@ -619,6 +619,9 @@ internal interface UniffiCallbackInterfaceCacheObserverBridgeMethod0 : com.sun.j
 internal interface UniffiCallbackInterfaceCacheObserverBridgeMethod1 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`statusJson`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
 }
+internal interface UniffiCallbackInterfaceContactSyncObserverBridgeMethod0 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`payloadJson`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
+}
 internal interface UniffiCallbackInterfaceKeychainBridgeMethod0 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`accountId`: RustBuffer.ByValue,`slot`: RustBuffer.ByValue,`value`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
 }
@@ -650,6 +653,25 @@ internal open class UniffiVTableCallbackInterfaceCacheObserverBridge(
         `uniffiClone` = other.`uniffiClone`
         `cacheUpdated` = other.`cacheUpdated`
         `refreshStatus` = other.`refreshStatus`
+    }
+
+}
+@Structure.FieldOrder("uniffiFree", "uniffiClone", "contactsSynced")
+internal open class UniffiVTableCallbackInterfaceContactSyncObserverBridge(
+    @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+    @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+    @JvmField internal var `contactsSynced`: UniffiCallbackInterfaceContactSyncObserverBridgeMethod0? = null,
+) : Structure() {
+    class UniffiByValue(
+        `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+        `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+        `contactsSynced`: UniffiCallbackInterfaceContactSyncObserverBridgeMethod0? = null,
+    ): UniffiVTableCallbackInterfaceContactSyncObserverBridge(`uniffiFree`,`uniffiClone`,`contactsSynced`,), Structure.ByValue
+
+   internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceContactSyncObserverBridge) {
+        `uniffiFree` = other.`uniffiFree`
+        `uniffiClone` = other.`uniffiClone`
+        `contactsSynced` = other.`contactsSynced`
     }
 
 }
@@ -756,6 +778,8 @@ external fun uniffi_cal_ffi_checksum_method_cacheobserverbridge_cache_updated(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_cacheobserverbridge_refresh_status(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_contactsyncobserverbridge_contacts_synced(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_accounts_json(
@@ -769,6 +793,8 @@ external fun uniffi_cal_ffi_checksum_method_host_begin_oauth_json(
 external fun uniffi_cal_ffi_checksum_method_host_calendar_current_user_email(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_change_sync_passphrase_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_clear_contacts_cache(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_clear_sync_log(
 ): Short
@@ -842,6 +868,8 @@ external fun uniffi_cal_ffi_checksum_method_host_get_cache_refresh_status_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_get_contact_photo_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_get_contacts_sync_status_json(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_get_event_by_id_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_get_events_json(
@@ -900,6 +928,12 @@ external fun uniffi_cal_ffi_checksum_method_host_set_cache_observer(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_set_contact_photo_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_set_contact_sync_observer(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_set_contacts_include_read_only_on_sync(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_set_contacts_sync_interval(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_set_container_color_label(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_set_event_color(
@@ -909,6 +943,8 @@ external fun uniffi_cal_ffi_checksum_method_host_set_section_color(
 external fun uniffi_cal_ffi_checksum_method_host_set_user_pref(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_sync_conflict_count(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_sync_contacts_now(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_sync_now_json(
 ): Short
@@ -979,6 +1015,7 @@ internal object UniffiLib {
     init {
         Native.register(UniffiLib::class.java, findLibraryName(componentName = "cal_ffi"))
         uniffiCallbackInterfaceCacheObserverBridge.register(this)
+        uniffiCallbackInterfaceContactSyncObserverBridge.register(this)
         uniffiCallbackInterfaceKeychainBridge.register(this)
         
     }
@@ -1040,6 +1077,14 @@ external fun uniffi_cal_ffi_fn_method_cacheobserverbridge_cache_updated(`ptr`: L
 ): Unit
 external fun uniffi_cal_ffi_fn_method_cacheobserverbridge_refresh_status(`ptr`: Long,`statusJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_clone_contactsyncobserverbridge(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_cal_ffi_fn_free_contactsyncobserverbridge(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_init_callback_vtable_contactsyncobserverbridge(`vtable`: UniffiVTableCallbackInterfaceContactSyncObserverBridge,
+): Unit
+external fun uniffi_cal_ffi_fn_method_contactsyncobserverbridge_contacts_synced(`ptr`: Long,`payloadJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_clone_host(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_cal_ffi_fn_free_host(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1060,6 +1105,8 @@ external fun uniffi_cal_ffi_fn_method_host_calendar_current_user_email(`ptr`: Lo
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_change_sync_passphrase_json(`ptr`: Long,`oldPassphrase`: RustBuffer.ByValue,`newPassphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_clear_contacts_cache(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Int
 external fun uniffi_cal_ffi_fn_method_host_clear_sync_log(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_compact_now_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1132,6 +1179,8 @@ external fun uniffi_cal_ffi_fn_method_host_get_cache_refresh_status_json(`ptr`: 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_get_contact_photo_json(`ptr`: Long,`id`: RustBuffer.ByValue,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_get_contacts_sync_status_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_get_event_by_id_json(`ptr`: Long,`id`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_get_events_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1190,6 +1239,12 @@ external fun uniffi_cal_ffi_fn_method_host_set_cache_observer(`ptr`: Long,`obser
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_set_contact_photo_json(`ptr`: Long,`id`: RustBuffer.ByValue,`listId`: RustBuffer.ByValue,`photoJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_set_contact_sync_observer(`ptr`: Long,`observer`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_set_contacts_include_read_only_on_sync(`ptr`: Long,`enabled`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_set_contacts_sync_interval(`ptr`: Long,`minutes`: Int,uniffi_out_err: UniffiRustCallStatus, 
+): Int
 external fun uniffi_cal_ffi_fn_method_host_set_container_color_label(`ptr`: Long,`containerId`: RustBuffer.ByValue,`kind`: RustBuffer.ByValue,`colorLabelId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_set_event_color(`ptr`: Long,`eventId`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,`colorLabelId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1200,6 +1255,8 @@ external fun uniffi_cal_ffi_fn_method_host_set_user_pref(`ptr`: Long,`key`: Rust
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_sync_conflict_count(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
+external fun uniffi_cal_ffi_fn_method_host_sync_contacts_now(`ptr`: Long,`includeReadOnly`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
 external fun uniffi_cal_ffi_fn_method_host_sync_now_json(`ptr`: Long,`trigger`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_sync_status_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1457,6 +1514,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_cacheobserverbridge_refresh_status() != 42903.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_contactsyncobserverbridge_contacts_synced() != 18316.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json() != 45743.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1476,6 +1536,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_change_sync_passphrase_json() != 15380.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_clear_contacts_cache() != 47465.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_clear_sync_log() != 18521.toShort()) {
@@ -1586,6 +1649,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_get_contact_photo_json() != 13811.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_get_contacts_sync_status_json() != 5498.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_get_event_by_id_json() != 41217.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1673,6 +1739,15 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_set_contact_photo_json() != 21774.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_set_contact_sync_observer() != 36170.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_set_contacts_include_read_only_on_sync() != 22401.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_set_contacts_sync_interval() != 64206.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_set_container_color_label() != 32220.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1686,6 +1761,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_sync_conflict_count() != 12817.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_sync_contacts_now() != 7203.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_sync_now_json() != 5198.toShort()) {
@@ -2564,6 +2642,333 @@ public object FfiConverterTypeCacheObserverBridge: FfiConverter<CacheObserverBri
 
 
 /**
+ * Foreign-side sink for the "a contact-sync pass finished" broadcast (the
+ * mobile analogue of the desktop Tauri `contacts-synced` event). The JS layer
+ * implements this and registers it via [`Host::set_contact_sync_observer`]; the
+ * payload is a JSON string with the same shape the desktop event carries, so
+ * the RN side can update the "last synced" footer + re-read the contact views.
+ */
+public interface ContactSyncObserverBridge {
+    
+    /**
+     * A contact-sync pass finished. `payload_json` is a `ContactsSyncedPayload`
+     * (`{last_synced_at, succeeded_accounts, failed_accounts}`).
+     */
+    fun `contactsSynced`(`payloadJson`: kotlin.String)
+    
+    companion object
+}
+
+/**
+ * Foreign-side sink for the "a contact-sync pass finished" broadcast (the
+ * mobile analogue of the desktop Tauri `contacts-synced` event). The JS layer
+ * implements this and registers it via [`Host::set_contact_sync_observer`]; the
+ * payload is a JSON string with the same shape the desktop event carries, so
+ * the RN side can update the "last synced" footer + re-read the contact views.
+ */
+open class ContactSyncObserverBridgeImpl: Disposable, AutoCloseable, ContactSyncObserverBridge
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_cal_ffi_fn_free_contactsyncobserverbridge(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_cal_ffi_fn_clone_contactsyncobserverbridge(handle, status)
+        }
+    }
+
+    
+    /**
+     * A contact-sync pass finished. `payload_json` is a `ContactsSyncedPayload`
+     * (`{last_synced_at, succeeded_accounts, failed_accounts}`).
+     */override fun `contactsSynced`(`payloadJson`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_contactsyncobserverbridge_contacts_synced(
+        it,
+        FfiConverterString.lower(`payloadJson`),_status)
+}
+    }
+    
+    
+
+    
+
+    
+
+
+    
+    
+    /**
+     * @suppress
+     */
+    companion object
+    
+}
+
+
+
+// Put the implementation in an object so we don't pollute the top-level namespace
+internal object uniffiCallbackInterfaceContactSyncObserverBridge {
+    internal object `contactsSynced`: UniffiCallbackInterfaceContactSyncObserverBridgeMethod0 {
+        override fun callback(`uniffiHandle`: Long,`payloadJson`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeContactSyncObserverBridge.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`contactsSynced`(
+                    FfiConverterString.lift(`payloadJson`),
+                )
+            }
+            val writeReturn = { _: Unit -> Unit }
+            uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
+        }
+    }
+
+    internal object uniffiFree: UniffiCallbackInterfaceFree {
+        override fun callback(handle: Long) {
+            FfiConverterTypeContactSyncObserverBridge.handleMap.remove(handle)
+        }
+    }
+
+    internal object uniffiClone: UniffiCallbackInterfaceClone {
+        override fun callback(handle: Long): Long {
+            return FfiConverterTypeContactSyncObserverBridge.handleMap.clone(handle)
+        }
+    }
+
+    internal var vtable = UniffiVTableCallbackInterfaceContactSyncObserverBridge.UniffiByValue(
+        uniffiFree,
+        uniffiClone,
+        `contactsSynced`,
+    )
+
+    // Registers the foreign callback with the Rust side.
+    // This method is generated for each callback interface.
+    internal fun register(lib: UniffiLib) {
+        lib.uniffi_cal_ffi_fn_init_callback_vtable_contactsyncobserverbridge(vtable)
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeContactSyncObserverBridge: FfiConverter<ContactSyncObserverBridge, Long> {
+    internal val handleMap = UniffiHandleMap<ContactSyncObserverBridge>()
+
+    override fun lower(value: ContactSyncObserverBridge): Long {
+        if (value is ContactSyncObserverBridgeImpl) {
+             // Rust-implemented object.  Clone the handle and return it
+            return value.uniffiCloneHandle()
+         } else {
+            // Kotlin object, generate a new vtable handle and return that.
+            return handleMap.insert(value)
+         }
+    }
+
+    override fun lift(value: Long): ContactSyncObserverBridge {
+        if ((value and 1.toLong()) == 0.toLong()) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return ContactSyncObserverBridgeImpl(UniffiWithHandle, value)
+        } else {
+            // Kotlin-generated handle, get the object from the handle map
+            return handleMap.remove(value)
+        }
+    }
+
+    override fun read(buf: ByteBuffer): ContactSyncObserverBridge {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: ContactSyncObserverBridge) = 8UL
+
+    override fun write(value: ContactSyncObserverBridge, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+/**
  * The mobile app's handle to the full on-device engine.
  */
 public interface HostInterface {
@@ -2645,6 +3050,16 @@ public interface HostInterface {
      * that lacked it).
      */
     fun `changeSyncPassphraseJson`(`oldPassphrase`: kotlin.String, `newPassphrase`: kotlin.String)
+    
+    /**
+     * Drop every external adapter's in-memory contact cache + reset
+     * `contacts.lastSyncedAt` to "never" (the "Cache leeren" action). Returns
+     * the number of accounts the invalidate succeeded against — partial success
+     * is the right outcome when one account's server is unreachable. Per-adapter
+     * errors are swallowed (cal-ffi has no logger), mirroring the desktop body
+     * minus the warn. Distinct from the per-list SWR `invalidate_contacts_cache`.
+     */
+    fun `clearContactsCache`(): kotlin.UInt
     
     /**
      * Drop every `sync_log` row (the "clear history" action — also useful
@@ -2965,6 +3380,12 @@ public interface HostInterface {
     fun `getContactPhotoJson`(`id`: kotlin.String, `listId`: kotlin.String?): kotlin.String
     
     /**
+     * The contact-sync status (`{last_synced_at, interval_minutes, in_flight,
+     * include_read_only_on_sync}`) as JSON — the footer + Settings seed.
+     */
+    fun `getContactsSyncStatusJson`(): kotlin.String
+    
+    /**
      * One event by id as JSON (`Event` or `null`). `calendar_id` routes the
      * lookup: a LOCAL calendar (or an absent/unknown id) reads the stored row;
      * an EXTERNAL one — which has no by-id adapter fetch — is resolved from the
@@ -3221,6 +3642,27 @@ public interface HostInterface {
     fun `setContactPhotoJson`(`id`: kotlin.String, `listId`: kotlin.String?, `photoJson`: kotlin.String)
     
     /**
+     * Register the JS-side contact-sync observer. A finished pass then pushes
+     * `contacts_synced` (the RN layer updates the footer + re-reads contacts)
+     * across the bridge. Until this is called the pushes are dropped — passes
+     * still run; the UI just re-reads on its own.
+     */
+    fun `setContactSyncObserver`(`observer`: ContactSyncObserverBridge)
+    
+    /**
+     * Persist the "also pull read-only directories" toggle (the literal
+     * `"true"`/`"false"`, matching the desktop command). Device-local.
+     */
+    fun `setContactsIncludeReadOnlyOnSync`(`enabled`: kotlin.Boolean)
+    
+    /**
+     * Persist the periodic-sync interval (minutes), clamped to [1, 1440] like
+     * the desktop command. Device-local; returns the clamped value the UI
+     * echoes back.
+     */
+    fun `setContactsSyncInterval`(`minutes`: kotlin.UInt): kotlin.UInt
+    
+    /**
      * Set or clear a container's bound colour label (DESIGN §8.2). Mirrors the
      * desktop `set_container_color_label`: a LOCAL calendar / task list carries
      * the binding on its own (synced) row (update + emit the matching sync
@@ -3262,6 +3704,15 @@ public interface HostInterface {
      * Count of unresolved conflicts — the cheap badge query.
      */
     fun `syncConflictCount`(): kotlin.UInt
+    
+    /**
+     * Run one contact-sync pass now — the mobile stand-in for the desktop tokio
+     * loop, driven from a foreground trigger / the manual "Sync now" button.
+     * `include_read_only`: `None` reads the persisted pref (matches the desktop
+     * manual button); `Some(_)` overrides it. Returns `false` when a pass was
+     * already in flight (the core dedupes).
+     */
+    fun `syncContactsNow`(`includeReadOnly`: kotlin.Boolean?): kotlin.Boolean
     
     /**
      * Run one sync round (push local pending logs, fetch + apply foreign ones,
@@ -3705,6 +4156,28 @@ open class Host: Disposable, AutoCloseable, HostInterface
 }
     }
     
+    
+
+    
+    /**
+     * Drop every external adapter's in-memory contact cache + reset
+     * `contacts.lastSyncedAt` to "never" (the "Cache leeren" action). Returns
+     * the number of accounts the invalidate succeeded against — partial success
+     * is the right outcome when one account's server is unreachable. Per-adapter
+     * errors are swallowed (cal-ffi has no logger), mirroring the desktop body
+     * minus the warn. Distinct from the per-list SWR `invalidate_contacts_cache`.
+     */
+    @Throws(StoreException::class)override fun `clearContactsCache`(): kotlin.UInt {
+            return FfiConverterUInt.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_clear_contacts_cache(
+        it,
+        _status)
+}
+    }
+    )
+    }
     
 
     
@@ -4443,6 +4916,24 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * The contact-sync status (`{last_synced_at, interval_minutes, in_flight,
+     * include_read_only_on_sync}`) as JSON — the footer + Settings seed.
+     */
+    @Throws(StoreException::class)override fun `getContactsSyncStatusJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_get_contacts_sync_status_json(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * One event by id as JSON (`Event` or `null`). `calendar_id` routes the
      * lookup: a LOCAL calendar (or an absent/unknown id) reads the stored row;
      * an EXTERNAL one — which has no by-id adapter fetch — is resolved from the
@@ -5038,6 +5529,60 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Register the JS-side contact-sync observer. A finished pass then pushes
+     * `contacts_synced` (the RN layer updates the footer + re-reads contacts)
+     * across the bridge. Until this is called the pushes are dropped — passes
+     * still run; the UI just re-reads on its own.
+     */override fun `setContactSyncObserver`(`observer`: ContactSyncObserverBridge)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_set_contact_sync_observer(
+        it,
+        FfiConverterTypeContactSyncObserverBridge.lower(`observer`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Persist the "also pull read-only directories" toggle (the literal
+     * `"true"`/`"false"`, matching the desktop command). Device-local.
+     */
+    @Throws(StoreException::class)override fun `setContactsIncludeReadOnlyOnSync`(`enabled`: kotlin.Boolean)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_set_contacts_include_read_only_on_sync(
+        it,
+        FfiConverterBoolean.lower(`enabled`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Persist the periodic-sync interval (minutes), clamped to [1, 1440] like
+     * the desktop command. Device-local; returns the clamped value the UI
+     * echoes back.
+     */
+    @Throws(StoreException::class)override fun `setContactsSyncInterval`(`minutes`: kotlin.UInt): kotlin.UInt {
+            return FfiConverterUInt.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_set_contacts_sync_interval(
+        it,
+        FfiConverterUInt.lower(`minutes`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Set or clear a container's bound colour label (DESIGN §8.2). Mirrors the
      * desktop `set_container_color_label`: a LOCAL calendar / task list carries
      * the binding on its own (synced) row (update + emit the matching sync
@@ -5129,6 +5674,27 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_sync_conflict_count(
         it,
         _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Run one contact-sync pass now — the mobile stand-in for the desktop tokio
+     * loop, driven from a foreground trigger / the manual "Sync now" button.
+     * `include_read_only`: `None` reads the persisted pref (matches the desktop
+     * manual button); `Some(_)` overrides it. Returns `false` when a pass was
+     * already in flight (the core dedupes).
+     */
+    @Throws(StoreException::class)override fun `syncContactsNow`(`includeReadOnly`: kotlin.Boolean?): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_sync_contacts_now(
+        it,
+        FfiConverterOptionalBoolean.lower(`includeReadOnly`),_status)
 }
     }
     )

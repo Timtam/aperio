@@ -798,6 +798,221 @@ public func FfiConverterTypeCacheObserverBridge_lower(_ value: CacheObserverBrid
 
 
 /**
+ * Foreign-side sink for the "a contact-sync pass finished" broadcast (the
+ * mobile analogue of the desktop Tauri `contacts-synced` event). The JS layer
+ * implements this and registers it via [`Host::set_contact_sync_observer`]; the
+ * payload is a JSON string with the same shape the desktop event carries, so
+ * the RN side can update the "last synced" footer + re-read the contact views.
+ */
+public protocol ContactSyncObserverBridge: AnyObject, Sendable {
+    
+    /**
+     * A contact-sync pass finished. `payload_json` is a `ContactsSyncedPayload`
+     * (`{last_synced_at, succeeded_accounts, failed_accounts}`).
+     */
+    func contactsSynced(payloadJson: String) 
+    
+}
+/**
+ * Foreign-side sink for the "a contact-sync pass finished" broadcast (the
+ * mobile analogue of the desktop Tauri `contacts-synced` event). The JS layer
+ * implements this and registers it via [`Host::set_contact_sync_observer`]; the
+ * payload is a JSON string with the same shape the desktop event carries, so
+ * the RN side can update the "last synced" footer + re-read the contact views.
+ */
+open class ContactSyncObserverBridgeImpl: ContactSyncObserverBridge, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_cal_ffi_fn_clone_contactsyncobserverbridge(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_cal_ffi_fn_free_contactsyncobserverbridge(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * A contact-sync pass finished. `payload_json` is a `ContactsSyncedPayload`
+     * (`{last_synced_at, succeeded_accounts, failed_accounts}`).
+     */
+open func contactsSynced(payloadJson: String)  {try! rustCall() {
+    uniffi_cal_ffi_fn_method_contactsyncobserverbridge_contacts_synced(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(payloadJson),$0
+    )
+}
+}
+    
+
+    
+}
+
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceContactSyncObserverBridge {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // Store the vtable directly.
+    static let vtable: UniffiVTableCallbackInterfaceContactSyncObserverBridge = UniffiVTableCallbackInterfaceContactSyncObserverBridge(
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            do {
+                try FfiConverterTypeContactSyncObserverBridge.handleMap.remove(handle: uniffiHandle)
+            } catch {
+                print("Uniffi callback interface ContactSyncObserverBridge: handle missing in uniffiFree")
+            }
+        },
+        uniffiClone: { (uniffiHandle: UInt64) -> UInt64 in
+            do {
+                return try FfiConverterTypeContactSyncObserverBridge.handleMap.clone(handle: uniffiHandle)
+            } catch {
+                fatalError("Uniffi callback interface ContactSyncObserverBridge: handle missing in uniffiClone")
+            }
+        },
+        contactsSynced: { (
+            uniffiHandle: UInt64,
+            payloadJson: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterTypeContactSyncObserverBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.contactsSynced(
+                     payloadJson: try FfiConverterString.lift(payloadJson)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        }
+    )
+
+    // Rust stores this pointer for future callback invocations, so it must live
+    // for the process lifetime (not just for the init function call).
+    static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceContactSyncObserverBridge> = {
+        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceContactSyncObserverBridge>.allocate(capacity: 1)
+        ptr.initialize(to: vtable)
+        return UnsafePointer(ptr)
+    }()
+}
+
+private func uniffiCallbackInitContactSyncObserverBridge() {
+    uniffi_cal_ffi_fn_init_callback_vtable_contactsyncobserverbridge(UniffiCallbackInterfaceContactSyncObserverBridge.vtablePtr)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeContactSyncObserverBridge: FfiConverter {
+    fileprivate static let handleMap = UniffiHandleMap<ContactSyncObserverBridge>()
+
+    typealias FfiType = UInt64
+    typealias SwiftType = ContactSyncObserverBridge
+
+    public static func lift(_ handle: UInt64) throws -> ContactSyncObserverBridge {
+        if ((handle & 1) == 0) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return ContactSyncObserverBridgeImpl(unsafeFromHandle: handle)
+        } else {
+            // Swift-generated handle, get the object from the handle map
+            return try handleMap.remove(handle: handle)
+        }
+    }
+
+    public static func lower(_ value: ContactSyncObserverBridge) -> UInt64 {
+         if let rustImpl = value as? ContactSyncObserverBridgeImpl {
+             // Rust-implemented object.  Clone the handle and return it
+            return rustImpl.uniffiCloneHandle()
+         } else {
+            // Swift object, generate a new vtable handle and return that.
+            return handleMap.insert(obj: value)
+         }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ContactSyncObserverBridge {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: ContactSyncObserverBridge, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeContactSyncObserverBridge_lift(_ handle: UInt64) throws -> ContactSyncObserverBridge {
+    return try FfiConverterTypeContactSyncObserverBridge.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeContactSyncObserverBridge_lower(_ value: ContactSyncObserverBridge) -> UInt64 {
+    return FfiConverterTypeContactSyncObserverBridge.lower(value)
+}
+
+
+
+
+
+
+/**
  * The mobile app's handle to the full on-device engine.
  */
 public protocol HostProtocol: AnyObject, Sendable {
@@ -879,6 +1094,16 @@ public protocol HostProtocol: AnyObject, Sendable {
      * that lacked it).
      */
     func changeSyncPassphraseJson(oldPassphrase: String, newPassphrase: String) throws 
+    
+    /**
+     * Drop every external adapter's in-memory contact cache + reset
+     * `contacts.lastSyncedAt` to "never" (the "Cache leeren" action). Returns
+     * the number of accounts the invalidate succeeded against — partial success
+     * is the right outcome when one account's server is unreachable. Per-adapter
+     * errors are swallowed (cal-ffi has no logger), mirroring the desktop body
+     * minus the warn. Distinct from the per-list SWR `invalidate_contacts_cache`.
+     */
+    func clearContactsCache() throws  -> UInt32
     
     /**
      * Drop every `sync_log` row (the "clear history" action — also useful
@@ -1199,6 +1424,12 @@ public protocol HostProtocol: AnyObject, Sendable {
     func getContactPhotoJson(id: String, listId: String?) throws  -> String
     
     /**
+     * The contact-sync status (`{last_synced_at, interval_minutes, in_flight,
+     * include_read_only_on_sync}`) as JSON — the footer + Settings seed.
+     */
+    func getContactsSyncStatusJson() throws  -> String
+    
+    /**
      * One event by id as JSON (`Event` or `null`). `calendar_id` routes the
      * lookup: a LOCAL calendar (or an absent/unknown id) reads the stored row;
      * an EXTERNAL one — which has no by-id adapter fetch — is resolved from the
@@ -1455,6 +1686,27 @@ public protocol HostProtocol: AnyObject, Sendable {
     func setContactPhotoJson(id: String, listId: String?, photoJson: String) throws 
     
     /**
+     * Register the JS-side contact-sync observer. A finished pass then pushes
+     * `contacts_synced` (the RN layer updates the footer + re-reads contacts)
+     * across the bridge. Until this is called the pushes are dropped — passes
+     * still run; the UI just re-reads on its own.
+     */
+    func setContactSyncObserver(observer: ContactSyncObserverBridge) 
+    
+    /**
+     * Persist the "also pull read-only directories" toggle (the literal
+     * `"true"`/`"false"`, matching the desktop command). Device-local.
+     */
+    func setContactsIncludeReadOnlyOnSync(enabled: Bool) throws 
+    
+    /**
+     * Persist the periodic-sync interval (minutes), clamped to [1, 1440] like
+     * the desktop command. Device-local; returns the clamped value the UI
+     * echoes back.
+     */
+    func setContactsSyncInterval(minutes: UInt32) throws  -> UInt32
+    
+    /**
      * Set or clear a container's bound colour label (DESIGN §8.2). Mirrors the
      * desktop `set_container_color_label`: a LOCAL calendar / task list carries
      * the binding on its own (synced) row (update + emit the matching sync
@@ -1496,6 +1748,15 @@ public protocol HostProtocol: AnyObject, Sendable {
      * Count of unresolved conflicts — the cheap badge query.
      */
     func syncConflictCount() throws  -> UInt32
+    
+    /**
+     * Run one contact-sync pass now — the mobile stand-in for the desktop tokio
+     * loop, driven from a foreground trigger / the manual "Sync now" button.
+     * `include_read_only`: `None` reads the persisted pref (matches the desktop
+     * manual button); `Some(_)` overrides it. Returns `false` when a pass was
+     * already in flight (the core dedupes).
+     */
+    func syncContactsNow(includeReadOnly: Bool?) throws  -> Bool
     
     /**
      * Run one sync round (push local pending logs, fetch + apply foreign ones,
@@ -1879,6 +2140,22 @@ open func changeSyncPassphraseJson(oldPassphrase: String, newPassphrase: String)
         FfiConverterString.lower(newPassphrase),$0
     )
 }
+}
+    
+    /**
+     * Drop every external adapter's in-memory contact cache + reset
+     * `contacts.lastSyncedAt` to "never" (the "Cache leeren" action). Returns
+     * the number of accounts the invalidate succeeded against — partial success
+     * is the right outcome when one account's server is unreachable. Per-adapter
+     * errors are swallowed (cal-ffi has no logger), mirroring the desktop body
+     * minus the warn. Distinct from the per-list SWR `invalidate_contacts_cache`.
+     */
+open func clearContactsCache()throws  -> UInt32  {
+    return try  FfiConverterUInt32.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_clear_contacts_cache(
+            self.uniffiCloneHandle(),$0
+    )
+})
 }
     
     /**
@@ -2450,6 +2727,18 @@ open func getContactPhotoJson(id: String, listId: String?)throws  -> String  {
 }
     
     /**
+     * The contact-sync status (`{last_synced_at, interval_minutes, in_flight,
+     * include_read_only_on_sync}`) as JSON — the footer + Settings seed.
+     */
+open func getContactsSyncStatusJson()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_get_contacts_sync_status_json(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
      * One event by id as JSON (`Event` or `null`). `calendar_id` routes the
      * lookup: a LOCAL calendar (or an absent/unknown id) reads the stored row;
      * an EXTERNAL one — which has no by-id adapter fetch — is resolved from the
@@ -2908,6 +3197,46 @@ open func setContactPhotoJson(id: String, listId: String?, photoJson: String)thr
 }
     
     /**
+     * Register the JS-side contact-sync observer. A finished pass then pushes
+     * `contacts_synced` (the RN layer updates the footer + re-reads contacts)
+     * across the bridge. Until this is called the pushes are dropped — passes
+     * still run; the UI just re-reads on its own.
+     */
+open func setContactSyncObserver(observer: ContactSyncObserverBridge)  {try! rustCall() {
+    uniffi_cal_ffi_fn_method_host_set_contact_sync_observer(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeContactSyncObserverBridge_lower(observer),$0
+    )
+}
+}
+    
+    /**
+     * Persist the "also pull read-only directories" toggle (the literal
+     * `"true"`/`"false"`, matching the desktop command). Device-local.
+     */
+open func setContactsIncludeReadOnlyOnSync(enabled: Bool)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_set_contacts_include_read_only_on_sync(
+            self.uniffiCloneHandle(),
+        FfiConverterBool.lower(enabled),$0
+    )
+}
+}
+    
+    /**
+     * Persist the periodic-sync interval (minutes), clamped to [1, 1440] like
+     * the desktop command. Device-local; returns the clamped value the UI
+     * echoes back.
+     */
+open func setContactsSyncInterval(minutes: UInt32)throws  -> UInt32  {
+    return try  FfiConverterUInt32.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_set_contacts_sync_interval(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt32.lower(minutes),$0
+    )
+})
+}
+    
+    /**
      * Set or clear a container's bound colour label (DESIGN §8.2). Mirrors the
      * desktop `set_container_color_label`: a LOCAL calendar / task list carries
      * the binding on its own (synced) row (update + emit the matching sync
@@ -2983,6 +3312,22 @@ open func syncConflictCount()throws  -> UInt32  {
     return try  FfiConverterUInt32.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_sync_conflict_count(
             self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Run one contact-sync pass now — the mobile stand-in for the desktop tokio
+     * loop, driven from a foreground trigger / the manual "Sync now" button.
+     * `include_read_only`: `None` reads the persisted pref (matches the desktop
+     * manual button); `Some(_)` overrides it. Returns `false` when a pass was
+     * already in flight (the core dedupes).
+     */
+open func syncContactsNow(includeReadOnly: Bool?)throws  -> Bool  {
+    return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_sync_contacts_now(
+            self.uniffiCloneHandle(),
+        FfiConverterOptionBool.lower(includeReadOnly),$0
     )
 })
 }
@@ -6584,6 +6929,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_cacheobserverbridge_refresh_status() != 42903) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_contactsyncobserverbridge_contacts_synced() != 18316) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json() != 45743) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -6603,6 +6951,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_change_sync_passphrase_json() != 15380) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_clear_contacts_cache() != 47465) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_clear_sync_log() != 18521) {
@@ -6713,6 +7064,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_get_contact_photo_json() != 13811) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_get_contacts_sync_status_json() != 5498) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_get_event_by_id_json() != 41217) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -6800,6 +7154,15 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_set_contact_photo_json() != 21774) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_set_contact_sync_observer() != 36170) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_set_contacts_include_read_only_on_sync() != 22401) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_set_contacts_sync_interval() != 64206) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_set_container_color_label() != 32220) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -6813,6 +7176,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_sync_conflict_count() != 12817) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_sync_contacts_now() != 7203) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_sync_now_json() != 5198) {
@@ -6895,6 +7261,7 @@ private let initializationResult: InitializationResult = {
     }
 
     uniffiCallbackInitCacheObserverBridge()
+    uniffiCallbackInitContactSyncObserverBridge()
     uniffiCallbackInitKeychainBridge()
     return InitializationResult.ok
 }()

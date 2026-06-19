@@ -20,6 +20,17 @@ private final class JsCacheObserver: CacheObserverBridge {
   }
 }
 
+/// Adapts the UniFFI `ContactSyncObserverBridge` callback to an Expo event. A
+/// finished contact-sync pass calls back here (on a background thread);
+/// `sendEvent` forwards it to JS. Mirrors the Android `JsContactSyncObserver`.
+private final class JsContactSyncObserver: ContactSyncObserverBridge {
+  weak var module: CalFfiModule?
+  init(module: CalFfiModule) { self.module = module }
+  func contactsSynced(payloadJson: String) {
+    module?.sendEvent("onContactsSynced", ["payload": payloadJson])
+  }
+}
+
 public class CalFfiModule: Module {
   // The full on-device engine: accounts + the statically-embedded adapter
   // registry, opened lazily at the app-sandbox database path. Credentials
@@ -37,6 +48,8 @@ public class CalFfiModule: Module {
     // Forward external-cache refresh callbacks to JS as Expo events (live-update
     // the open view + a polite announcement). Mirrors the Android module.
     opened.setCacheObserver(observer: JsCacheObserver(module: self))
+    // Forward contact-sync pass-finished callbacks to JS. Mirrors the Android module.
+    opened.setContactSyncObserver(observer: JsContactSyncObserver(module: self))
     return opened
   }()
 
@@ -47,7 +60,7 @@ public class CalFfiModule: Module {
     // cache-updated / cache-refresh-status events). onCacheUpdated carries
     // { payload: "<CacheUpdatedPayload JSON>" }; onCacheRefreshStatus carries
     // { status: "<CacheRefreshStatus JSON>" }.
-    Events("onCacheUpdated", "onCacheRefreshStatus")
+    Events("onCacheUpdated", "onCacheRefreshStatus", "onContactsSynced")
 
     Function("parseAttendee") { (entry: String) -> [String: Any?] in
       let parsed = parseAttendee(entry: entry)
@@ -224,6 +237,28 @@ public class CalFfiModule: Module {
 
     AsyncFunction("warmCacheOnForeground") {
       self.host.warmCacheOnForeground()
+    }
+
+    // Contact sync (§10.5). The pass is driven from JS (manual button /
+    // foreground); the interval + include-read-only prefs are device-local.
+    AsyncFunction("syncContactsNow") { (includeReadOnly: Bool?) -> Bool in
+      try self.host.syncContactsNow(includeReadOnly: includeReadOnly)
+    }
+
+    AsyncFunction("getContactsSyncStatusJson") { () -> String in
+      try self.host.getContactsSyncStatusJson()
+    }
+
+    AsyncFunction("setContactsSyncInterval") { (minutes: Int) -> Int in
+      Int(try self.host.setContactsSyncInterval(minutes: UInt32(minutes)))
+    }
+
+    AsyncFunction("setContactsIncludeReadOnlyOnSync") { (enabled: Bool) in
+      try self.host.setContactsIncludeReadOnlyOnSync(enabled: enabled)
+    }
+
+    AsyncFunction("clearContactsCache") { () -> Int in
+      Int(try self.host.clearContactsCache())
     }
 
     AsyncFunction("syncConflictCount") { () -> Int in

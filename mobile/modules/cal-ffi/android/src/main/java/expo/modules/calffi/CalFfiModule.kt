@@ -36,6 +36,10 @@ class CalFfiModule : Module() {
     // warm pass calls back here, and we forward it as an Expo event the RN layer
     // subscribes to (live-update the open view + a polite announcement).
     opened.setCacheObserver(JsCacheObserver())
+    // Wire the contact-sync observer to JS: a finished pass forwards its payload
+    // as an Expo event the RN layer subscribes to (update the "last synced"
+    // footer + re-read the contact views).
+    opened.setContactSyncObserver(JsContactSyncObserver())
     opened
   }
 
@@ -51,6 +55,15 @@ class CalFfiModule : Module() {
     }
   }
 
+  /// Adapts the UniFFI `ContactSyncObserverBridge` callback to an Expo event.
+  /// Fired on a background thread when a contact-sync pass finishes; `sendEvent`
+  /// marshals to JS. Mirrors `JsCacheObserver`.
+  private inner class JsContactSyncObserver : uniffi.cal_ffi.ContactSyncObserverBridge {
+    override fun contactsSynced(payloadJson: String) {
+      this@CalFfiModule.sendEvent("onContactsSynced", mapOf("payload" to payloadJson))
+    }
+  }
+
   override fun definition() = ModuleDefinition {
     Name("CalFfi")
 
@@ -58,7 +71,7 @@ class CalFfiModule : Module() {
     // cache-updated / cache-refresh-status events). onCacheUpdated carries
     // { payload: "<CacheUpdatedPayload JSON>" }; onCacheRefreshStatus carries
     // { status: "<CacheRefreshStatus JSON>" }.
-    Events("onCacheUpdated", "onCacheRefreshStatus")
+    Events("onCacheUpdated", "onCacheRefreshStatus", "onContactsSynced")
 
     // Calls the Rust `cal_ffi::parse_attendee` through the UniFFI-generated
     // Kotlin bindings (uniffi/cal_ffi/cal_ffi.kt), backed by libcal_ffi.so.
@@ -253,6 +266,28 @@ class CalFfiModule : Module() {
 
     AsyncFunction("warmCacheOnForeground") {
       host.warmCacheOnForeground()
+    }
+
+    // Contact sync (§10.5). The pass is driven from JS (manual button /
+    // foreground); the interval + include-read-only prefs are device-local.
+    AsyncFunction("syncContactsNow") { includeReadOnly: Boolean? ->
+      host.syncContactsNow(includeReadOnly)
+    }
+
+    AsyncFunction("getContactsSyncStatusJson") {
+      host.getContactsSyncStatusJson()
+    }
+
+    AsyncFunction("setContactsSyncInterval") { minutes: Int ->
+      host.setContactsSyncInterval(minutes.toUInt()).toInt()
+    }
+
+    AsyncFunction("setContactsIncludeReadOnlyOnSync") { enabled: Boolean ->
+      host.setContactsIncludeReadOnlyOnSync(enabled)
+    }
+
+    AsyncFunction("clearContactsCache") {
+      host.clearContactsCache().toInt()
     }
 
     AsyncFunction("syncConflictCount") {

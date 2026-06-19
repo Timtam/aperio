@@ -7,6 +7,8 @@ import { ParsedAttendee } from './CalFfi.types';
 export type CalFfiModuleEvents = {
   onCacheUpdated: (event: { payload: string }) => void;
   onCacheRefreshStatus: (event: { status: string }) => void;
+  /** A contact-sync pass finished; `payload` is a `ContactsSyncedPayload` JSON. */
+  onContactsSynced: (event: { payload: string }) => void;
 };
 
 declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
@@ -181,6 +183,21 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** Warm the external cache on app-foreground (the mobile stand-in for the
    *  desktop periodic warm loop). Fire-and-forget. */
   warmCacheOnForeground(): Promise<void>;
+  /** Run one contact-sync pass (§10.5) — warms every external book's cache.
+   *  `includeReadOnly`: `null`/`undefined` reads the pref, `true`/`false`
+   *  overrides. Resolves `false` if a pass was already in flight. */
+  syncContactsNow(includeReadOnly: boolean | null): Promise<boolean>;
+  /** Contact-sync status as JSON `{last_synced_at, interval_minutes, in_flight,
+   *  include_read_only_on_sync}`. */
+  getContactsSyncStatusJson(): Promise<string>;
+  /** Persist the periodic contact-sync interval (minutes, clamped [1,1440]);
+   *  resolves to the clamped value. Device-local. */
+  setContactsSyncInterval(minutes: number): Promise<number>;
+  /** Persist the "also pull read-only directories" toggle. Device-local. */
+  setContactsIncludeReadOnlyOnSync(enabled: boolean): Promise<void>;
+  /** Drop every external book's contact cache + reset "last synced"; resolves
+   *  to the count of accounts invalidated. */
+  clearContactsCache(): Promise<number>;
   /** Count of unresolved sync conflicts (the badge). */
   syncConflictCount(): Promise<number>;
   /** Every unresolved conflict as a JSON `ConflictRecord[]`. */
