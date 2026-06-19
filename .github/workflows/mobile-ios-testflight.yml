@@ -11,16 +11,13 @@ name: Mobile iOS TestFlight
 # never needs to live in git, and there is no committed-tree skew between the
 # Swift bindings and the static lib.
 #
-# Trigger: push a tag matching `ios-build-*` (works from any branch, unlike
-# workflow_dispatch which GitHub only exposes once the workflow is on the default
-# branch). e.g.  git tag ios-build-7 && git push origin ios-build-7
-# The tagged commit is what gets built, so tag the commit that carries the change
-# you want on TestFlight.
+# Trigger: manual only. From GitHub → Actions → "Mobile iOS TestFlight" → Run
+# workflow, pick the branch to build. NOTE: the "Run workflow" button only shows
+# once this file exists on the DEFAULT branch (main) — that's a GitHub rule for
+# workflow_dispatch — so the file is kept on main too (it never runs on its own).
+# Dispatching against feat/mobile-foundation checks out and builds that branch.
 
 on:
-  push:
-    tags:
-      - "ios-build-*"
   workflow_dispatch:
     inputs:
       profile:
