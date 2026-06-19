@@ -2100,15 +2100,25 @@ impl Host {
                 };
                 // Delete from the source. A move is NOT a cancellation — the
                 // event still exists at the target — so never email attendees.
-                // Best-effort: the create already succeeded, so a failed cleanup
-                // leaves a recoverable duplicate at the source rather than data
-                // loss. cal-ffi has no logger (matching its other best-effort
-                // paths), so the failure is swallowed; the user resolves the
-                // duplicate manually, the less-bad failure mode.
-                let _ = match self.route(&previous)? {
-                    None => self.adapter.delete_event(&source_event_id, false).await,
-                    Some(ext) => ext.delete_event(&source_event_id, false).await,
-                };
+                // Best-effort: the create already succeeded, so the cleanup must
+                // NEVER abort the move. A non-routable source (the account was
+                // logged out / removed between the editor opening and the save)
+                // is treated as "no cleanup needed — the create on the target
+                // stands", mirroring the desktop; so resolve the route WITHOUT
+                // `?` (an erroring `?` here would return Err after a successful
+                // create → a spurious failure + a duplicate on retry + skipped
+                // sync-log appends). cal-ffi has no logger, so a delete error is
+                // swallowed too; the user resolves any duplicate manually.
+                match self.route(&previous) {
+                    Ok(None) => {
+                        let _ = self.adapter.delete_event(&source_event_id, false).await;
+                    }
+                    Ok(Some(ext)) => {
+                        let _ = ext.delete_event(&source_event_id, false).await;
+                    }
+                    // Source account gone — nothing to clean up; the move stands.
+                    Err(_) => {}
+                }
                 Ok::<_, StoreError>(created)
             })?;
 
@@ -2484,7 +2494,25 @@ impl Host {
         task_json: String,
         previous_list_id: Option<String>,
     ) -> Result<String, StoreError> {
-        let task: cal_core::Task = from_json("task", &task_json)?;
+        let mut task: cal_core::Task = from_json("task", &task_json)?;
+
+        // DESIGN §9.12: a task that GAINS on-demand recurrence via an edit (not
+        // just at creation) needs a stable series_id, or the idempotent spawner
+        // has nothing to dedup on and re-completing it spawns a duplicate. Assign
+        // one host-side before any routing, mirroring the desktop update_task.
+        // The local adapter's update_task_sync writes series_id verbatim and
+        // relies on the host having assigned it (create_task_sync's
+        // ensure_series_id covers the external→local move, but a local↔local move
+        // and a plain in-place local edit reach update_task_sync directly). Plain
+        // scheduled rules get none — the provider owns those.
+        if task.series_id.is_none()
+            && task
+                .recurrence
+                .as_ref()
+                .is_some_and(cal_core::recurrence_needs_extras)
+        {
+            task.series_id = Some(uuid::Uuid::new_v4().to_string());
+        }
 
         let target_local = self.is_local_task_list(&task.list_id);
         let is_move = previous_list_id
@@ -2547,19 +2575,25 @@ impl Host {
             };
 
             // Delete from the source. Best-effort: the create already succeeded,
-            // so a failed cleanup leaves a recoverable duplicate at the source
-            // rather than data loss. cal-ffi has no logger (matching its other
-            // best-effort paths), so the failure is swallowed.
-            let _ = match self.route_task_list(&previous)? {
-                None => self
-                    .adapter
-                    .delete_task_sync(&source_task_id)
-                    .map_err(map_store_err),
-                Some(ext) => self
-                    .runtime
-                    .block_on(async { ext.delete_task(&source_task_id).await })
-                    .map_err(map_store_err),
-            };
+            // so the cleanup must NEVER abort the move. A non-routable source
+            // (the account was logged out / removed between the editor opening
+            // and the save) is treated as "no cleanup needed — the create on the
+            // target stands", mirroring the desktop; so resolve the route WITHOUT
+            // `?` (an erroring `?` here would return Err after a successful create
+            // → a spurious failure + a duplicate on retry + skipped sync-log
+            // appends). cal-ffi has no logger, so a delete error is swallowed too.
+            match self.route_task_list(&previous) {
+                Ok(None) => {
+                    let _ = self.adapter.delete_task_sync(&source_task_id);
+                }
+                Ok(Some(ext)) => {
+                    let _ = self
+                        .runtime
+                        .block_on(async { ext.delete_task(&source_task_id).await });
+                }
+                // Source account gone — nothing to clean up; the move stands.
+                Err(_) => {}
+            }
 
             // Each LOCAL side emits its own event-log entry; external sides stay
             // silent (the provider's own sync mesh propagates the change).
@@ -6723,6 +6757,50 @@ mod tests {
         let reread: serde_json::Value =
             serde_json::from_str(&host.task_json(task_id).unwrap()).unwrap();
         assert_eq!(reread["title"], "Renamed");
+    }
+
+    #[test]
+    fn editing_a_task_into_extras_recurrence_assigns_a_series_id() {
+        // DESIGN §9.12: a plain task edited into an on-demand (backlog) recurring
+        // one must gain a stable series_id host-side — the local adapter's
+        // update path writes it verbatim and relies on the host having assigned
+        // it. Without the hoist this in-place edit would persist series_id=null
+        // and break the idempotent spawner's dedup.
+        let (_dir, host, _kc) = open_host();
+        let list = serde_json::from_str::<serde_json::Value>(
+            &host.create_task_list_json("S".to_string()).unwrap(),
+        )
+        .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let new_task = r#"{"title":"Plain","description":null,"status":"open","priority":"medium","scheduled_date":null,"scheduled_time":null,"deadline_date":null,"deadline_time":null,"recurrence":null,"parent_id":null,"color_label":null,"reminders":[],"sound":null}"#;
+        let created = host
+            .create_task_json(list.clone(), new_task.to_string())
+            .unwrap();
+        let mut task: serde_json::Value = serde_json::from_str(&created).unwrap();
+        assert!(
+            task["series_id"].is_null(),
+            "a non-recurring task starts without a series id"
+        );
+        let task_id = task["id"].as_str().unwrap().to_string();
+        // Give it a backlog rule (placement != schedule ⇒ recurrence_needs_extras).
+        task["recurrence"] = serde_json::json!({
+            "frequency": "daily",
+            "interval": 1,
+            "day_of_week": null,
+            "day_of_month": null,
+            "end": null,
+            "placement": "backlog"
+        });
+        // In-place edit (no move): previous == current.
+        host.update_task_json(task.to_string(), Some(list)).unwrap();
+        let reread: serde_json::Value =
+            serde_json::from_str(&host.task_json(task_id).unwrap()).unwrap();
+        assert!(
+            reread["series_id"].is_string(),
+            "editing into extras-recurrence assigns a series id; got {reread}"
+        );
     }
 
     #[test]

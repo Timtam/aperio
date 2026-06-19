@@ -60,6 +60,9 @@ tokio.workspace = true
 chrono.workspace = true
 # Error type returned to the foreign side for unparseable boundary values.
 thiserror.workspace = true
+# Host-side series_id assignment for a task that gains on-demand recurrence via
+# an edit (DESIGN §9.12) — mirrors the desktop update_task/create_task.
+uuid.workspace = true
 # Base64 for the E2E data key in the keychain (the SecretStore holds strings;
 # the 32-byte AES key is base64-encoded, matching the desktop's key storage).
 base64 = "0.22"
