@@ -154,12 +154,21 @@ export const createEvent = async (
   return created;
 };
 
-/** Full-overwrite update; the event's `calendar_id` selects the route. */
+/**
+ * Full-overwrite update; the event's `calendar_id` selects the route.
+ * `previousCalendarId` is the calendar the editor loaded the event FROM — pass
+ * it when the calendar picker may have changed so the bridge can detect a
+ * cross-calendar MOVE (create-on-target + best-effort-delete-from-source);
+ * without it a move to an external target would PUT to a non-existent resource
+ * and fail with 412. Returns the resulting event (a cross-adapter move returns
+ * the freshly-created event at the target, with a new id).
+ */
 export const updateEvent = async (
   event: CalendarEvent,
+  previousCalendarId: string | null = null,
 ): Promise<CalendarEvent> => {
   const updated = JSON.parse(
-    await CalFfi.updateEventJson(JSON.stringify(event)),
+    await CalFfi.updateEventJson(JSON.stringify(event), previousCalendarId),
   ) as CalendarEvent;
   scheduleBackgroundPush();
   return updated;

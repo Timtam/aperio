@@ -266,22 +266,29 @@ export default function EventEditorModal({
       }
       if (editing && original != null) {
         // Send the loaded event back whole with the edits applied — preserves
-        // recurrence / reminders / attendees / sound / etag.
-        const updated = await updateEvent({
-          ...original,
-          title: trimmedTitle,
-          calendar_id: calId,
-          all_day: allDay,
-          start,
-          end,
-          location: location.trim() || null,
-          description: description.trim() || null,
-          color_label: colorToSend,
-          reminders,
-          recurrence: recurrenceToSend,
-          attendees,
-          send_invitations: sendInvitations,
-        });
+        // recurrence / reminders / attendees / sound / etag. Pass the ORIGINAL
+        // calendar so a calendar-picker change is detected as a cross-calendar
+        // move (create-on-target + delete-from-source) rather than an in-place
+        // PUT to a non-existent target resource (which an external provider
+        // rejects 412). A cross-adapter move returns the new event at the target.
+        const updated = await updateEvent(
+          {
+            ...original,
+            title: trimmedTitle,
+            calendar_id: calId,
+            all_day: allDay,
+            start,
+            end,
+            location: location.trim() || null,
+            description: description.trim() || null,
+            color_label: colorToSend,
+            reminders,
+            recurrence: recurrenceToSend,
+            attendees,
+            send_invitations: sendInvitations,
+          },
+          original.calendar_id,
+        );
         // External calendar: a capable provider now stores the colour natively
         // (clear any stale override so the native value wins); a non-capable one
         // ignores it, so keep it as a host-local override. Local rides the row.

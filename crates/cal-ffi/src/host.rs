@@ -2015,12 +2015,122 @@ impl Host {
         to_json(&created)
     }
 
-    /// Update an event in place (its `calendar_id` field selects the route);
-    /// returns the updated `Event` as JSON. Mirrors the in-place branch of the
-    /// desktop `update_event`. Cross-calendar moves (the create-on-target +
-    /// best-effort-delete dance with `previous_calendar_id`) are deferred.
-    pub fn update_event_json(&self, event_json: String) -> Result<String, StoreError> {
+    /// Update an event; `previous_calendar_id` (the calendar the editor loaded
+    /// the event FROM) lets the bridge detect a cross-calendar MOVE — the
+    /// editor's calendar picker doubles as a move gesture. Returns the resulting
+    /// `Event` as JSON. Mirrors the desktop `update_event`.
+    ///
+    /// A move to an EXTERNAL target can't be a plain in-place PUT: it would PUT
+    /// to a resource that doesn't exist on the target while carrying the source's
+    /// ETag in If-Match, which a provider like iCloud rejects with 412 (the
+    /// precondition can never be met) — the move would silently fail. So a move
+    /// reduces to create-on-target + best-effort-delete-from-source, creating
+    /// FIRST so a half-failed move leaves a recoverable duplicate rather than an
+    /// empty hole. A local↔local move stays a single SQL `UPDATE` on the
+    /// `calendar_id` column. (No cache-driven colour-hex resolution here — cal-ffi
+    /// has no read cache, same as `create_event_json`; colour rides `color_label`/
+    /// `color_hex` straight through and the client applies any override after.)
+    pub fn update_event_json(
+        &self,
+        event_json: String,
+        previous_calendar_id: Option<String>,
+    ) -> Result<String, StoreError> {
         let event: Event = from_json("event", &event_json)?;
+
+        let target_local = self.is_local_calendar(&event.calendar_id);
+        let is_move = previous_calendar_id
+            .as_deref()
+            .map(|prev| prev != event.calendar_id)
+            .unwrap_or(false);
+
+        if is_move {
+            let previous = previous_calendar_id.expect("checked above");
+            let source_local = self.is_local_calendar(&previous);
+
+            // Local↔Local: the LocalAdapter handles the calendar_id change as a
+            // single SQL UPDATE — no resource-URL gymnastics, so there's nothing
+            // to gain from the two-call dance.
+            if source_local && target_local {
+                let updated = self
+                    .runtime
+                    .block_on(async { self.adapter.update_event(event).await })
+                    .map_err(map_store_err)?;
+                if let Ok(fields) = serde_json::to_value(&updated) {
+                    self.writer.append(SyncEvent::EventUpdated(EventPayload {
+                        id: updated.id.clone(),
+                        fields,
+                    }));
+                }
+                return to_json(&updated);
+            }
+
+            // Cross-adapter move (at least one external side). Create on the
+            // target FIRST; the source delete is best-effort (logged, not bubbled)
+            // so a failed cleanup leaves a resolvable duplicate, not data loss.
+            let new_payload = NewEvent {
+                // A move re-creates at the target; the organizer-notify intent
+                // isn't carried through this path (matches the desktop).
+                send_invitations: false,
+                title: event.title.clone(),
+                description: event.description.clone(),
+                location: event.location.clone(),
+                start: event.start,
+                end: event.end,
+                all_day: event.all_day,
+                recurrence: event.recurrence.clone(),
+                color_label: event.color_label.clone(),
+                color_hex: event.color_hex.clone(),
+                reminders: event.reminders.clone(),
+                sound: event.sound.clone(),
+                attendees: event.attendees.clone(),
+            };
+            let target_calendar_id = event.calendar_id.clone();
+            let source_event_id = event.id.clone();
+            let created = self.runtime.block_on(async {
+                let created = match self.route(&target_calendar_id)? {
+                    None => self
+                        .adapter
+                        .create_event(&target_calendar_id, new_payload)
+                        .await
+                        .map_err(map_store_err)?,
+                    Some(ext) => ext
+                        .create_event(&target_calendar_id, new_payload)
+                        .await
+                        .map_err(map_store_err)?,
+                };
+                // Delete from the source. A move is NOT a cancellation — the
+                // event still exists at the target — so never email attendees.
+                // Best-effort: the create already succeeded, so a failed cleanup
+                // leaves a recoverable duplicate at the source rather than data
+                // loss. cal-ffi has no logger (matching its other best-effort
+                // paths), so the failure is swallowed; the user resolves the
+                // duplicate manually, the less-bad failure mode.
+                let _ = match self.route(&previous)? {
+                    None => self.adapter.delete_event(&source_event_id, false).await,
+                    Some(ext) => ext.delete_event(&source_event_id, false).await,
+                };
+                Ok::<_, StoreError>(created)
+            })?;
+
+            // Each LOCAL side emits its own event-log entry; external sides stay
+            // silent (the provider's own sync mesh propagates the change).
+            if target_local {
+                if let Ok(fields) = serde_json::to_value(&created) {
+                    self.writer.append(SyncEvent::EventCreated(EventPayload {
+                        id: created.id.clone(),
+                        fields,
+                    }));
+                }
+            }
+            if source_local {
+                self.writer.append(SyncEvent::EventDeleted(IdPayload {
+                    id: source_event_id,
+                }));
+            }
+            return to_json(&created);
+        }
+
+        // Plain in-place update — no calendar change.
         let updated = self.runtime.block_on(async {
             match self.route(&event.calendar_id)? {
                 None => self
@@ -4674,7 +4784,7 @@ mod tests {
         let created = host.create_event_json(new_event_json(&cal, "Old")).unwrap();
         let mut event: serde_json::Value = serde_json::from_str(&created).unwrap();
         event["title"] = serde_json::json!("New");
-        let updated = host.update_event_json(event.to_string()).unwrap();
+        let updated = host.update_event_json(event.to_string(), None).unwrap();
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&updated).unwrap()["title"],
             "New"
@@ -4700,10 +4810,12 @@ mod tests {
         let mut event: serde_json::Value = serde_json::from_str(&created).unwrap();
         let id = event["id"].as_str().unwrap().to_string();
 
-        // A local→local move is an in-place update routed by event.calendar_id
-        // (the desktop treats it as a single SQL UPDATE).
+        // A local→local move passes the source as previous_calendar_id, taking
+        // the move-detection branch — which the desktop treats as a single SQL
+        // UPDATE routed by event.calendar_id.
         event["calendar_id"] = serde_json::json!(cal_b);
-        host.update_event_json(event.to_string()).unwrap();
+        host.update_event_json(event.to_string(), Some(cal_a.clone()))
+            .unwrap();
 
         // B now contains the event; A no longer does.
         let in_b: serde_json::Value =
@@ -4720,6 +4832,23 @@ mod tests {
             .unwrap()
             .iter()
             .all(|e| e["id"] != serde_json::json!(id)));
+    }
+
+    #[test]
+    fn passing_previous_equal_to_current_is_an_in_place_update_not_a_move() {
+        let (_dir, host, _kc) = open_host();
+        let cal = make_calendar(&host);
+        let created = host.create_event_json(new_event_json(&cal, "Old")).unwrap();
+        let mut event: serde_json::Value = serde_json::from_str(&created).unwrap();
+        let id = event["id"].as_str().unwrap().to_string();
+        // previous_calendar_id == event.calendar_id → not a move; the title edit
+        // applies in place against the same row (no create-then-delete).
+        event["title"] = serde_json::json!("Renamed");
+        host.update_event_json(event.to_string(), Some(cal.clone()))
+            .unwrap();
+        let reread: serde_json::Value =
+            serde_json::from_str(&host.get_event_by_id_json(id).unwrap()).unwrap();
+        assert_eq!(reread["title"], "Renamed");
     }
 
     #[test]
@@ -4748,7 +4877,7 @@ mod tests {
         let event: serde_json::Value = serde_json::from_str(&created).unwrap();
         let id = event["id"].as_str().unwrap().to_string();
         host.delete_event(id, Some(cal), None).unwrap();
-        let err = host.update_event_json(event.to_string()).unwrap_err();
+        let err = host.update_event_json(event.to_string(), None).unwrap_err();
         assert!(matches!(err, StoreError::NotFound));
     }
 

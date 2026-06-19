@@ -135,8 +135,8 @@ public class CalFfiModule: Module {
       try self.host.createEventJson(requestJson: requestJson)
     }
 
-    AsyncFunction("updateEventJson") { (eventJson: String) -> String in
-      try self.host.updateEventJson(eventJson: eventJson)
+    AsyncFunction("updateEventJson") { (eventJson: String, previousCalendarId: String?) -> String in
+      try self.host.updateEventJson(eventJson: eventJson, previousCalendarId: previousCalendarId)
     }
 
     AsyncFunction("deleteEvent") { (id: String, calendarId: String?, sendCancellations: Bool?) in

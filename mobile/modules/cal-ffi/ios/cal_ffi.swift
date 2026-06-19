@@ -1141,12 +1141,23 @@ public protocol HostProtocol: AnyObject, Sendable {
     func updateContactJson(contactJson: String) throws  -> String
     
     /**
-     * Update an event in place (its `calendar_id` field selects the route);
-     * returns the updated `Event` as JSON. Mirrors the in-place branch of the
-     * desktop `update_event`. Cross-calendar moves (the create-on-target +
-     * best-effort-delete dance with `previous_calendar_id`) are deferred.
+     * Update an event; `previous_calendar_id` (the calendar the editor loaded
+     * the event FROM) lets the bridge detect a cross-calendar MOVE — the
+     * editor's calendar picker doubles as a move gesture. Returns the resulting
+     * `Event` as JSON. Mirrors the desktop `update_event`.
+     *
+     * A move to an EXTERNAL target can't be a plain in-place PUT: it would PUT
+     * to a resource that doesn't exist on the target while carrying the source's
+     * ETag in If-Match, which a provider like iCloud rejects with 412 (the
+     * precondition can never be met) — the move would silently fail. So a move
+     * reduces to create-on-target + best-effort-delete-from-source, creating
+     * FIRST so a half-failed move leaves a recoverable duplicate rather than an
+     * empty hole. A local↔local move stays a single SQL `UPDATE` on the
+     * `calendar_id` column. (No cache-driven colour-hex resolution here — cal-ffi
+     * has no read cache, same as `create_event_json`; colour rides `color_label`/
+     * `color_hex` straight through and the client applies any override after.)
      */
-    func updateEventJson(eventJson: String) throws  -> String
+    func updateEventJson(eventJson: String, previousCalendarId: String?) throws  -> String
     
     /**
      * Update a section from a JSON `cal_core::Section`; returns it as JSON,
@@ -2308,16 +2319,28 @@ open func updateContactJson(contactJson: String)throws  -> String  {
 }
     
     /**
-     * Update an event in place (its `calendar_id` field selects the route);
-     * returns the updated `Event` as JSON. Mirrors the in-place branch of the
-     * desktop `update_event`. Cross-calendar moves (the create-on-target +
-     * best-effort-delete dance with `previous_calendar_id`) are deferred.
+     * Update an event; `previous_calendar_id` (the calendar the editor loaded
+     * the event FROM) lets the bridge detect a cross-calendar MOVE — the
+     * editor's calendar picker doubles as a move gesture. Returns the resulting
+     * `Event` as JSON. Mirrors the desktop `update_event`.
+     *
+     * A move to an EXTERNAL target can't be a plain in-place PUT: it would PUT
+     * to a resource that doesn't exist on the target while carrying the source's
+     * ETag in If-Match, which a provider like iCloud rejects with 412 (the
+     * precondition can never be met) — the move would silently fail. So a move
+     * reduces to create-on-target + best-effort-delete-from-source, creating
+     * FIRST so a half-failed move leaves a recoverable duplicate rather than an
+     * empty hole. A local↔local move stays a single SQL `UPDATE` on the
+     * `calendar_id` column. (No cache-driven colour-hex resolution here — cal-ffi
+     * has no read cache, same as `create_event_json`; colour rides `color_label`/
+     * `color_hex` straight through and the client applies any override after.)
      */
-open func updateEventJson(eventJson: String)throws  -> String  {
+open func updateEventJson(eventJson: String, previousCalendarId: String?)throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_update_event_json(
             self.uniffiCloneHandle(),
-        FfiConverterString.lower(eventJson),$0
+        FfiConverterString.lower(eventJson),
+        FfiConverterOptionString.lower(previousCalendarId),$0
     )
 })
 }
@@ -5825,7 +5848,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_update_contact_json() != 31223) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_update_event_json() != 27193) {
+    if (uniffi_cal_ffi_checksum_method_host_update_event_json() != 11973) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_update_section_json() != 27633) {

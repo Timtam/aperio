@@ -96,9 +96,16 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
   /** Create an event from `{calendar_id, …NewEvent}`; returns the created
    *  `Event` as JSON. */
   createEventJson(requestJson: string): Promise<string>;
-  /** Update an event in place from a JSON `Event` (its `calendar_id` selects
-   *  the route); returns the updated `Event` as JSON. */
-  updateEventJson(eventJson: string): Promise<string>;
+  /** Update an event from a JSON `Event` (its `calendar_id` selects the route).
+   *  `previousCalendarId` is the calendar the editor loaded the event FROM; when
+   *  it differs from the event's `calendar_id` the bridge treats the save as a
+   *  cross-calendar MOVE (create-on-target + best-effort-delete-from-source) so
+   *  an external target isn't PUT to a non-existent resource (412). Returns the
+   *  resulting `Event` as JSON. */
+  updateEventJson(
+    eventJson: string,
+    previousCalendarId: string | null,
+  ): Promise<string>;
   /** Delete an event. `calendarId` is routing-only (null → local);
    *  `sendCancellations` (external only) defaults to false. */
   deleteEvent(
