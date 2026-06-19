@@ -51,8 +51,8 @@ use cal_core::{
 };
 use host_core::accounts::{AccountsRepo, AdapterKind};
 use host_core::cache::{
-    has_snapshot, is_stale, refresh_events, spawn_item_refresh, CacheObserver, CacheStore,
-    RefreshCoordinator, SyncScope, SWR_TTL_SECS,
+    has_snapshot, is_stale, refresh_contacts, refresh_events, refresh_tasks, spawn_item_refresh,
+    CacheObserver, CacheStore, RefreshCoordinator, SyncScope, SWR_TTL_SECS,
 };
 use host_core::conflicts::{
     ConflictKind, ConflictRecord, ConflictsError, ConflictsRepo, ResolutionChoice,
@@ -636,6 +636,31 @@ impl Host {
         let _ = self
             .cache
             .invalidate(&account, SyncScope::Events, calendar_id);
+    }
+
+    /// Invalidate the tasks snapshot for `list_id` after a task mutation, so the
+    /// next read sees it as cold and re-fetches (the cold-fallback serves a live
+    /// read → the edit shows immediately). A no-op for the local account (there's
+    /// no cache row). Mirrors `invalidate_events_cache`.
+    fn invalidate_tasks_cache(&self, list_id: &str) {
+        let account = self
+            .registry
+            .account_for_task_list(list_id)
+            .unwrap_or_else(|| LOCAL_ID.to_string());
+        let _ = self.cache.invalidate(&account, SyncScope::Tasks, list_id);
+    }
+
+    /// Invalidate the contacts snapshot for `list_id` after a contact mutation,
+    /// so the next read sees it as cold and re-fetches. A no-op for the local
+    /// account (no cache row). Mirrors `invalidate_events_cache`.
+    fn invalidate_contacts_cache(&self, list_id: &str) {
+        let account = self
+            .registry
+            .account_for_contact_list(list_id)
+            .unwrap_or_else(|| LOCAL_ID.to_string());
+        let _ = self
+            .cache
+            .invalidate(&account, SyncScope::Contacts, list_id);
     }
 
     /// Append one `sync_log` row (best-effort: a logging failure must never sink
@@ -2618,6 +2643,7 @@ impl Host {
     /// owning account (local store or external provider).
     pub fn tasks_json(&self, list_id: String) -> Result<String, StoreError> {
         match self.route_task_list(&list_id)? {
+            // LOCAL: a direct read (the local store isn't cached).
             None => {
                 let tasks = self
                     .adapter
@@ -2625,11 +2651,53 @@ impl Host {
                     .map_err(map_store_err)?;
                 to_json(&tasks)
             }
+            // EXTERNAL: stale-while-revalidate with a mobile cold-fallback — see
+            // get_events_json for the full rationale. A WARM list (a snapshot
+            // exists) serves the cached rows instantly + queues a background
+            // refresh when stale; a COLD one (no snapshot yet, or one just
+            // invalidated by a write) does a LIVE read so the first paint is
+            // never blank, and warms the cache in the background. The refresh is
+            // gated on stale|cold (not coverage) and runs on the Host's one
+            // worker thread. Mirrors the desktop tasks read.
             Some(ext) => {
-                let tasks = self
-                    .runtime
-                    .block_on(async { ext.get_tasks(&list_id).await })
-                    .map_err(map_store_err)?;
+                let account = self
+                    .registry
+                    .account_for_task_list(&list_id)
+                    .unwrap_or_else(|| LOCAL_ID.to_string());
+                let state = self
+                    .cache
+                    .get_sync_state(&account, SyncScope::Tasks, &list_id)
+                    .ok()
+                    .flatten();
+                let warm = has_snapshot(&state);
+                let stale = is_stale(&state, SWR_TTL_SECS);
+                let tasks = if warm {
+                    self.cache
+                        .read_tasks(&account, &list_id)
+                        .unwrap_or_default()
+                } else {
+                    self.runtime
+                        .block_on(async { ext.get_tasks(&list_id).await })
+                        .map_err(map_store_err)?
+                };
+                if !warm || stale {
+                    let cache_bg = Arc::clone(&self.cache);
+                    let ext_bg = Arc::clone(&ext);
+                    let acc = account.clone();
+                    let list = list_id.clone();
+                    spawn_item_refresh(
+                        self.runtime.handle(),
+                        Arc::clone(&self.cache_observer),
+                        Arc::clone(&self.cache),
+                        Arc::clone(&self.coord),
+                        SyncScope::Tasks,
+                        account,
+                        list_id.clone(),
+                        move || async move {
+                            refresh_tasks(&cache_bg, ext_bg.as_ref(), &acc, &list).await
+                        },
+                    );
+                }
                 to_json(&tasks)
             }
         }
@@ -2676,6 +2744,7 @@ impl Host {
                     .runtime
                     .block_on(async { ext.create_task(&list_id, new).await })
                     .map_err(map_store_err)?;
+                self.invalidate_tasks_cache(&task.list_id);
                 to_json(&task)
             }
         }
@@ -2747,6 +2816,11 @@ impl Host {
                         fields,
                     }));
                 }
+                // A move touches both ends; the helpers no-op for the local
+                // account (no cache row), but stay consistent with the
+                // cross-adapter branch + the desktop's both-ends invalidate.
+                self.invalidate_tasks_cache(&previous);
+                self.invalidate_tasks_cache(&updated.list_id);
                 return to_json(&updated);
             }
 
@@ -2822,6 +2896,11 @@ impl Host {
                 self.writer
                     .append(SyncEvent::TaskDeleted(IdPayload { id: source_task_id }));
             }
+            // A move touches both ends — invalidate the source + the target so
+            // neither serves a stale snapshot (no-op for any local side; mirrors
+            // the desktop's both-ends invalidate).
+            self.invalidate_tasks_cache(&previous);
+            self.invalidate_tasks_cache(&target_list_id);
             return to_json(&created);
         }
 
@@ -2842,6 +2921,7 @@ impl Host {
                     .runtime
                     .block_on(async { ext.update_task(task).await })
                     .map_err(map_store_err)?;
+                self.invalidate_tasks_cache(&updated.list_id);
                 to_json(&updated)
             }
         }
@@ -2863,10 +2943,15 @@ impl Host {
                 self.writer.append(SyncEvent::TaskDeleted(IdPayload { id }));
                 Ok(())
             }
-            Some(ext) => self
-                .runtime
-                .block_on(async { ext.delete_task(&id).await })
-                .map_err(map_store_err),
+            Some(ext) => {
+                self.runtime
+                    .block_on(async { ext.delete_task(&id).await })
+                    .map_err(map_store_err)?;
+                if let Some(lid) = list_id.as_deref() {
+                    self.invalidate_tasks_cache(lid);
+                }
+                Ok(())
+            }
         }
     }
 
@@ -4412,17 +4497,64 @@ impl Host {
     /// Contacts in a list as a JSON `Contact[]`, routed to the list's owning
     /// account (local store or external provider).
     pub fn contacts_json(&self, list_id: String) -> Result<String, StoreError> {
-        let route = self.route_contact_list(&list_id)?;
-        let contacts = self
-            .runtime
-            .block_on(async {
-                match route {
-                    None => self.adapter.get_contacts(&list_id).await,
-                    Some(ext) => ext.get_contacts(&list_id).await,
+        match self.route_contact_list(&list_id)? {
+            // LOCAL: a direct read (the local store isn't cached).
+            None => {
+                let contacts = self
+                    .runtime
+                    .block_on(async { self.adapter.get_contacts(&list_id).await })
+                    .map_err(map_store_err)?;
+                to_json(&contacts)
+            }
+            // EXTERNAL: stale-while-revalidate with a mobile cold-fallback — see
+            // get_events_json for the full rationale. A WARM book (a snapshot
+            // exists) serves the cached rows instantly + queues a background
+            // refresh when stale; a COLD one (no snapshot yet, or one just
+            // invalidated by a write) does a LIVE read so the first paint is
+            // never blank, and warms the cache in the background. Mirrors the
+            // desktop contacts read.
+            Some(ext) => {
+                let account = self
+                    .registry
+                    .account_for_contact_list(&list_id)
+                    .unwrap_or_else(|| LOCAL_ID.to_string());
+                let state = self
+                    .cache
+                    .get_sync_state(&account, SyncScope::Contacts, &list_id)
+                    .ok()
+                    .flatten();
+                let warm = has_snapshot(&state);
+                let stale = is_stale(&state, SWR_TTL_SECS);
+                let contacts = if warm {
+                    self.cache
+                        .read_contacts(&account, &list_id)
+                        .unwrap_or_default()
+                } else {
+                    self.runtime
+                        .block_on(async { ext.get_contacts(&list_id).await })
+                        .map_err(map_store_err)?
+                };
+                if !warm || stale {
+                    let cache_bg = Arc::clone(&self.cache);
+                    let ext_bg = Arc::clone(&ext);
+                    let acc = account.clone();
+                    let list = list_id.clone();
+                    spawn_item_refresh(
+                        self.runtime.handle(),
+                        Arc::clone(&self.cache_observer),
+                        Arc::clone(&self.cache),
+                        Arc::clone(&self.coord),
+                        SyncScope::Contacts,
+                        account,
+                        list_id.clone(),
+                        move || async move {
+                            refresh_contacts(&cache_bg, ext_bg.as_ref(), &acc, &list).await
+                        },
+                    );
                 }
-            })
-            .map_err(map_store_err)?;
-        to_json(&contacts)
+                to_json(&contacts)
+            }
+        }
     }
 
     /// Create a contact from a JSON `cal_core::NewContact`; returns the created
@@ -4443,6 +4575,7 @@ impl Host {
                 }
             })
             .map_err(map_store_err)?;
+        self.invalidate_contacts_cache(&contact.list_id);
         to_json(&contact)
     }
 
@@ -4460,6 +4593,10 @@ impl Host {
                 }
             })
             .map_err(map_store_err)?;
+        // The update API carries no previous list (a contact can't move between
+        // books in one call here, unlike a task/event move), so only the
+        // contact's own list needs invalidating.
+        self.invalidate_contacts_cache(&updated.list_id);
         to_json(&updated)
     }
 
@@ -4478,7 +4615,11 @@ impl Host {
                     Some(ext) => ext.delete_contact(&id).await,
                 }
             })
-            .map_err(map_store_err)
+            .map_err(map_store_err)?;
+        if let Some(lid) = list_id.as_deref() {
+            self.invalidate_contacts_cache(lid);
+        }
+        Ok(())
     }
 
     /// A contact's avatar as JSON `Option<ContactPhoto>` — `{content_type,
@@ -4528,7 +4669,13 @@ impl Host {
                     Some(ext) => ext.set_contact_photo(&id, photo).await,
                 }
             })
-            .map_err(map_store_err)
+            .map_err(map_store_err)?;
+        // A photo change alters the cached contact — invalidate so the next read
+        // re-fetches it.
+        if let Some(lid) = list_id.as_deref() {
+            self.invalidate_contacts_cache(lid);
+        }
+        Ok(())
     }
 
     /// Remove a contact's avatar (other fields untouched), routed by the
@@ -4549,7 +4696,13 @@ impl Host {
                     Some(ext) => ext.delete_contact_photo(&id).await,
                 }
             })
-            .map_err(map_store_err)
+            .map_err(map_store_err)?;
+        // A photo change alters the cached contact — invalidate so the next read
+        // re-fetches it.
+        if let Some(lid) = list_id.as_deref() {
+            self.invalidate_contacts_cache(lid);
+        }
+        Ok(())
     }
 
     /// Create a top-level LOCAL address book; returns it as a `ContactListRow`.
