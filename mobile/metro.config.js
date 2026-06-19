@@ -4,25 +4,21 @@ const path = require('path');
 
 const config = getDefaultConfig(__dirname);
 
-// Share the dep-free @aperio/locales package, which lives at the repo root —
-// OUTSIDE this Expo project. We deliberately do NOT fold mobile into an npm
-// workspace: the desktop frontend pins React 18 and mobile pins React 19, so a
-// hoisted workspace would clash. Instead we alias just the locale JSON files
-// (no dependencies of their own) and point Metro at that one folder so it can
-// read and watch it. Deep imports like `@aperio/locales/de/translation.json`
-// resolve through the alias.
+// @aperio/locales + @aperio/shared live at the repo root, OUTSIDE this Expo
+// project, and are consumed as local `file:` dependencies (see package.json):
+// `npm install` symlinks them into node_modules, so Metro resolves them as
+// ordinary packages. That works in the dev server AND the production
+// `expo export` / EAS bundle — unlike a `watchFolders` + `extraNodeModules`
+// alias, which the production resolver did NOT honour for deep JSON imports like
+// `@aperio/locales/de/translation.json` (it resolved only in the dev server, so
+// the gap surfaced as a release-bundle failure on EAS). We deliberately keep
+// them as plain file: deps rather than an npm workspace — the desktop pins React
+// 18 and mobile React 19, and these two packages are dependency-free, so there's
+// nothing to hoist or clash.
+//
+// We still watch the real folders so edits to the shared code hot-reload in dev.
 const localesDir = path.resolve(__dirname, '..', 'locales');
-
-// The shared, platform-agnostic frontend domain (@aperio/shared) lives at the
-// repo root too — the task types + grouping + label helpers reused 1:1 with the
-// desktop. Same alias mechanism as @aperio/locales (NOT an npm workspace), so
-// `@aperio/shared` resolves to shared/index.ts and Metro watches the folder.
 const sharedDir = path.resolve(__dirname, '..', 'shared');
 config.watchFolders = [...(config.watchFolders ?? []), localesDir, sharedDir];
-config.resolver.extraNodeModules = {
-  ...config.resolver.extraNodeModules,
-  '@aperio/locales': localesDir,
-  '@aperio/shared': sharedDir,
-};
 
 module.exports = config;
