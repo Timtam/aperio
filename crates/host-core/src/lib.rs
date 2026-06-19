@@ -16,6 +16,7 @@ pub mod accounts;
 pub mod birthdays;
 pub mod cache;
 pub mod conflicts;
+pub mod contact_sync;
 pub mod credential_sync;
 pub mod db;
 pub mod device_names;

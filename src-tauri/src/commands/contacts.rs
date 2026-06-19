@@ -21,7 +21,7 @@ use cal_adapter_local::LocalAdapter;
 use cal_core::{Contact, ContactList, ContactPhoto, ContactsFeature, NewContact};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tauri::{AppHandle, Runtime, State};
+use tauri::{AppHandle, State};
 use tracing::warn;
 
 use super::cache_swr;
@@ -460,13 +460,13 @@ pub async fn set_contact_photo(
 /// matches whatever the periodic scheduler would do. Most
 /// callers should pass `None` to keep the behaviour consistent.
 #[tauri::command]
-pub async fn sync_contacts_now<R: Runtime>(
+pub async fn sync_contacts_now(
     scheduler: State<'_, Arc<ContactSyncScheduler>>,
-    app: AppHandle<R>,
     include_read_only: Option<bool>,
 ) -> CommandResult<bool> {
     let effective = include_read_only.unwrap_or_else(|| scheduler.read_include_read_only_on_sync());
-    Ok(scheduler.run_sync(&app, effective).await)
+    // The scheduler owns the Tauri observer, so the pass needs no app handle.
+    Ok(scheduler.run_sync(effective).await)
 }
 
 /// Snapshot the contact sync status — used by the contacts view
