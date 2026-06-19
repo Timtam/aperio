@@ -887,6 +887,19 @@ public protocol HostProtocol: AnyObject, Sendable {
     func clearSyncLog() throws 
     
     /**
+     * Manually trigger a compaction round (§19.10): snapshot the local state,
+     * push `snapshot.json`, advance `meta.json`'s snapshot timestamp, and GC
+     * every log file older than the new horizon. Mirrors the desktop
+     * `compact_now`; the scheduler runs this same path automatically at the
+     * §19.10 thresholds, so this is the "user got impatient" override. Rejects
+     * when no sync adapter is configured. Records the outcome in the `sync_log`
+     * (success or partial-failure) like the desktop's `record_compaction_outcome`
+     * — no push/fetch counts on a compaction, so `applied` carries the
+     * deleted-log count and the Protokoll renders "N old logs removed".
+     */
+    func compactNowJson() throws  -> String
+    
+    /**
      * Complete a host-driven OAuth flow: exchange the redirect's `code` (+ the
      * `pkce_verifier`/`state` from [`Self::begin_oauth_json`]) for tokens via
      * the plugin (`phase:"exchange"`, the network step), then create the
@@ -1877,6 +1890,25 @@ open func clearSyncLog()throws   {try rustCallWithError(FfiConverterTypeStoreErr
             self.uniffiCloneHandle(),$0
     )
 }
+}
+    
+    /**
+     * Manually trigger a compaction round (§19.10): snapshot the local state,
+     * push `snapshot.json`, advance `meta.json`'s snapshot timestamp, and GC
+     * every log file older than the new horizon. Mirrors the desktop
+     * `compact_now`; the scheduler runs this same path automatically at the
+     * §19.10 thresholds, so this is the "user got impatient" override. Rejects
+     * when no sync adapter is configured. Records the outcome in the `sync_log`
+     * (success or partial-failure) like the desktop's `record_compaction_outcome`
+     * — no push/fetch counts on a compaction, so `applied` carries the
+     * deleted-log count and the Protokoll renders "N old logs removed".
+     */
+open func compactNowJson()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_compact_now_json(
+            self.uniffiCloneHandle(),$0
+    )
+})
 }
     
     /**
@@ -6574,6 +6606,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_clear_sync_log() != 18521) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_compact_now_json() != 57819) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_complete_oauth_json() != 7847) {

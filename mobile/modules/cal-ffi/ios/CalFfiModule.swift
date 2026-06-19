@@ -210,6 +210,10 @@ public class CalFfiModule: Module {
       try self.host.clearSyncLog()
     }
 
+    AsyncFunction("compactNowJson") { () -> String in
+      try self.host.compactNowJson()
+    }
+
     AsyncFunction("refreshExternalCache") {
       self.host.refreshExternalCache()
     }

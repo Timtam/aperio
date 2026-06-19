@@ -199,6 +199,23 @@ export const listSyncLog = async (limit = 100): Promise<SyncLogEntry[]> =>
 /** Clear the sync-log history. */
 export const clearSyncLog = (): Promise<void> => CalFfi.clearSyncLog();
 
+/** Outcome of a compaction round (§19.10) — the counters the UI renders. */
+export interface CompactionReport {
+  snapshot_timestamp: string | null;
+  deleted_logs: number;
+  failed_deletes: number;
+  stale_devices: number;
+  snapshot_rows: number;
+  snapshot_settings: number;
+}
+
+/** Run a compaction round now: snapshot the local state + GC log files older
+ *  than the new horizon. Rejects when no sync target is configured. Compaction
+ *  also runs automatically at the §19.10 thresholds; this is the manual
+ *  override. The outcome is also recorded in the sync log. */
+export const compactNow = async (): Promise<CompactionReport> =>
+  JSON.parse(await CalFfi.compactNowJson()) as CompactionReport;
+
 // ── External cache (SWR) controls ──
 // External reads already serve stale-while-revalidate + self-warm on a
 // cold/stale read; these are the explicit controls (the desktop's cache surface):

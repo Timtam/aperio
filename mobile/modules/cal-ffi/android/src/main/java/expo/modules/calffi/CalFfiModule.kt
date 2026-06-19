@@ -239,6 +239,10 @@ class CalFfiModule : Module() {
       host.clearSyncLog()
     }
 
+    AsyncFunction("compactNowJson") {
+      host.compactNowJson()
+    }
+
     AsyncFunction("refreshExternalCache") {
       host.refreshExternalCache()
     }

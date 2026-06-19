@@ -18,6 +18,7 @@ import {
   adoptRemoteEncryption,
   cacheRefreshStatus,
   changeSyncPassphrase,
+  compactNow,
   configureSyncAdapter,
   disableSyncEncryption,
   enableSyncEncryption,
@@ -77,6 +78,7 @@ export default function SyncScreen() {
   const [conflictCount, setConflictCount] = useState(0);
   const [syncLog, setSyncLog] = useState<SyncLogEntry[]>([]);
   const [busy, setBusy] = useState(false);
+  const [busyCompact, setBusyCompact] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The external-cache warm-pass status (the desktop's cache surface): drives
   // the "refreshing…" / "last updated" line + the manual refresh button. Loaded
@@ -188,6 +190,24 @@ export default function SyncScreen() {
       })),
     [t],
   );
+
+  // Manual compaction (§19.10): snapshot + GC old logs. Compaction also runs
+  // automatically at the thresholds; this is the override. Refresh the protocol
+  // afterwards so its recorded row shows.
+  const onCompact = useCallback(async () => {
+    setBusyCompact(true);
+    try {
+      const report = await compactNow();
+      announce(
+        t('dialogs.settings.sync.compactDone', { deleted: report.deleted_logs }),
+      );
+      setSyncLog(await listSyncLog(100).catch(() => []));
+    } catch (err) {
+      announce(t('mobile.error', { message: errorMessage(err) }));
+    } finally {
+      setBusyCompact(false);
+    }
+  }, [announce, t]);
 
   const refresh = useCallback(async () => {
     try {
@@ -1069,6 +1089,25 @@ export default function SyncScreen() {
             disabled={busy}
           />
         </View>
+      )}
+
+      {/* Manual compaction (§19.10): snapshot + GC old logs. Auto-runs at the
+          thresholds too; this is the override. Configured-only. */}
+      {status?.configured && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: busyCompact }}
+          accessibilityLabel={t('dialogs.settings.sync.compactNow')}
+          disabled={busyCompact}
+          onPress={() => void onCompact()}
+          style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.ghostButtonText}>
+            {busyCompact
+              ? t('dialogs.settings.sync.compacting')
+              : t('dialogs.settings.sync.compactNow')}
+          </Text>
+        </Pressable>
       )}
 
       {/* Unresolved sync conflicts → the resolution screen. Shown only when

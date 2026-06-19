@@ -772,6 +772,8 @@ external fun uniffi_cal_ffi_checksum_method_host_change_sync_passphrase_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_clear_sync_log(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_compact_now_json(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_complete_oauth_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_complete_oauth_reconnect_json(
@@ -1060,6 +1062,8 @@ external fun uniffi_cal_ffi_fn_method_host_change_sync_passphrase_json(`ptr`: Lo
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_clear_sync_log(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_compact_now_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_complete_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_complete_oauth_reconnect_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`accountId`: RustBuffer.ByValue,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1475,6 +1479,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_clear_sync_log() != 18521.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_compact_now_json() != 57819.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_complete_oauth_json() != 7847.toShort()) {
@@ -2646,6 +2653,19 @@ public interface HostInterface {
     fun `clearSyncLog`()
     
     /**
+     * Manually trigger a compaction round (§19.10): snapshot the local state,
+     * push `snapshot.json`, advance `meta.json`'s snapshot timestamp, and GC
+     * every log file older than the new horizon. Mirrors the desktop
+     * `compact_now`; the scheduler runs this same path automatically at the
+     * §19.10 thresholds, so this is the "user got impatient" override. Rejects
+     * when no sync adapter is configured. Records the outcome in the `sync_log`
+     * (success or partial-failure) like the desktop's `record_compaction_outcome`
+     * — no push/fetch counts on a compaction, so `applied` carries the
+     * deleted-log count and the Protokoll renders "N old logs removed".
+     */
+    fun `compactNowJson`(): kotlin.String
+    
+    /**
      * Complete a host-driven OAuth flow: exchange the redirect's `code` (+ the
      * `pkce_verifier`/`state` from [`Self::begin_oauth_json`]) for tokens via
      * the plugin (`phase:"exchange"`, the network step), then create the
@@ -3702,6 +3722,31 @@ open class Host: Disposable, AutoCloseable, HostInterface
 }
     }
     
+    
+
+    
+    /**
+     * Manually trigger a compaction round (§19.10): snapshot the local state,
+     * push `snapshot.json`, advance `meta.json`'s snapshot timestamp, and GC
+     * every log file older than the new horizon. Mirrors the desktop
+     * `compact_now`; the scheduler runs this same path automatically at the
+     * §19.10 thresholds, so this is the "user got impatient" override. Rejects
+     * when no sync adapter is configured. Records the outcome in the `sync_log`
+     * (success or partial-failure) like the desktop's `record_compaction_outcome`
+     * — no push/fetch counts on a compaction, so `applied` carries the
+     * deleted-log count and the Protokoll renders "N old logs removed".
+     */
+    @Throws(StoreException::class)override fun `compactNowJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_compact_now_json(
+        it,
+        _status)
+}
+    }
+    )
+    }
     
 
     

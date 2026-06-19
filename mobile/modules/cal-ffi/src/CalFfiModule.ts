@@ -170,6 +170,9 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   listSyncLogJson(limit: number): Promise<string>;
   /** Drop every sync-log row. */
   clearSyncLog(): Promise<void>;
+  /** Run a compaction round now (snapshot + GC old logs); resolves to a JSON
+   *  `CompactionReport`. Rejects when no sync target is configured. */
+  compactNowJson(): Promise<string>;
   /** Kick an immediate warm pass over every external account's containers +
    *  in-window events (the manual "refresh now"). Fire-and-forget. */
   refreshExternalCache(): Promise<void>;

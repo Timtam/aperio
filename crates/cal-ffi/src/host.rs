@@ -4274,6 +4274,69 @@ impl Host {
         }
     }
 
+    /// Manually trigger a compaction round (§19.10): snapshot the local state,
+    /// push `snapshot.json`, advance `meta.json`'s snapshot timestamp, and GC
+    /// every log file older than the new horizon. Mirrors the desktop
+    /// `compact_now`; the scheduler runs this same path automatically at the
+    /// §19.10 thresholds, so this is the "user got impatient" override. Rejects
+    /// when no sync adapter is configured. Records the outcome in the `sync_log`
+    /// (success or partial-failure) like the desktop's `record_compaction_outcome`
+    /// — no push/fetch counts on a compaction, so `applied` carries the
+    /// deleted-log count and the Protokoll renders "N old logs removed".
+    pub fn compact_now_json(&self) -> Result<String, StoreError> {
+        let Some(adapter) = self.orchestrator.adapter_handle() else {
+            return Err(StoreError::Unsupported {
+                detail: "no sync adapter configured".into(),
+            });
+        };
+        let started = std::time::Instant::now();
+        let result = self.runtime.block_on(async {
+            self.orchestrator
+                .compactor()
+                .compact_now(adapter.as_ref())
+                .await
+        });
+        let duration_ms = Some(started.elapsed().as_millis() as u64);
+        match result {
+            Ok(report) => {
+                // A compaction succeeds even with some failed deletes; flag the
+                // partial failure so the Protokoll shows it, mirroring desktop.
+                let success = report.failed_deletes == 0;
+                let error = (!success).then(|| {
+                    format!(
+                        "{} of {} log deletions failed",
+                        report.failed_deletes,
+                        report.deleted_logs + report.failed_deletes,
+                    )
+                });
+                self.record_sync_round(
+                    SyncTrigger::Compaction,
+                    success,
+                    &SyncLogCounters {
+                        pushed_logs: None,
+                        fetched_logs: None,
+                        applied: Some(u32::try_from(report.deleted_logs).unwrap_or(u32::MAX)),
+                        conflicts: None,
+                    },
+                    duration_ms,
+                    error.as_deref(),
+                );
+                to_json(&report)
+            }
+            Err(e) => {
+                let err = sync_err(e);
+                self.record_sync_round(
+                    SyncTrigger::Compaction,
+                    false,
+                    &SyncLogCounters::default(),
+                    duration_ms,
+                    Some(&err.to_string()),
+                );
+                Err(err)
+            }
+        }
+    }
+
     /// Push the local pending logs without fetching (call from RN AppState
     /// "background"). Returns the number of logs pushed. Records the outcome in
     /// the failure latch AND a `sync_log` row, like `sync_now`. `trigger` is the
