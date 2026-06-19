@@ -43,7 +43,8 @@
         }
       ],
       "expo-audio",
-      "./plugins/withReminderSoundProvider"
+      "./plugins/withReminderSoundProvider",
+      "./plugins/withoutPushEntitlement"
     ]
   }
 }
