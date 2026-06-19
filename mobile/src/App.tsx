@@ -1,7 +1,12 @@
 import { createNativeBottomTabNavigator } from '@bottom-tabs/react-navigation';
-import { NavigationContainer } from '@react-navigation/native';
+import {
+  NavigationContainer,
+  type NavigationState,
+  type PartialState,
+} from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -61,6 +66,22 @@ const TasksStack = createNativeStackNavigator<RootStackParamList>();
 const CalendarStack = createNativeStackNavigator<RootStackParamList>();
 const ContactsStack = createNativeStackNavigator<RootStackParamList>();
 const SettingsStack = createNativeStackNavigator<RootStackParamList>();
+
+// The four tab-root screens. The native bottom tab bar belongs ONLY on these;
+// on any drill-down (Sync, Accounts, the editors, …) it is hidden so it doesn't
+// sit in the screen's VoiceOver swipe order — a sub-screen should never let the
+// user wipe left into the tab bar (reported on iOS).
+const TAB_ROOT_ROUTES = new Set(['Tasks', 'Events', 'Contacts', 'Settings']);
+
+/** Name of the deepest focused route across the nested navigators. */
+function deepestRouteName(
+  state: NavigationState | PartialState<NavigationState> | undefined,
+): string | undefined {
+  if (state == null || state.routes.length === 0) return undefined;
+  const index = state.index ?? state.routes.length - 1;
+  const route = state.routes[index];
+  return route.state ? deepestRouteName(route.state) : route.name;
+}
 
 function TasksStackNav() {
   const { t } = useTranslation();
@@ -314,18 +335,26 @@ function AppContent() {
   // announcements of attention-class transitions (conflict / failure /
   // schema-too-old) for screen-reader users. The data is already bridged.
   const sync = useSyncStatus();
+  // Hide the native tab bar on every drill-down screen (it belongs only on the
+  // four tab roots), so VoiceOver can't reach it from a sub-screen's content.
+  const [tabBarHidden, setTabBarHidden] = useState(false);
   return (
     <>
       {/* Dark status-bar glyphs on the light background, light glyphs on the
           dark / high-contrast backgrounds. */}
       <StatusBar style={theme.mode === 'light' ? 'dark' : 'light'} />
-      <NavigationContainer theme={navigationThemeFor(theme)}>
+      <NavigationContainer
+        theme={navigationThemeFor(theme)}
+        onStateChange={(state) =>
+          setTabBarHidden(!TAB_ROOT_ROUTES.has(deepestRouteName(state) ?? ''))
+        }
+      >
         <TaskStoreProvider>
           {/* Day-start checks (deadline-pin + the review modal) — need the task
               store, so they mount inside the provider; the review modal overlays
               the focused tab when the gate opens it. */}
           <DayStartChecks />
-          <Tab.Navigator initialRouteName="TasksTab">
+          <Tab.Navigator initialRouteName="TasksTab" tabBarHidden={tabBarHidden}>
             <Tab.Screen
               name="TasksTab"
               component={TasksStackNav}
