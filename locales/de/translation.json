@@ -148,6 +148,7 @@
   },
   "reminders": {
     "label": "Erinnerungen",
+    "silentLabel": "Stille Erinnerungen",
     "empty": "Keine Erinnerungen gesetzt.",
     "add": "Erinnerung hinzufügen",
     "remove": "Entfernen",

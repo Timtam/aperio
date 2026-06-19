@@ -22,15 +22,22 @@ const HORIZON_MINUTES = 7 * 24 * 60;
  *  foreground/mutation) rolls the window forward. */
 const MAX_SCHEDULED = 60;
 const CHANNEL_ID = 'reminders';
+/** Silent variant — a "Silent" reminder (§14.4) lands here: visible in the
+ *  shade, no sound. Android couples sound to the channel (immutable per-channel),
+ *  so a no-sound reminder needs its own LOW-importance channel rather than a
+ *  per-notification flag. */
+const SILENT_CHANNEL_ID = 'reminders-silent';
 /** Debounce for the post-mutation reschedule — a burst of edits coalesces. */
 const DEBOUNCE_MS = 2500;
 
-// When a reminder arrives while the app is foregrounded, still surface it.
+// When a reminder arrives while the app is foregrounded, still surface it —
+// but honour a "Silent" reminder by not playing its sound (the scheduled
+// notification set content.sound=false; mirror that in the foreground handler).
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
+  handleNotification: async (notification) => ({
     shouldShowBanner: true,
     shouldShowList: true,
-    shouldPlaySound: true,
+    shouldPlaySound: notification.request.content.sound != null,
     shouldSetBadge: false,
   }),
 });
@@ -44,7 +51,19 @@ async function ensureAndroidChannel(): Promise<void> {
     name: i18n.t('reminders.label'),
     importance: Notifications.AndroidImportance.HIGH,
   });
+  // A second channel for "Silent" reminders — LOW importance plays no sound
+  // (still shown in the shade). The user can fine-tune both in system settings.
+  await Notifications.setNotificationChannelAsync(SILENT_CHANNEL_ID, {
+    name: i18n.t('reminders.silentLabel'),
+    importance: Notifications.AndroidImportance.LOW,
+  });
   channelEnsured = true;
+}
+
+/** Whether this reminder's effective sound is "silent" (visual only). Anything
+ *  else (system, or a custom sound we can't bundle yet) plays the default. */
+function isSilent(r: { sound?: { source?: { type?: string } } }): boolean {
+  return r.sound?.source?.type === 'silent';
 }
 
 async function ensurePermission(): Promise<boolean> {
@@ -75,17 +94,23 @@ export async function rescheduleReminders(): Promise<void> {
       .filter((r) => new Date(r.trigger_at).getTime() > now)
       .slice(0, MAX_SCHEDULED);
     for (const r of due) {
+      const silent = isSilent(r);
       await Notifications.scheduleNotificationAsync({
         content: {
           title: r.title,
           body: r.body,
+          // §14.4: "Silent" plays no sound (visual only); anything else uses the
+          // OS default. iOS honours this per-notification field; Android takes it
+          // from the channel (below). Per-notification VOLUME isn't an OS concept
+          // — notifications use the system volume — so SoundConfig.volume is N/A.
+          sound: silent ? false : 'default',
           // Carried so a tap can route to the item (wired in App).
           data: { itemId: r.item_id, itemKind: r.item_kind },
         },
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.DATE,
           date: new Date(r.trigger_at),
-          channelId: CHANNEL_ID,
+          channelId: silent ? SILENT_CHANNEL_ID : CHANNEL_ID,
         },
       });
     }

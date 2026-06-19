@@ -148,6 +148,7 @@
   },
   "reminders": {
     "label": "Reminders",
+    "silentLabel": "Silent reminders",
     "empty": "No reminders set.",
     "add": "Add reminder",
     "remove": "Remove",

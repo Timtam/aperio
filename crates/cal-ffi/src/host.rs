@@ -4335,6 +4335,10 @@ impl Host {
                     "title": t.title,
                     "body": t.body,
                     "trigger_at": t.trigger_at.to_rfc3339(),
+                    // The §14.4 effective sound (reminder→item→container→global),
+                    // already resolved on the Trigger — the mobile scheduler maps
+                    // it to the OS notification sound (System vs Silent).
+                    "sound": t.sound,
                 })
             })
             .collect();
