@@ -5326,6 +5326,118 @@ impl Host {
 
         to_json(&created)
     }
+
+    /// Re-run the OAuth flow for an EXISTING account whose token expired / was
+    /// lost: exchange the code, write FRESH tokens under the existing account id,
+    /// and re-register so reads route through the new credentials without an app
+    /// restart. Keeps the account row + every downstream calendar/task/override
+    /// reference (unlike remove+re-add). NO new row, NO `AccountCreated`. The
+    /// `request_json` is a `CompleteOAuthRequest`; only its exchange fields are
+    /// used — `adapter_kind` is taken from the existing account (and must be
+    /// Google / Microsoft Graph). Mirrors the desktop `reconnect_*_account`,
+    /// adapted to the mobile two-phase flow. (The exchange is verified on-device.)
+    pub fn complete_oauth_reconnect_json(
+        &self,
+        plugin_id: String,
+        account_id: String,
+        request_json: String,
+    ) -> Result<String, StoreError> {
+        let req: CompleteOAuthRequest = from_json("oauth reconnect", &request_json)?;
+        let shared = self.db.shared();
+        let repo = AccountsRepo::new(&shared);
+        let account = repo
+            .get(&account_id)
+            .map_err(acc_err)?
+            .ok_or(StoreError::NotFound)?;
+        if !matches!(
+            account.adapter_kind,
+            AdapterKind::Google | AdapterKind::MicrosoftGraph
+        ) {
+            return Err(StoreError::InvalidField {
+                field: "account_id".to_string(),
+                detail: format!(
+                    "account kind {} does not use the OAuth reconnect flow",
+                    account.adapter_kind.as_str()
+                ),
+            });
+        }
+        if req.client_id.trim().is_empty() {
+            return Err(StoreError::InvalidField {
+                field: "client_id".to_string(),
+                detail: "client_id must not be empty".to_string(),
+            });
+        }
+        if matches!(account.adapter_kind, AdapterKind::Google)
+            && req
+                .client_secret
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or("")
+                .is_empty()
+        {
+            return Err(StoreError::InvalidField {
+                field: "client_secret".to_string(),
+                detail: "client_secret must not be empty".to_string(),
+            });
+        }
+
+        // Exchange the code for fresh tokens (the plugin checks CSRF/state).
+        let exchange_args = serde_json::json!({
+            "phase": "exchange",
+            "client_id": req.client_id,
+            "client_secret": req.client_secret,
+            "authority": req.authority,
+            "code": req.code,
+            "pkce_verifier": req.pkce_verifier,
+            "state": req.state,
+            "returned_state": req.returned_state,
+            "redirect_uri": req.redirect_uri,
+        });
+        let bytes = self
+            .runtime
+            .block_on(async {
+                self.plugin_manager
+                    .interactive_auth(&plugin_id, &exchange_args.to_string())
+                    .await
+            })
+            .map_err(|e| StoreError::Auth {
+                detail: e.to_string(),
+            })?;
+        let tokens: OAuthTokenJson =
+            serde_json::from_slice(&bytes).map_err(|e| StoreError::Protocol {
+                detail: format!("token blob: {e}"),
+            })?;
+
+        // Write the fresh tokens under the EXISTING id (overwriting the stale
+        // ones). On a store failure the row + old tokens stay put — the user can
+        // retry without losing the account. The refresh token is the durable
+        // credential, synced via the E2E log; the access token is ephemeral.
+        self.secret_store
+            .store(&account.id, SecretSlot::AccessToken, &tokens.access_token)
+            .map_err(|err| StoreError::Storage {
+                detail: format!("store access token: {err}"),
+            })?;
+        if let Some(refresh) = tokens.refresh_token.as_deref() {
+            self.secret_store
+                .store(&account.id, SecretSlot::RefreshToken, refresh)
+                .map_err(|err| StoreError::Storage {
+                    detail: format!("store refresh token: {err}"),
+                })?;
+            host_core::credential_sync::emit_credential_set(
+                &self.writer,
+                &shared,
+                &account.id,
+                SecretSlot::RefreshToken,
+                refresh,
+            );
+        }
+        self.registry
+            .register(&account)
+            .map_err(|err| StoreError::Storage {
+                detail: format!("adapter registration failed: {err}"),
+            })?;
+        to_json(&account)
+    }
 }
 
 /// Request body for [`Host::complete_oauth_json`]. The `config_json` is the
@@ -5682,6 +5794,45 @@ mod tests {
             host.set_account_secret("nope".to_string(), "x".to_string())
                 .unwrap_err(),
             StoreError::NotFound
+        ));
+    }
+
+    #[test]
+    fn oauth_reconnect_rejects_unknown_and_non_oauth_accounts() {
+        let (_dir, host, _kc) = open_host();
+        let req = r#"{"adapter_kind":"google","display_name":"x","config_json":"{}","client_id":"a","code":"c","pkce_verifier":"v","state":"s","returned_state":"s","redirect_uri":"aperio://oauth-callback"}"#;
+        // Unknown account → NotFound (before any exchange).
+        assert!(matches!(
+            host.complete_oauth_reconnect_json(
+                "com.aperio.cal-adapter-google".to_string(),
+                "nope".to_string(),
+                req.to_string(),
+            )
+            .unwrap_err(),
+            StoreError::NotFound
+        ));
+        // A non-OAuth (CalDAV) account → InvalidField (it uses set_account_secret).
+        let caldav = r#"{
+            "adapter_kind": "caldav",
+            "display_name": "Work",
+            "config_json": "{\"server_url\":\"https://dav.example.invalid/\",\"username\":\"a\",\"auth_kind\":\"basic\"}",
+            "secret": "pw"
+        }"#;
+        let id = serde_json::from_str::<serde_json::Value>(
+            &host.create_account_json(caldav.to_string()).unwrap(),
+        )
+        .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(matches!(
+            host.complete_oauth_reconnect_json(
+                "com.aperio.cal-adapter-google".to_string(),
+                id,
+                req.to_string(),
+            )
+            .unwrap_err(),
+            StoreError::InvalidField { .. }
         ));
     }
 

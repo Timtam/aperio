@@ -199,3 +199,20 @@ export const completeOauth = async (
   scheduleBackgroundPush();
   return created;
 };
+
+/** Re-run OAuth for an EXISTING account (an expired / lost token): exchange the
+ *  redirect's `code` for fresh tokens, write them under `accountId`, and
+ *  re-register — keeps the account row + its downstream calendar/task/override
+ *  references (no remove-and-re-add). `request`'s exchange fields are used; the
+ *  kind comes from the existing account. Returns the (unchanged) account. */
+export const completeOauthReconnect = async (
+  pluginId: string,
+  accountId: string,
+  request: CompleteOauthRequest,
+): Promise<Account> => {
+  const account = JSON.parse(
+    await CalFfi.completeOauthReconnectJson(pluginId, accountId, JSON.stringify(request)),
+  ) as Account;
+  scheduleBackgroundPush();
+  return account;
+};

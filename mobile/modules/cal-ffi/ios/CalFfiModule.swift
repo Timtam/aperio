@@ -350,6 +350,12 @@ public class CalFfiModule: Module {
       try self.host.completeOauthJson(pluginId: pluginId, requestJson: requestJson)
     }
 
+    AsyncFunction("completeOauthReconnectJson") {
+      (pluginId: String, accountId: String, requestJson: String) -> String in
+      try self.host.completeOauthReconnectJson(
+        pluginId: pluginId, accountId: accountId, requestJson: requestJson)
+    }
+
     // ─── Discovery (EWS Autodiscover; host-driven, like the desktop) ──────────
 
     AsyncFunction("discoverJson") { (pluginId: String, argsJson: String) -> String in

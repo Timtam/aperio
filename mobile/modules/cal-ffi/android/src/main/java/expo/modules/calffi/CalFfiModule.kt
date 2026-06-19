@@ -380,6 +380,10 @@ class CalFfiModule : Module() {
       host.completeOauthJson(pluginId, requestJson)
     }
 
+    AsyncFunction("completeOauthReconnectJson") { pluginId: String, accountId: String, requestJson: String ->
+      host.completeOauthReconnectJson(pluginId, accountId, requestJson)
+    }
+
     // ─── Discovery (EWS Autodiscover; host-driven, like the desktop) ──────────
     // discoverJson runs a plugin's endpoint discovery (EWS: {email, password} →
     // {ews_url, account_email}); the network call hits the provider, so a thrown

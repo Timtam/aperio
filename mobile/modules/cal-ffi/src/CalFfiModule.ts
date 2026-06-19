@@ -304,6 +304,15 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  pkce_verifier, state, returned_state, redirect_uri}`. Returns the created
    *  `Account` as JSON. */
   completeOauthJson(pluginId: string, requestJson: string): Promise<string>;
+  /** Re-run OAuth for an EXISTING account (expired/lost token): exchange the
+   *  code + write fresh tokens under `accountId` + re-register — no new row.
+   *  `requestJson` is the same shape as completeOauthJson (its exchange fields
+   *  are used; the kind comes from the account). Returns the account as JSON. */
+  completeOauthReconnectJson(
+    pluginId: string,
+    accountId: string,
+    requestJson: string,
+  ): Promise<string>;
 
   // ── Discovery (EWS Autodiscover; host-driven) ──
   /** Run a plugin's endpoint discovery. `argsJson` carries `{email, password}`

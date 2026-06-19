@@ -24,6 +24,7 @@ import {
   renameAccount,
   setAccountSecret,
 } from '../api/accounts';
+import { reconnectOAuthAccount } from '../api/oauth';
 import OAuthConnectForm from './OAuthConnectForm';
 
 // Accounts management — list + add (credential kinds) + connect (OAuth kinds via
@@ -310,6 +311,29 @@ export default function AccountsScreen() {
     setRepairSecret('');
   }, []);
 
+  // Re-run the provider sign-in for an OAuth account whose token expired — fresh
+  // tokens land under the existing account id (its calendars / overrides stay).
+  // A browser dismiss / declined consent is silent; a real failure surfaces.
+  const reconnectOauth = useCallback(
+    async (account: Account) => {
+      setError(null);
+      try {
+        const result = await reconnectOAuthAccount(account);
+        if (result.kind === 'cancelled') return;
+        pendingFocusId.current = account.id;
+        await load();
+        announce(
+          t('dialogs.accounts.credentialUpdated', { name: account.display_name }),
+        );
+      } catch (err) {
+        const message = errorMessage(err);
+        setError(message);
+        announce(t('mobile.error', { message }));
+      }
+    },
+    [announce, load, t],
+  );
+
   const saveRepair = useCallback(
     async (account: Account) => {
       const value = repairSecret.trim();
@@ -382,13 +406,11 @@ export default function AccountsScreen() {
             const kindName = t(`dialogs.accounts.kindName.${account.adapter_kind}`);
             const missing = missingIds.has(account.id);
             const oauth = isOAuthKind(account.adapter_kind);
-            // Fold the credential state into the row's single SR label; for an
-            // OAuth account (no inline repair) also speak the remove+reconnect
-            // guidance so the user knows the path forward.
+            // Fold the credential state into the row's single SR label; a
+            // "Reconnect" affordance follows for both kinds (OAuth re-runs the
+            // provider sign-in; others reveal the inline secret field).
             const rowLabel = missing
-              ? oauth
-                ? `${account.display_name}, ${kindName}, ${t('dialogs.accounts.missingBadge')}. ${t('dialogs.accounts.oauthReconnectHint')}`
-                : `${account.display_name}, ${kindName}, ${t('dialogs.accounts.missingBadge')}`
+              ? `${account.display_name}, ${kindName}, ${t('dialogs.accounts.missingBadge')}`
               : `${account.display_name}, ${kindName}`;
             if (repairId === account.id) {
               return (
@@ -470,7 +492,7 @@ export default function AccountsScreen() {
                   isLocal
                     ? undefined
                     : [
-                        ...(missing && !oauth
+                        ...(missing
                           ? [{ name: 'reconnect', label: t('dialogs.accounts.reconnect') }]
                           : []),
                         { name: 'rename', label: t('mobile.rename') },
@@ -480,7 +502,12 @@ export default function AccountsScreen() {
                 onAccessibilityAction={(e) => {
                   if (e.nativeEvent.actionName === 'delete') void remove(account);
                   else if (e.nativeEvent.actionName === 'rename') startRename(account);
-                  else if (e.nativeEvent.actionName === 'reconnect') startRepair(account);
+                  else if (e.nativeEvent.actionName === 'reconnect') {
+                    // OAuth re-runs the provider sign-in; others reveal the
+                    // inline credential field.
+                    if (oauth) void reconnectOauth(account);
+                    else startRepair(account);
+                  }
                 }}
                 style={styles.row}
               >
@@ -492,19 +519,16 @@ export default function AccountsScreen() {
                       {t('dialogs.accounts.missingBadge')}
                     </Text>
                   )}
-                  {missing && oauth && (
-                    <Text style={styles.hint} importantForAccessibility="no">
-                      {t('dialogs.accounts.oauthReconnectHint')}
-                    </Text>
-                  )}
                 </View>
                 {!isLocal && (
                   <>
-                    {missing && !oauth && (
+                    {missing && (
                       <Pressable
                         accessibilityRole="button"
                         accessibilityLabel={`${t('dialogs.accounts.reconnect')}: ${account.display_name}`}
-                        onPress={() => startRepair(account)}
+                        onPress={() =>
+                          oauth ? void reconnectOauth(account) : startRepair(account)
+                        }
                         style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
                       >
                         <Text style={styles.smallButtonText}>

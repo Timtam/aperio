@@ -18,6 +18,7 @@ import {
   OAUTH_PLUGIN_IDS,
   beginOauth,
   completeOauth,
+  completeOauthReconnect,
 } from './accounts';
 import { SYNC_OAUTH_PLUGIN_IDS, completeSyncOauth } from './sync';
 
@@ -116,6 +117,72 @@ export async function connectOAuthAccount(
     redirect_uri: OAUTH_REDIRECT_URI,
   });
   return { kind: 'connected', account };
+}
+
+/** Re-run OAuth for an EXISTING account whose token expired / was lost. Reads the
+ *  persisted client_id / client_secret / authority off the account row, runs the
+ *  same begin → native auth session → exchange dance, and writes fresh tokens
+ *  under the existing account id (keeping its row + downstream references). A
+ *  browser dismiss / declined consent is `cancelled`, not an error. */
+export async function reconnectOAuthAccount(
+  account: Account,
+): Promise<OAuthConnectResult> {
+  const provider: OAuthProvider =
+    account.adapter_kind === 'microsoft_graph' ? 'microsoft_graph' : 'google';
+  const pluginId = OAUTH_PLUGIN_IDS[provider];
+  const isMicrosoft = provider === 'microsoft_graph';
+  // The non-secret OAuth config the account was created with.
+  const config = JSON.parse(account.config_json || '{}') as {
+    client_id?: string;
+    client_secret?: string;
+    authority?: string;
+  };
+  const clientId = config.client_id ?? '';
+  const authority = config.authority ?? 'common';
+
+  const beginArgs: Record<string, string> = {
+    client_id: clientId,
+    redirect_uri: OAUTH_REDIRECT_URI,
+  };
+  if (isMicrosoft) beginArgs.authority = authority;
+  const authz = await beginOauth(pluginId, beginArgs);
+
+  const result = await WebBrowser.openAuthSessionAsync(
+    authz.authorize_url,
+    OAUTH_REDIRECT_URI,
+  );
+  if (result.type !== 'success') {
+    return { kind: 'cancelled' };
+  }
+
+  const params = Linking.parse(result.url).queryParams ?? {};
+  const errorParam = firstString(params.error);
+  if (errorParam != null) {
+    if (errorParam === 'access_denied' || errorParam === 'user_cancelled') {
+      return { kind: 'cancelled' };
+    }
+    throw new Error(errorParam);
+  }
+  const code = firstString(params.code);
+  const returnedState = firstString(params.state) ?? '';
+  if (code == null || code.length === 0) {
+    throw new Error('OAUTH_NO_CODE');
+  }
+
+  const account2 = await completeOauthReconnect(pluginId, account.id, {
+    adapter_kind: account.adapter_kind,
+    display_name: account.display_name,
+    config_json: account.config_json,
+    client_id: clientId,
+    client_secret: isMicrosoft ? null : (config.client_secret ?? ''),
+    authority: isMicrosoft ? authority : null,
+    code,
+    pkce_verifier: authz.pkce_verifier,
+    state: authz.state,
+    returned_state: returnedState,
+    redirect_uri: OAUTH_REDIRECT_URI,
+  });
+  return { kind: 'connected', account: account2 };
 }
 
 // ── Sync-target OAuth (Dropbox / Google Drive) ───────────────────────────────
