@@ -17,8 +17,10 @@ import { Calendar, deleteCalendar, listCalendars } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
 import { renameContainer, setContainerColorLabel } from '../api/containerColor';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
+import { RemindersEditor } from '../components/RemindersEditor';
 import { SoundSelect } from '../components/SoundSelect';
 import type { RootStackScreenProps } from '../navigation/types';
+import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
 import { useSoundPref } from '../state/useSoundPref';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -54,6 +56,11 @@ export default function CalendarEditorModal({
   // inheritable. Offered for every calendar (local + external) since the sound
   // pref applies to any container's reminders.
   const sound = useSoundPref(`sound.calendar.${calendarId}`);
+  // Per-calendar default reminders (§ iOS "Default Alert Times" parity): applied
+  // at notification time to events in this calendar that carry no own reminder.
+  // The Host's reminder computation already reads this pref, so it genuinely
+  // fires. Offered for every calendar (the iCloud display-fill is its use case).
+  const defaultReminders = useCalendarDefaultReminders(calendarId);
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
@@ -251,6 +258,21 @@ export default function CalendarEditorModal({
         />
       )}
 
+      {/* Per-calendar default reminders — applied to events without their own
+          reminder (the iCloud "Default Alert Times" case). */}
+      {!defaultReminders.loading && (
+        <View style={styles.field}>
+          <Text style={styles.hint} accessibilityRole="text">
+            {t('dialogs.settings.calendars.hint')}
+          </Text>
+          <RemindersEditor
+            mode="event"
+            value={defaultReminders.value}
+            onChange={defaultReminders.save}
+          />
+        </View>
+      )}
+
       {/* Delete (its events cascade away) — local calendars only; an external
           calendar is provider-owned, so it can't be deleted from here. */}
       {isLocal && (
@@ -277,6 +299,8 @@ const makeStyles = (c: ThemeColors) =>
     content: { padding: 16, gap: 16 },
     title: { fontSize: 22, fontWeight: '700', color: c.textPrimary },
     heading: { fontSize: 17, fontWeight: '700', color: c.textLabel },
+    field: { gap: 6 },
+    hint: { fontSize: 13, color: c.textSecondary },
     error: { fontSize: 15, fontWeight: '600', color: c.danger },
     muted: { fontSize: 15, color: c.textSecondary, padding: 16 },
     addRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
