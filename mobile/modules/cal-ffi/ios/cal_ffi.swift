@@ -1287,6 +1287,16 @@ public protocol HostProtocol: AnyObject, Sendable {
     func pushNow(trigger: String) throws  -> UInt32
     
     /**
+     * Attendee free/busy over `[range_start, range_end]` for the account owning
+     * the request's `calendar_id`, as a JSON `FreeBusy[]` (`{email, slots:
+     * [{start, end}]}`). Best-effort + non-blocking on failure: a LOCAL
+     * calendar, an unroutable account, or a provider that can't answer (no
+     * scheduling / permission denied) returns `[]` — the UI reads that as
+     * "free/unknown" rather than an error. Mirrors the desktop `query_free_busy`.
+     */
+    func queryFreeBusyJson(requestJson: String) throws  -> String
+    
+    /**
      * Kick an immediate warm pass over every external account's containers +
      * in-window events (the manual "refresh now"). Fire-and-forget on the Host
      * worker thread; per-container `cache_updated` + the `refresh_status`
@@ -2552,6 +2562,23 @@ open func pushNow(trigger: String)throws  -> UInt32  {
     uniffi_cal_ffi_fn_method_host_push_now(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(trigger),$0
+    )
+})
+}
+    
+    /**
+     * Attendee free/busy over `[range_start, range_end]` for the account owning
+     * the request's `calendar_id`, as a JSON `FreeBusy[]` (`{email, slots:
+     * [{start, end}]}`). Best-effort + non-blocking on failure: a LOCAL
+     * calendar, an unroutable account, or a provider that can't answer (no
+     * scheduling / permission denied) returns `[]` — the UI reads that as
+     * "free/unknown" rather than an error. Mirrors the desktop `query_free_busy`.
+     */
+open func queryFreeBusyJson(requestJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_query_free_busy_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(requestJson),$0
     )
 })
 }
@@ -6602,6 +6629,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_push_now() != 4483) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_query_free_busy_json() != 44096) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_refresh_external_cache() != 5904) {

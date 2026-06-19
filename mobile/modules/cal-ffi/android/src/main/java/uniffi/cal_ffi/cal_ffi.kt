@@ -862,6 +862,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_push_now(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_query_free_busy_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_refresh_external_cache(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_rename_account_json(
@@ -1140,6 +1142,8 @@ external fun uniffi_cal_ffi_fn_method_host_preview_sync_target_json(`ptr`: Long,
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_push_now(`ptr`: Long,`trigger`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
+external fun uniffi_cal_ffi_fn_method_host_query_free_busy_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_refresh_external_cache(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_rename_account_json(`ptr`: Long,`id`: RustBuffer.ByValue,`newName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1590,6 +1594,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_push_now() != 4483.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_query_free_busy_json() != 44096.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_refresh_external_cache() != 5904.toShort()) {
@@ -3009,6 +3016,16 @@ public interface HostInterface {
      * for the background flush — unknown ⇒ `kick`).
      */
     fun `pushNow`(`trigger`: kotlin.String): kotlin.UInt
+    
+    /**
+     * Attendee free/busy over `[range_start, range_end]` for the account owning
+     * the request's `calendar_id`, as a JSON `FreeBusy[]` (`{email, slots:
+     * [{start, end}]}`). Best-effort + non-blocking on failure: a LOCAL
+     * calendar, an unroutable account, or a provider that can't answer (no
+     * scheduling / permission denied) returns `[]` — the UI reads that as
+     * "free/unknown" rather than an error. Mirrors the desktop `query_free_busy`.
+     */
+    fun `queryFreeBusyJson`(`requestJson`: kotlin.String): kotlin.String
     
     /**
      * Kick an immediate warm pass over every external account's containers +
@@ -4552,6 +4569,28 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_push_now(
         it,
         FfiConverterString.lower(`trigger`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Attendee free/busy over `[range_start, range_end]` for the account owning
+     * the request's `calendar_id`, as a JSON `FreeBusy[]` (`{email, slots:
+     * [{start, end}]}`). Best-effort + non-blocking on failure: a LOCAL
+     * calendar, an unroutable account, or a provider that can't answer (no
+     * scheduling / permission denied) returns `[]` — the UI reads that as
+     * "free/unknown" rather than an error. Mirrors the desktop `query_free_busy`.
+     */
+    @Throws(StoreException::class)override fun `queryFreeBusyJson`(`requestJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_query_free_busy_json(
+        it,
+        FfiConverterString.lower(`requestJson`),_status)
 }
     }
     )

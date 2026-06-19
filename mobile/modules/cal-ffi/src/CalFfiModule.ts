@@ -118,6 +118,10 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  lookup: a LOCAL calendar (or null) reads the stored row; an EXTERNAL one
    *  reads from the SWR snapshot cache (the adapter has no by-id fetch). */
   getEventByIdJson(id: string, calendarId: string | null): Promise<string>;
+  /** Attendee free/busy over a window for the account owning the request's
+   *  calendar, as a JSON `FreeBusy[]`. `{calendar_id, emails, range_start,
+   *  range_end}`; best-effort → `[]` for local/unroutable/can't-answer. */
+  queryFreeBusyJson(requestJson: string): Promise<string>;
   /** Create an event from `{calendar_id, …NewEvent}`; returns the created
    *  `Event` as JSON. */
   createEventJson(requestJson: string): Promise<string>;

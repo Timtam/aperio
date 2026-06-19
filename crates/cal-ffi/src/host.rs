@@ -489,6 +489,16 @@ struct EventRangeRequest {
     end: chrono::DateTime<chrono::Utc>,
 }
 
+/// Free/busy lookup request — the desktop `query_free_busy` payload.
+/// `range_start`/`range_end` are RFC-3339 UTC instants.
+#[derive(serde::Deserialize)]
+struct FreeBusyRequest {
+    calendar_id: String,
+    emails: Vec<String>,
+    range_start: chrono::DateTime<chrono::Utc>,
+    range_end: chrono::DateTime<chrono::Utc>,
+}
+
 /// Create-event request — the target calendar plus a flattened `NewEvent`
 /// (the desktop `create_event` payload shape).
 #[derive(serde::Deserialize)]
@@ -4492,6 +4502,26 @@ impl Host {
             .map_err(map_store_err)?;
         self.invalidate_events_cache(&calendar_id);
         Ok(())
+    }
+
+    /// Attendee free/busy over `[range_start, range_end]` for the account owning
+    /// the request's `calendar_id`, as a JSON `FreeBusy[]` (`{email, slots:
+    /// [{start, end}]}`). Best-effort + non-blocking on failure: a LOCAL
+    /// calendar, an unroutable account, or a provider that can't answer (no
+    /// scheduling / permission denied) returns `[]` — the UI reads that as
+    /// "free/unknown" rather than an error. Mirrors the desktop `query_free_busy`.
+    pub fn query_free_busy_json(&self, request_json: String) -> Result<String, StoreError> {
+        let req: FreeBusyRequest = from_json("request", &request_json)?;
+        let Some(ext) = self.route(&req.calendar_id).ok().flatten() else {
+            return to_json(&Vec::<cal_core::FreeBusy>::new());
+        };
+        let range = DateRange::new(req.range_start, req.range_end);
+        let refs: Vec<&str> = req.emails.iter().map(String::as_str).collect();
+        let fb = self
+            .runtime
+            .block_on(async { ext.get_free_busy(&refs, range).await })
+            .unwrap_or_default();
+        to_json(&fb)
     }
 
     /// Users assignable to a task in `list_id` — its collaborator pool (§9.7),

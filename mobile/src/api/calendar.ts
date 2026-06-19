@@ -231,3 +231,37 @@ export const respondToEvent = async (
 ): Promise<void> => {
   await CalFfi.respondToEvent(calendarId, eventId, status, sendResponse);
 };
+
+/** One attendee's busy blocks within the queried window (the cal_core `FreeBusy`
+ *  wire shape). An empty `slots` array means "no known conflicts" (or the
+ *  provider couldn't answer). */
+export interface FreeBusySlot {
+  /** RFC-3339 UTC instant. */
+  start: string;
+  end: string;
+}
+export interface FreeBusy {
+  email: string;
+  slots: FreeBusySlot[];
+}
+
+/** Attendee availability for `emails` over `[rangeStart, rangeEnd]` (RFC-3339)
+ *  through the account that owns `calendarId`. Best-effort: returns `[]` for a
+ *  local calendar or a provider that can't answer (no error), which the UI reads
+ *  as "free/unknown". */
+export const queryFreeBusy = async (
+  calendarId: string,
+  emails: string[],
+  rangeStart: string,
+  rangeEnd: string,
+): Promise<FreeBusy[]> =>
+  JSON.parse(
+    await CalFfi.queryFreeBusyJson(
+      JSON.stringify({
+        calendar_id: calendarId,
+        emails,
+        range_start: rangeStart,
+        range_end: rangeEnd,
+      }),
+    ),
+  ) as FreeBusy[];

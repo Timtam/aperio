@@ -14,6 +14,7 @@ import {
 import type { ColorLabel, Reminder } from '@aperio/shared';
 
 import { AttendeesEditor } from '../components/AttendeesEditor';
+import { AvailabilityChecker } from '../components/AvailabilityChecker';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { DescriptionLinks } from '../components/DescriptionLinks';
 import { EventRsvp } from '../components/EventRsvp';
@@ -595,6 +596,20 @@ export default function EventEditorModal({
           (calendars.find((c) => c.id === calId)?.supports_scheduling ?? false)
         }
       />
+
+      {/* Free/busy — attendee availability over the entered window. Shown only
+          when there are attendees AND the target calendar advertises scheduling
+          (a local calendar / non-scheduling provider returns no slots anyway).
+          The window honours the all-day end-exclusive convention. */}
+      {attendees.length > 0 &&
+        (calendars.find((c) => c.id === calId)?.supports_scheduling ?? false) && (
+          <AvailabilityChecker
+            calendarId={calId}
+            attendees={attendees}
+            start={localToIso(startDate, allDay ? '00:00' : startTime)}
+            end={allDay ? allDayWireEnd(endDate) : localToIso(endDate, endTime)}
+          />
+        )}
 
       {/* RSVP — only meaningful for an existing meeting that carries per-attendee
           response data (external, scheduling-capable providers); renders nothing
