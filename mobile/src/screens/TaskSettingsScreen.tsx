@@ -126,6 +126,7 @@ export default function TaskSettingsScreen() {
       <View style={styles.section}>
         <RadioGroup<CheckoffMode>
           label={t('dialogs.tasks.checkoffMode.heading')}
+          labelAsHeading
           value={checkoffMode}
           options={[
             { value: 'toggle', label: t('dialogs.tasks.checkoffMode.options.toggle') },
@@ -169,6 +170,7 @@ export default function TaskSettingsScreen() {
       <View style={styles.section}>
         <RadioGroup<CarryOverDefault>
           label={t('dialogs.tasks.carryOverDefault.heading')}
+          labelAsHeading
           value={carryOver}
           options={[
             { value: 'ask', label: t('dialogs.tasks.carryOverDefault.options.ask') },
@@ -185,6 +187,7 @@ export default function TaskSettingsScreen() {
       <View style={styles.section}>
         <RadioGroup<DayStartTrigger>
           label={t('dialogs.tasks.dayStartTrigger.heading')}
+          labelAsHeading
           value={dayStart}
           options={[
             { value: '00:00', label: t('dialogs.tasks.dayStartTrigger.options.midnight') },

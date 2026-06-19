@@ -26,6 +26,7 @@ import CalendarEditorModal from './screens/CalendarEditorModal';
 import CalendarsScreen from './screens/CalendarsScreen';
 import EventEditorModal from './screens/EventEditorModal';
 import EventsScreen from './screens/EventsScreen';
+import GeneralSettingsScreen from './screens/GeneralSettingsScreen';
 import ListEditorModal from './screens/ListEditorModal';
 import ListsScreen from './screens/ListsScreen';
 import LogsScreen from './screens/LogsScreen';
@@ -202,6 +203,11 @@ function SettingsStackNav() {
         name="Settings"
         component={SettingsScreen}
         options={{ title: t('dialogs.settings.title') }}
+      />
+      <SettingsStack.Screen
+        name="General"
+        component={GeneralSettingsScreen}
+        options={{ title: t('dialogs.settings.tabs.general') }}
       />
       <SettingsStack.Screen
         name="Accounts"

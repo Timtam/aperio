@@ -62,6 +62,9 @@ export type RootStackParamList = {
   CalendarEditor: { calendarId: string };
   Sync: undefined;
   Settings: undefined;
+  // General app config (language / first day of week / default reminder sound) —
+  // the desktop Settings "General" tab, pushed from the Settings hub.
+  General: undefined;
   TaskSettings: undefined;
   ColorLabels: undefined;
   // Diagnostics: the rolling log — detail level, recent lines, redacted export.

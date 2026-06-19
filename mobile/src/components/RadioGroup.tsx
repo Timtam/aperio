@@ -23,17 +23,24 @@ export function RadioGroup<T extends string | number>({
   options,
   onChange,
   disabled,
+  labelAsHeading,
 }: {
   label: string;
   value: T;
   options: RadioOption<T>[];
   onChange: (value: T) => void;
   disabled?: boolean;
+  /** Expose the legend as an accessibility heading, so screen-reader heading
+   *  navigation reaches section-level pickers (the Settings groups). Off by
+   *  default — inline pickers (status/priority/list/section) are not headers. */
+  labelAsHeading?: boolean;
 }) {
   const styles = useThemedStyles(makeStyles);
   return (
     <View accessibilityRole="radiogroup" accessibilityLabel={label} style={styles.group}>
-      <Text style={styles.legend}>{label}</Text>
+      <Text style={styles.legend} accessibilityRole={labelAsHeading ? 'header' : undefined}>
+        {label}
+      </Text>
       {options.map((opt) => {
         const selected = opt.value === value;
         return (
