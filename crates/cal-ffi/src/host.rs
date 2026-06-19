@@ -2392,12 +2392,73 @@ impl Host {
         }
     }
 
-    /// One local event by id as JSON (`Event` or `null`). Local-only by design
-    /// — the desktop `get_event_by_id` is the reminders-overview lookup against
-    /// the local store; external events aren't addressable by a bare id without
-    /// their calendar.
-    pub fn get_event_by_id_json(&self, id: String) -> Result<String, StoreError> {
-        let event = self.adapter.get_event_by_id(&id).map_err(map_store_err)?;
+    /// One event by id as JSON (`Event` or `null`). `calendar_id` routes the
+    /// lookup: a LOCAL calendar (or an absent/unknown id) reads the stored row;
+    /// an EXTERNAL one — which has no by-id adapter fetch — is resolved from the
+    /// SWR snapshot cache by account. Passing the owning calendar is what lets
+    /// the editor open an external event (the local store has no row for it).
+    pub fn get_event_by_id_json(
+        &self,
+        id: String,
+        calendar_id: Option<String>,
+    ) -> Result<String, StoreError> {
+        // Route by the owning calendar when the caller knows it. A LOCAL calendar
+        // (or an absent/unknown calendar_id) reads the stored row directly. An
+        // EXTERNAL calendar has no by-id adapter fetch (CalendarFeature exposes
+        // none), so look the event up in the SWR snapshot cache — warm after the
+        // list read that necessarily preceded this edit. THIS is what lets the
+        // editor open an external event at all: without it the lookup was
+        // local-only, so an external event opened EMPTY and a save then created a
+        // duplicate. A cold cache (rare: a deep-link before any list read) falls
+        // back to `null`, exactly as before. `id` is the series master id (the
+        // editor passes seriesIdOf), which is what the cache stores (un-expanded).
+        // Gate on locality (not `route`, which would Err on a non-live external
+        // adapter): the cache read needs only the resolved ACCOUNT, so an
+        // external event resolves even when its adapter isn't currently live. An
+        // unknown id (route map not yet primed) degrades to the local lookup →
+        // `null`, exactly as before.
+        let local = match &calendar_id {
+            Some(cid) => self.is_local_calendar(cid),
+            None => true,
+        };
+        let event = if local {
+            self.adapter.get_event_by_id(&id).map_err(map_store_err)?
+        } else {
+            let cid = calendar_id.as_deref().unwrap_or_default();
+            let account = self
+                .registry
+                .account_for_calendar(cid)
+                .unwrap_or_else(|| LOCAL_ID.to_string());
+            // No range on a by-id lookup → scan the whole cached window. The
+            // 4-digit-year bounds keep the cache's lexicographic RFC-3339
+            // comparison valid (chrono's `+`/`-` year prefixes for MIN/MAX_UTC
+            // would not sort against stored timestamps).
+            let whole = DateRange::new(
+                "0001-01-01T00:00:00Z"
+                    .parse()
+                    .expect("valid lower wide-range bound"),
+                "9999-12-31T23:59:59Z"
+                    .parse()
+                    .expect("valid upper wide-range bound"),
+            );
+            let mut events = self
+                .cache
+                .read_events(&account, cid, whole)
+                .unwrap_or_default();
+            // Resolve colour the same way the list read does (native
+            // color_hex → label, then host-local overrides) so the editor's
+            // colour picker seeds the effective value.
+            for ev in events.iter_mut() {
+                if let Some(hex) = ev.color_hex.clone() {
+                    if let Ok(Some(label)) = self.adapter.match_hex_to_label(&hex) {
+                        ev.color_label = Some(ColorLabelId(label));
+                    }
+                }
+            }
+            let shared = self.db.shared();
+            apply_color_to_events(&OverridesRepo::new(&shared), &mut events);
+            events.into_iter().find(|e| e.id == id)
+        };
         to_json(&event)
     }
 
@@ -6205,7 +6266,7 @@ mod tests {
             .unwrap();
 
         let refreshed: serde_json::Value =
-            serde_json::from_str(&host.get_event_by_id_json(id).unwrap()).unwrap();
+            serde_json::from_str(&host.get_event_by_id_json(id, None).unwrap()).unwrap();
         assert_eq!(
             refreshed["recurrence"]["exceptions"]
                 .as_array()
@@ -6353,7 +6414,7 @@ mod tests {
 
         // get_event_by_id returns Some(event).
         let one: serde_json::Value =
-            serde_json::from_str(&host.get_event_by_id_json(id.clone()).unwrap()).unwrap();
+            serde_json::from_str(&host.get_event_by_id_json(id.clone(), None).unwrap()).unwrap();
         assert_eq!(one["id"], serde_json::json!(id));
     }
 
@@ -6371,7 +6432,7 @@ mod tests {
         );
         let id = event["id"].as_str().unwrap().to_string();
         let reread: serde_json::Value =
-            serde_json::from_str(&host.get_event_by_id_json(id).unwrap()).unwrap();
+            serde_json::from_str(&host.get_event_by_id_json(id, None).unwrap()).unwrap();
         assert_eq!(reread["title"], "New");
     }
 
@@ -6427,7 +6488,7 @@ mod tests {
         host.update_event_json(event.to_string(), Some(cal.clone()))
             .unwrap();
         let reread: serde_json::Value =
-            serde_json::from_str(&host.get_event_by_id_json(id).unwrap()).unwrap();
+            serde_json::from_str(&host.get_event_by_id_json(id, None).unwrap()).unwrap();
         assert_eq!(reread["title"], "Renamed");
     }
 
@@ -6444,7 +6505,7 @@ mod tests {
             .to_string();
         host.delete_event(id.clone(), Some(cal), None).unwrap();
         // get_event_by_id → JSON null after deletion.
-        assert_eq!(host.get_event_by_id_json(id).unwrap().trim(), "null");
+        assert_eq!(host.get_event_by_id_json(id, None).unwrap().trim(), "null");
     }
 
     #[test]

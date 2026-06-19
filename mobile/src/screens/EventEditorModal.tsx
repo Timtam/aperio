@@ -161,7 +161,10 @@ export default function EventEditorModal({
         setCalendars(cals);
         setColorLabels(labels);
         if (editing && eventId != null) {
-          const ev = await getEventById(eventId);
+          // Pass the route's calendarId so an EXTERNAL event resolves via the
+          // SWR cache (the local store has no row for it) — otherwise the editor
+          // opens empty + a save would duplicate it.
+          const ev = await getEventById(eventId, calendarId);
           if (ev != null) {
             setOriginal(ev);
             setTitle(ev.title);
@@ -220,7 +223,7 @@ export default function EventEditorModal({
         setLoading(false);
       }
     })();
-  }, [editing, eventId, occurrence, t]);
+  }, [editing, eventId, calendarId, occurrence, t]);
 
   const save = useCallback(async () => {
     const trimmedTitle = title.trim();

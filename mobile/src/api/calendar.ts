@@ -138,9 +138,15 @@ export const getEvents = async (
 ): Promise<CalendarEvent[]> =>
   JSON.parse(await CalFfi.getEventsJson(JSON.stringify(request))) as CalendarEvent[];
 
-/** One event by id; `null` when absent (the Host returns JSON `null`). */
-export const getEventById = async (id: string): Promise<CalendarEvent | null> =>
-  JSON.parse(await CalFfi.getEventByIdJson(id)) as CalendarEvent | null;
+/** One event by id; `null` when absent (the Host returns JSON `null`). Pass the
+ *  owning `calendarId` so an EXTERNAL event resolves via the SWR cache — the
+ *  local store has no row for it, so without the route the editor would open
+ *  empty (and a save would create a duplicate). Omit/null for a local event. */
+export const getEventById = async (
+  id: string,
+  calendarId: string | null = null,
+): Promise<CalendarEvent | null> =>
+  JSON.parse(await CalFfi.getEventByIdJson(id, calendarId)) as CalendarEvent | null;
 
 /** Create an event. `request` is the target calendar plus the NewEvent fields
  *  flattened — the desktop create_event payload shape. */

@@ -1114,7 +1114,7 @@ external fun uniffi_cal_ffi_fn_method_host_get_cache_refresh_status_json(`ptr`: 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_get_contact_photo_json(`ptr`: Long,`id`: RustBuffer.ByValue,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-external fun uniffi_cal_ffi_fn_method_host_get_event_by_id_json(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_cal_ffi_fn_method_host_get_event_by_id_json(`ptr`: Long,`id`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_get_events_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1553,7 +1553,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_get_contact_photo_json() != 13811.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_get_event_by_id_json() != 43277.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_get_event_by_id_json() != 41217.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_get_events_json() != 18958.toShort()) {
@@ -2896,12 +2896,13 @@ public interface HostInterface {
     fun `getContactPhotoJson`(`id`: kotlin.String, `listId`: kotlin.String?): kotlin.String
     
     /**
-     * One local event by id as JSON (`Event` or `null`). Local-only by design
-     * — the desktop `get_event_by_id` is the reminders-overview lookup against
-     * the local store; external events aren't addressable by a bare id without
-     * their calendar.
+     * One event by id as JSON (`Event` or `null`). `calendar_id` routes the
+     * lookup: a LOCAL calendar (or an absent/unknown id) reads the stored row;
+     * an EXTERNAL one — which has no by-id adapter fetch — is resolved from the
+     * SWR snapshot cache by account. Passing the owning calendar is what lets
+     * the editor open an external event (the local store has no row for it).
      */
-    fun `getEventByIdJson`(`id`: kotlin.String): kotlin.String
+    fun `getEventByIdJson`(`id`: kotlin.String, `calendarId`: kotlin.String?): kotlin.String
     
     /**
      * Events in `calendar_id` overlapping `[start, end]`, as a JSON `Event[]`.
@@ -4288,18 +4289,19 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
-     * One local event by id as JSON (`Event` or `null`). Local-only by design
-     * — the desktop `get_event_by_id` is the reminders-overview lookup against
-     * the local store; external events aren't addressable by a bare id without
-     * their calendar.
+     * One event by id as JSON (`Event` or `null`). `calendar_id` routes the
+     * lookup: a LOCAL calendar (or an absent/unknown id) reads the stored row;
+     * an EXTERNAL one — which has no by-id adapter fetch — is resolved from the
+     * SWR snapshot cache by account. Passing the owning calendar is what lets
+     * the editor open an external event (the local store has no row for it).
      */
-    @Throws(StoreException::class)override fun `getEventByIdJson`(`id`: kotlin.String): kotlin.String {
+    @Throws(StoreException::class)override fun `getEventByIdJson`(`id`: kotlin.String, `calendarId`: kotlin.String?): kotlin.String {
             return FfiConverterString.lift(
     callWithHandle {
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_method_host_get_event_by_id_json(
         it,
-        FfiConverterString.lower(`id`),_status)
+        FfiConverterString.lower(`id`),FfiConverterOptionalString.lower(`calendarId`),_status)
 }
     }
     )

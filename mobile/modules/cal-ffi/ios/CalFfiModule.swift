@@ -160,8 +160,8 @@ public class CalFfiModule: Module {
       try self.host.getEventsJson(requestJson: requestJson)
     }
 
-    AsyncFunction("getEventByIdJson") { (id: String) -> String in
-      try self.host.getEventByIdJson(id: id)
+    AsyncFunction("getEventByIdJson") { (id: String, calendarId: String?) -> String in
+      try self.host.getEventByIdJson(id: id, calendarId: calendarId)
     }
 
     AsyncFunction("createEventJson") { (requestJson: String) -> String in

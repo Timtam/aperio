@@ -114,8 +114,10 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** Events overlapping a range, from `{calendar_id, start, end}` (RFC-3339);
    *  returns a JSON `Event[]`. */
   getEventsJson(requestJson: string): Promise<string>;
-  /** One local event by id as JSON (`Event` or `null`). */
-  getEventByIdJson(id: string): Promise<string>;
+  /** One event by id as JSON (`Event` or `null`). `calendarId` routes the
+   *  lookup: a LOCAL calendar (or null) reads the stored row; an EXTERNAL one
+   *  reads from the SWR snapshot cache (the adapter has no by-id fetch). */
+  getEventByIdJson(id: string, calendarId: string | null): Promise<string>;
   /** Create an event from `{calendar_id, …NewEvent}`; returns the created
    *  `Event` as JSON. */
   createEventJson(requestJson: string): Promise<string>;

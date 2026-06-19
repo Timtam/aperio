@@ -1172,12 +1172,13 @@ public protocol HostProtocol: AnyObject, Sendable {
     func getContactPhotoJson(id: String, listId: String?) throws  -> String
     
     /**
-     * One local event by id as JSON (`Event` or `null`). Local-only by design
-     * — the desktop `get_event_by_id` is the reminders-overview lookup against
-     * the local store; external events aren't addressable by a bare id without
-     * their calendar.
+     * One event by id as JSON (`Event` or `null`). `calendar_id` routes the
+     * lookup: a LOCAL calendar (or an absent/unknown id) reads the stored row;
+     * an EXTERNAL one — which has no by-id adapter fetch — is resolved from the
+     * SWR snapshot cache by account. Passing the owning calendar is what lets
+     * the editor open an external event (the local store has no row for it).
      */
-    func getEventByIdJson(id: String) throws  -> String
+    func getEventByIdJson(id: String, calendarId: String?) throws  -> String
     
     /**
      * Events in `calendar_id` overlapping `[start, end]`, as a JSON `Event[]`.
@@ -2353,16 +2354,18 @@ open func getContactPhotoJson(id: String, listId: String?)throws  -> String  {
 }
     
     /**
-     * One local event by id as JSON (`Event` or `null`). Local-only by design
-     * — the desktop `get_event_by_id` is the reminders-overview lookup against
-     * the local store; external events aren't addressable by a bare id without
-     * their calendar.
+     * One event by id as JSON (`Event` or `null`). `calendar_id` routes the
+     * lookup: a LOCAL calendar (or an absent/unknown id) reads the stored row;
+     * an EXTERNAL one — which has no by-id adapter fetch — is resolved from the
+     * SWR snapshot cache by account. Passing the owning calendar is what lets
+     * the editor open an external event (the local store has no row for it).
      */
-open func getEventByIdJson(id: String)throws  -> String  {
+open func getEventByIdJson(id: String, calendarId: String?)throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_get_event_by_id_json(
             self.uniffiCloneHandle(),
-        FfiConverterString.lower(id),$0
+        FfiConverterString.lower(id),
+        FfiConverterOptionString.lower(calendarId),$0
     )
 })
 }
@@ -6562,7 +6565,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_get_contact_photo_json() != 13811) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_get_event_by_id_json() != 43277) {
+    if (uniffi_cal_ffi_checksum_method_host_get_event_by_id_json() != 41217) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_get_events_json() != 18958) {
