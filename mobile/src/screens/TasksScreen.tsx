@@ -31,6 +31,7 @@ import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
 import { describeDue } from '../intl/describeDue';
 import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
 import { useTaskStore } from '../state/taskStoreContext';
+import { surfaceTaskNow } from '../state/moveActions';
 import { applyTaskToggle, recomputeAncestors, statusAnnounce } from '../state/taskToggle';
 import { useTasks } from '../state/useTasks';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -202,6 +203,21 @@ export default function TasksScreen({
     [navigation],
   );
 
+  // Bring a deferred task back into the active backlog now (clears its future
+  // resurface date) — the desktop's "Ins Backlog holen" chip action.
+  const surfaceNow = useCallback(
+    async (task: Task) => {
+      try {
+        await surfaceTaskNow(task);
+        invalidateData();
+        announce(t('chipMenu.broughtToBacklog', { title: task.title }));
+      } catch (err) {
+        announce(t('mobile.error', { message: errorMessage(err) }));
+      }
+    },
+    [announce, invalidateData, t],
+  );
+
   const newTask = useCallback(() => {
     // No list at all → send the user to create one first. Otherwise open the
     // quick-add (it resolves its own default list — last-used, else first
@@ -367,6 +383,9 @@ export default function TasksScreen({
         case 'moveCopy':
           openMoveCopy(task);
           break;
+        case 'surface':
+          void surfaceNow(task);
+          break;
         case 'addSubtask':
           addSubtask(task);
           break;
@@ -381,6 +400,7 @@ export default function TasksScreen({
       openEditor,
       openPlan,
       openMoveCopy,
+      surfaceNow,
       removeTask,
       toggleCollapsed,
       toggleDone,
@@ -450,6 +470,11 @@ export default function TasksScreen({
       { name: 'plan', label: t('mobile.plan') },
       { name: 'moveCopy', label: t('mobile.moveCopy') },
     ];
+    // "Bring to backlog" — only for a deferred task (a future resurface date);
+    // clearing it pulls the task back into the active backlog now.
+    if (task.resurface_date != null) {
+      actions.push({ name: 'surface', label: t('chipMenu.bringToBacklog') });
+    }
     // Subtasks ride parent_id on the local store; offer "Add subtask" only for
     // local lists (external subtask support is provider-dependent — deferred).
     if (taskListById.get(task.list_id)?.account_id === 'local') {

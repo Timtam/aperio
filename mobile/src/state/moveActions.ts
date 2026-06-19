@@ -19,6 +19,16 @@ export type MoveCopyMode = 'move' | 'copy';
 export type MoveCopyScope = 'occurrence' | 'series';
 
 /**
+ * Pull a deferred task into the active backlog now by clearing its
+ * `resurface_date` (DESIGN §9.12) — the mobile twin of the desktop's "Bring to
+ * backlog" chip action. The existing update bridge writes `resurface_date`
+ * verbatim, so a null clears it (no dedicated bridge needed).
+ */
+export async function surfaceTaskNow(task: Task): Promise<Task> {
+  return updateTask({ ...task, resurface_date: null });
+}
+
+/**
  * Move a task (and its direct children) to a different list. Passes the previous
  * `list_id` as the cross-adapter move hint (local stays a single UPDATE;
  * external adapters reroute as create-on-target + delete-from-source, which
