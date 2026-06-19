@@ -13,6 +13,7 @@ import { CalendarDayList } from '../components/CalendarDayList';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { readWeekStart, type WeekStart } from '../settings/weekStart';
 import type { RootStackScreenProps } from '../navigation/types';
+import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Accessible Week view — the screen-reader-first port of the desktop WeekView.
 // The desktop's 7-column aria-activedescendant grid has no TalkBack/VoiceOver
@@ -57,6 +58,7 @@ function isoWeekNumber(date: Date): number {
 
 export default function WeekScreen({ navigation, route }: RootStackScreenProps<'Week'>) {
   const { t, i18n } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
 
   const [anchor, setAnchor] = useState(() => {
     const seed = route.params?.anchor ? new Date(route.params.anchor) : new Date();
@@ -199,54 +201,55 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#ffffff' },
-  navBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingTop: 12,
-  },
-  rangeHeading: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#10131a',
-    textAlign: 'center',
-  },
-  navButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#f4f7fb',
-  },
-  navButtonText: { fontSize: 26, color: '#10131a', lineHeight: 30 },
-  actionBar: { flexDirection: 'row', gap: 10, padding: 12, alignItems: 'center' },
-  ghostButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-  },
-  ghostButtonText: { fontSize: 16, fontWeight: '600', color: '#1d3a2f' },
-  jumpInput: {
-    flex: 1,
-    fontSize: 16,
-    color: '#10131a',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  error: { fontSize: 15, fontWeight: '600', color: '#b42318', paddingHorizontal: 16 },
-  pressed: { opacity: 0.7 },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.background },
+    navBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingHorizontal: 12,
+      paddingTop: 12,
+    },
+    rangeHeading: {
+      flex: 1,
+      fontSize: 16,
+      fontWeight: '700',
+      color: c.textPrimary,
+      textAlign: 'center',
+    },
+    navButton: {
+      width: 48,
+      height: 48,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: c.surfaceAlt,
+    },
+    navButtonText: { fontSize: 26, color: c.textPrimary, lineHeight: 30 },
+    actionBar: { flexDirection: 'row', gap: 10, padding: 12, alignItems: 'center' },
+    ghostButton: {
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
+    jumpInput: {
+      flex: 1,
+      fontSize: 16,
+      color: c.textPrimary,
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    error: { fontSize: 15, fontWeight: '600', color: c.danger, paddingHorizontal: 16 },
+    pressed: { opacity: 0.7 },
+  });

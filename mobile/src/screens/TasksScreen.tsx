@@ -33,6 +33,7 @@ import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
 import { useTaskStore } from '../state/taskStoreContext';
 import { applyTaskToggle, recomputeAncestors, statusAnnounce } from '../state/taskToggle';
 import { useTasks } from '../state/useTasks';
+import { useThemedStyles, type ThemeColors } from '../theme';
 import type { RootStackScreenProps } from '../navigation/types';
 
 // The grouped tasks tree — a faithful port of the desktop TaskView, adapted to
@@ -53,6 +54,7 @@ export default function TasksScreen({
   navigation,
 }: RootStackScreenProps<'Tasks'>) {
   const { t, i18n } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
   const { tasks, loading, taskListById } = useTasks();
   const {
     selectedTaskListIds,
@@ -560,69 +562,70 @@ function focusTargetAfterRemoving(entries: Entry[], taskId: string): string | nu
   return null;
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#ffffff' },
-  toolbar: {
-    flexDirection: 'row',
-    gap: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  list: { gap: 8, padding: 16 },
-  button: {
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    borderRadius: 10,
-    backgroundColor: '#1d4ed8',
-    alignItems: 'center',
-  },
-  buttonPressed: { backgroundColor: '#1740a8' },
-  buttonText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
-  ghostButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-    alignItems: 'center',
-  },
-  ghostButtonText: { fontSize: 16, fontWeight: '600', color: '#1d3a2f' },
-  center: { alignItems: 'center', gap: 8, paddingVertical: 24 },
-  muted: { fontSize: 15, color: '#5b6573', padding: 16 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 12,
-    paddingRight: 16,
-    borderRadius: 8,
-    backgroundColor: '#eef2f8',
-  },
-  twisty: { fontSize: 16, width: 18, textAlign: 'center', color: '#2b3240' },
-  headerTitle: { flex: 1, fontSize: 16, fontWeight: '700', color: '#10131a' },
-  task: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-  },
-  rowPressed: { backgroundColor: '#e4ebf5' },
-  taskCheck: { fontSize: 20, width: 26, textAlign: 'center', color: '#10131a' },
-  // A small colour dot for the task's bound colour label (sighted users).
-  colorDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.18)',
-  },
-  taskBody: { flex: 1 },
-  taskTitle: { fontSize: 18, color: '#10131a' },
-  taskTitleDone: { textDecorationLine: 'line-through', color: '#5b6573' },
-  taskMeta: { fontSize: 14, color: '#5b6573', marginTop: 2 },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.background },
+    toolbar: {
+      flexDirection: 'row',
+      gap: 10,
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+    },
+    list: { gap: 8, padding: 16 },
+    button: {
+      paddingVertical: 12,
+      paddingHorizontal: 18,
+      borderRadius: 10,
+      backgroundColor: c.accent,
+      alignItems: 'center',
+    },
+    buttonPressed: { backgroundColor: c.accentPressed },
+    buttonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
+    ghostButton: {
+      paddingVertical: 12,
+      paddingHorizontal: 18,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+      alignItems: 'center',
+    },
+    ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
+    center: { alignItems: 'center', gap: 8, paddingVertical: 24 },
+    muted: { fontSize: 15, color: c.textSecondary, padding: 16 },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingVertical: 12,
+      paddingRight: 16,
+      borderRadius: 8,
+      backgroundColor: c.surfaceSubtle,
+    },
+    twisty: { fontSize: 16, width: 18, textAlign: 'center', color: c.textLabel },
+    headerTitle: { flex: 1, fontSize: 16, fontWeight: '700', color: c.textPrimary },
+    task: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      padding: 16,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    rowPressed: { backgroundColor: c.surfacePressed },
+    taskCheck: { fontSize: 20, width: 26, textAlign: 'center', color: c.textPrimary },
+    // A small colour dot for the task's bound colour label (sighted users).
+    colorDot: {
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: c.borderOverlay,
+    },
+    taskBody: { flex: 1 },
+    taskTitle: { fontSize: 18, color: c.textPrimary },
+    taskTitleDone: { textDecorationLine: 'line-through', color: c.textSecondary },
+    taskMeta: { fontSize: 14, color: c.textSecondary, marginTop: 2 },
+  });

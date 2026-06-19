@@ -11,6 +11,7 @@ import {
 } from '@aperio/shared';
 import type { EndMode, Freq, MonthlyOption, ParsedRule } from '@aperio/shared';
 
+import { useThemedStyles, type ThemeColors } from '../theme';
 import { RadioGroup } from './RadioGroup';
 
 // Mobile EVENT recurrence editor — a faithful RN port of the desktop
@@ -55,6 +56,7 @@ export function RecurrenceSelector({
   start?: Date;
 }) {
   const { t, i18n } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
   const startKey = start ? start.toDateString() : '';
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const startDate = useMemo(() => start ?? new Date(), [startKey]);
@@ -284,31 +286,32 @@ function intlMonthName(locale: string, date: Date): string {
   }
 }
 
-const styles = StyleSheet.create({
-  group: { gap: 14 },
-  field: { gap: 6 },
-  label: { fontSize: 15, fontWeight: '600', color: '#2b3240' },
-  input: {
-    fontSize: 17,
-    color: '#10131a',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  weekdayRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  weekday: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  weekdayChecked: { borderColor: '#1d4ed8', backgroundColor: '#eaf0fd' },
-  weekdayText: { fontSize: 15, color: '#10131a' },
-  weekdayTextChecked: { fontWeight: '700', color: '#1d3a2f' },
-  pressed: { backgroundColor: '#e4ebf5' },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    group: { gap: 14 },
+    field: { gap: 6 },
+    label: { fontSize: 15, fontWeight: '600', color: c.textLabel },
+    input: {
+      fontSize: 17,
+      color: c.textPrimary,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    weekdayRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    weekday: {
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    weekdayChecked: { borderColor: c.accent, backgroundColor: c.surfaceSelected },
+    weekdayText: { fontSize: 15, color: c.textPrimary },
+    weekdayTextChecked: { fontWeight: '700', color: c.link },
+    pressed: { backgroundColor: c.surfacePressed },
+  });

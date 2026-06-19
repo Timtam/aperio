@@ -16,6 +16,7 @@ import type { TaskList } from '@aperio/shared';
 
 import { createTaskList } from '../api/client';
 import { useTaskStore } from '../state/taskStoreContext';
+import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Task-list catalog: read the lists, toggle which are shown (the selection Set +
 // reconciler), and create a top-level local list. A "Manage" entry opens the
@@ -32,6 +33,7 @@ export default function ListsScreen() {
   const navigation = useNavigation();
   const { taskLists, selectedTaskListIds, toggleTaskList, refreshTaskLists, colorLabels } =
     useTaskStore();
+  const styles = useThemedStyles(makeStyles);
 
   const [newName, setNewName] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -182,70 +184,71 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#ffffff' },
-  form: { flexDirection: 'row', gap: 10, padding: 16, alignItems: 'center' },
-  input: {
-    flex: 1,
-    fontSize: 17,
-    color: '#10131a',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  button: {
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    borderRadius: 10,
-    backgroundColor: '#1d4ed8',
-    alignItems: 'center',
-  },
-  buttonPressed: { backgroundColor: '#1740a8' },
-  buttonText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
-  list: { gap: 12, padding: 16 },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-  },
-  rowToggle: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 6,
-  },
-  rowPressed: { backgroundColor: '#e4ebf5' },
-  manageButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#ffffff',
-  },
-  manageButtonText: { fontSize: 15, fontWeight: '600', color: '#1d4ed8' },
-  check: { fontSize: 22, width: 26, textAlign: 'center', color: '#10131a' },
-  // The list's bound colour (sighted users); subtle border keeps light colours
-  // visible on the card. Matches the task/event row dot.
-  colorDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.18)',
-  },
-  listName: { flex: 1, fontSize: 18, color: '#10131a' },
-  muted: { fontSize: 15, color: '#5b6573', padding: 16 },
-  error: { fontSize: 15, fontWeight: '600', color: '#b42318', paddingHorizontal: 16 },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.background },
+    form: { flexDirection: 'row', gap: 10, padding: 16, alignItems: 'center' },
+    input: {
+      flex: 1,
+      fontSize: 17,
+      color: c.textPrimary,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    button: {
+      paddingVertical: 12,
+      paddingHorizontal: 18,
+      borderRadius: 10,
+      backgroundColor: c.accent,
+      alignItems: 'center',
+    },
+    buttonPressed: { backgroundColor: c.accentPressed },
+    buttonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
+    list: { gap: 12, padding: 16 },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingVertical: 6,
+      paddingHorizontal: 10,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    rowToggle: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      paddingVertical: 10,
+      paddingHorizontal: 6,
+    },
+    rowPressed: { backgroundColor: c.surfacePressed },
+    manageButton: {
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.background,
+    },
+    manageButtonText: { fontSize: 15, fontWeight: '600', color: c.accent },
+    check: { fontSize: 22, width: 26, textAlign: 'center', color: c.textPrimary },
+    // The list's bound colour (sighted users); subtle border keeps light colours
+    // visible on the card. Matches the task/event row dot.
+    colorDot: {
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: c.borderOverlay,
+    },
+    listName: { flex: 1, fontSize: 18, color: c.textPrimary },
+    muted: { fontSize: 15, color: c.textSecondary, padding: 16 },
+    error: { fontSize: 15, fontWeight: '600', color: c.danger, paddingHorizontal: 16 },
+  });

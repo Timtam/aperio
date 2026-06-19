@@ -19,6 +19,7 @@ import {
   listColorLabels,
   updateColorLabel,
 } from '../api/colorLabels';
+import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Manage the app-wide colour-label palette (§8). Colour labels are named hex
 // colours any event / task / calendar / list can bind to; they live in local
@@ -42,6 +43,7 @@ function errorMessage(err: unknown): string {
 
 export default function ColorLabelsScreen() {
   const { t } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
 
   const [labels, setLabels] = useState<ColorLabel[]>([]);
   const [newName, setNewName] = useState('');
@@ -352,57 +354,58 @@ export default function ColorLabelsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#ffffff' },
-  content: { padding: 16, gap: 12 },
-  heading: { fontSize: 17, fontWeight: '700', color: '#2b3240', marginTop: 8 },
-  label: { fontSize: 15, fontWeight: '600', color: '#2b3240' },
-  error: { fontSize: 15, fontWeight: '600', color: '#b42318' },
-  muted: { fontSize: 15, color: '#5b6573' },
-  field: { gap: 6 },
-  hexRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  hexInput: { flex: 1 },
-  input: {
-    fontSize: 17,
-    color: '#10131a',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  addButton: {
-    paddingVertical: 12,
-    borderRadius: 10,
-    backgroundColor: '#1d4ed8',
-    alignItems: 'center',
-  },
-  addButtonText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
-  labelRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
-  labelInfo: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  labelName: { flex: 1, fontSize: 17, color: '#10131a' },
-  // The exact stored hex, monospace + muted (matches the SyncScreen fingerprint
-  // convention) so a sighted user can read off / compare colours at a glance.
-  hexValue: { fontSize: 14, color: '#5b6573', fontFamily: 'monospace' },
-  // A real colour swatch (a coloured box) for sighted users. The subtle border
-  // keeps white / very light swatches visible on the white background.
-  swatch: {
-    width: 22,
-    height: 22,
-    borderRadius: 5,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.18)',
-  },
-  rowButtons: { flexDirection: 'row', gap: 10 },
-  smallButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-  },
-  smallButtonText: { fontSize: 15, fontWeight: '600', color: '#1d4ed8' },
-  pressed: { opacity: 0.7 },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.background },
+    content: { padding: 16, gap: 12 },
+    heading: { fontSize: 17, fontWeight: '700', color: c.textLabel, marginTop: 8 },
+    label: { fontSize: 15, fontWeight: '600', color: c.textLabel },
+    error: { fontSize: 15, fontWeight: '600', color: c.danger },
+    muted: { fontSize: 15, color: c.textSecondary },
+    field: { gap: 6 },
+    hexRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    hexInput: { flex: 1 },
+    input: {
+      fontSize: 17,
+      color: c.textPrimary,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    addButton: {
+      paddingVertical: 12,
+      borderRadius: 10,
+      backgroundColor: c.accent,
+      alignItems: 'center',
+    },
+    addButtonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
+    labelRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
+    labelInfo: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+    labelName: { flex: 1, fontSize: 17, color: c.textPrimary },
+    // The exact stored hex, monospace + muted (matches the SyncScreen fingerprint
+    // convention) so a sighted user can read off / compare colours at a glance.
+    hexValue: { fontSize: 14, color: c.textSecondary, fontFamily: 'monospace' },
+    // A real colour swatch (a coloured box) for sighted users. The subtle border
+    // keeps white / very light swatches visible on the white background.
+    swatch: {
+      width: 22,
+      height: 22,
+      borderRadius: 5,
+      borderWidth: 1,
+      borderColor: c.borderOverlay,
+    },
+    rowButtons: { flexDirection: 'row', gap: 10 },
+    smallButton: {
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    smallButtonText: { fontSize: 15, fontWeight: '600', color: c.accent },
+    pressed: { opacity: 0.7 },
+  });

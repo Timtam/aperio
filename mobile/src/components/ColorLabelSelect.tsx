@@ -4,6 +4,8 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { ColorLabel } from '@aperio/shared';
 
+import { useThemedStyles, type ThemeColors } from '../theme';
+
 /**
  * Accessible colour-label picker: a radio group over "No colour" + every named
  * label. Serves both audiences — sighted users see a real colour SWATCH per
@@ -24,6 +26,7 @@ export function ColorLabelSelect({
   disabled?: boolean;
 }) {
   const { t } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
   const options = useMemo(
     () => [
       { value: '', label: t('dialogs.task.section.noColor'), hex: null as string | null },
@@ -83,31 +86,32 @@ export function ColorLabelSelect({
   );
 }
 
-const styles = StyleSheet.create({
-  group: { gap: 6 },
-  legend: { fontSize: 15, fontWeight: '600', color: '#2b3240' },
-  option: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  optionSelected: { borderColor: '#1d4ed8', backgroundColor: '#eaf0fd' },
-  optionPressed: { backgroundColor: '#e4ebf5' },
-  optionDisabled: { opacity: 0.5 },
-  marker: { fontSize: 18, width: 22, textAlign: 'center', color: '#10131a' },
-  swatch: {
-    width: 20,
-    height: 20,
-    borderRadius: 5,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.18)',
-  },
-  swatchNone: { backgroundColor: '#ffffff', borderStyle: 'dashed' },
-  optionLabel: { flex: 1, fontSize: 16, color: '#10131a' },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    group: { gap: 6 },
+    legend: { fontSize: 15, fontWeight: '600', color: c.textLabel },
+    option: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    optionSelected: { borderColor: c.accent, backgroundColor: c.surfaceSelected },
+    optionPressed: { backgroundColor: c.surfacePressed },
+    optionDisabled: { opacity: 0.5 },
+    marker: { fontSize: 18, width: 22, textAlign: 'center', color: c.textPrimary },
+    swatch: {
+      width: 20,
+      height: 20,
+      borderRadius: 5,
+      borderWidth: 1,
+      borderColor: c.borderOverlay,
+    },
+    swatchNone: { backgroundColor: c.background, borderStyle: 'dashed' },
+    optionLabel: { flex: 1, fontSize: 16, color: c.textPrimary },
+  });

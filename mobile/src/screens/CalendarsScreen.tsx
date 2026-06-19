@@ -16,6 +16,7 @@ import type { ColorLabel } from '@aperio/shared';
 import { Calendar, createCalendar, listCalendars } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
 import type { RootStackScreenProps } from '../navigation/types';
+import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Calendar catalog: read the calendars (local + external), create a local one,
 // and open the editor to rename / recolour / delete a LOCAL calendar. External
@@ -34,6 +35,7 @@ export default function CalendarsScreen({
   navigation,
 }: RootStackScreenProps<'Calendars'>) {
   const { t } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
 
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [colorLabels, setColorLabels] = useState<ColorLabel[]>([]);
@@ -202,68 +204,69 @@ export default function CalendarsScreen({
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#ffffff' },
-  form: { flexDirection: 'row', gap: 10, padding: 16, alignItems: 'center' },
-  input: {
-    flex: 1,
-    fontSize: 17,
-    color: '#10131a',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  button: {
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    borderRadius: 10,
-    backgroundColor: '#1d4ed8',
-    alignItems: 'center',
-  },
-  buttonPressed: { backgroundColor: '#1740a8' },
-  buttonText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
-  list: { gap: 12, padding: 16 },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-  },
-  rowText: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 6,
-  },
-  rowPressed: { backgroundColor: '#e4ebf5' },
-  colorDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.18)',
-  },
-  calName: { fontSize: 18, color: '#10131a' },
-  account: { fontSize: 13, color: '#5b6573' },
-  manageButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#ffffff',
-  },
-  manageButtonText: { fontSize: 15, fontWeight: '600', color: '#1d4ed8' },
-  muted: { fontSize: 15, color: '#5b6573', padding: 16 },
-  error: { fontSize: 15, fontWeight: '600', color: '#b42318', paddingHorizontal: 16 },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.background },
+    form: { flexDirection: 'row', gap: 10, padding: 16, alignItems: 'center' },
+    input: {
+      flex: 1,
+      fontSize: 17,
+      color: c.textPrimary,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    button: {
+      paddingVertical: 12,
+      paddingHorizontal: 18,
+      borderRadius: 10,
+      backgroundColor: c.accent,
+      alignItems: 'center',
+    },
+    buttonPressed: { backgroundColor: c.accentPressed },
+    buttonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
+    list: { gap: 12, padding: 16 },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingVertical: 6,
+      paddingHorizontal: 10,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    rowText: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingVertical: 10,
+      paddingHorizontal: 6,
+    },
+    rowPressed: { backgroundColor: c.surfacePressed },
+    colorDot: {
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: c.borderOverlay,
+    },
+    calName: { fontSize: 18, color: c.textPrimary },
+    account: { fontSize: 13, color: c.textSecondary },
+    manageButton: {
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.background,
+    },
+    manageButtonText: { fontSize: 15, fontWeight: '600', color: c.accent },
+    muted: { fontSize: 15, color: c.textSecondary, padding: 16 },
+    error: { fontSize: 15, fontWeight: '600', color: c.danger, paddingHorizontal: 16 },
+  });

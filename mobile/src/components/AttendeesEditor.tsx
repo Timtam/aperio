@@ -12,6 +12,7 @@ import {
 
 import { useListFocusManager } from '../a11y/useListFocusManager';
 import { parseAttendee } from '../api/calendar';
+import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
 // Event attendees editor — the mobile analogue of the desktop AttendeePicker,
 // minus the contacts typeahead (that needs the not-yet-bridged contact search).
@@ -52,6 +53,8 @@ export function AttendeesEditor({
   showNotify: boolean;
 }) {
   const { t } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
   const [input, setInput] = useState('');
   const [error, setError] = useState<string | null>(null);
   // Move SR focus to the new/sibling row after add/remove (RN won't on its own).
@@ -171,7 +174,7 @@ export function AttendeesEditor({
           <View pointerEvents="none">
             <Switch
               value={notify}
-              trackColor={{ false: '#c9d2e0', true: '#1d4ed8' }}
+              trackColor={{ false: colors.border, true: colors.accent }}
               importantForAccessibility="no"
               accessibilityElementsHidden
             />
@@ -182,64 +185,65 @@ export function AttendeesEditor({
   );
 }
 
-const styles = StyleSheet.create({
-  field: { gap: 8 },
-  label: { fontSize: 15, fontWeight: '600', color: '#2b3240' },
-  list: { gap: 8 },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  attendee: { flex: 1, fontSize: 16, color: '#10131a' },
-  addRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
-  input: {
-    flex: 1,
-    fontSize: 17,
-    color: '#10131a',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#ffffff',
-  },
-  addButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    borderRadius: 10,
-    backgroundColor: '#1d4ed8',
-    alignItems: 'center',
-  },
-  addButtonText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
-  removeButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#d9b3b0',
-    backgroundColor: '#fbeceb',
-  },
-  removeButtonText: { fontSize: 14, fontWeight: '600', color: '#b42318' },
-  switchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  switchLabel: { flex: 1, fontSize: 16, color: '#10131a' },
-  error: { fontSize: 14, fontWeight: '600', color: '#b42318' },
-  pressed: { opacity: 0.7 },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    field: { gap: 8 },
+    label: { fontSize: 15, fontWeight: '600', color: c.textLabel },
+    list: { gap: 8 },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    attendee: { flex: 1, fontSize: 16, color: c.textPrimary },
+    addRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
+    input: {
+      flex: 1,
+      fontSize: 17,
+      color: c.textPrimary,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.background,
+    },
+    addButton: {
+      paddingVertical: 12,
+      paddingHorizontal: 18,
+      borderRadius: 10,
+      backgroundColor: c.accent,
+      alignItems: 'center',
+    },
+    addButtonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
+    removeButton: {
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.dangerBorder,
+      backgroundColor: c.dangerBg,
+    },
+    removeButtonText: { fontSize: 14, fontWeight: '600', color: c.danger },
+    switchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    switchLabel: { flex: 1, fontSize: 16, color: c.textPrimary },
+    error: { fontSize: 14, fontWeight: '600', color: c.danger },
+    pressed: { opacity: 0.7 },
+  });

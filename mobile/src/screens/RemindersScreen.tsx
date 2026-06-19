@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { upcomingReminders, UpcomingReminder } from '../api/reminders';
+import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Read-only overview of upcoming reminder triggers — the mobile twin of the
 // desktop "Reminders overview" dialog. Lists the same triggers the on-device
@@ -21,6 +22,7 @@ function errorMessage(err: unknown): string {
 
 export default function RemindersScreen() {
   const { t, i18n } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
 
   const [reminders, setReminders] = useState<UpcomingReminder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -117,22 +119,23 @@ export default function RemindersScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#ffffff' },
-  content: { padding: 16, gap: 12 },
-  count: { fontSize: 15, fontWeight: '600', color: '#2b3240' },
-  list: { gap: 12 },
-  row: {
-    gap: 2,
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-  },
-  rowTitle: { fontSize: 18, fontWeight: '600', color: '#10131a' },
-  rowWhen: { fontSize: 14, color: '#5b6573' },
-  rowBody: { fontSize: 14, color: '#2b3240' },
-  muted: { fontSize: 15, color: '#5b6573' },
-  error: { fontSize: 15, fontWeight: '600', color: '#b42318' },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.background },
+    content: { padding: 16, gap: 12 },
+    count: { fontSize: 15, fontWeight: '600', color: c.textLabel },
+    list: { gap: 12 },
+    row: {
+      gap: 2,
+      padding: 16,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    rowTitle: { fontSize: 18, fontWeight: '600', color: c.textPrimary },
+    rowWhen: { fontSize: 14, color: c.textSecondary },
+    rowBody: { fontSize: 14, color: c.textLabel },
+    muted: { fontSize: 15, color: c.textSecondary },
+    error: { fontSize: 15, fontWeight: '600', color: c.danger },
+  });

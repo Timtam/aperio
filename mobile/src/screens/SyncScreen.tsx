@@ -36,6 +36,7 @@ import {
 } from '../api/sync';
 import { connectSyncOAuth } from '../api/oauth';
 import { RadioGroup } from '../components/RadioGroup';
+import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Cross-device sync — a full desktop peer (same engine, statically-embedded
 // adapters). This screen exposes the password targets (a local shared folder,
@@ -55,6 +56,7 @@ function errorMessage(err: unknown): string {
 export default function SyncScreen() {
   const { t } = useTranslation();
   const navigation = useNavigation();
+  const styles = useThemedStyles(makeStyles);
 
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [conflictCount, setConflictCount] = useState(0);
@@ -1713,72 +1715,73 @@ export default function SyncScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#ffffff' },
-  content: { padding: 16, gap: 16 },
-  status: { fontSize: 16, color: '#10131a', fontWeight: '600' },
-  field: { gap: 6 },
-  label: { fontSize: 15, fontWeight: '600', color: '#2b3240' },
-  hint: { fontSize: 13, color: '#5b6573' },
-  input: {
-    fontSize: 17,
-    color: '#10131a',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  primaryButton: {
-    paddingVertical: 14,
-    borderRadius: 10,
-    backgroundColor: '#1d4ed8',
-    alignItems: 'center',
-  },
-  primaryPressed: { backgroundColor: '#1740a8' },
-  primaryDisabled: { backgroundColor: '#9aa9c9' },
-  primaryButtonText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
-  conflictsButton: {
-    paddingVertical: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#f0c2bd',
-    backgroundColor: '#fdecea',
-    alignItems: 'center',
-  },
-  conflictsButtonText: { fontSize: 16, fontWeight: '700', color: '#b42318' },
-  ghostButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-    alignItems: 'center',
-  },
-  ghostButtonText: { fontSize: 16, fontWeight: '600', color: '#1d3a2f' },
-  pressed: { opacity: 0.7 },
-  error: { fontSize: 15, fontWeight: '600', color: '#b42318' },
-  warning: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#92400e',
-    backgroundColor: '#fef3c7',
-    padding: 12,
-    borderRadius: 10,
-  },
-  trustPanel: {
-    gap: 8,
-    padding: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#d9b3b0',
-    backgroundColor: '#fbeceb',
-  },
-  trustTitle: { fontSize: 17, fontWeight: '700', color: '#10131a' },
-  trustBody: { fontSize: 14, color: '#2b3240' },
-  // Monospace so the fingerprint reads character-by-character (and a SR user can
-  // compare it exactly against the out-of-band value).
-  trustField: { fontSize: 14, color: '#10131a', fontFamily: 'monospace' },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.background },
+    content: { padding: 16, gap: 16 },
+    status: { fontSize: 16, color: c.textPrimary, fontWeight: '600' },
+    field: { gap: 6 },
+    label: { fontSize: 15, fontWeight: '600', color: c.textLabel },
+    hint: { fontSize: 13, color: c.textSecondary },
+    input: {
+      fontSize: 17,
+      color: c.textPrimary,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    primaryButton: {
+      paddingVertical: 14,
+      borderRadius: 10,
+      backgroundColor: c.accent,
+      alignItems: 'center',
+    },
+    primaryPressed: { backgroundColor: c.accentPressed },
+    primaryDisabled: { backgroundColor: c.accentDisabled },
+    primaryButtonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
+    conflictsButton: {
+      paddingVertical: 12,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.dangerBorder,
+      backgroundColor: c.dangerBg,
+      alignItems: 'center',
+    },
+    conflictsButtonText: { fontSize: 16, fontWeight: '700', color: c.danger },
+    ghostButton: {
+      paddingVertical: 12,
+      paddingHorizontal: 18,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+      alignItems: 'center',
+    },
+    ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
+    pressed: { opacity: 0.7 },
+    error: { fontSize: 15, fontWeight: '600', color: c.danger },
+    warning: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: c.warning,
+      backgroundColor: c.warningBg,
+      padding: 12,
+      borderRadius: 10,
+    },
+    trustPanel: {
+      gap: 8,
+      padding: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.dangerBorder,
+      backgroundColor: c.dangerBg,
+    },
+    trustTitle: { fontSize: 17, fontWeight: '700', color: c.textPrimary },
+    trustBody: { fontSize: 14, color: c.textLabel },
+    // Monospace so the fingerprint reads character-by-character (and a SR user can
+    // compare it exactly against the out-of-band value).
+    trustField: { fontSize: 14, color: c.textPrimary, fontFamily: 'monospace' },
+  });

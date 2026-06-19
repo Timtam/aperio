@@ -35,6 +35,7 @@ import { TaskRecurrenceSelector } from '../components/TaskRecurrenceSelector';
 import { useTaskStore } from '../state/taskStoreContext';
 import { recomputeAncestors } from '../state/taskToggle';
 import type { RootStackScreenProps } from '../navigation/types';
+import { useThemedStyles, type ThemeColors } from '../theme';
 
 // The rich task editor — a faithful RN port of the desktop TaskDialog, sub-4
 // CORE: title, list, section, status, priority, scheduled + deadline date/time,
@@ -149,6 +150,7 @@ export default function TaskEditorModal({
   navigation,
 }: RootStackScreenProps<'TaskEditor'>) {
   const { t, i18n } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
   const { taskId, listId, parentId } = route.params;
   const { taskLists, sectionsByList, loadSections, colorLabels, invalidateData } =
     useTaskStore();
@@ -625,6 +627,7 @@ function DateTimeField({
   dateRef: RefObject<TextInput | null>;
   editable: boolean;
 }) {
+  const styles = useThemedStyles(makeStyles);
   const hasDate = dateValue.trim() !== '';
   return (
     <View style={styles.field}>
@@ -676,44 +679,45 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#ffffff' },
-  content: { padding: 20, gap: 18 },
-  field: { gap: 6 },
-  legend: { fontSize: 15, fontWeight: '600', color: '#2b3240' },
-  hint: { fontSize: 13, color: '#5b6573' },
-  input: {
-    fontSize: 17,
-    color: '#10131a',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  multiline: { minHeight: 96 },
-  buttons: { flexDirection: 'row', gap: 10, marginTop: 8 },
-  button: {
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    borderRadius: 10,
-    backgroundColor: '#1d4ed8',
-    alignItems: 'center',
-  },
-  buttonPressed: { backgroundColor: '#1740a8' },
-  buttonDisabled: { opacity: 0.5 },
-  buttonText: { fontSize: 17, fontWeight: '700', color: '#ffffff' },
-  ghostButton: {
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-    alignItems: 'center',
-  },
-  ghostPressed: { backgroundColor: '#e4ebf5' },
-  ghostButtonText: { fontSize: 17, fontWeight: '600', color: '#1d3a2f' },
-  error: { fontSize: 15, fontWeight: '600', color: '#b42318' },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.background },
+    content: { padding: 20, gap: 18 },
+    field: { gap: 6 },
+    legend: { fontSize: 15, fontWeight: '600', color: c.textLabel },
+    hint: { fontSize: 13, color: c.textSecondary },
+    input: {
+      fontSize: 17,
+      color: c.textPrimary,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    multiline: { minHeight: 96 },
+    buttons: { flexDirection: 'row', gap: 10, marginTop: 8 },
+    button: {
+      paddingVertical: 14,
+      paddingHorizontal: 18,
+      borderRadius: 10,
+      backgroundColor: c.accent,
+      alignItems: 'center',
+    },
+    buttonPressed: { backgroundColor: c.accentPressed },
+    buttonDisabled: { opacity: 0.5 },
+    buttonText: { fontSize: 17, fontWeight: '700', color: c.textOnAccent },
+    ghostButton: {
+      paddingVertical: 14,
+      paddingHorizontal: 18,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+      alignItems: 'center',
+    },
+    ghostPressed: { backgroundColor: c.surfacePressed },
+    ghostButtonText: { fontSize: 17, fontWeight: '600', color: c.link },
+    error: { fontSize: 15, fontWeight: '600', color: c.danger },
+  });

@@ -1,5 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { useThemedStyles, type ThemeColors } from '../theme';
+
 export interface CheckboxOption {
   value: string;
   label: string;
@@ -25,6 +27,7 @@ export function CheckboxGroup({
   selected: Set<string>;
   onToggle: (value: string) => void;
 }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View accessibilityRole="none" style={styles.group}>
       <Text style={styles.legend}>{label}</Text>
@@ -58,23 +61,24 @@ export function CheckboxGroup({
   );
 }
 
-const styles = StyleSheet.create({
-  group: { gap: 6 },
-  legend: { fontSize: 15, fontWeight: '600', color: '#2b3240' },
-  hint: { fontSize: 13, color: '#5b6573' },
-  option: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  optionChecked: { borderColor: '#1d4ed8', backgroundColor: '#eaf0fd' },
-  optionPressed: { backgroundColor: '#e4ebf5' },
-  marker: { fontSize: 20, width: 24, textAlign: 'center', color: '#10131a' },
-  optionLabel: { flex: 1, fontSize: 16, color: '#10131a' },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    group: { gap: 6 },
+    legend: { fontSize: 15, fontWeight: '600', color: c.textLabel },
+    hint: { fontSize: 13, color: c.textSecondary },
+    option: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    optionChecked: { borderColor: c.accent, backgroundColor: c.surfaceSelected },
+    optionPressed: { backgroundColor: c.surfacePressed },
+    marker: { fontSize: 20, width: 24, textAlign: 'center', color: c.textPrimary },
+    optionLabel: { flex: 1, fontSize: 16, color: c.textPrimary },
+  });

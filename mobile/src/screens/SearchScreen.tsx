@@ -31,6 +31,7 @@ import { CheckboxGroup } from '../components/CheckboxGroup';
 import { RadioGroup } from '../components/RadioGroup';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useTaskStore } from '../state/taskStoreContext';
+import { useThemedStyles, type ThemeColors } from '../theme';
 
 /** The selectable task statuses, in the desktop's order. */
 const TASK_STATUSES: TaskStatus[] = ['open', 'in_progress', 'completed', 'cancelled'];
@@ -53,6 +54,7 @@ function errorMessage(err: unknown): string {
 export default function SearchScreen({ navigation }: RootStackScreenProps<'Search'>) {
   const { t, i18n } = useTranslation();
   const { taskLists } = useTaskStore();
+  const styles = useThemedStyles(makeStyles);
 
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [query, setQuery] = useState('');
@@ -398,49 +400,50 @@ export default function SearchScreen({ navigation }: RootStackScreenProps<'Searc
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#ffffff' },
-  input: {
-    margin: 16,
-    fontSize: 17,
-    color: '#10131a',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  filtersToggle: { paddingHorizontal: 16, paddingBottom: 8 },
-  filtersToggleText: { fontSize: 15, fontWeight: '600', color: '#1d4ed8' },
-  filters: { paddingHorizontal: 16, paddingBottom: 8, gap: 10 },
-  rangeRow: { flexDirection: 'row', gap: 10 },
-  rangeField: { flex: 1, gap: 4 },
-  rangeLabel: { fontSize: 14, fontWeight: '600', color: '#2b3240' },
-  rangeInput: {
-    fontSize: 16,
-    color: '#10131a',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  status: { fontSize: 14, color: '#5b6573', paddingHorizontal: 16, paddingBottom: 4 },
-  error: { fontSize: 15, fontWeight: '600', color: '#b42318', paddingHorizontal: 16 },
-  muted: { fontSize: 15, color: '#5b6573', padding: 16 },
-  list: { gap: 8, padding: 16 },
-  groupHeader: { fontSize: 15, fontWeight: '700', color: '#2b3240', marginTop: 8 },
-  row: {
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-  },
-  rowPressed: { backgroundColor: '#e4ebf5' },
-  pressed: { opacity: 0.7 },
-  rowTitle: { fontSize: 17, fontWeight: '600', color: '#10131a' },
-  rowSecondary: { fontSize: 14, color: '#5b6573', marginTop: 2 },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.background },
+    input: {
+      margin: 16,
+      fontSize: 17,
+      color: c.textPrimary,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    filtersToggle: { paddingHorizontal: 16, paddingBottom: 8 },
+    filtersToggleText: { fontSize: 15, fontWeight: '600', color: c.accent },
+    filters: { paddingHorizontal: 16, paddingBottom: 8, gap: 10 },
+    rangeRow: { flexDirection: 'row', gap: 10 },
+    rangeField: { flex: 1, gap: 4 },
+    rangeLabel: { fontSize: 14, fontWeight: '600', color: c.textLabel },
+    rangeInput: {
+      fontSize: 16,
+      color: c.textPrimary,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    status: { fontSize: 14, color: c.textSecondary, paddingHorizontal: 16, paddingBottom: 4 },
+    error: { fontSize: 15, fontWeight: '600', color: c.danger, paddingHorizontal: 16 },
+    muted: { fontSize: 15, color: c.textSecondary, padding: 16 },
+    list: { gap: 8, padding: 16 },
+    groupHeader: { fontSize: 15, fontWeight: '700', color: c.textLabel, marginTop: 8 },
+    row: {
+      padding: 16,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    rowPressed: { backgroundColor: c.surfacePressed },
+    pressed: { opacity: 0.7 },
+    rowTitle: { fontSize: 17, fontWeight: '600', color: c.textPrimary },
+    rowSecondary: { fontSize: 14, color: c.textSecondary, marginTop: 2 },
+  });

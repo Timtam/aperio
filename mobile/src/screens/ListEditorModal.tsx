@@ -28,6 +28,7 @@ import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { RadioGroup } from '../components/RadioGroup';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useTaskStore } from '../state/taskStoreContext';
+import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Manage a single task list (the sub-5 piece of the tasks port): reparent it
 // (nest under another list / promote to top level), manage its sections (create
@@ -63,6 +64,7 @@ export default function ListEditorModal({
 }: RootStackScreenProps<'ListEditor'>) {
   const { listId } = route.params;
   const { t } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
   const {
     taskLists,
     refreshTaskLists,
@@ -631,69 +633,70 @@ export default function ListEditorModal({
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#ffffff' },
-  content: { padding: 16, gap: 16 },
-  title: { fontSize: 22, fontWeight: '700', color: '#10131a' },
-  heading: { fontSize: 17, fontWeight: '700', color: '#2b3240' },
-  error: { fontSize: 15, fontWeight: '600', color: '#b42318' },
-  muted: { fontSize: 15, color: '#5b6573' },
-  addRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
-  input: {
-    flex: 1,
-    fontSize: 17,
-    color: '#10131a',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  addButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    backgroundColor: '#1d4ed8',
-  },
-  addButtonText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
-  sectionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 8,
-  },
-  // Edit mode stacks the name field, the colour picker and the buttons.
-  sectionEditPanel: { gap: 10, paddingVertical: 8 },
-  editButtons: { flexDirection: 'row', gap: 10 },
-  // The section's bound colour (sighted users); subtle border keeps light
-  // colours visible. Matches the task/event/list row dot.
-  colorDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.18)',
-  },
-  sectionName: { flex: 1, fontSize: 17, color: '#10131a' },
-  smallButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-  },
-  smallButtonText: { fontSize: 15, fontWeight: '600', color: '#1d4ed8' },
-  pressed: { opacity: 0.7 },
-  deleteButton: {
-    marginTop: 8,
-    paddingVertical: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#f0c2bd',
-    backgroundColor: '#fdecea',
-    alignItems: 'center',
-  },
-  deleteButtonText: { fontSize: 16, fontWeight: '700', color: '#b42318' },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.background },
+    content: { padding: 16, gap: 16 },
+    title: { fontSize: 22, fontWeight: '700', color: c.textPrimary },
+    heading: { fontSize: 17, fontWeight: '700', color: c.textLabel },
+    error: { fontSize: 15, fontWeight: '600', color: c.danger },
+    muted: { fontSize: 15, color: c.textSecondary },
+    addRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
+    input: {
+      flex: 1,
+      fontSize: 17,
+      color: c.textPrimary,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    addButton: {
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 10,
+      backgroundColor: c.accent,
+    },
+    addButtonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
+    sectionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingVertical: 8,
+    },
+    // Edit mode stacks the name field, the colour picker and the buttons.
+    sectionEditPanel: { gap: 10, paddingVertical: 8 },
+    editButtons: { flexDirection: 'row', gap: 10 },
+    // The section's bound colour (sighted users); subtle border keeps light
+    // colours visible. Matches the task/event/list row dot.
+    colorDot: {
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: c.borderOverlay,
+    },
+    sectionName: { flex: 1, fontSize: 17, color: c.textPrimary },
+    smallButton: {
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    smallButtonText: { fontSize: 15, fontWeight: '600', color: c.accent },
+    pressed: { opacity: 0.7 },
+    deleteButton: {
+      marginTop: 8,
+      paddingVertical: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.dangerBorder,
+      backgroundColor: c.dangerBg,
+      alignItems: 'center',
+    },
+    deleteButtonText: { fontSize: 16, fontWeight: '700', color: c.danger },
+  });

@@ -30,6 +30,7 @@ import {
 import { listColorLabels } from '../api/colorLabels';
 import { setEventColor } from '../api/containerColor';
 import type { RootStackScreenProps } from '../navigation/types';
+import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
 // Create / edit a calendar event. Screen-reader-first: every control is an
 // addressable element with an explicit label; the calendar picker is a
@@ -77,6 +78,8 @@ export default function EventEditorModal({
   navigation,
 }: RootStackScreenProps<'EventEditor'>) {
   const { t } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
   const { eventId, calendarId, occurrence } = route.params;
   const editing = eventId != null;
   // A single occurrence of a recurring series was opened (occurrence = its
@@ -415,7 +418,7 @@ export default function EventEditorModal({
         <View style={styles.switchVisual}>
           <Switch
             value={allDay}
-            trackColor={{ false: '#c9d2e0', true: '#1d4ed8' }}
+            trackColor={{ false: colors.border, true: colors.accent }}
             importantForAccessibility="no"
             accessibilityElementsHidden
           />
@@ -570,45 +573,46 @@ export default function EventEditorModal({
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#ffffff' },
-  content: { padding: 16, gap: 14 },
-  field: { gap: 6 },
-  label: { fontSize: 15, fontWeight: '600', color: '#2b3240' },
-  input: {
-    fontSize: 17,
-    color: '#10131a',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  multiline: { minHeight: 88, textAlignVertical: 'top' },
-  switchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  switchLabel: { fontSize: 16, fontWeight: '600', color: '#2b3240' },
-  switchVisual: { pointerEvents: 'none' },
-  primaryButton: {
-    marginTop: 8,
-    paddingVertical: 14,
-    borderRadius: 10,
-    backgroundColor: '#1d4ed8',
-    alignItems: 'center',
-  },
-  primaryPressed: { backgroundColor: '#1740a8' },
-  primaryDisabled: { backgroundColor: '#9aa9c9' },
-  primaryButtonText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
-  muted: { fontSize: 15, color: '#5b6573', padding: 16 },
-  pressed: { opacity: 0.7 },
-  error: { fontSize: 15, fontWeight: '600', color: '#b42318' },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.background },
+    content: { padding: 16, gap: 14 },
+    field: { gap: 6 },
+    label: { fontSize: 15, fontWeight: '600', color: c.textLabel },
+    input: {
+      fontSize: 17,
+      color: c.textPrimary,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    multiline: { minHeight: 88, textAlignVertical: 'top' },
+    switchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    switchLabel: { fontSize: 16, fontWeight: '600', color: c.textLabel },
+    switchVisual: { pointerEvents: 'none' },
+    primaryButton: {
+      marginTop: 8,
+      paddingVertical: 14,
+      borderRadius: 10,
+      backgroundColor: c.accent,
+      alignItems: 'center',
+    },
+    primaryPressed: { backgroundColor: c.accentPressed },
+    primaryDisabled: { backgroundColor: c.accentDisabled },
+    primaryButtonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
+    muted: { fontSize: 15, color: c.textSecondary, padding: 16 },
+    pressed: { opacity: 0.7 },
+    error: { fontSize: 15, fontWeight: '600', color: c.danger },
+  });

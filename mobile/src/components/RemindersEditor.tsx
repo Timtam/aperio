@@ -5,6 +5,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { Reminder } from '@aperio/shared';
 
 import { useListFocusManager, type RowRefCallback } from '../a11y/useListFocusManager';
+import { useThemedStyles, type ThemeColors } from '../theme';
 import { RadioGroup } from './RadioGroup';
 
 // Mobile reminders editor — faithful RN port of the desktop RemindersEditor in
@@ -87,6 +88,7 @@ export function RemindersEditor({
   mode?: 'event' | 'task';
 }) {
   const { t } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
   // Move SR focus to the new/sibling row after add/remove (RN won't on its own).
   const { registerRow, registerAdd, onAdd, onRemove } = useListFocusManager(
     value.length,
@@ -158,6 +160,7 @@ function ReminderRow({
   rowRef: RowRefCallback;
 }) {
   const { t } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
   // Local-store task reminders are relative/absolute/app_start; an email kind
   // (adapter-side) would show as relative until re-picked — won't occur here.
   const kindOption: ReminderKindOption =
@@ -237,6 +240,7 @@ function RelativeFields({
   onChange: (minutes: number) => void;
 }) {
   const { t } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
   const { amount, unit } = splitRelative(minutes);
   const rowPrefix = t('reminders.rowLabel', { n: position });
   return (
@@ -279,6 +283,7 @@ function AbsoluteFields({
   onChange: (iso: string) => void;
 }) {
   const { t } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
   const initial = isoToDateTime(iso);
   const [date, setDate] = useState(initial.date);
   const [time, setTime] = useState(initial.time);
@@ -318,40 +323,41 @@ function AbsoluteFields({
   );
 }
 
-const styles = StyleSheet.create({
-  field: { gap: 6 },
-  label: { fontSize: 15, fontWeight: '600', color: '#2b3240' },
-  hint: { fontSize: 13, color: '#5b6573' },
-  row: {
-    gap: 10,
-    padding: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  rowLabel: { fontSize: 14, fontWeight: '700', color: '#10131a' },
-  relativeRow: { gap: 10 },
-  amountField: { gap: 6 },
-  input: {
-    fontSize: 17,
-    color: '#10131a',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#ffffff',
-  },
-  ghostButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-    alignItems: 'center',
-  },
-  ghostButtonText: { fontSize: 16, fontWeight: '600', color: '#1d3a2f' },
-  pressed: { backgroundColor: '#e4ebf5' },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    field: { gap: 6 },
+    label: { fontSize: 15, fontWeight: '600', color: c.textLabel },
+    hint: { fontSize: 13, color: c.textSecondary },
+    row: {
+      gap: 10,
+      padding: 12,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    rowLabel: { fontSize: 14, fontWeight: '700', color: c.textPrimary },
+    relativeRow: { gap: 10 },
+    amountField: { gap: 6 },
+    input: {
+      fontSize: 17,
+      color: c.textPrimary,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.background,
+    },
+    ghostButton: {
+      paddingVertical: 12,
+      paddingHorizontal: 18,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+      alignItems: 'center',
+    },
+    ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
+    pressed: { backgroundColor: c.surfacePressed },
+  });

@@ -30,6 +30,7 @@ import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { resolveEventColor } from '../intl/eventColor';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
 import type { RootStackScreenProps } from '../navigation/types';
+import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Accessible Agenda view — a flat ~30-day-forward list of events grouped by
 // day, the screen-reader-natural sibling of the day view (EventsScreen). Same
@@ -67,6 +68,7 @@ export default function AgendaScreen({
   navigation,
 }: RootStackScreenProps<'Agenda'>) {
   const { t, i18n } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
 
   // Window anchor (local midnight); seeded from the switcher's `anchor` param so
   // switching Day⇄Agenda keeps the selected date, else today.
@@ -438,92 +440,93 @@ export default function AgendaScreen({
   }
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#ffffff' },
-  navBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingTop: 12,
-  },
-  rangeHeading: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#10131a',
-    textAlign: 'center',
-  },
-  navButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#f4f7fb',
-  },
-  navButtonText: { fontSize: 26, color: '#10131a', lineHeight: 30 },
-  actionBar: { flexDirection: 'row', gap: 10, padding: 12, alignItems: 'center' },
-  ghostButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-  },
-  ghostButtonText: { fontSize: 16, fontWeight: '600', color: '#1d3a2f' },
-  jumpInput: {
-    flex: 1,
-    fontSize: 16,
-    color: '#10131a',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  list: { gap: 10, padding: 16 },
-  dayHeader: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#2b3240',
-    marginTop: 8,
-    marginBottom: 2,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-  },
-  rowText: { flex: 1, gap: 2 },
-  colorDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.18)',
-  },
-  eventTitle: { fontSize: 18, fontWeight: '600', color: '#10131a' },
-  eventTime: { fontSize: 14, color: '#5b6573' },
-  deleteButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#d9b3b0',
-    backgroundColor: '#fbeceb',
-  },
-  deleteButtonText: { fontSize: 15, fontWeight: '600', color: '#b42318' },
-  pressed: { opacity: 0.7 },
-  muted: { fontSize: 15, color: '#5b6573', padding: 16 },
-  error: { fontSize: 15, fontWeight: '600', color: '#b42318', paddingHorizontal: 16 },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.background },
+    navBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingHorizontal: 12,
+      paddingTop: 12,
+    },
+    rangeHeading: {
+      flex: 1,
+      fontSize: 16,
+      fontWeight: '700',
+      color: c.textPrimary,
+      textAlign: 'center',
+    },
+    navButton: {
+      width: 48,
+      height: 48,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: c.surfaceAlt,
+    },
+    navButtonText: { fontSize: 26, color: c.textPrimary, lineHeight: 30 },
+    actionBar: { flexDirection: 'row', gap: 10, padding: 12, alignItems: 'center' },
+    ghostButton: {
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
+    jumpInput: {
+      flex: 1,
+      fontSize: 16,
+      color: c.textPrimary,
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    list: { gap: 10, padding: 16 },
+    dayHeader: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: c.textLabel,
+      marginTop: 8,
+      marginBottom: 2,
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      padding: 16,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    rowText: { flex: 1, gap: 2 },
+    colorDot: {
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: c.borderOverlay,
+    },
+    eventTitle: { fontSize: 18, fontWeight: '600', color: c.textPrimary },
+    eventTime: { fontSize: 14, color: c.textSecondary },
+    deleteButton: {
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.dangerBorder,
+      backgroundColor: c.dangerBg,
+    },
+    deleteButtonText: { fontSize: 15, fontWeight: '600', color: c.danger },
+    pressed: { opacity: 0.7 },
+    muted: { fontSize: 15, color: c.textSecondary, padding: 16 },
+    error: { fontSize: 15, fontWeight: '600', color: c.danger, paddingHorizontal: 16 },
+  });

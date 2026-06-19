@@ -24,6 +24,7 @@ import {
 } from '../api/contacts';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import type { RootStackScreenProps } from '../navigation/types';
+import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Address-book management — create, rename, recolour, and delete address books.
 // The mobile parallel of the Tasks ListsScreen, reached from ContactsScreen
@@ -42,6 +43,7 @@ export default function ContactListsScreen({
   navigation,
 }: RootStackScreenProps<'ContactLists'>) {
   const { t } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
 
   const [lists, setLists] = useState<ContactList[]>([]);
   const [colorLabels, setColorLabels] = useState<ColorLabel[]>([]);
@@ -337,87 +339,88 @@ export default function ContactListsScreen({
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#ffffff' },
-  form: { flexDirection: 'row', gap: 10, padding: 16, alignItems: 'center' },
-  input: {
-    flex: 1,
-    fontSize: 17,
-    color: '#10131a',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  button: {
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    borderRadius: 10,
-    backgroundColor: '#1d4ed8',
-    alignItems: 'center',
-  },
-  buttonPressed: { backgroundColor: '#1740a8' },
-  buttonText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
-  list: { gap: 12, padding: 16 },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-  },
-  rowText: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  bookName: { flex: 1, fontSize: 18, fontWeight: '600', color: '#10131a' },
-  colorDot: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.18)',
-  },
-  editPanel: {
-    gap: 10,
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#1d4ed8',
-    backgroundColor: '#f8fafc',
-  },
-  editInput: {
-    fontSize: 17,
-    color: '#10131a',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#ffffff',
-  },
-  editActions: { flexDirection: 'row', gap: 10 },
-  smallButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-  },
-  smallButtonText: { fontSize: 15, fontWeight: '600', color: '#1d4ed8' },
-  deleteButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#d9b3b0',
-    backgroundColor: '#fbeceb',
-  },
-  deleteButtonText: { fontSize: 15, fontWeight: '600', color: '#b42318' },
-  pressed: { opacity: 0.7 },
-  muted: { fontSize: 15, color: '#5b6573', padding: 16 },
-  error: { fontSize: 15, fontWeight: '600', color: '#b42318', paddingHorizontal: 16 },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.background },
+    form: { flexDirection: 'row', gap: 10, padding: 16, alignItems: 'center' },
+    input: {
+      flex: 1,
+      fontSize: 17,
+      color: c.textPrimary,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    button: {
+      paddingVertical: 12,
+      paddingHorizontal: 18,
+      borderRadius: 10,
+      backgroundColor: c.accent,
+      alignItems: 'center',
+    },
+    buttonPressed: { backgroundColor: c.accentPressed },
+    buttonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
+    list: { gap: 12, padding: 16 },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      padding: 16,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    rowText: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+    bookName: { flex: 1, fontSize: 18, fontWeight: '600', color: c.textPrimary },
+    colorDot: {
+      width: 14,
+      height: 14,
+      borderRadius: 7,
+      borderWidth: 1,
+      borderColor: c.borderOverlay,
+    },
+    editPanel: {
+      gap: 10,
+      padding: 16,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.accent,
+      backgroundColor: c.surface,
+    },
+    editInput: {
+      fontSize: 17,
+      color: c.textPrimary,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.background,
+    },
+    editActions: { flexDirection: 'row', gap: 10 },
+    smallButton: {
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    smallButtonText: { fontSize: 15, fontWeight: '600', color: c.accent },
+    deleteButton: {
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.dangerBorder,
+      backgroundColor: c.dangerBg,
+    },
+    deleteButtonText: { fontSize: 15, fontWeight: '600', color: c.danger },
+    pressed: { opacity: 0.7 },
+    muted: { fontSize: 15, color: c.textSecondary, padding: 16 },
+    error: { fontSize: 15, fontWeight: '600', color: c.danger, paddingHorizontal: 16 },
+  });

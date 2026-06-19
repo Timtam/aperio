@@ -16,6 +16,7 @@ import {
   SyncResolutionChoice,
 } from '../api/sync';
 import type { RootStackScreenProps } from '../navigation/types';
+import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Sync-conflict resolution — a faithful RN port of the desktop SyncConflictsDialog
 // (DESIGN §19.3). A field-level conflict (a field edited differently on two
@@ -43,6 +44,7 @@ function decodeForDisplay(raw: string | null): string {
 
 export default function ConflictsScreen({ navigation }: RootStackScreenProps<'Conflicts'>) {
   const { t, i18n } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
   const [conflicts, setConflicts] = useState<SyncConflict[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -197,31 +199,32 @@ export default function ConflictsScreen({ navigation }: RootStackScreenProps<'Co
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#ffffff' },
-  intro: { fontSize: 15, color: '#2b3240', padding: 16 },
-  error: { fontSize: 15, fontWeight: '600', color: '#b42318', paddingHorizontal: 16 },
-  list: { gap: 12, padding: 16 },
-  card: {
-    gap: 4,
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-  },
-  cardField: { fontSize: 16, fontWeight: '700', color: '#10131a' },
-  cardSource: { fontSize: 13, color: '#5b6573' },
-  cardValue: { fontSize: 15, color: '#10131a' },
-  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 8 },
-  actionBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#ffffff',
-  },
-  actionText: { fontSize: 15, fontWeight: '600', color: '#1d4ed8' },
-  pressed: { opacity: 0.7 },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.background },
+    intro: { fontSize: 15, color: c.textLabel, padding: 16 },
+    error: { fontSize: 15, fontWeight: '600', color: c.danger, paddingHorizontal: 16 },
+    list: { gap: 12, padding: 16 },
+    card: {
+      gap: 4,
+      padding: 16,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    cardField: { fontSize: 16, fontWeight: '700', color: c.textPrimary },
+    cardSource: { fontSize: 13, color: c.textSecondary },
+    cardValue: { fontSize: 15, color: c.textPrimary },
+    actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 8 },
+    actionBtn: {
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.background,
+    },
+    actionText: { fontSize: 15, fontWeight: '600', color: c.accent },
+    pressed: { opacity: 0.7 },
+  });

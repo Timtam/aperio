@@ -1,6 +1,8 @@
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { useThemedStyles, type ThemeColors } from '../theme';
+
 // Day ⇄ Week ⇄ Month ⇄ Agenda view switch — the mobile analogue of the desktop
 // toolbar's view switcher (sibling calendar views, not separate tabs). Buttons
 // carry accessibilityState.selected (TalkBack/VoiceOver announce "selected") + a
@@ -16,6 +18,7 @@ export function CalendarViewSwitcher({
   onSelect: (view: CalendarViewKind) => void;
 }) {
   const { t } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
   const options: { key: CalendarViewKind; label: string }[] = [
     { key: 'day', label: t('toolbar.views.day') },
     { key: 'week', label: t('toolbar.views.week') },
@@ -58,19 +61,20 @@ export function CalendarViewSwitcher({
   );
 }
 
-const styles = StyleSheet.create({
-  row: { flexDirection: 'row', gap: 8, paddingHorizontal: 12, paddingTop: 12 },
-  button: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-    alignItems: 'center',
-  },
-  buttonSelected: { borderColor: '#1d4ed8', backgroundColor: '#eaf0fd' },
-  buttonText: { fontSize: 16, fontWeight: '600', color: '#1d3a2f' },
-  buttonTextSelected: { color: '#1d3a2f', fontWeight: '700' },
-  pressed: { backgroundColor: '#e4ebf5' },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    row: { flexDirection: 'row', gap: 8, paddingHorizontal: 12, paddingTop: 12 },
+    button: {
+      flex: 1,
+      paddingVertical: 10,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+      alignItems: 'center',
+    },
+    buttonSelected: { borderColor: c.accent, backgroundColor: c.surfaceSelected },
+    buttonText: { fontSize: 16, fontWeight: '600', color: c.link },
+    buttonTextSelected: { color: c.link, fontWeight: '700' },
+    pressed: { backgroundColor: c.surfacePressed },
+  });

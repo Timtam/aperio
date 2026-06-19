@@ -55,6 +55,7 @@ import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
 import type { RootStackParamList } from '../navigation/types';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
 import { applyTaskToggle, statusAnnounce } from '../state/taskToggle';
+import { useThemedStyles, type ThemeColors } from '../theme';
 
 // The shared, screen-reader-first calendar day list — the rendering + data
 // engine behind both the Week and Month views (and any future day-range view).
@@ -114,6 +115,7 @@ export function CalendarDayList({
   dayAnnounceKey,
 }: CalendarDayListProps) {
   const { t, i18n } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
 
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [colorLabels, setColorLabels] = useState<ColorLabel[]>([]);
@@ -608,48 +610,49 @@ export function CalendarDayList({
   );
 }
 
-const styles = StyleSheet.create({
-  list: { gap: 8, padding: 16 },
-  daySection: { gap: 8 },
-  dayHeader: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#2b3240',
-    marginTop: 8,
-    marginBottom: 2,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-  },
-  rowText: { flex: 1, gap: 2 },
-  taskCheck: { fontSize: 20, width: 26, textAlign: 'center', color: '#10131a' },
-  colorDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.18)',
-  },
-  itemTitle: { fontSize: 18, fontWeight: '600', color: '#10131a' },
-  itemTitleDone: { textDecorationLine: 'line-through', color: '#5b6573' },
-  itemMeta: { fontSize: 14, color: '#5b6573' },
-  deleteButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#d9b3b0',
-    backgroundColor: '#fbeceb',
-  },
-  deleteButtonText: { fontSize: 15, fontWeight: '600', color: '#b42318' },
-  pressed: { opacity: 0.7 },
-  muted: { fontSize: 15, color: '#5b6573', padding: 16 },
-  error: { fontSize: 15, fontWeight: '600', color: '#b42318', paddingHorizontal: 16 },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    list: { gap: 8, padding: 16 },
+    daySection: { gap: 8 },
+    dayHeader: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: c.textLabel,
+      marginTop: 8,
+      marginBottom: 2,
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      padding: 16,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    rowText: { flex: 1, gap: 2 },
+    taskCheck: { fontSize: 20, width: 26, textAlign: 'center', color: c.textPrimary },
+    colorDot: {
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: c.borderOverlay,
+    },
+    itemTitle: { fontSize: 18, fontWeight: '600', color: c.textPrimary },
+    itemTitleDone: { textDecorationLine: 'line-through', color: c.textSecondary },
+    itemMeta: { fontSize: 14, color: c.textSecondary },
+    deleteButton: {
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.dangerBorder,
+      backgroundColor: c.dangerBg,
+    },
+    deleteButtonText: { fontSize: 15, fontWeight: '600', color: c.danger },
+    pressed: { opacity: 0.7 },
+    muted: { fontSize: 15, color: c.textSecondary, padding: 16 },
+    error: { fontSize: 15, fontWeight: '600', color: c.danger, paddingHorizontal: 16 },
+  });

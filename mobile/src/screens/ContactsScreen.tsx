@@ -20,6 +20,7 @@ import {
   searchContacts,
 } from '../api/contacts';
 import type { RootStackScreenProps } from '../navigation/types';
+import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Accessible address-book view — a linear, screen-reader-first list of every
 // contact across all address books (local + external providers), grouped under
@@ -46,6 +47,7 @@ export default function ContactsScreen({
   navigation,
 }: RootStackScreenProps<'Contacts'>) {
   const { t } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
 
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
@@ -369,66 +371,67 @@ export default function ContactsScreen({
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#ffffff' },
-  actionBar: { flexDirection: 'row', gap: 10, padding: 12, alignItems: 'center' },
-  searchBar: { paddingHorizontal: 12, paddingBottom: 8, gap: 6 },
-  searchInput: {
-    fontSize: 17,
-    color: '#10131a',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  searchCount: { fontSize: 13, color: '#5b6573' },
-  primaryButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 10,
-    backgroundColor: '#1d4ed8',
-    alignItems: 'center',
-  },
-  primaryPressed: { backgroundColor: '#1740a8' },
-  primaryDisabled: { backgroundColor: '#9aa9c9' },
-  primaryButtonText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
-  ghostButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-  },
-  ghostButtonText: { fontSize: 16, fontWeight: '600', color: '#1d3a2f' },
-  list: { gap: 18, padding: 16 },
-  group: { gap: 10 },
-  groupHeading: { fontSize: 16, fontWeight: '700', color: '#2b3240' },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-  },
-  rowText: { flex: 1, gap: 2 },
-  contactName: { fontSize: 18, fontWeight: '600', color: '#10131a' },
-  contactSub: { fontSize: 14, color: '#5b6573' },
-  deleteButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#d9b3b0',
-    backgroundColor: '#fbeceb',
-  },
-  deleteButtonText: { fontSize: 15, fontWeight: '600', color: '#b42318' },
-  pressed: { opacity: 0.7 },
-  muted: { fontSize: 15, color: '#5b6573', padding: 16 },
-  error: { fontSize: 15, fontWeight: '600', color: '#b42318', paddingHorizontal: 16 },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.background },
+    actionBar: { flexDirection: 'row', gap: 10, padding: 12, alignItems: 'center' },
+    searchBar: { paddingHorizontal: 12, paddingBottom: 8, gap: 6 },
+    searchInput: {
+      fontSize: 17,
+      color: c.textPrimary,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    searchCount: { fontSize: 13, color: c.textSecondary },
+    primaryButton: {
+      flex: 1,
+      paddingVertical: 12,
+      borderRadius: 10,
+      backgroundColor: c.accent,
+      alignItems: 'center',
+    },
+    primaryPressed: { backgroundColor: c.accentPressed },
+    primaryDisabled: { backgroundColor: c.accentDisabled },
+    primaryButtonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
+    ghostButton: {
+      paddingVertical: 12,
+      paddingHorizontal: 18,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
+    list: { gap: 18, padding: 16 },
+    group: { gap: 10 },
+    groupHeading: { fontSize: 16, fontWeight: '700', color: c.textLabel },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      padding: 16,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    rowText: { flex: 1, gap: 2 },
+    contactName: { fontSize: 18, fontWeight: '600', color: c.textPrimary },
+    contactSub: { fontSize: 14, color: c.textSecondary },
+    deleteButton: {
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.dangerBorder,
+      backgroundColor: c.dangerBg,
+    },
+    deleteButtonText: { fontSize: 15, fontWeight: '600', color: c.danger },
+    pressed: { opacity: 0.7 },
+    muted: { fontSize: 15, color: c.textSecondary, padding: 16 },
+    error: { fontSize: 15, fontWeight: '600', color: c.danger, paddingHorizontal: 16 },
+  });

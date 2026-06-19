@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
 import { RadioGroup } from '../components/RadioGroup';
+import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 import {
   readTaskBehaviour,
   writeAutoDate,
@@ -33,6 +34,8 @@ function SwitchRow({
   value: boolean;
   onToggle: () => void;
 }) {
+  const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
   return (
     <Pressable
       accessibilityRole="switch"
@@ -47,7 +50,7 @@ function SwitchRow({
       <View pointerEvents="none">
         <Switch
           value={value}
-          trackColor={{ false: '#c9d2e0', true: '#1d4ed8' }}
+          trackColor={{ false: colors.border, true: colors.accent }}
           importantForAccessibility="no"
           accessibilityElementsHidden
         />
@@ -58,6 +61,7 @@ function SwitchRow({
 
 export default function TaskSettingsScreen() {
   const { t } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
   const [checkoffMode, setCheckoffMode] = useState<CheckoffMode>('toggle');
   const [cascade, setCascade] = useState(true);
   const [autoDate, setAutoDate] = useState(true);
@@ -147,24 +151,25 @@ export default function TaskSettingsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#ffffff' },
-  content: { padding: 16, gap: 24 },
-  section: { gap: 8 },
-  heading: { fontSize: 15, fontWeight: '600', color: '#2b3240' },
-  hint: { fontSize: 14, color: '#5b6573', lineHeight: 20 },
-  switchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  switchLabel: { flex: 1, fontSize: 16, color: '#10131a' },
-  pressed: { opacity: 0.7 },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.background },
+    content: { padding: 16, gap: 24 },
+    section: { gap: 8 },
+    heading: { fontSize: 15, fontWeight: '600', color: c.textLabel },
+    hint: { fontSize: 14, color: c.textSecondary, lineHeight: 20 },
+    switchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    switchLabel: { flex: 1, fontSize: 16, color: c.textPrimary },
+    pressed: { opacity: 0.7 },
+  });

@@ -23,6 +23,7 @@ import {
 import { RadioGroup } from '../components/RadioGroup';
 import { useListFocusManager } from '../a11y/useListFocusManager';
 import type { RootStackScreenProps } from '../navigation/types';
+import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
 // Create / edit a contact OR a distribution list (group). Screen-reader-first:
 // every field is a labelled stop; the address book is a radio group (no native
@@ -142,6 +143,8 @@ export default function ContactEditorModal({
   navigation,
 }: RootStackScreenProps<'ContactEditor'>) {
   const { t } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
   const { contactId, listId } = route.params;
   const editing = contactId != null;
 
@@ -382,7 +385,7 @@ export default function ContactEditorModal({
         <View pointerEvents="none">
           <Switch
             value={isGroup}
-            trackColor={{ false: '#c9d2e0', true: '#1d4ed8' }}
+            trackColor={{ false: colors.border, true: colors.accent }}
             importantForAccessibility="no"
             accessibilityElementsHidden
           />
@@ -638,6 +641,7 @@ function Field({
   hint?: string;
   children: React.ReactNode;
 }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
@@ -651,86 +655,87 @@ function Field({
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#ffffff' },
-  content: { padding: 16, gap: 16 },
-  field: { gap: 6 },
-  label: { fontSize: 15, fontWeight: '600', color: '#2b3240' },
-  hint: { fontSize: 13, color: '#5b6573' },
-  input: {
-    fontSize: 17,
-    color: '#10131a',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  multiline: { minHeight: 88, textAlignVertical: 'top' },
-  switchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  switchLabel: { flex: 1, fontSize: 16, color: '#10131a' },
-  addressRow: {
-    gap: 6,
-    padding: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-  },
-  addressHeading: { fontSize: 15, fontWeight: '700', color: '#10131a' },
-  subLabel: { fontSize: 13, fontWeight: '600', color: '#5b6573' },
-  removeButton: {
-    marginTop: 4,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#d9b3b0',
-    backgroundColor: '#fbeceb',
-    alignSelf: 'flex-start',
-  },
-  removeButtonText: { fontSize: 15, fontWeight: '600', color: '#b42318' },
-  addButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-    alignItems: 'center',
-  },
-  addButtonText: { fontSize: 15, fontWeight: '600', color: '#1d3a2f' },
-  pressed: { opacity: 0.7 },
-  primaryButton: {
-    paddingVertical: 14,
-    borderRadius: 10,
-    backgroundColor: '#1d4ed8',
-    alignItems: 'center',
-  },
-  primaryPressed: { backgroundColor: '#1740a8' },
-  primaryDisabled: { backgroundColor: '#9aa9c9' },
-  primaryButtonText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
-  error: { fontSize: 15, fontWeight: '600', color: '#b42318' },
-  readOnlyBanner: {
-    fontSize: 14,
-    color: '#5b6573',
-    fontWeight: '600',
-    padding: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#eef2f8',
-  },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.background },
+    content: { padding: 16, gap: 16 },
+    field: { gap: 6 },
+    label: { fontSize: 15, fontWeight: '600', color: c.textLabel },
+    hint: { fontSize: 13, color: c.textSecondary },
+    input: {
+      fontSize: 17,
+      color: c.textPrimary,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    multiline: { minHeight: 88, textAlignVertical: 'top' },
+    switchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    switchLabel: { flex: 1, fontSize: 16, color: c.textPrimary },
+    addressRow: {
+      gap: 6,
+      padding: 12,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    addressHeading: { fontSize: 15, fontWeight: '700', color: c.textPrimary },
+    subLabel: { fontSize: 13, fontWeight: '600', color: c.textSecondary },
+    removeButton: {
+      marginTop: 4,
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.dangerBorder,
+      backgroundColor: c.dangerBg,
+      alignSelf: 'flex-start',
+    },
+    removeButtonText: { fontSize: 15, fontWeight: '600', color: c.danger },
+    addButton: {
+      paddingVertical: 12,
+      paddingHorizontal: 18,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+      alignItems: 'center',
+    },
+    addButtonText: { fontSize: 15, fontWeight: '600', color: c.link },
+    pressed: { opacity: 0.7 },
+    primaryButton: {
+      paddingVertical: 14,
+      borderRadius: 10,
+      backgroundColor: c.accent,
+      alignItems: 'center',
+    },
+    primaryPressed: { backgroundColor: c.accentPressed },
+    primaryDisabled: { backgroundColor: c.accentDisabled },
+    primaryButtonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
+    error: { fontSize: 15, fontWeight: '600', color: c.danger },
+    readOnlyBanner: {
+      fontSize: 14,
+      color: c.textSecondary,
+      fontWeight: '600',
+      padding: 12,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceSubtle,
+    },
+  });

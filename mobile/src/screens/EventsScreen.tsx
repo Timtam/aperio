@@ -25,6 +25,7 @@ import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { resolveEventColor } from '../intl/eventColor';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
 import type { RootStackScreenProps } from '../navigation/types';
+import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Accessible day view — the screen-reader-first equivalent of the desktop
 // calendar grid: a linear list of the selected day's events across all
@@ -50,6 +51,7 @@ function errorMessage(err: unknown): string {
 
 export default function EventsScreen({ navigation, route }: RootStackScreenProps<'Events'>) {
   const { t, i18n } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
 
   // The selected day at local midnight (date-only semantics for the heading).
   // Seeded from the Day⇄Agenda switcher's `anchor` param so switching keeps the
@@ -426,98 +428,99 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#ffffff' },
-  dayBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingTop: 14,
-  },
-  dayHeading: { flex: 1, fontSize: 18, fontWeight: '700', color: '#10131a', textAlign: 'center' },
-  navButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#f4f7fb',
-  },
-  navButtonText: { fontSize: 26, color: '#10131a', lineHeight: 30 },
-  jumpBar: {
-    flexDirection: 'row',
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingTop: 12,
-    alignItems: 'center',
-  },
-  jumpInput: {
-    flex: 1,
-    fontSize: 16,
-    color: '#10131a',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  actionBar: { flexDirection: 'row', gap: 10, padding: 12, alignItems: 'center' },
-  ghostButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-  },
-  ghostButtonText: { fontSize: 16, fontWeight: '600', color: '#1d3a2f' },
-  primaryButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 10,
-    backgroundColor: '#1d4ed8',
-    alignItems: 'center',
-  },
-  primaryPressed: { backgroundColor: '#1740a8' },
-  primaryDisabled: { backgroundColor: '#9aa9c9' },
-  primaryButtonText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
-  list: { gap: 12, padding: 16 },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f4f7fb',
-  },
-  rowText: { flex: 1, gap: 2 },
-  // A small colour dot for the event's resolved colour (sighted users); the
-  // subtle border keeps light colours visible on the card. Matches TasksScreen.
-  colorDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.18)',
-  },
-  eventTitle: { fontSize: 18, fontWeight: '600', color: '#10131a' },
-  eventTime: { fontSize: 14, color: '#5b6573' },
-  deleteButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#d9b3b0',
-    backgroundColor: '#fbeceb',
-  },
-  deleteButtonText: { fontSize: 15, fontWeight: '600', color: '#b42318' },
-  pressed: { opacity: 0.7 },
-  muted: { fontSize: 15, color: '#5b6573', padding: 16 },
-  error: { fontSize: 15, fontWeight: '600', color: '#b42318', paddingHorizontal: 16 },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.background },
+    dayBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingHorizontal: 12,
+      paddingTop: 14,
+    },
+    dayHeading: { flex: 1, fontSize: 18, fontWeight: '700', color: c.textPrimary, textAlign: 'center' },
+    navButton: {
+      width: 48,
+      height: 48,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: c.surfaceAlt,
+    },
+    navButtonText: { fontSize: 26, color: c.textPrimary, lineHeight: 30 },
+    jumpBar: {
+      flexDirection: 'row',
+      gap: 10,
+      paddingHorizontal: 12,
+      paddingTop: 12,
+      alignItems: 'center',
+    },
+    jumpInput: {
+      flex: 1,
+      fontSize: 16,
+      color: c.textPrimary,
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    actionBar: { flexDirection: 'row', gap: 10, padding: 12, alignItems: 'center' },
+    ghostButton: {
+      paddingVertical: 12,
+      paddingHorizontal: 18,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
+    primaryButton: {
+      flex: 1,
+      paddingVertical: 12,
+      borderRadius: 10,
+      backgroundColor: c.accent,
+      alignItems: 'center',
+    },
+    primaryPressed: { backgroundColor: c.accentPressed },
+    primaryDisabled: { backgroundColor: c.accentDisabled },
+    primaryButtonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
+    list: { gap: 12, padding: 16 },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      padding: 16,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    rowText: { flex: 1, gap: 2 },
+    // A small colour dot for the event's resolved colour (sighted users); the
+    // subtle border keeps light colours visible on the card. Matches TasksScreen.
+    colorDot: {
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: c.borderOverlay,
+    },
+    eventTitle: { fontSize: 18, fontWeight: '600', color: c.textPrimary },
+    eventTime: { fontSize: 14, color: c.textSecondary },
+    deleteButton: {
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.dangerBorder,
+      backgroundColor: c.dangerBg,
+    },
+    deleteButtonText: { fontSize: 15, fontWeight: '600', color: c.danger },
+    pressed: { opacity: 0.7 },
+    muted: { fontSize: 15, color: c.textSecondary, padding: 16 },
+    error: { fontSize: 15, fontWeight: '600', color: c.danger, paddingHorizontal: 16 },
+  });

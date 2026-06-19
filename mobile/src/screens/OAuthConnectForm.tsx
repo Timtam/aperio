@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 
 import { RadioGroup } from '../components/RadioGroup';
+import { useThemedStyles, type ThemeColors } from '../theme';
 import { Account } from '../api/accounts';
 import { connectOAuthAccount, type OAuthProvider } from '../api/oauth';
 
@@ -39,6 +40,7 @@ interface OAuthConnectFormProps {
 
 export default function OAuthConnectForm({ onConnected }: OAuthConnectFormProps) {
   const { t } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
 
   const [provider, setProvider] = useState<OAuthProvider>('google');
   const [displayName, setDisplayName] = useState('');
@@ -274,31 +276,32 @@ export default function OAuthConnectForm({ onConnected }: OAuthConnectFormProps)
   );
 }
 
-const styles = StyleSheet.create({
-  section: { gap: 14, marginTop: 8 },
-  heading: { fontSize: 20, fontWeight: '700', color: '#10131a' },
-  field: { gap: 6 },
-  label: { fontSize: 15, fontWeight: '600', color: '#2b3240' },
-  hint: { fontSize: 13, color: '#5b6573' },
-  error: { fontSize: 15, fontWeight: '600', color: '#b42318' },
-  input: {
-    fontSize: 17,
-    color: '#10131a',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  button: {
-    marginTop: 8,
-    paddingVertical: 14,
-    borderRadius: 10,
-    backgroundColor: '#1d4ed8',
-    alignItems: 'center',
-  },
-  buttonPressed: { backgroundColor: '#1740a8' },
-  buttonDisabled: { backgroundColor: '#9aa9c9' },
-  buttonText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    section: { gap: 14, marginTop: 8 },
+    heading: { fontSize: 20, fontWeight: '700', color: c.textPrimary },
+    field: { gap: 6 },
+    label: { fontSize: 15, fontWeight: '600', color: c.textLabel },
+    hint: { fontSize: 13, color: c.textSecondary },
+    error: { fontSize: 15, fontWeight: '600', color: c.danger },
+    input: {
+      fontSize: 17,
+      color: c.textPrimary,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    button: {
+      marginTop: 8,
+      paddingVertical: 14,
+      borderRadius: 10,
+      backgroundColor: c.accent,
+      alignItems: 'center',
+    },
+    buttonPressed: { backgroundColor: c.accentPressed },
+    buttonDisabled: { backgroundColor: c.accentDisabled },
+    buttonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
+  });

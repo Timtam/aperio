@@ -18,6 +18,7 @@ import { listColorLabels } from '../api/colorLabels';
 import { renameContainer, setContainerColorLabel } from '../api/containerColor';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import type { RootStackScreenProps } from '../navigation/types';
+import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Manage a single calendar: rename it, bind a colour label, or (local only)
 // delete it. Mirrors ListEditorModal's interaction patterns (rename field +
@@ -38,6 +39,7 @@ export default function CalendarEditorModal({
 }: RootStackScreenProps<'CalendarEditor'>) {
   const { calendarId } = route.params;
   const { t } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
 
   const [calendar, setCalendar] = useState<Calendar | null>(null);
   const [colorLabels, setColorLabels] = useState<ColorLabel[]>([]);
@@ -251,41 +253,42 @@ export default function CalendarEditorModal({
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#ffffff' },
-  content: { padding: 16, gap: 16 },
-  title: { fontSize: 22, fontWeight: '700', color: '#10131a' },
-  heading: { fontSize: 17, fontWeight: '700', color: '#2b3240' },
-  error: { fontSize: 15, fontWeight: '600', color: '#b42318' },
-  muted: { fontSize: 15, color: '#5b6573', padding: 16 },
-  addRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
-  input: {
-    flex: 1,
-    fontSize: 17,
-    color: '#10131a',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#c9d2e0',
-    backgroundColor: '#f8fafc',
-  },
-  addButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    backgroundColor: '#1d4ed8',
-  },
-  addButtonText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
-  pressed: { opacity: 0.7 },
-  deleteButton: {
-    marginTop: 8,
-    paddingVertical: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#f0c2bd',
-    backgroundColor: '#fdecea',
-    alignItems: 'center',
-  },
-  deleteButtonText: { fontSize: 16, fontWeight: '700', color: '#b42318' },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.background },
+    content: { padding: 16, gap: 16 },
+    title: { fontSize: 22, fontWeight: '700', color: c.textPrimary },
+    heading: { fontSize: 17, fontWeight: '700', color: c.textLabel },
+    error: { fontSize: 15, fontWeight: '600', color: c.danger },
+    muted: { fontSize: 15, color: c.textSecondary, padding: 16 },
+    addRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
+    input: {
+      flex: 1,
+      fontSize: 17,
+      color: c.textPrimary,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    addButton: {
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 10,
+      backgroundColor: c.accent,
+    },
+    addButtonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
+    pressed: { opacity: 0.7 },
+    deleteButton: {
+      marginTop: 8,
+      paddingVertical: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.dangerBorder,
+      backgroundColor: c.dangerBg,
+      alignItems: 'center',
+    },
+    deleteButtonText: { fontSize: 16, fontWeight: '700', color: c.danger },
+  });
