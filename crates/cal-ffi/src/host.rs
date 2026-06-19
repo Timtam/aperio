@@ -50,6 +50,10 @@ use cal_core::{
     NewEvent, TaskList, TasksFeature,
 };
 use host_core::accounts::{AccountsRepo, AdapterKind};
+use host_core::cache::{
+    has_snapshot, is_stale, refresh_events, spawn_item_refresh, CacheObserver, CacheStore,
+    RefreshCoordinator, SyncScope, SWR_TTL_SECS,
+};
 use host_core::conflicts::{
     ConflictKind, ConflictRecord, ConflictsError, ConflictsRepo, ResolutionChoice,
 };
@@ -562,6 +566,26 @@ pub struct Host {
     /// Failure latch for `sustained_failure` / `last_error_code` in the sync
     /// status (the desktop scheduler's job; mobile has no scheduler).
     progress: SyncProgressDriver,
+    /// The external-adapter snapshot cache (CACHE-1/2). External reads serve the
+    /// cached snapshot instantly and queue a deduplicated background refresh —
+    /// the desktop SWR behaviour, now shared via host-core.
+    cache: Arc<CacheStore>,
+    /// Dedups concurrent background refreshes of the same container.
+    coord: Arc<RefreshCoordinator>,
+    /// Where a finished background refresh reports "this container changed" so
+    /// the UI can re-read. A no-op until the JS layer registers its bridge (a
+    /// later step); the cache itself is populated regardless.
+    cache_observer: Arc<dyn CacheObserver>,
+}
+
+/// A `CacheObserver` that drops every notification — the Host's default until
+/// the JS layer registers a real bridge. Background refreshes still populate the
+/// cache; the UI just re-reads on its own focus/refetch until the push lands.
+struct NullCacheObserver;
+
+impl CacheObserver for NullCacheObserver {
+    fn cache_updated(&self, _payload: &host_core::cache::CacheUpdatedPayload) {}
+    fn refresh_status(&self, _status: &host_core::cache::CacheRefreshStatus) {}
 }
 
 impl Host {
@@ -597,6 +621,21 @@ impl Host {
         self.registry
             .account_for_calendar(calendar_id)
             .is_none_or(|a| a == LOCAL_ID)
+    }
+
+    /// Invalidate the events snapshot for `calendar_id` after a mutation, so the
+    /// next read sees it as cold and re-fetches (the cold-fallback serves a live
+    /// read → the edit shows immediately). A no-op for the local account (there's
+    /// no cache row). Mirrors the desktop `cache.invalidate` after external event
+    /// writes.
+    fn invalidate_events_cache(&self, calendar_id: &str) {
+        let account = self
+            .registry
+            .account_for_calendar(calendar_id)
+            .unwrap_or_else(|| LOCAL_ID.to_string());
+        let _ = self
+            .cache
+            .invalidate(&account, SyncScope::Events, calendar_id);
     }
 
     /// Append one `sync_log` row (best-effort: a logging failure must never sink
@@ -1630,6 +1669,14 @@ impl Host {
             }
         }
 
+        // The external-adapter snapshot cache. Construct it (and the refresh
+        // dedup coordinator) here, mirroring the desktop lib.rs; the periodic
+        // warm loop is NOT started — mobile drives refreshes manually + on
+        // foreground (a later step). The observer is a no-op until the JS layer
+        // registers its bridge; background refreshes populate the cache anyway.
+        let cache = Arc::new(CacheStore::new(db.clone()));
+        let coord = Arc::new(RefreshCoordinator::new());
+
         Ok(Arc::new(Self {
             db,
             adapter,
@@ -1641,6 +1688,9 @@ impl Host {
             onboarding: graph.onboarding,
             plugin_manager,
             progress: SyncProgressDriver::default(),
+            cache,
+            coord,
+            cache_observer: Arc::new(NullCacheObserver),
         }))
     }
 
@@ -1992,53 +2042,99 @@ impl Host {
     pub fn get_events_json(&self, request_json: String) -> Result<String, StoreError> {
         let req: EventRangeRequest = from_json("request", &request_json)?;
         let range = DateRange::new(req.start, req.end);
-        // Only EXTERNAL events get the host-local colour stamp (local events carry
-        // their own binding; synthetic birthday events need none).
-        let is_external = !host_core::birthdays::is_birthday_calendar_id(&req.calendar_id)
-            && self.route(&req.calendar_id)?.is_some();
-        let mut events = self.runtime.block_on(async {
-            // Birthday calendars are synthesised, not stored: derive their
-            // events from the underlying LOCAL contact list's birthdays. (The
-            // mobile host has no external contact cache, so only local birthday
-            // layers exist — see list_calendars_json.)
-            if host_core::birthdays::is_birthday_calendar_id(&req.calendar_id) {
+
+        // Birthday calendars are synthesised, not stored: derive their events
+        // from the underlying LOCAL contact list's birthdays. (No cache — the
+        // mobile host has no external contact cache, so only local birthday
+        // layers exist — see list_calendars_json.)
+        if host_core::birthdays::is_birthday_calendar_id(&req.calendar_id) {
+            let events = self.runtime.block_on(async {
                 let list_id = host_core::birthdays::underlying_contact_list_id(&req.calendar_id)
                     .unwrap_or_default();
                 let contacts = self.adapter.get_contacts(list_id).await.unwrap_or_default();
-                return Ok::<_, StoreError>(host_core::birthdays::events_for_contacts(
-                    contacts,
-                    &req.calendar_id,
-                    range,
-                ));
+                host_core::birthdays::events_for_contacts(contacts, &req.calendar_id, range)
+            });
+            return to_json(&events);
+        }
+
+        match self.route(&req.calendar_id)? {
+            // LOCAL: a direct read (the local store isn't cached).
+            None => {
+                let events = self
+                    .runtime
+                    .block_on(async { self.adapter.get_events(&req.calendar_id, range).await })
+                    .map_err(map_store_err)?;
+                to_json(&events)
             }
-            match self.route(&req.calendar_id)? {
-                None => self
-                    .adapter
-                    .get_events(&req.calendar_id, range)
-                    .await
-                    .map_err(map_store_err),
-                Some(ext) => ext
-                    .get_events(&req.calendar_id, range)
-                    .await
-                    .map_err(map_store_err),
-            }
-        })?;
-        if is_external {
-            // Map a colour-capable provider's native color_hex back to a label
-            // FIRST, then stamp host-local overrides (which skip native-coloured
-            // events) — the desktop ordering so a provider colour always wins.
-            for ev in events.iter_mut() {
-                if let Some(hex) = ev.color_hex.clone() {
-                    if let Ok(Some(label)) = self.adapter.match_hex_to_label(&hex) {
-                        ev.color_label = Some(ColorLabelId(label));
+            // EXTERNAL: stale-while-revalidate. A WARM container (a snapshot
+            // exists) serves the cached rows for the range instantly (never
+            // blocks on the network, works offline) and queues a background
+            // refresh when the snapshot is stale. A COLD container (no snapshot
+            // yet, or one just invalidated by a write) does a LIVE read so the
+            // first paint is never blank, and warms the cache in the background
+            // for next time — the mobile stand-in until the cache-updated push
+            // (a later step) can fill an empty snapshot in place. Gating the
+            // refresh on stale|cold (not coverage) breaks the refresh→re-read
+            // loop: a just-refreshed container stamps last_refreshed_at so it's
+            // neither cold nor stale for the TTL. The background refresh runs on
+            // the Host's one worker thread (it advances between block_on calls,
+            // like the writer drain task). Mirrors the desktop get_events, plus
+            // the cold-live fallback.
+            Some(ext) => {
+                let account = self
+                    .registry
+                    .account_for_calendar(&req.calendar_id)
+                    .unwrap_or_else(|| LOCAL_ID.to_string());
+                let state = self
+                    .cache
+                    .get_sync_state(&account, SyncScope::Events, &req.calendar_id)
+                    .ok()
+                    .flatten();
+                let warm = has_snapshot(&state);
+                let stale = is_stale(&state, SWR_TTL_SECS);
+                let mut events = if warm {
+                    self.cache
+                        .read_events(&account, &req.calendar_id, range)
+                        .unwrap_or_default()
+                } else {
+                    self.runtime
+                        .block_on(async { ext.get_events(&req.calendar_id, range).await })
+                        .map_err(map_store_err)?
+                };
+                // Colour: map a colour-capable provider's native color_hex back
+                // to a label FIRST, then stamp host-local overrides (which skip
+                // native-coloured events) — the desktop ordering, so a provider
+                // colour always wins.
+                for ev in events.iter_mut() {
+                    if let Some(hex) = ev.color_hex.clone() {
+                        if let Ok(Some(label)) = self.adapter.match_hex_to_label(&hex) {
+                            ev.color_label = Some(ColorLabelId(label));
+                        }
                     }
                 }
+                let shared = self.db.shared();
+                apply_color_to_events(&OverridesRepo::new(&shared), &mut events);
+                if !warm || stale {
+                    let cache_bg = Arc::clone(&self.cache);
+                    let ext_bg = Arc::clone(&ext);
+                    let acc = account.clone();
+                    let cal = req.calendar_id.clone();
+                    spawn_item_refresh(
+                        self.runtime.handle(),
+                        Arc::clone(&self.cache_observer),
+                        Arc::clone(&self.cache),
+                        Arc::clone(&self.coord),
+                        SyncScope::Events,
+                        account,
+                        req.calendar_id.clone(),
+                        move || async move {
+                            refresh_events(&cache_bg, ext_bg.as_ref(), &acc, &cal, range).await
+                        },
+                    );
+                }
+                to_json(&events)
             }
-            let shared = self.db.shared();
-            let repo = OverridesRepo::new(&shared);
-            apply_color_to_events(&repo, &mut events);
         }
-        to_json(&events)
     }
 
     /// One local event by id as JSON (`Event` or `null`). Local-only by design
@@ -2115,6 +2211,7 @@ impl Host {
                 }));
             }
         }
+        self.invalidate_events_cache(&created.calendar_id);
         to_json(&created)
     }
 
@@ -2164,6 +2261,7 @@ impl Host {
                         fields,
                     }));
                 }
+                self.invalidate_events_cache(&updated.calendar_id);
                 return to_json(&updated);
             }
 
@@ -2240,6 +2338,11 @@ impl Host {
                     id: source_event_id,
                 }));
             }
+            // A move touches both ends — invalidate the source + the target so
+            // neither serves a stale snapshot (mirrors the desktop's both-ends
+            // invalidate).
+            self.invalidate_events_cache(&previous);
+            self.invalidate_events_cache(&target_calendar_id);
             return to_json(&created);
         }
 
@@ -2262,6 +2365,7 @@ impl Host {
                 }));
             }
         }
+        self.invalidate_events_cache(&updated.calendar_id);
         to_json(&updated)
     }
 
@@ -2297,6 +2401,9 @@ impl Host {
         if is_local {
             self.writer
                 .append(SyncEvent::EventDeleted(IdPayload { id }));
+        }
+        if let Some(cid) = calendar_id.as_deref() {
+            self.invalidate_events_cache(cid);
         }
         Ok(())
     }
@@ -2345,6 +2452,9 @@ impl Host {
                     .block_on(async { ext.add_event_exdate(&id, occ).await })
                     .map_err(map_store_err)?;
             }
+        }
+        if let Some(cid) = calendar_id.as_deref() {
+            self.invalidate_events_cache(cid);
         }
         Ok(())
     }
