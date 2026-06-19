@@ -116,9 +116,13 @@ export function SoundSelect({
           }),
         );
       }
-    } catch {
-      setError(t('reminders.sound.importError'));
-      AccessibilityInfo.announceForAccessibility(t('reminders.sound.importError'));
+    } catch (e) {
+      // Surface the importer's specific reason (unsupported format / too large)
+      // when present — the same way the other mobile error surfaces do — falling
+      // back to the generic message only when there's none.
+      const msg = e instanceof Error && e.message ? e.message : t('reminders.sound.importError');
+      setError(msg);
+      AccessibilityInfo.announceForAccessibility(msg);
     } finally {
       setBusy(false);
     }

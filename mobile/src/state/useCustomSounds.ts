@@ -52,9 +52,16 @@ export function useCustomSounds(): CustomSoundsBinding {
     });
     const asset = res.canceled ? undefined : res.assets[0];
     if (asset == null) return null;
+    // The picker returns a `file://` URI (copyToCacheDirectory), but the Rust
+    // importer reads a filesystem PATH via std::fs, which has no URI awareness —
+    // strip the scheme (and percent-decode) before handing it over, else every
+    // import fails NotFound.
+    const local = asset.uri.startsWith('file://')
+      ? decodeURIComponent(asset.uri.replace(/^file:\/\//, ''))
+      : asset.uri;
     // importSound validates format + size Rust-side; let a rejection propagate
     // so the caller can announce it.
-    const imported = await importSound(asset.uri);
+    const imported = await importSound(local);
     await reload();
     refreshRemindersSoon();
     return imported;

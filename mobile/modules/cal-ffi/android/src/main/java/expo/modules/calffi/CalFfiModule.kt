@@ -308,21 +308,24 @@ class CalFfiModule : Module() {
       val context = appContext.reactContext?.applicationContext
         ?: throw IllegalStateException("CalFfi: no Android context for the sound channel")
       val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-      // The channel's sound can't change after creation; the per-sound id means
-      // we only need to create it once.
-      if (nm.getNotificationChannel(channelId) != null) return@AsyncFunction
       val uri = FileProvider.getUriForFile(
         context,
         "${context.packageName}.remindersounds",
         File(soundPath),
       )
       // The system-UI process plays the channel sound — grant it read access to
-      // our not-exported provider's URI.
+      // our not-exported provider's URI. Re-issued on EVERY call (the scheduler
+      // invokes this on each reschedule): the grant is transient + not guaranteed
+      // to survive a reboot, so re-granting before the create-once guard keeps a
+      // persisted channel's sound readable after a restart. Cheap + idempotent.
       context.grantUriPermission(
         "com.android.systemui",
         uri,
         Intent.FLAG_GRANT_READ_URI_PERMISSION,
       )
+      // The channel's sound can't change after creation; the per-sound id means
+      // we only need to create the channel once.
+      if (nm.getNotificationChannel(channelId) != null) return@AsyncFunction
       val attrs = AudioAttributes.Builder()
         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
         .setUsage(AudioAttributes.USAGE_NOTIFICATION)

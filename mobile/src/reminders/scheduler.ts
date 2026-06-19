@@ -83,7 +83,10 @@ async function resolveDelivery(
       const path = await customSoundPath(src.sha256);
       if (path != null) {
         const channelId = `${CUSTOM_CHANNEL_PREFIX}${src.sha256}`;
-        await CalFfi.ensureCustomSoundChannel(channelId, path, i18n.t('reminders.label'));
+        // Distinguishing name (the short hash) so the per-sound channels don't
+        // all read identically as "Reminders" in Android notification settings.
+        const name = `${i18n.t('reminders.label')} (${src.sha256.slice(0, 8)})`;
+        await CalFfi.ensureCustomSoundChannel(channelId, path, name);
         return { channelId, sound: 'default' };
       }
     } catch {
