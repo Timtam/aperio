@@ -18,7 +18,6 @@ import {
   collectLogs,
   getLogLevel,
   getRecentLogs,
-  logsDirPath,
   setLogLevel,
   type LogLevel,
 } from '../api/logs';
@@ -81,7 +80,6 @@ export default function LogsScreen() {
   const [level, setLevel] = useState<LogLevel>('info');
   const [redact, setRedact] = useState(true);
   const [recent, setRecent] = useState('');
-  const [dirPath, setDirPath] = useState('');
   const [busyExport, setBusyExport] = useState(false);
 
   const announce = useCallback(
@@ -103,9 +101,6 @@ export default function LogsScreen() {
         .then((lv) => {
           if (isLogLevel(lv)) setLevel(lv);
         })
-        .catch(() => {});
-      void logsDirPath()
-        .then(setDirPath)
         .catch(() => {});
       void loadRecent();
     }, [loadRecent]),
@@ -229,11 +224,6 @@ export default function LogsScreen() {
             {t('dialogs.settings.logs.clear')}
           </Text>
         </Pressable>
-        {dirPath.length > 0 && (
-          <Text style={styles.location} accessibilityRole="text">
-            {t('dialogs.settings.logs.location', { path: dirPath })}
-          </Text>
-        )}
       </View>
 
       {/* Recent log viewer */}
@@ -266,7 +256,6 @@ const makeStyles = (c: ThemeColors) =>
     section: { gap: 10 },
     heading: { fontSize: 17, fontWeight: '700', color: c.textLabel },
     hint: { fontSize: 14, color: c.textSecondary, lineHeight: 20 },
-    location: { fontSize: 13, color: c.textSecondary },
     primaryButton: {
       paddingVertical: 14,
       paddingHorizontal: 18,
