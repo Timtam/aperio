@@ -322,6 +322,24 @@ export function CalendarDayList({
     [navigation],
   );
 
+  // Per-day "+ new event": seed a new event on that day (first writable
+  // calendar) — the mobile twin of the desktop's day-anchored create.
+  const firstWritableCalendarId = useMemo(
+    () => calendars.find((c) => !c.read_only)?.id ?? null,
+    [calendars],
+  );
+  const addEventOnDay = useCallback(
+    (dayKey: string) => {
+      if (firstWritableCalendarId == null) return;
+      navigation.navigate('EventEditor', {
+        eventId: null,
+        calendarId: firstWritableCalendarId,
+        anchor: dayKey,
+      });
+    },
+    [firstWritableCalendarId, navigation],
+  );
+
   // Check off a task via the shared toggle path (honours the synced
   // task-behaviour knobs), then reload. Like the other calendar screens, focus
   // is not forcibly restored across the reload.
@@ -608,6 +626,21 @@ export function CalendarDayList({
             return (
               <View key={b.key} style={styles.daySection}>
                 {rows}
+                {firstWritableCalendarId != null && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`${t('toolbar.newEvent')}, ${fmtFullDate(b.date)}`}
+                    onPress={() => addEventOnDay(b.key)}
+                    style={({ pressed }) => [
+                      styles.newEventButton,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text style={styles.newEventText}>
+                      {t('toolbar.newEvent')}
+                    </Text>
+                  </Pressable>
+                )}
               </View>
             );
           })}
@@ -621,6 +654,16 @@ const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
     list: { gap: 8, padding: 16 },
     daySection: { gap: 8 },
+    newEventButton: {
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+      alignItems: 'center',
+    },
+    newEventText: { fontSize: 15, fontWeight: '600', color: c.link },
     dayHeader: {
       fontSize: 15,
       fontWeight: '700',

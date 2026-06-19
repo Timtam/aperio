@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 
 import type { ColorLabel } from '@aperio/shared';
-import { expandAll, occurrenceIsoOf, seriesIdOf } from '@aperio/shared';
+import { expandAll, localDateKey, occurrenceIsoOf, seriesIdOf } from '@aperio/shared';
 
 import {
   Calendar,
@@ -194,8 +194,13 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
 
   const addEvent = useCallback(() => {
     if (firstCalendarId == null) return;
-    navigation.navigate('EventEditor', { eventId: null, calendarId: firstCalendarId });
-  }, [firstCalendarId, navigation]);
+    // Seed the new event on the day the user is viewing, not today.
+    navigation.navigate('EventEditor', {
+      eventId: null,
+      calendarId: firstCalendarId,
+      anchor: localDateKey(day),
+    });
+  }, [firstCalendarId, navigation, day]);
 
   // Editing an occurrence edits its underlying SERIES — the expanded row's id
   // is synthetic (`master@iso`), so resolve the real master id via seriesIdOf;

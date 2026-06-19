@@ -114,7 +114,7 @@ export default function EventEditorModal({
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
-  const { eventId, calendarId, occurrence } = route.params;
+  const { eventId, calendarId, occurrence, anchor } = route.params;
   const editing = eventId != null;
   // A single occurrence of a recurring series was opened (occurrence = its
   // instant) — offer the edit scope + seed the dates from the occurrence.
@@ -218,11 +218,13 @@ export default function EventEditorModal({
             setAttendees(ev.attendees ?? []);
           }
         } else {
-          // New event: default to the next full hour today, one hour long.
+          // New event: the next full hour, one hour long, on the anchored day
+          // (the tapped calendar day) when given, else today.
           const now = todayParts();
-          setStartDate(now.date);
+          const date = anchor ?? now.date;
+          setStartDate(date);
           setStartTime(now.time);
-          setEndDate(now.date);
+          setEndDate(date);
           setEndTime(now.time);
         }
       } catch (err) {
@@ -233,7 +235,7 @@ export default function EventEditorModal({
         setLoading(false);
       }
     })();
-  }, [editing, eventId, calendarId, occurrence, t]);
+  }, [editing, eventId, calendarId, occurrence, anchor, t]);
 
   const save = useCallback(async () => {
     const trimmedTitle = title.trim();

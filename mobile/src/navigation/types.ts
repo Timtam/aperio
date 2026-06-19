@@ -57,6 +57,9 @@ export type RootStackParamList = {
     eventId: string | null;
     calendarId: string;
     occurrence?: string | null;
+    // `anchor` (YYYY-MM-DD) seeds a NEW event's date from the tapped calendar
+    // day instead of today (the per-day "+ new event" affordance).
+    anchor?: string;
   };
   Calendars: undefined;
   CalendarEditor: { calendarId: string };

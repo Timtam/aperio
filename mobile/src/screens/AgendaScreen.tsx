@@ -188,6 +188,24 @@ export default function AgendaScreen({
     [calendars],
   );
 
+  // First writable calendar — the seed target for the per-day "+ new event"
+  // affordance (the day-anchored create, mirroring the desktop calendar views).
+  const firstWritableCalendarId = useMemo(
+    () => calendars.find((c) => !c.read_only)?.id ?? null,
+    [calendars],
+  );
+  const addEventOnDay = useCallback(
+    (dayKey: string) => {
+      if (firstWritableCalendarId == null) return;
+      navigation.navigate('EventEditor', {
+        eventId: null,
+        calendarId: firstWritableCalendarId,
+        anchor: dayKey,
+      });
+    },
+    [firstWritableCalendarId, navigation],
+  );
+
   const goToday = useCallback(() => setAnchor(localMidnight(new Date())), []);
 
   const jumpToDate = useCallback(() => {
@@ -338,11 +356,32 @@ export default function AgendaScreen({
         >
           {(() => {
             let prevKey: string | null = null;
+            let prevDay: Date | null = null;
             const rows: ReactNode[] = [];
+            // Close the current day group with a "+ new event" affordance seeded
+            // to that day (only when a writable calendar exists to host it).
+            const pushDayFooter = () => {
+              if (prevKey == null || prevDay == null || firstWritableCalendarId == null) return;
+              const dayKey = prevKey;
+              const day = prevDay;
+              rows.push(
+                <Pressable
+                  key={`add-${dayKey}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${t('toolbar.newEvent')}, ${fmtFullDate(day)}`}
+                  onPress={() => addEventOnDay(dayKey)}
+                  style={({ pressed }) => [styles.newEventButton, pressed && styles.pressed]}
+                >
+                  <Text style={styles.newEventText}>{t('toolbar.newEvent')}</Text>
+                </Pressable>,
+              );
+            };
             for (const occ of occurrences) {
               const key = localDateKey(occ.day);
               if (key !== prevKey) {
+                pushDayFooter();
                 prevKey = key;
+                prevDay = occ.day;
                 rows.push(
                   <Text
                     key={`h-${key}`}
@@ -359,6 +398,7 @@ export default function AgendaScreen({
               }
               rows.push(renderRow(occ, key));
             }
+            pushDayFooter();
             return rows;
           })()}
         </ScrollView>
@@ -529,6 +569,16 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.dangerBg,
     },
     deleteButtonText: { fontSize: 15, fontWeight: '600', color: c.danger },
+    newEventButton: {
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+      alignItems: 'center',
+    },
+    newEventText: { fontSize: 15, fontWeight: '600', color: c.link },
     pressed: { opacity: 0.7 },
     muted: { fontSize: 15, color: c.textSecondary, padding: 16 },
     error: { fontSize: 15, fontWeight: '600', color: c.danger, paddingHorizontal: 16 },
