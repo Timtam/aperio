@@ -254,14 +254,8 @@ export default function ContactsScreen({
         >
           <Text style={styles.ghostButtonText}>{t('mobile.manageContactLists')}</Text>
         </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('dialogs.settings.tabs.contacts')}
-          onPress={() => navigation.navigate('ContactSettings')}
-          style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
-        >
-          <Text style={styles.ghostButtonText}>{t('dialogs.settings.tabs.contacts')}</Text>
-        </Pressable>
+        {/* Contacts settings deliberately live under Settings (not here) — the
+            desktop groups them there; the Settings hub has the entry point. */}
       </View>
 
       {/* Search is a SUPERSET of browse (local FTS + every provider, incl.

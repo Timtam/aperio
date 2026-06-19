@@ -190,11 +190,6 @@ function ContactsStackNav() {
         component={ContactEditorModal}
         options={{ presentation: 'modal', title: t('dialogs.contact.createTitle') }}
       />
-      <ContactsStack.Screen
-        name="ContactSettings"
-        component={ContactsSettingsScreen}
-        options={{ title: t('dialogs.settings.tabs.contacts') }}
-      />
     </ContactsStack.Navigator>
   );
 }
@@ -243,8 +238,8 @@ function SettingsStackNav() {
         component={TaskSettingsScreen}
         options={{ title: t('dialogs.settings.tabs.tasks') }}
       />
-      {/* Cross-registered (also on the Contacts stack) so opening it from the
-          Settings tab stays on this stack rather than switching tabs. */}
+      {/* Contacts settings live under Settings (not the Contacts tab) — the
+          desktop groups them under settings, so this is their only home. */}
       <SettingsStack.Screen
         name="ContactSettings"
         component={ContactsSettingsScreen}
