@@ -32,10 +32,12 @@ pub struct SoundsDir(pub PathBuf);
 /// Map the shared importer's error onto the command layer's `CommandError`.
 fn map_import_err(err: ImportSoundError) -> CommandError {
     match err {
-        ImportSoundError::UnsupportedFormat(_) | ImportSoundError::TooLarge { .. } => CommandError {
-            code: "invalid_input",
-            message: err.to_string(),
-        },
+        ImportSoundError::UnsupportedFormat(_) | ImportSoundError::TooLarge { .. } => {
+            CommandError {
+                code: "invalid_input",
+                message: err.to_string(),
+            }
+        }
         ImportSoundError::Io(_) => CommandError {
             code: "internal",
             message: err.to_string(),
