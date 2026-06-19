@@ -11,4 +11,5 @@ export * from './rrule';
 export * from './dateKey';
 export * from './multiDay';
 export * from './taskCascade';
+export * from './dayStart';
 export * from './links';

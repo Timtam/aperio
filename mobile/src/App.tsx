@@ -10,6 +10,7 @@ import { useCacheUpdates } from './state/cacheObserver';
 import { ThemeProvider, useTheme, navigationThemeFor } from './theme';
 import type { RootStackParamList, RootTabParamList } from './navigation/types';
 import { useReminderTriggers } from './reminders/scheduler';
+import { useDayStartChecks } from './state/useDayStartChecks';
 import { useStoredLanguage } from './settings/language';
 import { useSyncStatus } from './state/useSyncStatus';
 import AccountsScreen from './screens/AccountsScreen';
@@ -239,6 +240,13 @@ export default function App() {
   );
 }
 
+/** Runs the day-start checks (it needs the task store, so it lives inside
+ *  TaskStoreProvider). Renders nothing. */
+function DayStartChecks(): null {
+  useDayStartChecks();
+  return null;
+}
+
 function AppContent() {
   const { t } = useTranslation();
   const theme = useTheme();
@@ -268,6 +276,9 @@ function AppContent() {
       <StatusBar style={theme.mode === 'light' ? 'dark' : 'light'} />
       <NavigationContainer theme={navigationThemeFor(theme)}>
         <TaskStoreProvider>
+          {/* Day-start checks (deadline-pin, …) — needs the task store, so it
+              mounts inside the provider; returns nothing. */}
+          <DayStartChecks />
           <Tab.Navigator initialRouteName="TasksTab">
             <Tab.Screen
               name="TasksTab"
