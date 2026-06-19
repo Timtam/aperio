@@ -859,6 +859,14 @@ public protocol HostProtocol: AnyObject, Sendable {
     func beginOauthJson(pluginId: String, argsJson: String) throws  -> String
     
     /**
+     * The connected account's email for `calendar_id`, used by the RSVP UI to
+     * tell an *attendee* from the *organizer*. `None` for local/iCal calendars
+     * and any provider that can't report an identity (which hides RSVP).
+     * Mirrors the desktop `calendar_current_user_email`.
+     */
+    func calendarCurrentUserEmail(calendarId: String) throws  -> String?
+    
+    /**
      * Rotate the dataset's E2E passphrase (§19.7): verify `old_passphrase`
      * against the dataset's `meta.json` params (recovering the UNCHANGED data
      * key), then mint a fresh KEK from `new_passphrase` over a freshly-rotated
@@ -1322,6 +1330,17 @@ public protocol HostProtocol: AnyObject, Sendable {
     func resolveSyncConflict(id: Int64, choice: String) throws 
     
     /**
+     * RSVP to an invitation on `calendar_id` / `event_id`: set the connected
+     * user's participation status. `status` is the wire `AttendeeStatus`
+     * (kebab-case). When `send_response` is true a scheduling-capable provider
+     * also emails the reply to the organizer. Invalidates the calendar's event
+     * cache so the next read reflects the new status. Local / unroutable →
+     * error (the UI only offers RSVP on scheduling-capable, non-organizer
+     * meetings). Mirrors the desktop `respond_to_event`.
+     */
+    func respondToEvent(calendarId: String, eventId: String, status: String, sendResponse: Bool) throws 
+    
+    /**
      * Resume a device flagged STALE (§19.10): it fell so far behind the dataset
      * that incremental sync can't safely catch up, so re-onboard from the
      * configured target, then drop the latched stale flag (subsequent rounds run
@@ -1450,9 +1469,38 @@ public protocol HostProtocol: AnyObject, Sendable {
     func syncStatusJson() throws  -> String
     
     /**
+     * Add/invite a member to `list_id`. `member_ref` is the provider's add key
+     * (Vikunja username, Todoist email). `right` ("read" / "write" / "admin")
+     * applies on backends with roles; `None` where the backend has none
+     * (Todoist). Mirrors the desktop `task_add_member`.
+     */
+    func taskAddMember(listId: String, memberRef: String, right: String?) throws 
+    
+    /**
+     * The connected account's own identity ("me") for the account owning
+     * `list_id`, as a JSON `TaskUser` (or `null`). Lets the assignee picker mark
+     * "assigned to me". `null` for local lists. Mirrors `task_current_user`.
+     */
+    func taskCurrentUserJson(listId: String) throws  -> String
+    
+    /**
      * One task by id as JSON; [`StoreError::NotFound`] when absent.
      */
     func taskJson(id: String) throws  -> String
+    
+    /**
+     * Users assignable to a task in `list_id` — its collaborator pool (§9.7),
+     * as a JSON `TaskUser[]`. Empty for local lists / providers without
+     * sharing. Mirrors the desktop `task_list_members`.
+     */
+    func taskListMembersJson(listId: String) throws  -> String
+    
+    /**
+     * The editable membership/shares of `list_id` as a JSON `TaskListShare[]`
+     * (§9.7), driving the members manager. Empty for local / non-manageable
+     * backends. Mirrors the desktop `task_list_shares`.
+     */
+    func taskListSharesJson(listId: String) throws  -> String
     
     /**
      * All task lists (local + external) as a JSON `TaskListRow[]` (the desktop
@@ -1462,6 +1510,26 @@ public protocol HostProtocol: AnyObject, Sendable {
      * a dead account is skipped (its error swallowed), never blanking the list.
      */
     func taskListsJson() throws  -> String
+    
+    /**
+     * Remove a member from `list_id`. `member_ref` is the provider's remove key
+     * (Vikunja user id, Todoist email). Mirrors the desktop `task_remove_member`.
+     */
+    func taskRemoveMember(listId: String, memberRef: String) throws 
+    
+    /**
+     * Search the owning account's user directory for people to add to `list_id`
+     * (Vikunja) as a JSON `TaskUser[]`. Empty for local lists and backends
+     * without a directory (Todoist invites by raw email). Mirrors the desktop
+     * `task_search_users`.
+     */
+    func taskSearchUsersJson(listId: String, query: String) throws  -> String
+    
+    /**
+     * Change an existing member's right on `list_id` (Vikunja). `right` is the
+     * wire `MemberRight` (snake_case). Mirrors the desktop `task_set_member_right`.
+     */
+    func taskSetMemberRight(listId: String, memberRef: String, right: String) throws 
     
     /**
      * Tasks in a list as a JSON array (`cal_core::Task[]`), routed to the list's
@@ -1722,6 +1790,21 @@ open func beginOauthJson(pluginId: String, argsJson: String)throws  -> String  {
             self.uniffiCloneHandle(),
         FfiConverterString.lower(pluginId),
         FfiConverterString.lower(argsJson),$0
+    )
+})
+}
+    
+    /**
+     * The connected account's email for `calendar_id`, used by the RSVP UI to
+     * tell an *attendee* from the *organizer*. `None` for local/iCal calendars
+     * and any provider that can't report an identity (which hides RSVP).
+     * Mirrors the desktop `calendar_current_user_email`.
+     */
+open func calendarCurrentUserEmail(calendarId: String)throws  -> String?  {
+    return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_calendar_current_user_email(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(calendarId),$0
     )
 })
 }
@@ -2551,6 +2634,26 @@ open func resolveSyncConflict(id: Int64, choice: String)throws   {try rustCallWi
 }
     
     /**
+     * RSVP to an invitation on `calendar_id` / `event_id`: set the connected
+     * user's participation status. `status` is the wire `AttendeeStatus`
+     * (kebab-case). When `send_response` is true a scheduling-capable provider
+     * also emails the reply to the organizer. Invalidates the calendar's event
+     * cache so the next read reflects the new status. Local / unroutable →
+     * error (the UI only offers RSVP on scheduling-capable, non-organizer
+     * meetings). Mirrors the desktop `respond_to_event`.
+     */
+open func respondToEvent(calendarId: String, eventId: String, status: String, sendResponse: Bool)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_respond_to_event(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(calendarId),
+        FfiConverterString.lower(eventId),
+        FfiConverterString.lower(status),
+        FfiConverterBool.lower(sendResponse),$0
+    )
+}
+}
+    
+    /**
      * Resume a device flagged STALE (§19.10): it fell so far behind the dataset
      * that incremental sync can't safely catch up, so re-onboard from the
      * configured target, then drop the latched stale flag (subsequent rounds run
@@ -2778,6 +2881,36 @@ open func syncStatusJson()throws  -> String  {
 }
     
     /**
+     * Add/invite a member to `list_id`. `member_ref` is the provider's add key
+     * (Vikunja username, Todoist email). `right` ("read" / "write" / "admin")
+     * applies on backends with roles; `None` where the backend has none
+     * (Todoist). Mirrors the desktop `task_add_member`.
+     */
+open func taskAddMember(listId: String, memberRef: String, right: String?)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_task_add_member(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(listId),
+        FfiConverterString.lower(memberRef),
+        FfiConverterOptionString.lower(right),$0
+    )
+}
+}
+    
+    /**
+     * The connected account's own identity ("me") for the account owning
+     * `list_id`, as a JSON `TaskUser` (or `null`). Lets the assignee picker mark
+     * "assigned to me". `null` for local lists. Mirrors `task_current_user`.
+     */
+open func taskCurrentUserJson(listId: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_task_current_user_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(listId),$0
+    )
+})
+}
+    
+    /**
      * One task by id as JSON; [`StoreError::NotFound`] when absent.
      */
 open func taskJson(id: String)throws  -> String  {
@@ -2785,6 +2918,34 @@ open func taskJson(id: String)throws  -> String  {
     uniffi_cal_ffi_fn_method_host_task_json(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(id),$0
+    )
+})
+}
+    
+    /**
+     * Users assignable to a task in `list_id` — its collaborator pool (§9.7),
+     * as a JSON `TaskUser[]`. Empty for local lists / providers without
+     * sharing. Mirrors the desktop `task_list_members`.
+     */
+open func taskListMembersJson(listId: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_task_list_members_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(listId),$0
+    )
+})
+}
+    
+    /**
+     * The editable membership/shares of `list_id` as a JSON `TaskListShare[]`
+     * (§9.7), driving the members manager. Empty for local / non-manageable
+     * backends. Mirrors the desktop `task_list_shares`.
+     */
+open func taskListSharesJson(listId: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_task_list_shares_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(listId),$0
     )
 })
 }
@@ -2802,6 +2963,49 @@ open func taskListsJson()throws  -> String  {
             self.uniffiCloneHandle(),$0
     )
 })
+}
+    
+    /**
+     * Remove a member from `list_id`. `member_ref` is the provider's remove key
+     * (Vikunja user id, Todoist email). Mirrors the desktop `task_remove_member`.
+     */
+open func taskRemoveMember(listId: String, memberRef: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_task_remove_member(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(listId),
+        FfiConverterString.lower(memberRef),$0
+    )
+}
+}
+    
+    /**
+     * Search the owning account's user directory for people to add to `list_id`
+     * (Vikunja) as a JSON `TaskUser[]`. Empty for local lists and backends
+     * without a directory (Todoist invites by raw email). Mirrors the desktop
+     * `task_search_users`.
+     */
+open func taskSearchUsersJson(listId: String, query: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_task_search_users_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(listId),
+        FfiConverterString.lower(query),$0
+    )
+})
+}
+    
+    /**
+     * Change an existing member's right on `list_id` (Vikunja). `right` is the
+     * wire `MemberRight` (snake_case). Mirrors the desktop `task_set_member_right`.
+     */
+open func taskSetMemberRight(listId: String, memberRef: String, right: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_task_set_member_right(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(listId),
+        FfiConverterString.lower(memberRef),
+        FfiConverterString.lower(right),$0
+    )
+}
 }
     
     /**
@@ -6253,6 +6457,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_begin_oauth_json() != 10684) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_calendar_current_user_email() != 11381) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_change_sync_passphrase_json() != 15380) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -6409,6 +6616,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_resolve_sync_conflict() != 25566) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_respond_to_event() != 17954) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_resume_stale_device_json() != 29568) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -6451,10 +6661,31 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_sync_status_json() != 5739) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_task_add_member() != 8323) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_task_current_user_json() != 13771) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_task_json() != 19358) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_task_list_members_json() != 60259) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_task_list_shares_json() != 10412) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_task_lists_json() != 64113) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_task_remove_member() != 37396) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_task_search_users_json() != 32081) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_task_set_member_right() != 31335) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_tasks_json() != 40630) {

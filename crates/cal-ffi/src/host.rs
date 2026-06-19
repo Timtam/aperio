@@ -219,6 +219,29 @@ fn external_reparent_unsupported() -> StoreError {
     }
 }
 
+/// Parse a wire `AttendeeStatus` (kebab-case: "accepted" / "tentative" /
+/// "declined" / "needs-action") into the core enum, via its serde rename so the
+/// mapping never drifts from the type.
+fn parse_attendee_status(s: &str) -> Result<cal_core::AttendeeStatus, StoreError> {
+    serde_json::from_value(serde_json::Value::String(s.to_owned())).map_err(|_| {
+        StoreError::InvalidField {
+            field: "status".to_string(),
+            detail: format!("unknown attendee status '{s}'"),
+        }
+    })
+}
+
+/// Parse a wire `MemberRight` (snake_case: "read" / "write" / "admin") into the
+/// core enum, via its serde rename.
+fn parse_member_right(s: &str) -> Result<cal_core::MemberRight, StoreError> {
+    serde_json::from_value(serde_json::Value::String(s.to_owned())).map_err(|_| {
+        StoreError::InvalidField {
+            field: "right".to_string(),
+            detail: format!("unknown member right '{s}'"),
+        }
+    })
+}
+
 /// Map a `ConflictsRepo` failure into the bridge's `StoreError`: a missing row
 /// is `NotFound`, a bad kind/resolution is an `InvalidField`, the rest SQLite.
 fn map_conflicts_err(e: ConflictsError) -> StoreError {
@@ -1288,6 +1311,19 @@ impl Host {
                 .map(Some)
                 .ok_or(StoreError::NotFound)
         }
+    }
+
+    /// Resolve the EXTERNAL task adapter owning `list_id`, or `Unsupported` when
+    /// the list is local / has no provider. Member-management writes (§9.7) only
+    /// make sense against a sharing-capable provider — the UI gates them on the
+    /// `manageable` capability, which the local store never advertises, so this
+    /// is a belt-and-braces guard rather than a reachable error. Mirrors the
+    /// desktop `route_task_list` helper (which 404s a non-routable list).
+    fn route_task_list_external(&self, list_id: &str) -> Result<Arc<dyn TasksFeature>, StoreError> {
+        self.route_task_list(list_id)?
+            .ok_or_else(|| StoreError::Unsupported {
+                detail: "member management is only available on external task lists".to_string(),
+            })
     }
 
     /// Whether `list_id` belongs to the local account (unknown → local, matching
@@ -4343,6 +4379,167 @@ impl Host {
             })
             .collect();
         to_json(&dtos)
+    }
+
+    // ── Collaboration: RSVP (§7.3) + task-list members/sharing (§9.7) ─────────
+    //
+    // All routed to the owning EXTERNAL adapter — the local store has no user or
+    // sharing concept. Read paths degrade to empty / null for local + unroutable
+    // accounts (matching the desktop commands), so the UI simply hides the
+    // affordance; write paths surface an error. These bypass the SWR cache (a
+    // members/shares list is small + rarely changes; the desktop reads them live
+    // too), except `respond_to_event`, which invalidates the event snapshot so
+    // the new status shows on the next read.
+
+    /// The connected account's email for `calendar_id`, used by the RSVP UI to
+    /// tell an *attendee* from the *organizer*. `None` for local/iCal calendars
+    /// and any provider that can't report an identity (which hides RSVP).
+    /// Mirrors the desktop `calendar_current_user_email`.
+    pub fn calendar_current_user_email(
+        &self,
+        calendar_id: String,
+    ) -> Result<Option<String>, StoreError> {
+        let Some(ext) = self.route(&calendar_id).ok().flatten() else {
+            return Ok(None);
+        };
+        Ok(self
+            .runtime
+            .block_on(async { ext.current_user_email().await })
+            .unwrap_or(None))
+    }
+
+    /// RSVP to an invitation on `calendar_id` / `event_id`: set the connected
+    /// user's participation status. `status` is the wire `AttendeeStatus`
+    /// (kebab-case). When `send_response` is true a scheduling-capable provider
+    /// also emails the reply to the organizer. Invalidates the calendar's event
+    /// cache so the next read reflects the new status. Local / unroutable →
+    /// error (the UI only offers RSVP on scheduling-capable, non-organizer
+    /// meetings). Mirrors the desktop `respond_to_event`.
+    pub fn respond_to_event(
+        &self,
+        calendar_id: String,
+        event_id: String,
+        status: String,
+        send_response: bool,
+    ) -> Result<(), StoreError> {
+        let status = parse_attendee_status(&status)?;
+        let ext = self.route(&calendar_id)?.ok_or(StoreError::Unsupported {
+            detail: "RSVP is only available on external calendar accounts".to_string(),
+        })?;
+        self.runtime
+            .block_on(async { ext.respond_to_event(&event_id, status, send_response).await })
+            .map_err(map_store_err)?;
+        self.invalidate_events_cache(&calendar_id);
+        Ok(())
+    }
+
+    /// Users assignable to a task in `list_id` — its collaborator pool (§9.7),
+    /// as a JSON `TaskUser[]`. Empty for local lists / providers without
+    /// sharing. Mirrors the desktop `task_list_members`.
+    pub fn task_list_members_json(&self, list_id: String) -> Result<String, StoreError> {
+        let members = match self.route_task_list(&list_id).ok().flatten() {
+            None => Vec::new(),
+            Some(ext) => self
+                .runtime
+                .block_on(async { ext.list_task_list_members(&list_id).await })
+                .map_err(map_store_err)?,
+        };
+        to_json(&members)
+    }
+
+    /// The connected account's own identity ("me") for the account owning
+    /// `list_id`, as a JSON `TaskUser` (or `null`). Lets the assignee picker mark
+    /// "assigned to me". `null` for local lists. Mirrors `task_current_user`.
+    pub fn task_current_user_json(&self, list_id: String) -> Result<String, StoreError> {
+        let me = match self.route_task_list(&list_id).ok().flatten() {
+            None => None,
+            Some(ext) => self
+                .runtime
+                .block_on(async { ext.current_user().await })
+                .map_err(map_store_err)?,
+        };
+        to_json(&me)
+    }
+
+    /// The editable membership/shares of `list_id` as a JSON `TaskListShare[]`
+    /// (§9.7), driving the members manager. Empty for local / non-manageable
+    /// backends. Mirrors the desktop `task_list_shares`.
+    pub fn task_list_shares_json(&self, list_id: String) -> Result<String, StoreError> {
+        let shares = match self.route_task_list(&list_id).ok().flatten() {
+            None => Vec::new(),
+            Some(ext) => self
+                .runtime
+                .block_on(async { ext.list_task_list_shares(&list_id).await })
+                .map_err(map_store_err)?,
+        };
+        to_json(&shares)
+    }
+
+    /// Search the owning account's user directory for people to add to `list_id`
+    /// (Vikunja) as a JSON `TaskUser[]`. Empty for local lists and backends
+    /// without a directory (Todoist invites by raw email). Mirrors the desktop
+    /// `task_search_users`.
+    pub fn task_search_users_json(
+        &self,
+        list_id: String,
+        query: String,
+    ) -> Result<String, StoreError> {
+        let users = match self.route_task_list(&list_id).ok().flatten() {
+            None => Vec::new(),
+            Some(ext) => self
+                .runtime
+                .block_on(async { ext.search_users(&query).await })
+                .map_err(map_store_err)?,
+        };
+        to_json(&users)
+    }
+
+    /// Add/invite a member to `list_id`. `member_ref` is the provider's add key
+    /// (Vikunja username, Todoist email). `right` ("read" / "write" / "admin")
+    /// applies on backends with roles; `None` where the backend has none
+    /// (Todoist). Mirrors the desktop `task_add_member`.
+    pub fn task_add_member(
+        &self,
+        list_id: String,
+        member_ref: String,
+        right: Option<String>,
+    ) -> Result<(), StoreError> {
+        let right = right.map(|r| parse_member_right(&r)).transpose()?;
+        let ext = self.route_task_list_external(&list_id)?;
+        self.runtime
+            .block_on(async { ext.add_task_list_member(&list_id, &member_ref, right).await })
+            .map_err(map_store_err)
+    }
+
+    /// Remove a member from `list_id`. `member_ref` is the provider's remove key
+    /// (Vikunja user id, Todoist email). Mirrors the desktop `task_remove_member`.
+    pub fn task_remove_member(
+        &self,
+        list_id: String,
+        member_ref: String,
+    ) -> Result<(), StoreError> {
+        let ext = self.route_task_list_external(&list_id)?;
+        self.runtime
+            .block_on(async { ext.remove_task_list_member(&list_id, &member_ref).await })
+            .map_err(map_store_err)
+    }
+
+    /// Change an existing member's right on `list_id` (Vikunja). `right` is the
+    /// wire `MemberRight` (snake_case). Mirrors the desktop `task_set_member_right`.
+    pub fn task_set_member_right(
+        &self,
+        list_id: String,
+        member_ref: String,
+        right: String,
+    ) -> Result<(), StoreError> {
+        let right = parse_member_right(&right)?;
+        let ext = self.route_task_list_external(&list_id)?;
+        self.runtime
+            .block_on(async {
+                ext.set_task_list_member_right(&list_id, &member_ref, right)
+                    .await
+            })
+            .map_err(map_store_err)
     }
 
     // ── User preferences (generic key/value; synced-key whitelist) ────────────

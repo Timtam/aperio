@@ -340,6 +340,50 @@ public class CalFfiModule: Module {
       try self.host.deleteContactList(id: id)
     }
 
+    // ─── Collaboration: RSVP (§7.3) + task-list members/sharing (§9.7) ────────
+    // Routed Rust-side to the owning external adapter; reads degrade to empty /
+    // null for local + unroutable accounts (the UI hides the affordance), writes
+    // throw. respondToEvent invalidates the event cache so the next read shows
+    // the new status.
+
+    AsyncFunction("calendarCurrentUserEmail") { (calendarId: String) -> String? in
+      try self.host.calendarCurrentUserEmail(calendarId: calendarId)
+    }
+
+    AsyncFunction("respondToEvent") {
+      (calendarId: String, eventId: String, status: String, sendResponse: Bool) in
+      try self.host.respondToEvent(
+        calendarId: calendarId, eventId: eventId, status: status, sendResponse: sendResponse)
+    }
+
+    AsyncFunction("taskListMembersJson") { (listId: String) -> String in
+      try self.host.taskListMembersJson(listId: listId)
+    }
+
+    AsyncFunction("taskCurrentUserJson") { (listId: String) -> String in
+      try self.host.taskCurrentUserJson(listId: listId)
+    }
+
+    AsyncFunction("taskListSharesJson") { (listId: String) -> String in
+      try self.host.taskListSharesJson(listId: listId)
+    }
+
+    AsyncFunction("taskSearchUsersJson") { (listId: String, query: String) -> String in
+      try self.host.taskSearchUsersJson(listId: listId, query: query)
+    }
+
+    AsyncFunction("taskAddMember") { (listId: String, memberRef: String, right: String?) in
+      try self.host.taskAddMember(listId: listId, memberRef: memberRef, right: right)
+    }
+
+    AsyncFunction("taskRemoveMember") { (listId: String, memberRef: String) in
+      try self.host.taskRemoveMember(listId: listId, memberRef: memberRef)
+    }
+
+    AsyncFunction("taskSetMemberRight") { (listId: String, memberRef: String, right: String) in
+      try self.host.taskSetMemberRight(listId: listId, memberRef: memberRef, right: right)
+    }
+
     // ─── OAuth (host-driven; mobile opens authorize_url in a native session) ──
 
     AsyncFunction("beginOauthJson") { (pluginId: String, argsJson: String) -> String in

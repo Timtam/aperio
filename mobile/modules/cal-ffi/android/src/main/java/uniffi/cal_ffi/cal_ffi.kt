@@ -766,6 +766,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_begin_oauth_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_calendar_current_user_email(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_change_sync_passphrase_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_clear_sync_log(
@@ -870,6 +872,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_resolve_sync_conflict(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_respond_to_event(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_resume_stale_device_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_search_contacts_json(
@@ -898,9 +902,23 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_sync_status_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_task_add_member(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_task_current_user_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_task_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_task_list_members_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_task_list_shares_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_task_lists_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_task_remove_member(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_task_search_users_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_task_set_member_right(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_tasks_json(
     ): Short
@@ -1026,6 +1044,8 @@ external fun uniffi_cal_ffi_fn_method_host_adopt_remote_encryption_json(`ptr`: L
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_begin_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_calendar_current_user_email(`ptr`: Long,`calendarId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_change_sync_passphrase_json(`ptr`: Long,`oldPassphrase`: RustBuffer.ByValue,`newPassphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_clear_sync_log(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1130,6 +1150,8 @@ external fun uniffi_cal_ffi_fn_method_host_reparent_task_list_json(`ptr`: Long,`
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_resolve_sync_conflict(`ptr`: Long,`id`: Long,`choice`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_respond_to_event(`ptr`: Long,`calendarId`: RustBuffer.ByValue,`eventId`: RustBuffer.ByValue,`status`: RustBuffer.ByValue,`sendResponse`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_resume_stale_device_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_search_contacts_json(`ptr`: Long,`query`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1158,10 +1180,24 @@ external fun uniffi_cal_ffi_fn_method_host_sync_now_json(`ptr`: Long,`trigger`: 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_sync_status_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_task_add_member(`ptr`: Long,`listId`: RustBuffer.ByValue,`memberRef`: RustBuffer.ByValue,`right`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_task_current_user_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_task_json(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_task_list_members_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_task_list_shares_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_task_lists_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_task_remove_member(`ptr`: Long,`listId`: RustBuffer.ByValue,`memberRef`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_task_search_users_json(`ptr`: Long,`listId`: RustBuffer.ByValue,`query`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_task_set_member_right(`ptr`: Long,`listId`: RustBuffer.ByValue,`memberRef`: RustBuffer.ByValue,`right`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_tasks_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_trust_sftp_host_key(`ptr`: Long,`hostPort`: RustBuffer.ByValue,`fingerprint`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1412,6 +1448,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_begin_oauth_json() != 10684.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_calendar_current_user_email() != 11381.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_change_sync_passphrase_json() != 15380.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1568,6 +1607,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_resolve_sync_conflict() != 25566.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_respond_to_event() != 17954.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_resume_stale_device_json() != 29568.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1610,10 +1652,31 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_sync_status_json() != 5739.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_task_add_member() != 8323.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_task_current_user_json() != 13771.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_task_json() != 19358.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_task_list_members_json() != 60259.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_task_list_shares_json() != 10412.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_task_lists_json() != 64113.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_task_remove_member() != 37396.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_task_search_users_json() != 32081.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_task_set_member_right() != 31335.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_tasks_json() != 40630.toShort()) {
@@ -2520,6 +2583,14 @@ public interface HostInterface {
     fun `beginOauthJson`(`pluginId`: kotlin.String, `argsJson`: kotlin.String): kotlin.String
     
     /**
+     * The connected account's email for `calendar_id`, used by the RSVP UI to
+     * tell an *attendee* from the *organizer*. `None` for local/iCal calendars
+     * and any provider that can't report an identity (which hides RSVP).
+     * Mirrors the desktop `calendar_current_user_email`.
+     */
+    fun `calendarCurrentUserEmail`(`calendarId`: kotlin.String): kotlin.String?
+    
+    /**
      * Rotate the dataset's E2E passphrase (§19.7): verify `old_passphrase`
      * against the dataset's `meta.json` params (recovering the UNCHANGED data
      * key), then mint a fresh KEK from `new_passphrase` over a freshly-rotated
@@ -2983,6 +3054,17 @@ public interface HostInterface {
     fun `resolveSyncConflict`(`id`: kotlin.Long, `choice`: kotlin.String)
     
     /**
+     * RSVP to an invitation on `calendar_id` / `event_id`: set the connected
+     * user's participation status. `status` is the wire `AttendeeStatus`
+     * (kebab-case). When `send_response` is true a scheduling-capable provider
+     * also emails the reply to the organizer. Invalidates the calendar's event
+     * cache so the next read reflects the new status. Local / unroutable →
+     * error (the UI only offers RSVP on scheduling-capable, non-organizer
+     * meetings). Mirrors the desktop `respond_to_event`.
+     */
+    fun `respondToEvent`(`calendarId`: kotlin.String, `eventId`: kotlin.String, `status`: kotlin.String, `sendResponse`: kotlin.Boolean)
+    
+    /**
      * Resume a device flagged STALE (§19.10): it fell so far behind the dataset
      * that incremental sync can't safely catch up, so re-onboard from the
      * configured target, then drop the latched stale flag (subsequent rounds run
@@ -3111,9 +3193,38 @@ public interface HostInterface {
     fun `syncStatusJson`(): kotlin.String
     
     /**
+     * Add/invite a member to `list_id`. `member_ref` is the provider's add key
+     * (Vikunja username, Todoist email). `right` ("read" / "write" / "admin")
+     * applies on backends with roles; `None` where the backend has none
+     * (Todoist). Mirrors the desktop `task_add_member`.
+     */
+    fun `taskAddMember`(`listId`: kotlin.String, `memberRef`: kotlin.String, `right`: kotlin.String?)
+    
+    /**
+     * The connected account's own identity ("me") for the account owning
+     * `list_id`, as a JSON `TaskUser` (or `null`). Lets the assignee picker mark
+     * "assigned to me". `null` for local lists. Mirrors `task_current_user`.
+     */
+    fun `taskCurrentUserJson`(`listId`: kotlin.String): kotlin.String
+    
+    /**
      * One task by id as JSON; [`StoreError::NotFound`] when absent.
      */
     fun `taskJson`(`id`: kotlin.String): kotlin.String
+    
+    /**
+     * Users assignable to a task in `list_id` — its collaborator pool (§9.7),
+     * as a JSON `TaskUser[]`. Empty for local lists / providers without
+     * sharing. Mirrors the desktop `task_list_members`.
+     */
+    fun `taskListMembersJson`(`listId`: kotlin.String): kotlin.String
+    
+    /**
+     * The editable membership/shares of `list_id` as a JSON `TaskListShare[]`
+     * (§9.7), driving the members manager. Empty for local / non-manageable
+     * backends. Mirrors the desktop `task_list_shares`.
+     */
+    fun `taskListSharesJson`(`listId`: kotlin.String): kotlin.String
     
     /**
      * All task lists (local + external) as a JSON `TaskListRow[]` (the desktop
@@ -3123,6 +3234,26 @@ public interface HostInterface {
      * a dead account is skipped (its error swallowed), never blanking the list.
      */
     fun `taskListsJson`(): kotlin.String
+    
+    /**
+     * Remove a member from `list_id`. `member_ref` is the provider's remove key
+     * (Vikunja user id, Todoist email). Mirrors the desktop `task_remove_member`.
+     */
+    fun `taskRemoveMember`(`listId`: kotlin.String, `memberRef`: kotlin.String)
+    
+    /**
+     * Search the owning account's user directory for people to add to `list_id`
+     * (Vikunja) as a JSON `TaskUser[]`. Empty for local lists and backends
+     * without a directory (Todoist invites by raw email). Mirrors the desktop
+     * `task_search_users`.
+     */
+    fun `taskSearchUsersJson`(`listId`: kotlin.String, `query`: kotlin.String): kotlin.String
+    
+    /**
+     * Change an existing member's right on `list_id` (Vikunja). `right` is the
+     * wire `MemberRight` (snake_case). Mirrors the desktop `task_set_member_right`.
+     */
+    fun `taskSetMemberRight`(`listId`: kotlin.String, `memberRef`: kotlin.String, `right`: kotlin.String)
     
     /**
      * Tasks in a list as a JSON array (`cal_core::Task[]`), routed to the list's
@@ -3432,6 +3563,26 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_begin_oauth_json(
         it,
         FfiConverterString.lower(`pluginId`),FfiConverterString.lower(`argsJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The connected account's email for `calendar_id`, used by the RSVP UI to
+     * tell an *attendee* from the *organizer*. `None` for local/iCal calendars
+     * and any provider that can't report an identity (which hides RSVP).
+     * Mirrors the desktop `calendar_current_user_email`.
+     */
+    @Throws(StoreException::class)override fun `calendarCurrentUserEmail`(`calendarId`: kotlin.String): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_calendar_current_user_email(
+        it,
+        FfiConverterString.lower(`calendarId`),_status)
 }
     }
     )
@@ -4507,6 +4658,28 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * RSVP to an invitation on `calendar_id` / `event_id`: set the connected
+     * user's participation status. `status` is the wire `AttendeeStatus`
+     * (kebab-case). When `send_response` is true a scheduling-capable provider
+     * also emails the reply to the organizer. Invalidates the calendar's event
+     * cache so the next read reflects the new status. Local / unroutable →
+     * error (the UI only offers RSVP on scheduling-capable, non-organizer
+     * meetings). Mirrors the desktop `respond_to_event`.
+     */
+    @Throws(StoreException::class)override fun `respondToEvent`(`calendarId`: kotlin.String, `eventId`: kotlin.String, `status`: kotlin.String, `sendResponse`: kotlin.Boolean)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_respond_to_event(
+        it,
+        FfiConverterString.lower(`calendarId`),FfiConverterString.lower(`eventId`),FfiConverterString.lower(`status`),FfiConverterBoolean.lower(`sendResponse`),_status)
+}
+    }
+    
+    
+
+    
+    /**
      * Resume a device flagged STALE (§19.10): it fell so far behind the dataset
      * that incremental sync can't safely catch up, so re-onboard from the
      * configured target, then drop the latched stale flag (subsequent rounds run
@@ -4795,6 +4968,44 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Add/invite a member to `list_id`. `member_ref` is the provider's add key
+     * (Vikunja username, Todoist email). `right` ("read" / "write" / "admin")
+     * applies on backends with roles; `None` where the backend has none
+     * (Todoist). Mirrors the desktop `task_add_member`.
+     */
+    @Throws(StoreException::class)override fun `taskAddMember`(`listId`: kotlin.String, `memberRef`: kotlin.String, `right`: kotlin.String?)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_task_add_member(
+        it,
+        FfiConverterString.lower(`listId`),FfiConverterString.lower(`memberRef`),FfiConverterOptionalString.lower(`right`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * The connected account's own identity ("me") for the account owning
+     * `list_id`, as a JSON `TaskUser` (or `null`). Lets the assignee picker mark
+     * "assigned to me". `null` for local lists. Mirrors `task_current_user`.
+     */
+    @Throws(StoreException::class)override fun `taskCurrentUserJson`(`listId`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_task_current_user_json(
+        it,
+        FfiConverterString.lower(`listId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * One task by id as JSON; [`StoreError::NotFound`] when absent.
      */
     @Throws(StoreException::class)override fun `taskJson`(`id`: kotlin.String): kotlin.String {
@@ -4804,6 +5015,44 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_task_json(
         it,
         FfiConverterString.lower(`id`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Users assignable to a task in `list_id` — its collaborator pool (§9.7),
+     * as a JSON `TaskUser[]`. Empty for local lists / providers without
+     * sharing. Mirrors the desktop `task_list_members`.
+     */
+    @Throws(StoreException::class)override fun `taskListMembersJson`(`listId`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_task_list_members_json(
+        it,
+        FfiConverterString.lower(`listId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The editable membership/shares of `list_id` as a JSON `TaskListShare[]`
+     * (§9.7), driving the members manager. Empty for local / non-manageable
+     * backends. Mirrors the desktop `task_list_shares`.
+     */
+    @Throws(StoreException::class)override fun `taskListSharesJson`(`listId`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_task_list_shares_json(
+        it,
+        FfiConverterString.lower(`listId`),_status)
 }
     }
     )
@@ -4829,6 +5078,60 @@ open class Host: Disposable, AutoCloseable, HostInterface
     }
     )
     }
+    
+
+    
+    /**
+     * Remove a member from `list_id`. `member_ref` is the provider's remove key
+     * (Vikunja user id, Todoist email). Mirrors the desktop `task_remove_member`.
+     */
+    @Throws(StoreException::class)override fun `taskRemoveMember`(`listId`: kotlin.String, `memberRef`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_task_remove_member(
+        it,
+        FfiConverterString.lower(`listId`),FfiConverterString.lower(`memberRef`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Search the owning account's user directory for people to add to `list_id`
+     * (Vikunja) as a JSON `TaskUser[]`. Empty for local lists and backends
+     * without a directory (Todoist invites by raw email). Mirrors the desktop
+     * `task_search_users`.
+     */
+    @Throws(StoreException::class)override fun `taskSearchUsersJson`(`listId`: kotlin.String, `query`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_task_search_users_json(
+        it,
+        FfiConverterString.lower(`listId`),FfiConverterString.lower(`query`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Change an existing member's right on `list_id` (Vikunja). `right` is the
+     * wire `MemberRight` (snake_case). Mirrors the desktop `task_set_member_right`.
+     */
+    @Throws(StoreException::class)override fun `taskSetMemberRight`(`listId`: kotlin.String, `memberRef`: kotlin.String, `right`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_task_set_member_right(
+        it,
+        FfiConverterString.lower(`listId`),FfiConverterString.lower(`memberRef`),FfiConverterString.lower(`right`),_status)
+}
+    }
+    
     
 
     

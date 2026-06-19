@@ -367,6 +367,48 @@ class CalFfiModule : Module() {
       host.deleteContactList(id)
     }
 
+    // ─── Collaboration: RSVP (§7.3) + task-list members/sharing (§9.7) ────────
+    // Routed Rust-side to the owning external adapter; reads degrade to empty /
+    // null for local + unroutable accounts (the UI hides the affordance), writes
+    // throw. respondToEvent invalidates the event cache so the next read shows
+    // the new status.
+
+    AsyncFunction("calendarCurrentUserEmail") { calendarId: String ->
+      host.calendarCurrentUserEmail(calendarId)
+    }
+
+    AsyncFunction("respondToEvent") { calendarId: String, eventId: String, status: String, sendResponse: Boolean ->
+      host.respondToEvent(calendarId, eventId, status, sendResponse)
+    }
+
+    AsyncFunction("taskListMembersJson") { listId: String ->
+      host.taskListMembersJson(listId)
+    }
+
+    AsyncFunction("taskCurrentUserJson") { listId: String ->
+      host.taskCurrentUserJson(listId)
+    }
+
+    AsyncFunction("taskListSharesJson") { listId: String ->
+      host.taskListSharesJson(listId)
+    }
+
+    AsyncFunction("taskSearchUsersJson") { listId: String, query: String ->
+      host.taskSearchUsersJson(listId, query)
+    }
+
+    AsyncFunction("taskAddMember") { listId: String, memberRef: String, right: String? ->
+      host.taskAddMember(listId, memberRef, right)
+    }
+
+    AsyncFunction("taskRemoveMember") { listId: String, memberRef: String ->
+      host.taskRemoveMember(listId, memberRef)
+    }
+
+    AsyncFunction("taskSetMemberRight") { listId: String, memberRef: String, right: String ->
+      host.taskSetMemberRight(listId, memberRef, right)
+    }
+
     // ─── OAuth (host-driven; mobile opens authorize_url in a native session) ──
     // beginOauthJson runs the pure authorize phase (no network) → returns
     // {authorize_url, pkce_verifier, state}. complete (network exchange + account

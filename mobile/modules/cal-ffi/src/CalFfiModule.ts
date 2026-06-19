@@ -291,6 +291,43 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** Delete a local address book (the seeded default can't be deleted). */
   deleteContactList(id: string): Promise<void>;
 
+  // ── Collaboration: RSVP (§7.3) + task-list members/sharing (§9.7) ──
+  // Routed Rust-side to the owning external adapter; reads degrade to empty/null
+  // for local + unroutable accounts (the UI hides the affordance), writes reject.
+  /** The connected account's email for `calendarId` (RSVP "who am I"), or null
+   *  for local/iCal calendars + providers that can't report an identity. */
+  calendarCurrentUserEmail(calendarId: string): Promise<string | null>;
+  /** RSVP to an invitation: set the connected user's participation `status`
+   *  ('accepted' | 'tentative' | 'declined' | 'needs-action') on
+   *  `calendarId`/`eventId`. `sendResponse` also emails the organizer on a
+   *  scheduling-capable provider. Invalidates the event cache. */
+  respondToEvent(
+    calendarId: string,
+    eventId: string,
+    status: string,
+    sendResponse: boolean,
+  ): Promise<void>;
+  /** Users assignable to a task in `listId` (its collaborator pool) as a JSON
+   *  `TaskUser[]`. Empty for local lists / providers without sharing. */
+  taskListMembersJson(listId: string): Promise<string>;
+  /** The connected account's identity ("me") for `listId` as a JSON `TaskUser`
+   *  (or `null`) — marks "assigned to me". `null` for local lists. */
+  taskCurrentUserJson(listId: string): Promise<string>;
+  /** The editable membership/shares of `listId` as a JSON `TaskListShare[]`.
+   *  Empty for local / non-manageable backends. */
+  taskListSharesJson(listId: string): Promise<string>;
+  /** Search the owning account's user directory (Vikunja) for people to add to
+   *  `listId`; returns a JSON `TaskUser[]`. Empty for backends without one. */
+  taskSearchUsersJson(listId: string, query: string): Promise<string>;
+  /** Add/invite a member to `listId`. `memberRef` is the provider's add key
+   *  (Vikunja username, Todoist email); `right` ('read'|'write'|'admin'), or
+   *  null where the backend has no roles. */
+  taskAddMember(listId: string, memberRef: string, right: string | null): Promise<void>;
+  /** Remove a member from `listId` (`memberRef` = the provider's remove key). */
+  taskRemoveMember(listId: string, memberRef: string): Promise<void>;
+  /** Change a member's `right` ('read'|'write'|'admin') on `listId` (Vikunja). */
+  taskSetMemberRight(listId: string, memberRef: string, right: string): Promise<void>;
+
   // ── OAuth (host-driven; mobile opens authorize_url in a native session) ──
   /** Begin OAuth for an account plugin (e.g. `com.aperio.cal-adapter-google`).
    *  `argsJson` carries `{client_id, redirect_uri[, authority]}`. Returns the
