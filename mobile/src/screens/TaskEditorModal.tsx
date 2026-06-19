@@ -41,6 +41,7 @@ import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { DescriptionLinks } from '../components/DescriptionLinks';
 import { RadioGroup } from '../components/RadioGroup';
 import { RemindersEditor } from '../components/RemindersEditor';
+import { SegmentedSelect } from '../components/SegmentedSelect';
 import { SoundSelect } from '../components/SoundSelect';
 import { TaskRecurrenceSelector } from '../components/TaskRecurrenceSelector';
 import { writeLastUsedTaskList } from '../state/lastUsedTaskList';
@@ -575,7 +576,7 @@ export default function TaskEditorModal({
         />
       )}
 
-      <RadioGroup<TaskStatus>
+      <SegmentedSelect<TaskStatus>
         label={t('dialogs.task.fields.status')}
         value={form.status}
         options={statusOptions}
@@ -587,7 +588,7 @@ export default function TaskEditorModal({
         </Text>
       )}
 
-      <RadioGroup<TaskPriority>
+      <SegmentedSelect<TaskPriority>
         label={t('dialogs.task.fields.priority')}
         value={form.priority}
         options={priorityOptions}

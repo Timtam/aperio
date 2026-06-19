@@ -1,4 +1,4 @@
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createNativeBottomTabNavigator } from '@bottom-tabs/react-navigation';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
@@ -53,7 +53,7 @@ import { TaskStoreProvider } from './state/taskStore';
 // (@aperio/locales); every domain type from @aperio/shared; persistence through
 // the shared Rust core via the cal-ffi bridge.
 
-const Tab = createBottomTabNavigator<RootTabParamList>();
+const Tab = createNativeBottomTabNavigator<RootTabParamList>();
 const TasksStack = createNativeStackNavigator<RootStackParamList>();
 const CalendarStack = createNativeStackNavigator<RootStackParamList>();
 const ContactsStack = createNativeStackNavigator<RootStackParamList>();
@@ -311,32 +311,39 @@ function AppContent() {
             <Tab.Screen
               name="TasksTab"
               component={TasksStackNav}
-              options={{ headerShown: false, title: t('views.tasks.title') }}
+              options={{
+                title: t('views.tasks.title'),
+                tabBarIcon: () => ({ sfSymbol: 'checklist' }),
+              }}
             />
             <Tab.Screen
               name="CalendarTab"
               component={CalendarStackNav}
-              options={{ headerShown: false, title: t('mobile.eventsButtonLabel') }}
+              options={{
+                title: t('mobile.eventsButtonLabel'),
+                tabBarIcon: () => ({ sfSymbol: 'calendar' }),
+              }}
             />
             <Tab.Screen
               name="ContactsTab"
               component={ContactsStackNav}
-              options={{ headerShown: false, title: t('sidebar.contactLists') }}
+              options={{
+                title: t('sidebar.contactLists'),
+                tabBarIcon: () => ({ sfSymbol: 'person.2' }),
+              }}
             />
             <Tab.Screen
               name="SettingsTab"
               component={SettingsStackNav}
               options={{
-                headerShown: false,
                 title: t('dialogs.settings.title'),
-                // Flag sync issues on the Settings tab (Sync lives under it):
-                // a badge for sighted users + the state folded into the tab's
-                // accessible label so a screen-reader user hears it on the tab.
-                tabBarBadge: sync.badge,
-                tabBarAccessibilityLabel:
-                  sync.badge != null
-                    ? `${t('dialogs.settings.title')}, ${t('syncStatus.label')}: ${sync.label}`
-                    : undefined,
+                tabBarIcon: () => ({ sfSymbol: 'gearshape' }),
+                // Flag sync issues on the Settings tab (Sync lives under it) with
+                // a badge. The native tab bar exposes no per-tab accessibility
+                // label (unlike the JS bottom tabs), so the spoken sync state now
+                // comes solely from useSyncStatus's live-region announcements of
+                // attention-class transitions, not from the tab's label.
+                tabBarBadge: sync.badge != null ? String(sync.badge) : undefined,
               }}
             />
           </Tab.Navigator>

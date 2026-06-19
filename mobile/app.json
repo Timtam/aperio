@@ -45,7 +45,8 @@
       "expo-audio",
       "./plugins/withReminderSoundProvider",
       "./plugins/withoutPushEntitlement",
-      "expo-localization"
+      "expo-localization",
+      "react-native-bottom-tabs"
     ]
   }
 }
