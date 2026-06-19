@@ -44,7 +44,8 @@
       ],
       "expo-audio",
       "./plugins/withReminderSoundProvider",
-      "./plugins/withoutPushEntitlement"
+      "./plugins/withoutPushEntitlement",
+      "expo-localization"
     ]
   }
 }

@@ -1,3 +1,4 @@
+import { getLocales } from 'expo-localization';
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 
@@ -14,19 +15,25 @@ export const SUPPORTED_LANGUAGES = ['de', 'en'] as const;
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
 
 /**
- * Best-effort device language. Unlike the desktop (which reads
- * `navigator.languages` from the Tauri webview), React Native has no such API,
- * so we use the locale the JS engine's `Intl` resolves from the OS. Falls back
- * to English when neither shipped language matches.
+ * Best-effort device language. Unlike the desktop (which reads the
+ * preference-ordered `navigator.languages` from the Tauri webview), React
+ * Native's Hermes engine does NOT reflect the OS language list through `Intl`
+ * (on iOS it resolves to en-US regardless of the device setting), so we read the
+ * OS preference list from expo-localization instead. `getLocales()` is ordered
+ * by the user's preference and guaranteed non-empty; we return the first locale
+ * whose language is one we ship, else fall back to English.
  */
 export function detectSystemLanguage(): SupportedLanguage {
   try {
-    const locale = Intl.DateTimeFormat().resolvedOptions().locale;
-    const base = locale.toLowerCase().split(/[-_]/)[0];
-    if (base === 'de') return 'de';
-    if (base === 'en') return 'en';
+    for (const locale of getLocales()) {
+      const base = (locale.languageCode ?? locale.languageTag)
+        ?.toLowerCase()
+        .split(/[-_]/)[0];
+      if (base === 'de') return 'de';
+      if (base === 'en') return 'en';
+    }
   } catch {
-    // Intl unavailable — fall through to the default.
+    // expo-localization unavailable — fall through to the default.
   }
   return 'en';
 }
