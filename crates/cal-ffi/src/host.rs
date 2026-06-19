@@ -2458,17 +2458,127 @@ impl Host {
         }
     }
 
-    /// Update a task from a JSON `cal_core::Task`; returns the updated `Task` as
-    /// JSON, routed by the task's `list_id`. LOCAL: a single SQL UPDATE (a
-    /// list_id change is the desktop's local↔local move) + `TaskUpdated`;
-    /// completing a recurring task spawns its next instance locally and the
-    /// peer's applier re-runs the spawner deduped on `series_id`, so only
-    /// `TaskUpdated` crosses. EXTERNAL: routed to the provider in place (no event
-    /// log; it self-syncs). Deferred for external: cross-list moves (needs
-    /// previous_list_id, which the mobile signature doesn't carry) + the
-    /// on-demand next-instance spawn (cache-dependent) — documented gaps.
-    pub fn update_task_json(&self, task_json: String) -> Result<String, StoreError> {
+    /// Update a task from a JSON `cal_core::Task`, routed by its `list_id`.
+    /// `previous_list_id` is the list the editor loaded the task FROM; when it
+    /// differs from the task's `list_id` the save is a cross-list MOVE — the
+    /// list picker doubles as a "move to another list" gesture. Returns the
+    /// resulting `Task` as JSON. Mirrors the desktop `update_task`.
+    ///
+    /// A move to an EXTERNAL list can't be an in-place PATCH (it would hit the
+    /// wrong resource: a CalDAV VTODO at the old URL → 412, Google Tasks
+    /// `tasks.patch` against the wrong tasklist → 404). So a move reduces to
+    /// create-on-target + best-effort-delete-from-source, creating FIRST so a
+    /// half-failed move leaves a recoverable duplicate rather than nothing. A
+    /// local↔local move stays a single SQL `UPDATE` on the `list_id` column.
+    /// The new task gets a fresh adapter-assigned id; the client's refetch on
+    /// editor-close surfaces it (no old→new id translation needed).
+    ///
+    /// In-place LOCAL: a single SQL UPDATE + `TaskUpdated` (completing a recurring
+    /// task spawns its next instance locally; the peer's applier re-runs the
+    /// spawner deduped on `series_id`, so only `TaskUpdated` crosses). In-place
+    /// EXTERNAL: routed to the provider (no event log; it self-syncs). Deferred
+    /// for external (cache-dependent, documented gaps): the host-side series_id
+    /// assignment + on-demand next-instance spawn for external recurring tasks.
+    pub fn update_task_json(
+        &self,
+        task_json: String,
+        previous_list_id: Option<String>,
+    ) -> Result<String, StoreError> {
         let task: cal_core::Task = from_json("task", &task_json)?;
+
+        let target_local = self.is_local_task_list(&task.list_id);
+        let is_move = previous_list_id
+            .as_deref()
+            .map(|prev| prev != task.list_id)
+            .unwrap_or(false);
+
+        if is_move {
+            let previous = previous_list_id.expect("checked above");
+            let source_local = self.is_local_task_list(&previous);
+
+            // Local↔Local: the LocalAdapter does the move as a single SQL UPDATE
+            // on the list_id column — no create+delete dance needed.
+            if source_local && target_local {
+                let updated = self.adapter.update_task_sync(task).map_err(map_store_err)?;
+                if let Ok(fields) = serde_json::to_value(&updated) {
+                    self.writer.append(SyncEvent::TaskUpdated(EventPayload {
+                        id: updated.id.clone(),
+                        fields,
+                    }));
+                }
+                return to_json(&updated);
+            }
+
+            // Cross-adapter move (at least one external side). The new task lands
+            // at the top of the target list with no section (sections belong to
+            // the source list, hence section_id: None). Create on the target
+            // FIRST; the source delete is best-effort.
+            let new_payload = cal_core::NewTask {
+                assignees: Vec::new(),
+                title: task.title.clone(),
+                description: task.description.clone(),
+                status: task.status,
+                priority: task.priority,
+                scheduled_date: task.scheduled_date,
+                scheduled_time: task.scheduled_time,
+                deadline_date: task.deadline_date,
+                deadline_time: task.deadline_time,
+                recurrence: task.recurrence.clone(),
+                resurface_date: task.resurface_date,
+                series_id: task.series_id.clone(),
+                parent_id: task.parent_id.clone(),
+                section_id: None,
+                color_label: task.color_label.clone(),
+                reminders: task.reminders.clone(),
+                sound: task.sound.clone(),
+            };
+            let target_list_id = task.list_id.clone();
+            let source_task_id = task.id.clone();
+
+            let created = match self.route_task_list(&target_list_id)? {
+                None => self
+                    .adapter
+                    .create_task_sync(&target_list_id, new_payload)
+                    .map_err(map_store_err)?,
+                Some(ext) => self
+                    .runtime
+                    .block_on(async { ext.create_task(&target_list_id, new_payload).await })
+                    .map_err(map_store_err)?,
+            };
+
+            // Delete from the source. Best-effort: the create already succeeded,
+            // so a failed cleanup leaves a recoverable duplicate at the source
+            // rather than data loss. cal-ffi has no logger (matching its other
+            // best-effort paths), so the failure is swallowed.
+            let _ = match self.route_task_list(&previous)? {
+                None => self
+                    .adapter
+                    .delete_task_sync(&source_task_id)
+                    .map_err(map_store_err),
+                Some(ext) => self
+                    .runtime
+                    .block_on(async { ext.delete_task(&source_task_id).await })
+                    .map_err(map_store_err),
+            };
+
+            // Each LOCAL side emits its own event-log entry; external sides stay
+            // silent (the provider's own sync mesh propagates the change).
+            if target_local {
+                if let Ok(fields) = serde_json::to_value(&created) {
+                    self.writer.append(SyncEvent::TaskCreated(EventPayload {
+                        id: created.id.clone(),
+                        fields,
+                    }));
+                }
+            }
+            if source_local {
+                self.writer
+                    .append(SyncEvent::TaskDeleted(IdPayload { id: source_task_id }));
+            }
+            return to_json(&created);
+        }
+
+        // Plain in-place update — no list change.
         match self.route_task_list(&task.list_id)? {
             None => {
                 let updated = self.adapter.update_task_sync(task).map_err(map_store_err)?;
@@ -6540,6 +6650,79 @@ mod tests {
                 .all(|r| r["item_id"] != serde_json::json!(task_id)),
             "a tomorrow reminder must be outside a 30-minute horizon; got: {narrow}",
         );
+    }
+
+    #[test]
+    fn moving_a_task_between_local_lists_reroutes_it() {
+        let (_dir, host, _kc) = open_host();
+        let list_a = serde_json::from_str::<serde_json::Value>(
+            &host.create_task_list_json("A".to_string()).unwrap(),
+        )
+        .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let list_b = serde_json::from_str::<serde_json::Value>(
+            &host.create_task_list_json("B".to_string()).unwrap(),
+        )
+        .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let new_task = r#"{"title":"Movable","description":null,"status":"open","priority":"medium","scheduled_date":null,"scheduled_time":null,"deadline_date":null,"deadline_time":null,"recurrence":null,"parent_id":null,"color_label":null,"reminders":[],"sound":null}"#;
+        let created = host
+            .create_task_json(list_a.clone(), new_task.to_string())
+            .unwrap();
+        let mut task: serde_json::Value = serde_json::from_str(&created).unwrap();
+        let task_id = task["id"].as_str().unwrap().to_string();
+
+        // A local→local move passes the source as previous_list_id (the move
+        // branch), which the local adapter resolves as a single SQL UPDATE on
+        // the list_id column.
+        task["list_id"] = serde_json::json!(list_b);
+        host.update_task_json(task.to_string(), Some(list_a.clone()))
+            .unwrap();
+
+        // B now holds it; A no longer does.
+        let in_b: serde_json::Value =
+            serde_json::from_str(&host.tasks_json(list_b).unwrap()).unwrap();
+        assert!(in_b
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["id"] == serde_json::json!(task_id)));
+        let in_a: serde_json::Value =
+            serde_json::from_str(&host.tasks_json(list_a).unwrap()).unwrap();
+        assert!(in_a
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["id"] != serde_json::json!(task_id)));
+    }
+
+    #[test]
+    fn updating_a_task_with_previous_list_equal_to_current_is_in_place() {
+        let (_dir, host, _kc) = open_host();
+        let list = serde_json::from_str::<serde_json::Value>(
+            &host.create_task_list_json("L".to_string()).unwrap(),
+        )
+        .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let new_task = r#"{"title":"Old","description":null,"status":"open","priority":"medium","scheduled_date":null,"scheduled_time":null,"deadline_date":null,"deadline_time":null,"recurrence":null,"parent_id":null,"color_label":null,"reminders":[],"sound":null}"#;
+        let created = host
+            .create_task_json(list.clone(), new_task.to_string())
+            .unwrap();
+        let mut task: serde_json::Value = serde_json::from_str(&created).unwrap();
+        let task_id = task["id"].as_str().unwrap().to_string();
+        // previous_list_id == list_id → in-place edit, not a move.
+        task["title"] = serde_json::json!("Renamed");
+        host.update_task_json(task.to_string(), Some(list.clone()))
+            .unwrap();
+        let reread: serde_json::Value =
+            serde_json::from_str(&host.task_json(task_id).unwrap()).unwrap();
+        assert_eq!(reread["title"], "Renamed");
     }
 
     #[test]

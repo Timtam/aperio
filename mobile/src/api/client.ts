@@ -162,10 +162,20 @@ export const duplicateTask = async (task: Task): Promise<Task> =>
 /** Full-overwrite update. Send the task exactly as read so the store-managed
  *  `series_id` / `resurface_date` round-trip. Completing a recurring task
  *  spawns its next instance (visible on the next fetch) — callers must refetch
- *  (bump dataVersion), never optimistically splice. */
-export const updateTask = async (task: Task): Promise<Task> => {
+ *  (bump dataVersion), never optimistically splice.
+ *
+ *  `previousListId` is the list the editor loaded the task FROM — pass it when
+ *  the list picker may have changed so the bridge detects a cross-list MOVE
+ *  (create-on-target + best-effort-delete-from-source); without it a move to an
+ *  external list would PATCH the wrong resource and fail (412/404). A
+ *  cross-adapter move returns the freshly-created task at the target (new id),
+ *  so callers must refetch rather than splice the old id. */
+export const updateTask = async (
+  task: Task,
+  previousListId: string | null = null,
+): Promise<Task> => {
   const updated = JSON.parse(
-    await CalFfi.updateTaskJson(JSON.stringify(task)),
+    await CalFfi.updateTaskJson(JSON.stringify(task), previousListId),
   ) as Task;
   scheduleBackgroundPush();
   return updated;

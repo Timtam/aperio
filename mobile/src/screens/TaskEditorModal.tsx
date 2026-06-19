@@ -384,33 +384,41 @@ export default function TaskEditorModal({
         // Spread ...loaded so store-managed fields (series_id, resurface_date,
         // etag, created_at) AND the not-yet-editable ones (recurrence, reminders,
         // sound, colour, assignees — sub-4b/desktop) round-trip untouched.
-        await updateTask({
-          ...loaded,
-          title,
-          list_id: form.listId,
-          // A cross-list move drops the section (it belonged to the old list);
-          // a list with no sections drops it too.
-          section_id:
-            !canSection || form.listId !== loaded.list_id
-              ? null
-              : form.sectionId || null,
-          status: form.status,
-          priority: form.priority,
-          scheduled_date: sched.date,
-          scheduled_time: sched.time,
-          deadline_date: dead.date,
-          deadline_time: dead.time,
-          recurrence: canRecur ? toBackend(form.recurrence) : null,
-          reminders: form.reminders,
-          description,
-          // Local task: the picker drives the colour; external: leave the
-          // (override-stamped) value untouched (external colour = later).
-          color_label: isLocalList ? form.colorLabel || null : loaded.color_label,
-          completed_at:
-            form.status === 'completed'
-              ? (loaded.completed_at ?? new Date().toISOString())
-              : null,
-        });
+        // Pass loaded.list_id as the previous list so a list-picker change is
+        // detected as a cross-list move (create-on-target + delete-from-source)
+        // rather than an in-place PATCH at the wrong resource (412/404 external).
+        await updateTask(
+          {
+            ...loaded,
+            title,
+            list_id: form.listId,
+            // A cross-list move drops the section (it belonged to the old list);
+            // a list with no sections drops it too.
+            section_id:
+              !canSection || form.listId !== loaded.list_id
+                ? null
+                : form.sectionId || null,
+            status: form.status,
+            priority: form.priority,
+            scheduled_date: sched.date,
+            scheduled_time: sched.time,
+            deadline_date: dead.date,
+            deadline_time: dead.time,
+            recurrence: canRecur ? toBackend(form.recurrence) : null,
+            reminders: form.reminders,
+            description,
+            // Local task: the picker drives the colour; external: leave the
+            // (override-stamped) value untouched (external colour = later).
+            color_label: isLocalList
+              ? form.colorLabel || null
+              : loaded.color_label,
+            completed_at:
+              form.status === 'completed'
+                ? (loaded.completed_at ?? new Date().toISOString())
+                : null,
+          },
+          loaded.list_id,
+        );
         AccessibilityInfo.announceForAccessibility(
           t('mobile.saved', { title }),
         );

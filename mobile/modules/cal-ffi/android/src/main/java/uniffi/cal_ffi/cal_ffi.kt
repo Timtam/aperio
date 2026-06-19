@@ -1087,7 +1087,7 @@ external fun uniffi_cal_ffi_fn_method_host_update_event_json(`ptr`: Long,`eventJ
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_update_section_json(`ptr`: Long,`sectionJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-external fun uniffi_cal_ffi_fn_method_host_update_task_json(`ptr`: Long,`taskJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_cal_ffi_fn_method_host_update_task_json(`ptr`: Long,`taskJson`: RustBuffer.ByValue,`previousListId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_clone_keychainbridge(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
@@ -1507,7 +1507,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_update_section_json() != 27633.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_update_task_json() != 12155.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_update_task_json() != 47251.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_keychainbridge_store() != 54380.toShort()) {
@@ -2591,17 +2591,29 @@ public interface HostInterface {
     fun `updateSectionJson`(`sectionJson`: kotlin.String): kotlin.String
     
     /**
-     * Update a task from a JSON `cal_core::Task`; returns the updated `Task` as
-     * JSON, routed by the task's `list_id`. LOCAL: a single SQL UPDATE (a
-     * list_id change is the desktop's local↔local move) + `TaskUpdated`;
-     * completing a recurring task spawns its next instance locally and the
-     * peer's applier re-runs the spawner deduped on `series_id`, so only
-     * `TaskUpdated` crosses. EXTERNAL: routed to the provider in place (no event
-     * log; it self-syncs). Deferred for external: cross-list moves (needs
-     * previous_list_id, which the mobile signature doesn't carry) + the
-     * on-demand next-instance spawn (cache-dependent) — documented gaps.
+     * Update a task from a JSON `cal_core::Task`, routed by its `list_id`.
+     * `previous_list_id` is the list the editor loaded the task FROM; when it
+     * differs from the task's `list_id` the save is a cross-list MOVE — the
+     * list picker doubles as a "move to another list" gesture. Returns the
+     * resulting `Task` as JSON. Mirrors the desktop `update_task`.
+     *
+     * A move to an EXTERNAL list can't be an in-place PATCH (it would hit the
+     * wrong resource: a CalDAV VTODO at the old URL → 412, Google Tasks
+     * `tasks.patch` against the wrong tasklist → 404). So a move reduces to
+     * create-on-target + best-effort-delete-from-source, creating FIRST so a
+     * half-failed move leaves a recoverable duplicate rather than nothing. A
+     * local↔local move stays a single SQL `UPDATE` on the `list_id` column.
+     * The new task gets a fresh adapter-assigned id; the client's refetch on
+     * editor-close surfaces it (no old→new id translation needed).
+     *
+     * In-place LOCAL: a single SQL UPDATE + `TaskUpdated` (completing a recurring
+     * task spawns its next instance locally; the peer's applier re-runs the
+     * spawner deduped on `series_id`, so only `TaskUpdated` crosses). In-place
+     * EXTERNAL: routed to the provider (no event log; it self-syncs). Deferred
+     * for external (cache-dependent, documented gaps): the host-side series_id
+     * assignment + on-demand next-instance spawn for external recurring tasks.
      */
-    fun `updateTaskJson`(`taskJson`: kotlin.String): kotlin.String
+    fun `updateTaskJson`(`taskJson`: kotlin.String, `previousListId`: kotlin.String?): kotlin.String
     
     companion object
 }
@@ -4136,23 +4148,35 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
-     * Update a task from a JSON `cal_core::Task`; returns the updated `Task` as
-     * JSON, routed by the task's `list_id`. LOCAL: a single SQL UPDATE (a
-     * list_id change is the desktop's local↔local move) + `TaskUpdated`;
-     * completing a recurring task spawns its next instance locally and the
-     * peer's applier re-runs the spawner deduped on `series_id`, so only
-     * `TaskUpdated` crosses. EXTERNAL: routed to the provider in place (no event
-     * log; it self-syncs). Deferred for external: cross-list moves (needs
-     * previous_list_id, which the mobile signature doesn't carry) + the
-     * on-demand next-instance spawn (cache-dependent) — documented gaps.
+     * Update a task from a JSON `cal_core::Task`, routed by its `list_id`.
+     * `previous_list_id` is the list the editor loaded the task FROM; when it
+     * differs from the task's `list_id` the save is a cross-list MOVE — the
+     * list picker doubles as a "move to another list" gesture. Returns the
+     * resulting `Task` as JSON. Mirrors the desktop `update_task`.
+     *
+     * A move to an EXTERNAL list can't be an in-place PATCH (it would hit the
+     * wrong resource: a CalDAV VTODO at the old URL → 412, Google Tasks
+     * `tasks.patch` against the wrong tasklist → 404). So a move reduces to
+     * create-on-target + best-effort-delete-from-source, creating FIRST so a
+     * half-failed move leaves a recoverable duplicate rather than nothing. A
+     * local↔local move stays a single SQL `UPDATE` on the `list_id` column.
+     * The new task gets a fresh adapter-assigned id; the client's refetch on
+     * editor-close surfaces it (no old→new id translation needed).
+     *
+     * In-place LOCAL: a single SQL UPDATE + `TaskUpdated` (completing a recurring
+     * task spawns its next instance locally; the peer's applier re-runs the
+     * spawner deduped on `series_id`, so only `TaskUpdated` crosses). In-place
+     * EXTERNAL: routed to the provider (no event log; it self-syncs). Deferred
+     * for external (cache-dependent, documented gaps): the host-side series_id
+     * assignment + on-demand next-instance spawn for external recurring tasks.
      */
-    @Throws(StoreException::class)override fun `updateTaskJson`(`taskJson`: kotlin.String): kotlin.String {
+    @Throws(StoreException::class)override fun `updateTaskJson`(`taskJson`: kotlin.String, `previousListId`: kotlin.String?): kotlin.String {
             return FfiConverterString.lift(
     callWithHandle {
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_method_host_update_task_json(
         it,
-        FfiConverterString.lower(`taskJson`),_status)
+        FfiConverterString.lower(`taskJson`),FfiConverterOptionalString.lower(`previousListId`),_status)
 }
     }
     )

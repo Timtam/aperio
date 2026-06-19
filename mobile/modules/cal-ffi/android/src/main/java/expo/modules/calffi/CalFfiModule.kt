@@ -78,8 +78,8 @@ class CalFfiModule : Module() {
       host.createTaskJson(listId, newTaskJson)
     }
 
-    AsyncFunction("updateTaskJson") { taskJson: String ->
-      host.updateTaskJson(taskJson)
+    AsyncFunction("updateTaskJson") { taskJson: String, previousListId: String? ->
+      host.updateTaskJson(taskJson, previousListId)
     }
 
     AsyncFunction("deleteTask") { taskId: String, listId: String? ->

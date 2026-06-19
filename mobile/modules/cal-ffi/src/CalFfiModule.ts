@@ -33,9 +33,17 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
   taskJson(id: string): Promise<string>;
   /** Create a task from a JSON `NewTask`; returns the created `Task` as JSON. */
   createTaskJson(listId: string, newTaskJson: string): Promise<string>;
-  /** Update a task from a JSON `Task`; returns the updated `Task` as JSON.
-   *  Completing a recurring task spawns its next instance (DESIGN §9.12). */
-  updateTaskJson(taskJson: string): Promise<string>;
+  /** Update a task from a JSON `Task`; returns the resulting `Task` as JSON.
+   *  Completing a recurring task spawns its next instance (DESIGN §9.12).
+   *  `previousListId` is the list the editor loaded the task FROM; when it
+   *  differs from the task's `list_id` the bridge treats the save as a
+   *  cross-list MOVE (create-on-target + best-effort-delete-from-source) so an
+   *  external target isn't PATCHed at the wrong resource (412/404). A
+   *  cross-adapter move returns the freshly-created task at the target (new id). */
+  updateTaskJson(
+    taskJson: string,
+    previousListId: string | null,
+  ): Promise<string>;
   /** Delete a task. `listId` (the owning list) routes the delete to the right
    *  account — omit/null for a local task. Rejects on unknown id. */
   deleteTask(taskId: string, listId: string | null): Promise<void>;

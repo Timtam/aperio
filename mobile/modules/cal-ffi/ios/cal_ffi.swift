@@ -1168,17 +1168,29 @@ public protocol HostProtocol: AnyObject, Sendable {
     func updateSectionJson(sectionJson: String) throws  -> String
     
     /**
-     * Update a task from a JSON `cal_core::Task`; returns the updated `Task` as
-     * JSON, routed by the task's `list_id`. LOCAL: a single SQL UPDATE (a
-     * list_id change is the desktop's local↔local move) + `TaskUpdated`;
-     * completing a recurring task spawns its next instance locally and the
-     * peer's applier re-runs the spawner deduped on `series_id`, so only
-     * `TaskUpdated` crosses. EXTERNAL: routed to the provider in place (no event
-     * log; it self-syncs). Deferred for external: cross-list moves (needs
-     * previous_list_id, which the mobile signature doesn't carry) + the
-     * on-demand next-instance spawn (cache-dependent) — documented gaps.
+     * Update a task from a JSON `cal_core::Task`, routed by its `list_id`.
+     * `previous_list_id` is the list the editor loaded the task FROM; when it
+     * differs from the task's `list_id` the save is a cross-list MOVE — the
+     * list picker doubles as a "move to another list" gesture. Returns the
+     * resulting `Task` as JSON. Mirrors the desktop `update_task`.
+     *
+     * A move to an EXTERNAL list can't be an in-place PATCH (it would hit the
+     * wrong resource: a CalDAV VTODO at the old URL → 412, Google Tasks
+     * `tasks.patch` against the wrong tasklist → 404). So a move reduces to
+     * create-on-target + best-effort-delete-from-source, creating FIRST so a
+     * half-failed move leaves a recoverable duplicate rather than nothing. A
+     * local↔local move stays a single SQL `UPDATE` on the `list_id` column.
+     * The new task gets a fresh adapter-assigned id; the client's refetch on
+     * editor-close surfaces it (no old→new id translation needed).
+     *
+     * In-place LOCAL: a single SQL UPDATE + `TaskUpdated` (completing a recurring
+     * task spawns its next instance locally; the peer's applier re-runs the
+     * spawner deduped on `series_id`, so only `TaskUpdated` crosses). In-place
+     * EXTERNAL: routed to the provider (no event log; it self-syncs). Deferred
+     * for external (cache-dependent, documented gaps): the host-side series_id
+     * assignment + on-demand next-instance spawn for external recurring tasks.
      */
-    func updateTaskJson(taskJson: String) throws  -> String
+    func updateTaskJson(taskJson: String, previousListId: String?) throws  -> String
     
 }
 /**
@@ -2361,21 +2373,34 @@ open func updateSectionJson(sectionJson: String)throws  -> String  {
 }
     
     /**
-     * Update a task from a JSON `cal_core::Task`; returns the updated `Task` as
-     * JSON, routed by the task's `list_id`. LOCAL: a single SQL UPDATE (a
-     * list_id change is the desktop's local↔local move) + `TaskUpdated`;
-     * completing a recurring task spawns its next instance locally and the
-     * peer's applier re-runs the spawner deduped on `series_id`, so only
-     * `TaskUpdated` crosses. EXTERNAL: routed to the provider in place (no event
-     * log; it self-syncs). Deferred for external: cross-list moves (needs
-     * previous_list_id, which the mobile signature doesn't carry) + the
-     * on-demand next-instance spawn (cache-dependent) — documented gaps.
+     * Update a task from a JSON `cal_core::Task`, routed by its `list_id`.
+     * `previous_list_id` is the list the editor loaded the task FROM; when it
+     * differs from the task's `list_id` the save is a cross-list MOVE — the
+     * list picker doubles as a "move to another list" gesture. Returns the
+     * resulting `Task` as JSON. Mirrors the desktop `update_task`.
+     *
+     * A move to an EXTERNAL list can't be an in-place PATCH (it would hit the
+     * wrong resource: a CalDAV VTODO at the old URL → 412, Google Tasks
+     * `tasks.patch` against the wrong tasklist → 404). So a move reduces to
+     * create-on-target + best-effort-delete-from-source, creating FIRST so a
+     * half-failed move leaves a recoverable duplicate rather than nothing. A
+     * local↔local move stays a single SQL `UPDATE` on the `list_id` column.
+     * The new task gets a fresh adapter-assigned id; the client's refetch on
+     * editor-close surfaces it (no old→new id translation needed).
+     *
+     * In-place LOCAL: a single SQL UPDATE + `TaskUpdated` (completing a recurring
+     * task spawns its next instance locally; the peer's applier re-runs the
+     * spawner deduped on `series_id`, so only `TaskUpdated` crosses). In-place
+     * EXTERNAL: routed to the provider (no event log; it self-syncs). Deferred
+     * for external (cache-dependent, documented gaps): the host-side series_id
+     * assignment + on-demand next-instance spawn for external recurring tasks.
      */
-open func updateTaskJson(taskJson: String)throws  -> String  {
+open func updateTaskJson(taskJson: String, previousListId: String?)throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_update_task_json(
             self.uniffiCloneHandle(),
-        FfiConverterString.lower(taskJson),$0
+        FfiConverterString.lower(taskJson),
+        FfiConverterOptionString.lower(previousListId),$0
     )
 })
 }
@@ -5854,7 +5879,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_update_section_json() != 27633) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_update_task_json() != 12155) {
+    if (uniffi_cal_ffi_checksum_method_host_update_task_json() != 47251) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_keychainbridge_store() != 54380) {

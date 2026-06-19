@@ -63,8 +63,8 @@ public class CalFfiModule: Module {
       try self.host.createTaskJson(listId: listId, newTaskJson: newTaskJson)
     }
 
-    AsyncFunction("updateTaskJson") { (taskJson: String) -> String in
-      try self.host.updateTaskJson(taskJson: taskJson)
+    AsyncFunction("updateTaskJson") { (taskJson: String, previousListId: String?) -> String in
+      try self.host.updateTaskJson(taskJson: taskJson, previousListId: previousListId)
     }
 
     AsyncFunction("deleteTask") { (taskId: String, listId: String?) in
