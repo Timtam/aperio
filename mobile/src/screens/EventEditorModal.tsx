@@ -59,6 +59,34 @@ function localToIso(date: string, time: string): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+/** All-day end instant for the wire: the convention is END-EXCLUSIVE at the day
+ *  level (the view's `daysCoveredKeys` walks `[start, endDay)` and breaks on the
+ *  end day), so the form's last *inclusive* day `YYYY-MM-DD` stores as local
+ *  midnight of the day AFTER it. Mirrors the desktop `allDayWireEnd`; without it
+ *  a mobile-created multi-day all-day event drops its last day in every view. */
+function allDayWireEnd(endDate: string): string | null {
+  const d = endDate.trim();
+  if (!d) return null;
+  const date = new Date(`${d}T00:00`);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setDate(date.getDate() + 1);
+  return date.toISOString();
+}
+
+/** Inverse of {@link allDayWireEnd} for hydrating the form: the stored
+ *  (exclusive) end instant maps back to the LAST covered day (end − 1 day, local
+ *  time), clamped to the start's day so a legacy inclusive row (end == start)
+ *  still hydrates to a valid single-day range. Mirrors the desktop
+ *  `allDayFormEndDate`. */
+function allDayFormEndDate(startIso: string, endIso: string): string {
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  const lastDay = new Date(end.getFullYear(), end.getMonth(), end.getDate() - 1);
+  const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const pick = lastDay.getTime() < startDay.getTime() ? startDay : lastDay;
+  return `${pick.getFullYear()}-${pad(pick.getMonth() + 1)}-${pad(pick.getDate())}`;
+}
+
 /** The start `YYYY-MM-DD` as a local Date for the recurrence selector's derived
  *  monthly/yearly options, or undefined when the field is empty/unparseable. */
 function recurrenceStartDate(date: string): Date | undefined {
@@ -153,14 +181,20 @@ export default function EventEditorModal({
               const eo = isoToLocalParts(occEnd.toISOString());
               setStartDate(so.date);
               setStartTime(so.time);
-              setEndDate(eo.date);
+              // All-day: map the (exclusive) end back to the last inclusive day,
+              // else the editor shows one day too many (see allDayFormEndDate).
+              setEndDate(
+                ev.all_day
+                  ? allDayFormEndDate(occStart.toISOString(), occEnd.toISOString())
+                  : eo.date,
+              );
               setEndTime(eo.time);
             } else {
               const s = isoToLocalParts(ev.start);
               const e = isoToLocalParts(ev.end);
               setStartDate(s.date);
               setStartTime(s.time);
-              setEndDate(e.date);
+              setEndDate(ev.all_day ? allDayFormEndDate(ev.start, ev.end) : e.date);
               setEndTime(e.time);
             }
             setLocation(ev.location ?? '');
@@ -198,10 +232,11 @@ export default function EventEditorModal({
       setError(t('dialogs.event.calendarRequired'));
       return;
     }
-    // All-day clamps to 00:00 / 23:59 on the picked dates; timed uses the
-    // entered times.
+    // All-day: start = local midnight of the start day; end = local midnight of
+    // the day AFTER the last picked day (END-EXCLUSIVE, the view convention —
+    // see allDayWireEnd). Timed: the entered times.
     const start = localToIso(startDate, allDay ? '00:00' : startTime);
-    const end = localToIso(endDate, allDay ? '23:59' : endTime);
+    const end = allDay ? allDayWireEnd(endDate) : localToIso(endDate, endTime);
     if (start == null || end == null) {
       setError(t('dialogs.event.dateInvalid'));
       return;
