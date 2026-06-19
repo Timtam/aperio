@@ -129,7 +129,9 @@ aperio-db = { path = "crates/aperio-db" }
 cal-core = { path = "crates/cal-core" }
 cal-adapter-local = { path = "crates/cal-adapter-local" }
 host-core = { path = "crates/host-core" }
-host-plugins = { path = "crates/host-plugins" }
+# default-features off: the sole consumer (cal-ffi) selects adapters per-feature
+# so the mobile build can drop adapters it doesn't ship (e.g. sync-adapter-local).
+host-plugins = { path = "crates/host-plugins", default-features = false }
 plugin-core = { path = "crates/plugin-core" }
 plugin-sdk = { path = "crates/plugin-sdk" }
 sync-core = { path = "crates/sync-core" }

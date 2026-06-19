@@ -41,12 +41,35 @@ aperio-db.workspace = true
 cal-adapter-local.workspace = true
 rusqlite.workspace = true
 # The shared, Tauri-free host (DbHandle + AccountsRepo + AdapterRegistry) and
-# the static plugin registry. `host-plugins` links all 17 adapter `-plugin`
+# the static plugin registry. `host-plugins` links the bundled adapter `-plugin`
 # rlibs into this cdylib/staticlib — the on-device static embedding (no dlopen,
 # which iOS forbids). plugin-core + sync-engine bring the PluginManager + the
 # SecretStore seam the registry routes credentials through.
+#
+# We enable every bundled adapter EXCEPT sync-adapter-local (default-features
+# off drops the `static` umbrella; the per-adapter features are listed
+# explicitly): a device-local sync target only writes into the app sandbox no
+# other device can reach, so mobile never offers it — no point building or
+# embedding it. cal-adapter-local (the local DATA store) is separate + always on.
 host-core.workspace = true
-host-plugins.workspace = true
+host-plugins = { workspace = true, features = [
+    "caldav",
+    "ical",
+    "google",
+    "microsoft-graph",
+    "ews",
+    "vikunja",
+    "todoist",
+    "sync-webdav",
+    "sync-ftp",
+    "sync-sftp",
+    "sync-dropbox",
+    "sync-googledrive",
+    "vc-zoom",
+    "vc-teams",
+    "vc-meet",
+    "vc-webex",
+] }
 plugin-core.workspace = true
 sync-core.workspace = true
 sync-engine.workspace = true
@@ -82,6 +105,12 @@ uniffi = "0.31.1"
 # Host integration tests open a real on-disk SQLite file (the DbHandle read
 # pool needs a file, not `:memory:`).
 tempfile = "3"
+# The sync / E2E host tests drive two-host sync through the local FS target —
+# the natural no-network test double. The production build excludes
+# sync-adapter-local (see [dependencies]); re-enable just that adapter for the
+# test build so those fixtures still register it. resolver = "2" keeps this
+# dev-only feature out of the shipped cdylib/staticlib.
+host-plugins = { workspace = true, features = ["sync-local"] }
 
 [lints]
 workspace = true
