@@ -1,3 +1,4 @@
+import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -6,7 +7,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 
@@ -83,7 +83,6 @@ export default function AgendaScreen({
   const [occurrences, setOccurrences] = useState<DayOccurrence<CalendarEvent>[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [jumpText, setJumpText] = useState('');
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
@@ -208,20 +207,6 @@ export default function AgendaScreen({
 
   const goToday = useCallback(() => setAnchor(localMidnight(new Date())), []);
 
-  const jumpToDate = useCallback(() => {
-    const raw = jumpText.trim();
-    if (raw === '') return;
-    const parsed = new Date(`${raw}T00:00`);
-    if (Number.isNaN(parsed.getTime())) {
-      setError(t('dialogs.event.dateInvalid'));
-      announce(t('dialogs.event.dateInvalid'));
-      return;
-    }
-    setError(null);
-    setJumpText('');
-    setAnchor(localMidnight(parsed));
-  }, [announce, jumpText, t]);
-
   const editEvent = useCallback(
     (ev: CalendarEvent) =>
       navigation.navigate('EventEditor', {
@@ -321,25 +306,21 @@ export default function AgendaScreen({
         >
           <Text style={styles.ghostButtonText}>{t('mobile.today')}</Text>
         </Pressable>
-        <TextInput
-          style={styles.jumpInput}
-          value={jumpText}
-          onChangeText={setJumpText}
-          placeholder="YYYY-MM-DD"
-          accessibilityLabel={t('mobile.jumpToDate')}
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="go"
-          onSubmitEditing={jumpToDate}
+        <Text style={styles.jumpLabel} accessibilityRole="text">
+          {t('mobile.jumpToDateNative')}
+        </Text>
+        {/* Native date picker (Apple-Reminders-style compact field) — commits on
+            selection, so no separate "go" button + no manual YYYY-MM-DD parsing. */}
+        <DateTimePicker
+          mode="date"
+          display="compact"
+          value={anchor}
+          onValueChange={(_, date) => {
+            setError(null);
+            setAnchor(localMidnight(date));
+          }}
+          locale={i18n.language}
         />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('mobile.jumpToDateAction')}
-          onPress={jumpToDate}
-          style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
-        >
-          <Text style={styles.ghostButtonText}>{t('mobile.jumpToDateAction')}</Text>
-        </Pressable>
       </View>
 
       {error != null && (
@@ -530,17 +511,7 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surfaceAlt,
     },
     ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
-    jumpInput: {
-      flex: 1,
-      fontSize: 16,
-      color: c.textPrimary,
-      paddingVertical: 10,
-      paddingHorizontal: 14,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: c.border,
-      backgroundColor: c.surface,
-    },
+    jumpLabel: { fontSize: 15, fontWeight: '600', color: c.textLabel },
     list: { gap: 10, padding: 16 },
     dayHeader: {
       fontSize: 15,

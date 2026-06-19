@@ -1,3 +1,4 @@
+import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -7,7 +8,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 
@@ -68,9 +68,6 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // "Jump to date" field (YYYY-MM-DD) — navigate straight to a far-off day
-  // instead of stepping prev/next.
-  const [jumpText, setJumpText] = useState('');
 
   // Lookup tables for resolving each event's rendered colour (event label →
   // unmapped native colour → owning calendar's colour), rebuilt only when the
@@ -176,19 +173,6 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
     setDay(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
   }, []);
 
-  const jumpToDate = useCallback(() => {
-    const raw = jumpText.trim();
-    if (raw === '') return;
-    const parsed = new Date(`${raw}T00:00`);
-    if (Number.isNaN(parsed.getTime())) {
-      setError(t('dialogs.event.dateInvalid'));
-      announce(t('dialogs.event.dateInvalid'));
-      return;
-    }
-    setError(null);
-    setJumpText('');
-    setDay(new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()));
-  }, [announce, jumpText, t]);
 
   const firstCalendarId = calendars[0]?.id ?? null;
 
@@ -287,25 +271,21 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
       {/* Jump straight to a date (YYYY-MM-DD) — submit on the field or the
           button; an unparseable date surfaces the inline error. */}
       <View style={styles.jumpBar}>
-        <TextInput
-          style={styles.jumpInput}
-          value={jumpText}
-          onChangeText={setJumpText}
-          placeholder="YYYY-MM-DD"
-          accessibilityLabel={t('mobile.jumpToDate')}
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="go"
-          onSubmitEditing={jumpToDate}
+        <Text style={styles.jumpLabel} accessibilityRole="text">
+          {t('mobile.jumpToDateNative')}
+        </Text>
+        {/* Native date picker (Apple-Reminders-style compact field) — commits on
+            selection, so no separate "go" button + no manual YYYY-MM-DD parsing. */}
+        <DateTimePicker
+          mode="date"
+          display="compact"
+          value={day}
+          onValueChange={(_, date) => {
+            setError(null);
+            setDay(new Date(date.getFullYear(), date.getMonth(), date.getDate()));
+          }}
+          locale={i18n.language}
         />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('mobile.jumpToDateAction')}
-          onPress={jumpToDate}
-          style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
-        >
-          <Text style={styles.ghostButtonText}>{t('mobile.jumpToDateAction')}</Text>
-        </Pressable>
       </View>
 
       <View style={styles.actionBar}>
@@ -474,17 +454,7 @@ const makeStyles = (c: ThemeColors) =>
       paddingTop: 12,
       alignItems: 'center',
     },
-    jumpInput: {
-      flex: 1,
-      fontSize: 16,
-      color: c.textPrimary,
-      paddingVertical: 10,
-      paddingHorizontal: 14,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: c.border,
-      backgroundColor: c.surface,
-    },
+    jumpLabel: { fontSize: 15, fontWeight: '600', color: c.textLabel },
     actionBar: { flexDirection: 'row', gap: 10, padding: 12, alignItems: 'center' },
     ghostButton: {
       paddingVertical: 12,

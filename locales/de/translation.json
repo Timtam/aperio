@@ -67,6 +67,7 @@
     "today": "Heute",
     "jumpToDate": "Zu Datum springen (JJJJ-MM-TT)",
     "jumpToDateAction": "Zum Datum",
+    "jumpToDateNative": "Zu Datum springen",
     "renameListLabel": "Liste umbenennen",
     "listRenamed": "Liste umbenannt in „{{name}}“.",
     "calendarsButtonLabel": "Kalender",
