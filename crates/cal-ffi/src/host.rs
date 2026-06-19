@@ -1904,6 +1904,16 @@ impl Host {
             .parent()
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| std::path::PathBuf::from("."));
+        // Bring up the rolling-file log sink under <data_dir>/logs BEFORE the
+        // heavy registry / orchestrator work so early traces are captured, then
+        // apply the persisted level. Process-global + Once-guarded, so the many
+        // Host::open calls in the test binary install it exactly once.
+        crate::logging::init_mobile_logging(&data_dir);
+        if let Ok(Some(level)) =
+            UserPrefsRepo::new(&db.shared()).get(host_core::logging::PREF_LOG_LEVEL)
+        {
+            crate::logging::set_level(&level);
+        }
         // The content-addressed custom-sound store, same convention + location as
         // the sync round (which already push/fetches it via build_orchestrator's
         // DesktopSyncRoundHooks) and the desktop SoundsDir.
@@ -4593,6 +4603,84 @@ impl Host {
         Ok(succeeded)
     }
 
+    // ─── Diagnostics / logs (§ Diagnostics) ──────────────────────────────────────
+    //
+    // The rolling-file log sink is brought up in Host::open (process-global); the
+    // level is a DEVICE-LOCAL pref (logging.level), the live filter is reloaded
+    // through the cached handle. These mirror the desktop commands/logs.rs 1:1.
+
+    /// The persisted log level, or the default when unset.
+    pub fn get_log_level(&self) -> Result<String, StoreError> {
+        let shared = self.db.shared();
+        Ok(UserPrefsRepo::new(&shared)
+            .get(host_core::logging::PREF_LOG_LEVEL)
+            .map_err(storage_err)?
+            .unwrap_or_else(|| host_core::logging::DEFAULT_LEVEL.to_string()))
+    }
+
+    /// Change the live verbosity + persist the choice (device-local). Validated
+    /// against the known level set so a bad value can't be stored or silence
+    /// logging.
+    pub fn set_log_level(&self, level: String) -> Result<(), StoreError> {
+        if !matches!(
+            level.as_str(),
+            "error" | "warn" | "info" | "debug" | "trace"
+        ) {
+            return Err(StoreError::InvalidField {
+                field: "level".into(),
+                detail: format!("unknown log level '{level}'"),
+            });
+        }
+        crate::logging::set_level(&level);
+        let shared = self.db.shared();
+        UserPrefsRepo::new(&shared)
+            .set(host_core::logging::PREF_LOG_LEVEL, &level)
+            .map_err(storage_err)?;
+        Ok(())
+    }
+
+    /// Tail of the newest log file for the in-app viewer (default 500 lines).
+    pub fn get_recent_logs(&self, lines: Option<u32>) -> Result<String, StoreError> {
+        let dir = crate::logging::logs_dir().ok_or_else(|| StoreError::Storage {
+            detail: "logging not initialised".into(),
+        })?;
+        Ok(host_core::logging::recent_lines(
+            dir,
+            lines.unwrap_or(500) as usize,
+        ))
+    }
+
+    /// The full (optionally redacted, default true) log bundle as a string — for
+    /// the Share sheet. Capped to the most-recent ~2 MB so a huge trace bundle
+    /// doesn't choke the share channel.
+    pub fn collect_logs(&self, redact: Option<bool>) -> Result<String, StoreError> {
+        let dir = crate::logging::logs_dir().ok_or_else(|| StoreError::Storage {
+            detail: "logging not initialised".into(),
+        })?;
+        Ok(host_core::logging::collect(
+            dir,
+            redact.unwrap_or(true),
+            Some(2 * 1024 * 1024),
+        ))
+    }
+
+    /// Remove the rotated log files (the active one is kept).
+    pub fn clear_logs(&self) -> Result<(), StoreError> {
+        let dir = crate::logging::logs_dir().ok_or_else(|| StoreError::Storage {
+            detail: "logging not initialised".into(),
+        })?;
+        host_core::logging::clear(dir);
+        Ok(())
+    }
+
+    /// The on-disk logs directory, for display.
+    pub fn logs_dir_path(&self) -> Result<String, StoreError> {
+        let dir = crate::logging::logs_dir().ok_or_else(|| StoreError::Storage {
+            detail: "logging not initialised".into(),
+        })?;
+        Ok(dir.display().to_string())
+    }
+
     // ─── Sync conflicts ────────────────────────────────────────────────────────
     //
     // Field-level conflicts the sync applier recorded (a field edited differently
@@ -6241,6 +6329,24 @@ mod tests {
         let json = host.accounts_json().unwrap();
         // Migration 0003 seeds the implicit local account.
         assert!(json.contains("\"adapter_kind\":\"local\""), "got: {json}");
+    }
+
+    #[test]
+    fn logging_init_is_idempotent_across_hosts_and_set_level_works() {
+        // Two Host::open in one binary must NOT double-install the global
+        // subscriber (the Once guard). The level facade works on the cached
+        // handle regardless of which host set it; the default reads back "info".
+        let (_d1, h1, _k1) = open_host();
+        let (_d2, h2, _k2) = open_host();
+        assert_eq!(h1.get_log_level().unwrap(), "info");
+        h2.set_log_level("debug".into()).unwrap();
+        assert_eq!(h2.get_log_level().unwrap(), "debug");
+        // A bad level is rejected, not stored.
+        assert!(h2.set_log_level("loud".into()).is_err());
+        // The logs dir resolved (logging initialised), and a recent-lines read
+        // doesn't error even with no content yet.
+        assert!(h1.logs_dir_path().unwrap().contains("logs"));
+        let _ = h1.get_recent_logs(Some(10)).unwrap();
     }
 
     #[test]

@@ -198,6 +198,19 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** Drop every external book's contact cache + reset "last synced"; resolves
    *  to the count of accounts invalidated. */
   clearContactsCache(): Promise<number>;
+  /** The persisted log level (`error`…`trace`), or the default when unset. */
+  getLogLevel(): Promise<string>;
+  /** Validate → live-reload the filter → persist (device-local). */
+  setLogLevel(level: string): Promise<void>;
+  /** Tail of the newest log file (default 500 lines). `null` ⇒ default. */
+  getRecentLogs(lines: number | null): Promise<string>;
+  /** The full (optionally redacted, default true) log bundle, capped to ~2 MB
+   *  for the Share sheet. */
+  collectLogs(redact: boolean | null): Promise<string>;
+  /** Remove the rotated log files (the active one is kept). */
+  clearLogs(): Promise<void>;
+  /** The on-disk logs directory, for display. */
+  logsDirPath(): Promise<string>;
   /** Count of unresolved sync conflicts (the badge). */
   syncConflictCount(): Promise<number>;
   /** Every unresolved conflict as a JSON `ConflictRecord[]`. */

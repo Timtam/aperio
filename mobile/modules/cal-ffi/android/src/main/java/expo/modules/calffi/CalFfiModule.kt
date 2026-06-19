@@ -290,6 +290,31 @@ class CalFfiModule : Module() {
       host.clearContactsCache().toInt()
     }
 
+    // Diagnostics / logs (§ Diagnostics).
+    AsyncFunction("getLogLevel") {
+      host.getLogLevel()
+    }
+
+    AsyncFunction("setLogLevel") { level: String ->
+      host.setLogLevel(level)
+    }
+
+    AsyncFunction("getRecentLogs") { lines: Int? ->
+      host.getRecentLogs(lines?.toUInt())
+    }
+
+    AsyncFunction("collectLogs") { redact: Boolean? ->
+      host.collectLogs(redact)
+    }
+
+    AsyncFunction("clearLogs") {
+      host.clearLogs()
+    }
+
+    AsyncFunction("logsDirPath") {
+      host.logsDirPath()
+    }
+
     AsyncFunction("syncConflictCount") {
       host.syncConflictCount().toInt()
     }

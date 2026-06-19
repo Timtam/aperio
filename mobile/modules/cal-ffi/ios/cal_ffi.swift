@@ -1106,10 +1106,22 @@ public protocol HostProtocol: AnyObject, Sendable {
     func clearContactsCache() throws  -> UInt32
     
     /**
+     * Remove the rotated log files (the active one is kept).
+     */
+    func clearLogs() throws 
+    
+    /**
      * Drop every `sync_log` row (the "clear history" action — also useful
      * before sharing a screen). Mirrors the desktop `clear_sync_log`.
      */
     func clearSyncLog() throws 
+    
+    /**
+     * The full (optionally redacted, default true) log bundle as a string — for
+     * the Share sheet. Capped to the most-recent ~2 MB so a huge trace bundle
+     * doesn't choke the share channel.
+     */
+    func collectLogs(redact: Bool?) throws  -> String
     
     /**
      * Manually trigger a compaction round (§19.10): snapshot the local state,
@@ -1454,12 +1466,22 @@ public protocol HostProtocol: AnyObject, Sendable {
     func getEventsJson(requestJson: String) throws  -> String
     
     /**
+     * The persisted log level, or the default when unset.
+     */
+    func getLogLevel() throws  -> String
+    
+    /**
      * Resolve a one-off `hex` to a hidden ad-hoc colour label (dedup by hex),
      * creating one when needed; appends `ColorLabelCreated` only on a genuine
      * create (re-picking the same colour doesn't spam the log). The custom
      * colour picker calls this; named colours go through `create_color_label`.
      */
     func getOrCreateAdHocColorLabelJson(hex: String) throws  -> String
+    
+    /**
+     * Tail of the newest log file for the in-app viewer (default 500 lines).
+     */
+    func getRecentLogs(lines: UInt32?) throws  -> String
     
     /**
      * Read a user preference, or `None` when unset.
@@ -1519,6 +1541,11 @@ public protocol HostProtocol: AnyObject, Sendable {
      * viewer. Mirrors the desktop `list_sync_log_entries`.
      */
     func listSyncLogJson(limit: UInt32) throws  -> String
+    
+    /**
+     * The on-disk logs directory, for display.
+     */
+    func logsDirPath() throws  -> String
     
     /**
      * The currently-pinned SFTP fingerprint for `host_port`, or `None`. Lets the
@@ -1728,6 +1755,13 @@ public protocol HostProtocol: AnyObject, Sendable {
      * stray override can never shadow a provider colour.)
      */
     func setEventColor(eventId: String, calendarId: String, colorLabelId: String?) throws 
+    
+    /**
+     * Change the live verbosity + persist the choice (device-local). Validated
+     * against the known level set so a bad value can't be stored or silence
+     * logging.
+     */
+    func setLogLevel(level: String) throws 
     
     /**
      * Set or clear a SECTION's colour label (DESIGN §8.2). Routed by the owning
@@ -2159,6 +2193,16 @@ open func clearContactsCache()throws  -> UInt32  {
 }
     
     /**
+     * Remove the rotated log files (the active one is kept).
+     */
+open func clearLogs()throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_clear_logs(
+            self.uniffiCloneHandle(),$0
+    )
+}
+}
+    
+    /**
      * Drop every `sync_log` row (the "clear history" action — also useful
      * before sharing a screen). Mirrors the desktop `clear_sync_log`.
      */
@@ -2167,6 +2211,20 @@ open func clearSyncLog()throws   {try rustCallWithError(FfiConverterTypeStoreErr
             self.uniffiCloneHandle(),$0
     )
 }
+}
+    
+    /**
+     * The full (optionally redacted, default true) log bundle as a string — for
+     * the Share sheet. Capped to the most-recent ~2 MB so a huge trace bundle
+     * doesn't choke the share channel.
+     */
+open func collectLogs(redact: Bool?)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_collect_logs(
+            self.uniffiCloneHandle(),
+        FfiConverterOptionBool.lower(redact),$0
+    )
+})
 }
     
     /**
@@ -2778,6 +2836,17 @@ open func getEventsJson(requestJson: String)throws  -> String  {
 }
     
     /**
+     * The persisted log level, or the default when unset.
+     */
+open func getLogLevel()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_get_log_level(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
      * Resolve a one-off `hex` to a hidden ad-hoc colour label (dedup by hex),
      * creating one when needed; appends `ColorLabelCreated` only on a genuine
      * create (re-picking the same colour doesn't spam the log). The custom
@@ -2788,6 +2857,18 @@ open func getOrCreateAdHocColorLabelJson(hex: String)throws  -> String  {
     uniffi_cal_ffi_fn_method_host_get_or_create_ad_hoc_color_label_json(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(hex),$0
+    )
+})
+}
+    
+    /**
+     * Tail of the newest log file for the in-app viewer (default 500 lines).
+     */
+open func getRecentLogs(lines: UInt32?)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_get_recent_logs(
+            self.uniffiCloneHandle(),
+        FfiConverterOptionUInt32.lower(lines),$0
     )
 })
 }
@@ -2898,6 +2979,17 @@ open func listSyncLogJson(limit: UInt32)throws  -> String  {
     uniffi_cal_ffi_fn_method_host_list_sync_log_json(
             self.uniffiCloneHandle(),
         FfiConverterUInt32.lower(limit),$0
+    )
+})
+}
+    
+    /**
+     * The on-disk logs directory, for display.
+     */
+open func logsDirPath()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_logs_dir_path(
+            self.uniffiCloneHandle(),$0
     )
 })
 }
@@ -3271,6 +3363,19 @@ open func setEventColor(eventId: String, calendarId: String, colorLabelId: Strin
         FfiConverterString.lower(eventId),
         FfiConverterString.lower(calendarId),
         FfiConverterOptionString.lower(colorLabelId),$0
+    )
+}
+}
+    
+    /**
+     * Change the live verbosity + persist the choice (device-local). Validated
+     * against the known level set so a bad value can't be stored or silence
+     * logging.
+     */
+open func setLogLevel(level: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_set_log_level(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(level),$0
     )
 }
 }
@@ -6507,6 +6612,30 @@ fileprivate struct FfiConverterOptionUInt8: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
+    typealias SwiftType = UInt32?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt32.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt32.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionBool: FfiConverterRustBuffer {
     typealias SwiftType = Bool?
 
@@ -6956,7 +7085,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_clear_contacts_cache() != 47465) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_clear_logs() != 53053) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_clear_sync_log() != 18521) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_collect_logs() != 37811) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_compact_now_json() != 57819) {
@@ -7073,7 +7208,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_get_events_json() != 18958) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_get_log_level() != 43590) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_get_or_create_ad_hoc_color_label_json() != 25209) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_get_recent_logs() != 35363) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_get_user_pref() != 20426) {
@@ -7098,6 +7239,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_list_sync_log_json() != 60629) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_logs_dir_path() != 51122) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_pinned_sftp_host_key() != 44107) {
@@ -7167,6 +7311,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_set_event_color() != 36971) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_set_log_level() != 18279) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_set_section_color() != 14381) {

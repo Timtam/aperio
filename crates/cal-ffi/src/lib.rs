@@ -22,6 +22,10 @@ uniffi::setup_scaffolding!();
 /// themselves with the scaffolding regardless of module visibility.
 mod host;
 
+/// Process-global rolling-file log sink + level control (the mobile twin of the
+/// desktop's Tauri-managed `LogState`). Installed once from `Host::open`.
+mod logging;
+
 // ───────────────────────────── Attendee parsing ─────────────────────────────
 
 /// A parsed attendee entry: an optional display name plus the email address.

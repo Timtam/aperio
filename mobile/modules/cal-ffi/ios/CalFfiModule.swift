@@ -261,6 +261,31 @@ public class CalFfiModule: Module {
       Int(try self.host.clearContactsCache())
     }
 
+    // Diagnostics / logs (§ Diagnostics).
+    AsyncFunction("getLogLevel") { () -> String in
+      try self.host.getLogLevel()
+    }
+
+    AsyncFunction("setLogLevel") { (level: String) in
+      try self.host.setLogLevel(level: level)
+    }
+
+    AsyncFunction("getRecentLogs") { (lines: Int?) -> String in
+      try self.host.getRecentLogs(lines: lines.map { UInt32($0) })
+    }
+
+    AsyncFunction("collectLogs") { (redact: Bool?) -> String in
+      try self.host.collectLogs(redact: redact)
+    }
+
+    AsyncFunction("clearLogs") {
+      try self.host.clearLogs()
+    }
+
+    AsyncFunction("logsDirPath") { () -> String in
+      try self.host.logsDirPath()
+    }
+
     AsyncFunction("syncConflictCount") { () -> Int in
       Int(try self.host.syncConflictCount())
     }

@@ -796,7 +796,11 @@ external fun uniffi_cal_ffi_checksum_method_host_change_sync_passphrase_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_clear_contacts_cache(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_clear_logs(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_clear_sync_log(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_collect_logs(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_compact_now_json(
 ): Short
@@ -874,7 +878,11 @@ external fun uniffi_cal_ffi_checksum_method_host_get_event_by_id_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_get_events_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_get_log_level(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_get_or_create_ad_hoc_color_label_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_get_recent_logs(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_get_user_pref(
 ): Short
@@ -891,6 +899,8 @@ external fun uniffi_cal_ffi_checksum_method_host_list_custom_sounds_json(
 external fun uniffi_cal_ffi_checksum_method_host_list_sync_conflicts_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_list_sync_log_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_logs_dir_path(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_pinned_sftp_host_key(
 ): Short
@@ -937,6 +947,8 @@ external fun uniffi_cal_ffi_checksum_method_host_set_contacts_sync_interval(
 external fun uniffi_cal_ffi_checksum_method_host_set_container_color_label(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_set_event_color(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_set_log_level(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_set_section_color(
 ): Short
@@ -1107,8 +1119,12 @@ external fun uniffi_cal_ffi_fn_method_host_change_sync_passphrase_json(`ptr`: Lo
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_clear_contacts_cache(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
+external fun uniffi_cal_ffi_fn_method_host_clear_logs(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_clear_sync_log(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_collect_logs(`ptr`: Long,`redact`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_compact_now_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_complete_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1185,7 +1201,11 @@ external fun uniffi_cal_ffi_fn_method_host_get_event_by_id_json(`ptr`: Long,`id`
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_get_events_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_get_log_level(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_get_or_create_ad_hoc_color_label_json(`ptr`: Long,`hex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_get_recent_logs(`ptr`: Long,`lines`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_get_user_pref(`ptr`: Long,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1202,6 +1222,8 @@ external fun uniffi_cal_ffi_fn_method_host_list_custom_sounds_json(`ptr`: Long,u
 external fun uniffi_cal_ffi_fn_method_host_list_sync_conflicts_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_sync_log_json(`ptr`: Long,`limit`: Int,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_logs_dir_path(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_pinned_sftp_host_key(`ptr`: Long,`hostPort`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1248,6 +1270,8 @@ external fun uniffi_cal_ffi_fn_method_host_set_contacts_sync_interval(`ptr`: Lon
 external fun uniffi_cal_ffi_fn_method_host_set_container_color_label(`ptr`: Long,`containerId`: RustBuffer.ByValue,`kind`: RustBuffer.ByValue,`colorLabelId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_set_event_color(`ptr`: Long,`eventId`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,`colorLabelId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_set_log_level(`ptr`: Long,`level`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_set_section_color(`ptr`: Long,`sectionId`: RustBuffer.ByValue,`listId`: RustBuffer.ByValue,`colorLabelId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -1541,7 +1565,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_clear_contacts_cache() != 47465.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_clear_logs() != 53053.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_clear_sync_log() != 18521.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_collect_logs() != 37811.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_compact_now_json() != 57819.toShort()) {
@@ -1658,7 +1688,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_get_events_json() != 18958.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_get_log_level() != 43590.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_get_or_create_ad_hoc_color_label_json() != 25209.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_get_recent_logs() != 35363.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_get_user_pref() != 20426.toShort()) {
@@ -1683,6 +1719,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_list_sync_log_json() != 60629.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_logs_dir_path() != 51122.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_pinned_sftp_host_key() != 44107.toShort()) {
@@ -1752,6 +1791,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_set_event_color() != 36971.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_set_log_level() != 18279.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_set_section_color() != 14381.toShort()) {
@@ -3062,10 +3104,22 @@ public interface HostInterface {
     fun `clearContactsCache`(): kotlin.UInt
     
     /**
+     * Remove the rotated log files (the active one is kept).
+     */
+    fun `clearLogs`()
+    
+    /**
      * Drop every `sync_log` row (the "clear history" action — also useful
      * before sharing a screen). Mirrors the desktop `clear_sync_log`.
      */
     fun `clearSyncLog`()
+    
+    /**
+     * The full (optionally redacted, default true) log bundle as a string — for
+     * the Share sheet. Capped to the most-recent ~2 MB so a huge trace bundle
+     * doesn't choke the share channel.
+     */
+    fun `collectLogs`(`redact`: kotlin.Boolean?): kotlin.String
     
     /**
      * Manually trigger a compaction round (§19.10): snapshot the local state,
@@ -3410,12 +3464,22 @@ public interface HostInterface {
     fun `getEventsJson`(`requestJson`: kotlin.String): kotlin.String
     
     /**
+     * The persisted log level, or the default when unset.
+     */
+    fun `getLogLevel`(): kotlin.String
+    
+    /**
      * Resolve a one-off `hex` to a hidden ad-hoc colour label (dedup by hex),
      * creating one when needed; appends `ColorLabelCreated` only on a genuine
      * create (re-picking the same colour doesn't spam the log). The custom
      * colour picker calls this; named colours go through `create_color_label`.
      */
     fun `getOrCreateAdHocColorLabelJson`(`hex`: kotlin.String): kotlin.String
+    
+    /**
+     * Tail of the newest log file for the in-app viewer (default 500 lines).
+     */
+    fun `getRecentLogs`(`lines`: kotlin.UInt?): kotlin.String
     
     /**
      * Read a user preference, or `None` when unset.
@@ -3475,6 +3539,11 @@ public interface HostInterface {
      * viewer. Mirrors the desktop `list_sync_log_entries`.
      */
     fun `listSyncLogJson`(`limit`: kotlin.UInt): kotlin.String
+    
+    /**
+     * The on-disk logs directory, for display.
+     */
+    fun `logsDirPath`(): kotlin.String
     
     /**
      * The currently-pinned SFTP fingerprint for `host_port`, or `None`. Lets the
@@ -3684,6 +3753,13 @@ public interface HostInterface {
      * stray override can never shadow a provider colour.)
      */
     fun `setEventColor`(`eventId`: kotlin.String, `calendarId`: kotlin.String, `colorLabelId`: kotlin.String?)
+    
+    /**
+     * Change the live verbosity + persist the choice (device-local). Validated
+     * against the known level set so a bad value can't be stored or silence
+     * logging.
+     */
+    fun `setLogLevel`(`level`: kotlin.String)
     
     /**
      * Set or clear a SECTION's colour label (DESIGN §8.2). Routed by the owning
@@ -4182,6 +4258,22 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Remove the rotated log files (the active one is kept).
+     */
+    @Throws(StoreException::class)override fun `clearLogs`()
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_clear_logs(
+        it,
+        _status)
+}
+    }
+    
+    
+
+    
+    /**
      * Drop every `sync_log` row (the "clear history" action — also useful
      * before sharing a screen). Mirrors the desktop `clear_sync_log`.
      */
@@ -4195,6 +4287,25 @@ open class Host: Disposable, AutoCloseable, HostInterface
 }
     }
     
+    
+
+    
+    /**
+     * The full (optionally redacted, default true) log bundle as a string — for
+     * the Share sheet. Capped to the most-recent ~2 MB so a huge trace bundle
+     * doesn't choke the share channel.
+     */
+    @Throws(StoreException::class)override fun `collectLogs`(`redact`: kotlin.Boolean?): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_collect_logs(
+        it,
+        FfiConverterOptionalBoolean.lower(`redact`),_status)
+}
+    }
+    )
+    }
     
 
     
@@ -4982,6 +5093,23 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * The persisted log level, or the default when unset.
+     */
+    @Throws(StoreException::class)override fun `getLogLevel`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_get_log_level(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Resolve a one-off `hex` to a hidden ad-hoc colour label (dedup by hex),
      * creating one when needed; appends `ColorLabelCreated` only on a genuine
      * create (re-picking the same colour doesn't spam the log). The custom
@@ -4994,6 +5122,23 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_get_or_create_ad_hoc_color_label_json(
         it,
         FfiConverterString.lower(`hex`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Tail of the newest log file for the in-app viewer (default 500 lines).
+     */
+    @Throws(StoreException::class)override fun `getRecentLogs`(`lines`: kotlin.UInt?): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_get_recent_logs(
+        it,
+        FfiConverterOptionalUInt.lower(`lines`),_status)
 }
     }
     )
@@ -5149,6 +5294,23 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_list_sync_log_json(
         it,
         FfiConverterUInt.lower(`limit`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The on-disk logs directory, for display.
+     */
+    @Throws(StoreException::class)override fun `logsDirPath`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_logs_dir_path(
+        it,
+        _status)
 }
     }
     )
@@ -5621,6 +5783,24 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_set_event_color(
         it,
         FfiConverterString.lower(`eventId`),FfiConverterString.lower(`calendarId`),FfiConverterOptionalString.lower(`colorLabelId`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Change the live verbosity + persist the choice (device-local). Validated
+     * against the known level set so a bad value can't be stored or silence
+     * logging.
+     */
+    @Throws(StoreException::class)override fun `setLogLevel`(`level`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_set_log_level(
+        it,
+        FfiConverterString.lower(`level`),_status)
 }
     }
     
@@ -9047,6 +9227,38 @@ public object FfiConverterOptionalUByte: FfiConverterRustBuffer<kotlin.UByte?> {
         } else {
             buf.put(1)
             FfiConverterUByte.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalUInt: FfiConverterRustBuffer<kotlin.UInt?> {
+    override fun read(buf: ByteBuffer): kotlin.UInt? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterUInt.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.UInt?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterUInt.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.UInt?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterUInt.write(value, buf)
         }
     }
 }
