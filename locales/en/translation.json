@@ -755,6 +755,8 @@
         "previewAcceptTitle": "Adopt dataset",
         "previewAcceptBody": "Downloads the existing snapshot and all newer log files and merges them into this device. Local changes you made before onboarding are NOT lost — they upload on the next sync.",
         "previewAcceptButton": "Adopt dataset",
+        "joinEncryptedTitle": "Encrypted dataset found",
+        "previewJoinButton": "Join dataset",
         "previewAdoptTitle": "Start fresh",
         "previewAdoptBody": "Overwrites the sync storage's meta.json with a fresh dataset registering only this device. Other devices won't see their own entries any more — their next sync will report them as a \"new device\".",
         "previewAdoptButton": "Start fresh",

@@ -46,6 +46,8 @@ import {
 import { listAccounts } from '../api/accounts';
 import { connectSyncOAuth } from '../api/oauth';
 import { setUserPref } from '../api/prefs';
+import { useScreenA11yInert } from '../a11y/useScreenA11yInert';
+import { AppDialog } from '../components/AppDialog';
 import { RadioGroup } from '../components/RadioGroup';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import CalFfi from '../../modules/cal-ffi';
@@ -76,6 +78,10 @@ export default function SyncScreen() {
   const { t } = useTranslation();
   const navigation = useNavigation();
   const styles = useThemedStyles(makeStyles);
+  // Leave the screen out of the a11y tree while it isn't focused so an
+  // interrupted back-swipe / stack transition can't strand VoiceOver on a stale
+  // node here (issue #1 — same guard SettingsScreen uses).
+  const inert = useScreenA11yInert();
 
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [conflictCount, setConflictCount] = useState(0);
@@ -132,6 +138,10 @@ export default function SyncScreen() {
   // user taps "Check existing dataset"). When `existing`, the join panel shows.
   const [preview, setPreview] = useState<SyncPreview | null>(null);
   const [joinPassphrase, setJoinPassphrase] = useState(''); // join-existing E2E passphrase
+  // Open while collecting the passphrase for an EXISTING ENCRYPTED dataset, in a
+  // focus-trapping dialog — so the field is impossible to miss and the
+  // destructive "start fresh" stays out of the join path (issues #2 / #4).
+  const [joinDialogOpen, setJoinDialogOpen] = useState(false);
   const [joinDeviceName, setJoinDeviceName] = useState(''); // optional name for meta.json
   // The empty-target "enable E2E at creation" toggle — the unified Connect
   // button's second-press option; reuses joinPassphrase as the passphrase draft.
@@ -422,18 +432,18 @@ export default function SyncScreen() {
           announce(t('dialogs.settings.sync.errorSchemaTooOld'));
           return;
         }
-        // Encrypted + no passphrase yet → reveal the field (rendered off
-        // preview.e2e_enabled) and wait for the next press.
-        if (p.e2e_enabled && joinPassphrase.trim().length === 0) {
-          setError(t('dialogs.settings.sync.e2eRemoteRequiresPassphrase'));
+        // Encrypted → collect the passphrase in a focus-trapping dialog and
+        // join from there (the field is impossible to miss, and the destructive
+        // "start fresh" stays out of the join path). The preview stays so the
+        // panel still offers "start fresh" as a deliberate, separate choice.
+        if (p.e2e_enabled) {
+          setJoinPassphrase('');
+          setJoinDialogOpen(true);
           announce(t('dialogs.settings.sync.e2eRemoteRequiresPassphrase'));
           return;
         }
-        const report = await acceptRemoteDataset(
-          config,
-          device,
-          p.e2e_enabled ? joinPassphrase : null,
-        );
+        // Plaintext existing → join immediately (non-destructive).
+        const report = await acceptRemoteDataset(config, device, null);
         setPreview(null);
         setJoinPassphrase('');
         setCreateE2e(false);
@@ -478,6 +488,34 @@ export default function SyncScreen() {
     refresh,
     t,
   ]);
+
+  // Join the probed EXISTING ENCRYPTED dataset with the passphrase entered in
+  // the dialog (the non-destructive adopt path). The Confirm is gated on a
+  // non-empty passphrase, so this never reaches the bridge blank.
+  const joinExisting = useCallback(async () => {
+    const config = buildConfig();
+    if (config == null || joinPassphrase.trim().length === 0) return;
+    const device = joinDeviceName.trim().length > 0 ? joinDeviceName.trim() : null;
+    setError(null);
+    setBusy(true);
+    try {
+      const report = await acceptRemoteDataset(config, device, joinPassphrase);
+      setJoinDialogOpen(false);
+      setPreview(null);
+      setJoinPassphrase('');
+      setCreateE2e(false);
+      await refresh();
+      announce(
+        t('dialogs.settings.sync.onboardingDone', { count: report.device_count }),
+      );
+    } catch (err) {
+      const message = errorMessage(err);
+      setError(message);
+      announce(t('mobile.error', { message }));
+    } finally {
+      setBusy(false);
+    }
+  }, [announce, buildConfig, joinDeviceName, joinPassphrase, refresh, t]);
 
   // Destructive "start fresh" over an EXISTING dataset — overwrites the remote
   // meta.json, orphaning other devices' sync. Demoted behind an Alert confirm
@@ -541,6 +579,10 @@ export default function SyncScreen() {
   // twin of the trust-panel focus handling) so the blind user lands on the new
   // controls rather than hunting downward from the Check button.
   useEffect(() => {
+    // The encrypted-existing case opens the passphrase dialog, which drives its
+    // own focus — don't also yank focus onto the panel title behind it (a race
+    // that contributed to the "focus jumps around" report).
+    if (preview?.kind === 'existing' && preview.e2e_enabled) return;
     const ref =
       preview?.kind === 'existing'
         ? joinPanelRef
@@ -1004,6 +1046,7 @@ export default function SyncScreen() {
       style={styles.screen}
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"
+      {...inert}
     >
       <Text
         style={styles.status}
@@ -1945,31 +1988,35 @@ export default function SyncScreen() {
                 </Text>
               )}
 
+              {/* Encrypted: the non-destructive JOIN — opens the focus-trapping
+                  passphrase dialog. Kept ABOVE the destructive overwrite so a
+                  linear screen-reader pass reaches "Join" before "Start fresh"
+                  (issue #4). */}
               {preview.e2e_enabled && (
-                <>
-                  <Text style={styles.hint} accessibilityRole="text">
-                    {t('dialogs.settings.sync.adoptRemoteE2eHint')}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: busy }}
+                  accessibilityLabel={t('dialogs.settings.sync.previewJoinButton')}
+                  disabled={busy}
+                  onPress={() => {
+                    setJoinPassphrase('');
+                    setJoinDialogOpen(true);
+                  }}
+                  style={({ pressed }) => [
+                    styles.primaryButton,
+                    pressed && styles.primaryPressed,
+                    busy && styles.primaryDisabled,
+                  ]}
+                >
+                  <Text style={styles.primaryButtonText}>
+                    {t('dialogs.settings.sync.previewJoinButton')}
                   </Text>
-                  <Text style={styles.label}>
-                    {t('dialogs.settings.sync.adoptRemoteE2ePassphraseLabel')}
-                  </Text>
-                  <TextInput
-                    style={styles.input}
-                    value={joinPassphrase}
-                    onChangeText={setJoinPassphrase}
-                    accessibilityLabel={t(
-                      'dialogs.settings.sync.adoptRemoteE2ePassphraseLabel',
-                    )}
-                    secureTextEntry
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                </>
+                </Pressable>
               )}
 
               {/* Destructive "start fresh" over THIS dataset — overwrites the
                   remote (other devices lose their sync), so it sits behind a
-                  confirm and apart from the non-destructive Connect join. */}
+                  confirm and apart from the non-destructive join. */}
               <Pressable
                 accessibilityRole="button"
                 accessibilityState={{ disabled: busy }}
@@ -2104,6 +2151,30 @@ export default function SyncScreen() {
           </Pressable>
         )}
       </View>
+
+      {/* Encrypted-dataset join: a focus-trapping popup that owns the passphrase
+          entry. Confirm (Join) stays greyed until a passphrase is typed; Cancel
+          / tap-outside leaves the dataset untouched (issues #2 / #4). */}
+      <AppDialog
+        visible={joinDialogOpen}
+        title={t('dialogs.settings.sync.joinEncryptedTitle')}
+        message={t('dialogs.settings.sync.e2eRemoteRequiresPassphrase')}
+        input={{
+          value: joinPassphrase,
+          onChangeText: setJoinPassphrase,
+          label: t('dialogs.settings.sync.adoptRemoteE2ePassphraseLabel'),
+          secureTextEntry: true,
+        }}
+        confirmLabel={t('dialogs.settings.sync.previewJoinButton')}
+        cancelLabel={t('mobile.cancel')}
+        confirmDisabled={joinPassphrase.trim().length === 0}
+        busy={busy}
+        onConfirm={() => void joinExisting()}
+        onCancel={() => {
+          setJoinDialogOpen(false);
+          setJoinPassphrase('');
+        }}
+      />
     </ScrollView>
   );
 }

@@ -752,6 +752,8 @@
         "previewAcceptTitle": "Datensatz übernehmen",
         "previewAcceptBody": "Lädt den bestehenden Snapshot und alle neueren Log-Dateien herunter und integriert sie in dieses Gerät. Lokale Änderungen, die hier vor dem Onboarding gemacht wurden, gehen NICHT verloren — sie werden beim nächsten Sync hochgeladen.",
         "previewAcceptButton": "Datensatz übernehmen",
+        "joinEncryptedTitle": "Verschlüsselter Datensatz gefunden",
+        "previewJoinButton": "Datensatz beitreten",
         "previewAdoptTitle": "Neu beginnen",
         "previewAdoptBody": "Überschreibt die meta.json des Sync-Speichers mit einem neuen Datensatz, in dem nur dieses Gerät registriert ist. Andere Geräte sehen ihre eigenen Einträge nicht mehr — bei deren nächstem Sync werden sie als „neues Gerät\" gemeldet.",
         "previewAdoptButton": "Neu beginnen",
