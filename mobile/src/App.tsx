@@ -31,6 +31,7 @@ import SearchScreen from './screens/SearchScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import SyncScreen from './screens/SyncScreen';
 import TaskEditorModal from './screens/TaskEditorModal';
+import TaskMembersScreen from './screens/TaskMembersScreen';
 import TaskSettingsScreen from './screens/TaskSettingsScreen';
 import TasksScreen from './screens/TasksScreen';
 import WeekScreen from './screens/WeekScreen';
@@ -70,6 +71,13 @@ function TasksStackNav() {
         name="ListEditor"
         component={ListEditorModal}
         options={{ presentation: 'modal', title: t('mobile.manageList') }}
+      />
+      {/* Members manager — pushed from the list editor; its own header title is
+          set per-list in the screen. */}
+      <TasksStack.Screen
+        name="TaskMembers"
+        component={TaskMembersScreen}
+        options={{ title: t('mobile.manageList') }}
       />
       <TasksStack.Screen
         name="TaskEditor"

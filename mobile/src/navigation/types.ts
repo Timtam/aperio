@@ -26,6 +26,10 @@ export type RootStackParamList = {
   TaskEditor: { taskId: string | null; listId: string; parentId?: string | null };
   Lists: undefined;
   ListEditor: { listId: string };
+  // Manage a shared list's membership (§9.7) — only reachable for lists whose
+  // adapter declares `manageable`. `listName` seeds the header before the store
+  // resolves.
+  TaskMembers: { listId: string; listName: string };
   Accounts: undefined;
   // `anchor` (ISO instant) seeds the initial day/window when arriving from the
   // Day⇄Agenda switcher, so switching views keeps the selected date.

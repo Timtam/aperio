@@ -116,6 +116,9 @@ export default function ListEditorModal({
   const canDeleteList = isLocal;
   const canManageSections =
     isLocal || (list?.task_capabilities?.manageable_sections ?? false);
+  // Membership/sharing (§9.7) — only for external lists whose adapter declares
+  // it; opens the dedicated members manager. Local lists have no sharing concept.
+  const canManageMembers = list?.task_capabilities?.manageable ?? false;
 
   // Eligible parents = every OTHER local list that isn't a descendant of this
   // one (no cycles). Plus the "top level" sentinel.
@@ -460,6 +463,21 @@ export default function ListEditorModal({
         disabled={busy}
       />
 
+      {/* Members / sharing — external lists whose adapter declares it (§9.7);
+          opens the dedicated members manager. */}
+      {canManageMembers && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${t('mobile.manageMembersLabel')}: ${list.name}`}
+          onPress={() =>
+            navigation.navigate('TaskMembers', { listId, listName: list.name })
+          }
+          style={({ pressed }) => [styles.manageMembersButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.manageMembersText}>{t('mobile.manageMembersLabel')}</Text>
+        </Pressable>
+      )}
+
       {/* Sections — local lists, or external lists whose provider can manage
           sections at the source. */}
       {canManageSections && (
@@ -688,6 +706,16 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surfaceAlt,
     },
     smallButtonText: { fontSize: 15, fontWeight: '600', color: c.accent },
+    manageMembersButton: {
+      paddingVertical: 14,
+      paddingHorizontal: 18,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+      alignItems: 'center',
+    },
+    manageMembersText: { fontSize: 16, fontWeight: '700', color: c.accent },
     pressed: { opacity: 0.7 },
     deleteButton: {
       marginTop: 8,
