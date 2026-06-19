@@ -37,9 +37,12 @@ export function confirmDeleteEvent(
     })();
   };
 
+  // Notify attendees only when the meeting has any (desktop parity — the chip
+  // menu passes send-cancellations = attendees.length > 0). Deleting a single
+  // occurrence (EXDATE) doesn't notify; only the master/single delete does.
   const deleteSeries = () =>
     run(
-      () => deleteEvent(series, ev.calendar_id, false),
+      () => deleteEvent(series, ev.calendar_id, ev.attendees.length > 0),
       t('dialogs.event.deleted', { title: ev.title }),
     );
 
