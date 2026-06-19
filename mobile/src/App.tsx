@@ -31,6 +31,7 @@ import ListEditorModal from './screens/ListEditorModal';
 import ListsScreen from './screens/ListsScreen';
 import LogsScreen from './screens/LogsScreen';
 import MonthScreen from './screens/MonthScreen';
+import MoveCopyModal from './screens/MoveCopyModal';
 import PlanTaskModal from './screens/PlanTaskModal';
 import QuickAddTaskModal from './screens/QuickAddTaskModal';
 import RemindersScreen from './screens/RemindersScreen';
@@ -103,6 +104,11 @@ function TasksStackNav() {
         options={{ presentation: 'modal', title: t('mobile.plan') }}
       />
       <TasksStack.Screen
+        name="MoveCopy"
+        component={MoveCopyModal}
+        options={{ presentation: 'modal', title: t('mobile.moveCopy') }}
+      />
+      <TasksStack.Screen
         name="Search"
         component={SearchScreen}
         options={{ presentation: 'modal', title: t('dialogs.search.title') }}
@@ -161,6 +167,11 @@ function CalendarStackNav() {
         name="EventEditor"
         component={EventEditorModal}
         options={{ presentation: 'modal', title: t('dialogs.event.newTitle') }}
+      />
+      <CalendarStack.Screen
+        name="MoveCopy"
+        component={MoveCopyModal}
+        options={{ presentation: 'modal', title: t('mobile.moveCopy') }}
       />
       <CalendarStack.Screen
         name="Search"

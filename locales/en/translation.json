@@ -78,6 +78,7 @@
     "duplicate": "Duplicate",
     "addSubtask": "Add subtask",
     "plan": "Plan",
+    "moveCopy": "Move / copy",
     "cyclePriority": "Change priority",
     "priorityCycled": "Priority set to {{priority}}.",
     "subtaskStatusSet": "{{title}} set to {{status}}.",

@@ -78,6 +78,7 @@
     "duplicate": "Duplizieren",
     "addSubtask": "Unteraufgabe hinzufügen",
     "plan": "Einplanen",
+    "moveCopy": "Verschieben/Kopieren",
     "cyclePriority": "Priorität ändern",
     "priorityCycled": "Priorität auf {{priority}} gesetzt.",
     "subtaskStatusSet": "{{title}} auf {{status}} gesetzt.",

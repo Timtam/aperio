@@ -1,5 +1,7 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
+import type { CalendarEvent } from '../api/calendar';
+
 /**
  * The root native-stack route table. Must be a `type` alias (React Navigation
  * 7's typing pattern), not an interface.
@@ -37,6 +39,13 @@ export type RootStackParamList = {
   // Plan-from-backlog quick scheduler (Today / Tomorrow / Next Monday / custom /
   // back-to-backlog). The mobile twin of the desktop PlanTaskDialog.
   PlanTask: { taskId: string; listId: string };
+  // Move / copy a task to another list or an event to another calendar (with the
+  // occurrence-vs-series scope for a recurring event). The mobile twin of the
+  // desktop MoveCopyDialog. A task is re-fetched by id; an event carries its full
+  // row (an expanded occurrence is synthetic, so there's no id to re-fetch it by).
+  MoveCopy:
+    | { kind: 'task'; taskId: string; listId: string }
+    | { kind: 'event'; event: CalendarEvent };
   Lists: undefined;
   ListEditor: { listId: string };
   // Manage a shared list's membership (§9.7) — only reachable for lists whose

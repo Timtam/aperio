@@ -232,6 +232,13 @@ export default function AgendaScreen({
     [navigation],
   );
 
+  // Move / copy to another calendar — pass the full (possibly expanded) row so
+  // the modal can offer the occurrence-vs-series scope.
+  const moveCopyEvent = useCallback(
+    (ev: CalendarEvent) => navigation.navigate('MoveCopy', { kind: 'event', event: ev }),
+    [navigation],
+  );
+
   // Delete with recurrence scope: an occurrence offers "this occurrence" (exdate)
   // vs "whole series"; a single event a plain delete (shared helper).
   const removeEvent = useCallback(
@@ -452,10 +459,12 @@ export default function AgendaScreen({
         accessibilityHint={t('mobile.taskHint')}
         accessibilityActions={[
           { name: 'activate', label: t('mobile.editTaskLabel') },
+          { name: 'moveCopy', label: t('mobile.moveCopy') },
           { name: 'delete', label: t('dialogs.event.delete') },
         ]}
         onAccessibilityAction={(e) => {
           if (e.nativeEvent.actionName === 'delete') removeEvent(ev);
+          else if (e.nativeEvent.actionName === 'moveCopy') moveCopyEvent(ev);
           else editEvent(ev);
         }}
         style={styles.row}

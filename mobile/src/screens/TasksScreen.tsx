@@ -190,6 +190,18 @@ export default function TasksScreen({
     [navigation],
   );
 
+  // Move / copy the task (and its subtasks) to another list — the desktop's
+  // Shift+M affordance as a row action.
+  const openMoveCopy = useCallback(
+    (task: Task) =>
+      navigation.navigate('MoveCopy', {
+        kind: 'task',
+        taskId: task.id,
+        listId: task.list_id,
+      }),
+    [navigation],
+  );
+
   const newTask = useCallback(() => {
     // No list at all → send the user to create one first. Otherwise open the
     // quick-add (it resolves its own default list — last-used, else first
@@ -352,6 +364,9 @@ export default function TasksScreen({
         case 'plan':
           openPlan(task);
           break;
+        case 'moveCopy':
+          openMoveCopy(task);
+          break;
         case 'addSubtask':
           addSubtask(task);
           break;
@@ -360,7 +375,16 @@ export default function TasksScreen({
           break;
       }
     },
-    [addSubtask, duplicate, openEditor, openPlan, removeTask, toggleCollapsed, toggleDone],
+    [
+      addSubtask,
+      duplicate,
+      openEditor,
+      openPlan,
+      openMoveCopy,
+      removeTask,
+      toggleCollapsed,
+      toggleDone,
+    ],
   );
 
   const taskLabel = (task: Task, colourName: string | null): string => {
@@ -424,6 +448,7 @@ export default function TasksScreen({
       { name: 'delete', label: t('mobile.delete') },
       { name: 'duplicate', label: t('mobile.duplicate') },
       { name: 'plan', label: t('mobile.plan') },
+      { name: 'moveCopy', label: t('mobile.moveCopy') },
     ];
     // Subtasks ride parent_id on the local store; offer "Add subtask" only for
     // local lists (external subtask support is provider-dependent — deferred).

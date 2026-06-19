@@ -299,6 +299,13 @@ export function CalendarDayList({
     [navigation],
   );
 
+  // Move / copy to another calendar — pass the full (possibly expanded) row so
+  // the modal can offer the occurrence-vs-series scope.
+  const moveCopyEvent = useCallback(
+    (ev: CalendarEvent) => navigation.navigate('MoveCopy', { kind: 'event', event: ev }),
+    [navigation],
+  );
+
   const removeEvent = useCallback(
     (ev: CalendarEvent) =>
       confirmDeleteEvent(
@@ -319,6 +326,16 @@ export function CalendarDayList({
   const openTask = useCallback(
     (task: Task) =>
       navigation.navigate('TaskEditor', { taskId: task.id, listId: task.list_id }),
+    [navigation],
+  );
+
+  const moveCopyTask = useCallback(
+    (task: Task) =>
+      navigation.navigate('MoveCopy', {
+        kind: 'task',
+        taskId: task.id,
+        listId: task.list_id,
+      }),
     [navigation],
   );
 
@@ -483,10 +500,12 @@ export function CalendarDayList({
         accessibilityHint={t('mobile.taskHint')}
         accessibilityActions={[
           { name: 'activate', label: t('mobile.editTaskLabel') },
+          { name: 'moveCopy', label: t('mobile.moveCopy') },
           { name: 'delete', label: t('dialogs.event.delete') },
         ]}
         onAccessibilityAction={(e) => {
           if (e.nativeEvent.actionName === 'delete') removeEvent(ev);
+          else if (e.nativeEvent.actionName === 'moveCopy') moveCopyEvent(ev);
           else editEvent(ev);
         }}
         style={styles.row}
@@ -536,12 +555,14 @@ export function CalendarDayList({
         accessibilityActions={[
           { name: 'toggle', label: done ? t('mobile.reopen') : t('mobile.complete') },
           { name: 'edit', label: t('mobile.rename') },
+          { name: 'moveCopy', label: t('mobile.moveCopy') },
           { name: 'delete', label: t('mobile.delete') },
         ]}
         onAccessibilityAction={(e) => {
           const name = e.nativeEvent.actionName;
           if (name === 'toggle') void toggleTask(task);
           else if (name === 'delete') removeTask(task);
+          else if (name === 'moveCopy') moveCopyTask(task);
           else openTask(task);
         }}
         style={styles.row}
