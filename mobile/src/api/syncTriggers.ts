@@ -30,7 +30,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 
 import { refreshRemindersSoon } from '../reminders/scheduler';
 import { getUserPref } from './prefs';
-import { pushNow, syncNow, warmCacheOnForeground } from './sync';
+import { pushNow, syncNow, syncStatus, warmCacheOnForeground } from './sync';
 
 /** Debounce window for the post-mutation push (matches the desktop scheduler's
  *  debounce: coalesce a rapid burst of edits into a single push). */
@@ -59,6 +59,32 @@ async function readSyncIntervalMs(): Promise<number> {
   return minutes * 60_000;
 }
 
+// Auto (non-user-invoked) rounds run only when a sync target is configured — the
+// mobile twin of the desktop scheduler, which SKIPS the round when there is no
+// adapter. Without this, every launch/foreground/periodic tick hit the engine
+// with "no sync adapter configured", which the Host latched as a failure; after
+// a few it tripped `sustained_failure`, surfacing a spurious "sync has failed
+// several times" banner + a Settings-tab error badge with no target ever set.
+// Manual "Sync now" (the Sync screen) stays unguarded. Best-effort + silent.
+async function autoSyncIfConfigured(reason: Parameters<typeof syncNow>[0]): Promise<void> {
+  try {
+    if (!(await syncStatus()).configured) return;
+    await syncNow(reason);
+  } catch {
+    // missing target / transient network error — silent, as a background action
+    // the user didn't invoke must never surface an error.
+  }
+}
+
+async function autoPushIfConfigured(reason: Parameters<typeof pushNow>[0]): Promise<void> {
+  try {
+    if (!(await syncStatus()).configured) return;
+    await pushNow(reason);
+  } catch {
+    // silent — see autoSyncIfConfigured.
+  }
+}
+
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Schedule a debounced background push. Call after any local mutation; rapid
@@ -69,7 +95,7 @@ export function scheduleBackgroundPush(): void {
   pushTimer = setTimeout(() => {
     pushTimer = null;
     // The debounced post-mutation push — tagged 'kick' in the sync log.
-    void pushNow('kick').catch(() => undefined);
+    void autoPushIfConfigured('kick');
   }, MUTATION_PUSH_DEBOUNCE_MS);
   // A local mutation may have added/changed/removed a reminder — roll the
   // scheduled OS notifications forward too (debounced, best-effort).
@@ -84,7 +110,7 @@ function flushPendingPush(): void {
     pushTimer = null;
   }
   // The background flush before the OS suspends us — tagged 'app_exit'.
-  void pushNow('app_exit').catch(() => undefined);
+  void autoPushIfConfigured('app_exit');
 }
 
 /**
@@ -112,7 +138,7 @@ export function useSyncTriggers(): void {
         // flight — don't arm a timer that should be paused.
         if (AppState.currentState === 'active') {
           periodic = setInterval(() => {
-            void syncNow('periodic').catch(() => undefined);
+            void autoSyncIfConfigured('periodic');
           }, ms);
         }
       });
@@ -122,7 +148,7 @@ export function useSyncTriggers(): void {
     // + a warm pass over the external SWR caches (the mobile stand-in for the
     // desktop periodic warm loop) + arm the foreground periodic timer (the app
     // starts active).
-    void syncNow('app_start').catch(() => undefined);
+    void autoSyncIfConfigured('app_start');
     void warmCacheOnForeground().catch(() => undefined);
     startPeriodic();
 
@@ -131,7 +157,7 @@ export function useSyncTriggers(): void {
         // Foreground-resume full round + external-cache warm + re-arm the
         // periodic timer (the synced interval may have changed on another
         // device while we were away).
-        void syncNow('periodic').catch(() => undefined);
+        void autoSyncIfConfigured('periodic');
         void warmCacheOnForeground().catch(() => undefined);
         startPeriodic();
       } else {

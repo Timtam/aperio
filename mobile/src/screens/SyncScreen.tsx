@@ -952,7 +952,7 @@ export default function SyncScreen() {
         </Text>
       )}
 
-      {status?.sustained_failure === true && (
+      {status?.configured && status?.sustained_failure === true && (
         <Text
           style={styles.warning}
           accessibilityRole="text"

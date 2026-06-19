@@ -23,7 +23,8 @@ const POLL_MS = 30000;
 function toneOf(status: SyncStatus | null, conflictCount: number): SyncTone {
   if (status?.schema_too_old) return 'schema_too_old';
   if (conflictCount > 0) return 'conflict';
-  if (status?.sustained_failure || status?.last_error_code != null) return 'error';
+  if (status?.configured && (status.sustained_failure || status.last_error_code != null))
+    return 'error';
   if (status?.in_flight) return 'uploading';
   if (status?.configured) return 'synced';
   return 'off';
