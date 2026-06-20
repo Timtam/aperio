@@ -4,7 +4,8 @@ import {
   AccessibilityInfo,
   Alert,
   Pressable,
-  ScrollView,
+  SectionList,
+  type SectionListData,
   StyleSheet,
   Text,
   TextInput,
@@ -275,6 +276,53 @@ export default function ContactsScreen({
   const searchPending = searching && searchResults == null;
   const searchTotal = searchResults?.length ?? 0;
 
+  // SectionList feed: one section per address book. A VIRTUALIZED list (cells
+  // recycled, the RN equivalent of Apple's UITableView) so a directory with
+  // thousands of contacts (an EWS global address list) scrolls smoothly instead
+  // of rendering every row up front — the cause of the massive browse lag.
+  const sections = useMemo<SectionListData<Contact, { list: ContactList }>[]>(
+    () => displayGroups.map((g) => ({ list: g.list, data: g.contacts })),
+    [displayGroups],
+  );
+
+  const renderContact = (c: Contact, list: ContactList) => (
+    <View
+      accessible
+      accessibilityRole="button"
+      accessibilityLabel={subtitle(c) ? `${c.display_name}, ${subtitle(c)}` : c.display_name}
+      accessibilityHint={t('mobile.contactHint')}
+      accessibilityActions={
+        list.read_only
+          ? [{ name: 'activate', label: t('dialogs.contact.editTitle') }]
+          : [
+              { name: 'activate', label: t('dialogs.contact.editTitle') },
+              { name: 'delete', label: t('dialogs.contact.delete') },
+            ]
+      }
+      onAccessibilityAction={(e) => {
+        if (e.nativeEvent.actionName === 'delete' && !list.read_only) removeContact(c);
+        else editContact(c);
+      }}
+      style={styles.row}
+    >
+      <Pressable accessible={false} onPress={() => editContact(c)} style={styles.rowText}>
+        <Text style={styles.contactName}>{c.display_name}</Text>
+        {subtitle(c) !== '' && <Text style={styles.contactSub}>{subtitle(c)}</Text>}
+      </Pressable>
+      {/* Read-only book (a directory / GAL): view-only — no delete. */}
+      {!list.read_only && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${t('dialogs.contact.delete')}: ${c.display_name}`}
+          onPress={() => removeContact(c)}
+          style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.deleteButtonText}>{t('dialogs.contact.delete')}</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+
   return (
     <View style={styles.screen}>
       <View style={styles.actionBar}>
@@ -374,70 +422,28 @@ export default function ContactsScreen({
           {t('views.contacts.searchEmpty', { query: query.trim() })}
         </Text>
       ) : (
-        <ScrollView
+        <SectionList
           accessibilityRole="list"
+          sections={sections}
+          keyExtractor={(c) => c.id}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
-        >
-          {displayGroups.map((g) => (
-            <View key={g.list.id} style={styles.group}>
-              <Text style={styles.groupHeading} accessibilityRole="header">
-                {g.list.name}
-              </Text>
-              {g.contacts.length === 0 ? (
-                <Text style={styles.muted}>{t('mobile.noContacts')}</Text>
-              ) : (
-                g.contacts.map((c) => (
-                  <View
-                    key={c.id}
-                    accessible
-                    accessibilityRole="button"
-                    accessibilityLabel={
-                      subtitle(c) ? `${c.display_name}, ${subtitle(c)}` : c.display_name
-                    }
-                    accessibilityHint={t('mobile.contactHint')}
-                    accessibilityActions={
-                      g.list.read_only
-                        ? [{ name: 'activate', label: t('dialogs.contact.editTitle') }]
-                        : [
-                            { name: 'activate', label: t('dialogs.contact.editTitle') },
-                            { name: 'delete', label: t('dialogs.contact.delete') },
-                          ]
-                    }
-                    onAccessibilityAction={(e) => {
-                      if (e.nativeEvent.actionName === 'delete' && !g.list.read_only)
-                        removeContact(c);
-                      else editContact(c);
-                    }}
-                    style={styles.row}
-                  >
-                    <Pressable
-                      accessible={false}
-                      onPress={() => editContact(c)}
-                      style={styles.rowText}
-                    >
-                      <Text style={styles.contactName}>{c.display_name}</Text>
-                      {subtitle(c) !== '' && (
-                        <Text style={styles.contactSub}>{subtitle(c)}</Text>
-                      )}
-                    </Pressable>
-                    {/* Read-only book (a directory / GAL): view-only — no delete. */}
-                    {!g.list.read_only && (
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`${t('dialogs.contact.delete')}: ${c.display_name}`}
-                        onPress={() => removeContact(c)}
-                        style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
-                      >
-                        <Text style={styles.deleteButtonText}>{t('dialogs.contact.delete')}</Text>
-                      </Pressable>
-                    )}
-                  </View>
-                ))
-              )}
-            </View>
-          ))}
-        </ScrollView>
+          stickySectionHeadersEnabled={false}
+          initialNumToRender={20}
+          windowSize={11}
+          removeClippedSubviews
+          renderSectionHeader={({ section }) => (
+            <Text style={styles.groupHeading} accessibilityRole="header">
+              {section.list.name}
+            </Text>
+          )}
+          renderSectionFooter={({ section }) =>
+            section.data.length === 0 ? (
+              <Text style={styles.muted}>{t('mobile.noContacts')}</Text>
+            ) : null
+          }
+          renderItem={({ item, section }) => renderContact(item, section.list)}
+        />
       )}
     </View>
   );
