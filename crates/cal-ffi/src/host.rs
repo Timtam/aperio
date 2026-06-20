@@ -3035,10 +3035,14 @@ impl Host {
     // Mobile-deferred (documented per method): `create_task_list` stays LOCAL
     // (external list creation needs account + parent params this signature lacks)
     // and `reparent_task_list` is a local-store concept (external lists →
-    // `Unsupported`); external recurring tasks get no host-side series_id +
-    // on-demand next-instance spawn (cache-dependent); cross-list MOVES aren't
-    // detected (no previous_list_id); cache-invalidation + the reminder scheduler
-    // kick are desktop-only and have no mobile analogue.
+    // `Unsupported`); cross-list MOVES aren't detected here (no previous_list_id —
+    // the Move/Copy flow handles those); the reminder-scheduler kick is the
+    // desktop worker's job (mobile reschedules via its own JS scheduler). External
+    // recurring tasks still get no host-ASSIGNED series_id (the spawn dedups via
+    // the snapshot cache instead). NO LONGER deferred: external on-demand/backlog
+    // recurring-task resurface IS handled (`spawn_external_on_demand`, wired into
+    // the external `update_task` branch), and external mutations invalidate the
+    // SWR cache (`invalidate_*_cache`).
 
     /// All task lists (local + external) as a JSON `TaskListRow[]` (the desktop
     /// wire shape: each `TaskList` flattened + its `account_id`). Primes the
