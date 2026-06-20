@@ -436,7 +436,10 @@ export default function TasksScreen({
         accessible
         accessibilityRole="button"
         accessibilityLabel={entry.task.title}
-        accessibilityHint={t('mobile.groupHeaderHint')}
+        // An expandable header (hasChildren + accessibilityState.expanded) is a
+        // native iOS disclosure — let VoiceOver speak its own "double tap to
+        // expand/collapse" hint rather than overriding it with a custom one.
+        accessibilityHint={entry.hasChildren ? undefined : t('mobile.groupHeaderHint')}
         accessibilityState={entry.hasChildren ? { expanded: !isCollapsed } : undefined}
         onPress={() => toggleCollapsed(id, entry.task.title)}
         style={({ pressed }) => [

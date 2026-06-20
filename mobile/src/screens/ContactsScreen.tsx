@@ -272,6 +272,10 @@ export default function ContactsScreen({
     c.organization ?? c.emails[0] ?? c.phone_numbers[0] ?? '';
 
   const total = groups.reduce((n, g) => n + g.contacts.length, 0);
+  // Whether any address book is actually syncable (an external provider). Local
+  // device books never sync, so for an all-local setup the manual sync + the
+  // last-synced line are meaningless and hidden.
+  const hasSyncable = groups.some((g) => g.list.account_id !== 'local');
   // Search is in flight until the debounced call resolves (results still null).
   const searchPending = searching && searchResults == null;
   const searchTotal = searchResults?.length ?? 0;
@@ -348,27 +352,34 @@ export default function ContactsScreen({
         >
           <Text style={styles.ghostButtonText}>{t('mobile.manageContactLists')}</Text>
         </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('dialogs.settings.contacts.syncNow')}
-          accessibilityState={{ disabled: refreshing || (syncStatus?.in_flight ?? false) }}
-          disabled={refreshing || (syncStatus?.in_flight ?? false)}
-          onPress={() => void refreshNow()}
-          style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
-        >
-          <Text style={styles.ghostButtonText}>
-            {refreshing || syncStatus?.in_flight
-              ? t('dialogs.settings.contacts.syncing')
-              : t('dialogs.settings.contacts.syncNow')}
-          </Text>
-        </Pressable>
+        {hasSyncable && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('dialogs.settings.contacts.syncNow')}
+            accessibilityState={{ disabled: refreshing || (syncStatus?.in_flight ?? false) }}
+            disabled={refreshing || (syncStatus?.in_flight ?? false)}
+            onPress={() => void refreshNow()}
+            style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.ghostButtonText}>
+              {refreshing || syncStatus?.in_flight
+                ? t('dialogs.settings.contacts.syncing')
+                : t('dialogs.settings.contacts.syncNow')}
+            </Text>
+          </Pressable>
+        )}
         {/* Full contacts settings (interval, directories, cache, privacy) live
             under Settings; the browse surface keeps just the manual refresh. */}
       </View>
 
-      <Text style={styles.lastSynced} accessibilityRole="text">
-        {lastSynced}
-      </Text>
+      {/* Last-synced line only once a sync has actually recorded a time AND a
+          syncable account exists — never the misleading "never synced" while
+          contacts are already showing. */}
+      {hasSyncable && syncStatus?.last_synced_at != null && (
+        <Text style={styles.lastSynced} accessibilityRole="text">
+          {lastSynced}
+        </Text>
+      )}
 
       {/* Search is a SUPERSET of browse (local FTS + every provider, incl.
           directories), so the bar shows whenever any book exists — even if
