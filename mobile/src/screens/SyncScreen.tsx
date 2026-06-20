@@ -277,9 +277,10 @@ export default function SyncScreen() {
 
   // Kick an immediate warm pass over every external account (the manual "refresh
   // now"). Fire-and-forget: the native `onCacheRefreshStatus` subscription above
-  // streams the refreshing→done transition into the status line.
+  // streams the refreshing→done transition into the status line, and the
+  // app-level observer speaks the single start/end cue — so no announce here
+  // (an immediate one would double up with the pass-start announcement).
   const refreshCache = useCallback(async () => {
-    announce(t('cacheRefresh.refreshing'));
     try {
       await refreshExternalCache();
     } catch (err) {

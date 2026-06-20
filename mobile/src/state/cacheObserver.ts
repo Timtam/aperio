@@ -14,6 +14,7 @@ import { useEffect, useRef } from 'react';
 import { AccessibilityInfo } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
+import type { CacheRefreshStatus } from '../api/sync';
 import CalFfi from '../../modules/cal-ffi';
 
 /** Coarse category a cache scope belongs to — drives the announcement string +
@@ -62,9 +63,16 @@ export function useCacheUpdates(): void {
   const { t } = useTranslation();
   const pending = useRef<Set<CacheCategory>>(new Set());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Last-seen warm-pass state, so we announce only the START and END of a pass.
+  const refreshing = useRef(false);
 
   useEffect(() => {
-    const sub = CalFfi.addListener('onCacheUpdated', ({ payload }) => {
+    // Per-container writes → live-reload the focused view (coalesced). NO
+    // announcement here: a slow warm pass touching many containers seconds apart
+    // defeats the coalesce window and spoke once per source — the chatter the
+    // user hit with 8+ calendars. The spoken cue now brackets the whole pass
+    // (see the refresh-status listener below).
+    const subData = CalFfi.addListener('onCacheUpdated', ({ payload }) => {
       let scope = '';
       try {
         scope = (JSON.parse(payload) as { scope?: string }).scope ?? '';
@@ -79,14 +87,28 @@ export function useCacheUpdates(): void {
         timer.current = null;
         const categories = Array.from(pending.current);
         pending.current.clear();
-        for (const cat of categories) {
-          AccessibilityInfo.announceForAccessibility(t(`mobile.cacheUpdated.${cat}`));
-          busListeners.forEach((l) => l(cat));
-        }
+        for (const cat of categories) busListeners.forEach((l) => l(cat));
       }, COALESCE_MS);
     });
+
+    // ONE polite cue at the start of an external refresh pass + ONE at the end
+    // (the user-chosen model), regardless of how many sources refresh in between.
+    const subStatus = CalFfi.addListener('onCacheRefreshStatus', ({ status: json }) => {
+      let next = false;
+      try {
+        next = (JSON.parse(json) as CacheRefreshStatus).refreshing;
+      } catch {
+        return;
+      }
+      if (next === refreshing.current) return;
+      refreshing.current = next;
+      AccessibilityInfo.announceForAccessibility(
+        t(next ? 'cacheRefresh.refreshing' : 'cacheRefresh.done'),
+      );
+    });
     return () => {
-      sub.remove();
+      subData.remove();
+      subStatus.remove();
       if (timer.current != null) clearTimeout(timer.current);
     };
   }, [t]);

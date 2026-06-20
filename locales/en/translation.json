@@ -236,6 +236,7 @@
   "cacheRefresh": {
     "label": "External data",
     "refreshing": "Refreshing external data …",
+    "done": "External data updated.",
     "lastUpdated": "External data updated: {{time}}",
     "never": "External data not refreshed yet",
     "refreshNow": "Refresh external data"
