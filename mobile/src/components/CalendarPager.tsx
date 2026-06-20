@@ -65,12 +65,18 @@ export function CalendarPager({
     <ScrollView
       ref={ref}
       horizontal
-      pagingEnabled
+      // NOT pagingEnabled: that puts iOS UIScrollView into paged mode, which
+      // makes VoiceOver announce "page X of N" before our month announcement.
+      // snapToOffsets + fast deceleration give the same page-snap (and the same
+      // three-finger-swipe scroll) WITHOUT the paged trait, so no page noise.
+      snapToOffsets={[0, size.width, size.width * 2]}
+      decelerationRate="fast"
+      disableIntervalMomentum
       showsHorizontalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
       onLayout={onLayout}
-      // VoiceOver paging animates to the page (fires momentum); a flick fires
-      // momentum too. onScrollEndDrag covers a slow drag that stops without it.
+      // A swipe / flick fires momentum; onScrollEndDrag covers a slow drag that
+      // stops without momentum. Both settle on a snap offset → onPrev/onNext.
       onMomentumScrollEnd={settle}
       onScrollEndDrag={settle}
       style={styles.flex}
