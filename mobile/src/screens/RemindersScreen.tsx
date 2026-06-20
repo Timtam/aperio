@@ -1,16 +1,18 @@
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { upcomingReminders, UpcomingReminder } from '../api/reminders';
+import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
-// Read-only overview of upcoming reminder triggers — the mobile twin of the
-// desktop "Reminders overview" dialog. Lists the same triggers the on-device
-// scheduler turns into OS notifications (one source of truth via the Host's
+// Overview of upcoming reminder triggers — the mobile twin of the desktop
+// "Reminders overview" dialog. Lists the same triggers the on-device scheduler
+// turns into OS notifications (one source of truth via the Host's
 // host_core::reminders enumeration), so a screen-reader user can review what's
-// coming up at a glance. Reachable from Settings.
+// coming up at a glance. Each row opens the underlying task/event editor.
+// Reachable from Settings.
 
 /** The overview is a planning view of upcoming reminders — match the DESKTOP
  *  overview's 90-day forward horizon (src-tauri reminders OVERVIEW_FUTURE_DAYS),
@@ -24,7 +26,9 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-export default function RemindersScreen() {
+export default function RemindersScreen({
+  navigation,
+}: RootStackScreenProps<'Reminders'>) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
 
@@ -72,6 +76,19 @@ export default function RemindersScreen() {
     [t, whenLabel],
   );
 
+  // Open the underlying task / event editor. container_id is the owning list
+  // (task) or calendar (event), so the editor can route + load the item.
+  const openReminder = useCallback(
+    (r: UpcomingReminder) => {
+      if (r.item_kind === 'task') {
+        navigation.navigate('TaskEditor', { taskId: r.item_id, listId: r.container_id });
+      } else {
+        navigation.navigate('EventEditor', { eventId: r.item_id, calendarId: r.container_id });
+      }
+    },
+    [navigation],
+  );
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text
@@ -101,12 +118,13 @@ export default function RemindersScreen() {
           style={styles.list}
         >
           {reminders.map((r) => (
-            <View
+            <Pressable
               key={`${r.item_id}:${r.trigger_at}`}
-              accessible
-              accessibilityRole="text"
+              accessibilityRole="button"
               accessibilityLabel={rowLabel(r)}
-              style={styles.row}
+              accessibilityHint={t('dialogs.reminders.openHint')}
+              onPress={() => openReminder(r)}
+              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
             >
               <Text style={styles.rowTitle}>{r.title}</Text>
               <Text style={styles.rowWhen}>
@@ -115,7 +133,7 @@ export default function RemindersScreen() {
               {r.body !== '' && r.body !== r.title && (
                 <Text style={styles.rowBody}>{r.body}</Text>
               )}
-            </View>
+            </Pressable>
           ))}
         </View>
       )}
@@ -137,6 +155,7 @@ const makeStyles = (c: ThemeColors) =>
       borderColor: c.border,
       backgroundColor: c.surfaceAlt,
     },
+    rowPressed: { backgroundColor: c.surfacePressed },
     rowTitle: { fontSize: 18, fontWeight: '600', color: c.textPrimary },
     rowWhen: { fontSize: 14, color: c.textSecondary },
     rowBody: { fontSize: 14, color: c.textLabel },

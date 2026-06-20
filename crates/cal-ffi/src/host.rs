@@ -4839,6 +4839,7 @@ impl Host {
                 serde_json::json!({
                     "item_id": t.item_id,
                     "item_kind": t.item_kind,
+                    "container_id": t.container_id,
                     "title": t.title,
                     "body": t.body,
                     "trigger_at": t.trigger_at.to_rfc3339(),

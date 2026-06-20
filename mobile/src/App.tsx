@@ -285,6 +285,18 @@ function SettingsStackNav() {
         component={RemindersScreen}
         options={{ title: t('dialogs.reminders.title') }}
       />
+      {/* The reminders overview drills into the underlying item, so its editors
+          must live on THIS stack (else navigate() bubbles to another tab). */}
+      <SettingsStack.Screen
+        name="TaskEditor"
+        component={TaskEditorModal}
+        options={{ presentation: 'modal', title: t('mobile.newTaskLabel') }}
+      />
+      <SettingsStack.Screen
+        name="EventEditor"
+        component={EventEditorModal}
+        options={{ presentation: 'modal', title: t('dialogs.event.newTitle') }}
+      />
       <SettingsStack.Screen
         name="ColorLabels"
         component={ColorLabelsScreen}

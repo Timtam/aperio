@@ -26,6 +26,9 @@ export interface SoundConfig {
 export interface UpcomingReminder {
   item_id: string;
   item_kind: 'event' | 'task';
+  /** The owning container — a task's list id / an event's calendar id. Routes a
+   *  tap on the overview row to the underlying item's editor. */
+  container_id: string;
   title: string;
   body: string;
   /** RFC-3339 UTC instant the notification should fire at. */

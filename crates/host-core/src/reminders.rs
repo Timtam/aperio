@@ -41,6 +41,9 @@ use crate::user_prefs::UserPrefsRepo;
 pub struct Trigger {
     pub item_id: String,
     pub item_kind: ItemKind,
+    /// The owning container — a task's `list_id`, an event's `calendar_id`. Lets
+    /// a reminders UI route a tap on this row to the underlying item's editor.
+    pub container_id: String,
     pub title: String,
     pub body: String,
     pub trigger_at: DateTime<Utc>,
@@ -344,6 +347,7 @@ pub fn enumerate_app_start_triggers(db: &SharedConn) -> Vec<Trigger> {
                         acc.push(Trigger {
                             item_id: id.clone(),
                             item_kind: ItemKind::Event,
+                            container_id: calendar_id.clone(),
                             title: title.clone(),
                             body: format_event_body(&start),
                             trigger_at: now,
@@ -389,6 +393,7 @@ pub fn enumerate_app_start_triggers(db: &SharedConn) -> Vec<Trigger> {
                         acc.push(Trigger {
                             item_id: id.clone(),
                             item_kind: ItemKind::Task,
+                            container_id: list_id.clone(),
                             title: title.clone(),
                             body: format_task_body(&due),
                             trigger_at: now,
@@ -530,6 +535,7 @@ fn occurrence_triggers(
             out.push(Trigger {
                 item_id: item_id.to_string(),
                 item_kind,
+                container_id: container_id.to_string(),
                 title: title.to_string(),
                 body: format_event_body(&occ_start),
                 trigger_at: at,
@@ -1394,6 +1400,7 @@ mod tests {
         Trigger {
             item_id: "t".into(),
             item_kind: ItemKind::Event,
+            container_id: "cal".into(),
             title: "T".into(),
             body: String::new(),
             trigger_at: now + ChronoDuration::minutes(at_offset_min),

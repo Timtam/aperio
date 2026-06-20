@@ -1504,7 +1504,8 @@
       "kindEvent": "Event",
       "kindTask": "Task",
       "eventRow": "{{when}}: event \"{{title}}\"",
-      "taskRow": "{{when}}: task \"{{title}}\""
+      "taskRow": "{{when}}: task \"{{title}}\"",
+      "openHint": "Opens the linked item"
     },
     "search": {
       "title": "Search",

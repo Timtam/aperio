@@ -1504,7 +1504,8 @@
       "kindEvent": "Termin",
       "kindTask": "Aufgabe",
       "eventRow": "{{when}}: Termin „{{title}}\"",
-      "taskRow": "{{when}}: Aufgabe „{{title}}\""
+      "taskRow": "{{when}}: Aufgabe „{{title}}\"",
+      "openHint": "Öffnet das zugehörige Element"
     },
     "search": {
       "title": "Suche",
