@@ -146,7 +146,18 @@ export default function ContactsScreen({
         contacts,
       }));
     }
-    return base.filter((g) => !hiddenBooks.has(g.list.id));
+    // Order: local/personal books first, then editable external books, then
+    // read-only directories (an EWS global address list can be thousands of
+    // contacts). A virtualized SectionList can't rotor-jump to a header that
+    // isn't rendered, so burying the small personal books under a giant
+    // directory made them unreachable by heading — keep the important books at
+    // the top and sink the huge directory to the end. Stable sort preserves the
+    // host's order within each rank.
+    const rank = (g: Group) =>
+      g.list.account_id === 'local' ? 0 : g.list.read_only ? 2 : 1;
+    return base
+      .filter((g) => !hiddenBooks.has(g.list.id))
+      .sort((a, b) => rank(a) - rank(b));
   }, [bookName, groups, searchResults, searching, hiddenBooks]);
 
   const load = useCallback(async () => {
