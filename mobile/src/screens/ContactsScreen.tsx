@@ -21,7 +21,6 @@ import {
   getContactsSyncStatus,
   listContactLists,
   searchContacts,
-  syncContactsNow,
 } from '../api/contacts';
 import { useTabBarInset } from '../hooks/useTabBarInset';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -64,7 +63,6 @@ export default function ContactsScreen({
   // Contact-sync status (for the browse-surface "Sync now" + last-synced line —
   // the desktop surfaces a manual refresh here, not only in Settings).
   const [syncStatus, setSyncStatus] = useState<ContactsSyncStatus | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   // Host search results (flat Contact[]) while a query is active; null = not
   // searching (browse the loaded groups).
   const [searchResults, setSearchResults] = useState<Contact[] | null>(null);
@@ -84,10 +82,6 @@ export default function ContactsScreen({
   // Debounced cross-account Host search with a request-token stale guard (the
   // latest query wins). Empty query → clear results + browse the loaded groups.
   const searchToken = useRef(0);
-  // True while the manual "sync now" runs. A sync streams many per-container
-  // cache updates; without this each one would re-run the full (GAL-sized) load
-  // and tank performance — so we skip them mid-sync and reload once at the end.
-  const refreshingRef = useRef(false);
   useEffect(() => {
     const token = (searchToken.current += 1);
     if (trimmedQuery === '') {
@@ -198,34 +192,6 @@ export default function ContactsScreen({
     return unsubscribe;
   }, [navigation, load]);
 
-  // Manual contact sync from the browse surface (desktop parity). Honours the
-  // stored include-read-only pref (managed in Settings); a pass can take a few
-  // seconds, so announce that it started, then reload the groups + status.
-  const refreshNow = useCallback(async () => {
-    if (refreshing || syncStatus?.in_flight) return;
-    refreshingRef.current = true;
-    setRefreshing(true);
-    const include = syncStatus?.include_read_only_on_sync ?? false;
-    AccessibilityInfo.announceForAccessibility(
-      include
-        ? t('dialogs.settings.contacts.syncStartedFull')
-        : t('dialogs.settings.contacts.syncStarted'),
-    );
-    try {
-      await syncContactsNow(include);
-      await load();
-      setRefreshNonce((n) => n + 1);
-      setSyncStatus(await getContactsSyncStatus());
-    } catch (err) {
-      AccessibilityInfo.announceForAccessibility(
-        t('mobile.error', { message: errorMessage(err) }),
-      );
-    } finally {
-      refreshingRef.current = false;
-      setRefreshing(false);
-    }
-  }, [refreshing, syncStatus?.in_flight, syncStatus?.include_read_only_on_sync, load, t]);
-
   const lastSynced = useMemo(() => {
     if (!syncStatus?.last_synced_at) return t('dialogs.settings.contacts.neverSynced');
     const d = new Date(syncStatus.last_synced_at);
@@ -238,14 +204,23 @@ export default function ContactsScreen({
   }, [syncStatus?.last_synced_at, i18n.language, t]);
 
   // Live-update the browse groups while focused when an external contact-cache
-  // refresh lands (the root observer already announced it politely). An active
-  // search re-runs on focus, not here — the overlay is a transient view. While a
-  // manual "sync now" runs we SKIP these streamed reloads (refreshNow does one
-  // final load) — else each event re-fetches + re-renders the whole list.
+  // refresh lands. A background contacts sync (or a cache warm) can stream MANY
+  // cache-update events; debounce so the big (GAL-sized) list reloads once per
+  // burst instead of re-fetching + re-rendering on every event.
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reloadFromCache = useCallback(() => {
-    if (refreshingRef.current) return;
-    void load();
+    if (reloadTimer.current != null) clearTimeout(reloadTimer.current);
+    reloadTimer.current = setTimeout(() => {
+      reloadTimer.current = null;
+      void load();
+    }, 250);
   }, [load]);
+  useEffect(
+    () => () => {
+      if (reloadTimer.current != null) clearTimeout(reloadTimer.current);
+    },
+    [],
+  );
   useCacheReload('contacts', reloadFromCache);
 
   // First writable (local-or-not, not read-only) book is the create target.
@@ -394,24 +369,8 @@ export default function ContactsScreen({
         >
           <Text style={styles.ghostButtonText}>{t('mobile.manageContactLists')}</Text>
         </Pressable>
-        {hasSyncable && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t('dialogs.settings.contacts.syncNow')}
-            accessibilityState={{ disabled: refreshing || (syncStatus?.in_flight ?? false) }}
-            disabled={refreshing || (syncStatus?.in_flight ?? false)}
-            onPress={() => void refreshNow()}
-            style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
-          >
-            <Text style={styles.ghostButtonText}>
-              {refreshing || syncStatus?.in_flight
-                ? t('dialogs.settings.contacts.syncing')
-                : t('dialogs.settings.contacts.syncNow')}
-            </Text>
-          </Pressable>
-        )}
-        {/* Full contacts settings (interval, directories, cache, privacy) live
-            under Settings; the browse surface keeps just the manual refresh. */}
+        {/* Contact sync runs automatically (periodic + the header sync action);
+            the manual control + full settings live under Settings → Contacts. */}
       </View>
 
       {/* Last-synced line only once a sync has actually recorded a time AND a
