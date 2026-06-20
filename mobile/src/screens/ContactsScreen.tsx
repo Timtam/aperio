@@ -84,6 +84,10 @@ export default function ContactsScreen({
   // Debounced cross-account Host search with a request-token stale guard (the
   // latest query wins). Empty query → clear results + browse the loaded groups.
   const searchToken = useRef(0);
+  // True while the manual "sync now" runs. A sync streams many per-container
+  // cache updates; without this each one would re-run the full (GAL-sized) load
+  // and tank performance — so we skip them mid-sync and reload once at the end.
+  const refreshingRef = useRef(false);
   useEffect(() => {
     const token = (searchToken.current += 1);
     if (trimmedQuery === '') {
@@ -188,6 +192,7 @@ export default function ContactsScreen({
   // seconds, so announce that it started, then reload the groups + status.
   const refreshNow = useCallback(async () => {
     if (refreshing || syncStatus?.in_flight) return;
+    refreshingRef.current = true;
     setRefreshing(true);
     const include = syncStatus?.include_read_only_on_sync ?? false;
     AccessibilityInfo.announceForAccessibility(
@@ -205,6 +210,7 @@ export default function ContactsScreen({
         t('mobile.error', { message: errorMessage(err) }),
       );
     } finally {
+      refreshingRef.current = false;
       setRefreshing(false);
     }
   }, [refreshing, syncStatus?.in_flight, syncStatus?.include_read_only_on_sync, load, t]);
@@ -222,8 +228,14 @@ export default function ContactsScreen({
 
   // Live-update the browse groups while focused when an external contact-cache
   // refresh lands (the root observer already announced it politely). An active
-  // search re-runs on focus, not here — the overlay is a transient view.
-  useCacheReload('contacts', load);
+  // search re-runs on focus, not here — the overlay is a transient view. While a
+  // manual "sync now" runs we SKIP these streamed reloads (refreshNow does one
+  // final load) — else each event re-fetches + re-renders the whole list.
+  const reloadFromCache = useCallback(() => {
+    if (refreshingRef.current) return;
+    void load();
+  }, [load]);
+  useCacheReload('contacts', reloadFromCache);
 
   // First writable (local-or-not, not read-only) book is the create target.
   const writableListId =
