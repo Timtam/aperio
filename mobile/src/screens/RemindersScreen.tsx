@@ -12,9 +12,13 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 // host_core::reminders enumeration), so a screen-reader user can review what's
 // coming up at a glance. Reachable from Settings.
 
-/** Match the scheduler's 7-day look-ahead so the overview shows exactly what is
- *  (or will be) scheduled as notifications. */
-const HORIZON_MINUTES = 7 * 24 * 60;
+/** The overview is a planning view of upcoming reminders — match the DESKTOP
+ *  overview's 90-day forward horizon (src-tauri reminders OVERVIEW_FUTURE_DAYS),
+ *  NOT the on-device scheduler's deliberately narrow 7-day window (that bound
+ *  exists only to stay under iOS's ~64 pending-notification limit; see
+ *  reminders/scheduler.ts). Kept at 90 days = the Host's EXTERNAL_FUTURE_DAYS so
+ *  the external reminder scan still covers the whole window. */
+const HORIZON_MINUTES = 90 * 24 * 60;
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
