@@ -56,6 +56,7 @@ import type { RootStackParamList } from '../navigation/types';
 import { useCacheReload } from '../state/cacheObserver';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
 import { applyTaskToggle, statusAnnounce } from '../state/taskToggle';
+import { useTaskListShowCompleted } from '../state/useTaskListShowCompleted';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 // The shared, screen-reader-first calendar day list — the rendering + data
@@ -254,9 +255,14 @@ export function CalendarDayList({
   useCacheReload('calendar', load);
   useCacheReload('tasks', load);
 
-  // Bucket each day's events + tasks. Completed tasks stay hidden (the desktop's
-  // per-list "show completed in calendar" opt-in has no mobile consumer yet —
-  // the documented default-hide applies).
+  // Per-list "show completed in calendar" opt-in (default hide). Shared store, so
+  // a toggle on the Lists screen reflects here on the next render.
+  const { shouldShow: showCompletedForList } = useTaskListShowCompleted();
+
+  // Bucket each day's events + tasks. Completed tasks stay hidden by default;
+  // per list, the "show completed in calendar" opt-in (toggled on the Lists
+  // screen, shared with the desktop's `tasks.showCompletedInCalendar` pref)
+  // keeps them visible.
   const buckets = useMemo<DayBucket[]>(() => {
     return days.map((date, i) => {
       const key = dayKeys[i];
@@ -266,7 +272,7 @@ export function CalendarDayList({
       const timedEvents = events.filter(
         (ev) => !ev.all_day && localDateKey(new Date(ev.start)) === key,
       );
-      const dayTasks = filterTasksOnDay(tasks, key);
+      const dayTasks = filterTasksOnDay(tasks, key, showCompletedForList);
       const { timed, untimed } = mergeDayItems(
         timedEvents,
         dayTasks,
@@ -282,7 +288,7 @@ export function CalendarDayList({
         count: allDay.length + timed.length + untimed.length,
       };
     });
-  }, [days, dayKeys, events, tasks]);
+  }, [days, dayKeys, events, tasks, showCompletedForList]);
 
   const totalItems = useMemo(
     () => buckets.reduce((sum, b) => sum + b.count, 0),

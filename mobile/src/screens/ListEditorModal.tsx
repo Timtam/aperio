@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 
+import { selectableCheckState, selectableRole } from '../a11y/roles';
 import { useListFocusManager } from '../a11y/useListFocusManager';
 import {
   createSection,
@@ -36,6 +37,7 @@ import {
   type ListOverrides,
 } from '../state/taskBehaviour';
 import { useSoundPref } from '../state/useSoundPref';
+import { useTaskListShowCompleted } from '../state/useTaskListShowCompleted';
 import { useTaskStore } from '../state/taskStoreContext';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -115,6 +117,10 @@ export default function ListEditorModal({
   // inheritable. Offered for every list since the sound pref applies to any
   // container's reminders.
   const sound = useSoundPref(`sound.tasklist.${listId}`);
+  // This list's "show completed tasks in calendar views" opt-in (host-local,
+  // default hide) — the same shared store the calendar day cells read, so a
+  // change here reflects on Day/Week/Month immediately.
+  const showCompleted = useTaskListShowCompleted();
   // This list's task-behaviour override (§ Settings → Tasks per-list): the full
   // synced map, of which this list's entry (or {} = inherit globals) is edited
   // here. Read once on open; each change persists the whole map.
@@ -517,6 +523,26 @@ export default function ListEditorModal({
         />
       )}
 
+      {/* Show completed tasks from THIS list on the calendar surfaces
+          (Day/Week/Month) — host-local, default hide. Mobile twin of the
+          desktop's per-list "show completed in calendar" toggle. */}
+      <Pressable
+        accessible
+        accessibilityRole={selectableRole('checkbox')}
+        accessibilityState={selectableCheckState(showCompleted.shouldShow(listId))}
+        accessibilityLabel={t('sidebar.menu.showCompletedInCalendar')}
+        onPress={() => showCompleted.toggle(listId)}
+        disabled={busy}
+        style={({ pressed }) => [styles.checkRow, pressed && styles.pressed]}
+      >
+        <Text style={styles.check} importantForAccessibility="no">
+          {showCompleted.shouldShow(listId) ? '☑' : '☐'}
+        </Text>
+        <Text style={styles.checkLabel} importantForAccessibility="no">
+          {t('sidebar.menu.showCompletedInCalendar')}
+        </Text>
+      </Pressable>
+
       {/* Per-list task-behaviour overrides (§ Settings → Tasks "Per task list"):
           override the global status-coupling / auto-date / carry-over for THIS
           list. "Global default" inherits. Applies to the check-off path + the
@@ -757,6 +783,14 @@ const makeStyles = (c: ThemeColors) =>
     content: { padding: 16, gap: 16 },
     title: { fontSize: 22, fontWeight: '700', color: c.textPrimary },
     heading: { fontSize: 17, fontWeight: '700', color: c.textLabel },
+    checkRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingVertical: 10,
+    },
+    check: { fontSize: 22, width: 26, textAlign: 'center', color: c.textPrimary },
+    checkLabel: { flex: 1, fontSize: 16, color: c.textPrimary },
     error: { fontSize: 15, fontWeight: '600', color: c.danger },
     muted: { fontSize: 15, color: c.textSecondary },
     addRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
