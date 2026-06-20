@@ -8,7 +8,8 @@ import { useSyncStatusInfo } from '../state/syncStatusContext';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Header sync indicator — the desktop's status pill, surfaced on each main
-// screen because the native tab bar can't carry an accessible label. Shows the
+// screen because the native tab bar has no slot for an extra custom accessible
+// control (its tabs announce their own titles, but nothing else fits). Shows the
 // current sync state (spoken via the label) and, on press, kicks a manual
 // update: a peer sync round (if a target is configured) plus an external-cache
 // warm. While a round runs it flips to "uploading" via the syncActivity

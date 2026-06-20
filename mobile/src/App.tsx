@@ -87,8 +87,9 @@ const TAB_ROOT_ROUTES = new Set([
   'Year',
 ]);
 
-// The header sync indicator, shared by every main screen (the tab bar can't
-// carry an accessible label, so it lives in the header instead).
+// The header sync indicator, shared by every main screen. The native tab bar
+// announces each tab's own title fine, but it has no slot for an EXTRA custom
+// accessible control like this status pill — so it lives in the header instead.
 const syncHeaderRight = () => <SyncStatusButton />;
 
 /** Name of the deepest focused route across the nested navigators. */
@@ -415,10 +416,11 @@ function AppContent() {
             title: t('dialogs.settings.title'),
             tabBarIcon: () => ({ sfSymbol: 'gearshape' }),
             // Flag sync issues on the Settings tab (Sync lives under it) with a
-            // badge. The native tab bar exposes no per-tab accessibility label
-            // (unlike the JS bottom tabs), so the spoken sync state now comes
-            // solely from useSyncStatus's live-region announcements of
-            // attention-class transitions, not from the tab's label.
+            // badge. The native tab bar has no per-tab slot for an EXTRA custom
+            // accessibility announcement (the tab's own title is announced, but
+            // there's no hook to fold the sync state into it), so the spoken
+            // sync state comes from useSyncStatus's live-region announcements of
+            // attention-class transitions plus the header indicator.
             tabBarBadge: tabBadge,
           }}
         />
@@ -445,7 +447,7 @@ function AppContent() {
           {/* App-icon badge: today's open tasks + upcoming events. */}
           <AppBadge />
           {/* The root sync-status poll feeds the per-screen header indicator
-              (the tab bar can't carry an accessible label). */}
+              (the native tab bar has no slot for an extra custom control). */}
           <SyncStatusContext.Provider value={sync}>{tabs}</SyncStatusContext.Provider>
         </TaskStoreProvider>
       </NavigationContainer>
