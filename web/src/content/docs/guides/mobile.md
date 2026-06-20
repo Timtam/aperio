@@ -1,0 +1,89 @@
+---
+title: "Mobile app"
+---
+
+Aperio is also a **mobile app for iOS and Android**. It is built on the **same
+core** as the desktop app, so your calendars, task lists, accounts and
+synchronization work exactly the same way – and, like the desktop app, it was
+designed from the ground up to be **fully usable with a screen reader**
+(VoiceOver on iOS, TalkBack on Android).
+
+This page covers what is specific to the mobile app. Everything about the
+**features themselves** – events, tasks, views, reminders, search,
+synchronization, contacts and colour labels – is described in the
+[Tutorial](/guides/tutorial/01-installation/) and applies equally here.
+
+## Getting the app
+
+The mobile app is currently in **beta**:
+
+- **iOS** – distributed through **TestFlight**. You receive an invitation link
+  and install it via Apple's TestFlight app.
+- **Android** – installed directly from a provided build.
+
+Both are built from the same Rust core as the desktop app, so a calendar or
+task you create on your phone behaves identically to one created on the desktop.
+
+## Finding your way around
+
+The app has a **bottom tab bar** with four tabs:
+
+- **Tasks** – your task lists, grouped and collapsible, with the rich task
+  editor.
+- **Calendar** – the day, week, month, year and agenda views, plus calendar
+  management.
+- **Contacts** – your address books and contacts.
+- **Settings** – accounts, synchronization, reminders, colour labels, logs and
+  the general settings.
+
+Editors (for a task, an event or a contact) open as **full screens** on top of
+the current tab. Each has a **Save** and a **Cancel** action; use the system
+**Back** gesture or the Cancel button to leave without saving.
+
+## Using a screen reader
+
+The mobile app follows the **same accessibility-first principles** as the
+desktop app (see [Accessibility](/guides/barrierefreiheit/) for the shared
+concepts), adapted to the way VoiceOver and TalkBack work:
+
+- **One stop per item.** Each task, event or contact is a single focus stop.
+  Swipe left or right to move between items, headings and controls.
+- **Actions instead of shortcuts.** Where the desktop uses keyboard shortcuts,
+  the mobile app exposes **custom actions** on the focused item – complete or
+  reopen a task, edit, delete, reschedule, change status or priority, move it,
+  and so on:
+  - With **VoiceOver**, swipe up or down with one finger to move through the
+    available actions, then double-tap to run the selected one.
+  - With **TalkBack**, open the **actions menu** (swipe up then right) and
+    choose an action.
+- **Live announcements.** Status changes are announced without moving the focus
+  – "Task done", "Event saved", the synchronization result, due reminders –
+  exactly as on the desktop.
+- **Group headings** (e.g. a task list or a section) are collapsible buttons
+  that announce whether they are expanded or collapsed.
+- **Dates and times** use the **native pickers**, so they read and behave the
+  way you already know from other apps on your phone.
+
+## Mobile-specific settings
+
+A few settings exist only on mobile, under **Settings → General**. All three are
+stored **on this device only** (they are not synchronized):
+
+- **Background sync.** Lets the system wake the app to synchronize while it is in
+  the background or closed, so a change made on another device – and any new
+  reminders – arrive without you reopening the app. The operating system decides
+  the exact timing (it is not immediate; on Android at least every 15 minutes, on
+  iOS in system-chosen windows), so it is a best-effort catch-up. The app always
+  does a full synchronization when you open it, so nothing is ever lost. You can
+  see background rounds in the sync log, labelled **Background**. Default: on.
+- **App icon badge.** Shows a number on the app icon for today's open tasks plus
+  the events still ahead today. Needs notification permission. Default: on.
+- **Haptic feedback.** A short vibration when an external-data refresh starts and
+  finishes. Default: on.
+
+## Reminders and notifications
+
+Reminders are delivered as **local notifications**. On first use the app asks for
+**notification permission** – grant it so reminders (and the app icon badge) can
+appear. Reminder sounds, lead times and snooze work as described under
+[Notifications](/guides/tutorial/06-benachrichtigungen/).

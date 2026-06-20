@@ -405,6 +405,22 @@ impl SyncOrchestrator {
                     });
                 }
             }
+
+            // §19.7 encryption gate. The dataset is end-to-end encrypted but
+            // this device isn't in E2E mode — i.e. another device flipped
+            // encryption on after we onboarded in plaintext. Refuse the round
+            // BEFORE the push step: our adapter is plain, so pushing would
+            // write readable logs into the encrypted dataset (corrupting it /
+            // leaking plaintext), and fetched logs are ciphertext we can't
+            // apply. `EncryptionRequired` latches as `last_error_code =
+            // encryption_required`, which the frontend turns into the §19.7
+            // "enter the dataset passphrase to adopt encryption" prompt
+            // (desktop `adopt_remote_encryption`). The pref is the source of
+            // truth for "am I encrypting"; it flips true the moment this device
+            // enables or adopts E2E, clearing this gate.
+            if meta.e2e_enabled && !self.store.e2e_enabled() {
+                return Err(sync_core::SyncError::EncryptionRequired);
+            }
         }
 
         let mut report = SyncRoundReport::default();

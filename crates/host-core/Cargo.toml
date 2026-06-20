@@ -1,0 +1,55 @@
+[package]
+name = "host-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aperio — Tauri-free host logic shared by the desktop backend and the mobile UniFFI host: SQLite handle, data paths, accounts, secrets, adapter registry, cache + sync stores (DESIGN.md section 22)."
+
+[dependencies]
+aperio-db.workspace = true
+cal-core.workspace = true
+cal-adapter-local.workspace = true
+plugin-core.workspace = true
+sync-core.workspace = true
+sync-engine.workspace = true
+vc-core.workspace = true
+rusqlite.workspace = true
+thiserror.workspace = true
+dirs.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+# File-backed logging core (§Diagnostics): the rolling file sink + reloadable
+# filter builders + the redacted export, shared by the desktop logging glue and
+# the mobile cal-ffi Host. `regex` backs the export redaction pass.
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+regex.workspace = true
+# Content-addressing for the custom-sound importer (sound_assets::import_sound):
+# files are stored as `<sha256>.<ext>` so identical audio dedupes.
+sha2.workspace = true
+# RRULE expansion for the reminder trigger enumeration (host_core::reminders).
+rrule.workspace = true
+# The event_log cluster: onboarding reads the pending dir via tokio::fs; the
+# desktop sync-round hooks are #[async_trait]. tokio cross-compiles to mobile
+# (cal-ffi already links it).
+tokio.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+# The sound-asset sync test drives a real local-filesystem sync target.
+sync-adapter-local = { path = "../sync-adapter-local" }
+# Re-declare the engine + local adapter with their test-support features so the
+# moved applier/onboarding/sync tests reach FakeSecrets / the in-memory store.
+# Dev-only: the normal (mobile) build never enables these.
+sync-engine = { workspace = true, features = ["test-support"] }
+cal-adapter-local = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true

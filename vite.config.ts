@@ -1,3 +1,5 @@
+import { fileURLToPath, URL } from 'node:url';
+
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -6,6 +8,20 @@ const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
   plugins: [react()],
+
+  resolve: {
+    alias: {
+      // Shared UI translations (also consumed by the mobile app). Kept as a
+      // top-level package so both frontends draw from one source of truth.
+      '@aperio/locales': fileURLToPath(new URL('./locales', import.meta.url)),
+      // Shared, platform-agnostic frontend domain (task types + grouping +
+      // label helpers; more over time). Same source of truth as the mobile
+      // app. Points at the index directly — the package has no main/exports.
+      '@aperio/shared': fileURLToPath(
+        new URL('./shared/index.ts', import.meta.url),
+      ),
+    },
+  },
 
   // Tauri expects a fixed port and bails out if the dev server moves.
   clearScreen: false,

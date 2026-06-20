@@ -54,6 +54,10 @@ jobs:
               - '.github/workflows/build-artifacts.yml'
             frontend:
               - 'src/**'
+              # Shared, platform-agnostic frontend TS the desktop compiles in
+              # (tsconfig `include`), lints (`eslint .`) and tests. A change
+              # here affects the desktop build, so it must run the frontend job.
+              - 'shared/**'
               - 'public/**'
               - 'index.html'
               - 'package.json'

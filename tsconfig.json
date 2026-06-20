@@ -16,8 +16,13 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    "baseUrl": ".",
+    "paths": {
+      "@aperio/locales/*": ["./locales/*"],
+      "@aperio/shared": ["./shared/index.ts"]
+    }
   },
-  "include": ["src", "vite.config.ts"],
+  "include": ["src", "vite.config.ts", "locales", "shared"],
   "exclude": ["node_modules", "dist", "src-tauri", "crates", "target"]
 }

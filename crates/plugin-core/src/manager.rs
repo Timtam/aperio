@@ -786,17 +786,35 @@ impl PluginManager {
     /// come straight from the plugin crate that's part of the
     /// host binary — no `dlopen`, no [`Library`] to retain.
     ///
-    /// Static-linked plugins don't get any of the optional named-
-    /// symbol hooks (`interactive_auth_fn`, `discover_fn`,
-    /// `probe_host_key_fn`) — the named-symbol lookup mechanism
-    /// the dlopen path uses has no static-link analogue. Plugins
-    /// that need them must therefore be dlopen-loaded (relevant
-    /// for any OAuth / Autodiscover / TOFU adapter).
+    /// Register a statically-linked plugin with NO optional auth hooks — the
+    /// common case (most adapters need only lifecycle + `open_instance`).
+    /// Thin wrapper over [`PluginManager::register_static_with_auth`].
     pub fn register_static(
         &self,
         manifest: PluginManifest,
         descriptor: *mut AperioPlugin,
         destroy_fn: AperioPluginDestroyFn,
+    ) -> PluginResult<()> {
+        self.register_static_with_auth(manifest, descriptor, destroy_fn, None, None, None)
+    }
+
+    /// Register a statically-linked plugin, carrying its optional auth hooks
+    /// (`interactive_auth_fn` / `discover_fn` / `probe_host_key_fn`). Unlike the
+    /// dlopen path (which resolves these by symbol name from the loaded
+    /// `Library`), a static consumer hands the crate-mangled typed twin
+    /// (`<plugin>::__aperio_*_impl`) straight through; `None` for hooks the
+    /// adapter doesn't expose. This is what lets OAuth (`interactive_auth`),
+    /// Autodiscover (`discover`) and TOFU (`probe_host_key`) adapters work when
+    /// statically embedded (e.g. on mobile), with no behaviour change for the
+    /// many adapters that pass `None`.
+    pub fn register_static_with_auth(
+        &self,
+        manifest: PluginManifest,
+        descriptor: *mut AperioPlugin,
+        destroy_fn: AperioPluginDestroyFn,
+        interactive_auth_fn: Option<InteractiveAuthFn>,
+        discover_fn: Option<DiscoverFn>,
+        probe_host_key_fn: Option<ProbeHostKeyFn>,
     ) -> PluginResult<()> {
         manifest.compatible_with(&self.app_version)?;
         if descriptor.is_null() {
@@ -809,9 +827,9 @@ impl PluginManager {
             manifest,
             plugin_ptr: descriptor,
             destroy_fn,
-            interactive_auth_fn: None,
-            discover_fn: None,
-            probe_host_key_fn: None,
+            interactive_auth_fn,
+            discover_fn,
+            probe_host_key_fn,
             in_flight: Arc::new(AtomicUsize::new(0)),
             library: None,
         };

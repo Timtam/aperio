@@ -672,27 +672,109 @@ plugin_sdk::declare_lifecycle! {
 // Interactive auth (OAuth 2.0 PKCE flow against Microsoft
 // Identity Platform v2.0)
 // ─────────────────────────────────────────────────────────────
-
+//
+// The handler supports the desktop "full" loopback dance (no `phase`, the
+// historical contract — backward compatible) AND a host-driven split for
+// mobile: `phase:"authorize"` returns {authorize_url, pkce_verifier, state} for
+// the host to open in a native auth session; `phase:"exchange"` swaps the
+// returned code for tokens. The host holds verifier/state between the two calls
+// (the adapter is stateless across phases). Microsoft is a PKCE public client —
+// there is NO `client_secret` in any phase; `authority` selects the v2.0 tenant
+// and must be the same across authorize + exchange.
 #[derive(Debug, serde::Deserialize)]
 struct InteractiveAuthArgs {
     client_id: String,
-    #[serde(default = "default_authority")]
-    authority: String,
+    /// Absent/null/empty → `common`. Carried verbatim from authorize through
+    /// exchange so a pinned tenant stays consistent.
+    #[serde(default)]
+    authority: Option<String>,
+    /// `"authorize"` | `"exchange"` | absent/`"full"` (desktop loopback).
+    #[serde(default)]
+    phase: Option<String>,
+    /// authorize + exchange: the caller-supplied redirect URI (mobile scheme).
+    #[serde(default)]
+    redirect_uri: Option<String>,
+    /// exchange: the auth code + the verifier/state from the authorize phase.
+    #[serde(default)]
+    code: Option<String>,
+    #[serde(default)]
+    pkce_verifier: Option<String>,
+    #[serde(default)]
+    state: Option<String>,
+    #[serde(default)]
+    returned_state: Option<String>,
+}
+
+/// Validate the OAuth CSRF `state`: the redirect's returned state must be
+/// present, non-empty, and equal to the one issued at authorize. Fails CLOSED —
+/// a missing or empty value on either side is rejected, since this guards the
+/// token exchange + account creation.
+fn verify_oauth_state(issued: Option<&str>, returned: Option<&str>) -> Result<(), String> {
+    let issued = issued.unwrap_or_default().trim();
+    let returned = returned.unwrap_or_default().trim();
+    if issued.is_empty() || returned.is_empty() || issued != returned {
+        return Err("OAuth state mismatch (possible CSRF) — aborting".to_string());
+    }
+    Ok(())
 }
 
 async fn plugin_interactive_auth(args_json: String) -> Result<Vec<u8>, String> {
     let args: InteractiveAuthArgs = serde_json::from_str(&args_json)
         .map_err(|e| format!("malformed interactive_auth args: {e}"))?;
-    if args.client_id.trim().is_empty() {
+    let client_id = args.client_id.trim();
+    if client_id.is_empty() {
         return Err("client_id must not be empty".to_string());
     }
-    let tokens = MicrosoftGraphAdapter::authenticate_interactive(
-        args.client_id.trim(),
-        args.authority.trim(),
-    )
-    .await
-    .map_err(|e| format!("Microsoft Graph OAuth: {e}"))?;
-    serde_json::to_vec(&tokens).map_err(|e| format!("serialise TokenSet: {e}"))
+    // Tolerate absent/null/empty (cal-ffi forwards `authority: null` for non-MS
+    // providers) by falling back to the default `common` tenant.
+    let authority = args
+        .authority
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(DEFAULT_AUTHORITY);
+    match args.phase.as_deref() {
+        Some("authorize") => {
+            let redirect_uri = args
+                .redirect_uri
+                .ok_or_else(|| "redirect_uri is required in the authorize phase".to_string())?;
+            let authz = MicrosoftGraphAdapter::oauth_authorize(client_id, authority, &redirect_uri)
+                .map_err(|e| format!("Microsoft Graph authorize: {e}"))?;
+            serde_json::to_vec(&authz).map_err(|e| format!("serialise authorize response: {e}"))
+        }
+        Some("exchange") => {
+            let code = args
+                .code
+                .ok_or_else(|| "code is required in the exchange phase".to_string())?;
+            let verifier = args
+                .pkce_verifier
+                .ok_or_else(|| "pkce_verifier is required in the exchange phase".to_string())?;
+            let redirect_uri = args
+                .redirect_uri
+                .ok_or_else(|| "redirect_uri is required in the exchange phase".to_string())?;
+            // CSRF: the redirect's `state` must equal the one issued at authorize.
+            // Fail CLOSED — this guards token minting + account creation, so a
+            // missing/empty state on either side aborts (see verify_oauth_state).
+            verify_oauth_state(args.state.as_deref(), args.returned_state.as_deref())?;
+            let tokens = MicrosoftGraphAdapter::oauth_exchange(
+                client_id,
+                authority,
+                code.trim(),
+                verifier.trim(),
+                &redirect_uri,
+            )
+            .await
+            .map_err(|e| format!("Microsoft Graph exchange: {e}"))?;
+            serde_json::to_vec(&tokens).map_err(|e| format!("serialise TokenSet: {e}"))
+        }
+        None | Some("full") => {
+            let tokens = MicrosoftGraphAdapter::authenticate_interactive(client_id, authority)
+                .await
+                .map_err(|e| format!("Microsoft Graph OAuth: {e}"))?;
+            serde_json::to_vec(&tokens).map_err(|e| format!("serialise TokenSet: {e}"))
+        }
+        Some(other) => Err(format!("unknown interactive_auth phase: {other}")),
+    }
 }
 
 plugin_sdk::declare_interactive_auth! {

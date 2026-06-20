@@ -11,7 +11,8 @@ use sync_core::{EventPayload, IdPayload, SyncEvent};
 use tauri::{AppHandle, State};
 
 use super::cache_swr;
-use crate::cache::{CacheStore, RefreshCoordinator, SyncScope};
+use super::cache_swr::TauriCacheObserver;
+use crate::cache::{CacheObserver, CacheStore, RefreshCoordinator, SyncScope};
 
 use plugin_core::{PluginManager, RecurrenceCapabilities};
 
@@ -139,7 +140,7 @@ pub async fn list_calendars(
     // here too so subsequent `get_events` calls reach the right
     // contacts adapter via the same registry mechanism real
     // calendars use.
-    let birthday_rows = list_birthday_calendars(&adapter, &registry, &cache).await;
+    let birthday_rows = list_birthday_calendars(&*adapter, &registry, &cache).await;
     for (cal, account_id) in &birthday_rows {
         registry.note_calendar_route(&cal.id, account_id);
     }
@@ -232,8 +233,10 @@ async fn external_calendars_swr(
             let adapter_bg = Arc::clone(&adapter);
             let reg = Arc::clone(registry);
             let acc = account.clone();
+            let rt = tauri::async_runtime::handle();
             cache_swr::spawn_refresh(
-                app.clone(),
+                rt.inner(),
+                Arc::new(TauriCacheObserver { app: app.clone() }) as Arc<dyn CacheObserver>,
                 Arc::clone(cache),
                 Arc::clone(coord),
                 SyncScope::Calendars,
@@ -355,7 +358,7 @@ pub async fn get_events(
     // regular adapter path.
     if is_birthday_calendar_id(&request.calendar_id) {
         if let Some(events) =
-            synthesise_birthday_events(&adapter, &registry, &cache, &request.calendar_id, range)
+            synthesise_birthday_events(&*adapter, &registry, &cache, &request.calendar_id, range)
                 .await
         {
             return Ok(events);
@@ -442,8 +445,10 @@ pub async fn get_events(
         let cache_bg = Arc::clone(&cache);
         let acc = account.clone();
         let cal = request.calendar_id.clone();
+        let rt = tauri::async_runtime::handle();
         cache_swr::spawn_item_refresh(
-            app.clone(),
+            rt.inner(),
+            Arc::new(TauriCacheObserver { app: app.clone() }) as Arc<dyn CacheObserver>,
             Arc::clone(&cache),
             Arc::clone(&coord),
             SyncScope::Events,

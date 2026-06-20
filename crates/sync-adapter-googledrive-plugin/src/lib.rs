@@ -233,27 +233,107 @@ plugin_sdk::declare_lifecycle! {
 // app flow)
 // ─────────────────────────────────────────────────────────────
 
+// The handler supports the desktop "full" loopback dance (no `phase`, the
+// historical contract — backward compatible) AND a host-driven split for
+// mobile: `phase:"authorize"` returns {authorize_url, pkce_verifier, state} for
+// the host to open in a native auth session; `phase:"exchange"` swaps the
+// returned code for tokens. The host holds verifier/state between the two calls
+// (the adapter is stateless across phases). Google requires a non-empty
+// client_secret at exchange (and the full dance), but NOT at authorize.
 #[derive(Debug, serde::Deserialize)]
 struct InteractiveAuthArgs {
     client_id: String,
+    #[serde(default)]
     client_secret: String,
+    /// `"authorize"` | `"exchange"` | absent/`"full"` (desktop loopback).
+    #[serde(default)]
+    phase: Option<String>,
+    /// authorize + exchange: the caller-supplied redirect URI (mobile scheme).
+    #[serde(default)]
+    redirect_uri: Option<String>,
+    /// exchange: the auth code + the verifier/state from the authorize phase.
+    #[serde(default)]
+    code: Option<String>,
+    #[serde(default)]
+    pkce_verifier: Option<String>,
+    #[serde(default)]
+    state: Option<String>,
+    #[serde(default)]
+    returned_state: Option<String>,
+}
+
+/// Validate the OAuth CSRF `state`: the redirect's returned state must be
+/// present, non-empty, and equal to the one issued at authorize. Fails CLOSED —
+/// a missing or empty value on either side is rejected, since this guards the
+/// token exchange.
+fn verify_oauth_state(issued: Option<&str>, returned: Option<&str>) -> Result<(), String> {
+    let issued = issued.unwrap_or_default().trim();
+    let returned = returned.unwrap_or_default().trim();
+    if issued.is_empty() || returned.is_empty() || issued != returned {
+        return Err("OAuth state mismatch (possible CSRF) — aborting".to_string());
+    }
+    Ok(())
 }
 
 async fn plugin_interactive_auth(args_json: String) -> Result<Vec<u8>, String> {
     let args: InteractiveAuthArgs = serde_json::from_str(&args_json)
         .map_err(|e| format!("malformed interactive_auth args: {e}"))?;
-    if args.client_id.trim().is_empty() || args.client_secret.trim().is_empty() {
-        return Err("client_id and client_secret must not be empty".to_string());
+    let client_id = args.client_id.trim();
+    if client_id.is_empty() {
+        return Err("client_id must not be empty".to_string());
     }
-    let http = reqwest::Client::new();
-    let tokens = sync_adapter_googledrive::oauth::run(
-        args.client_id.trim(),
-        args.client_secret.trim(),
-        &http,
-    )
-    .await
-    .map_err(|e| format!("Google Drive OAuth: {e}"))?;
-    serde_json::to_vec(&tokens).map_err(|e| format!("serialise TokenSet: {e}"))
+    match args.phase.as_deref() {
+        Some("authorize") => {
+            let redirect_uri = args
+                .redirect_uri
+                .ok_or_else(|| "redirect_uri is required in the authorize phase".to_string())?;
+            let authz = sync_adapter_googledrive::oauth::authorize(
+                client_id,
+                &redirect_uri,
+                sync_adapter_googledrive::oauth::GOOGLE_AUTH_URL,
+            )
+            .map_err(|e| format!("Google Drive authorize: {e}"))?;
+            serde_json::to_vec(&authz).map_err(|e| format!("serialise authorize response: {e}"))
+        }
+        Some("exchange") => {
+            if args.client_secret.trim().is_empty() {
+                return Err("client_secret must not be empty".to_string());
+            }
+            let code = args
+                .code
+                .ok_or_else(|| "code is required in the exchange phase".to_string())?;
+            let verifier = args
+                .pkce_verifier
+                .ok_or_else(|| "pkce_verifier is required in the exchange phase".to_string())?;
+            let redirect_uri = args
+                .redirect_uri
+                .ok_or_else(|| "redirect_uri is required in the exchange phase".to_string())?;
+            verify_oauth_state(args.state.as_deref(), args.returned_state.as_deref())?;
+            let http = reqwest::Client::new();
+            let tokens = sync_adapter_googledrive::oauth::exchange_code(
+                &http,
+                sync_adapter_googledrive::oauth::GOOGLE_TOKEN_URL,
+                client_id,
+                args.client_secret.trim(),
+                code.trim(),
+                verifier.trim(),
+                &redirect_uri,
+            )
+            .await
+            .map_err(|e| format!("Google Drive exchange: {e}"))?;
+            serde_json::to_vec(&tokens).map_err(|e| format!("serialise TokenSet: {e}"))
+        }
+        None | Some("full") => {
+            // run() → run_against rejects an empty client_id/client_secret.
+            let http = reqwest::Client::new();
+            let tokens =
+                sync_adapter_googledrive::oauth::run(client_id, args.client_secret.trim(), &http)
+                    .await
+                    .map_err(|e| format!("Google Drive OAuth: {e}"))?;
+            serde_json::to_vec(&tokens).map_err(|e| format!("serialise TokenSet: {e}"))
+        }
+        Some(other) => Err(format!("unknown interactive_auth phase: {other}")),
+    }
 }
 
 plugin_sdk::declare_interactive_auth! {

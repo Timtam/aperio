@@ -4,48 +4,41 @@
 //! adapter, and a first round of Tauri commands for CRUD. The plugin
 //! manager, sync engine, and external adapters arrive in later phases.
 
-pub mod accounts;
 pub mod audio;
 pub mod bundled_plugins;
-pub mod cache;
 pub mod cache_refresh;
 pub mod commands;
-pub mod conflicts;
 pub mod contact_sync;
-pub mod credential_sync;
-pub mod db;
-pub mod device_names;
 pub mod event_log;
 pub mod logging;
-pub mod overrides;
-mod paths;
 mod platform;
-pub mod registry;
 pub mod reminders;
-pub mod remote_plugins;
 pub mod secrets;
-pub mod sftp_host_keys;
 pub mod sound;
-pub mod sound_assets;
-pub mod sync_log;
 pub mod tray;
-pub mod user_prefs;
 mod window_state;
 
-pub use db::{DbError, DbHandle, DbResult, SharedConn};
-pub use paths::{resolve_data_dir, DataDirKind, DataDirResolution};
+// `db` + `paths` were extracted into the shared, Tauri-free `host-core`
+// crate (so the mobile UniFFI host reuses the same SQLite handle + portable
+// path resolution). Re-exported here so existing `crate::db::*` /
+// `crate::paths::*` references across the backend keep resolving unchanged.
+pub use host_core::db::{DbError, DbHandle, DbResult, SharedConn};
+pub use host_core::paths::{resolve_data_dir, DataDirKind, DataDirResolution};
+pub use host_core::{
+    accounts, cache, conflicts, credential_sync, db, device_names, overrides, paths, registry,
+    remote_plugins, sftp_host_keys, sound_assets, sync_log, user_prefs,
+};
 
 use cal_adapter_local::LocalAdapter;
 use contact_sync::ContactSyncScheduler;
-use event_log::{
-    Compactor, EventLogApplier, EventLogWriter, OnboardingService, SnapshotBuilder,
-    SyncOrchestrator, SyncScheduler,
-};
+// The sync-engine assembly (writer / applier / snapshot / compactor /
+// orchestrator) is now built by host_core::sync::build_orchestrator; lib.rs
+// only names the desktop-side SyncScheduler.
+use event_log::SyncScheduler;
 use registry::AdapterRegistry;
 use reminders::ReminderScheduler;
 use std::sync::Arc;
 use tauri::Manager;
-use tokio::sync::Notify;
 use tracing::{info, warn};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -147,6 +140,7 @@ pub fn run() {
 
     let registry = Arc::new(AdapterRegistry::with_data_dir(
         Arc::clone(&plugin_manager),
+        Arc::new(crate::secrets::KeyringSecretStore),
         Some(data_dir.path.clone()),
     ));
     {
@@ -341,150 +335,51 @@ pub fn run() {
     // `<data_dir>/sync/log/pending/` and appends every local
     // mutation that flows through the command layer's writer
     // hooks. Wrapped in Arc so cloning into Tauri State is free.
-    let device_id = crate::event_log::load_or_mint_device_id(&db.shared());
-    info!(
-        device_id = %device_id,
-        "event-log writer device id",
-    );
-    // Phase Se: the writer and the scheduler share a `Notify` so
-    // every local mutation kicks a debounced sync round. Built
-    // here so both halves see the same Arc — the writer pings via
-    // `notify_one`, the scheduler awaits via `notified`.
-    let kick_notify = Arc::new(Notify::new());
-    // One boot instant, shared by the writer (which names its
-    // session JSONL file with it) and the orchestrator (which stores
-    // it as `boot_at`). Captured BEFORE the writer spawns so the
-    // live session file's timestamp equals `boot_at` exactly — the
-    // orchestrator's empty-stub cleanup then never mistakes it for a
-    // stale leftover and deletes it mid-session (which on Windows
-    // silently unlinks the open file → lost events). See
-    // `EventLogWriter::spawn_with_kick`.
+    // One boot instant, shared by the writer (which names its session JSONL
+    // file with it) and the orchestrator (its stale-stub cleanup guard). See
+    // host_core::sync::build_orchestrator + EventLogWriter::spawn_with_kick.
     let boot_at = chrono::Utc::now();
-    // `EventLogWriter::spawn_with_kick` starts its drain task with
-    // `tokio::spawn`, which needs an active Tokio runtime context. `run()`
-    // executes here synchronously, *before* `app.run()` drives the Tauri event
-    // loop, so no context is established yet — calling it directly panics with
-    // "there is no reactor running". Establish the context via Tauri's global
-    // runtime (the very one the app then uses) for the call; the drain task
-    // lives on that runtime for the process lifetime. (Before the sync-engine
-    // extraction this was `tauri::async_runtime::spawn`, which needs no ambient
-    // context — the platform-agnostic crate can't depend on it.)
-    let event_log_writer = tauri::async_runtime::block_on(async {
-        EventLogWriter::spawn_with_kick(
+    let secret_store: Arc<dyn sync_engine::SecretStore> =
+        Arc::new(crate::secrets::KeyringSecretStore);
+    // The full sync graph — the SAME assembly the mobile UniFFI host builds
+    // (host_core::sync::build_orchestrator), wired here with the desktop's
+    // keyring SecretStore. The writer's drain task starts with `tokio::spawn`,
+    // which needs an active runtime context; `run()` executes synchronously
+    // before `app.run()` drives the loop, so establish the context via Tauri's
+    // global runtime (the very one the app then uses).
+    let sync_graph = tauri::async_runtime::block_on(async {
+        host_core::sync::build_orchestrator(
+            db.shared(),
             data_dir.path.clone(),
-            device_id.clone(),
-            Some(Arc::clone(&kick_notify)),
+            Arc::clone(&secret_store),
+            env!("CARGO_PKG_VERSION"),
             boot_at,
         )
     });
+    info!(
+        device_id = %sync_graph.device_id,
+        "event-log writer device id",
+    );
+    let event_log_writer = Arc::clone(&sync_graph.writer);
+    let kick_notify = Arc::clone(&sync_graph.kick);
+    let onboarding = Arc::clone(&sync_graph.onboarding);
+    let sync_orchestrator = Arc::clone(&sync_graph.orchestrator);
 
-    // One-shot: existing accounts created before the Account.*
-    // sync events shipped don't otherwise propagate (they pre-
-    // date the event variants). Replay them through the writer
-    // once so the next sync round actually carries them to the
-    // remote. Idempotent — gated by a pref the function sets on
-    // success.
+    // One-shot backfills: existing accounts (pre-dating the Account.* sync
+    // events) and existing LOCAL task lists/tasks (created while the `boot_at`
+    // writer race was live) never reached the event log. Replay them through
+    // the writer once so the next sync round carries them. Idempotent — each
+    // is gated by a pref it sets on success.
     commands::backfill_account_events(&db, &event_log_writer);
-
-    // One-shot: existing LOCAL task lists + tasks created while the
-    // `boot_at` writer race was live never reached the event log
-    // (their session file was deleted out from under the writer
-    // mid-session). Replay them once now that the writer persists
-    // reliably, so they finally sync to the remote / other devices.
-    // Idempotent — gated by a pref the fn sets on success.
     commands::backfill_local_task_events(&db, &event_log_writer);
 
-    // Phase Sc + Sd: stand up the applier and orchestrator.
-    //
-    // The applier uses its own `LocalAdapter` instance — both
-    // point at the same `SharedConn` so they see the same SQLite
-    // rows, but they don't share any in-memory state beyond
-    // that. A separate adapter handle keeps us from having to
-    // refactor every `State<'_, LocalAdapter>` command signature
-    // into `State<'_, Arc<LocalAdapter>>`.
-    let applier_adapter = Arc::new(LocalAdapter::new(db.shared()));
-    // The event-log applier, snapshot builder and compactor all live in the
-    // reusable `sync-engine` crate now and reach local storage through two
-    // platform seams: the desktop `SyncStore` (SQLite, via the applier's
-    // adapter) and the desktop `SecretStore` (the OS keychain). One store,
-    // shared (cloned) across all three.
-    let sync_store: Arc<dyn sync_engine::SyncStore> = Arc::new(
-        crate::event_log::DesktopSyncStore::new(db.shared(), Arc::clone(&applier_adapter)),
-    );
-    let applier = Arc::new(EventLogApplier::new(
-        Arc::clone(&sync_store),
-        Arc::new(crate::secrets::KeyringSecretStore),
-        Arc::clone(&applier_adapter),
-        device_id.clone(),
-    ));
-    // Phase Sg: snapshot builder + compactor. The builder is shared
-    // with the onboarding service (for snapshot consumption on
-    // accept_remote) and with the compactor (for snapshot
-    // generation during the compaction round).
-    let snapshot_builder = Arc::new(SnapshotBuilder::new(
-        Arc::clone(&sync_store),
-        Arc::new(crate::secrets::KeyringSecretStore),
-        env!("CARGO_PKG_VERSION"),
-    ));
-    // `<data_dir>/sync/log/pending/` — the local staging dir the writer
-    // drops session files into and the orchestrator pushes from. Shared
-    // (cloned) by the compactor (which sweeps redundant files after a
-    // snapshot), the orchestrator, and the onboarding service.
-    let pending_dir = data_dir.path.join("sync").join("log").join("pending");
-    let compactor = Arc::new(Compactor::new(
-        Arc::clone(&sync_store),
-        Arc::clone(&snapshot_builder),
-        device_id.clone(),
-        env!("CARGO_PKG_VERSION"),
-        // The compactor rolls the writer's session file over before
-        // snapshotting so already-snapshotted events aren't re-uploaded
-        // and post-compaction edits get a post-snapshot timestamp.
-        Some(Arc::clone(&event_log_writer)),
-        // …and sweeps every pending file the snapshot covers, so old
-        // leftovers (e.g. from a prior crash) aren't re-pushed forever.
-        Some(pending_dir.clone()),
-    ));
-    // Phase Sf: onboarding service. Shared between the orchestrator
-    // (which uses it for `meta.json` heartbeats after each round) and
-    // the Tauri command layer (which exposes preview/accept/adopt as
-    // user-facing commands).
-    // Local custom-sound store. Same convention used by the
-    // §19.10 / §19.11.7 sound-asset sync. Lives outside the
-    // sync/ subtree because the audio files are user content,
-    // not sync-engine plumbing.
+    // Local custom-sound store (user content, outside the sync/ subtree). §14.4:
+    // the reminder scheduler + the sound import/list/preview/delete commands
+    // resolve files out of this same dir. (build_orchestrator computes its own
+    // copy internally for the sync-round hooks; this is the same path.)
     let sounds_dir = crate::sound_assets::sounds_dir_under(&data_dir.path);
-    // §14.4: the reminder scheduler (custom-sound playback) and the
-    // sound import/list/preview/delete commands both resolve files out
-    // of this same dir.
     let sounds_dir_for_scheduler = sounds_dir.clone();
-    let sounds_dir_for_commands = sounds_dir.clone();
-    let onboarding = Arc::new(OnboardingService::new(
-        db.shared(),
-        device_id.clone(),
-        Arc::clone(&applier),
-        Arc::clone(&snapshot_builder),
-        pending_dir.clone(),
-        sounds_dir.clone(),
-        env!("CARGO_PKG_VERSION"),
-    ));
-    // The sync round itself lives in the reusable `sync-engine` crate; the
-    // desktop coordination steps it calls back into (meta heartbeat,
-    // sound-asset sync, device-name cache, compaction audit) are bundled in
-    // the `SyncRoundHooks` impl here.
-    let round_hooks = Arc::new(crate::event_log::DesktopSyncRoundHooks::new(
-        db.shared(),
-        Arc::clone(&onboarding),
-        sounds_dir,
-    ));
-    let sync_orchestrator = Arc::new(SyncOrchestrator::new(
-        Arc::clone(&sync_store),
-        pending_dir,
-        device_id,
-        applier,
-        round_hooks,
-        Arc::clone(&compactor),
-        boot_at,
-    ));
+    let sounds_dir_for_commands = sounds_dir;
     // If the user had previously configured a sync adapter,
     // reconstruct it now so `sync_now` works without a
     // re-configure step. Adapter credentials are device-local
@@ -835,7 +730,7 @@ pub fn run() {
             // prefs-driven interval, deduplicated against the per-read
             // SWR path. Stored in State so `refresh_external_cache` can
             // drive a manual pass.
-            let cache_refresher = cache_refresh::CacheRefresher::spawn(
+            let cache_refresher = cache_refresh::spawn(
                 Arc::clone(&registry_for_cache_refresh),
                 Arc::clone(&cache_for_refresh),
                 Arc::clone(&coord_for_refresh),

@@ -44,3 +44,6 @@ desktop.ini
 
 # Runtime lock from the scheduled-tasks system
 .claude/scheduled_tasks.lock
+
+# Aperio mobile — generated UniFFI bindings (regenerated from cal-ffi)
+/crates/cal-ffi/bindings/

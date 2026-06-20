@@ -144,6 +144,46 @@ impl GoogleAdapter {
         auth::run_default(client_id, client_secret, &http).await
     }
 
+    /// Host-driven OAuth **authorize** phase (mobile): build the consent URL +
+    /// PKCE verifier + CSRF state for a caller-supplied `redirect_uri` (e.g.
+    /// `aperio://oauth-callback`). Pure — the host opens the URL in a native
+    /// auth session, then calls [`Self::oauth_exchange`] with the returned code
+    /// + this verifier/state. (Desktop instead uses the loopback
+    /// [`Self::authenticate_interactive`].)
+    pub fn oauth_authorize(
+        client_id: &str,
+        redirect_uri: &str,
+    ) -> GoogleResult<auth::AuthorizeResponse> {
+        auth::authorize(client_id, redirect_uri, auth::GOOGLE_AUTH_URL)
+    }
+
+    /// Host-driven OAuth **exchange** phase (mobile): swap the authorization
+    /// `code` for tokens. `redirect_uri` must match the authorize call; the
+    /// caller validates the CSRF state (returned vs. issued) before calling.
+    pub async fn oauth_exchange(
+        client_id: &str,
+        client_secret: &str,
+        code: &str,
+        verifier: &str,
+        redirect_uri: &str,
+    ) -> GoogleResult<TokenSet> {
+        let http = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(30))
+            .build()
+            .map_err(|e| GoogleError::Io(e.to_string()))?;
+        auth::exchange_code(
+            &http,
+            auth::GOOGLE_TOKEN_URL,
+            client_id,
+            client_secret,
+            code,
+            verifier,
+            redirect_uri,
+        )
+        .await
+    }
+
     /// Expose the current in-memory tokens. Used after a refresh so
     /// the wrapping code (Tauri command, account-creation flow) can
     /// persist the updated access / refresh token back to keychain.

@@ -1,0 +1,19 @@
+[package]
+name = "vc-adapter-teams-cdylib"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aperio — cdylib FFI shell for the Teams adapter plugin: emits the #[no_mangle] C-ABI exports the desktop dlopen loader resolves (DESIGN.md section 20)."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+plugin-sdk.workspace = true
+vc-adapter-teams-plugin = { path = "../vc-adapter-teams-plugin" }
+
+[lints]
+workspace = true

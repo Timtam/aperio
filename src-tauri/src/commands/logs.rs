@@ -12,8 +12,10 @@ use crate::db::DbHandle;
 use crate::logging::{self, LogState, DEFAULT_LEVEL};
 use crate::user_prefs::UserPrefsRepo;
 
-/// Device-local pref holding the chosen log level (`error`…`trace`).
-pub const PREF_LOG_LEVEL: &str = "logging.level";
+/// Device-local pref holding the chosen log level (`error`…`trace`). Defined in
+/// host-core + re-exported here so the desktop command + the mobile facade
+/// share the exact same key string.
+pub use host_core::logging::PREF_LOG_LEVEL;
 
 fn internal<E: std::fmt::Display>(err: E) -> CommandError {
     CommandError {

@@ -51,6 +51,39 @@ members = [
     "crates/vc-adapter-meet-plugin",
     "crates/vc-adapter-webex-plugin",
 
+    # cdylib FFI shells: emit the #[no_mangle] C-ABI exports the desktop
+    # dlopen loader resolves. The -plugin crates are rlib-only so the mobile
+    # build can statically link them all into one binary (dlopen is
+    # impossible on iOS) without colliding on duplicate plugin symbols.
+    "crates/cal-adapter-caldav-cdylib",
+    "crates/cal-adapter-ical-cdylib",
+    "crates/cal-adapter-google-cdylib",
+    "crates/cal-adapter-microsoft-graph-cdylib",
+    "crates/cal-adapter-ews-cdylib",
+    "crates/cal-adapter-vikunja-cdylib",
+    "crates/cal-adapter-todoist-cdylib",
+    "crates/sync-adapter-local-cdylib",
+    "crates/sync-adapter-webdav-cdylib",
+    "crates/sync-adapter-ftp-cdylib",
+    "crates/sync-adapter-sftp-cdylib",
+    "crates/sync-adapter-dropbox-cdylib",
+    "crates/sync-adapter-googledrive-cdylib",
+    "crates/vc-adapter-zoom-cdylib",
+    "crates/vc-adapter-teams-cdylib",
+    "crates/vc-adapter-meet-cdylib",
+    "crates/vc-adapter-webex-cdylib",
+
+    # Tauri-free host logic shared by the desktop backend and the mobile
+    # UniFFI host (SQLite handle, paths, accounts, secrets, registry, …).
+    "crates/host-core",
+
+    # Static plugin registry: links the 17 -plugin rlibs + registers them into
+    # a PluginManager without dlopen (the mobile/iOS path).
+    "crates/host-plugins",
+
+    # Mobile engine-reuse: UniFFI wrapper exposing cal-core to Swift/Kotlin.
+    "crates/cal-ffi",
+
     # Tauri-App
     "src-tauri",
 ]
@@ -95,6 +128,10 @@ type_complexity = "allow"
 aperio-db = { path = "crates/aperio-db" }
 cal-core = { path = "crates/cal-core" }
 cal-adapter-local = { path = "crates/cal-adapter-local" }
+host-core = { path = "crates/host-core" }
+# default-features off: the sole consumer (cal-ffi) selects adapters per-feature
+# so the mobile build can drop adapters it doesn't ship (e.g. sync-adapter-local).
+host-plugins = { path = "crates/host-plugins", default-features = false }
 plugin-core = { path = "crates/plugin-core" }
 plugin-sdk = { path = "crates/plugin-sdk" }
 sync-core = { path = "crates/sync-core" }

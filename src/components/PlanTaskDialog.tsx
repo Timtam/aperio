@@ -10,7 +10,7 @@ import {
   isoNextMonday,
   isoToday,
   isoTomorrow,
-} from './planTaskDates';
+} from '@aperio/shared';
 import { Modal } from './Modal';
 
 /**

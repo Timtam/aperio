@@ -1,0 +1,116 @@
+[package]
+name = "cal-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aperio — UniFFI bindings exposing cal-core domain logic to Swift/Kotlin (mobile engine reuse)."
+
+[lib]
+name = "cal_ffi"
+# lib       -> other Rust crates and `cargo test` can use it
+# cdylib    -> Android `.so` + the artifact `uniffi-bindgen --library` reads
+# staticlib -> iOS `.a` (linked into the app later, on EAS' macOS workers)
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[[bin]]
+# Keeps the bindings generator version-locked to the `uniffi` runtime the
+# library links against (Mozilla's recommended setup). Gated behind the `cli`
+# feature so the runtime library — and the Android/iOS cross-compiles — don't
+# drag in the bindgen tooling (clap, goblin, askama, …). Invoke with:
+#   cargo run -p cal-ffi --features cli --bin uniffi-bindgen -- \
+#     generate --library <cdylib> --language swift|kotlin --out-dir <dir>
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+required-features = ["cli"]
+
+[features]
+# Pulls in UniFFI's binding-generator CLI — needed only by the
+# uniffi-bindgen binary above, never by the runtime library.
+cli = ["uniffi/cli"]
+
+[dependencies]
+cal-core = { workspace = true }
+# The on-device local store: the migrated SQLite schema (aperio-db) + the
+# shared local calendar/task adapter (cal-adapter-local) the desktop uses,
+# so the mobile app reads and writes through the same engine, not a
+# re-implementation. `rusqlite` (bundled) opens the sandbox database file.
+aperio-db.workspace = true
+cal-adapter-local.workspace = true
+rusqlite.workspace = true
+# The shared, Tauri-free host (DbHandle + AccountsRepo + AdapterRegistry) and
+# the static plugin registry. `host-plugins` links the bundled adapter `-plugin`
+# rlibs into this cdylib/staticlib — the on-device static embedding (no dlopen,
+# which iOS forbids). plugin-core + sync-engine bring the PluginManager + the
+# SecretStore seam the registry routes credentials through.
+#
+# We enable every bundled adapter EXCEPT sync-adapter-local (default-features
+# off drops the `static` umbrella; the per-adapter features are listed
+# explicitly): a device-local sync target only writes into the app sandbox no
+# other device can reach, so mobile never offers it — no point building or
+# embedding it. cal-adapter-local (the local DATA store) is separate + always on.
+host-core.workspace = true
+host-plugins = { workspace = true, features = [
+    "caldav",
+    "ical",
+    "google",
+    "microsoft-graph",
+    "ews",
+    "vikunja",
+    "todoist",
+    "sync-webdav",
+    "sync-ftp",
+    "sync-sftp",
+    "sync-dropbox",
+    "sync-googledrive",
+    "vc-zoom",
+    "vc-teams",
+    "vc-meet",
+    "vc-webex",
+] }
+plugin-core.workspace = true
+sync-core.workspace = true
+sync-engine.workspace = true
+# The Host drives the async CalendarFeature methods (list/get/create/update/
+# delete events) by block_on-ing them on a current-thread runtime; account CRUD
+# stays synchronous. The shim's external-adapter path uses spawn_blocking, which
+# the current-thread runtime's blocking pool serves.
+tokio.workspace = true
+# `NaiveDate` UNTIL values cross the boundary as ISO strings; chrono parses /
+# formats them in the conversion layer.
+chrono.workspace = true
+# Error type returned to the foreign side for unparseable boundary values.
+thiserror.workspace = true
+# Host-side series_id assignment for a task that gains on-demand recurrence via
+# an edit (DESIGN §9.12) — mirrors the desktop update_task/create_task.
+uuid.workspace = true
+# Base64 for the E2E data key in the keychain (the SecretStore holds strings;
+# the 32-byte AES key is base64-encoded, matching the desktop's key storage).
+base64 = "0.22"
+# The richer task surface crosses the FFI boundary as JSON (the cal_core serde
+# shape, identical to the desktop's Tauri payloads) so the hand-written mobile
+# bridge is a trivial string passthrough and the shared TS domain logic is reused.
+serde.workspace = true
+serde_json.workspace = true
+# The mobile logging glue assembles the rolling-file subscriber from the
+# host-core builders (the pure helpers + redaction live in host-core::logging).
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+# Runtime only by default; the bindgen CLI is behind the `cli` feature above.
+uniffi = "0.31.1"
+
+[dev-dependencies]
+# Host integration tests open a real on-disk SQLite file (the DbHandle read
+# pool needs a file, not `:memory:`).
+tempfile = "3"
+# The sync / E2E host tests drive two-host sync through the local FS target —
+# the natural no-network test double. The production build excludes
+# sync-adapter-local (see [dependencies]); re-enable just that adapter for the
+# test build so those fixtures still register it. resolver = "2" keeps this
+# dev-only feature out of the shipped cdylib/staticlib.
+host-plugins = { workspace = true, features = ["sync-local"] }
+
+[lints]
+workspace = true

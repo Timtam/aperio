@@ -61,20 +61,9 @@ pub fn pref_key_for_disabled(plugin_id: &str) -> String {
 /// status per row + by the §20.8 "Plugin fehlt" indicator on
 /// AccountsPanel.
 pub fn plugin_id_for_adapter_kind(kind: AdapterKind) -> Option<&'static str> {
-    match kind {
-        AdapterKind::Local => None,
-        AdapterKind::Caldav => Some("com.aperio.cal-adapter-caldav"),
-        AdapterKind::Ical => Some("com.aperio.cal-adapter-ical"),
-        AdapterKind::Google => Some("com.aperio.cal-adapter-google"),
-        AdapterKind::MicrosoftGraph => Some("com.aperio.cal-adapter-microsoft-graph"),
-        AdapterKind::Ews => Some("com.aperio.cal-adapter-ews"),
-        AdapterKind::Vikunja => Some("com.aperio.cal-adapter-vikunja"),
-        AdapterKind::Todoist => Some("com.aperio.cal-adapter-todoist"),
-        AdapterKind::Zoom => Some("com.aperio.vc-adapter-zoom"),
-        AdapterKind::Teams => Some("com.aperio.vc-adapter-teams"),
-        AdapterKind::Meet => Some("com.aperio.vc-adapter-meet"),
-        AdapterKind::Webex => Some("com.aperio.vc-adapter-webex"),
-    }
+    // One shared source of the kind→plugin map now lives on AdapterKind itself
+    // (host-core), so desktop + mobile can't drift when an adapter is added.
+    kind.plugin_id()
 }
 
 /// Map a plugin id to the [`AdapterKind`] used to find

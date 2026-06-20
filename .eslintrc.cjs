@@ -16,6 +16,25 @@ module.exports = {
   settings: { react: { version: '18.3' } },
   plugins: ['@typescript-eslint', 'react-refresh'],
   ignorePatterns: ['dist', 'node_modules', 'src-tauri', 'target', 'crates'],
+  overrides: [
+    {
+      // CommonJS build/config tooling (Metro/Babel configs, Expo config plugins)
+      // legitimately use require() + module.exports — they run in Node's CJS
+      // context at build time, not as ES modules. Exempt them from the
+      // ESM-only require rule rather than littering eslint-disable comments.
+      files: [
+        '**/*.config.js',
+        '**/metro.config.js',
+        '**/babel.config.js',
+        '**/plugins/**/*.js',
+      ],
+      parserOptions: { sourceType: 'script' },
+      rules: {
+        '@typescript-eslint/no-var-requires': 'off',
+        '@typescript-eslint/no-require-imports': 'off',
+      },
+    },
+  ],
   rules: {
     'react-refresh/only-export-components': [
       'warn',

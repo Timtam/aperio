@@ -4,7 +4,8 @@ title: "Welcome to Aperio"
 
 Aperio is a calendar and task planner built from the ground up to be **fully
 usable with a screen reader** – without ever having to switch to browse
-mode. At the same time, it is a fast, native desktop app.
+mode. At the same time, it is a fast, native desktop app. It also runs as a
+**mobile app** on iOS and Android – see [Mobile app](/guides/mobile/).
 
 This guide walks you step by step through every core feature. No prior
 knowledge required.

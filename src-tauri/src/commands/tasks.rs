@@ -13,10 +13,11 @@ use tauri::{AppHandle, State};
 use plugin_core::{PluginManager, TaskCapabilities};
 
 use super::cache_swr;
+use super::cache_swr::TauriCacheObserver;
 use super::plugins::plugin_id_for_adapter_kind;
 use super::{CommandError, CommandResult};
 use crate::accounts::{AccountsRepo, AdapterKind};
-use crate::cache::{CacheStore, RefreshCoordinator, SyncScope};
+use crate::cache::{CacheObserver, CacheStore, RefreshCoordinator, SyncScope};
 use crate::db::DbHandle;
 use crate::event_log::EventLogWriter;
 use crate::overrides::{
@@ -339,8 +340,10 @@ async fn external_task_lists_swr(
             let adapter_bg = Arc::clone(&adapter);
             let reg = Arc::clone(registry);
             let acc = account.clone();
+            let rt = tauri::async_runtime::handle();
             cache_swr::spawn_refresh(
-                app.clone(),
+                rt.inner(),
+                Arc::new(TauriCacheObserver { app: app.clone() }) as Arc<dyn CacheObserver>,
                 Arc::clone(cache),
                 Arc::clone(coord),
                 SyncScope::TaskLists,
@@ -556,8 +559,10 @@ pub async fn get_tasks(
             let cache_bg = Arc::clone(&cache);
             let acc = account.clone();
             let list = list_id.clone();
+            let rt = tauri::async_runtime::handle();
             cache_swr::spawn_item_refresh(
-                app.clone(),
+                rt.inner(),
+                Arc::new(TauriCacheObserver { app: app.clone() }) as Arc<dyn CacheObserver>,
                 Arc::clone(&cache),
                 Arc::clone(&coord),
                 SyncScope::Tasks,
@@ -580,8 +585,10 @@ pub async fn get_tasks(
     let cache_bg = Arc::clone(&cache);
     let acc = account.clone();
     let list = list_id.clone();
+    let rt = tauri::async_runtime::handle();
     cache_swr::spawn_item_refresh(
-        app.clone(),
+        rt.inner(),
+        Arc::new(TauriCacheObserver { app: app.clone() }) as Arc<dyn CacheObserver>,
         Arc::clone(&cache),
         Arc::clone(&coord),
         SyncScope::Tasks,

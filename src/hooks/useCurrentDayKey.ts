@@ -2,6 +2,12 @@ import { useEffect, useState } from 'react';
 
 import { todayIsoKey } from '../intl/taskDay';
 
+// `shouldFireToday` + the `DayStartTrigger` type now live in @aperio/shared
+// (shared with the mobile day-start checks). Re-exported so existing desktop
+// imports + tests keep their path; the hook + the localStorage fire-marker below
+// stay desktop-local.
+export { shouldFireToday, type DayStartTrigger } from '@aperio/shared';
+
 /**
  * The local `YYYY-MM-DD` for today, refreshed every minute so the
  * value updates when the date rolls over without a window reload.
@@ -33,60 +39,6 @@ export function useCurrentDayKey(): string {
     return () => window.clearInterval(interval);
   }, []);
   return key;
-}
-
-/**
- * The Settings → Tasks "Tageswechsel-Trigger" preference values.
- *
- *  - `'app-start'`: legacy mount-once semantics. Fires once on
- *    initial app start and never again until the next launch.
- *  - An `HH:MM` 24h string (e.g. `'00:00'`, `'08:00'`): fires once
- *    per local day, as soon as the local time on the new day has
- *    crossed the configured threshold. `'00:00'` means "as soon as
- *    the date rolls over" — the typical case.
- *
- * Storage is a plain string so future custom values fit without
- * a schema bump.
- */
-export type DayStartTrigger = string;
-
-/**
- * Decide whether a day-start checker should fire on this tick.
- *
- *  - `'app-start'` mode: fire iff we haven't fired at all yet
- *    (lastFiredDayKey is null).
- *  - HH:MM mode: fire iff we haven't fired for today AND the local
- *    clock has crossed the configured threshold.
- *
- * Pure helper so it's trivially testable.
- */
-export function shouldFireToday(
-  trigger: DayStartTrigger,
-  lastFiredDayKey: string | null,
-  todayKey: string,
-  now: Date = new Date(),
-): boolean {
-  if (trigger === 'app-start') {
-    return lastFiredDayKey === null;
-  }
-  if (lastFiredDayKey === todayKey) return false;
-  const m = trigger.match(/^(\d{1,2}):(\d{2})$/);
-  if (!m) {
-    // Unparseable preference — be conservative and treat it like the
-    // immediate-on-day-change default (00:00) so the user still gets
-    // a review.
-    return true;
-  }
-  const hours = Number(m[1]);
-  const minutes = Number(m[2]);
-  // Out-of-range numerics (e.g., "25:00") would otherwise silently
-  // never trigger because `now.getHours() === 25` is impossible.
-  // Treat the same as garbage — fire immediately.
-  if (hours > 23 || minutes > 59) return true;
-  return (
-    now.getHours() > hours ||
-    (now.getHours() === hours && now.getMinutes() >= minutes)
-  );
 }
 
 /**

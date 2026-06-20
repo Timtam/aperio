@@ -21,12 +21,13 @@ use cal_adapter_local::LocalAdapter;
 use cal_core::{Contact, ContactList, ContactPhoto, ContactsFeature, NewContact};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tauri::{AppHandle, Runtime, State};
+use tauri::{AppHandle, State};
 use tracing::warn;
 
 use super::cache_swr;
+use super::cache_swr::TauriCacheObserver;
 use super::{CommandError, CommandResult};
-use crate::cache::{CacheStore, RefreshCoordinator, SyncScope};
+use crate::cache::{CacheObserver, CacheStore, RefreshCoordinator, SyncScope};
 use crate::contact_sync::{
     ContactSyncScheduler, ContactsSyncStatus, PREF_INCLUDE_READ_ONLY_ON_SYNC, PREF_LAST_SYNCED_AT,
     PREF_SYNC_INTERVAL_MINUTES,
@@ -111,8 +112,10 @@ async fn external_contact_lists_swr(
             let adapter_bg = Arc::clone(&adapter);
             let reg = Arc::clone(registry);
             let acc = account.clone();
+            let rt = tauri::async_runtime::handle();
             cache_swr::spawn_refresh(
-                app.clone(),
+                rt.inner(),
+                Arc::new(TauriCacheObserver { app: app.clone() }) as Arc<dyn CacheObserver>,
                 Arc::clone(cache),
                 Arc::clone(coord),
                 SyncScope::ContactLists,
@@ -166,8 +169,10 @@ pub async fn get_contacts(
             let cache_bg = Arc::clone(&cache);
             let acc = account.clone();
             let list = list_id.clone();
+            let rt = tauri::async_runtime::handle();
             cache_swr::spawn_item_refresh(
-                app.clone(),
+                rt.inner(),
+                Arc::new(TauriCacheObserver { app: app.clone() }) as Arc<dyn CacheObserver>,
                 Arc::clone(&cache),
                 Arc::clone(&coord),
                 SyncScope::Contacts,
@@ -189,8 +194,10 @@ pub async fn get_contacts(
     let cache_bg = Arc::clone(&cache);
     let acc = account.clone();
     let list = list_id.clone();
+    let rt = tauri::async_runtime::handle();
     cache_swr::spawn_item_refresh(
-        app.clone(),
+        rt.inner(),
+        Arc::new(TauriCacheObserver { app: app.clone() }) as Arc<dyn CacheObserver>,
         Arc::clone(&cache),
         Arc::clone(&coord),
         SyncScope::Contacts,
@@ -453,13 +460,13 @@ pub async fn set_contact_photo(
 /// matches whatever the periodic scheduler would do. Most
 /// callers should pass `None` to keep the behaviour consistent.
 #[tauri::command]
-pub async fn sync_contacts_now<R: Runtime>(
+pub async fn sync_contacts_now(
     scheduler: State<'_, Arc<ContactSyncScheduler>>,
-    app: AppHandle<R>,
     include_read_only: Option<bool>,
 ) -> CommandResult<bool> {
     let effective = include_read_only.unwrap_or_else(|| scheduler.read_include_read_only_on_sync());
-    Ok(scheduler.run_sync(&app, effective).await)
+    // The scheduler owns the Tauri observer, so the pass needs no app handle.
+    Ok(scheduler.run_sync(effective).await)
 }
 
 /// Snapshot the contact sync status — used by the contacts view

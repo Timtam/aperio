@@ -3,10 +3,14 @@
 //!
 //! ## What's here
 //!
-//! - [`declare_lifecycle!`] — emits the two required exports
-//!   (`aperio_plugin_create` / `aperio_plugin_destroy`) plus a
-//!   `static AperioPlugin` descriptor pointing at the user-
-//!   supplied metadata + vtable + open/close hooks.
+//! - [`declare_lifecycle!`] — emits the crate-mangled descriptor
+//!   accessors (`build_descriptor` + `DESTROY_FN`) over a
+//!   `static AperioPlugin` pointing at the user-supplied metadata
+//!   + vtable + open/close hooks. The `#[no_mangle]`
+//!   `aperio_plugin_create` / `_destroy` C-ABI exports are emitted
+//!   separately by [`declare_cdylib_exports!`] in the companion
+//!   `*-cdylib` crate, so the `-plugin` rlibs can be statically
+//!   linked (the mobile path) without colliding.
 //!
 //! ## What's NOT here
 //!
@@ -28,10 +32,12 @@
 //! plugin (which is trivially true when it's a `static` in the
 //! plugin crate).
 
-/// Emit the two required FFI exports (`aperio_plugin_create`,
-/// `aperio_plugin_destroy`) plus a `static AperioPlugin`
-/// descriptor that the host's
-/// [`plugin_core::manager::PluginManager`] reads at load time.
+/// Emit the crate-mangled descriptor accessors (`build_descriptor`
+/// + `DESTROY_FN`) over a `static AperioPlugin` descriptor that the
+/// host's [`plugin_core::manager::PluginManager`] reads at load
+/// time. The `#[no_mangle]` `aperio_plugin_create` / `_destroy`
+/// C-ABI exports live in the companion `*-cdylib` crate (via
+/// [`declare_cdylib_exports!`]).
 ///
 /// Arguments (named-call shape — order doesn't matter):
 ///   - `id` — UTF-8 + NUL-terminated reverse-DNS id. Must match
@@ -116,12 +122,13 @@ macro_rules! declare_lifecycle {
                 Err(_) => panic!("plugin_type must not contain interior NUL"),
             };
 
-        /// Internal: shared body of `aperio_plugin_create`. Spelled
-        /// out as a non-mangled fn so both the C-ABI export (for
-        /// dlopen) and the typed Rust accessor (for static-link
-        /// hosts that can't tolerate duplicate `#[no_mangle]`
-        /// symbols across N linked plugin crates) share the same
-        /// implementation.
+        /// Internal: shared body behind `build_descriptor`. Spelled
+        /// out as a named fn so both the typed Rust accessor below
+        /// (used by `register_static` + static-link hosts that
+        /// can't tolerate duplicate `#[no_mangle]` symbols across N
+        /// linked plugin crates) and the cdylib shell's
+        /// `#[no_mangle] aperio_plugin_create` export — which calls
+        /// `build_descriptor()` — share the same implementation.
         unsafe fn __aperio_build_descriptor() -> *mut $crate::plugin_core::AperioPlugin {
             let descriptor = $crate::plugin_core::AperioPlugin {
                 abi_version: $crate::plugin_core::ABI_VERSION,
@@ -148,62 +155,27 @@ macro_rules! declare_lifecycle {
             let _ = Box::from_raw(plugin);
         }
 
-        /// `aperio_plugin_create` per DESIGN.md §20.3 — the C-ABI
-        /// entry point Aperio's [`plugin_core::PluginManager`]
-        /// looks up by symbol name after `dlopen`-ing the
-        /// plugin's shared library.
-        ///
-        /// The host MUST NOT link plugin rlibs into its main
-        /// binary — that would collide on this `#[no_mangle]`
-        /// symbol across the N bundled plugins. The dlopen path
-        /// avoids the issue: each plugin's cdylib owns its own
-        /// copy of the symbol; the host loads them as separate
-        /// shared libraries at runtime.
+        /// Typed Rust accessor for the plugin's descriptor. The
+        /// `#[no_mangle] aperio_plugin_create` C-ABI export now
+        /// lives in the companion `*-cdylib` crate (via
+        /// `declare_cdylib_exports!`), so the `-plugin` rlibs can
+        /// be statically linked into one binary (the mobile path)
+        /// without colliding on the duplicate symbol. This
+        /// crate-mangled accessor is what `register_static` and
+        /// the cdylib shell both call.
         ///
         /// # Safety
         ///
-        /// FFI export. Called once by the host immediately after
-        /// `dlopen`. No precondition on host state.
-        #[no_mangle]
-        pub unsafe extern "C" fn aperio_plugin_create() -> *mut $crate::plugin_core::AperioPlugin {
-            __aperio_build_descriptor()
-        }
-
-        /// `aperio_plugin_destroy` per DESIGN.md §20.3.
-        ///
-        /// # Safety
-        ///
-        /// `plugin` must be the pointer returned by the
-        /// preceding `aperio_plugin_create` call, not yet freed.
-        /// The host's [`plugin_core::manager::LoadedPlugin::drop`]
-        /// guarantees this.
-        #[no_mangle]
-        pub unsafe extern "C" fn aperio_plugin_destroy(
-            plugin: *mut $crate::plugin_core::AperioPlugin,
-        ) {
-            __aperio_destroy_descriptor(plugin)
-        }
-
-        /// Typed Rust accessor for the plugin's descriptor.
-        /// Mirrors [`aperio_plugin_create`] (same implementation)
-        /// but is callable from Rust code that links the plugin
-        /// as an rlib — used by the plugin's own integration
-        /// tests, which exercise the `PluginManager::register_static`
-        /// path without going through dlopen.
-        ///
-        /// # Safety
-        ///
-        /// Same contract as `aperio_plugin_create`. The returned
-        /// pointer must eventually be passed back to [`DESTROY_FN`].
+        /// Builds a fresh descriptor; the returned pointer must
+        /// eventually be passed back to [`DESTROY_FN`].
         pub unsafe fn build_descriptor() -> *mut $crate::plugin_core::AperioPlugin {
             __aperio_build_descriptor()
         }
 
         /// Typed destroy fn-pointer that pairs with
-        /// [`build_descriptor`]. Same body as
-        /// `aperio_plugin_destroy`; exposed so the integration-
-        /// test path can hand it to
-        /// [`plugin_core::PluginManager::register_static`].
+        /// [`build_descriptor`]; the matching `#[no_mangle]
+        /// aperio_plugin_destroy` export lives in the companion
+        /// `*-cdylib` crate.
         pub const DESTROY_FN: unsafe extern "C" fn(
             *mut $crate::plugin_core::AperioPlugin,
         ) = __aperio_destroy_descriptor;
@@ -253,15 +225,17 @@ macro_rules! declare_lifecycle {
 /// }
 /// ```
 ///
-/// The macro generates the `#[no_mangle]` wrapper that adapts
+/// The macro generates the crate-mangled typed twin that adapts
 /// the raw FFI args + spins up the plugin's tokio runtime via
-/// [`crate::open_instance::open_instance_with`]'s sibling
-/// helper [`crate::interactive_auth::interactive_auth_with`].
+/// [`crate::interactive_auth::interactive_auth_with`]. The
+/// matching `#[no_mangle] aperio_plugin_interactive_auth` C-ABI
+/// export is emitted by [`declare_cdylib_exports!`] in the
+/// companion `*-cdylib` crate.
 ///
-/// At most one `declare_interactive_auth!` invocation per
-/// crate — emitting two copies of `aperio_plugin_interactive_auth`
-/// would collide at link time, same as
-/// `declare_lifecycle!`'s create/destroy exports.
+/// At most one `declare_interactive_auth!` invocation per crate —
+/// the cdylib shell would otherwise emit two copies of
+/// `aperio_plugin_interactive_auth` and collide at link time,
+/// same as `declare_lifecycle!`'s create/destroy exports.
 ///
 /// ## Memory ownership
 ///
@@ -273,18 +247,19 @@ macro_rules! declare_lifecycle {
 #[macro_export]
 macro_rules! declare_interactive_auth {
     (handler: $handler:path $(,)?) => {
-        /// `aperio_plugin_interactive_auth` symbol — see
-        /// `aperio_plugin.h`. The host looks this up by name via
-        /// libloading; plugins that don't export it surface as
-        /// `InteractiveAuthError::Unsupported`.
+        /// Typed twin of the `aperio_plugin_interactive_auth`
+        /// C-ABI export. Crate-mangled, so N `-plugin` rlibs can
+        /// be statically linked (the mobile path) without
+        /// colliding; the companion `*-cdylib` crate re-exports
+        /// it as `#[no_mangle]` via [`declare_cdylib_exports!`].
         ///
         /// # Safety
         ///
-        /// FFI export. `args_ptr` + `args_len` must describe a
+        /// FFI shape. `args_ptr` + `args_len` must describe a
         /// valid byte buffer the host owns for the duration of
         /// the call.
-        #[no_mangle]
-        pub unsafe extern "C" fn aperio_plugin_interactive_auth(
+        #[doc(hidden)]
+        pub unsafe extern "C" fn __aperio_interactive_auth_impl(
             args_ptr: *const u8,
             args_len: usize,
         ) -> $crate::plugin_core::ffi::PluginCallResult {
@@ -302,9 +277,11 @@ macro_rules! declare_interactive_auth {
 ///
 /// Sibling of [`declare_interactive_auth!`]: the plugin author
 /// writes a single typed handler, the macro emits the
-/// `#[no_mangle]` wrapper that bridges the raw FFI args to a
-/// fresh tokio runtime via
-/// [`crate::discover::discover_with`].
+/// crate-mangled typed twin that bridges the raw FFI args to a
+/// fresh tokio runtime via [`crate::discover::discover_with`].
+/// The matching `#[no_mangle] aperio_plugin_discover` C-ABI
+/// export is emitted by [`declare_cdylib_exports!`] in the
+/// companion `*-cdylib` crate.
 ///
 /// ```ignore
 /// async fn run_autodiscover(json: String) -> Result<Vec<u8>, String> {
@@ -321,9 +298,9 @@ macro_rules! declare_interactive_auth {
 /// }
 /// ```
 ///
-/// At most one `declare_discover!` invocation per crate —
-/// emitting two copies of `aperio_plugin_discover` would
-/// collide at link time.
+/// At most one `declare_discover!` invocation per crate — the
+/// cdylib shell would otherwise emit two copies of
+/// `aperio_plugin_discover` and collide at link time.
 ///
 /// ## Memory ownership
 ///
@@ -335,18 +312,18 @@ macro_rules! declare_interactive_auth {
 #[macro_export]
 macro_rules! declare_discover {
     (handler: $handler:path $(,)?) => {
-        /// `aperio_plugin_discover` symbol — see
-        /// `aperio_plugin.h`. The host looks this up by name via
-        /// libloading; plugins that don't export it surface as
-        /// `DiscoverError::Unsupported`.
+        /// Typed twin of the `aperio_plugin_discover` C-ABI
+        /// export. Crate-mangled (static-link safe); the
+        /// companion `*-cdylib` crate re-exports it as
+        /// `#[no_mangle]` via [`declare_cdylib_exports!`].
         ///
         /// # Safety
         ///
-        /// FFI export. `args_ptr` + `args_len` must describe a
+        /// FFI shape. `args_ptr` + `args_len` must describe a
         /// valid byte buffer the host owns for the duration of
         /// the call.
-        #[no_mangle]
-        pub unsafe extern "C" fn aperio_plugin_discover(
+        #[doc(hidden)]
+        pub unsafe extern "C" fn __aperio_discover_impl(
             args_ptr: *const u8,
             args_len: usize,
         ) -> $crate::plugin_core::ffi::PluginCallResult {
@@ -364,9 +341,12 @@ macro_rules! declare_discover {
 ///
 /// Sibling of [`declare_discover!`] /
 /// [`declare_interactive_auth!`]: the plugin author writes a
-/// single typed handler, the macro emits the `#[no_mangle]`
-/// wrapper that bridges the raw FFI args to a fresh tokio
-/// runtime via [`crate::probe_host_key::probe_host_key_with`].
+/// single typed handler, the macro emits the crate-mangled typed
+/// twin that bridges the raw FFI args to a fresh tokio runtime
+/// via [`crate::probe_host_key::probe_host_key_with`]. The
+/// matching `#[no_mangle] aperio_plugin_probe_host_key` C-ABI
+/// export is emitted by [`declare_cdylib_exports!`] in the
+/// companion `*-cdylib` crate.
 ///
 /// ```ignore
 /// async fn run_probe(json: String) -> Result<Vec<u8>, String> {
@@ -386,8 +366,8 @@ macro_rules! declare_discover {
 /// ```
 ///
 /// At most one `declare_probe_host_key!` invocation per crate —
-/// emitting two copies of `aperio_plugin_probe_host_key` would
-/// collide at link time.
+/// the cdylib shell would otherwise emit two copies of
+/// `aperio_plugin_probe_host_key` and collide at link time.
 ///
 /// ## Memory ownership
 ///
@@ -556,24 +536,161 @@ macro_rules! sync_dispatch_helpers {
 #[macro_export]
 macro_rules! declare_probe_host_key {
     (handler: $handler:path $(,)?) => {
-        /// `aperio_plugin_probe_host_key` symbol — see
-        /// `aperio_plugin.h`. The host looks this up by name via
-        /// libloading; plugins that don't export it surface as
-        /// `ProbeHostKeyError::Unsupported`.
+        /// Typed twin of the `aperio_plugin_probe_host_key`
+        /// C-ABI export. Crate-mangled (static-link safe); the
+        /// companion `*-cdylib` crate re-exports it as
+        /// `#[no_mangle]` via [`declare_cdylib_exports!`].
         ///
         /// # Safety
         ///
-        /// FFI export. `args_ptr` + `args_len` must describe a
+        /// FFI shape. `args_ptr` + `args_len` must describe a
         /// valid byte buffer the host owns for the duration of
         /// the call.
-        #[no_mangle]
-        pub unsafe extern "C" fn aperio_plugin_probe_host_key(
+        #[doc(hidden)]
+        pub unsafe extern "C" fn __aperio_probe_host_key_impl(
             args_ptr: *const u8,
             args_len: usize,
         ) -> $crate::plugin_core::ffi::PluginCallResult {
             $crate::probe_host_key::probe_host_key_with(args_ptr, args_len, |json| async move {
                 $handler(json).await
             })
+        }
+    };
+}
+
+/// Emit the `#[no_mangle]` C-ABI plugin exports in a thin
+/// companion `*-cdylib` crate, delegating to the crate-mangled
+/// typed accessors that live in the sibling `-plugin` rlib.
+///
+/// ## Why this exists
+///
+/// The `-plugin` crates are `rlib`-only so the mobile build can
+/// STATICALLY link all N of them into one binary
+/// without colliding on duplicate `#[no_mangle]
+/// aperio_plugin_create` (and the optional auth symbols) — dlopen
+/// is impossible on iOS. The desktop dlopen path still needs
+/// those symbols, so each plugin gets a one-file companion
+/// `*-cdylib` crate (`crate-type = ["cdylib"]`) whose only job is
+/// this macro invocation. The symbols then live exactly once per
+/// shared library; the rlibs carry only crate-mangled twins
+/// (`build_descriptor` / `DESTROY_FN` / `__aperio_*_impl`).
+///
+/// ## Arguments (fixed order)
+///
+///   - `plugin_crate` — path to the `-plugin` rlib crate
+///     (e.g. `cal_adapter_google_plugin`). Always calls its
+///     `build_descriptor()` + `DESTROY_FN`.
+///   - `interactive_auth: yes` — also re-export the OAuth symbol
+///     (delegates to `<crate>::__aperio_interactive_auth_impl`).
+///   - `discover: yes` — also re-export the Autodiscover symbol.
+///   - `probe_host_key: yes` — also re-export the TOFU host-key
+///     probe symbol.
+///
+/// The optional auth lines, when present, must appear in that
+/// order. A plugin needs at most one of them today.
+///
+/// ## Example
+///
+/// ```ignore
+/// // cal-adapter-google-cdylib/src/lib.rs
+/// plugin_sdk::declare_cdylib_exports! {
+///     plugin_crate: cal_adapter_google_plugin,
+///     interactive_auth: yes,
+/// }
+/// ```
+#[macro_export]
+macro_rules! declare_cdylib_exports {
+    (
+        plugin_crate: $plugin:ident
+        $(, interactive_auth: $ia:tt)?
+        $(, discover: $disc:tt)?
+        $(, probe_host_key: $probe:tt)?
+        $(,)?
+    ) => {
+        /// `aperio_plugin_create` (DESIGN.md §20.3) — thin
+        /// `#[no_mangle]` wrapper over the rlib's typed
+        /// `build_descriptor()`.
+        ///
+        /// # Safety
+        ///
+        /// FFI export. Called once by the host right after
+        /// `dlopen`.
+        #[no_mangle]
+        pub unsafe extern "C" fn aperio_plugin_create(
+        ) -> *mut $crate::plugin_core::AperioPlugin {
+            $plugin::build_descriptor()
+        }
+
+        /// `aperio_plugin_destroy` (DESIGN.md §20.3).
+        ///
+        /// # Safety
+        ///
+        /// `plugin` must be the pointer returned by the preceding
+        /// `aperio_plugin_create` call, not yet freed.
+        #[no_mangle]
+        pub unsafe extern "C" fn aperio_plugin_destroy(
+            plugin: *mut $crate::plugin_core::AperioPlugin,
+        ) {
+            ($plugin::DESTROY_FN)(plugin)
+        }
+
+        $($crate::declare_cdylib_exports!(@interactive_auth $plugin, $ia);)?
+        $($crate::declare_cdylib_exports!(@discover $plugin, $disc);)?
+        $($crate::declare_cdylib_exports!(@probe_host_key $plugin, $probe);)?
+    };
+
+    // ── Internal opt-in arms ─────────────────────────────────
+    (@interactive_auth $plugin:ident, no) => {};
+    (@interactive_auth $plugin:ident, yes) => {
+        /// `aperio_plugin_interactive_auth` — delegates to the
+        /// rlib's typed twin.
+        ///
+        /// # Safety
+        ///
+        /// FFI export. `args_ptr` + `args_len` must describe a
+        /// valid host-owned byte buffer for the call's duration.
+        #[no_mangle]
+        pub unsafe extern "C" fn aperio_plugin_interactive_auth(
+            args_ptr: *const u8,
+            args_len: usize,
+        ) -> $crate::plugin_core::ffi::PluginCallResult {
+            $plugin::__aperio_interactive_auth_impl(args_ptr, args_len)
+        }
+    };
+
+    (@discover $plugin:ident, no) => {};
+    (@discover $plugin:ident, yes) => {
+        /// `aperio_plugin_discover` — delegates to the rlib's
+        /// typed twin.
+        ///
+        /// # Safety
+        ///
+        /// FFI export. `args_ptr` + `args_len` must describe a
+        /// valid host-owned byte buffer for the call's duration.
+        #[no_mangle]
+        pub unsafe extern "C" fn aperio_plugin_discover(
+            args_ptr: *const u8,
+            args_len: usize,
+        ) -> $crate::plugin_core::ffi::PluginCallResult {
+            $plugin::__aperio_discover_impl(args_ptr, args_len)
+        }
+    };
+
+    (@probe_host_key $plugin:ident, no) => {};
+    (@probe_host_key $plugin:ident, yes) => {
+        /// `aperio_plugin_probe_host_key` — delegates to the
+        /// rlib's typed twin.
+        ///
+        /// # Safety
+        ///
+        /// FFI export. `args_ptr` + `args_len` must describe a
+        /// valid host-owned byte buffer for the call's duration.
+        #[no_mangle]
+        pub unsafe extern "C" fn aperio_plugin_probe_host_key(
+            args_ptr: *const u8,
+            args_len: usize,
+        ) -> $crate::plugin_core::ffi::PluginCallResult {
+            $plugin::__aperio_probe_host_key_impl(args_ptr, args_len)
         }
     };
 }
@@ -609,12 +726,12 @@ mod tests {
 
     #[test]
     fn descriptor_carries_expected_metadata() {
-        // Use the typed accessor (ungated) rather than the
-        // `aperio_plugin_create` C-ABI export. The export is
-        // behind the `cdylib-exports` feature gate, which
-        // plugin-sdk's own test crate doesn't enable — but the
-        // typed accessor is always emitted, so the macro
-        // expansion + descriptor shape can still be verified.
+        // Use the typed accessor rather than a C-ABI export: the
+        // `#[no_mangle] aperio_plugin_create` now lives in the
+        // companion `*-cdylib` crates (via declare_cdylib_exports!),
+        // so declare_lifecycle! emits only this crate-mangled
+        // accessor — which is exactly what register_static + the
+        // cdylib shell call.
         // SAFETY: the create + destroy contract — call once,
         // free at the end of the test.
         let plugin_ptr = unsafe { build_descriptor() };
