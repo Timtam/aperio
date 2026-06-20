@@ -634,6 +634,24 @@ macro_rules! declare_cdylib_exports {
             ($plugin::DESTROY_FN)(plugin)
         }
 
+        /// `aperio_plugin_set_log` — hand the plugin a host log sink.
+        /// The host calls this once right after `create`; the plugin
+        /// installs a `tracing` subscriber on its own (otherwise
+        /// isolated) global dispatcher that forwards every event to
+        /// `log`. Emitted unconditionally for every cdylib so all
+        /// adapters route their diagnostics to the host log.
+        ///
+        /// # Safety
+        ///
+        /// FFI export. `log` must be a valid `'static` host function
+        /// pointer (the loader passes one).
+        #[no_mangle]
+        pub unsafe extern "C" fn aperio_plugin_set_log(
+            log: $crate::plugin_core::AperioLogFn,
+        ) {
+            $crate::log_forward::install_log_forwarding(log)
+        }
+
         $($crate::declare_cdylib_exports!(@interactive_auth $plugin, $ia);)?
         $($crate::declare_cdylib_exports!(@discover $plugin, $disc);)?
         $($crate::declare_cdylib_exports!(@probe_host_key $plugin, $probe);)?

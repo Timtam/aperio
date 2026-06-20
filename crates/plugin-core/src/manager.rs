@@ -49,11 +49,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 use libloading::Library;
-use tracing::{info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::abi::{
-    AperioPlugin, AperioPluginCreateFn, AperioPluginDestroyFn, OpenInstanceResult, PLUGIN_OK,
-    SYMBOL_CREATE, SYMBOL_DESTROY,
+    AperioPlugin, AperioPluginCreateFn, AperioPluginDestroyFn, AperioPluginSetLogFn,
+    OpenInstanceResult, LOG_LEVEL_DEBUG, LOG_LEVEL_ERROR, LOG_LEVEL_INFO, LOG_LEVEL_WARN,
+    PLUGIN_OK, SYMBOL_CREATE, SYMBOL_DESTROY, SYMBOL_SET_LOG,
 };
 use crate::error::{PluginError, PluginResult};
 use crate::ffi::{PluginCallResult, PLUGIN_CALL_OK};
@@ -113,6 +114,43 @@ pub type ProbeHostKeyFn =
 
 /// Canonical symbol name for the probe-host-key entry point.
 pub const SYMBOL_PROBE_HOST_KEY: &[u8] = b"aperio_plugin_probe_host_key";
+
+/// Host log sink handed to every dlopen'd plugin via
+/// `aperio_plugin_set_log`. A plugin's forwarding subscriber calls
+/// this for each `tracing` event; we re-emit it into the host's own
+/// subscriber (the log file) under the `aperio::plugin` target, with
+/// the plugin's original event target preserved in the `source`
+/// field. The host's level filter then decides what is written.
+///
+/// The level is matched, not threaded, because `tracing`'s macros
+/// take a const level + const target; we keep the plugin's target as
+/// a value field instead.
+///
+/// # Safety
+///
+/// FFI callback. `target` / `message` must be valid NUL-terminated
+/// UTF-8 for the duration of the call (the plugin's forwarding
+/// subscriber guarantees this); either may be NULL.
+unsafe extern "C" fn forward_plugin_log(level: u8, target: *const c_char, message: *const c_char) {
+    // SAFETY: caller contract — valid NUL-terminated UTF-8 or NULL.
+    let read = |p: *const c_char| -> String {
+        if p.is_null() {
+            String::new()
+        } else {
+            unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned()
+        }
+    };
+    let source = read(target);
+    let message = read(message);
+    match level {
+        LOG_LEVEL_ERROR => error!(target: "aperio::plugin", source = %source, "{message}"),
+        LOG_LEVEL_WARN => warn!(target: "aperio::plugin", source = %source, "{message}"),
+        LOG_LEVEL_INFO => info!(target: "aperio::plugin", source = %source, "{message}"),
+        LOG_LEVEL_DEBUG => debug!(target: "aperio::plugin", source = %source, "{message}"),
+        // LOG_LEVEL_TRACE and any unknown future byte.
+        _ => trace!(target: "aperio::plugin", source = %source, "{message}"),
+    }
+}
 
 /// One loaded plugin — manifest + library handle + descriptor
 /// pointer + the `destroy` symbol we need to call before unload.
@@ -675,6 +713,19 @@ impl PluginManager {
                 "{} aperio_plugin_create returned NULL",
                 manifest.id
             )));
+        }
+
+        // Wire the plugin's isolated `tracing` global into the host
+        // log. Each dlopen'd `.so` links its own `tracing` dispatcher,
+        // so without this its adapter logs vanish. Optional symbol:
+        // plugins built before this ABI addition simply don't forward,
+        // and on the static-link (mobile) path the cdylib shell isn't
+        // loaded at all. Best-effort — a missing symbol must not block
+        // loading an otherwise healthy plugin.
+        unsafe {
+            if let Ok(set_log) = library.get::<AperioPluginSetLogFn>(SYMBOL_SET_LOG) {
+                set_log(forward_plugin_log);
+            }
         }
 
         // Look up the destructor up-front so the LoadedPlugin's

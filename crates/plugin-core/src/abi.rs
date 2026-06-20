@@ -168,12 +168,47 @@ pub type AperioPluginCreateFn = unsafe extern "C" fn() -> *mut AperioPlugin;
 /// Function-pointer type matching `aperio_plugin_destroy`.
 pub type AperioPluginDestroyFn = unsafe extern "C" fn(plugin: *mut AperioPlugin);
 
+/// Severity values carried across the [`AperioLogFn`] boundary,
+/// matching `tracing::Level` ordering (1 = most severe). Defined
+/// here so the SDK's forwarding subscriber and the host's re-emit
+/// agree on the wire values without sharing a Rust enum across the
+/// dylib seam.
+pub const LOG_LEVEL_ERROR: u8 = 1;
+pub const LOG_LEVEL_WARN: u8 = 2;
+pub const LOG_LEVEL_INFO: u8 = 3;
+pub const LOG_LEVEL_DEBUG: u8 = 4;
+pub const LOG_LEVEL_TRACE: u8 = 5;
+
+/// Host-supplied log sink handed to a plugin via
+/// `aperio_plugin_set_log`. The plugin installs a `tracing`
+/// subscriber that forwards each event by calling this with the
+/// level (see the `LOG_LEVEL_*` constants), the event `target`, and
+/// the rendered message — both NUL-terminated UTF-8 and valid only
+/// for the duration of the call. The callback must not unwind across
+/// the FFI boundary.
+///
+/// This bridges the dlopen logging gap: each plugin `.so` statically
+/// links its own `tracing` global, so without forwarding the host
+/// never sees adapter logs. On the static-link (mobile) path the
+/// global is already shared and `set_log` is simply never called.
+pub type AperioLogFn =
+    unsafe extern "C" fn(level: u8, target: *const c_char, message: *const c_char);
+
+/// Function-pointer type matching the optional `aperio_plugin_set_log`
+/// export: the host calls it once, right after `create`, to hand the
+/// plugin its [`AperioLogFn`] sink. MAY be absent (plugins built
+/// before this ABI addition) — the loader treats a missing symbol as
+/// "no log forwarding".
+pub type AperioPluginSetLogFn = unsafe extern "C" fn(log: AperioLogFn);
+
 /// Symbol names the host's loader looks up in every plugin's
 /// shared library. Defined here so the SDK macros emit
 /// `#[no_mangle] pub extern "C" fn` items with the exact same
 /// spelling.
 pub const SYMBOL_CREATE: &[u8] = b"aperio_plugin_create";
 pub const SYMBOL_DESTROY: &[u8] = b"aperio_plugin_destroy";
+/// Optional log-forwarding sink installer; see [`AperioPluginSetLogFn`].
+pub const SYMBOL_SET_LOG: &[u8] = b"aperio_plugin_set_log";
 
 #[cfg(test)]
 mod tests {

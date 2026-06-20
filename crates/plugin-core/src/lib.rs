@@ -38,9 +38,10 @@ pub mod version;
 pub mod vtables;
 
 pub use abi::{
-    AperioPlugin, AperioPluginCreateFn, AperioPluginDestroyFn, AperioPluginType,
-    OpenInstanceResult, PLUGIN_ERR_INIT, PLUGIN_ERR_INTERNAL, PLUGIN_ERR_INVALID_CONFIG, PLUGIN_OK,
-    SYMBOL_CREATE, SYMBOL_DESTROY,
+    AperioLogFn, AperioPlugin, AperioPluginCreateFn, AperioPluginDestroyFn, AperioPluginSetLogFn,
+    AperioPluginType, OpenInstanceResult, LOG_LEVEL_DEBUG, LOG_LEVEL_ERROR, LOG_LEVEL_INFO,
+    LOG_LEVEL_TRACE, LOG_LEVEL_WARN, PLUGIN_ERR_INIT, PLUGIN_ERR_INTERNAL,
+    PLUGIN_ERR_INVALID_CONFIG, PLUGIN_OK, SYMBOL_CREATE, SYMBOL_DESTROY, SYMBOL_SET_LOG,
 };
 pub use archive::{inspect_archive, install_archive, InstalledArchive};
 pub use capability::Capability;

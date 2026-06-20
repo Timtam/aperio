@@ -110,6 +110,7 @@ pub mod dispatch;
 pub mod error_map;
 pub mod instance;
 pub mod interactive_auth;
+pub mod log_forward;
 pub mod macros;
 pub mod open_instance;
 pub mod probe_host_key;
