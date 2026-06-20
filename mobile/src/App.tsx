@@ -1,4 +1,5 @@
 import { createNativeBottomTabNavigator } from '@bottom-tabs/react-navigation';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   NavigationContainer,
   type NavigationState,
@@ -6,7 +7,7 @@ import {
 } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -69,6 +70,12 @@ const TasksStack = createNativeStackNavigator<RootStackParamList>();
 const CalendarStack = createNativeStackNavigator<RootStackParamList>();
 const ContactsStack = createNativeStackNavigator<RootStackParamList>();
 const SettingsStack = createNativeStackNavigator<RootStackParamList>();
+
+// Persisted last-open navigation state (the active tab + the view/route within
+// it), so reopening the app restores where you left off — like the desktop.
+// Survives launches via AsyncStorage; a corrupt value just falls back to the
+// default tab.
+const NAV_STATE_KEY = 'aperio.nav.state';
 
 // Screens that keep the native bottom tab bar: the four tab roots PLUS the
 // alternate calendar views (Week/Month/Agenda/Year are siblings of the Day view
@@ -376,6 +383,32 @@ function AppContent() {
   // Hide the native tab bar on every drill-down screen (it belongs only on the
   // four tab roots), so VoiceOver can't reach it from a sub-screen's content.
   const [tabBarHidden, setTabBarHidden] = useState(false);
+  // Restore the last-open view on launch + persist it on every navigation, so
+  // reopening lands where you left off (desktop parity). A corrupt/unreadable
+  // saved value falls back to the default initial route.
+  const [navReady, setNavReady] = useState(false);
+  const [initialNavState, setInitialNavState] = useState<
+    PartialState<NavigationState> | undefined
+  >(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    AsyncStorage.getItem(NAV_STATE_KEY)
+      .then((saved) => {
+        if (cancelled || saved == null) return;
+        try {
+          setInitialNavState(JSON.parse(saved) as PartialState<NavigationState>);
+        } catch {
+          // Corrupt value — ignore and use the default initial route.
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setNavReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   // Memoize the navigator so an unrelated app-shell re-render (e.g. the 30s
   // sync-status poll) doesn't reconcile the native nav/tab views — that
   // reconciliation resets the VoiceOver cursor mid-navigation. It rebuilds ONLY
@@ -428,6 +461,9 @@ function AppContent() {
     ),
     [t, tabBarHidden, tabBadge],
   );
+  // Hold the first render until the saved nav state is loaded, so we don't flash
+  // the default tab before restoring (the splash screen covers this brief gap).
+  if (!navReady) return null;
   return (
     <>
       {/* Dark status-bar glyphs on the light background, light glyphs on the
@@ -435,9 +471,11 @@ function AppContent() {
       <StatusBar style={theme.mode === 'light' ? 'dark' : 'light'} />
       <NavigationContainer
         theme={navigationThemeFor(theme)}
-        onStateChange={(state) =>
-          setTabBarHidden(!TAB_ROOT_ROUTES.has(deepestRouteName(state) ?? ''))
-        }
+        initialState={initialNavState}
+        onStateChange={(state) => {
+          setTabBarHidden(!TAB_ROOT_ROUTES.has(deepestRouteName(state) ?? ''));
+          if (state) void AsyncStorage.setItem(NAV_STATE_KEY, JSON.stringify(state));
+        }}
       >
         <TaskStoreProvider>
           {/* Day-start checks (deadline-pin + the review modal) — need the task
