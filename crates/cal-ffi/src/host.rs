@@ -2139,7 +2139,13 @@ impl Host {
         // creds with an ephemeral adapter BEFORE writing any row, so a bad
         // password / unreachable host fails here instead of leaving a
         // saved-but-broken account. Local has no remote → probe_account skips it.
-        self.probe_account(req.adapter_kind, &req.config_json, req.secret.as_deref())?;
+        // Gated out of unit-test builds: the probe does live network (an on-device
+        // concern, like the test_account_json probe tests); the no-network
+        // validation branches stay covered. Production always smoke-tests.
+        #[cfg(not(test))]
+        {
+            self.probe_account(req.adapter_kind, &req.config_json, req.secret.as_deref())?;
+        }
 
         let shared = self.db.shared();
         let repo = AccountsRepo::new(&shared);
