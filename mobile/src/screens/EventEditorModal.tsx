@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
   Pressable,
-  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -18,6 +17,7 @@ import { AvailabilityChecker } from '../components/AvailabilityChecker';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { DescriptionLinks } from '../components/DescriptionLinks';
 import { EventRsvp } from '../components/EventRsvp';
+import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
 import { RecurrenceSelector } from '../components/RecurrenceSelector';
 import { RemindersEditor } from '../components/RemindersEditor';
@@ -420,11 +420,7 @@ export default function EventEditorModal({
   }
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
-    >
+    <FormScrollView style={styles.screen} contentContainerStyle={styles.content}>
       {error != null && (
         <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="assertive">
           {error}
@@ -656,7 +652,7 @@ export default function EventEditorModal({
       >
         <Text style={styles.primaryButtonText}>{t('mobile.save')}</Text>
       </Pressable>
-    </ScrollView>
+    </FormScrollView>
   );
 }
 

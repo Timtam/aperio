@@ -11,7 +11,6 @@ import {
   AccessibilityInfo,
   findNodeHandle,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -39,6 +38,7 @@ import {
 import { AssigneePicker } from '../components/AssigneePicker';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { DescriptionLinks } from '../components/DescriptionLinks';
+import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
 import { RemindersEditor } from '../components/RemindersEditor';
 import { SegmentedSelect } from '../components/SegmentedSelect';
@@ -671,10 +671,9 @@ export default function TaskEditorModal({
   ]);
 
   return (
-    <ScrollView
+    <FormScrollView
       style={styles.screen}
       contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
       accessibilityViewIsModal
     >
       {error != null && (
@@ -926,7 +925,7 @@ export default function TaskEditorModal({
           <Text style={styles.ghostButtonText}>{t('mobile.cancel')}</Text>
         </Pressable>
       </View>
-    </ScrollView>
+    </FormScrollView>
   );
 }
 
