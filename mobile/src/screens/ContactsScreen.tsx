@@ -297,13 +297,39 @@ export default function ContactsScreen({
   const searchPending = searching && searchResults == null;
   const searchTotal = searchResults?.length ?? 0;
 
+  // Address books are collapsible and COLLAPSED BY DEFAULT (browse): you get a
+  // compact list of book headers and expand only the one you want, so a giant
+  // external directory doesn't bury the small personal books in the scroll view
+  // (and the headings rotor reaches every book). Session-local; search always
+  // shows its results expanded.
+  const [expandedBooks, setExpandedBooks] = useState<Set<string>>(new Set());
+  const toggleBook = useCallback((id: string) => {
+    setExpandedBooks((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
   // SectionList feed: one section per address book. A VIRTUALIZED list (cells
-  // recycled, the RN equivalent of Apple's UITableView) so a directory with
-  // thousands of contacts (an EWS global address list) scrolls smoothly instead
-  // of rendering every row up front — the cause of the massive browse lag.
-  const sections = useMemo<SectionListData<Contact, { list: ContactList }>[]>(
-    () => displayGroups.map((g) => ({ list: g.list, data: g.contacts })),
-    [displayGroups],
+  // recycled) so an expanded directory with thousands of contacts (an EWS global
+  // address list) scrolls smoothly; a collapsed section carries empty data so
+  // only its header renders.
+  const sections = useMemo<
+    SectionListData<Contact, { list: ContactList; collapsed: boolean; count: number }>[]
+  >(
+    () =>
+      displayGroups.map((g) => {
+        const collapsed = !searching && !expandedBooks.has(g.list.id);
+        return {
+          list: g.list,
+          collapsed,
+          count: g.contacts.length,
+          data: collapsed ? [] : g.contacts,
+        };
+      }),
+    [displayGroups, searching, expandedBooks],
   );
 
   const renderContact = (c: Contact, list: ContactList) => (
@@ -444,13 +470,42 @@ export default function ContactsScreen({
           initialNumToRender={20}
           windowSize={11}
           removeClippedSubviews
-          renderSectionHeader={({ section }) => (
-            <Text style={styles.groupHeading} accessibilityRole="header">
-              {section.list.name}
-            </Text>
-          )}
+          renderSectionHeader={({ section }) => {
+            const label = t('views.contacts.groupLabel', {
+              name: section.list.name,
+              count: section.count,
+            });
+            // Search shows its results — a plain header. Browsing, the header is
+            // a heading (rotor-reachable) that toggles its book open/closed,
+            // collapsed by default, announcing its expanded state.
+            if (searching) {
+              return (
+                <Text style={styles.groupHeading} accessibilityRole="header">
+                  {label}
+                </Text>
+              );
+            }
+            return (
+              <Pressable
+                accessible
+                accessibilityRole="header"
+                accessibilityLabel={label}
+                accessibilityHint={t('mobile.groupHeaderHint')}
+                accessibilityState={{ expanded: !section.collapsed }}
+                onPress={() => toggleBook(section.list.id)}
+                style={({ pressed }) => [styles.groupHeadingRow, pressed && styles.pressed]}
+              >
+                <Text style={styles.twisty} importantForAccessibility="no">
+                  {section.collapsed ? '▸' : '▾'}
+                </Text>
+                <Text style={styles.groupHeading} importantForAccessibility="no">
+                  {label}
+                </Text>
+              </Pressable>
+            );
+          }}
           renderSectionFooter={({ section }) =>
-            section.data.length === 0 ? (
+            !section.collapsed && section.count === 0 ? (
               <Text style={styles.muted}>{t('mobile.noContacts')}</Text>
             ) : null
           }
@@ -506,6 +561,16 @@ const makeStyles = (c: ThemeColors) =>
     list: { gap: 18, padding: 16 },
     group: { gap: 10 },
     groupHeading: { fontSize: 16, fontWeight: '700', color: c.textLabel },
+    // Browse: the collapsible book header (twisty + name); search reuses the
+    // bare groupHeading text above.
+    groupHeadingRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+    },
+    twisty: { fontSize: 16, width: 18, textAlign: 'center', color: c.textLabel },
     row: {
       flexDirection: 'row',
       alignItems: 'center',
