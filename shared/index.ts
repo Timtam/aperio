@@ -10,6 +10,7 @@ export * from './recurrence';
 export * from './rrule';
 export * from './dateKey';
 export * from './multiDay';
+export * from './birthdays';
 export * from './taskCascade';
 export * from './dayStart';
 export * from './links';

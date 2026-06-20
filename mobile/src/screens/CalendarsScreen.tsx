@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 
+import { isBirthdayCalendarId } from '@aperio/shared';
 import type { ColorLabel } from '@aperio/shared';
 
 import { listAccounts, type Account } from '../api/accounts';
@@ -197,17 +198,23 @@ export default function CalendarsScreen({
                     {accountLabel}
                   </Text>
                 </View>
-                {/* Every calendar is manageable now: a local calendar carries
-                    its colour/name on its row; an external one stores a
-                    host-local colour/name override (delete stays local-only). */}
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`${t('mobile.manageCalendar')}: ${cal.name}`}
-                  onPress={() => navigation.navigate('CalendarEditor', { calendarId: cal.id })}
-                  style={({ pressed }) => [styles.manageButton, pressed && styles.rowPressed]}
-                >
-                  <Text style={styles.manageButtonText}>{t('mobile.manageCalendar')}</Text>
-                </Pressable>
+                {/* Manageable calendars: a local one carries its colour/name on
+                    its row; an external one stores a host-local colour/name
+                    override (delete stays local-only). Synthetic birthday
+                    calendars are read-only with no backing row, so they offer no
+                    Manage — rename/colour/delete wouldn't apply to them. */}
+                {!isBirthdayCalendarId(cal.id) && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`${t('mobile.manageCalendar')}: ${cal.name}`}
+                    onPress={() =>
+                      navigation.navigate('CalendarEditor', { calendarId: cal.id })
+                    }
+                    style={({ pressed }) => [styles.manageButton, pressed && styles.rowPressed]}
+                  >
+                    <Text style={styles.manageButtonText}>{t('mobile.manageCalendar')}</Text>
+                  </Pressable>
+                )}
               </View>
             );
           })}
