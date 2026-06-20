@@ -264,10 +264,19 @@ impl CaldavAdapter {
                 // mark the set complete. The host then caches an unbounded
                 // window and serves any later range from the snapshot
                 // instead of forcing a fresh cold sync per view.
-                let changes = self
+                let (changes, skipped) = self
                     .multiget_events_windowed(cal_url, &hrefs, whole_collection_range())
                     .await?;
-                let new_token = self.bootstrap_token(cal_url).await;
+                // Persist the sync-token ONLY when the snapshot is complete. If the
+                // server wouldn't serve some resources, leave the token unset: the
+                // next refresh re-bootstraps and retries them. Persisting it here
+                // would advance past the gap and hide those events for good (deltas
+                // only carry future CHANGES, never the resources we skipped).
+                let new_token = if skipped == 0 {
+                    self.bootstrap_token(cal_url).await
+                } else {
+                    None
+                };
                 Ok(ChangeSet {
                     changes,
                     deletions: Vec::new(),
@@ -308,14 +317,18 @@ impl CaldavAdapter {
         cal_url: &Url,
         hrefs: &[String],
         range: DateRange,
-    ) -> CoreResult<Vec<Event>> {
+    ) -> CoreResult<(Vec<Event>, usize)> {
         // 50 resources per REPORT: small enough that even a body-heavy
         // batch lands well inside the 30s client timeout, large enough to
         // keep the round-trip count sane on big calendars.
         const MULTIGET_BATCH: usize = 50;
         let mut changes = Vec::new();
         let mut fetched = 0usize;
-        let mut failed = 0usize;
+        // Hrefs the server wouldn't serve even one-at-a-time. Tracked (not just
+        // counted) so the warning can name them, and so the caller can refuse to
+        // advance the sync-token past a gap — leaving the resources to a later
+        // retry instead of masking their events permanently.
+        let mut skipped: Vec<String> = Vec::new();
         let mut last_err: Option<CoreError> = None;
         for batch in hrefs.chunks(MULTIGET_BATCH) {
             match self.multiget_batch(cal_url, batch, range).await {
@@ -336,14 +349,14 @@ impl CaldavAdapter {
                                 fetched += n;
                             }
                             Err(e) => {
-                                failed += 1;
+                                skipped.push(href.clone());
                                 last_err = Some(e);
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    failed += 1;
+                    skipped.extend(batch.iter().cloned());
                     last_err = Some(e);
                 }
             }
@@ -352,10 +365,25 @@ impl CaldavAdapter {
         // single poison resource. Propagate so the caller serves stale and
         // retries, rather than caching an empty snapshot + persisting the
         // token (which would mask the calendar until the token resets).
-        if fetched == 0 && failed > 0 {
-            return Err(last_err.expect("failed > 0 implies a recorded error"));
+        if fetched == 0 && !skipped.is_empty() {
+            return Err(last_err.expect("a skipped resource implies a recorded error"));
         }
-        Ok(changes)
+        // Some resources came back but the server wouldn't serve others — their
+        // events are NOT in this snapshot. Surface it (host-side on mobile; on the
+        // desktop dlopen plugin this won't reach the host log yet — see the issue)
+        // and report the count so the caller leaves the sync-token un-advanced.
+        if !skipped.is_empty() {
+            tracing::warn!(
+                target: "aperio::caldav",
+                calendar = %cal_url,
+                skipped = skipped.len(),
+                hrefs = ?skipped,
+                "CalDAV multiget could not fetch some resources; their events are \
+                 omitted from this snapshot. Leaving the sync-token un-advanced so \
+                 the next refresh retries them instead of masking them permanently."
+            );
+        }
+        Ok((changes, skipped.len()))
     }
 
     /// One `calendar-multiget` REPORT for `hrefs`. Returns the in-window
@@ -625,13 +653,21 @@ impl CaldavAdapter {
         // (the bootstrap cached it unbounded), so fold the changed
         // resources in at any date — no view-window filter — and keep the
         // set marked complete.
-        let changes = self
+        let (changes, skipped) = self
             .multiget_events_windowed(cal_url, &result.changed, whole_collection_range())
             .await?;
+        // If a changed resource couldn't be fetched, keep the OLD sync-token so the
+        // next delta re-runs from here and retries it — advancing past it would drop
+        // that change permanently (the next delta would never report it again).
+        let token: &str = if skipped == 0 {
+            &next_token
+        } else {
+            sync_token
+        };
         Ok(ChangeSet {
             changes,
             deletions: result.deleted,
-            new_token: Some(format!("sync:{next_token}")),
+            new_token: Some(format!("sync:{token}")),
             full_resync: false,
             complete: true,
         })
