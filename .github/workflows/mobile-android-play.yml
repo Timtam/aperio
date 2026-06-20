@@ -1,0 +1,106 @@
+name: Mobile Android Play
+
+# Full headless Android pipeline: build the cal-ffi Rust `.so` for the Android
+# ABIs with cargo-ndk, drop them into the Expo module, then run EAS Build (+
+# optional auto-submit to the Google Play INTERNAL testing track). Unlike iOS,
+# no Mac is needed, so this is a single Linux job.
+#
+# Secrets:
+#   EXPO_TOKEN                   - an Expo access token (already used by iOS).
+#   GOOGLE_SERVICE_ACCOUNT_JSON  - the Google Play service-account key JSON, used
+#                                  ONLY for auto-submit. Build-only runs (the very
+#                                  first one) don't need it.
+#
+# The jniLibs `.so` are gitignored regenerable artifacts, so CI rebuilds them
+# fresh every run and force-adds them into an EPHEMERAL commit that EAS captures
+# (never pushed) — the binary never lives in git.
+#
+# Trigger: manual only. GitHub -> Actions -> "Mobile Android Play" -> Run
+# workflow. FIRST TIME: run with submit = false, download the AAB from the EAS
+# build page, and upload it to the Play Console once by hand (Google requires the
+# first release to be created manually). After that, submit = true auto-submits.
+# (workflow_dispatch only shows once this file is on the default branch.)
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: EAS build profile
+        default: production
+        type: choice
+        options: [production, preview]
+      submit:
+        description: Auto-submit to Google Play internal track (production only)
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add Android Rust targets
+        run: rustup target add aarch64-linux-android x86_64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Build cal-ffi .so for Android (release)
+        run: |
+          export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_ROOT}"
+          cargo ndk -t arm64-v8a -t x86_64 \
+            -o mobile/modules/cal-ffi/android/src/main/jniLibs \
+            build -p cal-ffi --release
+
+      - name: Regenerate UniFFI Kotlin bindings (match the fresh .so)
+        run: |
+          cargo build -p cal-ffi --release
+          cargo run -p cal-ffi --features cli --bin uniffi-bindgen -- \
+            generate --library target/release/libcal_ffi.so \
+            --language kotlin --out-dir target/uniffi-kotlin
+          if [ -d target/uniffi-kotlin/uniffi ]; then
+            rm -rf mobile/modules/cal-ffi/android/src/main/java/uniffi
+            cp -R target/uniffi-kotlin/uniffi mobile/modules/cal-ffi/android/src/main/java/uniffi
+          fi
+
+      - name: Ephemeral commit so EAS captures the fresh .so
+        run: |
+          AUTHOR="-c user.email=ci@aperio.local -c user.name=Aperio CI"
+          # -f past the .gitignore on jniLibs; the Kotlin bindings are tracked.
+          git $AUTHOR add -f mobile/modules/cal-ffi/android/src/main/jniLibs
+          git $AUTHOR add mobile/modules/cal-ffi/android/src/main/java/uniffi
+          git $AUTHOR commit -m "ci: vendor fresh cal-ffi .so [not pushed]" || echo "nothing to commit"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install JS deps
+        working-directory: mobile
+        run: npm ci
+
+      - name: Install eas-cli
+        run: npm i -g eas-cli
+
+      - name: Write Google service-account key (auto-submit only)
+        if: ${{ github.event.inputs.submit != 'false' }}
+        env:
+          GSA: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: printf '%s' "$GSA" > mobile/google-service-account.json
+
+      - name: EAS build (+ optional submit)
+        working-directory: mobile
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          PROFILE="${{ github.event.inputs.profile || 'production' }}"
+          SUBMIT=""
+          if [ "${{ github.event.inputs.submit }}" != "false" ] && [ "$PROFILE" = "production" ]; then
+            SUBMIT="--auto-submit"
+          fi
+          echo "eas build --platform android --profile $PROFILE $SUBMIT --non-interactive"
+          eas build --platform android --profile "$PROFILE" $SUBMIT --non-interactive

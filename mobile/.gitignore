@@ -30,6 +30,9 @@ yarn-error.*
 .DS_Store
 *.pem
 
+# Google Play service-account key (written from a CI secret; never commit)
+/google-service-account.json
+
 # local env files
 .env*.local
 
