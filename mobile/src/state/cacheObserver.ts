@@ -15,6 +15,7 @@ import { AccessibilityInfo } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
 import type { CacheRefreshStatus } from '../api/sync';
+import { hapticSyncEnd, hapticSyncStart, loadHapticsPref } from './haptics';
 import CalFfi from '../../modules/cal-ffi';
 
 /** Coarse category a cache scope belongs to — drives the announcement string +
@@ -66,6 +67,11 @@ export function useCacheUpdates(): void {
   // Last-seen warm-pass state, so we announce only the START and END of a pass.
   const refreshing = useRef(false);
 
+  // Prime the device-local haptics pref once (default on).
+  useEffect(() => {
+    void loadHapticsPref();
+  }, []);
+
   useEffect(() => {
     // Per-container writes → live-reload the focused view (coalesced). NO
     // announcement here: a slow warm pass touching many containers seconds apart
@@ -105,6 +111,8 @@ export function useCacheUpdates(): void {
       AccessibilityInfo.announceForAccessibility(
         t(next ? 'cacheRefresh.refreshing' : 'cacheRefresh.done'),
       );
+      if (next) hapticSyncStart();
+      else hapticSyncEnd();
     });
     return () => {
       subData.remove();

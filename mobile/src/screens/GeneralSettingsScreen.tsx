@@ -5,6 +5,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { RadioGroup } from '../components/RadioGroup';
 import { SoundSelect } from '../components/SoundSelect';
+import { SwitchRow } from '../components/SwitchRow';
 import {
   applyLanguageChoice,
   readLanguageChoice,
@@ -12,6 +13,7 @@ import {
   type LanguageChoice,
 } from '../settings/language';
 import { readWeekStart, writeWeekStart, type WeekStart } from '../settings/weekStart';
+import { useHapticsPref } from '../state/haptics';
 import { useSoundPref } from '../state/useSoundPref';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -31,6 +33,8 @@ export default function GeneralSettingsScreen() {
   // — Custom needs an asset store the host lacks; a custom value synced from
   // desktop still round-trips and is shown read-only by SoundSelect.
   const globalSound = useSoundPref('sound.global');
+  // Device-local haptic feedback for the external-sync start/end cues (default on).
+  const [haptics, setHaptics] = useHapticsPref();
 
   // Reflect the stored choices whenever the screen is focused (they may have
   // been applied on launch — or changed on another device — before this mounted).
@@ -110,6 +114,12 @@ export default function GeneralSettingsScreen() {
             onChange={(next) => void globalSound.save(next)}
           />
         )}
+        <SwitchRow
+          label={t('dialogs.settings.general.hapticsLabel')}
+          hint={t('dialogs.settings.general.hapticsHint')}
+          value={haptics}
+          onToggle={() => setHaptics(!haptics)}
+        />
       </View>
     </ScrollView>
   );
