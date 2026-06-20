@@ -142,6 +142,10 @@ export interface TaskList {
    *  shape so a pre-capabilities snapshot still parses. Absent → cal-core
    *  default. */
   task_capabilities?: TaskCapabilities;
+  /** Recurrence capabilities of the owning adapter (frequencies, interval,
+   *  weekday/day-of-month, end modes). Optional so a pre-capabilities snapshot
+   *  still parses. Absent → full RFC-5545. */
+  recurrence_capabilities?: RecurrenceCapabilities;
 }
 
 export type TaskStatus = 'open' | 'in_progress' | 'completed' | 'cancelled';

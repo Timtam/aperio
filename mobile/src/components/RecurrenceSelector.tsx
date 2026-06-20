@@ -9,7 +9,14 @@ import {
   nthWeekdayOfMonth,
   parseRRule,
 } from '@aperio/shared';
-import type { EndMode, Freq, MonthlyOption, ParsedRule } from '@aperio/shared';
+import type {
+  EndMode,
+  Freq,
+  MonthlyOption,
+  ParsedRule,
+  RecurrenceCapabilities,
+  RecurrenceFreq,
+} from '@aperio/shared';
 
 import { selectableCheckState, selectableRole } from '../a11y/roles';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -23,10 +30,12 @@ import { RadioGroup } from './RadioGroup';
 // checkboxes → toggle Pressables, <input type=date> → a YYYY-MM-DD field (the
 // reliable SR input used elsewhere in the event editor).
 //
-// No capability gating: the mobile Host omits recurrence_capabilities this
-// slice (every calendar reports full RFC-5545 support, the desktop FULL_CAPS
-// fallback) — exactly as the mobile TaskRecurrenceSelector. When the Host
-// starts stamping caps for external calendars, gating arrives with it.
+// Capability gating: `capabilities` (the owning calendar's recurrence caps,
+// stamped by the Host from the adapter's plugin manifest) FILTERS options the
+// backend can't store — an unsupported frequency / interval / weekday picker /
+// monthly mode / end-mode is dropped from the picker rather than offered then
+// silently lost on save. (The desktop greys them out; on mobile, hiding keeps a
+// screen-reader pass short.) Absent → full RFC-5545 (FULL_CAPS).
 
 const WEEKDAYS: { rrule: string; key: string }[] = [
   { rrule: 'MO', key: 'mon' },
@@ -37,6 +46,34 @@ const WEEKDAYS: { rrule: string; key: string }[] = [
   { rrule: 'SA', key: 'sat' },
   { rrule: 'SU', key: 'sun' },
 ];
+
+/** Permissive fallback when no `capabilities` prop is supplied — every axis
+ *  supported. Mirrors `plugin_core::RecurrenceCapabilities::default`. */
+const FULL_CAPS: RecurrenceCapabilities = {
+  frequencies: ['daily', 'weekly', 'monthly', 'yearly'],
+  interval_frequencies: ['daily', 'weekly', 'monthly', 'yearly'],
+  relative_monthly: true,
+  relative_yearly: true,
+  weekly_byday: true,
+  monthly_day_of_month: true,
+  count: true,
+  until: true,
+};
+
+/** Lowercase a selector `Freq` to the wire `RecurrenceFreq`; `NONE` → null. */
+function freqKey(freq: Freq): RecurrenceFreq | null {
+  return freq === 'NONE' ? null : (freq.toLowerCase() as RecurrenceFreq);
+}
+
+function freqSupported(freq: Freq, caps: RecurrenceCapabilities): boolean {
+  const k = freqKey(freq);
+  return k === null || caps.frequencies.includes(k);
+}
+
+function intervalSupported(freq: Freq, caps: RecurrenceCapabilities): boolean {
+  const k = freqKey(freq);
+  return k === null || caps.interval_frequencies.includes(k);
+}
 
 /** Parse an integer from a text field, clamped to [min, max]; empty/NaN → min. */
 function clampInt(raw: string, min: number, max: number): number {
@@ -49,29 +86,53 @@ export function RecurrenceSelector({
   value,
   onChange,
   start,
+  capabilities,
 }: {
   value: string | null;
   onChange: (rrule: string | null) => void;
   /** Event start date — drives the derived monthly/yearly options + defaults.
    *  Falls back to today when omitted (only matters for the derived options). */
   start?: Date;
+  /** The owning calendar's recurrence capabilities; absent → full RFC-5545. */
+  capabilities?: RecurrenceCapabilities;
 }) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
+  const caps = capabilities ?? FULL_CAPS;
   const startKey = start ? start.toDateString() : '';
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const startDate = useMemo(() => start ?? new Date(), [startKey]);
   const parsed = useMemo(() => parseRRule(value), [value]);
   // Fill start-derived defaults so the monthly/yearly controls always show
-  // concrete values, even for a legacy FREQ=MONTHLY rule with no day specifier.
-  const rule = useMemo(() => resolveAgainstStart(parsed, startDate), [parsed, startDate]);
+  // concrete values; then clamp the interval to 1 when the source can't store
+  // one for this frequency (e.g. EWS yearly) so the emitted RRULE stays honest.
+  const rule = useMemo(() => {
+    const resolved = resolveAgainstStart(parsed, startDate);
+    if (
+      resolved.freq !== 'NONE' &&
+      !intervalSupported(resolved.freq, caps) &&
+      resolved.interval !== 1
+    ) {
+      return { ...resolved, interval: 1 };
+    }
+    return resolved;
+  }, [parsed, startDate, caps]);
 
   const update = (next: ParsedRule) => onChange(buildRRule(next));
 
   const isMonthlyish = rule.freq === 'MONTHLY' || rule.freq === 'YEARLY';
+  // Relative ("third Wednesday") is gated per-frequency; an explicit
+  // day-of-month is gated by its own axis (Vikunja can't store one).
+  const relativeAllowed =
+    rule.freq === 'YEARLY' ? caps.relative_yearly : caps.relative_monthly;
   const monthlyOptions = useMemo(
-    () => (isMonthlyish ? deriveMonthlyOptions(startDate) : []),
-    [isMonthlyish, startDate],
+    () =>
+      isMonthlyish
+        ? deriveMonthlyOptions(startDate, relativeAllowed).filter(
+            (o) => o.mode !== 'DAY_OF_MONTH' || caps.monthly_day_of_month,
+          )
+        : [],
+    [isMonthlyish, startDate, relativeAllowed, caps.monthly_day_of_month],
   );
   const selectedOptionKey = monthlyOptionKey(rule);
 
@@ -101,13 +162,15 @@ export function RecurrenceSelector({
       <RadioGroup<Freq>
         label={t('dialogs.event.recurrence.label')}
         value={rule.freq}
-        options={[
-          { value: 'NONE', label: t('dialogs.event.recurrence.none') },
-          { value: 'DAILY', label: t('dialogs.event.recurrence.daily') },
-          { value: 'WEEKLY', label: t('dialogs.event.recurrence.weekly') },
-          { value: 'MONTHLY', label: t('dialogs.event.recurrence.monthly') },
-          { value: 'YEARLY', label: t('dialogs.event.recurrence.yearly') },
-        ]}
+        options={(
+          [
+            { value: 'NONE', label: t('dialogs.event.recurrence.none') },
+            { value: 'DAILY', label: t('dialogs.event.recurrence.daily') },
+            { value: 'WEEKLY', label: t('dialogs.event.recurrence.weekly') },
+            { value: 'MONTHLY', label: t('dialogs.event.recurrence.monthly') },
+            { value: 'YEARLY', label: t('dialogs.event.recurrence.yearly') },
+          ] as { value: Freq; label: string }[]
+        ).filter((o) => freqSupported(o.value, caps))}
         onChange={(freq) =>
           update({ ...rule, freq, byDay: freq === 'WEEKLY' ? rule.byDay : [] })
         }
@@ -122,9 +185,13 @@ export function RecurrenceSelector({
               })}
             </Text>
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                !intervalSupported(rule.freq, caps) && styles.inputDisabled,
+              ]}
               value={String(rule.interval)}
               onChangeText={(v) => update({ ...rule, interval: clampInt(v, 1, 365) })}
+              editable={intervalSupported(rule.freq, caps)}
               keyboardType="number-pad"
               accessibilityLabel={t('dialogs.event.recurrence.intervalLabel', {
                 unit: t(`dialogs.event.recurrence.unit.${rule.freq}`),
@@ -132,7 +199,7 @@ export function RecurrenceSelector({
             />
           </View>
 
-          {rule.freq === 'WEEKLY' && (
+          {rule.freq === 'WEEKLY' && caps.weekly_byday && (
             <View
               accessibilityLabel={t('dialogs.event.recurrence.weekdays')}
               style={styles.field}
@@ -194,9 +261,13 @@ export function RecurrenceSelector({
             label={t('dialogs.event.recurrence.endLabel')}
             value={rule.endMode}
             options={[
-              { value: 'NEVER', label: t('dialogs.event.recurrence.end.never') },
-              { value: 'COUNT', label: t('dialogs.event.recurrence.end.count') },
-              { value: 'UNTIL', label: t('dialogs.event.recurrence.end.until') },
+              { value: 'NEVER' as EndMode, label: t('dialogs.event.recurrence.end.never') },
+              ...(caps.count
+                ? [{ value: 'COUNT' as EndMode, label: t('dialogs.event.recurrence.end.count') }]
+                : []),
+              ...(caps.until
+                ? [{ value: 'UNTIL' as EndMode, label: t('dialogs.event.recurrence.end.until') }]
+                : []),
             ]}
             onChange={(endMode) => update({ ...rule, endMode })}
           />
@@ -302,6 +373,7 @@ const makeStyles = (c: ThemeColors) =>
       borderColor: c.border,
       backgroundColor: c.surface,
     },
+    inputDisabled: { opacity: 0.5 },
     weekdayRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     weekday: {
       paddingVertical: 10,

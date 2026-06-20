@@ -584,6 +584,7 @@ export default function EventEditorModal({
           value={recurrence}
           onChange={setRecurrence}
           start={recurrenceStartDate(startDate)}
+          capabilities={calendars.find((c) => c.id === calId)?.recurrence_capabilities}
         />
       )}
 

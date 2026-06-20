@@ -408,6 +408,10 @@ export default function TaskEditorModal({
     [taskLists, form.listId],
   );
   const canRecur = caps?.task_recurrence ?? true;
+  const recurrenceCaps = useMemo(
+    () => taskLists.find((l) => l.id === form.listId)?.recurrence_capabilities,
+    [taskLists, form.listId],
+  );
   const canSection = caps?.sections ?? true;
   // Colour binds to a LOCAL task on its own row; on an external task it would be
   // a host-local override (a later increment), so only offer it for local lists.
@@ -820,6 +824,7 @@ export default function TaskEditorModal({
         <TaskRecurrenceSelector
           value={form.recurrence}
           onChange={(recurrence) => update('recurrence', recurrence)}
+          capabilities={recurrenceCaps}
         />
       )}
 

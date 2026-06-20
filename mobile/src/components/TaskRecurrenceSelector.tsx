@@ -2,6 +2,8 @@ import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type {
+  RecurrenceCapabilities,
+  RecurrenceFreq,
   TaskAnchor,
   TaskFixedDate,
   TaskFreq,
@@ -16,10 +18,38 @@ import { RadioGroup } from './RadioGroup';
 
 // Mobile recurrence editor — faithful RN port of the desktop
 // TaskRecurrenceSelector. The value model + backend converters are shared
-// (@aperio/shared). The local store reports no capabilities, so (matching the
-// desktop's FULL_CAPS fallback) every axis is enabled — no capability gating.
-// <select> → RadioGroup, <input type=number> → numeric TextInput, weekday
-// checkboxes → toggle Pressables, the fixed-dates list → add/remove rows.
+// (@aperio/shared). `capabilities` (the owning list's recurrence caps, stamped
+// by the Host from the adapter's plugin manifest) FILTERS options the backend
+// can't store — an unsupported frequency / interval / weekday picker /
+// day-of-month / end-mode is dropped rather than offered then silently lost on
+// save. Absent → full RFC-5545 (FULL_CAPS). <select> → RadioGroup, numbers →
+// numeric TextInput, weekday checkboxes → Pressables, fixed-dates → rows.
+
+const FULL_CAPS: RecurrenceCapabilities = {
+  frequencies: ['daily', 'weekly', 'monthly', 'yearly'],
+  interval_frequencies: ['daily', 'weekly', 'monthly', 'yearly'],
+  relative_monthly: true,
+  relative_yearly: true,
+  weekly_byday: true,
+  monthly_day_of_month: true,
+  count: true,
+  until: true,
+};
+
+/** Lowercase a `TaskFreq` to the wire `RecurrenceFreq`; `NONE` → null. */
+function freqKey(freq: TaskFreq): RecurrenceFreq | null {
+  return freq === 'NONE' ? null : (freq.toLowerCase() as RecurrenceFreq);
+}
+
+function freqSupported(freq: TaskFreq, caps: RecurrenceCapabilities): boolean {
+  const k = freqKey(freq);
+  return k === null || caps.frequencies.includes(k);
+}
+
+function intervalSupported(freq: TaskFreq, caps: RecurrenceCapabilities): boolean {
+  const k = freqKey(freq);
+  return k === null || caps.interval_frequencies.includes(k);
+}
 
 const WEEKDAYS: { iso: string; key: string }[] = [
   { iso: 'MO', key: 'mon' },
@@ -41,12 +71,17 @@ function clampInt(raw: string, min: number, max: number): number {
 export function TaskRecurrenceSelector({
   value,
   onChange,
+  capabilities,
 }: {
   value: TaskRecurrenceValue;
   onChange: (next: TaskRecurrenceValue) => void;
+  /** The owning task list's recurrence capabilities; absent → full RFC-5545. */
+  capabilities?: RecurrenceCapabilities;
 }) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
+  const caps = capabilities ?? FULL_CAPS;
+  const intervalOk = intervalSupported(value.freq, caps);
   const update = (patch: Partial<TaskRecurrenceValue>) =>
     onChange({ ...value, ...patch });
 
@@ -57,26 +92,34 @@ export function TaskRecurrenceSelector({
   const showWeekdays =
     value.freq === 'WEEKLY' &&
     value.placement === 'SCHEDULE' &&
-    value.fixedDates.length === 0;
+    value.fixedDates.length === 0 &&
+    caps.weekly_byday;
   const showDayOfMonth =
     value.freq === 'MONTHLY' &&
     value.placement === 'SCHEDULE' &&
-    value.fixedDates.length === 0;
+    value.fixedDates.length === 0 &&
+    caps.monthly_day_of_month;
 
   return (
     <View style={styles.group}>
       <RadioGroup<TaskFreq>
         label={t('dialogs.task.recurrence.label')}
         value={value.freq}
-        options={[
-          { value: 'NONE', label: t('dialogs.task.recurrence.none') },
-          { value: 'DAILY', label: t('dialogs.task.recurrence.daily') },
-          { value: 'WEEKLY', label: t('dialogs.task.recurrence.weekly') },
-          { value: 'MONTHLY', label: t('dialogs.task.recurrence.monthly') },
-          { value: 'YEARLY', label: t('dialogs.task.recurrence.yearly') },
-        ]}
+        options={(
+          [
+            { value: 'NONE', label: t('dialogs.task.recurrence.none') },
+            { value: 'DAILY', label: t('dialogs.task.recurrence.daily') },
+            { value: 'WEEKLY', label: t('dialogs.task.recurrence.weekly') },
+            { value: 'MONTHLY', label: t('dialogs.task.recurrence.monthly') },
+            { value: 'YEARLY', label: t('dialogs.task.recurrence.yearly') },
+          ] as { value: TaskFreq; label: string }[]
+        ).filter((o) => freqSupported(o.value, caps))}
         onChange={(freq) =>
-          update({ freq, byDay: freq === 'WEEKLY' ? value.byDay : [] })
+          update({
+            freq,
+            byDay: freq === 'WEEKLY' ? value.byDay : [],
+            interval: intervalSupported(freq, caps) ? value.interval : 1,
+          })
         }
       />
 
@@ -122,11 +165,12 @@ export function TaskRecurrenceSelector({
                 })}
               </Text>
               <TextInput
-                style={styles.input}
-                value={String(value.interval)}
+                style={[styles.input, !intervalOk && styles.inputDisabled]}
+                value={String(intervalOk ? value.interval : 1)}
                 onChangeText={(v) =>
                   update({ interval: clampInt(v, minInterval, 365) })
                 }
+                editable={intervalOk}
                 keyboardType="number-pad"
                 accessibilityLabel={t('dialogs.task.recurrence.intervalLabel', {
                   unit: t(`dialogs.task.recurrence.unit.${value.freq}`),
@@ -222,8 +266,18 @@ export function TaskRecurrenceSelector({
             label={t('dialogs.task.recurrence.endLabel')}
             value={value.endMode}
             options={[
-              { value: 'NEVER', label: t('dialogs.task.recurrence.end.never') },
-              { value: 'UNTIL', label: t('dialogs.task.recurrence.end.until') },
+              {
+                value: 'NEVER' as 'NEVER' | 'UNTIL',
+                label: t('dialogs.task.recurrence.end.never'),
+              },
+              ...(caps.until
+                ? [
+                    {
+                      value: 'UNTIL' as 'NEVER' | 'UNTIL',
+                      label: t('dialogs.task.recurrence.end.until'),
+                    },
+                  ]
+                : []),
             ]}
             onChange={(endMode) => update({ endMode })}
           />
@@ -344,6 +398,7 @@ const makeStyles = (c: ThemeColors) =>
       borderColor: c.border,
       backgroundColor: c.surface,
     },
+    inputDisabled: { opacity: 0.5 },
     weekdayRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     weekday: {
       paddingVertical: 10,
