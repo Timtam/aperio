@@ -30,6 +30,7 @@ import { deleteTask, duplicateTask } from '../api/client';
 import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
 import { describeDue } from '../intl/describeDue';
 import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
+import { useCacheReload } from '../state/cacheObserver';
 import { useTaskStore } from '../state/taskStoreContext';
 import { surfaceTaskNow } from '../state/moveActions';
 import { applyTaskToggle, recomputeAncestors, statusAnnounce } from '../state/taskToggle';
@@ -65,6 +66,11 @@ export default function TasksScreen({
     colorLabels,
     invalidateData,
   } = useTaskStore();
+  // A cross-device sync round applies a peer's task changes to the local store;
+  // reload (bump dataVersion) when the sync layer signals a data change, so joined
+  // / synced tasks appear without an app restart. Other screens reload via their
+  // own useCacheReload; the Tasks screen drives reloads through dataVersion.
+  useCacheReload('tasks', invalidateData);
 
   // The shared helpers + buildEntries take a plain (key, vars) => string; adapt
   // i18next's t (whose overload union isn't directly assignable).

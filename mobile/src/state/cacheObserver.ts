@@ -51,6 +51,21 @@ function subscribeBus(cb: BusListener): () => void {
   };
 }
 
+/**
+ * Fan an immediate reload to every screen subscribed via `useCacheReload`, across
+ * ALL categories. Use after a CROSS-DEVICE sync round (or onboarding) applies a
+ * peer's data: that path writes straight to the local store and never goes
+ * through the Host's external `onCacheUpdated` push, so without this the open
+ * screens stay stale until the app restarts. Silent — it's a data reload, not the
+ * external-refresh cue.
+ */
+export function notifyDataReload(): void {
+  const categories: CacheCategory[] = ['calendar', 'tasks', 'contacts'];
+  for (const cat of categories) {
+    busListeners.forEach((l) => l(cat));
+  }
+}
+
 /** Coalesce window: a warm pass emits one event per container in a burst; wait
  *  this long after the last before announcing + reloading once per category. */
 const COALESCE_MS = 700;
