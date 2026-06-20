@@ -49,6 +49,7 @@ import { setUserPref } from '../api/prefs';
 import { useScreenA11yInert } from '../a11y/useScreenA11yInert';
 import { AppDialog } from '../components/AppDialog';
 import { RadioGroup } from '../components/RadioGroup';
+import { formatLongDateTime } from '../intl/dateFormat';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import CalFfi from '../../modules/cal-ffi';
 
@@ -75,7 +76,7 @@ function errorMessage(err: unknown): string {
 }
 
 export default function SyncScreen() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigation = useNavigation();
   const styles = useThemedStyles(makeStyles);
   // Leave the screen out of the a11y tree while it isn't focused so an
@@ -1020,7 +1021,7 @@ export default function SyncScreen() {
 
   const lastSynced =
     status?.last_synced_at != null
-      ? new Date(status.last_synced_at).toLocaleString()
+      ? formatLongDateTime(new Date(status.last_synced_at), i18n.language)
       : t('mobile.syncNever');
 
   // The external-cache status line: refreshing now → "last updated …" → "never".
@@ -1028,7 +1029,7 @@ export default function SyncScreen() {
     ? t('cacheRefresh.refreshing')
     : cacheStatus?.last_refreshed_at != null
       ? t('cacheRefresh.lastUpdated', {
-          time: new Date(cacheStatus.last_refreshed_at).toLocaleString(),
+          time: formatLongDateTime(new Date(cacheStatus.last_refreshed_at), i18n.language),
         })
       : t('cacheRefresh.never');
 
@@ -1975,7 +1976,7 @@ export default function SyncScreen() {
               >
                 {preview.snapshot_timestamp != null
                   ? t('dialogs.settings.sync.previewExisting', {
-                      time: new Date(preview.snapshot_timestamp).toLocaleString(),
+                      time: formatLongDateTime(new Date(preview.snapshot_timestamp), i18n.language),
                     })
                   : t('dialogs.settings.sync.previewNeverCompacted')}
               </Text>
@@ -2116,7 +2117,7 @@ export default function SyncScreen() {
                 : t('dialogs.settings.sync.protocolSummaryFailure', {
                     error: entry.error ?? '',
                   });
-              const when = new Date(entry.recorded_at).toLocaleString();
+              const when = formatLongDateTime(new Date(entry.recorded_at), i18n.language);
               const duration =
                 entry.duration_ms != null
                   ? t('dialogs.settings.sync.protocolDuration', { ms: entry.duration_ms })

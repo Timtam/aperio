@@ -118,7 +118,7 @@ export default function AgendaScreen({
   );
   const fmtShortDate = useCallback(
     (d: Date) =>
-      d.toLocaleDateString(i18n.language, { year: 'numeric', month: 'short', day: 'numeric' }),
+      d.toLocaleDateString(i18n.language, { year: 'numeric', month: 'long', day: 'numeric' }),
     [i18n.language],
   );
   const timeLabel = useCallback(

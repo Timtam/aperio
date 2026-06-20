@@ -107,12 +107,12 @@ export default function SearchScreen({ navigation }: RootStackScreenProps<'Searc
   const formatDate = useMemo(() => {
     const dateOnly = new Intl.DateTimeFormat(i18n.language, {
       year: 'numeric',
-      month: 'short',
+      month: 'long',
       day: 'numeric',
     });
     const dateTime = new Intl.DateTimeFormat(i18n.language, {
       year: 'numeric',
-      month: 'short',
+      month: 'long',
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit',

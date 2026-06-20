@@ -202,7 +202,7 @@ export default function ContactsScreen({
     const d = new Date(syncStatus.last_synced_at);
     if (Number.isNaN(d.getTime())) return t('dialogs.settings.contacts.neverSynced');
     const fmt = new Intl.DateTimeFormat(i18n.language, {
-      dateStyle: 'medium',
+      dateStyle: 'long',
       timeStyle: 'short',
     });
     return t('dialogs.settings.contacts.lastSynced', { time: fmt.format(d) });

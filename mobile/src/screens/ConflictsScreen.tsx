@@ -15,6 +15,7 @@ import {
   SyncConflict,
   SyncResolutionChoice,
 } from '../api/sync';
+import { formatLongDateTime } from '../intl/dateFormat';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -100,7 +101,7 @@ export default function ConflictsScreen({ navigation }: RootStackScreenProps<'Co
   );
 
   const fmtTime = useCallback(
-    (iso: string) => new Date(iso).toLocaleString(i18n.language),
+    (iso: string) => formatLongDateTime(new Date(iso), i18n.language),
     [i18n.language],
   );
 

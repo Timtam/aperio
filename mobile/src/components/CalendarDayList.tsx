@@ -172,7 +172,7 @@ export function CalendarDayList({
   const fmtDateOnly = useMemo(() => {
     const f = new Intl.DateTimeFormat(i18n.language, {
       year: 'numeric',
-      month: 'short',
+      month: 'long',
       day: 'numeric',
     });
     return (iso: string) => f.format(new Date(iso));

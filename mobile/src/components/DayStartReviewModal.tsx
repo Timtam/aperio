@@ -71,7 +71,7 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   const formatDate = useMemo(() => {
     const f = new Intl.DateTimeFormat(i18n.language, {
       year: 'numeric',
-      month: 'short',
+      month: 'long',
       day: 'numeric',
     });
     return (iso: string) => f.format(new Date(`${iso}T00:00:00`));

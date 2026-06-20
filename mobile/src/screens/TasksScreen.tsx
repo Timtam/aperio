@@ -78,7 +78,7 @@ export default function TasksScreen({
   const formatDate = useMemo(() => {
     const f = new Intl.DateTimeFormat(i18n.language, {
       year: 'numeric',
-      month: 'short',
+      month: 'long',
       day: 'numeric',
     });
     return (iso: string) => f.format(new Date(iso));

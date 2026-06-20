@@ -464,7 +464,7 @@ export default function TaskEditorModal({
   const completedLine = useMemo(() => {
     if (form.status !== 'completed' || !loaded?.completed_at) return null;
     const fmt = new Intl.DateTimeFormat(i18n.language, {
-      dateStyle: 'medium',
+      dateStyle: 'long',
       timeStyle: 'short',
     });
     return t('dialogs.task.fields.completedAt', {

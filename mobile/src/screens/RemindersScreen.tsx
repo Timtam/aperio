@@ -50,8 +50,8 @@ export default function RemindersScreen() {
   const whenLabel = useCallback(
     (iso: string): string =>
       new Date(iso).toLocaleString(i18n.language, {
-        weekday: 'short',
-        month: 'short',
+        weekday: 'long',
+        month: 'long',
         day: 'numeric',
         hour: '2-digit',
         minute: '2-digit',
