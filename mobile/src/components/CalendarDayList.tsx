@@ -357,6 +357,25 @@ export function CalendarDayList({
     [firstWritableCalendarId, navigation],
   );
 
+  // Day-anchored task create — seed the new task's scheduled day from the tapped
+  // calendar day (the task twin of addEventOnDay). Lands in the first writable
+  // task list; the editor's list picker can move it.
+  const firstWritableTaskListId = useMemo(
+    () => taskLists.find((l) => !l.read_only)?.id ?? null,
+    [taskLists],
+  );
+  const addTaskOnDay = useCallback(
+    (dayKey: string) => {
+      if (firstWritableTaskListId == null) return;
+      navigation.navigate('TaskEditor', {
+        taskId: null,
+        listId: firstWritableTaskListId,
+        initialScheduledDate: dayKey,
+      });
+    },
+    [firstWritableTaskListId, navigation],
+  );
+
   // Check off a task via the shared toggle path (honours the synced
   // task-behaviour knobs), then reload. Like the other calendar screens, focus
   // is not forcibly restored across the reload.
@@ -660,6 +679,21 @@ export function CalendarDayList({
                   >
                     <Text style={styles.newEventText}>
                       {t('toolbar.newEvent')}
+                    </Text>
+                  </Pressable>
+                )}
+                {firstWritableTaskListId != null && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`${t('toolbar.newTask')}, ${fmtFullDate(b.date)}`}
+                    onPress={() => addTaskOnDay(b.key)}
+                    style={({ pressed }) => [
+                      styles.newEventButton,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text style={styles.newEventText}>
+                      {t('toolbar.newTask')}
                     </Text>
                   </Pressable>
                 )}
