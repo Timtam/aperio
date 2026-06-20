@@ -1378,6 +1378,12 @@ export default function SyncScreen() {
           </View>
         ))}
 
+      {/* Connection setup / onboarding — ONLY while no target is configured.
+          Once a target is connected the management controls (above + below)
+          take over; the user shouldn't see the "establish a connection" form
+          again (reported on iOS). */}
+      {!status?.configured && (
+        <>
       <RadioGroup<SyncKind>
         label={t('dialogs.settings.sync.adapterKind')}
         value={kind}
@@ -2034,6 +2040,8 @@ export default function SyncScreen() {
               </Pressable>
             </View>
           )}
+        </>
+      )}
         </>
       )}
 
