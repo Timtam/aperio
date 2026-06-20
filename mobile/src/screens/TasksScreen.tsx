@@ -442,12 +442,15 @@ export default function TasksScreen({
           headerTags.current[id] = node ? findNodeHandle(node) : null;
         }}
         accessible
-        accessibilityRole="button"
+        // A VoiceOver/TalkBack HEADING so the group regions (Backlog / lists /
+        // sections / Upcoming / Done) are reachable via the headings rotor —
+        // swipe-jump between them instead of scrolling through every task. It
+        // still toggles on double-tap (onPress) + announces its expanded/
+        // collapsed state; a header isn't a "button", so it carries the explicit
+        // toggle hint itself rather than relying on the native button hint.
+        accessibilityRole="header"
         accessibilityLabel={entry.task.title}
-        // An expandable header (hasChildren + accessibilityState.expanded) is a
-        // native iOS disclosure — let VoiceOver speak its own "double tap to
-        // expand/collapse" hint rather than overriding it with a custom one.
-        accessibilityHint={entry.hasChildren ? undefined : t('mobile.groupHeaderHint')}
+        accessibilityHint={t('mobile.groupHeaderHint')}
         accessibilityState={entry.hasChildren ? { expanded: !isCollapsed } : undefined}
         onPress={() => toggleCollapsed(id, entry.task.title)}
         style={({ pressed }) => [
