@@ -47,6 +47,10 @@ pub enum SyncTrigger {
     AppStart,
     /// `tokio::time::sleep(interval)` woke the worker.
     Periodic,
+    /// An OS background-sync round (mobile BGTaskScheduler / WorkManager woke
+    /// the app while backgrounded/closed). The desktop has no equivalent — its
+    /// process-alive periodic loop already covers that window.
+    Background,
     /// The EventLogWriter's debounced kick fired.
     Kick,
     /// User clicked "Sync now" in Settings or the status badge.
@@ -68,6 +72,7 @@ impl SyncTrigger {
         match self {
             SyncTrigger::AppStart => "app_start",
             SyncTrigger::Periodic => "periodic",
+            SyncTrigger::Background => "background",
             SyncTrigger::Kick => "kick",
             SyncTrigger::Manual => "manual",
             SyncTrigger::AppExit => "app_exit",

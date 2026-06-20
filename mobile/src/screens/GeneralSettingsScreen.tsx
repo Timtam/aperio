@@ -14,6 +14,7 @@ import {
 } from '../settings/language';
 import { readWeekStart, writeWeekStart, type WeekStart } from '../settings/weekStart';
 import { useAppBadgePref } from '../state/appBadge';
+import { useBackgroundSyncPref } from '../state/backgroundSync';
 import { useHapticsPref } from '../state/haptics';
 import { useSoundPref } from '../state/useSoundPref';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -38,6 +39,9 @@ export default function GeneralSettingsScreen() {
   const [haptics, setHaptics] = useHapticsPref();
   // Device-local app-icon badge (today's open tasks + upcoming events; default on).
   const [appBadge, setAppBadge] = useAppBadgePref();
+  // Device-local OS background sync (default on) — wakes the app to sync while
+  // it's backgrounded/closed; the OS decides the exact timing.
+  const [bgSync, setBgSync] = useBackgroundSyncPref();
 
   // Reflect the stored choices whenever the screen is focused (they may have
   // been applied on launch — or changed on another device — before this mounted).
@@ -128,6 +132,18 @@ export default function GeneralSettingsScreen() {
           hint={t('dialogs.settings.general.appBadgeHint')}
           value={appBadge}
           onToggle={() => setAppBadge(!appBadge)}
+        />
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.heading} accessibilityRole="header">
+          {t('dialogs.settings.general.backgroundSyncHeading')}
+        </Text>
+        <SwitchRow
+          label={t('dialogs.settings.general.backgroundSyncLabel')}
+          hint={t('dialogs.settings.general.backgroundSyncHint')}
+          value={bgSync}
+          onToggle={() => setBgSync(!bgSync)}
         />
       </View>
     </ScrollView>

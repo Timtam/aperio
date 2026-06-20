@@ -14,11 +14,12 @@
 //                                    appended the SyncEvent; this ships it), so a
 //                                    burst of edits coalesces into one push.
 //
-// What this does NOT do (deliberately, a separate device-gated item): wake the
-// app to sync while it's backgrounded/closed. That needs the OS schedulers
-// (iOS BGTaskScheduler — unreliable timing; Android WorkManager), which are
-// genuinely platform-specific. On launch/foreground we always do a full round,
-// so a backgrounded device catches up the moment it's reopened.
+// OS-scheduled background sync (waking the app to sync while it's
+// backgrounded/closed) now lives in state/backgroundSync.ts and is registered
+// here on launch via initBackgroundSync(). It runs on the OS schedulers (iOS
+// BGTaskScheduler — system-chosen windows, often overnight; Android WorkManager
+// — a >= 15-min floor), so it's a best-effort catch-up, NOT a replacement for
+// the launch/foreground full rounds: a reopened device still catches up at once.
 //
 // Every trigger is best-effort and SILENT: a missing sync target ("not
 // configured") or a transient network error must never surface as a disruptive
@@ -29,6 +30,7 @@ import { useEffect } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
 import { refreshRemindersSoon } from '../reminders/scheduler';
+import { initBackgroundSync } from '../state/backgroundSync';
 import { getUserPref } from './prefs';
 import { pushNow, syncNow, syncStatus, warmCacheOnForeground } from './sync';
 
@@ -151,6 +153,10 @@ export function useSyncTriggers(): void {
     void autoSyncIfConfigured('app_start');
     void warmCacheOnForeground().catch(() => undefined);
     startPeriodic();
+    // Reconcile the OS background-sync registration to the device-local pref —
+    // registers (or removes) the BGTaskScheduler/WorkManager task that wakes us
+    // to sync while backgrounded/closed.
+    void initBackgroundSync();
 
     const onChange = (state: AppStateStatus) => {
       if (state === 'active') {

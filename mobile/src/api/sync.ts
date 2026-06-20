@@ -168,12 +168,14 @@ export const syncStatus = async (): Promise<SyncStatus> =>
 /** What kicked off a sync round — recorded in the sync log (the desktop
  *  `SyncTrigger`). Mobile has no scheduler, so the caller tags the context:
  *  `'manual'` (the Settings button), `'app_start'`/`'periodic'` (launch /
- *  foreground full rounds), `'kick'` (debounced push after a mutation),
- *  `'app_exit'` (the background flush). */
+ *  foreground full rounds), `'background'` (an OS background-sync round),
+ *  `'kick'` (debounced push after a mutation), `'app_exit'` (the background
+ *  flush). */
 export type SyncTrigger =
   | 'manual'
   | 'app_start'
   | 'periodic'
+  | 'background'
   | 'kick'
   | 'app_exit';
 

@@ -6491,6 +6491,7 @@ fn parse_sync_trigger(s: &str) -> SyncTrigger {
     match s {
         "app_start" => SyncTrigger::AppStart,
         "periodic" => SyncTrigger::Periodic,
+        "background" => SyncTrigger::Background,
         "kick" => SyncTrigger::Kick,
         "app_exit" => SyncTrigger::AppExit,
         _ => SyncTrigger::Manual,
