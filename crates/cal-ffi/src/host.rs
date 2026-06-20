@@ -7331,19 +7331,38 @@ mod tests {
     /// Poll (bounded) until the Host's pending sync dir has a non-empty log, so
     /// the writer's async drain has flushed before we push.
     fn wait_for_pending(dir: &tempfile::TempDir) {
+        // The writer appends events to a channel; a background drain task writes
+        // them to the session file. A test that logs SEVERAL events (e.g.
+        // CalendarCreated + EventCreated) must wait for ALL of them to reach disk
+        // before pushing — not just the first byte. Returning early (the old
+        // `bytes > 0` check) let a slow machine push a partial log, so the peer
+        // missed the later events (flaky on CI windows/macos). Wait until the
+        // total pending size is non-zero AND has stopped growing for a few
+        // consecutive samples — i.e. the drain has caught up with the queue.
         let pending = dir.path().join("sync").join("log").join("pending");
-        for _ in 0..40 {
-            let bytes: u64 = std::fs::read_dir(&pending)
+        let total = || -> u64 {
+            std::fs::read_dir(&pending)
                 .map(|es| {
                     es.flatten()
                         .filter_map(|e| std::fs::metadata(e.path()).ok())
                         .map(|m| m.len())
                         .sum()
                 })
-                .unwrap_or(0);
-            if bytes > 0 {
-                return;
+                .unwrap_or(0)
+        };
+        let mut last = 0u64;
+        let mut stable = 0u32;
+        for _ in 0..200 {
+            let bytes = total();
+            if bytes > 0 && bytes == last {
+                stable += 1;
+                if stable >= 3 {
+                    return;
+                }
+            } else {
+                stable = 0;
             }
+            last = bytes;
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
     }
