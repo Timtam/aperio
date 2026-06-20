@@ -1,10 +1,10 @@
 // Container colour-binding api-client (§8.2) — bind a calendar / task list /
-// contact list to a global colour label. The mobile twin of the desktop
-// set_container_color_label command's LOCAL branch: a local container carries
-// the binding on its own row, so the Host updates it and emits the container's
-// Updated sync event (→ background push). External containers + contact lists
-// bind via a host-local override (desktop-only for now), so the Host rejects
-// them — the UI only offers the picker for local containers.
+// contact list to a global colour label. A LOCAL container carries the binding
+// on its own row, so the Host updates it and emits the container's Updated sync
+// event (→ background push). An EXTERNAL container / contact list binds via a
+// host-LOCAL colour override (per-device, not synced) — the Host stamps it on
+// read. Both routes go through the same call; the UI offers the picker for
+// every container.
 
 import CalFfi from '../../modules/cal-ffi';
 
@@ -12,7 +12,8 @@ import { scheduleBackgroundPush } from './syncTriggers';
 
 export type ContainerKind = 'calendar' | 'task_list' | 'contact_list';
 
-/** Bind (or clear, with `null`) a LOCAL container's colour label. */
+/** Bind (or clear, with `null`) a container's colour label — on its own row for
+ *  a local container, as a host-local override for an external one. */
 export const setContainerColorLabel = async (
   containerId: string,
   kind: ContainerKind,
