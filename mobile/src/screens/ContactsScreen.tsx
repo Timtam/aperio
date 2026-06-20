@@ -23,6 +23,7 @@ import {
   searchContacts,
   syncContactsNow,
 } from '../api/contacts';
+import { useTabBarInset } from '../hooks/useTabBarInset';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useCacheReload } from '../state/cacheObserver';
 import { useContactVisibility } from '../state/contactVisibility';
@@ -54,6 +55,7 @@ export default function ContactsScreen({
 }: RootStackScreenProps<'Contacts'>) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
+  const tabBarInset = useTabBarInset();
 
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
@@ -454,7 +456,7 @@ export default function ContactsScreen({
           accessibilityRole="list"
           sections={sections}
           keyExtractor={(c) => c.id}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: tabBarInset }]}
           keyboardShouldPersistTaps="handled"
           stickySectionHeadersEnabled={false}
           initialNumToRender={20}

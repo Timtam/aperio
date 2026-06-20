@@ -14,6 +14,7 @@ import { expandAll } from '@aperio/shared';
 import { getEvents, listCalendars } from '../api/calendar';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
+import { useTabBarInset } from '../hooks/useTabBarInset';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useCacheReload } from '../state/cacheObserver';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -34,6 +35,7 @@ function errorMessage(err: unknown): string {
 export default function YearScreen({ navigation, route }: RootStackScreenProps<'Year'>) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
+  const tabBarInset = useTabBarInset();
 
   const [year, setYear] = useState(() => {
     const seed = route.params?.anchor ? new Date(route.params.anchor) : new Date();
@@ -170,7 +172,7 @@ export default function YearScreen({ navigation, route }: RootStackScreenProps<'
       <ScrollView
         accessibilityRole="list"
         accessibilityLabel={t('views.year.gridLabel')}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, { paddingBottom: tabBarInset }]}
         keyboardShouldPersistTaps="handled"
       >
         {months.map((mo) => (

@@ -28,6 +28,7 @@ import {
 
 import { deleteTask, duplicateTask } from '../api/client';
 import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
+import { useTabBarInset } from '../hooks/useTabBarInset';
 import { describeDue } from '../intl/describeDue';
 import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
 import { useCacheReload } from '../state/cacheObserver';
@@ -57,6 +58,7 @@ export default function TasksScreen({
 }: RootStackScreenProps<'Tasks'>) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
+  const tabBarInset = useTabBarInset();
   const { tasks, loading, taskListById } = useTasks();
   const {
     selectedTaskListIds,
@@ -605,7 +607,7 @@ export default function TasksScreen({
       ) : (
         <ScrollView
           accessibilityRole="list"
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: tabBarInset }]}
           keyboardShouldPersistTaps="handled"
         >
           {entries

@@ -23,6 +23,7 @@ import { listColorLabels } from '../api/colorLabels';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { JumpToDateButton } from '../components/JumpToDateButton';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
+import { useTabBarInset } from '../hooks/useTabBarInset';
 import { resolveEventColor } from '../intl/eventColor';
 import { useCacheReload } from '../state/cacheObserver';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
@@ -54,6 +55,7 @@ function errorMessage(err: unknown): string {
 export default function EventsScreen({ navigation, route }: RootStackScreenProps<'Events'>) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
+  const tabBarInset = useTabBarInset();
 
   // The selected day at local midnight (date-only semantics for the heading).
   // Seeded from the Day⇄Agenda switcher's `anchor` param so switching keeps the
@@ -336,7 +338,7 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
       ) : (
         <ScrollView
           accessibilityRole="list"
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: tabBarInset }]}
           keyboardShouldPersistTaps="handled"
         >
           {events.map((ev) => {

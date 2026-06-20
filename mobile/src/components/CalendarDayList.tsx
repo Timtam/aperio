@@ -50,6 +50,7 @@ import {
   listTaskLists,
 } from '../api/client';
 import { listColorLabels } from '../api/colorLabels';
+import { useTabBarInset } from '../hooks/useTabBarInset';
 import { resolveEventColor } from '../intl/eventColor';
 import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
 import type { RootStackParamList } from '../navigation/types';
@@ -118,6 +119,7 @@ export function CalendarDayList({
 }: CalendarDayListProps) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
+  const tabBarInset = useTabBarInset();
 
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [colorLabels, setColorLabels] = useState<ColorLabel[]>([]);
@@ -652,7 +654,7 @@ export function CalendarDayList({
           accessibilityRole="list"
           accessibilityLabel={gridLabel}
           style={styles.scroll}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: tabBarInset }]}
           keyboardShouldPersistTaps="handled"
         >
           {buckets.map((b) => {

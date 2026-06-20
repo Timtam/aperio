@@ -28,6 +28,7 @@ import { listColorLabels } from '../api/colorLabels';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { JumpToDateButton } from '../components/JumpToDateButton';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
+import { useTabBarInset } from '../hooks/useTabBarInset';
 import { resolveEventColor } from '../intl/eventColor';
 import { useCacheReload } from '../state/cacheObserver';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
@@ -71,6 +72,7 @@ export default function AgendaScreen({
 }: RootStackScreenProps<'Agenda'>) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
+  const tabBarInset = useTabBarInset();
 
   // Window anchor (local midnight); seeded from the switcher's `anchor` param so
   // switching Day⇄Agenda keeps the selected date, else today.
@@ -333,7 +335,7 @@ export default function AgendaScreen({
         <ScrollView
           accessibilityRole="list"
           accessibilityLabel={t('views.agenda.eventList')}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: tabBarInset }]}
           keyboardShouldPersistTaps="handled"
         >
           {(() => {
