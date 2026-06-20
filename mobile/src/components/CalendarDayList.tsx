@@ -614,6 +614,7 @@ export function CalendarDayList({
         <ScrollView
           accessibilityRole="list"
           accessibilityLabel={gridLabel}
+          style={styles.scroll}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
         >
@@ -673,6 +674,7 @@ export function CalendarDayList({
 
 const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
+    scroll: { flex: 1 },
     list: { gap: 8, padding: 16 },
     daySection: { gap: 8 },
     newEventButton: {

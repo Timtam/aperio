@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 
 import { CalendarDayList } from '../components/CalendarDayList';
+import { CalendarPager } from '../components/CalendarPager';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -58,6 +59,17 @@ export default function MonthScreen({ navigation, route }: RootStackScreenProps<
     () => anchor.toLocaleDateString(i18n.language, { month: 'long', year: 'numeric' }),
     [anchor, i18n.language],
   );
+
+  // Announce the period on navigation (the three-finger swipe / prev-next change
+  // the month silently otherwise). Skip the first render — nothing changed yet.
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    announce(monthLabel);
+  }, [monthLabel, announce]);
 
   const goToday = useCallback(() => setAnchor(localMidnight(new Date())), []);
 
@@ -148,14 +160,18 @@ export default function MonthScreen({ navigation, route }: RootStackScreenProps<
         </Text>
       )}
 
-      <CalendarDayList
-        navigation={navigation}
-        days={days}
-        range={range}
-        gridLabel={t('views.month.gridLabel')}
-        emptyText={t('views.month.empty')}
-        dayAnnounceKey="views.month.dayAnnounce"
-      />
+      {/* Three-finger swipe (VoiceOver) / horizontal flick pages between months;
+          vertical scrolling stays with the day list. */}
+      <CalendarPager onPrev={() => stepMonth(-1)} onNext={() => stepMonth(1)}>
+        <CalendarDayList
+          navigation={navigation}
+          days={days}
+          range={range}
+          gridLabel={t('views.month.gridLabel')}
+          emptyText={t('views.month.empty')}
+          dayAnnounceKey="views.month.dayAnnounce"
+        />
+      </CalendarPager>
     </View>
   );
 }
