@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { AccessibilityInfo, AppState } from 'react-native';
 
 import { syncConflictCount, syncStatus, type SyncStatus } from '../api/sync';
+import { subscribeSyncActivity } from './syncActivity';
 
 // App-wide sync-status surfacing — the mobile twin of the desktop
 // SyncStatusIndicator + useSync (DESIGN §19.9). Polls the (already-bridged)
@@ -82,6 +83,19 @@ export function useSyncStatus(): SyncStatusInfo {
       sub.remove();
     };
   }, [refresh]);
+
+  // Re-read the status the moment a sync round finishes — the 30s poll is too
+  // coarse to catch the just-settled state (a fresh conflict, a cleared error,
+  // an updated last_synced_at). The indicator itself flips to "uploading" while
+  // the round runs via syncActivity; this just pulls the result. Guarded by
+  // sameStatus, so it only re-renders the shell on a real change.
+  useEffect(
+    () =>
+      subscribeSyncActivity((active) => {
+        if (!active) void refresh();
+      }),
+    [refresh],
+  );
 
   const tone = toneOf(status, conflictCount);
   const isAuthError = tone === 'error' && status?.last_error_code === 'auth';

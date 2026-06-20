@@ -5,6 +5,7 @@
 
 import CalFfi from '../../modules/cal-ffi';
 import { notifyDataReload } from '../state/cacheObserver';
+import { withSyncActivity } from '../state/syncActivity';
 
 /** The active sync target. Mirrors the desktop `SyncAdapterConfig` enum; the
  *  password-only network kinds (webdav, ftp) + the OAuth kinds (dropbox,
@@ -185,7 +186,11 @@ export type SyncTrigger =
 export const syncNow = async (
   trigger: SyncTrigger = 'manual',
 ): Promise<SyncRoundReport> => {
-  const report = JSON.parse(await CalFfi.syncNowJson(trigger)) as SyncRoundReport;
+  // withSyncActivity surfaces "uploading" on the status indicator for the
+  // round's duration (the 30s status poll can't catch the in-flight window).
+  const report = await withSyncActivity(
+    async () => JSON.parse(await CalFfi.syncNowJson(trigger)) as SyncRoundReport,
+  );
   // A round applies a peer's changes straight to the local store — that path
   // doesn't go through the Host's external onCacheUpdated push, so nudge the open
   // screens to reload, else the data only shows after a restart.
@@ -299,9 +304,9 @@ export const syncConflictCount = (): Promise<number> => CalFfi.syncConflictCount
  *  from the configured target + clear the stale flag. Returns the
  *  OnboardingReport; rejects when no target is configured. */
 export const resumeStaleDevice = async (): Promise<OnboardingReport> => {
-  const report = JSON.parse(
-    await CalFfi.resumeStaleDeviceJson(),
-  ) as OnboardingReport;
+  const report = await withSyncActivity(
+    async () => JSON.parse(await CalFfi.resumeStaleDeviceJson()) as OnboardingReport,
+  );
   if ((report.applied ?? 0) > 0) notifyDataReload();
   return report;
 };
@@ -430,13 +435,16 @@ export const acceptRemoteDataset = async (
   deviceName: string | null,
   passphrase: string | null,
 ): Promise<OnboardingReport> => {
-  const report = JSON.parse(
-    await CalFfi.acceptRemoteDatasetJson(
-      JSON.stringify(config),
-      deviceName,
-      passphrase,
-    ),
-  ) as OnboardingReport;
+  const report = await withSyncActivity(
+    async () =>
+      JSON.parse(
+        await CalFfi.acceptRemoteDatasetJson(
+          JSON.stringify(config),
+          deviceName,
+          passphrase,
+        ),
+      ) as OnboardingReport,
+  );
   // Joining pulls + applies the peer dataset to the local store; reload the open
   // screens so it shows without a restart.
   if ((report.applied ?? 0) > 0) notifyDataReload();
@@ -454,10 +462,13 @@ export const adoptLocalDataset = async (
   deviceName: string | null,
   passphrase: string | null = null,
 ): Promise<OnboardingReport> =>
-  JSON.parse(
-    await CalFfi.adoptLocalDatasetJson(
-      JSON.stringify(config),
-      deviceName,
-      passphrase,
-    ),
-  ) as OnboardingReport;
+  withSyncActivity(
+    async () =>
+      JSON.parse(
+        await CalFfi.adoptLocalDatasetJson(
+          JSON.stringify(config),
+          deviceName,
+          passphrase,
+        ),
+      ) as OnboardingReport,
+  );
