@@ -91,6 +91,7 @@
     "allDay": "All day",
     "showingDate": "Events on {{date}}",
     "syncTitle": "Sync",
+    "syncRefreshHint": "Double tap to sync and refresh external data now.",
     "syncButtonLabel": "Sync",
     "syncStatusConfigured": "Sync target configured.",
     "syncStatusNotConfigured": "No sync target configured yet.",

@@ -12,7 +12,9 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useSyncTriggers } from './api/syncTriggers';
 import DayStartReviewModal from './components/DayStartReviewModal';
+import { SyncStatusButton } from './components/SyncStatusButton';
 import { useCacheUpdates } from './state/cacheObserver';
+import { SyncStatusContext } from './state/syncStatusContext';
 import { ThemeProvider, useTheme, navigationThemeFor } from './theme';
 import type { RootStackParamList, RootTabParamList } from './navigation/types';
 import { useReminderTriggers } from './reminders/scheduler';
@@ -84,6 +86,10 @@ const TAB_ROOT_ROUTES = new Set([
   'Year',
 ]);
 
+// The header sync indicator, shared by every main screen (the tab bar can't
+// carry an accessible label, so it lives in the header instead).
+const syncHeaderRight = () => <SyncStatusButton />;
+
 /** Name of the deepest focused route across the nested navigators. */
 function deepestRouteName(
   state: NavigationState | PartialState<NavigationState> | undefined,
@@ -101,7 +107,7 @@ function TasksStackNav() {
       <TasksStack.Screen
         name="Tasks"
         component={TasksScreen}
-        options={{ title: t('views.tasks.title') }}
+        options={{ title: t('views.tasks.title'), headerRight: syncHeaderRight }}
       />
       <TasksStack.Screen
         name="Lists"
@@ -163,27 +169,27 @@ function CalendarStackNav() {
       <CalendarStack.Screen
         name="Events"
         component={EventsScreen}
-        options={{ title: t('mobile.eventsTitle') }}
+        options={{ title: t('mobile.eventsTitle'), headerRight: syncHeaderRight }}
       />
       <CalendarStack.Screen
         name="Week"
         component={WeekScreen}
-        options={{ title: t('views.week.title') }}
+        options={{ title: t('views.week.title'), headerRight: syncHeaderRight }}
       />
       <CalendarStack.Screen
         name="Month"
         component={MonthScreen}
-        options={{ title: t('views.month.title') }}
+        options={{ title: t('views.month.title'), headerRight: syncHeaderRight }}
       />
       <CalendarStack.Screen
         name="Agenda"
         component={AgendaScreen}
-        options={{ title: t('views.agenda.title') }}
+        options={{ title: t('views.agenda.title'), headerRight: syncHeaderRight }}
       />
       <CalendarStack.Screen
         name="Year"
         component={YearScreen}
-        options={{ title: t('views.year.title') }}
+        options={{ title: t('views.year.title'), headerRight: syncHeaderRight }}
       />
       <CalendarStack.Screen
         name="Calendars"
@@ -228,7 +234,7 @@ function ContactsStackNav() {
       <ContactsStack.Screen
         name="Contacts"
         component={ContactsScreen}
-        options={{ title: t('sidebar.contactLists') }}
+        options={{ title: t('sidebar.contactLists'), headerRight: syncHeaderRight }}
       />
       <ContactsStack.Screen
         name="ContactLists"
@@ -416,7 +422,9 @@ function AppContent() {
               store, so they mount inside the provider; the review modal overlays
               the focused tab when the gate opens it. */}
           <DayStartChecks />
-          {tabs}
+          {/* The root sync-status poll feeds the per-screen header indicator
+              (the tab bar can't carry an accessible label). */}
+          <SyncStatusContext.Provider value={sync}>{tabs}</SyncStatusContext.Provider>
         </TaskStoreProvider>
       </NavigationContainer>
     </>

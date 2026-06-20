@@ -91,6 +91,7 @@
     "allDay": "Ganztägig",
     "showingDate": "Termine am {{date}}",
     "syncTitle": "Synchronisierung",
+    "syncRefreshHint": "Zum sofort Synchronisieren und Aktualisieren externer Daten doppeltippen.",
     "syncButtonLabel": "Sync",
     "syncStatusConfigured": "Sync-Ziel konfiguriert.",
     "syncStatusNotConfigured": "Noch kein Sync-Ziel konfiguriert.",
