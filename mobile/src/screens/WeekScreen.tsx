@@ -1,13 +1,7 @@
+import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  AccessibilityInfo,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CalendarDayList } from '../components/CalendarDayList';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
@@ -66,13 +60,6 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
     return localMidnight(Number.isNaN(seed.getTime()) ? new Date() : seed);
   });
   const [weekStart, setWeekStart] = useState<WeekStart>(1);
-  const [jumpText, setJumpText] = useState('');
-  const [jumpError, setJumpError] = useState<string | null>(null);
-
-  const announce = useCallback(
-    (message: string) => AccessibilityInfo.announceForAccessibility(message),
-    [],
-  );
 
   // Read the synced week-start pref on mount + whenever the screen regains focus
   // (it can change in Settings on this or another device).
@@ -103,20 +90,6 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
   const isoWeek = useMemo(() => isoWeekNumber(addDays(days[0], 3)), [days]);
 
   const goToday = useCallback(() => setAnchor(localMidnight(new Date())), []);
-
-  const jumpToDate = useCallback(() => {
-    const raw = jumpText.trim();
-    if (raw === '') return;
-    const parsed = new Date(`${raw}T00:00`);
-    if (Number.isNaN(parsed.getTime())) {
-      setJumpError(t('dialogs.event.dateInvalid'));
-      announce(t('dialogs.event.dateInvalid'));
-      return;
-    }
-    setJumpError(null);
-    setJumpText('');
-    setAnchor(localMidnight(parsed));
-  }, [announce, jumpText, t]);
 
   return (
     <View style={styles.screen}>
@@ -160,32 +133,19 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
         >
           <Text style={styles.ghostButtonText}>{t('mobile.today')}</Text>
         </Pressable>
-        <TextInput
-          style={styles.jumpInput}
-          value={jumpText}
-          onChangeText={setJumpText}
-          placeholder="YYYY-MM-DD"
-          accessibilityLabel={t('mobile.jumpToDate')}
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="go"
-          onSubmitEditing={jumpToDate}
-        />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('mobile.jumpToDateAction')}
-          onPress={jumpToDate}
-          style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
-        >
-          <Text style={styles.ghostButtonText}>{t('mobile.jumpToDateAction')}</Text>
-        </Pressable>
-      </View>
-
-      {jumpError != null && (
-        <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="assertive">
-          {jumpError}
+        <Text style={styles.jumpLabel} accessibilityRole="text">
+          {t('mobile.jumpToDateNative')}
         </Text>
-      )}
+        {/* Native date picker (Apple-Reminders-style compact field) — commits on
+            selection; any day selects its week. */}
+        <DateTimePicker
+          mode="date"
+          display="compact"
+          value={anchor}
+          onValueChange={(_, date) => setAnchor(localMidnight(date))}
+          locale={i18n.language}
+        />
+      </View>
 
       <CalendarDayList
         navigation={navigation}
@@ -237,17 +197,6 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surfaceAlt,
     },
     ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
-    jumpInput: {
-      flex: 1,
-      fontSize: 16,
-      color: c.textPrimary,
-      paddingVertical: 10,
-      paddingHorizontal: 14,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: c.border,
-      backgroundColor: c.surface,
-    },
-    error: { fontSize: 15, fontWeight: '600', color: c.danger, paddingHorizontal: 16 },
+    jumpLabel: { fontSize: 15, fontWeight: '600', color: c.textLabel },
     pressed: { opacity: 0.7 },
   });
