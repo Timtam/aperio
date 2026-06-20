@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import type { AccessibilityRole } from 'react-native';
+import type { AccessibilityRole, AccessibilityState } from 'react-native';
 
 /**
  * iOS/VoiceOver has no `radio` or `checkbox` accessibility trait — those
@@ -20,4 +20,17 @@ import type { AccessibilityRole } from 'react-native';
  */
 export function selectableRole(role: 'radio' | 'checkbox'): AccessibilityRole {
   return Platform.OS === 'ios' ? 'button' : role;
+}
+
+/**
+ * Multi-select state for a `checkbox` option. On iOS the option is a `button`
+ * (no checkbox trait exists), and VoiceOver does NOT reliably speak the
+ * `checked` state on a button — so a tapped item reads like a plain button with
+ * no on/off cue ("simulated checkbox"). Use the `selected` trait instead — the
+ * native iOS multi-select idiom that VoiceOver announces as "selected", exactly
+ * as the radio options already do. Android keeps `checked` on its real
+ * `android.widget.CheckBox`, which TalkBack announces first-class.
+ */
+export function selectableCheckState(checked: boolean): AccessibilityState {
+  return Platform.OS === 'ios' ? { selected: checked } : { checked };
 }

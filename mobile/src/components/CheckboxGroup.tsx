@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { selectableRole } from '../a11y/roles';
+import { selectableCheckState, selectableRole } from '../a11y/roles';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 export interface CheckboxOption {
@@ -42,7 +42,7 @@ export function CheckboxGroup({
             key={opt.value}
             accessible
             accessibilityRole={selectableRole('checkbox')}
-            accessibilityState={{ checked }}
+            accessibilityState={selectableCheckState(checked)}
             accessibilityLabel={opt.label}
             onPress={() => onToggle(opt.value)}
             style={({ pressed }) => [
