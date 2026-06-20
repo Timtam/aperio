@@ -718,6 +718,34 @@ pub fn delete_calendar_item(
     wrap(&body)
 }
 
+/// SOAP body for `DeleteItem` against a TASK. A task REQUIRES the
+/// `AffectedTaskOccurrences` attribute — EWS rejects a task delete that omits it
+/// with `ErrorAffectedTaskOccurrencesRequired` (a calendar item's
+/// `SendMeetingCancellations` is the wrong attribute and not enough). Reusing
+/// [`delete_calendar_item`] for tasks is why both the direct delete AND the
+/// cross-list move's source-delete failed. `AllOccurrences` removes the whole
+/// task (and every occurrence of a recurring/regenerating one); a task has no
+/// meeting to cancel, so `SendMeetingCancellations` is omitted.
+pub fn delete_task_item(item_id: &str, change_key: Option<&str>) -> String {
+    let id_attr = match change_key {
+        Some(ck) => format!(
+            r#"<t:ItemId Id="{}" ChangeKey="{}"/>"#,
+            escape_xml(item_id),
+            escape_xml(ck),
+        ),
+        None => format!(r#"<t:ItemId Id="{}"/>"#, escape_xml(item_id)),
+    };
+    let body = format!(
+        r#"    <m:DeleteItem DeleteType="MoveToDeletedItems"
+                   AffectedTaskOccurrences="AllOccurrences">
+      <m:ItemIds>
+        {id_attr}
+      </m:ItemIds>
+    </m:DeleteItem>"#,
+    );
+    wrap(&body)
+}
+
 /// SOAP body for an RSVP response object — `AcceptItem`, `DeclineItem`
 /// or `TentativelyAcceptItem`. EWS models a meeting reply as a *new*
 /// item created against the meeting via `<t:ReferenceItemId>`; the
@@ -977,6 +1005,19 @@ mod tests {
         assert!(body.contains(r#"DeleteType="MoveToDeletedItems""#));
         assert!(body.contains(r#"Id="ITEM-ID""#));
         assert!(body.contains(r#"ChangeKey="IK""#));
+    }
+
+    #[test]
+    fn delete_task_item_requires_affected_task_occurrences() {
+        let body = delete_task_item("TID", Some("TCK"));
+        assert!(body.contains("DeleteItem"));
+        assert!(body.contains(r#"DeleteType="MoveToDeletedItems""#));
+        // EWS rejects a task delete without this: ErrorAffectedTaskOccurrencesRequired.
+        assert!(body.contains(r#"AffectedTaskOccurrences="AllOccurrences""#));
+        assert!(body.contains(r#"Id="TID""#));
+        assert!(body.contains(r#"ChangeKey="TCK""#));
+        // A task isn't a meeting — the calendar-only cancellation attribute is gone.
+        assert!(!body.contains("SendMeetingCancellations"));
     }
 
     #[test]

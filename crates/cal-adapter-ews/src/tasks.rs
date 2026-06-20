@@ -78,7 +78,7 @@ use crate::mapping::{
     parse_first_item_id, rrule_to_ews_recurrence, split_calendar_id, EwsRecurrence,
     RecurrenceWalker,
 };
-use crate::soap::{delete_calendar_item, escape_xml};
+use crate::soap::{delete_task_item, escape_xml};
 
 /// DESIGN §9.12: the Aperio-Extras blob rides an invisible EWS extended
 /// property (a custom named property — `PropertySetId` + `PropertyName`),
@@ -161,12 +161,13 @@ pub async fn update_task(client: &EwsClient, task: &Task) -> EwsResult<Task> {
     })
 }
 
-/// Delete a task. `DeleteItem` works on any item type so we reuse
-/// the CalendarItem envelope — the server doesn't care whether the
-/// id points at an appointment or a task.
+/// Delete a task. A task's `DeleteItem` REQUIRES the `AffectedTaskOccurrences`
+/// attribute — EWS rejects it otherwise with `ErrorAffectedTaskOccurrencesRequired`
+/// — so it uses the task-specific envelope, NOT the calendar-item one (reusing
+/// that is what broke the direct delete + the cross-list move's source-delete).
 pub async fn delete_task(client: &EwsClient, task_id: &str) -> EwsResult<()> {
     let (item_id, change_key) = split_calendar_id(task_id);
-    let envelope = delete_calendar_item(&item_id, change_key.as_deref(), false);
+    let envelope = delete_task_item(&item_id, change_key.as_deref());
     client.post_soap(envelope).await?;
     Ok(())
 }
@@ -1929,7 +1930,13 @@ mod tests {
 </s:Envelope>"#;
         let _m = server
             .mock("POST", "/")
-            .match_body(mockito::Matcher::Regex(r#"Id="TID""#.into()))
+            // The delete must carry the task id AND AffectedTaskOccurrences (a task
+            // delete without it is rejected ErrorAffectedTaskOccurrencesRequired);
+            // if the envelope drops it the mock won't match and the test fails.
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex(r#"Id="TID""#.into()),
+                mockito::Matcher::Regex("AffectedTaskOccurrences".into()),
+            ]))
             .with_status(200)
             .with_body(body)
             .create_async()
