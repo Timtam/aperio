@@ -353,6 +353,8 @@
       "birthdayHint": "Optional — das Geburtsdatum des Kontakts.",
       "birthdayAdd": "Geburtstag hinzufügen",
       "birthdayClear": "Geburtstag entfernen",
+      "memberCount_one": "{{count}} Mitglied",
+      "memberCount_other": "{{count}} Mitglieder",
       "notesLabel": "Notizen",
       "addressesLabel": "Postanschriften",
       "addressesEmpty": "Noch keine Postanschriften hinterlegt.",

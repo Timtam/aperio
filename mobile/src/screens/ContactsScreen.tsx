@@ -267,9 +267,16 @@ export default function ContactsScreen({
     [announce, load, t],
   );
 
-  /** Subtitle: organization, else the first email/phone — context without bloat. */
-  const subtitle = (c: Contact): string =>
-    c.organization ?? c.emails[0] ?? c.phone_numbers[0] ?? '';
+  /** Subtitle: a group's member count, else organization / first email / phone —
+   *  context without bloat. */
+  const subtitle = (c: Contact): string => {
+    // A distribution list (group) carries `members`; show its size (a group has
+    // no organization/email/phone), so the row reads as a group + its count.
+    if (c.members != null) {
+      return t('dialogs.contact.memberCount', { count: c.members.length });
+    }
+    return c.organization ?? c.emails[0] ?? c.phone_numbers[0] ?? '';
+  };
 
   const total = groups.reduce((n, g) => n + g.contacts.length, 0);
   // Whether any address book is actually syncable (an external provider). Local
