@@ -109,6 +109,17 @@ typedef enum AperioPluginType {
 #define APERIO_PLUGIN_CALL_ERR_INTERNAL   10
 
 /*
+ * Log-severity levels handed to the `aperio_plugin_set_log` sink.
+ * Mirror `tracing::Level` (1 = most severe); the Rust side spells
+ * these `LOG_LEVEL_*` in `crates/plugin-core/src/abi.rs`.
+ */
+#define APERIO_PLUGIN_LOG_LEVEL_ERROR  1
+#define APERIO_PLUGIN_LOG_LEVEL_WARN   2
+#define APERIO_PLUGIN_LOG_LEVEL_INFO   3
+#define APERIO_PLUGIN_LOG_LEVEL_DEBUG  4
+#define APERIO_PLUGIN_LOG_LEVEL_TRACE  5
+
+/*
  * Plugin-owned byte buffer crossing the FFI boundary. Used both
  * for `OpenInstanceResult.error` and as the payload field on
  * every vtable call result.
@@ -250,6 +261,38 @@ typedef struct AperioPlugin {
  */
 AperioPlugin *aperio_plugin_create(void);
 void          aperio_plugin_destroy(AperioPlugin *plugin);
+
+/*
+ * Host-supplied log sink (see `aperio_plugin_set_log`).
+ *
+ * `level` is one of the APERIO_PLUGIN_LOG_LEVEL_* constants. `target`
+ * and `message` are NUL-terminated UTF-8 valid only for the duration
+ * of the call — copy them if you need to retain anything. The
+ * callback MUST NOT unwind (throw / panic) across the FFI boundary.
+ */
+typedef void (*AperioLogFn)(uint8_t level, const char *target, const char *message);
+
+/*
+ * Optional: log-sink installer.
+ *
+ * The host calls this exactly once, right after `aperio_plugin_create`,
+ * to hand the plugin a host-side log sink. A plugin that exports it
+ * should forward each of its own log events by calling `log` with the
+ * severity (an APERIO_PLUGIN_LOG_LEVEL_* value), the event target, and
+ * the rendered message, so its diagnostics reach the host log
+ * (`data/logs/aperio.log`). The host re-emits forwarded events under
+ * the tracing target `aperio::plugin`, preserving the plugin's own
+ * target in a `source` field.
+ *
+ * Each plugin shared library links its own logging stack, so without
+ * this its diagnostics never reach the host. MAY be left unexported:
+ * plugins built before this ABI addition simply don't forward, and
+ * the host treats a missing symbol as "no log forwarding" (a
+ * best-effort lookup, never a load error). Under static linking (the
+ * mobile build) the plugin already shares the host's logging global,
+ * so the host never calls this.
+ */
+void aperio_plugin_set_log(AperioLogFn log);
 
 /*
  * Optional: interactive authentication entry point.

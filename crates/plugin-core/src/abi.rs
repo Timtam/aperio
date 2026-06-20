@@ -254,6 +254,18 @@ mod tests {
     }
 
     #[test]
+    fn log_levels_match_c_header_values() {
+        // Mirror APERIO_PLUGIN_LOG_LEVEL_* in include/aperio_plugin.h.
+        // The header sync is convention-enforced (no codegen), so this
+        // guards against silent Rust-side drift.
+        assert_eq!(LOG_LEVEL_ERROR, 1);
+        assert_eq!(LOG_LEVEL_WARN, 2);
+        assert_eq!(LOG_LEVEL_INFO, 3);
+        assert_eq!(LOG_LEVEL_DEBUG, 4);
+        assert_eq!(LOG_LEVEL_TRACE, 5);
+    }
+
+    #[test]
     fn open_instance_missing_hook_is_failure_with_null_handle() {
         let r = OpenInstanceResult::missing_hook();
         assert!(r.instance.is_null());

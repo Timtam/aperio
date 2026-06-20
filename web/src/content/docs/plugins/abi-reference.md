@@ -3,9 +3,11 @@ title: "The C ABI"
 ---
 
 The host loads a plugin as a shared library and calls into it through a
-stable, versioned C ABI defined in the `plugin-core` crate (with a mirror
-C header, `aperio_plugin_vtables.h`). You normally interact with it through
-the [Rust SDK](/plugins/rust-sdk/); this chapter documents the contract itself.
+stable, versioned C ABI defined in the `plugin-core` crate, mirrored by the
+hand-maintained C headers `aperio_plugin.h` (lifecycle + exported symbols) and
+`aperio_plugin_vtables.h` (the capability vtables). You normally interact with
+it through the [Rust SDK](/plugins/rust-sdk/); this chapter documents the
+contract itself.
 
 ## Lifecycle
 
@@ -19,9 +21,12 @@ A plugin exports a small set of `extern "C"` symbols the host calls:
   handle (a pointer) on success, or an error.
 - **`plugin_close_instance(handle)`** — destroy the instance and free its
   resources.
+- **`aperio_plugin_set_log(log_fn)`** *(optional)* — the host calls this once,
+  right after creation, to hand the plugin a host-side log sink so the
+  plugin's diagnostics reach the host log. See [Logging](#logging).
 
-The SDK's `declare_lifecycle!` macro generates these plus the metadata
-exports.
+The SDK's `declare_lifecycle!` and `declare_cdylib_exports!` macros generate
+these for you (including the metadata and log exports).
 
 ## Vtables: one table per capability
 
@@ -71,6 +76,46 @@ encodes results for you.
   handles this) — the plugin allocates, the host signals when done.
 - The instance handle is owned by the plugin and freed only in
   `plugin_close_instance`.
+
+## Logging
+
+A plugin shared library links its own logging stack, so by default its
+diagnostics never reach the host's log (`data/logs/aperio.log`). One optional
+export bridges that gap:
+
+```text
+void aperio_plugin_set_log(void (*log)(uint8_t level,
+                                       const char *target,
+                                       const char *message));
+```
+
+The host calls `aperio_plugin_set_log` once, right after
+`aperio_plugin_create`, handing the plugin a log sink. To forward a log line
+the plugin calls `log` with:
+
+- **`level`** — a severity byte: `1` ERROR, `2` WARN, `3` INFO, `4` DEBUG,
+  `5` TRACE (the `APERIO_PLUGIN_LOG_LEVEL_*` constants; they mirror
+  `tracing::Level`).
+- **`target`** — the event's target/module (e.g. `my_adapter::sync`).
+- **`message`** — the rendered message.
+
+`target` and `message` are NUL-terminated UTF-8 valid only for the duration of
+the call, and the callback must not unwind across the boundary. The host
+re-emits each forwarded event into its own log at the same level, under the
+target `aperio::plugin`, keeping your original target in a `source` field — so
+look for `aperio::plugin` lines (with `source=my_adapter::…`) in `aperio.log`.
+The host's own log-level filter then decides what is actually written.
+
+The export is **optional** — like an absent vtable slot. A plugin built before
+this ABI addition simply doesn't forward, and the host treats a missing symbol
+as "no logging", never a load error. (On the static-linked mobile build the
+plugin already shares the host's logging, so the host never calls it.)
+
+**Rust plugins get this for free.** `declare_cdylib_exports!` emits
+`aperio_plugin_set_log` and installs a forwarding subscriber, so your ordinary
+`tracing` / `log` macros (`warn!`, `info!`, …) reach the host log with no extra
+code. **C / other-language plugins** implement the export themselves and call
+the supplied function pointer for each line they want forwarded.
 
 ## Versioning & compatibility
 

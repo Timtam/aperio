@@ -133,3 +133,7 @@ plugin_sdk::declare_lifecycle! {
   you only wire the slots you actually support.
 - **Forward compatibility:** when the host adds a new trait method/slot, an
   unrecompiled plugin simply has `None` there and the host falls back.
+- **Logging:** your `tracing` / `log` output is forwarded to the host log
+  automatically — the SDK exports `aperio_plugin_set_log` and installs a
+  forwarding subscriber, so `warn!`/`info!`/… land in `aperio.log` with no
+  extra code. See [Logging](/plugins/abi-reference/#logging).
