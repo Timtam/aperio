@@ -72,7 +72,7 @@ use host_core::sync::build_orchestrator;
 use host_core::sync_log::{SyncLogCounters, SyncLogRepo, SyncTrigger};
 use host_core::user_prefs::UserPrefsRepo;
 use host_core::DbHandle;
-use plugin_core::manifest::TaskCapabilities;
+use plugin_core::manifest::{RecurrenceCapabilities, TaskCapabilities};
 use plugin_core::shim::FfiSyncAdapter;
 use plugin_core::PluginManager;
 use sync_core::{
@@ -479,20 +479,30 @@ fn default_config_json() -> String {
 /// are flattened to the top level (so the JSON is `{id, name, …, account_id}`,
 /// not `{inner: {...}, account_id}`).
 ///
-/// `recurrence_capabilities` is intentionally omitted in this slice (the TS
-/// field is optional and the frontend defaults to full RFC-5545 support — the
-/// same default the desktop yields for the local / unknown account); it lands
-/// with the plugin-manifest capability port.
+/// `recurrence_capabilities` is stamped from the owning adapter's plugin
+/// manifest (full RFC-5545 for the local store / any account whose plugin can't
+/// be resolved), so the event editor greys out recurrence options the backend
+/// can't store rather than offering one it silently drops. Mirrors the desktop
+/// `CalendarRow`.
 #[derive(serde::Serialize)]
 struct CalendarRow {
     #[serde(flatten)]
     inner: Calendar,
     account_id: String,
+    recurrence_capabilities: RecurrenceCapabilities,
 }
 
 impl CalendarRow {
-    fn new(inner: Calendar, account_id: String) -> Self {
-        Self { inner, account_id }
+    fn new(
+        inner: Calendar,
+        account_id: String,
+        recurrence_capabilities: RecurrenceCapabilities,
+    ) -> Self {
+        Self {
+            inner,
+            account_id,
+            recurrence_capabilities,
+        }
     }
 }
 
@@ -1508,6 +1518,28 @@ impl Host {
             .unwrap_or_default()
     }
 
+    /// Resolve an account's recurrence capabilities from its plugin manifest
+    /// (mirrors the desktop `recurrence_caps_for_account`): the local store + any
+    /// account whose plugin we can't resolve fall back to full RFC-5545 support —
+    /// the host's own SQLite store has no restrictions, and a missing manifest
+    /// shouldn't silently strip options the source might actually support.
+    fn recurrence_caps_for_account(
+        &self,
+        account_id: &str,
+        account_kinds: &std::collections::HashMap<String, AdapterKind>,
+    ) -> RecurrenceCapabilities {
+        if account_id == LOCAL_ID {
+            return RecurrenceCapabilities::default();
+        }
+        let Some(plugin_id) = account_kinds.get(account_id).and_then(|k| k.plugin_id()) else {
+            return RecurrenceCapabilities::default();
+        };
+        self.plugin_manager
+            .get_including_disabled(plugin_id)
+            .map(|p| p.manifest.recurrence.clone())
+            .unwrap_or_default()
+    }
+
     /// Apply the `TakeRemote` conflict resolution: write the stored
     /// `remote_value` into the local row + emit the matching `*Updated`
     /// SyncEvent so other devices converge. Mirrors the desktop
@@ -1625,6 +1657,7 @@ struct TaskListRow {
     inner: TaskList,
     account_id: String,
     task_capabilities: TaskCapabilities,
+    recurrence_capabilities: RecurrenceCapabilities,
 }
 
 /// The local SQLite store's task capabilities — it has no manifest, so hard-code
@@ -2385,7 +2418,11 @@ impl Host {
             .await
             {
                 self.registry.note_calendar_route(&cal.id, &account_id);
-                birthday_rows.push(CalendarRow::new(cal, account_id));
+                birthday_rows.push(CalendarRow::new(
+                    cal,
+                    account_id,
+                    RecurrenceCapabilities::default(),
+                ));
             }
             Ok::<_, StoreError>((calendars, accounts, birthday_rows))
         })?;
@@ -2400,10 +2437,22 @@ impl Host {
             apply_color_to_calendars(&repo, &mut calendars);
         }
 
+        // Snapshot account_id → adapter_kind once so each row's recurrence-caps
+        // lookup is a cheap map hit (mirrors task_lists_json + the desktop). A
+        // read failure degrades to "every account looks local" → permissive caps.
+        let shared = self.db.shared();
+        let account_kinds: std::collections::HashMap<String, AdapterKind> =
+            AccountsRepo::new(&shared)
+                .list()
+                .map(|accs| accs.into_iter().map(|a| (a.id, a.adapter_kind)).collect())
+                .unwrap_or_default();
         let mut rows: Vec<CalendarRow> = calendars
             .into_iter()
             .zip(accounts)
-            .map(|(c, account)| CalendarRow::new(c, account))
+            .map(|(c, account)| {
+                let caps = self.recurrence_caps_for_account(&account, &account_kinds);
+                CalendarRow::new(c, account, caps)
+            })
             .collect();
         rows.extend(birthday_rows);
         to_json(&rows)
@@ -2430,7 +2479,11 @@ impl Host {
                 fields,
             }));
         }
-        to_json(&CalendarRow::new(created, LOCAL_ID.to_string()))
+        to_json(&CalendarRow::new(
+            created,
+            LOCAL_ID.to_string(),
+            RecurrenceCapabilities::default(),
+        ))
     }
 
     /// Delete a local calendar (its events cascade away). Mirrors the desktop
@@ -3068,10 +3121,14 @@ impl Host {
         // on the lists, then wrap. apply_* no-ops for local lists (own binding,
         // no override row).
         let mut lists: Vec<TaskList> = Vec::with_capacity(local.len() + external.len());
-        let mut meta: Vec<(String, TaskCapabilities)> =
+        let mut meta: Vec<(String, TaskCapabilities, RecurrenceCapabilities)> =
             Vec::with_capacity(local.len() + external.len());
         for l in local {
-            meta.push((LOCAL_ID.to_string(), local_task_capabilities()));
+            meta.push((
+                LOCAL_ID.to_string(),
+                local_task_capabilities(),
+                RecurrenceCapabilities::default(),
+            ));
             lists.push(l);
         }
         for l in external {
@@ -3080,7 +3137,9 @@ impl Host {
                 .account_for_task_list(&l.id)
                 .unwrap_or_else(|| LOCAL_ID.to_string());
             let task_capabilities = self.task_caps_for_account(&account_id, &account_kinds);
-            meta.push((account_id, task_capabilities));
+            let recurrence_capabilities =
+                self.recurrence_caps_for_account(&account_id, &account_kinds);
+            meta.push((account_id, task_capabilities, recurrence_capabilities));
             lists.push(l);
         }
 
@@ -3093,11 +3152,14 @@ impl Host {
         let rows: Vec<TaskListRow> = lists
             .into_iter()
             .zip(meta)
-            .map(|(inner, (account_id, task_capabilities))| TaskListRow {
-                inner,
-                account_id,
-                task_capabilities,
-            })
+            .map(
+                |(inner, (account_id, task_capabilities, recurrence_capabilities))| TaskListRow {
+                    inner,
+                    account_id,
+                    task_capabilities,
+                    recurrence_capabilities,
+                },
+            )
             .collect();
         to_json(&rows)
     }
