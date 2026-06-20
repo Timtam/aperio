@@ -742,6 +742,8 @@
         "protocolCleared": "Sync-Protokoll geleert.",
         "adapterConfigure": "Verbinden",
         "adapterDisconnect": "Trennen",
+        "adapterDisconnectConfirm": "Dieses Sync-Ziel trennen? Die Synchronisierung auf diesem Gerät stoppt. Deine Eingaben bleiben erhalten, damit du mit einem Tipp wieder verbinden kannst.",
+        "adapterDisconnected": "Sync-Ziel getrennt.",
         "adapterConnecting": "Verbinde …",
         "adapterTest": "Verbindung testen",
         "adapterTesting": "Teste …",

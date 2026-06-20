@@ -145,6 +145,22 @@ export interface SyncRoundReport {
 export const configureSyncAdapter = (config: SyncAdapterConfig): Promise<void> =>
   CalFfi.configureSyncAdapterJson(JSON.stringify(config));
 
+/** A non-secret summary of the configured sync target (kind + a human detail
+ *  string), for the "connected" card. `null` when nothing is configured. */
+export interface SyncAdapterSummary {
+  kind: string;
+  detail: string;
+}
+
+/** Read the configured target's non-secret summary (kind + detail), or `null`. */
+export const getSyncAdapterSummary = async (): Promise<SyncAdapterSummary | null> =>
+  JSON.parse(await CalFfi.getSyncAdapterSummaryJson()) as SyncAdapterSummary | null;
+
+/** Disconnect the configured sync target. Keeps the entered fields + secrets so
+ *  reconnecting is one tap; the form re-shows once syncStatus reads back
+ *  `configured: false`. */
+export const disconnectSync = (): Promise<void> => CalFfi.disconnectSync();
+
 /** The current engine status (no round). */
 export const syncStatus = async (): Promise<SyncStatus> =>
   JSON.parse(await CalFfi.syncStatusJson()) as SyncStatus;

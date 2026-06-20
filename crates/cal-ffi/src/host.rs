@@ -124,6 +124,16 @@ const PREF_SFTP_USER: &str = "sync.adapter.sftp.user";
 const PREF_SFTP_PATH: &str = "sync.adapter.sftp.path";
 const PREF_SFTP_AUTH_METHOD: &str = "sync.adapter.sftp.authMethod";
 const PREF_SFTP_KEY_PATH: &str = "sync.adapter.sftp.keyPath";
+
+/// Non-secret summary of the configured sync target — its kind plus a human
+/// "detail" string (user@url / host:port/path / folder), for the Settings
+/// "connected" card. Serializes to `null` (Option::None) when nothing is
+/// configured. Mirrors the desktop `SyncAdapterSummary`.
+#[derive(serde::Serialize)]
+struct SyncAdapterSummary {
+    kind: String,
+    detail: String,
+}
 const SFTP_SECRET_ACCOUNT: &str = "sync.adapter.sftp";
 const SFTP_KEY_SECRET_ACCOUNT: &str = "sync.adapter.sftp.key";
 /// Plugin ids of the statically-embedded sync adapters this host configures.
@@ -4374,6 +4384,100 @@ impl Host {
         self.orchestrator.configure(adapter);
         self.persist_sync_config(&req)?;
         Ok(())
+    }
+
+    /// Disconnect the configured sync target: deconfigure the orchestrator and
+    /// mark the adapter kind "none" so the summary reports nothing. The per-kind
+    /// field prefs + keychain secrets are KEPT, so reconnecting is one tap (no
+    /// re-typing) — mirrors the desktop `configure_sync_adapter({kind:"none"})`.
+    pub fn disconnect_sync(&self) -> Result<(), StoreError> {
+        self.orchestrator.deconfigure();
+        let shared = self.db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+        prefs.set(PREF_ADAPTER_KIND, "none").map_err(storage_err)?;
+        Ok(())
+    }
+
+    /// Non-secret summary of the configured sync target as JSON — `null` when
+    /// nothing is configured, else `{"kind","detail"}`. `detail` is a human
+    /// "user@url" / "host:port/path" string built from the stored field prefs,
+    /// never a secret. Mirrors the desktop `get_sync_adapter_summary`.
+    pub fn get_sync_adapter_summary_json(&self) -> Result<String, StoreError> {
+        let shared = self.db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+        let Some(kind) = prefs.get(PREF_ADAPTER_KIND).map_err(storage_err)? else {
+            return to_json(&Option::<SyncAdapterSummary>::None);
+        };
+        let detail = match kind.as_str() {
+            "local" => prefs
+                .get(PREF_LOCAL_PATH)
+                .map_err(storage_err)?
+                .unwrap_or_default(),
+            "webdav" => {
+                let url = prefs
+                    .get(PREF_WEBDAV_URL)
+                    .map_err(storage_err)?
+                    .unwrap_or_default();
+                let user = prefs
+                    .get(PREF_WEBDAV_USER)
+                    .map_err(storage_err)?
+                    .unwrap_or_default();
+                if user.is_empty() {
+                    url
+                } else {
+                    format!("{user}@{url}")
+                }
+            }
+            "sftp" => {
+                let host = prefs
+                    .get(PREF_SFTP_HOST)
+                    .map_err(storage_err)?
+                    .unwrap_or_default();
+                let port = prefs
+                    .get(PREF_SFTP_PORT)
+                    .map_err(storage_err)?
+                    .unwrap_or_else(|| "22".into());
+                let user = prefs
+                    .get(PREF_SFTP_USER)
+                    .map_err(storage_err)?
+                    .unwrap_or_default();
+                let path = prefs
+                    .get(PREF_SFTP_PATH)
+                    .map_err(storage_err)?
+                    .unwrap_or_default();
+                format!("{user}@{host}:{port}{path}")
+            }
+            "ftp" => {
+                let host = prefs
+                    .get(PREF_FTP_HOST)
+                    .map_err(storage_err)?
+                    .unwrap_or_default();
+                let port = prefs
+                    .get(PREF_FTP_PORT)
+                    .map_err(storage_err)?
+                    .unwrap_or_else(|| "21".into());
+                let user = prefs
+                    .get(PREF_FTP_USER)
+                    .map_err(storage_err)?
+                    .unwrap_or_default();
+                let path = prefs
+                    .get(PREF_FTP_PATH)
+                    .map_err(storage_err)?
+                    .unwrap_or_default();
+                format!("{user}@{host}:{port}{path}")
+            }
+            "dropbox" => prefs
+                .get(PREF_DROPBOX_PATH)
+                .map_err(storage_err)?
+                .unwrap_or_default(),
+            "googledrive" => prefs
+                .get(PREF_GOOGLEDRIVE_FOLDER_NAME)
+                .map_err(storage_err)?
+                .unwrap_or_default(),
+            "none" => return to_json(&Option::<SyncAdapterSummary>::None),
+            _ => String::new(),
+        };
+        to_json(&Some(SyncAdapterSummary { kind, detail }))
     }
 
     /// Run one sync round (push local pending logs, fetch + apply foreign ones,

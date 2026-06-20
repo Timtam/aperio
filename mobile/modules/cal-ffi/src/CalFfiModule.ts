@@ -164,6 +164,12 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  JSON. Rejects "not configured" until a target is set. `trigger` is the wire
    *  SyncTrigger ("manual"/"app_start"/"periodic"/…) recorded in the sync log. */
   syncNowJson(trigger: string): Promise<string>;
+  /** Disconnect the configured sync target (deconfigure + mark kind "none";
+   *  keeps the field prefs + secrets so reconnect is one tap). */
+  disconnectSync(): Promise<void>;
+  /** Non-secret summary of the configured target as JSON (`null` or
+   *  `{kind, detail}`) for the Settings "connected" card. */
+  getSyncAdapterSummaryJson(): Promise<string>;
   /** Push local pending logs without fetching (RN AppState background); returns
    *  the number of logs pushed. `trigger` ("kick"/"app_exit"/…) is logged. */
   pushNow(trigger: string): Promise<number>;

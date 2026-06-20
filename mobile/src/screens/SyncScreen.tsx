@@ -34,9 +34,12 @@ import {
   syncConflictCount,
   syncNow,
   syncStatus,
+  disconnectSync,
+  getSyncAdapterSummary,
   CacheRefreshStatus,
   HostKeyPreview,
   SyncAdapterConfig,
+  SyncAdapterSummary,
   SyncDeviceSummary,
   SyncLogEntry,
   SyncPreview,
@@ -84,6 +87,9 @@ export default function SyncScreen() {
   const [busy, setBusy] = useState(false);
   const [busyCompact, setBusyCompact] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The configured target's non-secret summary (kind + detail) for the
+  // "connected" card; null when nothing is configured. Loaded with the status.
+  const [adapterSummary, setAdapterSummary] = useState<SyncAdapterSummary | null>(null);
   // The external-cache warm-pass status (the desktop's cache surface): drives
   // the "refreshing…" / "last updated" line + the manual refresh button. Loaded
   // on focus and updated live from the native `onCacheRefreshStatus` event.
@@ -233,6 +239,7 @@ export default function SyncScreen() {
   const refresh = useCallback(async () => {
     try {
       setStatus(await syncStatus());
+      setAdapterSummary(await getSyncAdapterSummary().catch(() => null));
       setConflictCount(await syncConflictCount().catch(() => 0));
       setSyncLog(await listSyncLog(100).catch(() => []));
       setCacheStatus(await cacheRefreshStatus().catch(() => null));
@@ -306,6 +313,52 @@ export default function SyncScreen() {
                 const message = errorMessage(err);
                 setError(message);
                 announce(t('mobile.error', { message }));
+              }
+            })();
+          },
+        },
+      ],
+    );
+  }, [announce, refresh, t]);
+
+  // Friendly label for an adapter kind, reusing the connect-form's kind keys
+  // (adapterKind<Cap>); falls back to the raw kind (e.g. a 'local' config
+  // round-tripped from desktop, which the mobile form never offers).
+  const kindLabel = useCallback(
+    (kind: string): string =>
+      t(
+        `dialogs.settings.sync.adapterKind${kind.charAt(0).toUpperCase()}${kind.slice(1)}`,
+        { defaultValue: kind },
+      ),
+    [t],
+  );
+
+  // Disconnect the configured target (a confirm — syncing stops on this device).
+  // The entered fields + secrets are kept, so the connect form re-shows
+  // pre-filled and reconnecting is one tap.
+  const onDisconnect = useCallback(() => {
+    Alert.alert(
+      t('dialogs.settings.sync.adapterDisconnect'),
+      t('dialogs.settings.sync.adapterDisconnectConfirm'),
+      [
+        { text: t('mobile.cancel'), style: 'cancel' },
+        {
+          text: t('dialogs.settings.sync.adapterDisconnect'),
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setBusy(true);
+              try {
+                await disconnectSync();
+                setPreview(null);
+                await refresh();
+                announce(t('dialogs.settings.sync.adapterDisconnected'));
+              } catch (err) {
+                const message = errorMessage(err);
+                setError(message);
+                announce(t('mobile.error', { message }));
+              } finally {
+                setBusy(false);
               }
             })();
           },
@@ -1054,6 +1107,32 @@ export default function SyncScreen() {
         <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="assertive">
           {error}
         </Text>
+      )}
+
+      {/* Connected-target card + Disconnect — the first thing under the status,
+          so a screen-reader user reaches "Connected to X" then "Disconnect"
+          before the management controls. */}
+      {status?.configured && adapterSummary != null && (
+        <View style={styles.field}>
+          <Text style={styles.label} accessibilityRole="text">
+            {t('dialogs.settings.sync.connectedSummary', {
+              kind: kindLabel(adapterSummary.kind),
+              detail: adapterSummary.detail || '–',
+            })}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('dialogs.settings.sync.adapterDisconnect')}
+            accessibilityState={{ disabled: busy }}
+            disabled={busy}
+            onPress={onDisconnect}
+            style={({ pressed }) => [styles.ghostButton, pressed && { opacity: 0.6 }]}
+          >
+            <Text style={styles.ghostButtonText}>
+              {t('dialogs.settings.sync.adapterDisconnect')}
+            </Text>
+          </Pressable>
+        </View>
       )}
 
       {status?.configured && status?.sustained_failure === true && (

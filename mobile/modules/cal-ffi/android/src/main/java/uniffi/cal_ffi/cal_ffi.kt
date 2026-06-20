@@ -864,6 +864,8 @@ external fun uniffi_cal_ffi_checksum_method_host_delete_user_pref(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_disable_sync_encryption_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_disconnect_sync(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_discover_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_enable_sync_encryption_json(
@@ -885,6 +887,8 @@ external fun uniffi_cal_ffi_checksum_method_host_get_log_level(
 external fun uniffi_cal_ffi_checksum_method_host_get_or_create_ad_hoc_color_label_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_get_recent_logs(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_get_sync_adapter_summary_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_get_user_pref(
 ): Short
@@ -1189,6 +1193,8 @@ external fun uniffi_cal_ffi_fn_method_host_delete_user_pref(`ptr`: Long,`key`: R
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_disable_sync_encryption_json(`ptr`: Long,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_disconnect_sync(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_discover_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_enable_sync_encryption_json(`ptr`: Long,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1210,6 +1216,8 @@ external fun uniffi_cal_ffi_fn_method_host_get_log_level(`ptr`: Long,uniffi_out_
 external fun uniffi_cal_ffi_fn_method_host_get_or_create_ad_hoc_color_label_json(`ptr`: Long,`hex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_get_recent_logs(`ptr`: Long,`lines`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_get_sync_adapter_summary_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_get_user_pref(`ptr`: Long,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1671,6 +1679,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_disable_sync_encryption_json() != 18838.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_disconnect_sync() != 20870.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_discover_json() != 25945.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1702,6 +1713,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_get_recent_logs() != 35363.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_get_sync_adapter_summary_json() != 7278.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_get_user_pref() != 20426.toShort()) {
@@ -3406,6 +3420,14 @@ public interface HostInterface {
     fun `disableSyncEncryptionJson`(`passphrase`: kotlin.String): kotlin.String
     
     /**
+     * Disconnect the configured sync target: deconfigure the orchestrator and
+     * mark the adapter kind "none" so the summary reports nothing. The per-kind
+     * field prefs + keychain secrets are KEPT, so reconnecting is one tap (no
+     * re-typing) — mirrors the desktop `configure_sync_adapter({kind:"none"})`.
+     */
+    fun `disconnectSync`()
+    
+    /**
      * Run a plugin's endpoint **discovery** (e.g. EWS Autodiscover for
      * `com.aperio.cal-adapter-ews`). `args_json` carries the provider's discover
      * inputs — `{email, password}` for EWS. Returns the plugin's discovered
@@ -3500,6 +3522,14 @@ public interface HostInterface {
      * Tail of the newest log file for the in-app viewer (default 500 lines).
      */
     fun `getRecentLogs`(`lines`: kotlin.UInt?): kotlin.String
+    
+    /**
+     * Non-secret summary of the configured sync target as JSON — `null` when
+     * nothing is configured, else `{"kind","detail"}`. `detail` is a human
+     * "user@url" / "host:port/path" string built from the stored field prefs,
+     * never a secret. Mirrors the desktop `get_sync_adapter_summary`.
+     */
+    fun `getSyncAdapterSummaryJson`(): kotlin.String
     
     /**
      * Read a user preference, or `None` when unset.
@@ -4965,6 +4995,25 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Disconnect the configured sync target: deconfigure the orchestrator and
+     * mark the adapter kind "none" so the summary reports nothing. The per-kind
+     * field prefs + keychain secrets are KEPT, so reconnecting is one tap (no
+     * re-typing) — mirrors the desktop `configure_sync_adapter({kind:"none"})`.
+     */
+    @Throws(StoreException::class)override fun `disconnectSync`()
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_disconnect_sync(
+        it,
+        _status)
+}
+    }
+    
+    
+
+    
+    /**
      * Run a plugin's endpoint **discovery** (e.g. EWS Autodiscover for
      * `com.aperio.cal-adapter-ews`). `args_json` carries the provider's discover
      * inputs — `{email, password}` for EWS. Returns the plugin's discovered
@@ -5184,6 +5233,26 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_get_recent_logs(
         it,
         FfiConverterOptionalUInt.lower(`lines`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Non-secret summary of the configured sync target as JSON — `null` when
+     * nothing is configured, else `{"kind","detail"}`. `detail` is a human
+     * "user@url" / "host:port/path" string built from the stored field prefs,
+     * never a secret. Mirrors the desktop `get_sync_adapter_summary`.
+     */
+    @Throws(StoreException::class)override fun `getSyncAdapterSummaryJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_get_sync_adapter_summary_json(
+        it,
+        _status)
 }
     }
     )

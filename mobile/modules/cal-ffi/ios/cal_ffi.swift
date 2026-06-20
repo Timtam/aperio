@@ -1401,6 +1401,14 @@ public protocol HostProtocol: AnyObject, Sendable {
     func disableSyncEncryptionJson(passphrase: String) throws  -> String
     
     /**
+     * Disconnect the configured sync target: deconfigure the orchestrator and
+     * mark the adapter kind "none" so the summary reports nothing. The per-kind
+     * field prefs + keychain secrets are KEPT, so reconnecting is one tap (no
+     * re-typing) — mirrors the desktop `configure_sync_adapter({kind:"none"})`.
+     */
+    func disconnectSync() throws 
+    
+    /**
      * Run a plugin's endpoint **discovery** (e.g. EWS Autodiscover for
      * `com.aperio.cal-adapter-ews`). `args_json` carries the provider's discover
      * inputs — `{email, password}` for EWS. Returns the plugin's discovered
@@ -1495,6 +1503,14 @@ public protocol HostProtocol: AnyObject, Sendable {
      * Tail of the newest log file for the in-app viewer (default 500 lines).
      */
     func getRecentLogs(lines: UInt32?) throws  -> String
+    
+    /**
+     * Non-secret summary of the configured sync target as JSON — `null` when
+     * nothing is configured, else `{"kind","detail"}`. `detail` is a human
+     * "user@url" / "host:port/path" string built from the stored field prefs,
+     * never a secret. Mirrors the desktop `get_sync_adapter_summary`.
+     */
+    func getSyncAdapterSummaryJson() throws  -> String
     
     /**
      * Read a user preference, or `None` when unset.
@@ -2737,6 +2753,19 @@ open func disableSyncEncryptionJson(passphrase: String)throws  -> String  {
 }
     
     /**
+     * Disconnect the configured sync target: deconfigure the orchestrator and
+     * mark the adapter kind "none" so the summary reports nothing. The per-kind
+     * field prefs + keychain secrets are KEPT, so reconnecting is one tap (no
+     * re-typing) — mirrors the desktop `configure_sync_adapter({kind:"none"})`.
+     */
+open func disconnectSync()throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_disconnect_sync(
+            self.uniffiCloneHandle(),$0
+    )
+}
+}
+    
+    /**
      * Run a plugin's endpoint **discovery** (e.g. EWS Autodiscover for
      * `com.aperio.cal-adapter-ews`). `args_json` carries the provider's discover
      * inputs — `{email, password}` for EWS. Returns the plugin's discovered
@@ -2904,6 +2933,20 @@ open func getRecentLogs(lines: UInt32?)throws  -> String  {
     uniffi_cal_ffi_fn_method_host_get_recent_logs(
             self.uniffiCloneHandle(),
         FfiConverterOptionUInt32.lower(lines),$0
+    )
+})
+}
+    
+    /**
+     * Non-secret summary of the configured sync target as JSON — `null` when
+     * nothing is configured, else `{"kind","detail"}`. `detail` is a human
+     * "user@url" / "host:port/path" string built from the stored field prefs,
+     * never a secret. Mirrors the desktop `get_sync_adapter_summary`.
+     */
+open func getSyncAdapterSummaryJson()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_get_sync_adapter_summary_json(
+            self.uniffiCloneHandle(),$0
     )
 })
 }
@@ -7222,6 +7265,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_disable_sync_encryption_json() != 18838) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_disconnect_sync() != 20870) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_discover_json() != 25945) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -7253,6 +7299,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_get_recent_logs() != 35363) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_get_sync_adapter_summary_json() != 7278) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_get_user_pref() != 20426) {

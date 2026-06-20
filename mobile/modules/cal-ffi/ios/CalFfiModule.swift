@@ -211,6 +211,14 @@ public class CalFfiModule: Module {
       try self.host.syncNowJson(trigger: trigger)
     }
 
+    AsyncFunction("disconnectSync") { () in
+      try self.host.disconnectSync()
+    }
+
+    AsyncFunction("getSyncAdapterSummaryJson") { () -> String in
+      try self.host.getSyncAdapterSummaryJson()
+    }
+
     AsyncFunction("pushNow") { (trigger: String) -> Int in
       Int(try self.host.pushNow(trigger: trigger))
     }

@@ -745,6 +745,8 @@
         "protocolCleared": "Sync protocol cleared.",
         "adapterConfigure": "Connect",
         "adapterDisconnect": "Disconnect",
+        "adapterDisconnectConfirm": "Disconnect this sync target? Syncing stops on this device. Your entered settings are kept, so you can reconnect with one tap.",
+        "adapterDisconnected": "Sync target disconnected.",
         "adapterConnecting": "Connecting …",
         "adapterTest": "Test connection",
         "adapterTesting": "Testing …",

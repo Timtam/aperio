@@ -240,6 +240,14 @@ class CalFfiModule : Module() {
       host.syncNowJson(trigger)
     }
 
+    AsyncFunction("disconnectSync") {
+      host.disconnectSync()
+    }
+
+    AsyncFunction("getSyncAdapterSummaryJson") {
+      host.getSyncAdapterSummaryJson()
+    }
+
     AsyncFunction("pushNow") { trigger: String ->
       host.pushNow(trigger).toInt()
     }
