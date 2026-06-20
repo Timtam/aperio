@@ -7,6 +7,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -14,12 +15,11 @@ import {
 
 import type { TaskList } from '@aperio/shared';
 
-import { selectableCheckState, selectableRole } from '../a11y/roles';
 import { listAccounts } from '../api/accounts';
 import { createTaskList } from '../api/client';
 import { useCacheReload } from '../state/cacheObserver';
 import { useTaskStore } from '../state/taskStoreContext';
-import { useThemedStyles, type ThemeColors } from '../theme';
+import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
 // Task-list catalog: read the lists, toggle which are shown (the selection Set +
 // reconciler), and create a top-level local list. A "Manage" entry opens the
@@ -37,6 +37,7 @@ export default function ListsScreen() {
   const { taskLists, selectedTaskListIds, toggleTaskList, refreshTaskLists, colorLabels } =
     useTaskStore();
   const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
 
   const [newName, setNewName] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -101,17 +102,13 @@ export default function ListsScreen() {
     }
   }, [announce, newName, refreshTaskLists, t]);
 
+  // A native `switch`-role control (below): VoiceOver/TalkBack announce the new
+  // on/off state as part of the toggle itself — reliably, unlike the
+  // announceForAccessibility that used to sit here and was being dropped (the
+  // user heard no feedback). So no manual announce is needed.
   const onToggle = useCallback(
-    (list: TaskList) => {
-      const wasSelected = selectedTaskListIds.has(list.id);
-      toggleTaskList(list.id);
-      announce(
-        wasSelected
-          ? t('mobile.listDeselected', { name: list.name })
-          : t('mobile.listSelected', { name: list.name }),
-      );
-    },
-    [announce, selectedTaskListIds, t, toggleTaskList],
+    (list: TaskList) => toggleTaskList(list.id),
+    [toggleTaskList],
   );
 
   return (
@@ -176,15 +173,12 @@ export default function ListsScreen() {
                     rowTags.current[list.id] = node ? findNodeHandle(node) : null;
                   }}
                   accessible
-                  accessibilityRole={selectableRole('checkbox')}
-                  accessibilityState={selectableCheckState(selected)}
+                  accessibilityRole="switch"
+                  accessibilityState={{ checked: selected }}
                   accessibilityLabel={fullLabel}
                   onPress={() => onToggle(list)}
                   style={({ pressed }) => [styles.rowToggle, pressed && styles.rowPressed]}
                 >
-                  <Text style={styles.check} importantForAccessibility="no">
-                    {selected ? '☑' : '☐'}
-                  </Text>
                   {colour != null && (
                     <View
                       accessible={false}
@@ -199,6 +193,16 @@ export default function ListsScreen() {
                     <Text style={styles.listAccount} importantForAccessibility="no">
                       {accountName}
                     </Text>
+                  </View>
+                  {/* Visual only — the Pressable owns the toggle + the switch
+                      a11y trait; hidden from the reader (matches SwitchRow). */}
+                  <View pointerEvents="none">
+                    <Switch
+                      value={selected}
+                      trackColor={{ false: colors.border, true: colors.accent }}
+                      importantForAccessibility="no"
+                      accessibilityElementsHidden
+                    />
                   </View>
                 </Pressable>
                 <Pressable
@@ -276,7 +280,6 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.background,
     },
     manageButtonText: { fontSize: 15, fontWeight: '600', color: c.accent },
-    check: { fontSize: 22, width: 26, textAlign: 'center', color: c.textPrimary },
     // The list's bound colour (sighted users); subtle border keeps light colours
     // visible on the card. Matches the task/event row dot.
     colorDot: {

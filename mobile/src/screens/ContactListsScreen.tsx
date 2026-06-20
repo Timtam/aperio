@@ -7,6 +7,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -14,7 +15,6 @@ import {
 
 import type { ColorLabel } from '@aperio/shared';
 
-import { selectableCheckState, selectableRole } from '../a11y/roles';
 import { listColorLabels } from '../api/colorLabels';
 import { renameContainer, setContainerColorLabel } from '../api/containerColor';
 import {
@@ -27,7 +27,7 @@ import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useCacheReload } from '../state/cacheObserver';
 import { useContactVisibility } from '../state/contactVisibility';
-import { useThemedStyles, type ThemeColors } from '../theme';
+import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
 // Address-book management — create, rename, recolour, and delete address books.
 // The mobile parallel of the Tasks ListsScreen, reached from ContactsScreen
@@ -47,6 +47,7 @@ export default function ContactListsScreen({
 }: RootStackScreenProps<'ContactLists'>) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
   // Address-book visibility (hide a book from the Contacts browse + search).
   const { hidden: hiddenBooks, toggle: toggleVisibility } = useContactVisibility();
 
@@ -303,15 +304,22 @@ export default function ContactListsScreen({
               <View key={book.id} style={styles.row}>
                 <Pressable
                   accessible
-                  accessibilityRole={selectableRole('checkbox')}
-                  accessibilityState={selectableCheckState(!hiddenBooks.has(book.id))}
+                  accessibilityRole="switch"
+                  accessibilityState={{ checked: !hiddenBooks.has(book.id) }}
                   accessibilityLabel={t('mobile.contactBookVisible', { name: book.name })}
                   onPress={() => toggleVisibility(book.id)}
                   style={({ pressed }) => [styles.visToggle, pressed && styles.pressed]}
                 >
-                  <Text style={styles.check} importantForAccessibility="no">
-                    {hiddenBooks.has(book.id) ? '☐' : '☑'}
-                  </Text>
+                  {/* Visual only — the Pressable owns the toggle + the switch
+                      a11y trait (announced on toggle, unlike the old checkbox). */}
+                  <View pointerEvents="none">
+                    <Switch
+                      value={!hiddenBooks.has(book.id)}
+                      trackColor={{ false: colors.border, true: colors.accent }}
+                      importantForAccessibility="no"
+                      accessibilityElementsHidden
+                    />
+                  </View>
                 </Pressable>
                 <View
                   ref={(node) => {
@@ -396,7 +404,6 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surfaceAlt,
     },
     visToggle: { paddingVertical: 8, paddingHorizontal: 2 },
-    check: { fontSize: 22, width: 26, textAlign: 'center', color: c.textPrimary },
     rowText: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
     bookName: { flex: 1, fontSize: 18, fontWeight: '600', color: c.textPrimary },
     colorDot: {
