@@ -283,8 +283,14 @@ impl LocalAdapter {
     ///
     /// Order matters: parent rows go in before children so the FK
     /// constraints are satisfied on insert. `calendars` and
-    /// `task_lists` and `color_labels` go in first, then `events`
-    /// and `tasks` reference them.
+    /// `color_labels` go in FIRST: calendars, task_lists, sections, events and
+    /// tasks all carry a `color_label_id` that `REFERENCES color_labels(id)`, and
+    /// with `foreign_keys=ON` inserting a referencing row before its label fails
+    /// the FK and silently drops the row. That was the cause of "several local
+    /// lists, but only one shows on the second device" after a snapshot pull —
+    /// every colour-labelled list whose label wasn't already present on the
+    /// receiving device vanished. Then calendars/task_lists/sections, then
+    /// events/tasks reference them.
     ///
     /// Per-row failures are logged and skipped — a malformed row
     /// from a future Aperio version mustn't sink the rest of the
@@ -294,6 +300,15 @@ impl LocalAdapter {
         dump: &SnapshotDump,
     ) -> cal_core::Result<SnapshotApplyReport> {
         let mut report = SnapshotApplyReport::default();
+        // Colour labels first — they're the FK target for calendars / task_lists
+        // / sections / events / tasks (`foreign_keys=ON`), so any referencing row
+        // inserted before its label would FK-fail and be dropped.
+        for label in &dump.color_labels {
+            match self.upsert_color_label_from_sync(label) {
+                Ok(()) => report.applied += 1,
+                Err(_) => report.failed += 1,
+            }
+        }
         for cal in &dump.calendars {
             match self.upsert_calendar_from_sync(cal) {
                 Ok(()) => report.applied += 1,
@@ -332,12 +347,6 @@ impl LocalAdapter {
         // they slot between the two in the FK-safe insertion order.
         for section in &dump.sections {
             match self.upsert_section_from_sync(section) {
-                Ok(()) => report.applied += 1,
-                Err(_) => report.failed += 1,
-            }
-        }
-        for label in &dump.color_labels {
-            match self.upsert_color_label_from_sync(label) {
                 Ok(()) => report.applied += 1,
                 Err(_) => report.failed += 1,
             }
@@ -569,6 +578,47 @@ mod tests {
         let by_id = |id: &str| got.iter().find(|l| l.id == id).cloned().unwrap();
         assert_eq!(by_id("L-p").parent_id.as_deref(), Some("L-gp"));
         assert_eq!(by_id("L-c").parent_id.as_deref(), Some("L-p"));
+    }
+
+    /// Regression: a colour-labelled list must survive a snapshot apply even
+    /// though its `color_label` is itself in the same dump.
+    /// `task_lists.color_label_id REFERENCES color_labels(id)` with
+    /// `foreign_keys=ON`, so applying the list BEFORE its label fails the FK and
+    /// used to silently drop the list. That was the cause of "several local
+    /// lists, but only the colour-unlabelled / already-known one shows on the
+    /// second device" after a snapshot pull — the remote snapshot was correct;
+    /// the bug was purely the apply order. Colour labels must go in first.
+    #[test]
+    fn apply_inserts_color_labels_before_referencing_lists() {
+        let label = ColorLabel {
+            id: ColorLabelId::new("lbl-work".to_string()),
+            name: "Work".into(),
+            hex: "#3366cc".into(),
+            ad_hoc: false,
+        };
+        let mut list = fake_task_list("L-labelled", "Freelance");
+        list.color_label = Some(ColorLabelId::new("lbl-work".to_string()));
+
+        let dump = SnapshotDump {
+            task_lists: vec![list],
+            color_labels: vec![label],
+            ..SnapshotDump::default()
+        };
+
+        let dst = make_adapter();
+        let report = dst.apply_snapshot_dump(&dump).unwrap();
+        assert_eq!(
+            report.failed, 0,
+            "the label must be inserted before the list that references it",
+        );
+
+        let got = dst.dump_for_snapshot().unwrap().task_lists;
+        assert_eq!(got.len(), 1, "the colour-labelled list must survive the apply");
+        assert_eq!(
+            got[0].color_label.as_ref().map(|c| c.0.as_str()),
+            Some("lbl-work"),
+            "the colour-label reference round-trips",
+        );
     }
 
     /// Same FK hazard, sibling table: `tasks.parent_id` is self-referential
