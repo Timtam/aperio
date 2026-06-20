@@ -53,6 +53,7 @@
     "edit": "Bearbeiten",
     "colorHexInvalid": "Gib eine Farbe als #RRGGBB ein.",
     "colorLabelSuffix": ", Farbe {{name}}",
+    "accountSuffix": ", Konto {{name}}",
     "listAdded": "{{name}} hinzugefügt.",
     "listSelected": "{{name}} ausgewählt.",
     "listDeselected": "{{name}} abgewählt.",

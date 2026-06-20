@@ -15,6 +15,7 @@ import {
 import type { TaskList } from '@aperio/shared';
 
 import { selectableCheckState, selectableRole } from '../a11y/roles';
+import { listAccounts } from '../api/accounts';
 import { createTaskList } from '../api/client';
 import { useCacheReload } from '../state/cacheObserver';
 import { useTaskStore } from '../state/taskStoreContext';
@@ -42,6 +43,23 @@ export default function ListsScreen() {
 
   const rowTags = useRef<Record<string, number | null>>({});
   const pendingFocusId = useRef<string | null>(null);
+
+  // Resolve each list's owning account so a row can show which account it
+  // belongs to (local lists read as "On this device").
+  const [accountNames, setAccountNames] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    void listAccounts()
+      .then((list) => {
+        if (!cancelled) {
+          setAccountNames(new Map(list.map((a) => [a.id, a.display_name])));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
@@ -146,6 +164,11 @@ export default function ListsScreen() {
             const label = colour
               ? `${list.name}${t('mobile.colorLabelSuffix', { name: colour.name })}`
               : list.name;
+            const accountName =
+              list.account_id === 'local'
+                ? t('sidebar.localAccount')
+                : (accountNames.get(list.account_id) ?? list.account_id);
+            const fullLabel = `${label}${t('mobile.accountSuffix', { name: accountName })}`;
             return (
               <View key={list.id} style={styles.row}>
                 <Pressable
@@ -155,7 +178,7 @@ export default function ListsScreen() {
                   accessible
                   accessibilityRole={selectableRole('checkbox')}
                   accessibilityState={selectableCheckState(selected)}
-                  accessibilityLabel={label}
+                  accessibilityLabel={fullLabel}
                   onPress={() => onToggle(list)}
                   style={({ pressed }) => [styles.rowToggle, pressed && styles.rowPressed]}
                 >
@@ -169,9 +192,14 @@ export default function ListsScreen() {
                       style={[styles.colorDot, { backgroundColor: colour.hex }]}
                     />
                   )}
-                  <Text style={styles.listName} importantForAccessibility="no">
-                    {list.name}
-                  </Text>
+                  <View style={styles.rowText} importantForAccessibility="no">
+                    <Text style={styles.listName} importantForAccessibility="no">
+                      {list.name}
+                    </Text>
+                    <Text style={styles.listAccount} importantForAccessibility="no">
+                      {accountName}
+                    </Text>
+                  </View>
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
@@ -258,7 +286,9 @@ const makeStyles = (c: ThemeColors) =>
       borderWidth: 1,
       borderColor: c.borderOverlay,
     },
-    listName: { flex: 1, fontSize: 18, color: c.textPrimary },
+    rowText: { flex: 1 },
+    listName: { fontSize: 18, color: c.textPrimary },
+    listAccount: { fontSize: 13, color: c.textSecondary, marginTop: 2 },
     muted: { fontSize: 15, color: c.textSecondary, padding: 16 },
     error: { fontSize: 15, fontWeight: '600', color: c.danger, paddingHorizontal: 16 },
   });
