@@ -168,7 +168,7 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surfaceAlt,
     },
     navButtonText: { fontSize: 26, color: c.textPrimary, lineHeight: 30 },
-    actionBar: { flexDirection: 'row', gap: 10, padding: 12, alignItems: 'center' },
+    actionBar: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, padding: 12, alignItems: 'center' },
     ghostButton: {
       paddingVertical: 12,
       paddingHorizontal: 16,

@@ -447,15 +447,19 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surfaceAlt,
     },
     navButtonText: { fontSize: 26, color: c.textPrimary, lineHeight: 30 },
+    // Caption stacked ABOVE the native date chip (not beside it): the chip is a
+    // native view whose intrinsic width RN can't reliably flex against, so a
+    // side-by-side row let the label and the date overlap. Stacking is
+    // overlap-proof and reads as a labelled control.
     jumpBar: {
-      flexDirection: 'row',
-      gap: 10,
+      flexDirection: 'column',
+      gap: 6,
       paddingHorizontal: 12,
       paddingTop: 12,
-      alignItems: 'center',
+      alignItems: 'flex-start',
     },
     jumpLabel: { fontSize: 15, fontWeight: '600', color: c.textLabel },
-    actionBar: { flexDirection: 'row', gap: 10, padding: 12, alignItems: 'center' },
+    actionBar: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, padding: 12, alignItems: 'center' },
     ghostButton: {
       paddingVertical: 12,
       paddingHorizontal: 18,
@@ -465,9 +469,12 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surfaceAlt,
     },
     ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
+    // Content-sized (NOT flex:1): with the action bar now wrapping, a flexed
+    // primary button collapsed to a squished sliver once the row overflowed.
+    // It still stands out by its accent fill.
     primaryButton: {
-      flex: 1,
       paddingVertical: 12,
+      paddingHorizontal: 18,
       borderRadius: 10,
       backgroundColor: c.accent,
       alignItems: 'center',

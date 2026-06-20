@@ -641,6 +641,7 @@ const makeStyles = (c: ThemeColors) =>
     screen: { flex: 1, backgroundColor: c.background },
     toolbar: {
       flexDirection: 'row',
+      flexWrap: 'wrap',
       gap: 10,
       paddingHorizontal: 16,
       paddingVertical: 12,
