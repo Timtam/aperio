@@ -6,7 +6,6 @@ import {
   Alert,
   findNodeHandle,
   Pressable,
-  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -46,8 +45,8 @@ import {
 import { listAccounts } from '../api/accounts';
 import { connectSyncOAuth } from '../api/oauth';
 import { setUserPref } from '../api/prefs';
-import { useScreenA11yInert } from '../a11y/useScreenA11yInert';
 import { AppDialog } from '../components/AppDialog';
+import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
 import { formatLongDateTime } from '../intl/dateFormat';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -79,11 +78,6 @@ export default function SyncScreen() {
   const { t, i18n } = useTranslation();
   const navigation = useNavigation();
   const styles = useThemedStyles(makeStyles);
-  // Leave the screen out of the a11y tree while it isn't focused so an
-  // interrupted back-swipe / stack transition can't strand VoiceOver on a stale
-  // node here (issue #1 — same guard SettingsScreen uses).
-  const inert = useScreenA11yInert();
-
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [conflictCount, setConflictCount] = useState(0);
   const [syncLog, setSyncLog] = useState<SyncLogEntry[]>([]);
@@ -1044,12 +1038,8 @@ export default function SyncScreen() {
       : t('dialogs.settings.sync.adapterGoogledriveSigningIn');
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
-      {...inert}
-    >
+    <>
+    <FormScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text
         style={styles.status}
         accessibilityRole="text"
@@ -2161,6 +2151,7 @@ export default function SyncScreen() {
           </Pressable>
         )}
       </View>
+    </FormScrollView>
 
       {/* Encrypted-dataset join: a focus-trapping popup that owns the passphrase
           entry. Confirm (Join) stays greyed until a passphrase is typed; Cancel
@@ -2185,7 +2176,7 @@ export default function SyncScreen() {
           setJoinPassphrase('');
         }}
       />
-    </ScrollView>
+    </>
   );
 }
 

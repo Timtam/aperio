@@ -4,7 +4,6 @@ import {
   AccessibilityInfo,
   findNodeHandle,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -15,6 +14,7 @@ import type { Task } from '@aperio/shared';
 import { isoNextMonday, isoToday, isoTomorrow } from '@aperio/shared';
 
 import { getTaskById, updateTask } from '../api/client';
+import { FormScrollView } from '../components/FormScrollView';
 import { useTaskStore } from '../state/taskStoreContext';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -158,10 +158,9 @@ export default function PlanTaskModal({ route, navigation }: RootStackScreenProp
   ];
 
   return (
-    <ScrollView
+    <FormScrollView
       style={styles.screen}
       contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
       accessibilityViewIsModal
     >
       {task != null && (
@@ -246,7 +245,7 @@ export default function PlanTaskModal({ route, navigation }: RootStackScreenProp
       >
         <Text style={styles.ghostButtonText}>{t('dialogs.plan.cancel')}</Text>
       </Pressable>
-    </ScrollView>
+    </FormScrollView>
   );
 }
 

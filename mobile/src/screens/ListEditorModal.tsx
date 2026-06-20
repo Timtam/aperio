@@ -4,7 +4,6 @@ import {
   AccessibilityInfo,
   Alert,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -25,6 +24,7 @@ import {
   setSectionColor,
 } from '../api/containerColor';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
+import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
 import { SoundSelect } from '../components/SoundSelect';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -440,11 +440,7 @@ export default function ListEditorModal({
   const currentParent = list.parent_id ?? TOP_LEVEL;
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
-    >
+    <FormScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text style={styles.title} accessibilityRole="header">
         {list.name}
       </Text>
@@ -751,7 +747,7 @@ export default function ListEditorModal({
           </Text>
         </Pressable>
       )}
-    </ScrollView>
+    </FormScrollView>
   );
 }
 

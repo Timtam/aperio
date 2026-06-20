@@ -4,7 +4,6 @@ import {
   AccessibilityInfo,
   Alert,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -17,6 +16,7 @@ import { Calendar, deleteCalendar, listCalendars } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
 import { renameContainer, setContainerColorLabel } from '../api/containerColor';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
+import { FormScrollView } from '../components/FormScrollView';
 import { RemindersEditor } from '../components/RemindersEditor';
 import { SoundSelect } from '../components/SoundSelect';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -197,11 +197,7 @@ export default function CalendarEditorModal({
   }
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
-    >
+    <FormScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text style={styles.title} accessibilityRole="header">
         {calendar.name}
       </Text>
@@ -289,7 +285,7 @@ export default function CalendarEditorModal({
           </Text>
         </Pressable>
       )}
-    </ScrollView>
+    </FormScrollView>
   );
 }
 

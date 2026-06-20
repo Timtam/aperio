@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -14,6 +13,7 @@ import { isExpandedOccurrence } from '@aperio/shared';
 
 import { Calendar, listCalendars } from '../api/calendar';
 import { getTaskById, getTasks } from '../api/client';
+import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
 import { SegmentedSelect } from '../components/SegmentedSelect';
 import {
@@ -176,10 +176,9 @@ export default function MoveCopyModal({
   const blocked = submitting || (params.kind === 'task' && task == null);
 
   return (
-    <ScrollView
+    <FormScrollView
       style={styles.screen}
       contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
       accessibilityViewIsModal
     >
       <Text style={styles.heading} accessibilityRole="header">
@@ -272,7 +271,7 @@ export default function MoveCopyModal({
           <Text style={styles.ghostButtonText}>{t('dialogs.cancel')}</Text>
         </Pressable>
       </View>
-    </ScrollView>
+    </FormScrollView>
   );
 }
 

@@ -4,7 +4,6 @@ import {
   AccessibilityInfo,
   findNodeHandle,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -12,6 +11,7 @@ import {
 } from 'react-native';
 
 import { createTask } from '../api/client';
+import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
 import { readLastUsedTaskList, writeLastUsedTaskList } from '../state/lastUsedTaskList';
 import { useTaskStore } from '../state/taskStoreContext';
@@ -153,10 +153,9 @@ export default function QuickAddTaskModal({ navigation }: RootStackScreenProps<'
   }, [date, listId, navigation, title]);
 
   return (
-    <ScrollView
+    <FormScrollView
       style={styles.screen}
       contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
       accessibilityViewIsModal
     >
       {error != null && (
@@ -238,7 +237,7 @@ export default function QuickAddTaskModal({ navigation }: RootStackScreenProps<'
           <Text style={styles.ghostButtonText}>{t('dialogs.cancel')}</Text>
         </Pressable>
       </View>
-    </ScrollView>
+    </FormScrollView>
   );
 }
 

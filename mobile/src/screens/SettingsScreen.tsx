@@ -1,7 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { useScreenA11yInert } from '../a11y/useScreenA11yInert';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -16,15 +15,11 @@ export default function SettingsScreen({
 }: RootStackScreenProps<'Settings'>) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
-  // Keep the hub out of the a11y tree while it's not the focused route, so an
-  // interrupted back-swipe can't land the screen reader on its "Logs" row.
-  const inert = useScreenA11yInert();
   return (
     <ScrollView
       style={styles.screen}
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"
-      {...inert}
     >
       <View style={styles.links}>
         <Pressable

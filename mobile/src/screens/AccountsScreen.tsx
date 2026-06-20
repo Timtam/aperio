@@ -4,7 +4,6 @@ import {
   AccessibilityInfo,
   findNodeHandle,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -26,6 +25,7 @@ import {
 import { getUserPref, setUserPref } from '../api/prefs';
 import { reconnectOAuthAccount, type OAuthProvider } from '../api/oauth';
 import ContactsPrivacyNoticeModal from '../components/ContactsPrivacyNoticeModal';
+import { FormScrollView } from '../components/FormScrollView';
 import OAuthConnectForm from './OAuthConnectForm';
 
 // Accounts management — list + add (credential kinds) + connect (OAuth kinds via
@@ -468,11 +468,7 @@ export default function AccountsScreen() {
 
   return (
     <>
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
-    >
+    <FormScrollView style={styles.screen} contentContainerStyle={styles.content}>
       {error != null && (
         <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="assertive">
           {error}
@@ -836,7 +832,7 @@ export default function AccountsScreen() {
           </Pressable>
         </View>
       )}
-    </ScrollView>
+    </FormScrollView>
     {/* One-shot contacts privacy notice (app-modal; overlays the screen). */}
     <ContactsPrivacyNoticeModal
       adapterKind={privacyNoticeFor}

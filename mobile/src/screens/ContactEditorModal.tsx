@@ -5,7 +5,6 @@ import {
   AccessibilityInfo,
   Image,
   Pressable,
-  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -26,6 +25,7 @@ import {
   setContactPhoto,
   updateContact,
 } from '../api/contacts';
+import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
 import { useListFocusManager } from '../a11y/useListFocusManager';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -452,11 +452,7 @@ export default function ContactEditorModal({
   );
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
-    >
+    <FormScrollView style={styles.screen} contentContainerStyle={styles.content}>
       {error != null && (
         <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="assertive">
           {error}
@@ -808,7 +804,7 @@ export default function ContactEditorModal({
           <Text style={styles.primaryButtonText}>{t('mobile.save')}</Text>
         </Pressable>
       )}
-    </ScrollView>
+    </FormScrollView>
   );
 }
 
