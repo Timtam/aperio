@@ -1,3 +1,4 @@
+import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -34,14 +35,20 @@ import {
 } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
 import { setEventColor } from '../api/containerColor';
+import {
+  formatLocalDate,
+  formatLocalTime,
+  parseLocalDate,
+  parseLocalTime,
+} from '../intl/dateTimeField';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useSoundPref } from '../state/useSoundPref';
 import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
 // Create / edit a calendar event. Screen-reader-first: every control is an
 // addressable element with an explicit label; the calendar picker is a
-// RadioGroup; all-day is a switch; date/time are text fields (YYYY-MM-DD /
-// HH:MM) — the reliable SR input, matching the reminders editor. On edit the
+// RadioGroup; all-day is a switch; start/end date + time use the native
+// @expo/ui DateTimePicker (always present — an event has a start and end). On edit the
 // loaded event is sent back whole with the edits applied, so recurrence /
 // reminders / attendees / the inline sound field round-trip untouched (the
 // per-event sound OVERRIDE is a `sound.item.{id}` pref, edited below).
@@ -112,7 +119,7 @@ export default function EventEditorModal({
   route,
   navigation,
 }: RootStackScreenProps<'EventEditor'>) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   useCancelHeader(navigation);
@@ -477,54 +484,46 @@ export default function EventEditorModal({
 
       <View style={styles.field}>
         <Text style={styles.label}>{t('dialogs.event.fields.startDate')}</Text>
-        <TextInput
-          style={styles.input}
-          value={startDate}
-          onChangeText={setStartDate}
-          placeholder="YYYY-MM-DD"
-          accessibilityLabel={t('dialogs.event.fields.startDate')}
-          autoCapitalize="none"
-          autoCorrect={false}
+        <DateTimePicker
+          mode="date"
+          display="compact"
+          value={parseLocalDate(startDate)}
+          onValueChange={(_, d) => setStartDate(formatLocalDate(d))}
+          locale={i18n.language}
         />
       </View>
       {!allDay && (
         <View style={styles.field}>
           <Text style={styles.label}>{t('dialogs.event.fields.startTime')}</Text>
-          <TextInput
-            style={styles.input}
-            value={startTime}
-            onChangeText={setStartTime}
-            placeholder="HH:MM"
-            accessibilityLabel={t('dialogs.event.fields.startTime')}
-            autoCapitalize="none"
-            autoCorrect={false}
+          <DateTimePicker
+            mode="time"
+            display="compact"
+            value={parseLocalTime(startTime)}
+            onValueChange={(_, d) => setStartTime(formatLocalTime(d))}
+            locale={i18n.language}
           />
         </View>
       )}
 
       <View style={styles.field}>
         <Text style={styles.label}>{t('dialogs.event.fields.endDate')}</Text>
-        <TextInput
-          style={styles.input}
-          value={endDate}
-          onChangeText={setEndDate}
-          placeholder="YYYY-MM-DD"
-          accessibilityLabel={t('dialogs.event.fields.endDate')}
-          autoCapitalize="none"
-          autoCorrect={false}
+        <DateTimePicker
+          mode="date"
+          display="compact"
+          value={parseLocalDate(endDate)}
+          onValueChange={(_, d) => setEndDate(formatLocalDate(d))}
+          locale={i18n.language}
         />
       </View>
       {!allDay && (
         <View style={styles.field}>
           <Text style={styles.label}>{t('dialogs.event.fields.endTime')}</Text>
-          <TextInput
-            style={styles.input}
-            value={endTime}
-            onChangeText={setEndTime}
-            placeholder="HH:MM"
-            accessibilityLabel={t('dialogs.event.fields.endTime')}
-            autoCapitalize="none"
-            autoCorrect={false}
+          <DateTimePicker
+            mode="time"
+            display="compact"
+            value={parseLocalTime(endTime)}
+            onValueChange={(_, d) => setEndTime(formatLocalTime(d))}
+            locale={i18n.language}
           />
         </View>
       )}
