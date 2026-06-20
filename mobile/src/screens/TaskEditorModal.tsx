@@ -1,3 +1,4 @@
+import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import {
   useCallback,
   useEffect,
@@ -46,6 +47,12 @@ import { SoundSelect } from '../components/SoundSelect';
 import { SubtaskSection } from '../components/SubtaskSection';
 import { TaskRecurrenceSelector } from '../components/TaskRecurrenceSelector';
 import { useCancelHeader } from '../components/useCancelHeader';
+import {
+  formatLocalDate,
+  formatLocalTime,
+  parseLocalDate,
+  parseLocalTime,
+} from '../intl/dateTimeField';
 import { writeLastUsedTaskList } from '../state/lastUsedTaskList';
 import { useSoundPref } from '../state/useSoundPref';
 import { useTaskStore } from '../state/taskStoreContext';
@@ -208,8 +215,8 @@ export default function TaskEditorModal({
   const itemSound = useSoundPref(loaded ? `sound.item.${loaded.id}` : null);
 
   const titleRef = useRef<TextInput | null>(null);
-  const scheduledDateRef = useRef<TextInput | null>(null);
-  const deadlineDateRef = useRef<TextInput | null>(null);
+  const scheduledDateRef = useRef<View | null>(null);
+  const deadlineDateRef = useRef<View | null>(null);
 
   // Header title (announced on present) reflects the mode.
   useEffect(() => {
@@ -761,14 +768,18 @@ export default function TaskEditorModal({
         hint={t('dialogs.task.fields.scheduled.hint')}
         dateLabel={t('dialogs.task.fields.scheduled.date')}
         timeLabel={t('dialogs.task.fields.scheduled.time')}
+        addDateLabel={t('dialogs.task.fields.scheduled.addDate')}
         clearLabel={t('dialogs.task.fields.scheduled.clear')}
+        addTimeLabel={t('dialogs.task.fields.scheduled.addTime')}
+        clearTimeLabel={t('dialogs.task.fields.scheduled.clearTime')}
         dateValue={form.scheduledDate}
         timeValue={form.scheduledTime}
         onChangeDate={(v) => update('scheduledDate', v)}
         onChangeTime={(v) => update('scheduledTime', v)}
         onClear={() => clearSlot('scheduled')}
-        dateRef={scheduledDateRef}
+        fieldRef={scheduledDateRef}
         editable={!loading}
+        locale={i18n.language}
       />
 
       <DateTimeField
@@ -776,14 +787,18 @@ export default function TaskEditorModal({
         hint={t('dialogs.task.fields.deadline.hint')}
         dateLabel={t('dialogs.task.fields.deadline.date')}
         timeLabel={t('dialogs.task.fields.deadline.time')}
+        addDateLabel={t('dialogs.task.fields.deadline.addDate')}
         clearLabel={t('dialogs.task.fields.deadline.clear')}
+        addTimeLabel={t('dialogs.task.fields.deadline.addTime')}
+        clearTimeLabel={t('dialogs.task.fields.deadline.clearTime')}
         dateValue={form.deadlineDate}
         timeValue={form.deadlineTime}
         onChangeDate={(v) => update('deadlineDate', v)}
         onChangeTime={(v) => update('deadlineTime', v)}
         onClear={() => clearSlot('deadline')}
-        dateRef={deadlineDateRef}
+        fieldRef={deadlineDateRef}
         editable={!loading}
+        locale={i18n.language}
       />
 
       <View style={styles.field}>
@@ -941,71 +956,114 @@ function DateTimeField({
   hint,
   dateLabel,
   timeLabel,
+  addDateLabel,
   clearLabel,
+  addTimeLabel,
+  clearTimeLabel,
   dateValue,
   timeValue,
   onChangeDate,
   onChangeTime,
   onClear,
-  dateRef,
+  fieldRef,
   editable,
+  locale,
 }: {
   legend: string;
   hint: string;
   dateLabel: string;
   timeLabel: string;
+  addDateLabel: string;
   clearLabel: string;
+  addTimeLabel: string;
+  clearTimeLabel: string;
   dateValue: string;
   timeValue: string;
   onChangeDate: (v: string) => void;
   onChangeTime: (v: string) => void;
   onClear: () => void;
-  dateRef: RefObject<TextInput | null>;
+  fieldRef: RefObject<View | null>;
   editable: boolean;
+  locale: string;
 }) {
   const styles = useThemedStyles(makeStyles);
   const hasDate = dateValue.trim() !== '';
+  const hasTime = timeValue.trim() !== '';
+  // Native date/time pickers (the same compact @expo/ui control the calendar
+  // jump-to-date uses), mounted on demand: no day until the user adds one, no
+  // time slot until they add that. The form still holds 'YYYY-MM-DD' / 'HH:MM'
+  // strings, so save()/toStored() are unchanged — only the input UI differs.
   return (
-    <View style={styles.field}>
+    <View style={styles.field} ref={fieldRef}>
       <Text style={styles.legend}>{legend}</Text>
       {hint !== '' && (
         <Text style={styles.hint} accessibilityRole="text">
           {hint}
         </Text>
       )}
-      <TextInput
-        ref={dateRef}
-        style={styles.input}
-        value={dateValue}
-        onChangeText={onChangeDate}
-        placeholder="YYYY-MM-DD"
-        // Qualify with the legend so the scheduled vs deadline date inputs (both
-        // labelled "Date") are distinguishable when navigated control-by-control.
-        accessibilityLabel={`${legend} – ${dateLabel}`}
-        editable={editable}
-        autoCapitalize="none"
-        autoCorrect={false}
-      />
-      <TextInput
-        style={styles.input}
-        value={timeValue}
-        onChangeText={onChangeTime}
-        placeholder="HH:MM"
-        accessibilityLabel={`${legend} – ${timeLabel}`}
-        accessibilityState={{ disabled: !hasDate }}
-        editable={editable && hasDate}
-        autoCapitalize="none"
-        autoCorrect={false}
-      />
-      {hasDate && (
+      {!hasDate ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={clearLabel}
-          onPress={onClear}
+          accessibilityLabel={`${legend} – ${addDateLabel}`}
+          accessibilityState={{ disabled: !editable }}
+          disabled={!editable}
+          onPress={() => onChangeDate(formatLocalDate(new Date()))}
           style={({ pressed }) => [styles.ghostButton, pressed && styles.ghostPressed]}
         >
-          <Text style={styles.ghostButtonText}>{clearLabel}</Text>
+          <Text style={styles.ghostButtonText}>{addDateLabel}</Text>
         </Pressable>
+      ) : (
+        <>
+          <View style={styles.pickerRow}>
+            <Text style={styles.pickerLabel}>{`${legend} – ${dateLabel}`}</Text>
+            <DateTimePicker
+              mode="date"
+              display="compact"
+              value={parseLocalDate(dateValue)}
+              onValueChange={(_, d) => onChangeDate(formatLocalDate(d))}
+              locale={locale}
+            />
+          </View>
+          {!hasTime ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${legend} – ${addTimeLabel}`}
+              accessibilityState={{ disabled: !editable }}
+              disabled={!editable}
+              onPress={() => onChangeTime(formatLocalTime(new Date()))}
+              style={({ pressed }) => [styles.ghostButton, pressed && styles.ghostPressed]}
+            >
+              <Text style={styles.ghostButtonText}>{addTimeLabel}</Text>
+            </Pressable>
+          ) : (
+            <View style={styles.pickerRow}>
+              <Text style={styles.pickerLabel}>{`${legend} – ${timeLabel}`}</Text>
+              <DateTimePicker
+                mode="time"
+                display="compact"
+                value={parseLocalTime(timeValue)}
+                onValueChange={(_, d) => onChangeTime(formatLocalTime(d))}
+                locale={locale}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${legend} – ${clearTimeLabel}`}
+                onPress={() => onChangeTime('')}
+                style={({ pressed }) => [styles.ghostButton, pressed && styles.ghostPressed]}
+              >
+                <Text style={styles.ghostButtonText}>{clearTimeLabel}</Text>
+              </Pressable>
+            </View>
+          )}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={clearLabel}
+            onPress={onClear}
+            style={({ pressed }) => [styles.ghostButton, pressed && styles.ghostPressed]}
+          >
+            <Text style={styles.ghostButtonText}>{clearLabel}</Text>
+          </Pressable>
+        </>
       )}
     </View>
   );
@@ -1022,6 +1080,15 @@ const makeStyles = (c: ThemeColors) =>
     field: { gap: 6 },
     legend: { fontSize: 15, fontWeight: '600', color: c.textLabel },
     hint: { fontSize: 13, color: c.textSecondary },
+    pickerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      paddingVertical: 4,
+      flexWrap: 'wrap',
+    },
+    pickerLabel: { fontSize: 16, color: c.textPrimary, flexShrink: 1 },
     input: {
       fontSize: 17,
       color: c.textPrimary,

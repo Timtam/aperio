@@ -1224,7 +1224,10 @@
           "date": "Datum",
           "time": "Uhrzeit",
           "clear": "Geplanten Tag entfernen",
-          "cleared": "Geplanter Tag entfernt."
+          "cleared": "Geplanter Tag entfernt.",
+          "addDate": "Geplanten Tag hinzufügen",
+          "addTime": "Uhrzeit hinzufügen",
+          "clearTime": "Uhrzeit entfernen"
         },
         "deadline": {
           "legend": "Spätestens bis",
@@ -1232,7 +1235,10 @@
           "date": "Datum",
           "time": "Uhrzeit",
           "clear": "Frist entfernen",
-          "cleared": "Frist entfernt."
+          "cleared": "Frist entfernt.",
+          "addDate": "Frist-Tag hinzufügen",
+          "addTime": "Uhrzeit hinzufügen",
+          "clearTime": "Uhrzeit entfernen"
         },
         "description": "Beschreibung",
         "colorLabel": "Farb-Label"

@@ -1224,7 +1224,10 @@
           "date": "Date",
           "time": "Time",
           "clear": "Clear scheduled day",
-          "cleared": "Scheduled day removed."
+          "cleared": "Scheduled day removed.",
+          "addDate": "Add scheduled day",
+          "addTime": "Add time",
+          "clearTime": "Clear time"
         },
         "deadline": {
           "legend": "Due by",
@@ -1232,7 +1235,10 @@
           "date": "Date",
           "time": "Time",
           "clear": "Clear deadline",
-          "cleared": "Deadline removed."
+          "cleared": "Deadline removed.",
+          "addDate": "Add deadline day",
+          "addTime": "Add time",
+          "clearTime": "Clear time"
         },
         "description": "Description",
         "colorLabel": "Color label"
