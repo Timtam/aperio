@@ -1079,7 +1079,15 @@ async fn spawn_external_on_demand(
         }
     }
 
-    let Some(next) = cal_core::next_recurrence_instance(completed) else {
+    // Anchor on the LOCAL completion day (the user's timezone): a "+1 day
+    // backlog" task completed just after local midnight must resurface TOMORROW.
+    // Deriving from the UTC `completed_at` lands it on today (UTC is still
+    // yesterday at that hour) → it never leaves the active backlog.
+    let completion_date = completed
+        .completed_at
+        .map(|dt| dt.with_timezone(&chrono::Local).date_naive())
+        .unwrap_or_else(|| chrono::Local::now().date_naive());
+    let Some(next) = cal_core::next_recurrence_instance(completed, completion_date) else {
         return;
     };
     if let Err(err) = ext.create_task(&completed.list_id, next).await {

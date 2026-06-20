@@ -7,7 +7,7 @@
 //! create the result (local adapter via SQL, the host orchestration via the
 //! owning external adapter — DESIGN §9.12 "runs for external lists too").
 
-use chrono::{Datelike, Days, Months, NaiveDate, Utc};
+use chrono::{Datelike, Days, Months, NaiveDate};
 
 use crate::{
     MonthDay, NewTask, RecurrenceAnchor, RecurrenceEnd, RecurrenceFrequency, RecurrencePlacement,
@@ -18,25 +18,21 @@ use crate::{
 /// or `None` when nothing should be created — no recurrence, no anchor to
 /// advance from, an exhausted `fixed_dates` rule, or a rule past its end date.
 ///
+/// `completion_date` is the LOCAL calendar date the task was completed on — the
+/// caller converts the UTC `completed_at` to the user's timezone. This matters:
+/// a "+1 day backlog" rule completed at 00:30 LOCAL (still the previous day in
+/// UTC) must resurface TOMORROW, not today; deriving the date from UTC here made
+/// it land on today, so the task never left the active backlog.
+///
 /// This is the placement-aware core of the spawner; the caller adds
 /// idempotency (don't spawn a second open instance of a series) and the actual
 /// create.
-pub fn next_recurrence_instance(template: &Task) -> Option<NewTask> {
+pub fn next_recurrence_instance(template: &Task, completion_date: NaiveDate) -> Option<NewTask> {
     let rule = template.recurrence.as_ref()?;
     match rule.placement {
-        RecurrencePlacement::Schedule => next_scheduled_instance(template, rule),
-        RecurrencePlacement::Backlog => next_backlog_instance(template, rule),
+        RecurrencePlacement::Schedule => next_scheduled_instance(template, rule, completion_date),
+        RecurrencePlacement::Backlog => next_backlog_instance(template, rule, completion_date),
     }
-}
-
-/// The calendar date a task was completed on. Falls back to today when the
-/// row carries no `completed_at` (a status flip without a stamp), so the
-/// backlog/`FromCompletion` math always has an anchor.
-fn completion_date(template: &Task) -> NaiveDate {
-    template
-        .completed_at
-        .map(|dt| dt.date_naive())
-        .unwrap_or_else(|| Utc::now().date_naive())
 }
 
 /// True when a date-ended rule (`OnDate`) has run past its boundary.
@@ -81,10 +77,14 @@ fn next_fixed_date_after(from: NaiveDate, dates: &[MonthDay]) -> Option<NaiveDat
 /// Build the next `Schedule`-placement instance: a dated copy of the
 /// template advanced to the next trigger. `None` when there's no anchor to
 /// advance from or the rule has ended.
-fn next_scheduled_instance(template: &Task, rule: &TaskRecurrence) -> Option<NewTask> {
+fn next_scheduled_instance(
+    template: &Task,
+    rule: &TaskRecurrence,
+    completion_date: NaiveDate,
+) -> Option<NewTask> {
     let base = match rule.anchor {
         RecurrenceAnchor::FromDate => template.scheduled_date.or(template.deadline_date)?,
-        RecurrenceAnchor::FromCompletion => completion_date(template),
+        RecurrenceAnchor::FromCompletion => completion_date,
     };
     let next_date = next_trigger(base, rule)?;
     if recurrence_ended(rule, next_date) {
@@ -112,8 +112,12 @@ fn next_scheduled_instance(template: &Task, rule: &TaskRecurrence) -> Option<New
 /// Build the next `Backlog`-placement instance: an undated copy whose
 /// `resurface_date` decides when it re-enters the active backlog. `None`
 /// when a `fixed_dates` rule has no valid trigger or the rule has ended.
-fn next_backlog_instance(template: &Task, rule: &TaskRecurrence) -> Option<NewTask> {
-    let from = completion_date(template);
+fn next_backlog_instance(
+    template: &Task,
+    rule: &TaskRecurrence,
+    completion_date: NaiveDate,
+) -> Option<NewTask> {
+    let from = completion_date;
     let resurface: Option<NaiveDate> = match rule.fixed_dates.as_ref().filter(|d| !d.is_empty()) {
         Some(dates) => Some(next_fixed_date_after(from, dates)?),
         // No interval ⇒ surface immediately (the dishwasher case):
@@ -249,7 +253,14 @@ fn last_day_of_month(year: i32, month: u32) -> u32 {
 mod tests {
     use super::*;
     use crate::TaskPriority;
-    use chrono::TimeZone;
+    use chrono::{TimeZone, Utc};
+
+    /// Spawn the next instance anchoring on the template's recorded completion
+    /// date (the fixed-time test stamp makes the UTC date deterministic here —
+    /// production injects the LOCAL date instead).
+    fn spawn(t: &Task) -> Option<NewTask> {
+        next_recurrence_instance(t, t.completed_at.unwrap().date_naive())
+    }
 
     fn template(recurrence: TaskRecurrence, completed: NaiveDate) -> Task {
         Task {
@@ -311,7 +322,7 @@ mod tests {
             NaiveDate::from_ymd_opt(2026, 5, 10).unwrap(),
         );
         t.recurrence = None;
-        assert!(next_recurrence_instance(&t).is_none());
+        assert!(spawn(&t).is_none());
     }
 
     #[test]
@@ -326,7 +337,7 @@ mod tests {
             ),
             NaiveDate::from_ymd_opt(2026, 5, 10).unwrap(),
         );
-        let next = next_recurrence_instance(&t).unwrap();
+        let next = spawn(&t).unwrap();
         assert_eq!(next.scheduled_date, None);
         assert_eq!(next.resurface_date, None);
         assert_eq!(next.series_id.as_deref(), Some("series-1"));
@@ -347,11 +358,37 @@ mod tests {
             ),
             NaiveDate::from_ymd_opt(2026, 5, 10).unwrap(),
         );
-        let next = next_recurrence_instance(&t).unwrap();
+        let next = spawn(&t).unwrap();
         assert_eq!(
             next.resurface_date,
             Some(NaiveDate::from_ymd_opt(2026, 10, 1).unwrap()),
         );
+    }
+
+    #[test]
+    fn backlog_interval_resurfaces_one_interval_after_completion() {
+        // The user's case: a "recurring in backlog, in 1 day" task. The next
+        // instance must resurface the day AFTER the LOCAL completion day, so it
+        // leaves the active backlog — anchored on the injected date, NOT the UTC
+        // date of completed_at (which at 00:30 local is still yesterday → +1
+        // would land on today → never deferred).
+        let t = template(
+            rule(
+                RecurrenceFrequency::Daily,
+                1,
+                RecurrenceAnchor::FromCompletion,
+                RecurrencePlacement::Backlog,
+                None,
+            ),
+            NaiveDate::from_ymd_opt(2026, 6, 21).unwrap(),
+        );
+        let next =
+            next_recurrence_instance(&t, NaiveDate::from_ymd_opt(2026, 6, 21).unwrap()).unwrap();
+        assert_eq!(
+            next.resurface_date,
+            Some(NaiveDate::from_ymd_opt(2026, 6, 22).unwrap()),
+        );
+        assert_eq!(next.scheduled_date, None);
     }
 
     #[test]
@@ -367,7 +404,7 @@ mod tests {
             NaiveDate::from_ymd_opt(2026, 5, 10).unwrap(),
         );
         t.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 5, 1).unwrap());
-        let next = next_recurrence_instance(&t).unwrap();
+        let next = spawn(&t).unwrap();
         // Completed 10 May + 1 week → 17 May, landing in the scheduled slot.
         assert_eq!(
             next.scheduled_date,

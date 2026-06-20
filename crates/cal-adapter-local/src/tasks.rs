@@ -181,8 +181,15 @@ impl LocalAdapter {
         }
 
         // The placement-aware computation lives in `cal_core::spawn` so the
-        // host can run the same logic for external lists (DESIGN §9.12).
-        let Some(new) = cal_core::next_recurrence_instance(template) else {
+        // host can run the same logic for external lists (DESIGN §9.12). Anchor
+        // on the LOCAL completion day so a "+1 day backlog" task resurfaces
+        // tomorrow even when completed just after local midnight (the UTC date is
+        // still yesterday at that hour → resurface today → never deferred).
+        let completion_date = template
+            .completed_at
+            .map(|dt| dt.with_timezone(&chrono::Local).date_naive())
+            .unwrap_or_else(|| chrono::Local::now().date_naive());
+        let Some(new) = cal_core::next_recurrence_instance(template, completion_date) else {
             return Ok(None);
         };
         let task = self.create_task_sync(&template.list_id, new)?;
