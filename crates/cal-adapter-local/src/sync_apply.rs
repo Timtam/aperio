@@ -31,7 +31,7 @@
 
 use cal_core::{Calendar, ColorLabel, Event, Section, Task, TaskList};
 use chrono::Utc;
-use rusqlite::params;
+use rusqlite::{params, Connection};
 
 use crate::calendars::split_recurrence;
 use crate::mapping::{encode_json, fmt_date, fmt_time, fmt_utc, write_sound};
@@ -50,6 +50,7 @@ impl LocalAdapter {
         let (rrule, exceptions) = split_recurrence(&event.recurrence)?;
 
         let conn = self.db().lock().expect("db mutex poisoned");
+        ensure_color_label_ref(&conn, event.color_label.as_ref().map(|c| c.as_str()))?;
         conn.execute(
             "INSERT INTO events (
                 id, calendar_id, title, description, location,
@@ -127,6 +128,7 @@ impl LocalAdapter {
         let sound_json = write_sound(&cal.default_sound)?;
         let now_s = fmt_utc(&Utc::now());
         let conn = self.db().lock().expect("db mutex poisoned");
+        ensure_color_label_ref(&conn, cal.color_label.as_ref().map(|c| c.as_str()))?;
         conn.execute(
             "INSERT INTO calendars (
                 id, source, name, color_hex, color_source, color_label_id,
@@ -175,6 +177,7 @@ impl LocalAdapter {
             None => None,
         };
         let conn = self.db().lock().expect("db mutex poisoned");
+        ensure_color_label_ref(&conn, task.color_label.as_ref().map(|c| c.as_str()))?;
         conn.execute(
             "INSERT INTO tasks (
                 id, list_id, parent_id, section_id, title, description, status, priority,
@@ -254,6 +257,7 @@ impl LocalAdapter {
         let sound_json = write_sound(&list.default_sound)?;
         let now_s = fmt_utc(&Utc::now());
         let conn = self.db().lock().expect("db mutex poisoned");
+        ensure_color_label_ref(&conn, list.color_label.as_ref().map(|c| c.as_str()))?;
         conn.execute(
             "INSERT INTO task_lists (
                 id, source, name, color_hex, color_source, color_label_id,
@@ -302,6 +306,7 @@ impl LocalAdapter {
     pub fn upsert_section_from_sync(&self, section: &Section) -> cal_core::Result<()> {
         let now_s = fmt_utc(&Utc::now());
         let conn = self.db().lock().expect("db mutex poisoned");
+        ensure_color_label_ref(&conn, section.color_label.as_ref().map(|c| c.as_str()))?;
         conn.execute(
             "INSERT INTO sections (id, list_id, name, position, color_label_id, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -358,6 +363,28 @@ impl LocalAdapter {
             .map_err(map_sql_err)?;
         Ok(())
     }
+}
+
+/// Ensure a referenced colour label exists before inserting a row that
+/// FK-references it (`color_label_id REFERENCES color_labels(id)` with
+/// `foreign_keys=ON`).
+///
+/// On the event-log apply path events arrive in wall-clock order across devices
+/// and log files, so a row's `color_label.created` can land AFTER a row that
+/// references it — which would FK-fail and silently drop the row (the same
+/// hazard the snapshot apply hit, fixed there by ordering color_labels first).
+/// Insert a minimal placeholder for an unknown id; the real `color_label.created`
+/// fills it in via its `ON CONFLICT DO UPDATE`, so the row survives AND keeps its
+/// colour link. No-op when the id is `None` or the label already exists.
+fn ensure_color_label_ref(conn: &Connection, color_label_id: Option<&str>) -> cal_core::Result<()> {
+    if let Some(id) = color_label_id {
+        conn.execute(
+            "INSERT OR IGNORE INTO color_labels (id, name, hex, ad_hoc) VALUES (?, '', '', 0)",
+            params![id],
+        )
+        .map_err(map_sql_err)?;
+    }
+    Ok(())
 }
 
 fn color_source_to_text(source: cal_core::ColorSource) -> &'static str {

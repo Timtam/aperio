@@ -625,6 +625,44 @@ mod tests {
         );
     }
 
+    /// Regression for the LOG-apply path: a colour-labelled row that arrives
+    /// BEFORE its `color_label.created` event (cross-device / cross-log
+    /// wall-clock ordering — the snapshot reorder can't help here) must NOT be
+    /// dropped. `upsert_*_from_sync` now inserts a self-healing placeholder for an
+    /// unknown label id so the FK holds; the real label fills it in on arrival.
+    #[test]
+    fn log_apply_keeps_a_list_whose_color_label_arrives_later() {
+        let dst = make_adapter();
+        // Apply the list FIRST, referencing a label that doesn't exist yet.
+        let mut list = fake_task_list("L1", "Work");
+        list.color_label = Some(ColorLabelId::new("lbl-late".to_string()));
+        dst.upsert_task_list_from_sync(&list)
+            .expect("the list must survive a not-yet-present label");
+
+        let got = dst.dump_for_snapshot().unwrap().task_lists;
+        assert_eq!(got.len(), 1, "the list survives despite the missing label");
+        assert_eq!(
+            got[0].color_label.as_ref().map(|c| c.0.as_str()),
+            Some("lbl-late"),
+        );
+
+        // The real label arriving later heals the placeholder in place.
+        dst.upsert_color_label_from_sync(&ColorLabel {
+            id: ColorLabelId::new("lbl-late".to_string()),
+            name: "Work".into(),
+            hex: "#ff8800".into(),
+            ad_hoc: false,
+        })
+        .unwrap();
+        let labels = dst.dump_for_snapshot().unwrap().color_labels;
+        let lbl = labels
+            .iter()
+            .find(|l| l.id.0 == "lbl-late")
+            .expect("label present");
+        assert_eq!(lbl.name, "Work", "placeholder healed into the real label");
+        assert_eq!(lbl.hex, "#ff8800");
+    }
+
     /// Same FK hazard, sibling table: `tasks.parent_id` is self-referential
     /// too, so a subtask dumped before its parent task must still survive.
     #[test]
