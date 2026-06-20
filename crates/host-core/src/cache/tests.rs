@@ -627,6 +627,92 @@ fn invalidate_forces_next_read_cold() {
         .is_none());
 }
 
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use cal_core::{Adapter, AuthToken, Capability, Credentials, NewTask, TasksFeature};
+
+/// A fake tasks adapter whose `get_tasks` invalidates the list MID-FETCH —
+/// simulating a local mutation (e.g. completing a task in the day-start review)
+/// landing while a slow warm refresh is already in flight. Proves the generation
+/// guard in `refresh_tasks` drops the now-stale write.
+struct MidFetchInvalidator {
+    cache: Arc<CacheStore>,
+    tasks: Vec<Task>,
+}
+
+#[async_trait]
+impl Adapter for MidFetchInvalidator {
+    async fn authenticate(&self, _credentials: Credentials) -> cal_core::Result<AuthToken> {
+        Err(cal_core::Error::Unsupported("test fake".into()))
+    }
+    fn capabilities(&self) -> &[Capability] {
+        &[]
+    }
+}
+
+#[async_trait]
+impl TasksFeature for MidFetchInvalidator {
+    async fn list_task_lists(&self) -> cal_core::Result<Vec<TaskList>> {
+        Ok(vec![])
+    }
+    async fn get_tasks(&self, _list_id: &str) -> cal_core::Result<Vec<Task>> {
+        // The mutation lands DURING the fetch (before this returns its snapshot).
+        self.cache.invalidate(ACC, SyncScope::Tasks, LIST).unwrap();
+        Ok(self.tasks.clone())
+    }
+    async fn create_task(&self, _list_id: &str, _task: NewTask) -> cal_core::Result<Task> {
+        unreachable!("not exercised by the refresh path")
+    }
+    async fn update_task(&self, _task: Task) -> cal_core::Result<Task> {
+        unreachable!("not exercised by the refresh path")
+    }
+    async fn delete_task(&self, _task_id: &str) -> cal_core::Result<()> {
+        unreachable!("not exercised by the refresh path")
+    }
+}
+
+#[test]
+fn invalidate_bumps_the_refresh_generation_per_container() {
+    let store = setup();
+    assert_eq!(store.refresh_generation(ACC, SyncScope::Tasks, LIST), 0);
+    store.invalidate(ACC, SyncScope::Tasks, LIST).unwrap();
+    store.invalidate(ACC, SyncScope::Tasks, LIST).unwrap();
+    assert_eq!(store.refresh_generation(ACC, SyncScope::Tasks, LIST), 2);
+    // Independent per container + per scope.
+    assert_eq!(
+        store.refresh_generation(ACC, SyncScope::Tasks, "other-list"),
+        0
+    );
+    assert_eq!(store.refresh_generation(ACC, SyncScope::Events, LIST), 0);
+}
+
+#[tokio::test]
+async fn refresh_drops_a_write_whose_fetch_predates_an_invalidate() {
+    let store = Arc::new(setup());
+    // Warm the list with task t1.
+    store.replace_list_tasks(ACC, LIST, &[task("t1")]).unwrap();
+
+    // The fake invalidates the list mid-fetch (a local mutation), then returns a
+    // DIFFERENT snapshot (t2). The generation guard must drop that stale write,
+    // leaving the warmed t1 in place (the invalidation forces a cold re-read).
+    let adapter = MidFetchInvalidator {
+        cache: store.clone(),
+        tasks: vec![task("t2")],
+    };
+    super::refresh_tasks(&store, &adapter, ACC, LIST)
+        .await
+        .unwrap();
+
+    let cached = store.read_tasks(ACC, LIST).unwrap();
+    let ids: Vec<&str> = cached.iter().map(|t| t.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        ["t1"],
+        "a refresh whose fetch predates an invalidate must not overwrite the cache",
+    );
+}
+
 #[test]
 fn native_id_strips_kind_prefix_and_change_key() {
     use super::native_id;

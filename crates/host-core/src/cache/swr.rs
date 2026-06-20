@@ -168,8 +168,14 @@ pub async fn refresh_events(
         Some((Some(ws), Some(we))) if ws <= range.start && we >= range.end
     );
     let effective_token = if covered { token.as_deref() } else { None };
+    // Snapshot the generation before the fetch (see refresh_tasks): drop a stale
+    // write if a local mutation invalidates this calendar mid-fetch.
+    let gen = cache.refresh_generation(account, SyncScope::Events, calendar);
     match ext.get_events_delta(calendar, range, effective_token).await {
         Ok(cs) => {
+            if cache.refresh_generation(account, SyncScope::Events, calendar) != gen {
+                return Ok(());
+            }
             if cs.full_resync || effective_token.is_none() {
                 // Folder-complete adapters (EWS/CalDAV) return the WHOLE
                 // collection, so the snapshot now covers any range —
@@ -204,6 +210,9 @@ pub async fn refresh_events(
         }
         Err(cal_core::Error::Unsupported(_)) => {
             let events = ext.get_events(calendar, range).await?;
+            if cache.refresh_generation(account, SyncScope::Events, calendar) != gen {
+                return Ok(());
+            }
             let _ = cache.replace_calendar_events(account, calendar, range, &events);
             Ok(())
         }
@@ -218,6 +227,11 @@ pub async fn refresh_tasks(
     account: &str,
     list: &str,
 ) -> cal_core::Result<()> {
+    // Snapshot the generation BEFORE the (slow) fetch. If a local mutation
+    // invalidates this list while we fetch (e.g. a task completed in the
+    // day-start review), the generation changes and we drop our now-stale write
+    // so it can't clobber the invalidation with the pre-mutation snapshot.
+    let gen = cache.refresh_generation(account, SyncScope::Tasks, list);
     let token = cache
         .get_sync_state(account, SyncScope::Tasks, list)
         .ok()
@@ -225,6 +239,9 @@ pub async fn refresh_tasks(
         .and_then(|s| s.sync_token);
     match ext.get_tasks_delta(list, token.as_deref()).await {
         Ok(cs) => {
+            if cache.refresh_generation(account, SyncScope::Tasks, list) != gen {
+                return Ok(());
+            }
             if cs.full_resync || token.is_none() {
                 let _ = cache.replace_list_tasks(account, list, &cs.changes);
                 let _ = cache.set_token(account, SyncScope::Tasks, list, cs.new_token.as_deref());
@@ -243,6 +260,9 @@ pub async fn refresh_tasks(
         }
         Err(cal_core::Error::Unsupported(_)) => {
             let tasks = ext.get_tasks(list).await?;
+            if cache.refresh_generation(account, SyncScope::Tasks, list) != gen {
+                return Ok(());
+            }
             let _ = cache.replace_list_tasks(account, list, &tasks);
             Ok(())
         }
@@ -257,6 +277,9 @@ pub async fn refresh_contacts(
     account: &str,
     list: &str,
 ) -> cal_core::Result<()> {
+    // Snapshot the generation before the fetch (see refresh_tasks): drop a stale
+    // write if a local mutation invalidates this list mid-fetch.
+    let gen = cache.refresh_generation(account, SyncScope::Contacts, list);
     let token = cache
         .get_sync_state(account, SyncScope::Contacts, list)
         .ok()
@@ -264,6 +287,9 @@ pub async fn refresh_contacts(
         .and_then(|s| s.sync_token);
     match ext.get_contacts_delta(list, token.as_deref()).await {
         Ok(cs) => {
+            if cache.refresh_generation(account, SyncScope::Contacts, list) != gen {
+                return Ok(());
+            }
             if cs.full_resync || token.is_none() {
                 let _ = cache.replace_list_contacts(account, list, &cs.changes);
                 let _ =
@@ -283,6 +309,9 @@ pub async fn refresh_contacts(
         }
         Err(cal_core::Error::Unsupported(_)) => {
             let contacts = ext.get_contacts(list).await?;
+            if cache.refresh_generation(account, SyncScope::Contacts, list) != gen {
+                return Ok(());
+            }
             let _ = cache.replace_list_contacts(account, list, &contacts);
             Ok(())
         }

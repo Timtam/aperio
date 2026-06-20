@@ -72,6 +72,18 @@ pub fn unbounded_window() -> DateRange {
 #[derive(Clone)]
 pub struct CacheStore {
     db: DbHandle,
+    /// In-memory per-(account, scope, container) refresh generation.
+    /// [`Self::invalidate`] (and any local mutation that invalidates a container)
+    /// bumps it; a background refresh captures it BEFORE its slow fetch and drops
+    /// its write if it changed — so a warm pass whose fetch predates a local
+    /// mutation can't overwrite that mutation by writing stale provider data back
+    /// over the invalidation. In-memory (reset on restart) — the race is within a
+    /// session. Keyed by `scope.as_str()` so the `Copy` enum needn't be hashed.
+    /// `Arc`-shared so `CacheStore` clones (which share the DB) also share the
+    /// counter — an invalidate on one handle is seen by a refresh on another.
+    refresh_generations: std::sync::Arc<
+        std::sync::Mutex<std::collections::HashMap<(String, &'static str, String), u64>>,
+    >,
 }
 
 /// Which logical container/item-set a [`SyncState`] row describes.
@@ -173,7 +185,37 @@ pub struct CacheUpdatedPayload {
 
 impl CacheStore {
     pub fn new(db: DbHandle) -> Self {
-        Self { db }
+        Self {
+            db,
+            refresh_generations: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+        }
+    }
+
+    /// Current refresh generation for a container (0 when never invalidated). A
+    /// background refresh captures this before its fetch; if it differs at
+    /// write-time a local mutation invalidated the container mid-fetch, so the
+    /// fetched snapshot is stale and the write must be dropped.
+    pub fn refresh_generation(&self, account: &str, scope: SyncScope, container: &str) -> u64 {
+        *self
+            .refresh_generations
+            .lock()
+            .expect("cache refresh-generation poisoned")
+            .get(&(account.to_string(), scope.as_str(), container.to_string()))
+            .unwrap_or(&0)
+    }
+
+    /// Bump a container's refresh generation. Called from [`Self::invalidate`] so
+    /// any in-flight background refresh of that container drops its (now stale)
+    /// write rather than clobbering the invalidation.
+    fn bump_refresh_generation(&self, account: &str, scope: SyncScope, container: &str) {
+        *self
+            .refresh_generations
+            .lock()
+            .expect("cache refresh-generation poisoned")
+            .entry((account.to_string(), scope.as_str(), container.to_string()))
+            .or_insert(0) += 1;
     }
 
     // ── Events ───────────────────────────────────────────────────────
@@ -640,6 +682,10 @@ impl CacheStore {
     /// Used after an aperio-side mutation whose exact row delta is
     /// awkward to apply surgically (e.g. a cross-container move).
     pub fn invalidate(&self, account: &str, scope: SyncScope, container: &str) -> DbResult<()> {
+        // Bump the generation first so any refresh whose fetch is already in
+        // flight sees the change and drops its now-stale write (rather than
+        // re-freshening the cache over the invalidation we're about to make).
+        self.bump_refresh_generation(account, scope, container);
         self.db.with_conn(|c| {
             c.execute(
                 "UPDATE cache_sync_state
