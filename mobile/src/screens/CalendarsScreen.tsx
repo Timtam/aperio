@@ -13,6 +13,7 @@ import {
 
 import type { ColorLabel } from '@aperio/shared';
 
+import { listAccounts, type Account } from '../api/accounts';
 import { Calendar, createCalendar, listCalendars } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -43,6 +44,9 @@ export default function CalendarsScreen({
   const [newName, setNewName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Resolve external calendars' owning account to its display name (not the raw
+  // account id); local calendars read as "On this device".
+  const [accountNames, setAccountNames] = useState<Map<string, string>>(new Map());
 
   const rowTags = useRef<Record<string, number | null>>({});
   const pendingFocusId = useRef<string | null>(null);
@@ -59,12 +63,14 @@ export default function CalendarsScreen({
 
   const load = useCallback(async () => {
     try {
-      const [cals, labels] = await Promise.all([
+      const [cals, labels, accounts] = await Promise.all([
         listCalendars(),
         listColorLabels().catch(() => [] as ColorLabel[]),
+        listAccounts().catch(() => [] as Account[]),
       ]);
       setCalendars(cals);
       setColorLabels(labels);
+      setAccountNames(new Map(accounts.map((a) => [a.id, a.display_name])));
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -160,7 +166,9 @@ export default function CalendarsScreen({
               ? labelsById.get(cal.color_label)?.name
               : undefined;
             // name + account + (colour name) on the accessible label.
-            const accountLabel = isLocal ? t('sidebar.localAccount') : cal.account_id;
+            const accountLabel = isLocal
+              ? t('sidebar.localAccount')
+              : (accountNames.get(cal.account_id) ?? cal.account_id);
             const label =
               `${cal.name}, ${accountLabel}` +
               (colourName ? t('mobile.colorLabelSuffix', { name: colourName }) : '');
