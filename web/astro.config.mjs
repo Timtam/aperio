@@ -89,6 +89,7 @@ export default defineConfig({
               label: 'Reference',
               translations: { de: 'Referenz' },
               items: [
+                { label: 'Mobile app', translations: { de: 'Mobile App' }, slug: 'guides/mobile' },
                 { label: 'Keyboard Shortcuts', translations: { de: 'Tastaturkürzel' }, slug: 'guides/tastaturkuerzel' },
                 { label: 'Accessibility', translations: { de: 'Barrierefreiheit' }, slug: 'guides/barrierefreiheit' },
                 { label: 'Troubleshooting & Logs', translations: { de: 'Fehlersuche & Protokolle' }, slug: 'guides/troubleshooting' },
