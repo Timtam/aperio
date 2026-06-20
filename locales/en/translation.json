@@ -444,6 +444,8 @@
         "weekStartHint": "Sets which weekday the week and month views start on. Calendar week numbers stay ISO 8601 (Monday-based).",
         "hapticsLabel": "Haptic feedback",
         "hapticsHint": "A short vibration when an external-data refresh starts and finishes. Stored on this device only.",
+        "appBadgeLabel": "App icon badge",
+        "appBadgeHint": "Show a number on the app icon for today's open tasks plus events still ahead today. Stored on this device only; needs notification permission.",
         "trayHeading": "System tray",
         "trayIntro": "Keep Aperio running in the background — the reminder scheduler stays active and notifications still fire while the window is hidden in the tray.",
         "trayUnavailable": "This system has no usable tray, so these options stay off and the window closes/minimizes normally. (On Linux, GNOME needs an AppIndicator extension to show a tray.)",

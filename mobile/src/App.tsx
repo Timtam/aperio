@@ -18,6 +18,7 @@ import { SyncStatusContext } from './state/syncStatusContext';
 import { ThemeProvider, useTheme, navigationThemeFor } from './theme';
 import type { RootStackParamList, RootTabParamList } from './navigation/types';
 import { useReminderTriggers } from './reminders/scheduler';
+import { useAppBadge } from './state/useAppBadge';
 import { useDayStartChecks } from './state/useDayStartChecks';
 import { useStoredLanguage } from './settings/language';
 import { useSyncStatus } from './state/useSyncStatus';
@@ -330,6 +331,13 @@ function DayStartChecks() {
   return <DayStartReviewModal visible={reviewOpen} onClose={closeReview} />;
 }
 
+/** Keeps the app-icon badge (today's open tasks + upcoming events) in sync. It
+ *  reads the task store's dataVersion, so it mounts inside TaskStoreProvider. */
+function AppBadge() {
+  useAppBadge();
+  return null;
+}
+
 function AppContent() {
   const { t } = useTranslation();
   const theme = useTheme();
@@ -422,6 +430,8 @@ function AppContent() {
               store, so they mount inside the provider; the review modal overlays
               the focused tab when the gate opens it. */}
           <DayStartChecks />
+          {/* App-icon badge: today's open tasks + upcoming events. */}
+          <AppBadge />
           {/* The root sync-status poll feeds the per-screen header indicator
               (the tab bar can't carry an accessible label). */}
           <SyncStatusContext.Provider value={sync}>{tabs}</SyncStatusContext.Provider>

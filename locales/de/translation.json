@@ -441,6 +441,8 @@
         "weekStartHint": "Bestimmt, mit welchem Wochentag die Wochen- und Monatsansicht beginnt. Kalenderwochen werden weiterhin nach ISO 8601 (Montag) berechnet.",
         "hapticsLabel": "Haptisches Feedback",
         "hapticsHint": "Eine kurze Vibration, wenn eine Aktualisierung externer Daten beginnt und endet. Wird nur auf diesem Gerät gespeichert.",
+        "appBadgeLabel": "App-Symbol-Badge",
+        "appBadgeHint": "Zeigt auf dem App-Symbol eine Zahl für die heute noch offenen Aufgaben plus die heute noch anstehenden Termine. Wird nur auf diesem Gerät gespeichert; benötigt die Benachrichtigungsberechtigung.",
         "trayHeading": "Infobereich (System Tray)",
         "trayIntro": "Aperio im Hintergrund weiterlaufen lassen — der Erinnerungs-Scheduler bleibt aktiv und Benachrichtigungen erscheinen weiter, auch wenn das Fenster im Infobereich ausgeblendet ist.",
         "trayUnavailable": "Dieses System hat keinen nutzbaren Infobereich, daher bleiben diese Optionen aus und das Fenster schließt/minimiert sich normal. (Unter Linux braucht GNOME eine AppIndicator-Erweiterung, damit ein Infobereich erscheint.)",

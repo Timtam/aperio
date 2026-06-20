@@ -13,6 +13,7 @@ import {
   type LanguageChoice,
 } from '../settings/language';
 import { readWeekStart, writeWeekStart, type WeekStart } from '../settings/weekStart';
+import { useAppBadgePref } from '../state/appBadge';
 import { useHapticsPref } from '../state/haptics';
 import { useSoundPref } from '../state/useSoundPref';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -35,6 +36,8 @@ export default function GeneralSettingsScreen() {
   const globalSound = useSoundPref('sound.global');
   // Device-local haptic feedback for the external-sync start/end cues (default on).
   const [haptics, setHaptics] = useHapticsPref();
+  // Device-local app-icon badge (today's open tasks + upcoming events; default on).
+  const [appBadge, setAppBadge] = useAppBadgePref();
 
   // Reflect the stored choices whenever the screen is focused (they may have
   // been applied on launch — or changed on another device — before this mounted).
@@ -119,6 +122,12 @@ export default function GeneralSettingsScreen() {
           hint={t('dialogs.settings.general.hapticsHint')}
           value={haptics}
           onToggle={() => setHaptics(!haptics)}
+        />
+        <SwitchRow
+          label={t('dialogs.settings.general.appBadgeLabel')}
+          hint={t('dialogs.settings.general.appBadgeHint')}
+          value={appBadge}
+          onToggle={() => setAppBadge(!appBadge)}
         />
       </View>
     </ScrollView>
