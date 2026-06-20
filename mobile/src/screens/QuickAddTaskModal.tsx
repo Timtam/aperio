@@ -13,6 +13,7 @@ import {
 import { createTask } from '../api/client';
 import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
+import { useCancelHeader } from '../components/useCancelHeader';
 import { readLastUsedTaskList, writeLastUsedTaskList } from '../state/lastUsedTaskList';
 import { useTaskStore } from '../state/taskStoreContext';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -70,11 +71,16 @@ export default function QuickAddTaskModal({ navigation }: RootStackScreenProps<'
     };
   }, [writable]);
 
-  // Move SR focus into the title field on open (a modal must drive focus or
-  // TalkBack/VoiceOver lingers on the trigger row).
+  // Cancel button in the header (first element) so the user can back out fast.
+  useCancelHeader(navigation);
+
+  // Move SR focus into the title field on open AND open the keyboard, so a new
+  // task is ready to type immediately (a modal must drive focus or VoiceOver
+  // lingers on the trigger row).
   useEffect(() => {
     const tag = findNodeHandle(titleRef.current);
     if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+    titleRef.current?.focus();
   }, []);
 
   // Any dismissal refetches the list (the desktop DialogState.close behaviour).

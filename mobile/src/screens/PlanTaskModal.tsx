@@ -15,6 +15,7 @@ import { isoNextMonday, isoToday, isoTomorrow } from '@aperio/shared';
 
 import { getTaskById, updateTask } from '../api/client';
 import { FormScrollView } from '../components/FormScrollView';
+import { useCancelHeader } from '../components/useCancelHeader';
 import { useTaskStore } from '../state/taskStoreContext';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -46,6 +47,7 @@ export default function PlanTaskModal({ route, navigation }: RootStackScreenProp
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { invalidateData } = useTaskStore();
+  useCancelHeader(navigation);
 
   const [task, setTask] = useState<Task | null>(null);
   // Preload the custom field with the task's current scheduled date so

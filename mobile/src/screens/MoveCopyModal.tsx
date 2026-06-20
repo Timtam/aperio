@@ -16,6 +16,7 @@ import { getTaskById, getTasks } from '../api/client';
 import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
 import { SegmentedSelect } from '../components/SegmentedSelect';
+import { useCancelHeader } from '../components/useCancelHeader';
 import {
   moveOrCopyEvent,
   moveOrCopyTask,
@@ -46,6 +47,7 @@ export default function MoveCopyModal({
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { taskLists, invalidateData } = useTaskStore();
+  useCancelHeader(navigation);
 
   const [task, setTask] = useState<Task | null>(null);
   const [children, setChildren] = useState<Task[]>([]);

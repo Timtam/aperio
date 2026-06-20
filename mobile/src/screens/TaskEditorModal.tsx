@@ -45,6 +45,7 @@ import { SegmentedSelect } from '../components/SegmentedSelect';
 import { SoundSelect } from '../components/SoundSelect';
 import { SubtaskSection } from '../components/SubtaskSection';
 import { TaskRecurrenceSelector } from '../components/TaskRecurrenceSelector';
+import { useCancelHeader } from '../components/useCancelHeader';
 import { writeLastUsedTaskList } from '../state/lastUsedTaskList';
 import { useSoundPref } from '../state/useSoundPref';
 import { useTaskStore } from '../state/taskStoreContext';
@@ -217,6 +218,9 @@ export default function TaskEditorModal({
         taskId == null ? t('mobile.newTaskLabel') : t('mobile.editTaskLabel'),
     });
   }, [navigation, t, taskId]);
+  // A Cancel button as the first header element so the user can back out
+  // without swiping to the bottom of the form.
+  useCancelHeader(navigation);
 
   // Every dismissal (Save, Cancel, header back, swipe) bumps the data version so
   // the list refetches — the desktop DialogState.close() behaviour.
@@ -256,7 +260,10 @@ export default function TaskEditorModal({
     if (loading) return;
     const tag = findNodeHandle(titleRef.current);
     if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
-  }, [loading]);
+    // New task: also open the keyboard on the title so the user can start
+    // typing immediately (the desktop autofocuses the title).
+    if (taskId == null) titleRef.current?.focus();
+  }, [loading, taskId]);
 
   // Make sure the selected list's sections are loaded so the section picker can
   // offer them (lazy + sticky in the store).

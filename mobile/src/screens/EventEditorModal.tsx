@@ -22,6 +22,7 @@ import { RadioGroup } from '../components/RadioGroup';
 import { RecurrenceSelector } from '../components/RecurrenceSelector';
 import { RemindersEditor } from '../components/RemindersEditor';
 import { SoundSelect } from '../components/SoundSelect';
+import { useCancelHeader } from '../components/useCancelHeader';
 import {
   addEventExdate,
   Calendar,
@@ -114,6 +115,7 @@ export default function EventEditorModal({
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
+  useCancelHeader(navigation);
   const { eventId, calendarId, occurrence, anchor } = route.params;
   const editing = eventId != null;
   // A single occurrence of a recurring series was opened (occurrence = its
