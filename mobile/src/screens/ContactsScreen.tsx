@@ -25,6 +25,7 @@ import {
 } from '../api/contacts';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useCacheReload } from '../state/cacheObserver';
+import { useContactVisibility } from '../state/contactVisibility';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Accessible address-book view — a linear, screen-reader-first list of every
@@ -107,31 +108,40 @@ export default function ContactsScreen({
     [groups],
   );
 
+  // Per-device address-book visibility — the user can hide books from browse +
+  // search (toggled on the Manage-address-books screen).
+  const { hidden: hiddenBooks } = useContactVisibility();
+
   // What the list renders: the loaded groups when browsing, else the Host search
   // results grouped by their owning book (search supersets the loaded set, incl.
-  // directories), so the grouped renderer is shared.
+  // directories), so the grouped renderer is shared. Hidden books drop from both.
   const displayGroups = useMemo<Group[]>(() => {
-    if (!searching || searchResults == null) return groups;
-    const byList = new Map<string, Contact[]>();
-    for (const c of searchResults) {
-      const arr = byList.get(c.list_id);
-      if (arr) arr.push(c);
-      else byList.set(c.list_id, [c]);
+    let base: Group[];
+    if (!searching || searchResults == null) {
+      base = groups;
+    } else {
+      const byList = new Map<string, Contact[]>();
+      for (const c of searchResults) {
+        const arr = byList.get(c.list_id);
+        if (arr) arr.push(c);
+        else byList.set(c.list_id, [c]);
+      }
+      base = Array.from(byList.entries()).map(([listId, contacts]) => ({
+        list:
+          groups.find((g) => g.list.id === listId)?.list ??
+          ({
+            id: listId,
+            name: bookName(listId),
+            color: null,
+            color_label: null,
+            read_only: true,
+            account_id: '',
+          } as ContactList),
+        contacts,
+      }));
     }
-    return Array.from(byList.entries()).map(([listId, contacts]) => ({
-      list:
-        groups.find((g) => g.list.id === listId)?.list ??
-        ({
-          id: listId,
-          name: bookName(listId),
-          color: null,
-          color_label: null,
-          read_only: true,
-          account_id: '',
-        } as ContactList),
-      contacts,
-    }));
-  }, [bookName, groups, searchResults, searching]);
+    return base.filter((g) => !hiddenBooks.has(g.list.id));
+  }, [bookName, groups, searchResults, searching, hiddenBooks]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -278,7 +288,7 @@ export default function ContactsScreen({
     return c.organization ?? c.emails[0] ?? c.phone_numbers[0] ?? '';
   };
 
-  const total = groups.reduce((n, g) => n + g.contacts.length, 0);
+  const total = displayGroups.reduce((n, g) => n + g.contacts.length, 0);
   // Whether any address book is actually syncable (an external provider). Local
   // device books never sync, so for an all-local setup the manual sync + the
   // last-synced line are meaningless and hidden.

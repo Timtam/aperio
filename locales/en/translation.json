@@ -49,6 +49,7 @@
     "manageList": "Manage list",
     "manageMembersLabel": "Manage members",
     "manageContactLists": "Address books",
+    "contactBookVisible": "Show {{name}} in Contacts",
     "sectionsHeading": "Sections",
     "edit": "Edit",
     "colorHexInvalid": "Enter a colour as #RRGGBB.",

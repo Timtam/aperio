@@ -49,6 +49,7 @@
     "manageList": "Liste verwalten",
     "manageMembersLabel": "Mitglieder verwalten",
     "manageContactLists": "Kontaktbücher",
+    "contactBookVisible": "{{name}} in Kontakten anzeigen",
     "sectionsHeading": "Abschnitte",
     "edit": "Bearbeiten",
     "colorHexInvalid": "Gib eine Farbe als #RRGGBB ein.",
