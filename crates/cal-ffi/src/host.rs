@@ -4109,22 +4109,21 @@ impl Host {
         // recorded in the params written to meta.json) — mirrors
         // enable_sync_encryption_json's fresh branch. A blank passphrase leaves
         // the fresh dataset plaintext (the user can enable E2E afterwards).
-        let (key, e2e_params): (Option<[u8; KEY_LEN]>, Option<EncryptionParams>) =
-            match passphrase
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-            {
-                Some(pp) => {
-                    let mut params = EncryptionParams::fresh();
-                    let kek = derive_key(pp, &params).map_err(sync_err)?;
-                    let dek = fresh_data_key();
-                    let wrapped = wrap_key(&kek, &dek).map_err(sync_err)?;
-                    params.wrapped_data_key = Some(wrapped);
-                    (Some(dek), Some(params))
-                }
-                None => (None, None),
-            };
+        let (key, e2e_params): (Option<[u8; KEY_LEN]>, Option<EncryptionParams>) = match passphrase
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            Some(pp) => {
+                let mut params = EncryptionParams::fresh();
+                let kek = derive_key(pp, &params).map_err(sync_err)?;
+                let dek = fresh_data_key();
+                let wrapped = wrap_key(&kek, &dek).map_err(sync_err)?;
+                params.wrapped_data_key = Some(wrapped);
+                (Some(dek), Some(params))
+            }
+            None => (None, None),
+        };
         let adapter = wrap_if_encrypted(plain, key);
         let trimmed = device_name
             .as_deref()

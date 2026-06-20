@@ -613,7 +613,11 @@ mod tests {
         );
 
         let got = dst.dump_for_snapshot().unwrap().task_lists;
-        assert_eq!(got.len(), 1, "the colour-labelled list must survive the apply");
+        assert_eq!(
+            got.len(),
+            1,
+            "the colour-labelled list must survive the apply"
+        );
         assert_eq!(
             got[0].color_label.as_ref().map(|c| c.0.as_str()),
             Some("lbl-work"),
