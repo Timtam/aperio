@@ -1,4 +1,3 @@
-import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -22,6 +21,7 @@ import {
 } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
+import { JumpToDateButton } from '../components/JumpToDateButton';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import { resolveEventColor } from '../intl/eventColor';
 import { useCacheReload } from '../state/cacheObserver';
@@ -268,23 +268,15 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
         </Pressable>
       </View>
 
-      {/* Jump straight to a date (YYYY-MM-DD) — submit on the field or the
-          button; an unparseable date surfaces the inline error. */}
+      {/* Jump straight to a date — a real button that opens the picker on tap
+          (no always-visible date chip duplicating the heading). */}
       <View style={styles.jumpBar}>
-        <Text style={styles.jumpLabel} accessibilityRole="text">
-          {t('mobile.jumpToDateNative')}
-        </Text>
-        {/* Native date picker (Apple-Reminders-style compact field) — commits on
-            selection, so no separate "go" button + no manual YYYY-MM-DD parsing. */}
-        <DateTimePicker
-          mode="date"
-          display="compact"
+        <JumpToDateButton
           value={day}
-          onValueChange={(_, date) => {
+          onSelect={(date) => {
             setError(null);
             setDay(new Date(date.getFullYear(), date.getMonth(), date.getDate()));
           }}
-          locale={i18n.language}
         />
       </View>
 
@@ -447,18 +439,13 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surfaceAlt,
     },
     navButtonText: { fontSize: 26, color: c.textPrimary, lineHeight: 30 },
-    // Caption stacked ABOVE the native date chip (not beside it): the chip is a
-    // native view whose intrinsic width RN can't reliably flex against, so a
-    // side-by-side row let the label and the date overlap. Stacking is
-    // overlap-proof and reads as a labelled control.
+    // Wraps the jump-to-date button with the screen's horizontal padding;
+    // flex-start keeps it content-width on the left.
     jumpBar: {
-      flexDirection: 'column',
-      gap: 6,
       paddingHorizontal: 12,
       paddingTop: 12,
       alignItems: 'flex-start',
     },
-    jumpLabel: { fontSize: 15, fontWeight: '600', color: c.textLabel },
     actionBar: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, padding: 12, alignItems: 'center' },
     ghostButton: {
       paddingVertical: 12,

@@ -1,4 +1,3 @@
-import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -6,6 +5,7 @@ import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-nati
 import { CalendarDayList } from '../components/CalendarDayList';
 import { CalendarPager } from '../components/CalendarPager';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
+import { JumpToDateButton } from '../components/JumpToDateButton';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -110,18 +110,9 @@ export default function MonthScreen({ navigation, route }: RootStackScreenProps<
         >
           <Text style={styles.ghostButtonText}>{t('mobile.today')}</Text>
         </Pressable>
-        <Text style={styles.jumpLabel} accessibilityRole="text">
-          {t('mobile.jumpToDateNative')}
-        </Text>
-        {/* Native date picker (Apple-Reminders-style compact field) — commits on
-            selection; any day in a month selects that month. */}
-        <DateTimePicker
-          mode="date"
-          display="compact"
-          value={anchor}
-          onValueChange={(_, date) => setAnchor(localMidnight(date))}
-          locale={i18n.language}
-        />
+        {/* A real button that opens the picker on tap (any day in a month
+            selects that month). */}
+        <JumpToDateButton value={anchor} onSelect={(date) => setAnchor(localMidnight(date))} />
       </View>
 
       {/* Three-finger swipe (VoiceOver) / horizontal flick pages between months;
@@ -178,6 +169,5 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surfaceAlt,
     },
     ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
-    jumpLabel: { fontSize: 15, fontWeight: '600', color: c.textLabel },
     pressed: { opacity: 0.7 },
   });

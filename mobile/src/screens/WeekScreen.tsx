@@ -1,10 +1,10 @@
-import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CalendarDayList } from '../components/CalendarDayList';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
+import { JumpToDateButton } from '../components/JumpToDateButton';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import { readWeekStart, type WeekStart } from '../settings/weekStart';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -133,18 +133,8 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
         >
           <Text style={styles.ghostButtonText}>{t('mobile.today')}</Text>
         </Pressable>
-        <Text style={styles.jumpLabel} accessibilityRole="text">
-          {t('mobile.jumpToDateNative')}
-        </Text>
-        {/* Native date picker (Apple-Reminders-style compact field) — commits on
-            selection; any day selects its week. */}
-        <DateTimePicker
-          mode="date"
-          display="compact"
-          value={anchor}
-          onValueChange={(_, date) => setAnchor(localMidnight(date))}
-          locale={i18n.language}
-        />
+        {/* A real button that opens the picker on tap (any day selects its week). */}
+        <JumpToDateButton value={anchor} onSelect={(date) => setAnchor(localMidnight(date))} />
       </View>
 
       <CalendarDayList
@@ -197,6 +187,5 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surfaceAlt,
     },
     ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
-    jumpLabel: { fontSize: 15, fontWeight: '600', color: c.textLabel },
     pressed: { opacity: 0.7 },
   });

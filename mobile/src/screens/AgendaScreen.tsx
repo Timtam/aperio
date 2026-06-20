@@ -1,4 +1,3 @@
-import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -27,6 +26,7 @@ import {
 } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
+import { JumpToDateButton } from '../components/JumpToDateButton';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import { resolveEventColor } from '../intl/eventColor';
 import { useCacheReload } from '../state/cacheObserver';
@@ -306,20 +306,14 @@ export default function AgendaScreen({
         >
           <Text style={styles.ghostButtonText}>{t('mobile.today')}</Text>
         </Pressable>
-        <Text style={styles.jumpLabel} accessibilityRole="text">
-          {t('mobile.jumpToDateNative')}
-        </Text>
-        {/* Native date picker (Apple-Reminders-style compact field) — commits on
-            selection, so no separate "go" button + no manual YYYY-MM-DD parsing. */}
-        <DateTimePicker
-          mode="date"
-          display="compact"
+        {/* A real button that opens the picker on tap (no always-visible date
+            chip duplicating the heading). */}
+        <JumpToDateButton
           value={anchor}
-          onValueChange={(_, date) => {
+          onSelect={(date) => {
             setError(null);
             setAnchor(localMidnight(date));
           }}
-          locale={i18n.language}
         />
       </View>
 
@@ -511,7 +505,6 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surfaceAlt,
     },
     ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
-    jumpLabel: { fontSize: 15, fontWeight: '600', color: c.textLabel },
     list: { gap: 10, padding: 16 },
     dayHeader: {
       fontSize: 15,
