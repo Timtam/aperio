@@ -67,11 +67,22 @@ const CalendarStack = createNativeStackNavigator<RootStackParamList>();
 const ContactsStack = createNativeStackNavigator<RootStackParamList>();
 const SettingsStack = createNativeStackNavigator<RootStackParamList>();
 
-// The four tab-root screens. The native bottom tab bar belongs ONLY on these;
-// on any drill-down (Sync, Accounts, the editors, …) it is hidden so it doesn't
-// sit in the screen's VoiceOver swipe order — a sub-screen should never let the
-// user wipe left into the tab bar (reported on iOS).
-const TAB_ROOT_ROUTES = new Set(['Tasks', 'Events', 'Contacts', 'Settings']);
+// Screens that keep the native bottom tab bar: the four tab roots PLUS the
+// alternate calendar views (Week/Month/Agenda/Year are siblings of the Day view
+// reached via `navigation.replace`, not drill-downs, so the bar stays). On a
+// real drill-down (Sync, Accounts, the editors, Lists, …) the bar is hidden so
+// it doesn't sit in the screen's VoiceOver swipe order — a sub-screen should
+// never let the user swipe left into the tab bar (reported on iOS).
+const TAB_ROOT_ROUTES = new Set([
+  'Tasks',
+  'Events',
+  'Contacts',
+  'Settings',
+  'Week',
+  'Month',
+  'Agenda',
+  'Year',
+]);
 
 /** Name of the deepest focused route across the nested navigators. */
 function deepestRouteName(
