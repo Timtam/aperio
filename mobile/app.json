@@ -45,7 +45,12 @@
       "expo-audio",
       "./plugins/withReminderSoundProvider",
       "./plugins/withoutPushEntitlement",
-      "expo-localization",
+      [
+        "expo-localization",
+        {
+          "supportedLocales": ["en", "de"]
+        }
+      ],
       "react-native-bottom-tabs",
       "expo-background-task"
     ]
