@@ -988,6 +988,8 @@ external fun uniffi_cal_ffi_checksum_method_host_task_set_member_right(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_tasks_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_test_account_json(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_trust_sftp_host_key(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_upcoming_reminders_json(
@@ -1317,6 +1319,8 @@ external fun uniffi_cal_ffi_fn_method_host_task_set_member_right(`ptr`: Long,`li
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_tasks_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_test_account_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_trust_sftp_host_key(`ptr`: Long,`hostPort`: RustBuffer.ByValue,`fingerprint`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_upcoming_reminders_json(`ptr`: Long,`horizonMinutes`: Int,uniffi_out_err: UniffiRustCallStatus, 
@@ -1863,6 +1867,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_tasks_json() != 40630.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_test_account_json() != 9266.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_trust_sftp_host_key() != 43040.toShort()) {
@@ -3930,6 +3937,16 @@ public interface HostInterface {
      * owning account (local store or external provider).
      */
     fun `tasksJson`(`listId`: kotlin.String): kotlin.String
+    
+    /**
+     * Probe entered credentials WITHOUT persisting anything — open an ephemeral
+     * adapter from the (kind, config, secret) the add form assembles, run the
+     * kind's read probe, and drop it. `Ok(())` = the credentials work; a typed
+     * StoreError (its message names the cause) drives the UI banner. Reuses the
+     * NewAccountRequest wire shape (display_name is ignored). Mirrors the
+     * desktop `test_*_connection` commands.
+     */
+    fun `testAccountJson`(`requestJson`: kotlin.String)
     
     /**
      * Pin a user-confirmed SFTP host-key fingerprint for `host_port` (§19.5 —
@@ -6225,6 +6242,27 @@ open class Host: Disposable, AutoCloseable, HostInterface
     }
     )
     }
+    
+
+    
+    /**
+     * Probe entered credentials WITHOUT persisting anything — open an ephemeral
+     * adapter from the (kind, config, secret) the add form assembles, run the
+     * kind's read probe, and drop it. `Ok(())` = the credentials work; a typed
+     * StoreError (its message names the cause) drives the UI banner. Reuses the
+     * NewAccountRequest wire shape (display_name is ignored). Mirrors the
+     * desktop `test_*_connection` commands.
+     */
+    @Throws(StoreException::class)override fun `testAccountJson`(`requestJson`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_test_account_json(
+        it,
+        FfiConverterString.lower(`requestJson`),_status)
+}
+    }
+    
     
 
     

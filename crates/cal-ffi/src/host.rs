@@ -1257,6 +1257,37 @@ impl Host {
         }
     }
 
+    /// Run the registry's ephemeral credential probe (block_on the async
+    /// fan-out) and map the outcome: a non-credential kind (Local / OAuth) is a
+    /// silent skip, a missing/invalid field is an InvalidField, anything else
+    /// surfaces its message. Shared by `test_account_json` + the create-time
+    /// smoke-test.
+    fn probe_account(
+        &self,
+        adapter_kind: AdapterKind,
+        config_json: &str,
+        secret: Option<&str>,
+    ) -> Result<(), StoreError> {
+        use host_core::registry::RegistryError as Re;
+        match self.runtime.block_on(
+            self.registry
+                .probe_account(adapter_kind, config_json, secret),
+        ) {
+            Ok(()) | Err(Re::Unsupported(_)) => Ok(()),
+            Err(Re::Secret(detail)) => Err(StoreError::InvalidField {
+                field: "secret".to_string(),
+                detail,
+            }),
+            Err(Re::Config(detail)) => Err(StoreError::InvalidField {
+                field: "config".to_string(),
+                detail,
+            }),
+            Err(other) => Err(StoreError::Storage {
+                detail: other.to_string(),
+            }),
+        }
+    }
+
     /// Persist the device-local `sync.adapter.*` prefs + keychain secrets for a
     /// configured/joined target. The persist half of the old configure arms,
     /// split out so [`Self::configure_sync_adapter_json`] +
@@ -2071,6 +2102,12 @@ impl Host {
             });
         }
 
+        // Pre-persist credential smoke-test (desktop parity): probe the entered
+        // creds with an ephemeral adapter BEFORE writing any row, so a bad
+        // password / unreachable host fails here instead of leaving a
+        // saved-but-broken account. Local has no remote → probe_account skips it.
+        self.probe_account(req.adapter_kind, &req.config_json, req.secret.as_deref())?;
+
         let shared = self.db.shared();
         let repo = AccountsRepo::new(&shared);
         let created = repo
@@ -2123,6 +2160,17 @@ impl Host {
             .append(SyncEvent::AccountCreated(account_payload(&created)));
 
         to_json(&created)
+    }
+
+    /// Probe entered credentials WITHOUT persisting anything — open an ephemeral
+    /// adapter from the (kind, config, secret) the add form assembles, run the
+    /// kind's read probe, and drop it. `Ok(())` = the credentials work; a typed
+    /// StoreError (its message names the cause) drives the UI banner. Reuses the
+    /// NewAccountRequest wire shape (display_name is ignored). Mirrors the
+    /// desktop `test_*_connection` commands.
+    pub fn test_account_json(&self, request_json: String) -> Result<(), StoreError> {
+        let req: NewAccountRequest = from_json("test account", &request_json)?;
+        self.probe_account(req.adapter_kind, &req.config_json, req.secret.as_deref())
     }
 
     /// Delete an account: unregister its adapter, clear its secrets, and

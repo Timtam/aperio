@@ -21,6 +21,7 @@ import {
   listAccountsMissingCredentials,
   renameAccount,
   setAccountSecret,
+  testAccount,
 } from '../api/accounts';
 import { getUserPref, setUserPref } from '../api/prefs';
 import { reconnectOAuthAccount, type OAuthProvider } from '../api/oauth';
@@ -151,6 +152,7 @@ export default function AccountsScreen() {
   const [config, setConfig] = useState<Record<string, string>>({});
   const [secret, setSecret] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [discovering, setDiscovering] = useState(false);
   // Add flow: 'list' shows the connected accounts + an "Add account" button;
   // 'picker' a provider menu; 'credential'/'oauth' the chosen provider's form —
@@ -301,6 +303,35 @@ export default function AccountsScreen() {
       setSubmitting(false);
     }
   }, [announce, config, displayName, form, kind, load, maybeShowPrivacyNotice, resetForm, secret, t]);
+
+  // Probe the entered credentials without saving — the same (kind, config,
+  // secret) add() assembles, but via testAccount (persists nothing). Surfaces a
+  // bad password / unreachable host before the user commits.
+  const testConnection = useCallback(async () => {
+    setError(null);
+    setTesting(true);
+    try {
+      const configObject: Record<string, string> = { ...(form.fixedConfig ?? {}) };
+      for (const field of form.configFields) {
+        const value = (config[field.jsonKey] ?? '').trim();
+        if (value.length > 0) configObject[field.jsonKey] = value;
+      }
+      const trimmedSecret = secret.trim();
+      await testAccount({
+        adapter_kind: kind,
+        display_name: displayName.trim(),
+        config_json: JSON.stringify(configObject),
+        secret: form.secret && trimmedSecret.length > 0 ? trimmedSecret : null,
+      });
+      announce(t('dialogs.accounts.testWorks'));
+    } catch (err) {
+      const message = errorMessage(err);
+      setError(message);
+      announce(t('mobile.error', { message }));
+    } finally {
+      setTesting(false);
+    }
+  }, [announce, config, displayName, form, kind, secret, t]);
 
   // EWS Autodiscover: derive the endpoint from the email + password (the EWS
   // form's username field holds the email) and pre-fill the endpoint + username,
@@ -783,6 +814,25 @@ export default function AccountsScreen() {
               </Text>
             </Pressable>
           )}
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: testing || submitting, busy: testing }}
+            accessibilityLabel={t('dialogs.accounts.testConnection')}
+            disabled={testing || submitting}
+            onPress={() => void testConnection()}
+            style={({ pressed }) => [
+              styles.discoverButton,
+              pressed && styles.pressed,
+              (testing || submitting) && styles.discoverButtonDisabled,
+            ]}
+          >
+            <Text style={styles.discoverButtonText}>
+              {testing
+                ? t('dialogs.accounts.testing')
+                : t('dialogs.accounts.testConnection')}
+            </Text>
+          </Pressable>
 
           <Pressable
             accessibilityRole="button"

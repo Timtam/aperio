@@ -85,6 +85,10 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    * `Account` as JSON. Rejects for OAuth kinds (a later phase) + on bad config.
    */
   createAccountJson(requestJson: string): Promise<string>;
+  /** Probe entered credentials WITHOUT persisting — opens an ephemeral adapter
+   *  and runs the kind's read probe. Resolves if the creds work; rejects with
+   *  the typed error otherwise. */
+  testAccountJson(requestJson: string): Promise<void>;
   /** Delete an account: unregister its adapter, clear its secrets, drop the
    *  row. Rejects when deleting the implicit local account. */
   deleteAccount(accountId: string): Promise<void>;

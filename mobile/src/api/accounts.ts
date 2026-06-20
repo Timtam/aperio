@@ -66,6 +66,14 @@ export const createAccount = async (
   return created;
 };
 
+/** Probe entered credentials WITHOUT persisting anything — opens an ephemeral
+ *  adapter and runs the kind's read probe. Resolves if the credentials work,
+ *  rejects with the typed store error otherwise. Reuses the create-account
+ *  request shape (display_name is ignored). */
+export const testAccount = async (request: CreateAccountRequest): Promise<void> => {
+  await CalFfi.testAccountJson(JSON.stringify(request));
+};
+
 /** Delete an account (unregister adapter + clear secrets + drop row). Rejects
  *  when deleting the implicit local account. */
 export const deleteAccount = async (id: string): Promise<void> => {

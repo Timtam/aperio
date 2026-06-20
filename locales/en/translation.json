@@ -1437,6 +1437,7 @@
       "testConnection": "Test connection",
       "testing": "Testing …",
       "testOk": "Connection works. The calendars below will appear in the sidebar.",
+      "testWorks": "Connection works.",
       "feedUrlLabel": "Feed URL",
       "feedUrlPlaceholder": "e.g. https://example.com/holidays.ics",
       "feedUrlHint": "Public .ics URL. Read-only — events from this feed cannot be edited in Aperio.",

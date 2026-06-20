@@ -138,6 +138,10 @@ public class CalFfiModule: Module {
       try self.host.createAccountJson(requestJson: requestJson)
     }
 
+    AsyncFunction("testAccountJson") { (requestJson: String) in
+      try self.host.testAccountJson(requestJson: requestJson)
+    }
+
     AsyncFunction("deleteAccount") { (accountId: String) in
       try self.host.deleteAccount(accountId: accountId)
     }

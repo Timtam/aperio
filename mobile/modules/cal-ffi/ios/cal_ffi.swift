@@ -1913,6 +1913,16 @@ public protocol HostProtocol: AnyObject, Sendable {
     func tasksJson(listId: String) throws  -> String
     
     /**
+     * Probe entered credentials WITHOUT persisting anything — open an ephemeral
+     * adapter from the (kind, config, secret) the add form assembles, run the
+     * kind's read probe, and drop it. `Ok(())` = the credentials work; a typed
+     * StoreError (its message names the cause) drives the UI banner. Reuses the
+     * NewAccountRequest wire shape (display_name is ignored). Mirrors the
+     * desktop `test_*_connection` commands.
+     */
+    func testAccountJson(requestJson: String) throws 
+    
+    /**
      * Pin a user-confirmed SFTP host-key fingerprint for `host_port` (§19.5 —
      * always an explicit user gesture, for first-use AND key-change). The UI
      * calls this after the trust dialog, then configures. Mirrors the desktop
@@ -3689,6 +3699,22 @@ open func tasksJson(listId: String)throws  -> String  {
         FfiConverterString.lower(listId),$0
     )
 })
+}
+    
+    /**
+     * Probe entered credentials WITHOUT persisting anything — open an ephemeral
+     * adapter from the (kind, config, secret) the add form assembles, run the
+     * kind's read probe, and drop it. `Ok(())` = the credentials work; a typed
+     * StoreError (its message names the cause) drives the UI banner. Reuses the
+     * NewAccountRequest wire shape (display_name is ignored). Mirrors the
+     * desktop `test_*_connection` commands.
+     */
+open func testAccountJson(requestJson: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_test_account_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(requestJson),$0
+    )
+}
 }
     
     /**
@@ -7449,6 +7475,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_tasks_json() != 40630) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_test_account_json() != 9266) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_trust_sftp_host_key() != 43040) {

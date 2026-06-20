@@ -537,6 +537,118 @@ impl AdapterRegistry {
             .map_err(|err| RegistryError::Construct(err.to_string()))
     }
 
+    /// Smoke-test entered credentials WITHOUT persisting: open an EPHEMERAL
+    /// instance from (kind + config + secret) — the same per-kind config the
+    /// `register_*` paths build — run the kind's read probe (list_calendars /
+    /// list_task_lists), then drop it. `Ok(())` = the credentials work.
+    /// `Unsupported` for kinds with no credential probe (Local / OAuth); the
+    /// caller treats that as "nothing to smoke". Mirrors the desktop
+    /// `test_*_connection` commands.
+    pub async fn probe_account(
+        &self,
+        adapter_kind: AdapterKind,
+        config_json: &str,
+        secret: Option<&str>,
+    ) -> Result<(), RegistryError> {
+        enum ProbeFeature {
+            Calendar,
+            Tasks,
+        }
+        let (plugin_id, feature, config) = match adapter_kind {
+            AdapterKind::Caldav => {
+                let secret =
+                    secret.ok_or_else(|| RegistryError::Secret("missing password".into()))?;
+                (
+                    PLUGIN_ID_CALDAV,
+                    ProbeFeature::Calendar,
+                    merge_account_config(
+                        config_json,
+                        &[("secret", Value::String(secret.to_string()))],
+                    )?,
+                )
+            }
+            AdapterKind::Ical => {
+                // An iCal feed may be public — an empty password stays null,
+                // mirroring register_ical.
+                let password = secret
+                    .filter(|s| !s.is_empty())
+                    .map(|s| Value::String(s.to_string()))
+                    .unwrap_or(Value::Null);
+                (
+                    PLUGIN_ID_ICAL,
+                    ProbeFeature::Calendar,
+                    merge_account_config(config_json, &[("password", password)])?,
+                )
+            }
+            AdapterKind::Ews => {
+                let secret =
+                    secret.ok_or_else(|| RegistryError::Secret("missing password".into()))?;
+                // No state_dir here (unlike register_ews) — a probe never
+                // persists; EwsAccountConfig fills it from a serde default.
+                (
+                    PLUGIN_ID_EWS,
+                    ProbeFeature::Calendar,
+                    merge_account_config(
+                        config_json,
+                        &[("password", Value::String(secret.to_string()))],
+                    )?,
+                )
+            }
+            AdapterKind::Vikunja => {
+                let secret =
+                    secret.ok_or_else(|| RegistryError::Secret("missing API token".into()))?;
+                (
+                    PLUGIN_ID_VIKUNJA,
+                    ProbeFeature::Tasks,
+                    merge_account_config(
+                        config_json,
+                        &[("token", Value::String(secret.to_string()))],
+                    )?,
+                )
+            }
+            AdapterKind::Todoist => {
+                let secret =
+                    secret.ok_or_else(|| RegistryError::Secret("missing API token".into()))?;
+                (
+                    PLUGIN_ID_TODOIST,
+                    ProbeFeature::Tasks,
+                    merge_account_config(
+                        config_json,
+                        &[("token", Value::String(secret.to_string()))],
+                    )?,
+                )
+            }
+            other => return Err(RegistryError::Unsupported(other.as_str().to_string())),
+        };
+        let instance = self.open_plugin_instance(plugin_id, config)?;
+        match feature {
+            ProbeFeature::Calendar => {
+                let adapter = FfiCalendarAdapter::new(instance).ok_or_else(|| {
+                    RegistryError::Construct(
+                        "plugin doesn't expose the CalendarFeature surface".into(),
+                    )
+                })?;
+                adapter
+                    .list_calendars()
+                    .await
+                    .map(|_| ())
+                    .map_err(|err| RegistryError::Probe(err.to_string()))
+            }
+            ProbeFeature::Tasks => {
+                let adapter = FfiTasksAdapter::new(instance).ok_or_else(|| {
+                    RegistryError::Construct(
+                        "plugin doesn't expose the TasksFeature surface".into(),
+                    )
+                })?;
+                adapter
+                    .list_task_lists()
+                    .await
+                    .map(|_| ())
+                    .map_err(|err| RegistryError::Probe(err.to_string()))
+            }
+        }
+    }
+
     /// Insert the calendar slot for `account_id`. Wraps the
     /// FfiAdapter::new failure mode into a clear error so
     /// downstream callers (the AccountsDialog "this account
@@ -915,6 +1027,11 @@ pub enum RegistryError {
     Secret(String),
     #[error("adapter construction failed: {0}")]
     Construct(String),
+    /// A credential smoke-test reached the adapter but its read probe failed —
+    /// bad auth, an unreachable host, a protocol error. The string is the
+    /// underlying adapter error, surfaced to the user.
+    #[error("{0}")]
+    Probe(String),
     /// The plugin id referenced by the account isn't loaded into
     /// the host's [`PluginManager`] — typically because the user's
     /// other device installed a community plugin Aperio doesn't
