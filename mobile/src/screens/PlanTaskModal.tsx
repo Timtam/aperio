@@ -1,3 +1,4 @@
+import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -6,7 +7,6 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 
@@ -16,6 +16,7 @@ import { isoNextMonday, isoToday, isoTomorrow } from '@aperio/shared';
 import { getTaskById, updateTask } from '../api/client';
 import { FormScrollView } from '../components/FormScrollView';
 import { useCancelHeader } from '../components/useCancelHeader';
+import { formatLocalDate, parseLocalDate } from '../intl/dateTimeField';
 import { useTaskStore } from '../state/taskStoreContext';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -70,7 +71,9 @@ export default function PlanTaskModal({ route, navigation }: RootStackScreenProp
         return;
       }
       setTask(loaded);
-      setCustomDate(loaded.scheduled_date ?? '');
+      // Seed the custom-date picker with the task's day, or today if it's still
+      // in the backlog — the native picker always shows a concrete date.
+      setCustomDate(loaded.scheduled_date ?? formatLocalDate(new Date()));
       const tag = findNodeHandle(todayRef.current);
       if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
     });
@@ -205,16 +208,12 @@ export default function PlanTaskModal({ route, navigation }: RootStackScreenProp
 
       <View style={styles.field}>
         <Text style={styles.legend}>{t('dialogs.plan.customDate')}</Text>
-        <TextInput
-          style={styles.input}
-          value={customDate}
-          onChangeText={setCustomDate}
-          placeholder="YYYY-MM-DD"
-          accessibilityLabel={t('dialogs.plan.customDate')}
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="go"
-          onSubmitEditing={applyCustom}
+        <DateTimePicker
+          mode="date"
+          display="compact"
+          value={parseLocalDate(customDate)}
+          onValueChange={(_, d) => setCustomDate(formatLocalDate(d))}
+          locale={i18n.language}
         />
         <Pressable
           accessibilityRole="button"
@@ -259,16 +258,6 @@ const makeStyles = (c: ThemeColors) =>
     hint: { fontSize: 14, color: c.textSecondary },
     field: { gap: 10 },
     legend: { fontSize: 15, fontWeight: '600', color: c.textLabel },
-    input: {
-      fontSize: 17,
-      color: c.textPrimary,
-      paddingVertical: 12,
-      paddingHorizontal: 14,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: c.border,
-      backgroundColor: c.surface,
-    },
     button: {
       paddingVertical: 14,
       paddingHorizontal: 18,

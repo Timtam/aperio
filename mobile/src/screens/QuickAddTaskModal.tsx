@@ -1,3 +1,4 @@
+import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -14,6 +15,7 @@ import { createTask } from '../api/client';
 import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
 import { useCancelHeader } from '../components/useCancelHeader';
+import { formatLocalDate, parseLocalDate } from '../intl/dateTimeField';
 import { readLastUsedTaskList, writeLastUsedTaskList } from '../state/lastUsedTaskList';
 import { useTaskStore } from '../state/taskStoreContext';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -40,7 +42,7 @@ function dateInvalid(date: string): boolean {
 }
 
 export default function QuickAddTaskModal({ navigation }: RootStackScreenProps<'QuickAdd'>) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { taskLists, invalidateData } = useTaskStore();
 
@@ -187,15 +189,38 @@ export default function QuickAddTaskModal({ navigation }: RootStackScreenProps<'
 
       <View style={styles.field}>
         <Text style={styles.legend}>{t('dialogs.task.fields.scheduled.legend')}</Text>
-        <TextInput
-          style={styles.input}
-          value={date}
-          onChangeText={setDate}
-          placeholder="YYYY-MM-DD"
-          accessibilityLabel={t('dialogs.task.fields.scheduled.legend')}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
+        {date.trim() === '' ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('dialogs.task.fields.scheduled.addDate')}
+            onPress={() => setDate(formatLocalDate(new Date()))}
+            style={({ pressed }) => [styles.ghostButton, pressed && styles.ghostPressed]}
+          >
+            <Text style={styles.ghostButtonText}>
+              {t('dialogs.task.fields.scheduled.addDate')}
+            </Text>
+          </Pressable>
+        ) : (
+          <View style={styles.pickerRow}>
+            <DateTimePicker
+              mode="date"
+              display="compact"
+              value={parseLocalDate(date)}
+              onValueChange={(_, d) => setDate(formatLocalDate(d))}
+              locale={i18n.language}
+            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('dialogs.task.fields.scheduled.clear')}
+              onPress={() => setDate('')}
+              style={({ pressed }) => [styles.ghostButton, pressed && styles.ghostPressed]}
+            >
+              <Text style={styles.ghostButtonText}>
+                {t('dialogs.task.fields.scheduled.clear')}
+              </Text>
+            </Pressable>
+          </View>
+        )}
       </View>
 
       {listOptions.length > 0 ? (
@@ -253,6 +278,14 @@ const makeStyles = (c: ThemeColors) =>
     content: { padding: 20, gap: 18 },
     field: { gap: 6 },
     legend: { fontSize: 15, fontWeight: '600', color: c.textLabel },
+    pickerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      paddingVertical: 4,
+      flexWrap: 'wrap',
+    },
     hint: { fontSize: 13, color: c.textSecondary },
     input: {
       fontSize: 17,
