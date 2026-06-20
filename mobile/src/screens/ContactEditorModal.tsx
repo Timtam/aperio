@@ -1,3 +1,4 @@
+import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -27,6 +28,7 @@ import {
 } from '../api/contacts';
 import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
+import { formatLocalDate, parseLocalDate } from '../intl/dateTimeField';
 import { useListFocusManager } from '../a11y/useListFocusManager';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
@@ -155,7 +157,7 @@ export default function ContactEditorModal({
   route,
   navigation,
 }: RootStackScreenProps<'ContactEditor'>) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const { contactId, listId } = route.params;
@@ -648,15 +650,36 @@ export default function ContactEditorModal({
         label={t('dialogs.contact.birthdayLabel')}
         hint={t('dialogs.contact.birthdayHint')}
       >
-        <TextInput
-          style={styles.input}
-          value={birthday}
-          onChangeText={setBirthday}
-          placeholder="YYYY-MM-DD"
-          accessibilityLabel={t('dialogs.contact.birthdayLabel')}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
+        {birthday.trim() === '' ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('dialogs.contact.birthdayAdd')}
+            onPress={() => setBirthday(formatLocalDate(new Date()))}
+            style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.ghostButtonText}>{t('dialogs.contact.birthdayAdd')}</Text>
+          </Pressable>
+        ) : (
+          <View style={styles.pickerRow}>
+            <DateTimePicker
+              mode="date"
+              display="compact"
+              value={parseLocalDate(birthday)}
+              onValueChange={(_, d) => setBirthday(formatLocalDate(d))}
+              locale={i18n.language}
+            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('dialogs.contact.birthdayClear')}
+              onPress={() => setBirthday('')}
+              style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+            >
+              <Text style={styles.ghostButtonText}>
+                {t('dialogs.contact.birthdayClear')}
+              </Text>
+            </Pressable>
+          </View>
+        )}
       </Field>
 
       {/* Postal addresses — a dynamic list of structured rows. */}
@@ -836,6 +859,23 @@ const makeStyles = (c: ThemeColors) =>
     screen: { flex: 1, backgroundColor: c.background },
     content: { padding: 16, gap: 16 },
     field: { gap: 6 },
+    pickerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      flexWrap: 'wrap',
+    },
+    ghostButton: {
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+      alignItems: 'center',
+    },
+    ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
     label: { fontSize: 15, fontWeight: '600', color: c.textLabel },
     hint: { fontSize: 13, color: c.textSecondary },
     input: {

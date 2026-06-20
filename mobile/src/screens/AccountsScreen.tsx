@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
+  Alert,
   findNodeHandle,
   Pressable,
   StyleSheet,
@@ -370,17 +371,35 @@ export default function AccountsScreen() {
   }, [announce, config, secret, t]);
 
   const remove = useCallback(
-    async (account: Account) => {
-      setError(null);
-      try {
-        await deleteAccount(account.id);
-        await load();
-        announce(t('mobile.deleted', { title: account.display_name }));
-      } catch (err) {
-        const message = errorMessage(err);
-        setError(message);
-        announce(t('mobile.error', { message }));
-      }
+    (account: Account) => {
+      // Deleting an account drops its device-local credentials + its synced
+      // containers from view — confirm first (destructive, irreversible bar a
+      // re-add). The swipe action + the row's Delete button both route here.
+      Alert.alert(
+        t('dialogs.accounts.deleteConfirmTitle', { name: account.display_name }),
+        t('dialogs.accounts.deleteConfirmMessage'),
+        [
+          { text: t('mobile.cancel'), style: 'cancel' },
+          {
+            text: t('dialogs.accounts.delete'),
+            style: 'destructive',
+            onPress: () => {
+              void (async () => {
+                setError(null);
+                try {
+                  await deleteAccount(account.id);
+                  await load();
+                  announce(t('mobile.deleted', { title: account.display_name }));
+                } catch (err) {
+                  const message = errorMessage(err);
+                  setError(message);
+                  announce(t('mobile.error', { message }));
+                }
+              })();
+            },
+          },
+        ],
+      );
     },
     [announce, load, t],
   );
