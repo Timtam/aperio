@@ -10,7 +10,6 @@ import {
   View,
 } from 'react-native';
 
-import { selectableCheckState, selectableRole } from '../a11y/roles';
 import { useListFocusManager } from '../a11y/useListFocusManager';
 import {
   createSection,
@@ -28,6 +27,7 @@ import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
 import { SoundSelect } from '../components/SoundSelect';
+import { SwitchRow } from '../components/SwitchRow';
 import type { RootStackScreenProps } from '../navigation/types';
 import {
   readTaskBehaviour,
@@ -525,23 +525,14 @@ export default function ListEditorModal({
 
       {/* Show completed tasks from THIS list on the calendar surfaces
           (Day/Week/Month) — host-local, default hide. Mobile twin of the
-          desktop's per-list "show completed in calendar" toggle. */}
-      <Pressable
-        accessible
-        accessibilityRole={selectableRole('checkbox')}
-        accessibilityState={selectableCheckState(showCompleted.shouldShow(listId))}
-        accessibilityLabel={t('sidebar.menu.showCompletedInCalendar')}
-        onPress={() => showCompleted.toggle(listId)}
+          desktop's per-list "show completed in calendar" toggle. Native switch
+          so VoiceOver announces the on/off change on toggle. */}
+      <SwitchRow
+        label={t('sidebar.menu.showCompletedInCalendar')}
+        value={showCompleted.shouldShow(listId)}
+        onToggle={() => showCompleted.toggle(listId)}
         disabled={busy}
-        style={({ pressed }) => [styles.checkRow, pressed && styles.pressed]}
-      >
-        <Text style={styles.check} importantForAccessibility="no">
-          {showCompleted.shouldShow(listId) ? '☑' : '☐'}
-        </Text>
-        <Text style={styles.checkLabel} importantForAccessibility="no">
-          {t('sidebar.menu.showCompletedInCalendar')}
-        </Text>
-      </Pressable>
+      />
 
       {/* Per-list task-behaviour overrides (§ Settings → Tasks "Per task list"):
           override the global status-coupling / auto-date / carry-over for THIS
@@ -783,14 +774,6 @@ const makeStyles = (c: ThemeColors) =>
     content: { padding: 16, gap: 16 },
     title: { fontSize: 22, fontWeight: '700', color: c.textPrimary },
     heading: { fontSize: 17, fontWeight: '700', color: c.textLabel },
-    checkRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-      paddingVertical: 10,
-    },
-    check: { fontSize: 22, width: 26, textAlign: 'center', color: c.textPrimary },
-    checkLabel: { flex: 1, fontSize: 16, color: c.textPrimary },
     error: { fontSize: 15, fontWeight: '600', color: c.danger },
     muted: { fontSize: 15, color: c.textSecondary },
     addRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
