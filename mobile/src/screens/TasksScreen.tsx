@@ -519,9 +519,22 @@ export default function TasksScreen({
           pressed && styles.rowPressed,
         ]}
       >
-        <Text style={styles.taskCheck} importantForAccessibility="no">
-          {statusMarker(task.status)}
-        </Text>
+        {/* Sighted tap target to complete/reopen the task. The whole row's
+            onPress opens the editor, so the status marker needs its own
+            Pressable — otherwise tapping it just opened the editor and there was
+            no way to check a task off by sight. SR users use the row's "toggle"
+            custom action instead, so this stays out of the accessibility tree. */}
+        <Pressable
+          accessible={false}
+          importantForAccessibility="no"
+          onPress={() => void toggleDone(task)}
+          hitSlop={10}
+          style={({ pressed }) => [styles.taskCheckButton, pressed && styles.rowPressed]}
+        >
+          <Text style={styles.taskCheck} importantForAccessibility="no">
+            {statusMarker(task.status)}
+          </Text>
+        </Pressable>
         {taskHex != null && (
           <View
             accessible={false}
@@ -690,6 +703,7 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surfaceAlt,
     },
     rowPressed: { backgroundColor: c.surfacePressed },
+    taskCheckButton: { borderRadius: 8, padding: 4 },
     taskCheck: { fontSize: 20, width: 26, textAlign: 'center', color: c.textPrimary },
     // A small colour dot for the task's bound colour label (sighted users).
     colorDot: {

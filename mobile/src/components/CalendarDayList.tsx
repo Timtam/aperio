@@ -592,9 +592,21 @@ export function CalendarDayList({
         }}
         style={styles.row}
       >
-        <Text style={styles.taskCheck} importantForAccessibility="no">
-          {statusMarker(task.status)}
-        </Text>
+        {/* Sighted tap target to complete/reopen the task; the row otherwise
+            opens the task on tap, so the marker needs its own Pressable. SR
+            users use the row's "toggle" custom action, so this stays out of the
+            accessibility tree. */}
+        <Pressable
+          accessible={false}
+          importantForAccessibility="no"
+          onPress={() => void toggleTask(task)}
+          hitSlop={10}
+          style={({ pressed }) => [styles.taskCheckButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.taskCheck} importantForAccessibility="no">
+            {statusMarker(task.status)}
+          </Text>
+        </Pressable>
         {hex != null && (
           <View
             accessible={false}
@@ -745,6 +757,7 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surfaceAlt,
     },
     rowText: { flex: 1, gap: 2 },
+    taskCheckButton: { borderRadius: 8, padding: 4 },
     taskCheck: { fontSize: 20, width: 26, textAlign: 'center', color: c.textPrimary },
     colorDot: {
       width: 12,
