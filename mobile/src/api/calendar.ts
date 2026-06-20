@@ -17,6 +17,7 @@ import type {
   SoundConfig,
 } from '@aperio/shared';
 
+import { notifyCalendarChanged } from '../state/calendarMutations';
 import { scheduleBackgroundPush } from './syncTriggers';
 
 /** RRULE recurrence + UTC EXDATE instants (the cal_core `EventRecurrence`). */
@@ -157,6 +158,7 @@ export const createEvent = async (
     await CalFfi.createEventJson(JSON.stringify(request)),
   ) as CalendarEvent;
   scheduleBackgroundPush();
+  notifyCalendarChanged();
   return created;
 };
 
@@ -177,6 +179,7 @@ export const updateEvent = async (
     await CalFfi.updateEventJson(JSON.stringify(event), previousCalendarId),
   ) as CalendarEvent;
   scheduleBackgroundPush();
+  notifyCalendarChanged();
   return updated;
 };
 
@@ -187,6 +190,7 @@ export const deleteEvent = async (
 ): Promise<void> => {
   await CalFfi.deleteEvent(id, calendarId, sendCancellations);
   scheduleBackgroundPush();
+  notifyCalendarChanged();
 };
 
 /** Exclude ONE occurrence of a recurring event — append `occurrence` (its
@@ -200,6 +204,7 @@ export const addEventExdate = async (
 ): Promise<void> => {
   await CalFfi.addEventExdateJson(id, occurrence, calendarId);
   scheduleBackgroundPush();
+  notifyCalendarChanged();
 };
 
 /** Parse a free-form attendee entry ("Name <email>" or a bare email) into its
