@@ -32,6 +32,7 @@ import {
   type TaskBehaviour,
 } from '../state/taskBehaviour';
 import { setTaskStatusTo, statusAnnounce } from '../state/taskToggle';
+import { useCurrentUserByList } from '../state/currentUser';
 import { useTaskStore } from '../state/taskStoreContext';
 import { useTasks } from '../state/useTasks';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -109,11 +110,19 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
     (listId: string) => effectiveForList(beh, listId).cascade,
     [beh],
   );
+  // Only my own / unassigned tasks are offered; a task owned by a concrete other
+  // user is theirs to handle (DESIGN §9.7). `meFor` resolves the connected user
+  // per list from the session cache (null = no identity ⇒ keep the task).
+  const currentUserByList = useCurrentUserByList(tasks);
+  const meFor = useCallback(
+    (listId: string) => currentUserByList[listId] ?? null,
+    [currentUserByList],
+  );
 
-  const overdue = useMemo(() => filterOverdue(tasks), [tasks]);
+  const overdue = useMemo(() => filterOverdue(tasks, meFor), [tasks, meFor]);
   const slipped = useMemo(
-    () => filterCarriedOver(tasks, { cascadeEnabledFor: cascadeFor }),
-    [tasks, cascadeFor],
+    () => filterCarriedOver(tasks, { cascadeEnabledFor: cascadeFor, meFor }),
+    [tasks, cascadeFor, meFor],
   );
 
   const remainingOverdue = useMemo(

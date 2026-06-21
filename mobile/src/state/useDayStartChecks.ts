@@ -9,10 +9,11 @@ import {
   shouldFireToday,
   todayIsoKey,
 } from '@aperio/shared';
-import type { Task } from '@aperio/shared';
+import type { Task, TaskUser } from '@aperio/shared';
 import i18n from '../../i18n';
 
 import { getTasks, listTaskLists, updateTask } from '../api/client';
+import { currentUserForList } from './currentUser';
 import { readFiredDayKey, writeFiredDayKey } from './dayStartFired';
 import { isDayStartReviewSnoozed } from './dayStartSnooze';
 import { effectiveForList, readTaskBehaviour, type TaskBehaviour } from './taskBehaviour';
@@ -40,6 +41,20 @@ async function loadTasksForLists(ids: string[]): Promise<Task[]> {
   return per.flat();
 }
 
+/** Resolve "me" per list for `tasks` (session-cached) as a sync lookup for the
+ *  day-start ownership filter — only my own / unassigned tasks are offered or
+ *  auto-acted-on; a colleague's task is theirs to handle (DESIGN §9.7). */
+async function meForTasks(
+  tasks: Task[],
+): Promise<(listId: string) => TaskUser | null> {
+  const ids = Array.from(new Set(tasks.map((task) => task.list_id)));
+  const entries = await Promise.all(
+    ids.map(async (id) => [id, await currentUserForList(id)] as const),
+  );
+  const map = Object.fromEntries(entries) as Record<string, TaskUser | null>;
+  return (listId: string) => map[listId] ?? null;
+}
+
 /**
  * Silent "by"-deadline auto-pin: tasks whose deadline is today (and aren't
  * already scheduled for today) get pinned to today so they surface on today's
@@ -53,7 +68,7 @@ async function runDeadlinePin(invalidateData: () => void): Promise<void> {
   if (!shouldFireToday(behaviour.dayStartTrigger, fired, todayKey)) return;
   const all = await loadAllTasks();
   await writeFiredDayKey('deadlinePin', todayKey);
-  const targets = filterDeadlinePinTargets(all);
+  const targets = filterDeadlinePinTargets(all, await meForTasks(all));
   if (targets.length === 0) return;
   for (const task of targets) {
     // Pin to today; leave scheduled_time untouched ("by 14:30" ≠ "at 14:30").
@@ -137,9 +152,11 @@ async function runDayStartReview(
   // only job is "review for this day"); a partial run isn't re-fired.
   await writeFiredDayKey('dayStartReview', todayKey);
 
-  const overdue = filterOverdue(all);
+  const meFor = await meForTasks(all);
+  const overdue = filterOverdue(all, meFor);
   const slipped = filterCarriedOver(all, {
     cascadeEnabledFor: (listId) => effectiveForList(behaviour, listId).cascade,
+    meFor,
   });
 
   // Split slipped rows by each list's carry-over default: 'today' / 'backlog'

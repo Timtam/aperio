@@ -1,5 +1,6 @@
+import { isMineOrUnassigned } from './taskAssignment';
 import { todayIsoKey } from './taskDay';
-import type { Task } from './types';
+import type { Task, TaskUser } from './types';
 
 // Pure day-start-review + deadline-pin selectors + the fire-gate, shared by the
 // desktop checkers and the mobile day-start checks. No platform deps (storage /
@@ -11,12 +12,17 @@ import type { Task } from './types';
  * completed/cancelled. `scheduled_date` alone doesn't count — that's a planning
  * hint, not a missed commitment.
  */
-export function filterOverdue(tasks: Task[]): Task[] {
+export function filterOverdue(
+  tasks: Task[],
+  meFor?: (listId: string) => TaskUser | null,
+): Task[] {
   const today = todayIsoKey();
   return tasks.filter((task) => {
     if (!task.deadline_date) return false;
     if (task.status === 'completed' || task.status === 'cancelled') return false;
-    return task.deadline_date < today;
+    if (task.deadline_date >= today) return false;
+    // Don't offer a task owned by a concrete OTHER user — someone else handles it.
+    return meFor ? isMineOrUnassigned(task.assignees, meFor(task.list_id)) : true;
   });
 }
 
@@ -29,15 +35,21 @@ export function filterOverdue(tasks: Task[]): Task[] {
  */
 export function filterCarriedOver(
   tasks: Task[],
-  options?: { cascadeEnabledFor?: (listId: string) => boolean },
+  options?: {
+    cascadeEnabledFor?: (listId: string) => boolean;
+    meFor?: (listId: string) => TaskUser | null;
+  },
 ): Task[] {
   const today = todayIsoKey();
   const overdueIds = new Set(filterOverdue(tasks).map((t) => t.id));
+  const meFor = options?.meFor;
   const slipped = tasks.filter((task) => {
     if (!task.scheduled_date) return false;
     if (task.status === 'completed' || task.status === 'cancelled') return false;
     if (overdueIds.has(task.id)) return false;
-    return task.scheduled_date < today;
+    if (task.scheduled_date >= today) return false;
+    // Don't offer a task owned by a concrete OTHER user — someone else handles it.
+    return meFor ? isMineOrUnassigned(task.assignees, meFor(task.list_id)) : true;
   });
 
   const cascadeFor = options?.cascadeEnabledFor;
@@ -82,14 +94,18 @@ export function actionableDescendants(rootId: string, tasks: Task[]): Task[] {
  * "by"-deadline auto-pin. The scheduled-date check keeps the batch idempotent
  * across re-launches inside the same calendar day.
  */
-export function filterDeadlinePinTargets(tasks: Task[]): Task[] {
+export function filterDeadlinePinTargets(
+  tasks: Task[],
+  meFor?: (listId: string) => TaskUser | null,
+): Task[] {
   const today = todayIsoKey();
   return tasks.filter((task) => {
     if (!task.deadline_date) return false;
     if (task.deadline_date !== today) return false;
     if (task.status === 'completed' || task.status === 'cancelled') return false;
     if (task.scheduled_date === today) return false;
-    return true;
+    // Don't silently pin a task owned by a concrete OTHER user to my today.
+    return meFor ? isMineOrUnassigned(task.assignees, meFor(task.list_id)) : true;
   });
 }
 

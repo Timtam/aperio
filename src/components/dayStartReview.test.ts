@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 
-import type { Task } from '../api/types';
+import type { Task, TaskUser } from '../api/types';
 import {
   actionableDescendants,
   filterCarriedOver,
@@ -89,6 +89,46 @@ describe('filterOverdue', () => {
     ];
     // in_progress is NOT terminal — still a missed commitment.
     expect(filterOverdue(tasks).map((t) => t.id)).toEqual(['inprogress']);
+  });
+});
+
+describe('day-start ownership filter (meFor)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 4, 20, 12, 0, 0));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const me: TaskUser = { id: 'u1', name: 'Me', email: null };
+  const other: TaskUser = { id: 'u2', name: 'Other', email: null };
+  const meFor = () => me;
+
+  it('filterOverdue keeps mine + unassigned, drops a colleague task', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'mine', deadline_date: '2026-05-19', assignees: [me] },
+      { ...baseTask, id: 'unassigned', deadline_date: '2026-05-19', assignees: [] },
+      { ...baseTask, id: 'theirs', deadline_date: '2026-05-19', assignees: [other] },
+    ];
+    expect(filterOverdue(tasks, meFor).map((t) => t.id)).toEqual(['mine', 'unassigned']);
+    // Without meFor every overdue task is returned (back-compat).
+    expect(filterOverdue(tasks)).toHaveLength(3);
+  });
+
+  it('filterCarriedOver drops a colleague slipped task', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'mine', scheduled_date: '2026-05-18', assignees: [me] },
+      { ...baseTask, id: 'theirs', scheduled_date: '2026-05-18', assignees: [other] },
+    ];
+    expect(filterCarriedOver(tasks, { meFor }).map((t) => t.id)).toEqual(['mine']);
+  });
+
+  it('no identity (meFor → null) keeps everything', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'theirs', deadline_date: '2026-05-19', assignees: [other] },
+    ];
+    expect(filterOverdue(tasks, () => null).map((t) => t.id)).toEqual(['theirs']);
   });
 });
 

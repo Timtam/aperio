@@ -11,6 +11,7 @@ import {
   writeFiredDayKey,
 } from '../hooks/useCurrentDayKey';
 import { todayIsoKey } from '../intl/taskDay';
+import { useCurrentUserByList } from '../state/currentUser';
 import { useDialogState } from '../state/dialogStateContext';
 import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
 import type {
@@ -60,6 +61,7 @@ import {
  */
 export function DayStartReviewChecker() {
   const { tasks, loading } = useTasks();
+  const currentUserByList = useCurrentUserByList(tasks);
   const {
     mode: dialogMode,
     openDayStartReview,
@@ -93,10 +95,17 @@ export function DayStartReviewChecker() {
     // mark fired — when the snooze expires, the next tick should
     // run the gate properly.
     if (isDayStartReviewSnoozed()) return;
+    // Wait until the connected-user identity is resolved for every list, so the
+    // review never proposes (or silently carries over) a colleague's task — that
+    // belongs to someone else (DESIGN §9.7). The hook populates per list; once
+    // ready this effect re-runs via its `currentUserByList` dependency.
+    if (!tasks.every((tk) => tk.list_id in currentUserByList)) return;
+    const meFor = (listId: string) => currentUserByList[listId] ?? null;
 
-    const overdue = filterOverdue(tasks);
+    const overdue = filterOverdue(tasks, meFor);
     const slipped = filterCarriedOver(tasks, {
       cascadeEnabledFor: (listId) => effectiveForList(listId).cascade,
+      meFor,
     });
     // Even on an empty day we record the fire — the gate's only job
     // is "review for this day". If new slipped / overdue rows appear
@@ -169,6 +178,7 @@ export function DayStartReviewChecker() {
     loading,
     hydrating,
     tasks,
+    currentUserByList,
     effectiveForList,
     dayStartTrigger,
     todayKey,

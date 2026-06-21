@@ -12,6 +12,7 @@ import {
 } from '../hooks/useCurrentDayKey';
 import { todayIsoKey } from '../intl/taskDay';
 import { filterDeadlinePinTargets } from './deadlinePinTargets';
+import { useCurrentUserByList } from '../state/currentUser';
 import { useDialogState } from '../state/dialogStateContext';
 import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
 import { useTasks } from '../state/useTasks';
@@ -51,6 +52,7 @@ import { useTasks } from '../state/useTasks';
  */
 export function DeadlinePinChecker() {
   const { tasks, loading } = useTasks();
+  const currentUserByList = useCurrentUserByList(tasks);
   const { mode: dialogMode, invalidateData } = useDialogState();
   const announce = useAnnouncer();
   const { t } = useTranslation();
@@ -67,8 +69,13 @@ export function DeadlinePinChecker() {
     // `scheduled_date` under an open task editor would let the user
     // save stale data and undo our pin a moment later.
     if (dialogMode.kind !== 'none') return;
+    // Don't silently pin a colleague's task to my today — wait until the
+    // connected-user identity is resolved for every list (re-runs via the
+    // `currentUserByList` dep), then skip tasks owned by someone else.
+    if (!tasks.every((tk) => tk.list_id in currentUserByList)) return;
+    const meFor = (listId: string) => currentUserByList[listId] ?? null;
 
-    const targets = filterDeadlinePinTargets(tasks);
+    const targets = filterDeadlinePinTargets(tasks, meFor);
     firedRef.current = todayKey;
     writeFiredDayKey('deadlinePin', todayKey);
     if (targets.length === 0) return;
@@ -78,6 +85,7 @@ export function DeadlinePinChecker() {
     loading,
     hydrating,
     tasks,
+    currentUserByList,
     dayStartTrigger,
     todayKey,
     dialogMode.kind,

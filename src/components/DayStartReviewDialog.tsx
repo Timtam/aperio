@@ -6,6 +6,7 @@ import { useAnnouncer } from '../a11y/announcerContext';
 import type { Task } from '../api/types';
 import { todayIsoKey } from '../intl/taskDay';
 import { priorityI18nKey, priorityMarker } from '../intl/taskStatus';
+import { useCurrentUserByList } from '../state/currentUser';
 import { useDialogState } from '../state/dialogStateContext';
 import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
 import { useTaskStatusActions } from '../state/useTaskStatusToggle';
@@ -81,10 +82,19 @@ export function DayStartReviewDialog({
   );
   const { set: setTaskStatus } = useTaskStatusActions();
 
-  const overdue = useMemo(() => filterOverdue(tasks), [tasks]);
+  // Only my own / unassigned tasks are offered; a task owned by a concrete other
+  // user is someone else's to handle (DESIGN §9.7). `meFor` resolves the
+  // connected user per list from the session cache (null = no identity ⇒ keep).
+  const currentUserByList = useCurrentUserByList(tasks);
+  const meFor = useCallback(
+    (listId: string) => currentUserByList[listId] ?? null,
+    [currentUserByList],
+  );
+
+  const overdue = useMemo(() => filterOverdue(tasks, meFor), [tasks, meFor]);
   const slipped = useMemo(
-    () => filterCarriedOver(tasks, { cascadeEnabledFor }),
-    [tasks, cascadeEnabledFor],
+    () => filterCarriedOver(tasks, { cascadeEnabledFor, meFor }),
+    [tasks, cascadeEnabledFor, meFor],
   );
 
   const [busy, setBusy] = useState(false);
