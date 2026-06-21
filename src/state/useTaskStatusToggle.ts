@@ -1,9 +1,11 @@
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
+import { selfAssignOnStatusChange } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import { todayIsoKey } from '../intl/taskDay';
+import { currentUserForList } from './currentUser';
 import { useDialogState } from './dialogStateContext';
 import { planStatusCascade, type StatusWrite } from './taskCascade';
 import { useTaskCascadeEnabled } from './taskCascadeContext';
@@ -61,7 +63,8 @@ export function useTaskStatusActions(): TaskStatusActions {
   // here without affecting the rest of the app. Parent and child
   // tasks live in the same list (invariant from #98), so the cascade
   // planner walking the tree all reads the same per-list setting.
-  const { effectiveForList, checkoffMode } = useTaskCascadeEnabled();
+  const { effectiveForList, checkoffMode, autoSelfAssign } =
+    useTaskCascadeEnabled();
 
   const set = useCallback(
     async (task: Task, nextStatus: TaskStatus): Promise<void> => {
@@ -87,7 +90,7 @@ export function useTaskStatusActions(): TaskStatusActions {
       });
       if (writes.length === 0) return;
       try {
-        await applyCascade(writes, tasks);
+        await applyCascade(writes, tasks, autoSelfAssign);
         invalidateData();
         // Announce: focused task gets the usual status message; if
         // additional rows were touched, append a count so SR users
@@ -106,7 +109,15 @@ export function useTaskStatusActions(): TaskStatusActions {
         console.warn('update_task failed', err);
       }
     },
-    [announce, t, invalidateData, tasks, taskListById, effectiveForList],
+    [
+      announce,
+      t,
+      invalidateData,
+      tasks,
+      taskListById,
+      effectiveForList,
+      autoSelfAssign,
+    ],
   );
 
   const toggle = useCallback(
@@ -185,17 +196,32 @@ export function nextCycleStatus(
 async function applyCascade(
   writes: StatusWrite[],
   snapshot: Task[],
+  autoSelfAssign: boolean,
 ): Promise<void> {
   const byId = new Map(snapshot.map((row) => [row.id, row]));
   for (const w of writes) {
     const target = byId.get(w.taskId);
     if (!target) continue;
+    // Self-assignment (shared lists): assign me on →in_progress/→completed when
+    // nobody owns the task, drop only me on →open. "me" is resolved per the
+    // task's list (session-cached); a list with no identity yields null → the
+    // helper no-ops, as does the setting being off.
+    const me = autoSelfAssign
+      ? await currentUserForList(target.list_id)
+      : null;
+    const nextAssignees = selfAssignOnStatusChange(
+      w.status,
+      target.assignees,
+      me,
+      autoSelfAssign,
+    );
     await invoke<Task>('update_task', {
       task: {
         ...target,
         status: w.status,
         completed_at:
           w.status === 'completed' ? new Date().toISOString() : null,
+        assignees: nextAssignees ?? target.assignees,
         // Honour the planner's auto-date companion write: when a task
         // transitions into in_progress without a scheduled_date, the
         // planner pins it to today so the carry-over flow can find it

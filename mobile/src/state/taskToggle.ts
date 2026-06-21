@@ -1,7 +1,13 @@
-import { planAncestorRecompute, planStatusCascade, todayIsoKey } from '@aperio/shared';
+import {
+  planAncestorRecompute,
+  planStatusCascade,
+  selfAssignOnStatusChange,
+  todayIsoKey,
+} from '@aperio/shared';
 import type { StatusWrite, Task, TaskList, TaskStatus } from '@aperio/shared';
 
 import { updateTask } from '../api/client';
+import { currentUserForList } from './currentUser';
 import {
   canStoreInProgress,
   effectiveForList,
@@ -12,11 +18,15 @@ import {
 /** Apply each planned status write via update_task against `snapshot` (the task
  *  set the planner saw). Preserves an existing completion time, stamps a fresh
  *  one only on a newly-completed task, and honours the planner's auto-date
- *  companion (`scheduledDate !== undefined` = overwrite, else leave). Shared by
- *  the check-off cascade and the ancestor recompute. */
+ *  companion (`scheduledDate !== undefined` = overwrite, else leave). When
+ *  `autoSelfAssign` is on, also self-assigns me on a →in_progress/→completed of
+ *  an unassigned task and drops only me on →open (shared lists with an identity).
+ *  Shared by the check-off cascade, the ancestor recompute, and the editor
+ *  cascade. */
 export async function applyStatusWrites(
   writes: StatusWrite[],
   snapshot: Task[],
+  autoSelfAssign: boolean,
 ): Promise<void> {
   if (writes.length === 0) return;
   const byId = new Map(snapshot.map((t) => [t.id, t]));
@@ -24,10 +34,20 @@ export async function applyStatusWrites(
   for (const w of writes) {
     const target = byId.get(w.taskId);
     if (target == null) continue;
+    // "me" is resolved per the task's list (session-cached); a list with no
+    // identity yields null → the helper no-ops, as does the setting being off.
+    const me = autoSelfAssign ? await currentUserForList(target.list_id) : null;
+    const nextAssignees = selfAssignOnStatusChange(
+      w.status,
+      target.assignees,
+      me,
+      autoSelfAssign,
+    );
     await updateTask({
       ...target,
       status: w.status,
       completed_at: w.status === 'completed' ? (target.completed_at ?? nowIso) : null,
+      assignees: nextAssignees ?? target.assignees,
       scheduled_date:
         w.scheduledDate !== undefined ? w.scheduledDate : target.scheduled_date,
     });
@@ -57,7 +77,7 @@ export async function recomputeAncestors(
     cascadeEnabled: eff.cascade,
     ...(eff.autoDate ? { todayKey: todayIsoKey() } : {}),
   });
-  await applyStatusWrites(writes, snapshot);
+  await applyStatusWrites(writes, snapshot, behaviour.autoSelfAssign);
 }
 
 /** All descendants of `parentId` (children, grandchildren, …) in `all` — the
@@ -101,7 +121,7 @@ export async function cascadeEditorStatus(
     cascadeEnabled: eff.cascade,
     ...(eff.autoDate && canInProgress ? { todayKey: todayIsoKey() } : {}),
   }).filter((w) => w.taskId !== taskId);
-  await applyStatusWrites(writes, snapshot);
+  await applyStatusWrites(writes, snapshot, behaviour.autoSelfAssign);
 }
 
 // The one shared check-off path for every task surface (TasksScreen + the
@@ -142,7 +162,7 @@ export async function applyTaskToggle(
     ...(eff.autoDate && canInProgress ? { todayKey: todayIsoKey() } : {}),
   });
   if (writes.length === 0) return null;
-  await applyStatusWrites(writes, allTasks);
+  await applyStatusWrites(writes, allTasks, behaviour.autoSelfAssign);
   return nextStatus;
 }
 
@@ -174,7 +194,7 @@ export async function setTaskStatusTo(
     // applies it to such writes only); skip where the provider can't store it.
     ...(eff.autoDate && canInProgress ? { todayKey: todayIsoKey() } : {}),
   });
-  await applyStatusWrites(writes, allTasks);
+  await applyStatusWrites(writes, allTasks, behaviour.autoSelfAssign);
   return Math.max(0, writes.length - 1);
 }
 
