@@ -47,6 +47,7 @@ const AUTO_DATE_KEY = 'tasks.autoDateOnStart';
 const CARRY_OVER_KEY = 'tasks.carryOverDefault';
 const DAY_START_TRIGGER_KEY = 'tasks.dayStartTrigger';
 const CHECKOFF_MODE_KEY = 'tasks.checkoffMode';
+const AUTO_SELF_ASSIGN_KEY = 'tasks.autoSelfAssign';
 /**
  * Single JSON pref holding the per-list override map. Keyed by
  * task-list id, value is a `ListOverrides` record carrying any
@@ -163,6 +164,10 @@ export interface TaskCascadeContextValue {
   autoDate: boolean;
   /** Set the auto-date preference. Debounced-persisted. */
   setAutoDate: (value: boolean) => void;
+  /** True when "self-assign in shared lists on status change" is active. */
+  autoSelfAssign: boolean;
+  /** Set the auto-self-assign preference. Debounced-persisted. */
+  setAutoSelfAssign: (value: boolean) => void;
   /** Carry-over default action used by `CarryOverChecker`. */
   carryOverDefault: CarryOverDefault;
   /** Set the carry-over default. Debounced-persisted. */
@@ -198,6 +203,7 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
   // paint matches the legacy app even before user_prefs hydrates.
   const [enabled, setEnabledState] = useState(true);
   const [autoDate, setAutoDateState] = useState(true);
+  const [autoSelfAssign, setAutoSelfAssignState] = useState(true);
   const [carryOverDefault, setCarryOverDefaultState] =
     useState<CarryOverDefault>('ask');
   // Default '00:00' means "as soon as the local date rolls over",
@@ -220,6 +226,7 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       getUserPref(CARRY_OVER_KEY).catch(() => null),
       getUserPref(DAY_START_TRIGGER_KEY).catch(() => null),
       getUserPref(CHECKOFF_MODE_KEY).catch(() => null),
+      getUserPref(AUTO_SELF_ASSIGN_KEY).catch(() => null),
       getUserPref(LIST_OVERRIDES_KEY).catch(() => null),
     ])
       .then(
@@ -229,6 +236,7 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
           carryOverRaw,
           triggerRaw,
           checkoffRaw,
+          autoSelfAssignRaw,
           listOverridesRaw,
         ]) => {
           if (cancelled) return;
@@ -236,6 +244,7 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
           // before — only literal "false" toggles the default off.
           if (cascadeRaw === 'false') setEnabledState(false);
           if (autoDateRaw === 'false') setAutoDateState(false);
+          if (autoSelfAssignRaw === 'false') setAutoSelfAssignState(false);
           // Carry-over default is a tri-state enum; reject anything
           // that doesn't match the allowed values and keep the default.
           if (isCarryOverDefault(carryOverRaw)) {
@@ -336,6 +345,23 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
     };
   }, [autoDate, hydrating]);
 
+  const autoSelfAssignTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (hydrating) return;
+    if (autoSelfAssignTimer.current !== null) {
+      window.clearTimeout(autoSelfAssignTimer.current);
+    }
+    autoSelfAssignTimer.current = window.setTimeout(() => {
+      void setUserPref(AUTO_SELF_ASSIGN_KEY, autoSelfAssign ? 'true' : 'false');
+    }, WRITE_DEBOUNCE_MS);
+    return () => {
+      if (autoSelfAssignTimer.current !== null) {
+        window.clearTimeout(autoSelfAssignTimer.current);
+        autoSelfAssignTimer.current = null;
+      }
+    };
+  }, [autoSelfAssign, hydrating]);
+
   const carryOverTimer = useRef<number | null>(null);
   useEffect(() => {
     if (hydrating) return;
@@ -413,6 +439,9 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
   const setAutoDate = useCallback((value: boolean) => {
     setAutoDateState(value);
   }, []);
+  const setAutoSelfAssign = useCallback((value: boolean) => {
+    setAutoSelfAssignState(value);
+  }, []);
   const setCarryOverDefault = useCallback((value: CarryOverDefault) => {
     setCarryOverDefaultState(value);
   }, []);
@@ -470,6 +499,8 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       setEnabled,
       autoDate,
       setAutoDate,
+      autoSelfAssign,
+      setAutoSelfAssign,
       carryOverDefault,
       setCarryOverDefault,
       dayStartTrigger,
@@ -486,6 +517,8 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       setEnabled,
       autoDate,
       setAutoDate,
+      autoSelfAssign,
+      setAutoSelfAssign,
       carryOverDefault,
       setCarryOverDefault,
       dayStartTrigger,

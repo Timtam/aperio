@@ -8,6 +8,7 @@ import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 import {
   readTaskBehaviour,
   writeAutoDate,
+  writeAutoSelfAssign,
   writeCarryOverDefault,
   writeCascadeEnabled,
   writeCheckoffMode,
@@ -69,6 +70,7 @@ export default function TaskSettingsScreen() {
   const [checkoffMode, setCheckoffMode] = useState<CheckoffMode>('toggle');
   const [cascade, setCascade] = useState(true);
   const [autoDate, setAutoDate] = useState(true);
+  const [autoSelfAssign, setAutoSelfAssign] = useState(true);
   const [carryOver, setCarryOver] = useState<CarryOverDefault>('ask');
   const [dayStart, setDayStart] = useState<DayStartTrigger>('00:00');
 
@@ -80,6 +82,7 @@ export default function TaskSettingsScreen() {
         setCheckoffMode(b.checkoffMode);
         setCascade(b.cascadeEnabled);
         setAutoDate(b.autoDate);
+        setAutoSelfAssign(b.autoSelfAssign);
         setCarryOver(b.carryOverDefault);
         setDayStart(b.dayStartTrigger);
       });
@@ -113,6 +116,14 @@ export default function TaskSettingsScreen() {
     setAutoDate((prev) => {
       const next = !prev;
       void writeAutoDate(next);
+      return next;
+    });
+  }, []);
+
+  const onAutoSelfAssignToggle = useCallback(() => {
+    setAutoSelfAssign((prev) => {
+      const next = !prev;
+      void writeAutoSelfAssign(next);
       return next;
     });
   }, []);
@@ -164,6 +175,20 @@ export default function TaskSettingsScreen() {
         />
         <Text style={styles.hint} accessibilityRole="text">
           {t('dialogs.tasks.autoDate.hint')}
+        </Text>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.heading} accessibilityRole="header">
+          {t('dialogs.tasks.autoSelfAssign.heading')}
+        </Text>
+        <SwitchRow
+          label={t('dialogs.tasks.autoSelfAssign.label')}
+          value={autoSelfAssign}
+          onToggle={onAutoSelfAssignToggle}
+        />
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.tasks.autoSelfAssign.hint')}
         </Text>
       </View>
 

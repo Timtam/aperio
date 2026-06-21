@@ -60,6 +60,8 @@ export function TasksPanel() {
     setEnabled,
     autoDate,
     setAutoDate,
+    autoSelfAssign,
+    setAutoSelfAssign,
     carryOverDefault,
     setCarryOverDefault,
     dayStartTrigger,
@@ -104,6 +106,8 @@ export function TasksPanel() {
   const couplingHintId = useId();
   const autoDateHeadingId = useId();
   const autoDateHintId = useId();
+  const autoSelfAssignHeadingId = useId();
+  const autoSelfAssignHintId = useId();
   const carryOverHeadingId = useId();
   const carryOverHintId = useId();
   const carryOverGroupId = useId();
@@ -207,6 +211,27 @@ export function TasksPanel() {
             onChange={(e) => setAutoDate(e.target.checked)}
           />
           <span>{t('dialogs.tasks.autoDate.label')}</span>
+        </label>
+      </section>
+
+      <section
+        aria-labelledby={autoSelfAssignHeadingId}
+        className="tasks-settings__section"
+      >
+        <h3 id={autoSelfAssignHeadingId} className="color-labels__heading">
+          {t('dialogs.tasks.autoSelfAssign.heading')}
+        </h3>
+        <p id={autoSelfAssignHintId} className="tasks-settings__hint">
+          {t('dialogs.tasks.autoSelfAssign.hint')}
+        </p>
+        <label className="tasks-settings__toggle">
+          <input
+            type="checkbox"
+            checked={autoSelfAssign}
+            aria-describedby={autoSelfAssignHintId}
+            onChange={(e) => setAutoSelfAssign(e.target.checked)}
+          />
+          <span>{t('dialogs.tasks.autoSelfAssign.label')}</span>
         </label>
       </section>
 

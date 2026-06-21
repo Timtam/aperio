@@ -885,6 +885,11 @@
         "label": "Pin a backlog task to today when work begins",
         "hint": "When enabled, a task without a scheduled day gets today's date the moment its status flips to in progress — directly or via the cascade from a child. Disable to leave the scheduled day alone."
       },
+      "autoSelfAssign": {
+        "heading": "Self-assignment",
+        "label": "Assign shared-list tasks to me",
+        "hint": "When enabled, an unassigned task in a shared list (e.g. Vikunja) is assigned to me automatically the moment I set it in progress or done; setting it back to open removes only my assignment. For recurring tasks only the completed instance is assigned — the next instance stays unassigned. Disable to keep assignments manual."
+      },
       "carryOverDefault": {
         "heading": "Carry-over default",
         "hint": "On startup, decide what happens to tasks whose scheduled day has passed and that are still open. \"Ask\" opens the carry-over dialog; the other options run silently and announce the result.",
