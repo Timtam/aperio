@@ -5,9 +5,9 @@ import {
   AccessibilityInfo,
   ActivityIndicator,
   Alert,
+  FlatList,
   findNodeHandle,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -164,6 +164,17 @@ export default function TasksScreen({
         currentUserByList,
       ).entries,
     [tasks, taskListById, tr, collapsed, sectionsByList, today, currentUserByList],
+  );
+
+  // What the virtualized list renders: only the NON-hidden entries (children of
+  // a collapsed group/parent are out of the tree entirely). buildEntries keeps
+  // the hidden entries in `entries` for the focus-walk helpers below, so filter
+  // here. The FlatList then mounts only the on-screen window — so a list with
+  // thousands of (e.g. device-reminder) rows no longer balloons the VoiceOver
+  // accessibility tree the way the old all-rows-mounted ScrollView did.
+  const visibleEntries = useMemo(
+    () => entries.filter((entry) => !entry.hidden),
+    [entries],
   );
 
   // Colour resolution (task own → section → list), matching the desktop. The
@@ -630,15 +641,23 @@ export default function TasksScreen({
           {t('mobile.empty')}
         </Text>
       ) : (
-        <ScrollView
+        <FlatList
           accessibilityRole="list"
+          data={visibleEntries}
+          keyExtractor={(entry) => entry.task.id}
+          renderItem={({ item }) =>
+            item.group ? renderHeader(item) : renderTask(item)
+          }
           contentContainerStyle={[styles.list, { paddingBottom: tabBarInset }]}
           keyboardShouldPersistTaps="handled"
-        >
-          {entries
-            .filter((entry) => !entry.hidden)
-            .map((entry) => (entry.group ? renderHeader(entry) : renderTask(entry)))}
-        </ScrollView>
+          // Virtualization budget mirrors the contacts SectionList: keep the
+          // mounted window small so the screen-reader tree stays light even with
+          // a few thousand rows; the focus-restoration targets (the adjacent
+          // sibling after a delete/complete) sit well inside the window.
+          initialNumToRender={20}
+          windowSize={11}
+          removeClippedSubviews
+        />
       )}
     </View>
   );
