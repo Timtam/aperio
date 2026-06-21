@@ -786,6 +786,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "cal-core",
+ "chrono",
  "serde",
  "serde_json",
 ]
