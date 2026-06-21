@@ -25,11 +25,13 @@
 //! manual-only refresh (mobile) can build the refresher without ever
 //! starting the background loop.
 
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration as StdDuration;
 
 use chrono::{DateTime, Duration, Utc};
-use tokio::sync::Notify;
+use tokio::sync::{Notify, Semaphore};
+use tokio::task::JoinSet;
 use tracing::{debug, info};
 
 use cal_core::{CalendarFeature, ContactsFeature, DateRange, TasksFeature};
@@ -54,6 +56,11 @@ const WINDOW_FUTURE_DAYS: i64 = 366; // ~12 months ahead
 const APP_START_DELAY: StdDuration = StdDuration::from_secs(8);
 
 const DEFAULT_INTERVAL_MINUTES: u32 = 30;
+
+/// Max container refreshes in flight during a warm pass — overlaps a slow account
+/// with the rest without hammering any single provider (≈ a browser's per-host
+/// connection budget).
+const REFRESH_CONCURRENCY: usize = 6;
 
 /// `user_prefs` keys.
 pub const PREF_CACHE_REFRESH_INTERVAL_MINUTES: &str = "cache.refreshIntervalMinutes";
@@ -189,10 +196,11 @@ impl CacheRefresher {
             .unwrap_or(DEFAULT_INTERVAL_MINUTES)
     }
 
-    /// One full warm pass over every external account. Sequential +
-    /// dedup-guarded; runs on the background runtime so it never blocks a
-    /// command.
-    pub async fn warm_all(&self) {
+    /// One full warm pass over every external account: enumerate the containers,
+    /// then refresh their items with bounded concurrency so a slow provider can't
+    /// gate the rest. Dedup-guarded; runs on the background runtime so it never
+    /// blocks a command.
+    pub async fn warm_all(self: &Arc<Self>) {
         // Single-flight: a periodic tick that lands while a manual pass
         // is still running just bails.
         {
@@ -223,13 +231,29 @@ impl CacheRefresher {
         let total = targets.len() as u32;
         self.emit_status(true, last.clone(), Some(total), Some(0));
 
-        // Phase 2 — refresh each target's items, reporting progress per target.
-        let mut fetched: u32 = 0;
+        // Phase 2 — refresh each target's items with bounded concurrency, so a
+        // slow account overlaps the others instead of serialising the whole pass.
+        // Progress (fetched X of N) is reported as each target lands; the shared
+        // RefreshCoordinator still dedups against any per-read SWR refresh.
+        let fetched = Arc::new(AtomicU32::new(0));
+        let sem = Arc::new(Semaphore::new(REFRESH_CONCURRENCY));
+        let mut set = JoinSet::new();
         for target in targets {
-            self.refresh_one(target, window).await;
-            fetched += 1;
-            self.emit_status(true, last.clone(), Some(total), Some(fetched));
+            let me = Arc::clone(self);
+            let sem = Arc::clone(&sem);
+            let fetched = Arc::clone(&fetched);
+            let last = last.clone();
+            set.spawn(async move {
+                // Bound in-flight refreshes; the permit is held for the fetch.
+                let Ok(_permit) = sem.acquire_owned().await else {
+                    return;
+                };
+                me.refresh_one(target, window).await;
+                let done = fetched.fetch_add(1, Ordering::Relaxed) + 1;
+                me.emit_status(true, last, Some(total), Some(done));
+            });
         }
+        while set.join_next().await.is_some() {}
 
         // Stamp completion (in memory + prefs so the indicator survives a
         // restart with a meaningful "last updated").
