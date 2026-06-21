@@ -33,6 +33,7 @@ import { useTabBarInset } from '../hooks/useTabBarInset';
 import { describeDue } from '../intl/describeDue';
 import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
 import { useCacheReload } from '../state/cacheObserver';
+import { useCurrentUserByList } from '../state/currentUser';
 import { useTaskStore } from '../state/taskStoreContext';
 import { surfaceTaskNow } from '../state/moveActions';
 import { applyTaskToggle, recomputeAncestors, statusAnnounce } from '../state/taskToggle';
@@ -150,9 +151,19 @@ export default function TasksScreen({
     });
   }, [listIdsWithTasks, sectionsByList, loadSections]);
 
+  const currentUserByList = useCurrentUserByList(tasks);
   const entries = useMemo(
-    () => buildEntries(tasks, taskListById, tr, collapsed, sectionsByList, today).entries,
-    [tasks, taskListById, tr, collapsed, sectionsByList, today],
+    () =>
+      buildEntries(
+        tasks,
+        taskListById,
+        tr,
+        collapsed,
+        sectionsByList,
+        today,
+        currentUserByList,
+      ).entries,
+    [tasks, taskListById, tr, collapsed, sectionsByList, today, currentUserByList],
   );
 
   // Colour resolution (task own → section → list), matching the desktop. The

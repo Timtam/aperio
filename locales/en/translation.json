@@ -1720,6 +1720,7 @@
       "empty": "No tasks.",
       "backlog": "Backlog",
       "done": "Done ({{count}})",
+      "doneSplit": "Done – {{mine}} by me, {{others}} by others",
       "deferred": "Upcoming ({{count}})",
       "taskList": "Task list",
       "sectionActions": "Actions for section \"{{name}}\"",

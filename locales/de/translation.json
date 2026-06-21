@@ -1720,6 +1720,7 @@
       "empty": "Keine Aufgaben.",
       "backlog": "Backlog",
       "done": "Erledigt ({{count}})",
+      "doneSplit": "Erledigt – {{mine}} von mir, {{others}} von anderen",
       "deferred": "Zukünftig ({{count}})",
       "taskList": "Aufgabenliste",
       "sectionActions": "Aktionen für Abschnitt „{{name}}\"",

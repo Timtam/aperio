@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Section, Task } from '../../api/types';
+import type { Section, Task, TaskUser } from '../../api/types';
 import {
   buildEntries,
   DEFERRED_GROUP_ID,
@@ -83,6 +83,33 @@ function headers(
 function taskRows(result: ReturnType<typeof buildEntries>): Entry[] {
   return result.entries.filter((e) => !e.group);
 }
+
+describe('buildEntries done-count split', () => {
+  const me: TaskUser = { id: 'u1', name: 'Me', email: null };
+  const other: TaskUser = { id: 'u2', name: 'Other', email: null };
+  const done = (id: string, assignees: TaskUser[]): Task =>
+    baseTask({ id, status: 'completed', completed_at: '2026-05-20T10:00:00Z', assignees });
+  const doneTitle = (result: ReturnType<typeof buildEntries>): string | undefined =>
+    headers(result).find((h) => h.kind === 'done')?.label;
+
+  it('splits the Done title when a done task is owned by someone else', () => {
+    const tasks = [done('a', []), done('b', [me]), done('c', [other])];
+    const result = buildEntries(tasks, listById, t, new Set(), {}, TODAY, { L1: me });
+    expect(doneTitle(result)).toBe('views.tasks.doneSplit');
+  });
+
+  it('keeps one Done count when everything is mine or unassigned', () => {
+    const tasks = [done('a', []), done('b', [me])];
+    const result = buildEntries(tasks, listById, t, new Set(), {}, TODAY, { L1: me });
+    expect(doneTitle(result)).toBe('views.tasks.done');
+  });
+
+  it('keeps one Done count without an identity for the list', () => {
+    const tasks = [done('a', [other])];
+    // No currentUserByList ⇒ {} ⇒ everything counts as mine ⇒ single count.
+    expect(doneTitle(build(tasks))).toBe('views.tasks.done');
+  });
+});
 
 describe('buildEntries section grouping', () => {
   it('groups tasks by section in declared order, ungrouped first', () => {

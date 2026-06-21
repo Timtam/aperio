@@ -25,6 +25,7 @@ import {
   subtaskProgressSuffix,
 } from '../../intl/taskStatus';
 import { useCalendarStore } from '../../state/calendarStoreContext';
+import { useCurrentUserByList } from '../../state/currentUser';
 import { useChipContextMenu } from '../../state/useChipContextMenu';
 import { useDialogState } from '../../state/dialogStateContext';
 import { useTaskStatusToggle } from '../../state/useTaskStatusToggle';
@@ -141,10 +142,27 @@ export function TaskView() {
   // `flatTasks` — separators never receive focus. Children appear
   // depth-first under their parent; the `hidden` flag on each entry
   // tells the renderer when the parent above is collapsed.
+  const currentUserByList = useCurrentUserByList(tasks);
   const { entries, flatTasks } = useMemo(
     () =>
-      buildEntries(tasks, taskListById, t, collapsed, sectionsByList, todayKey),
-    [tasks, taskListById, t, collapsed, sectionsByList, todayKey],
+      buildEntries(
+        tasks,
+        taskListById,
+        t,
+        collapsed,
+        sectionsByList,
+        todayKey,
+        currentUserByList,
+      ),
+    [
+      tasks,
+      taskListById,
+      t,
+      collapsed,
+      sectionsByList,
+      todayKey,
+      currentUserByList,
+    ],
   );
 
   const [focusIndex, setFocusIndex] = useState(0);

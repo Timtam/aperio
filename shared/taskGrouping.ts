@@ -1,4 +1,5 @@
-import type { Section, Task } from './types';
+import type { Section, Task, TaskUser } from './types';
+import { classifyDoneByMe } from './taskAssignment';
 import { priorityRank } from './taskStatus';
 
 /** Sentinel id of the synthetic "Done (N)" group row. */
@@ -117,6 +118,10 @@ export function buildEntries(
   /** Today as `YYYY-MM-DD`; tasks whose `resurface_date` is strictly after
    *  it are held back in the "Zukünftig" group (DESIGN §9.12). */
   today: string,
+  /** Connected user per list id (Vikunja & co.), used to split the Done count
+   *  into "mine vs others". Lists without an identity are absent/null and never
+   *  split. */
+  currentUserByList: Record<string, TaskUser | null> = {},
 ): { entries: Entry[]; flatTasks: Task[] } {
   // Bucket children under their parent for O(1) subtask lookup. Tasks whose
   // parent_id points at a missing row are orphans → surfaced at top level.
@@ -282,10 +287,22 @@ export function buildEntries(
     doneTopLevel.sort((a, b) =>
       (b.completed_at ?? '').localeCompare(a.completed_at ?? ''),
     );
+    // Split the count into mine (unassigned OR assigned to me) vs others
+    // (assigned to a concrete other user) when at least one done task is
+    // someone else's; otherwise a single count (personal lists never split).
+    const mineCount = doneTopLevel.filter(
+      (task) =>
+        classifyDoneByMe(task.assignees, currentUserByList[task.list_id] ?? null) ===
+        'me',
+    ).length;
+    const othersCount = doneTopLevel.length - mineCount;
     forest.push({
       t: 'group',
       id: DONE_GROUP_ID,
-      title: t('views.tasks.done', { count: doneTopLevel.length }),
+      title:
+        othersCount > 0
+          ? t('views.tasks.doneSplit', { mine: mineCount, others: othersCount })
+          : t('views.tasks.done', { count: doneTopLevel.length }),
       meta: { kind: 'done' },
       children: doneTopLevel.map((task) => ({ t: 'task', task }) as GNode),
     });
