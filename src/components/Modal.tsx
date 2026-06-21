@@ -6,6 +6,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
+  type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -47,6 +48,16 @@ export interface ModalProps {
    * `true`.
    */
   dismissOnBackdrop?: boolean;
+  /**
+   * Explicit element to focus on open, overriding the default "first
+   * focusable in the body". A content-first dialog whose first focusable sits
+   * deep in a list — or whose list is still loading when the dialog opens —
+   * should point this at a stable top element (e.g. its intro, `tabIndex={-1}`),
+   * so focus reliably lands inside the `role="application"` body instead of
+   * falling back to the non-focusable dialog container and stranding the screen
+   * reader in an undetermined mode.
+   */
+  initialFocusRef?: RefObject<HTMLElement | null>;
 }
 
 export function Modal({
@@ -56,6 +67,7 @@ export function Modal({
   children,
   className,
   dismissOnBackdrop = true,
+  initialFocusRef,
 }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
@@ -81,9 +93,14 @@ export function Modal({
     const dialog = dialogRef.current;
     if (dialog) {
       const body = dialog.querySelector<HTMLElement>('.modal__body') ?? dialog;
+      // An explicit initial-focus target wins: a content-first dialog whose
+      // first focusable sits deep in a list (or whose list is still loading on
+      // open) would otherwise leave focus on the non-focusable dialog div and
+      // strand the screen reader in an undetermined mode. Else the first
+      // focusable, else the dialog container.
       const focusables = getFocusables(body);
-      const first = focusables[0] ?? dialog;
-      first.focus({ preventScroll: true });
+      const target = initialFocusRef?.current ?? focusables[0] ?? dialog;
+      target.focus({ preventScroll: true });
     }
 
     return () => {
@@ -95,7 +112,7 @@ export function Modal({
         target.focus({ preventScroll: true });
       });
     };
-  }, [isOpen]);
+  }, [isOpen, initialFocusRef]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLDivElement>) => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -90,6 +90,13 @@ export function DayStartReviewDialog({
     (listId: string) => currentUserByList[listId] ?? null,
     [currentUserByList],
   );
+
+  // The dialog auto-opens (no click trigger) and its task rows only render once
+  // its own useTasks re-fetch settles — so the Modal's "focus the first
+  // focusable" would find nothing yet and strand the screen reader. Focus this
+  // always-present intro instead: it lands inside the role="application" body
+  // (focus mode) and reads the dialog title + instructions first.
+  const introRef = useRef<HTMLParagraphElement>(null);
 
   const overdue = useMemo(() => filterOverdue(tasks, meFor), [tasks, meFor]);
   const slipped = useMemo(
@@ -421,8 +428,11 @@ export function DayStartReviewDialog({
       onClose={snoozeLater}
       title={t('dialogs.dayStartReview.title')}
       className="modal--form modal--day-start-review"
+      initialFocusRef={introRef}
     >
-      <p className="form__hint">{t('dialogs.dayStartReview.hint')}</p>
+      <p ref={introRef} tabIndex={-1} className="form__hint">
+        {t('dialogs.dayStartReview.hint')}
+      </p>
 
       {remainingOverdue.length > 0 && (
         <section className="day-start-review__section">
