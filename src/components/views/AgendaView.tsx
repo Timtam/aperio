@@ -226,7 +226,7 @@ export function AgendaView() {
       <header className="view__header">
         <h2>{t('views.agenda.title')}</h2>
         <span className="view__subtitle">
-          {fmt.format(range.start, 'PP')} – {fmt.format(range.end, 'PP')}
+          {fmt.format(range.start, 'PPP')} – {fmt.format(range.end, 'PPP')}
         </span>
       </header>
 

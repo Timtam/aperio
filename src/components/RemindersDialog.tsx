@@ -100,7 +100,7 @@ export function RemindersDialog({ isOpen, onClose }: RemindersDialogProps) {
     () =>
       items.map((r) => ({
         ...r,
-        when: fmt.format(new Date(r.trigger_at), 'PPpp'),
+        when: fmt.format(new Date(r.trigger_at), 'PPPp'),
       })),
     [items, fmt],
   );

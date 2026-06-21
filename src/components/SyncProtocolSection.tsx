@@ -171,7 +171,7 @@ function ProtocolRow({
   const isCompaction = entry.trigger === 'compaction';
   const timestamp = (() => {
     try {
-      return fmt.format(new Date(entry.recorded_at), 'PPpp');
+      return fmt.format(new Date(entry.recorded_at), 'PPPp');
     } catch {
       return entry.recorded_at;
     }

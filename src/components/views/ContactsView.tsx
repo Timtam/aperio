@@ -460,11 +460,8 @@ function formatLastSynced(iso: string, language: string): string {
     });
   }
   return parsed.toLocaleString(language, {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
+    dateStyle: 'long',
+    timeStyle: 'short',
   });
 }
 

@@ -46,7 +46,7 @@ import { useContactSync } from '../state/useContactSync';
 const INTERVAL_PRESETS: readonly number[] = [15, 30, 60, 120, 240];
 
 export function ContactsPanel() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { status, triggerSync } = useContactSync();
   const announce = useAnnouncer();
 
@@ -354,7 +354,10 @@ export function ContactsPanel() {
         <FocusableNote className="tasks-settings__hint">
           {status?.last_synced_at
             ? t('dialogs.settings.contacts.lastSynced', {
-                time: new Date(status.last_synced_at).toLocaleString(),
+                time: new Date(status.last_synced_at).toLocaleString(
+                  i18n.language,
+                  { dateStyle: 'long', timeStyle: 'short' },
+                ),
               })
             : t('dialogs.settings.contacts.neverSynced')}
         </FocusableNote>

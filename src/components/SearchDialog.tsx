@@ -100,7 +100,7 @@ export function SearchDialog({ isOpen, onClose }: SearchDialogProps) {
         id: ev.id,
         title: ev.title,
         secondary: t('dialogs.search.eventSecondary', {
-          date: fmt.format(new Date(ev.start), 'PP'),
+          date: fmt.format(new Date(ev.start), 'PPP'),
           calendar: calendarsById.get(ev.calendar_id)?.name ?? '—',
         }),
       });

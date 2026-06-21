@@ -19,7 +19,10 @@ export function CacheRefreshIndicator() {
 
   const lastLabel = lastRefreshedAt
     ? t('cacheRefresh.lastUpdated', {
-        time: new Date(lastRefreshedAt).toLocaleString(i18n.language),
+        time: new Date(lastRefreshedAt).toLocaleString(i18n.language, {
+          dateStyle: 'long',
+          timeStyle: 'short',
+        }),
       })
     : t('cacheRefresh.never');
 

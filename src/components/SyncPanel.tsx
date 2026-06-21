@@ -1184,7 +1184,7 @@ export function SyncPanel() {
     try {
       const dt = new Date(status.last_synced_at);
       return t('dialogs.settings.sync.stateLastSynced', {
-        time: fmt.format(dt, 'PPpp'),
+        time: fmt.format(dt, 'PPPp'),
       });
     } catch {
       return status.last_synced_at;
@@ -2358,7 +2358,7 @@ function SyncExistingInfo({
             try {
               return fmt.format(
                 new Date(preview.snapshot_timestamp as string),
-                'PP',
+                'PPP',
               );
             } catch {
               return preview.snapshot_timestamp;

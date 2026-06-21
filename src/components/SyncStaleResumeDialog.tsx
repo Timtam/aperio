@@ -54,7 +54,7 @@ export function SyncStaleResumeDialog({
 
   const snapshotLabel = (() => {
     try {
-      return fmt.format(new Date(snapshotAt), 'PPpp');
+      return fmt.format(new Date(snapshotAt), 'PPPp');
     } catch {
       return snapshotAt;
     }

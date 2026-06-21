@@ -66,7 +66,7 @@ export function DayStartReviewDialog({
   isOpen,
   onClose,
 }: DayStartReviewDialogProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const announce = useAnnouncer();
   const { tasks } = useTasks();
   const { invalidateData } = useDialogState();
@@ -460,7 +460,7 @@ export function DayStartReviewDialog({
                   {task.deadline_date && (
                     <span className="missed-tasks__deadline">
                       {t('dialogs.dayStartReview.deadlines.dateLabel', {
-                        date: formatIsoDate(task.deadline_date),
+                        date: formatIsoDate(task.deadline_date, i18n.language),
                       })}
                     </span>
                   )}
@@ -527,7 +527,7 @@ export function DayStartReviewDialog({
                   {task.scheduled_date && (
                     <span className="missed-tasks__deadline">
                       {t('dialogs.dayStartReview.carryOver.dateLabel', {
-                        date: formatIsoDate(task.scheduled_date),
+                        date: formatIsoDate(task.scheduled_date, i18n.language),
                       })}
                     </span>
                   )}
@@ -613,8 +613,8 @@ function tomorrowIsoKey(): string {
   return `${y}-${m}-${day}`;
 }
 
-function formatIsoDate(iso: string): string {
+function formatIsoDate(iso: string, locale: string): string {
   const d = new Date(`${iso}T00:00:00`);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString();
+  return d.toLocaleDateString(locale, { dateStyle: 'long' });
 }

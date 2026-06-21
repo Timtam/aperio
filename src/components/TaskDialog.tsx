@@ -1187,7 +1187,7 @@ export function TaskDialog({
         {form.status === 'completed' && task?.completed_at && (
           <p className="form__hint task-dialog__completed-at">
             {t('dialogs.task.fields.completedAt', {
-              date: fmt.format(new Date(task.completed_at), 'PPp'),
+              date: fmt.format(new Date(task.completed_at), 'PPPp'),
             })}
           </p>
         )}

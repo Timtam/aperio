@@ -346,7 +346,7 @@ export function WeekView() {
             title: task.title,
             date: fmt.format(
               new Date(`${newDayKey}T00:00:00`),
-              'PP',
+              'PPP',
             ),
           }),
         );
@@ -374,7 +374,7 @@ export function WeekView() {
         announce(
           t('views.eventMovedToDay', {
             title: ev.title,
-            date: fmt.format(new Date(`${dayKey}T00:00:00`), 'PP'),
+            date: fmt.format(new Date(`${dayKey}T00:00:00`), 'PPP'),
           }),
         );
         invalidateData();
@@ -607,7 +607,7 @@ export function WeekView() {
       <header className="view__header">
         <h2>
           {t('views.week.kw', { week: isoWeek })} ·{' '}
-          {fmt.format(weekStart, 'PP')} – {fmt.format(days[6], 'PP')}
+          {fmt.format(weekStart, 'PPP')} – {fmt.format(days[6], 'PPP')}
         </h2>
       </header>
 
@@ -1266,7 +1266,7 @@ function WeekDayTasks({
                 deadline: task.deadline_date
                   ? fmt.format(
                       new Date(`${task.deadline_date}T00:00:00`),
-                      'PP',
+                      'PPP',
                     )
                   : '',
                 state,

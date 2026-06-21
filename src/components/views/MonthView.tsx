@@ -293,7 +293,7 @@ export function MonthView() {
         announce(
           t('views.eventMovedToDay', {
             title: ev.title,
-            date: fmt.format(new Date(`${dayKey}T00:00:00`), 'PP'),
+            date: fmt.format(new Date(`${dayKey}T00:00:00`), 'PPP'),
           }),
         );
         invalidateData();
@@ -332,7 +332,7 @@ export function MonthView() {
         announce(
           t('views.backlog.scheduled', {
             title: payload.task.title,
-            date: fmt.format(day, 'PP'),
+            date: fmt.format(day, 'PPP'),
           }),
         );
       } catch (err) {
@@ -732,7 +732,7 @@ export function MonthView() {
                               deadline: task.deadline_date
                                 ? fmt.format(
                                     new Date(`${task.deadline_date}T00:00:00`),
-                                    'PP',
+                                    'PPP',
                                   )
                                 : '',
                               state: t(statusI18nKey(task.status)),

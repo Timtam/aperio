@@ -619,7 +619,7 @@ export function DayView() {
                       deadline: task.deadline_date
                         ? fmt.format(
                             new Date(`${task.deadline_date}T00:00:00`),
-                            'PP',
+                            'PPP',
                           )
                         : '',
                       state,

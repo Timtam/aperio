@@ -198,7 +198,7 @@ function ConflictRow({
   const kindLabel = t(`syncConflicts.rowKind.${conflict.row_kind}`);
   const remoteTime = (() => {
     try {
-      return fmt.format(new Date(conflict.remote_timestamp), 'Pp');
+      return fmt.format(new Date(conflict.remote_timestamp), 'PPPp');
     } catch {
       return conflict.remote_timestamp;
     }

@@ -1149,24 +1149,24 @@ function describeDue(
   // row's aria-label (which is built from `due`).
   if (task.status === 'completed' && task.completed_at) {
     return t('views.tasks.completedAt', {
-      date: fmt.format(new Date(task.completed_at), 'PP'),
+      date: fmt.format(new Date(task.completed_at), 'PPP'),
     });
   }
   // A deferred backlog task (DESIGN §9.12) shows WHEN it will resurface —
   // the only date that matters while it waits in the Zukünftig group.
   if (task.resurface_date && task.resurface_date > today) {
     return t('views.tasks.resurfacesOn', {
-      date: fmt.format(new Date(task.resurface_date), 'PP'),
+      date: fmt.format(new Date(task.resurface_date), 'PPP'),
     });
   }
   if (task.scheduled_date) {
     return t('views.tasks.dueScheduled', {
-      date: fmt.format(new Date(task.scheduled_date), 'PP'),
+      date: fmt.format(new Date(task.scheduled_date), 'PPP'),
     });
   }
   if (task.deadline_date) {
     return t('views.tasks.dueDeadline', {
-      date: fmt.format(new Date(task.deadline_date), 'PP'),
+      date: fmt.format(new Date(task.deadline_date), 'PPP'),
     });
   }
   return t('views.tasks.dueNone');
