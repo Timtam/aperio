@@ -6769,7 +6769,11 @@ struct CompleteSyncOAuthRequest {
 fn required_secret_slot(kind: host_core::accounts::AdapterKind) -> Option<SecretSlot> {
     use host_core::accounts::AdapterKind;
     match kind {
-        AdapterKind::Ical | AdapterKind::Local => None,
+        // No stored credential: local + iCal feeds need none, and the
+        // device-calendar account authenticates via the OS permission grant
+        // (EventKit / CalendarProvider), not a keychain secret — so it must NOT
+        // surface in the "credentials missing" repair banner.
+        AdapterKind::Ical | AdapterKind::Local | AdapterKind::DeviceCalendar => None,
         AdapterKind::Vikunja | AdapterKind::Todoist => Some(SecretSlot::ApiToken),
         AdapterKind::Google | AdapterKind::MicrosoftGraph => Some(SecretSlot::RefreshToken),
         _ => Some(SecretSlot::Password),

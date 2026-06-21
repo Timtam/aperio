@@ -210,7 +210,10 @@ pub async fn list_accounts_missing_credentials(
 /// different secret shape adds itself here too.
 fn required_secret_slot(kind: AdapterKind) -> Option<SecretSlot> {
     match kind {
-        AdapterKind::Ical | AdapterKind::Local => None,
+        // No stored credential: iCal feeds are public, Local is host-internal,
+        // and the mobile-only device-calendar account authenticates via the OS
+        // permission grant (never reaches desktop, but the kind is shared).
+        AdapterKind::Ical | AdapterKind::Local | AdapterKind::DeviceCalendar => None,
         AdapterKind::Vikunja | AdapterKind::Todoist => Some(SecretSlot::ApiToken),
         AdapterKind::Google | AdapterKind::MicrosoftGraph => Some(SecretSlot::RefreshToken),
         _ => Some(SecretSlot::Password),
@@ -1343,9 +1346,12 @@ mod tests {
             Some(SecretSlot::Password)
         ));
         // No-secret providers — iCal feeds are public; Local
-        // is host-internal.
+        // is host-internal; the device-calendar account uses the OS
+        // permission grant, not a stored secret (so it must never show
+        // the "credentials missing" repair banner).
         assert!(required_secret_slot(AdapterKind::Ical).is_none());
         assert!(required_secret_slot(AdapterKind::Local).is_none());
+        assert!(required_secret_slot(AdapterKind::DeviceCalendar).is_none());
         // API-token providers — surfaced as "API token" in the UI.
         assert!(matches!(
             required_secret_slot(AdapterKind::Vikunja),
