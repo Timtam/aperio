@@ -399,19 +399,22 @@ pub async fn get_events(
 
     // Stale-while-revalidate. Read the sync state once, serve whatever the
     // snapshot holds for `range` immediately (covered or only partially —
-    // `read_events` filters to the range either way, so the first paint
-    // never blocks on the network), and queue a background refresh ONLY when
-    // the snapshot is stale.
+    // `read_events` filters to the range either way, so the first paint never
+    // blocks on the network), and queue a background refresh when the snapshot
+    // is STALE *or* doesn't COVER the requested range.
     //
-    // Gating the refresh on staleness rather than on coverage is what keeps
-    // reads from looping. An *uncovered* calendar — e.g. right after an edit
-    // invalidates its window — would otherwise spawn a refresh on EVERY
-    // read, and each refresh's `cache-updated` push triggers another read
-    // (refresh → cache-updated → invalidate → re-read → refresh …, forever).
-    // A just-completed refresh stamps `last_refreshed_at`, so `is_stale` is
-    // false for the TTL and we don't re-spawn. A genuine cold start (no
-    // snapshot → `last_refreshed_at` is None) is stale, so it spawns exactly
-    // once and `cache-updated` then fills the view in.
+    // Refreshing on a coverage miss — not just staleness — is what stops events
+    // "going missing" when the view moves to a date the cached window never
+    // reached (issue #1): an uncovered read used to serve a partial snapshot and
+    // spawn nothing, so those events never arrived. This can't loop: the refresh
+    // fetches THIS `range`, and `refresh_events` then records a window that
+    // covers it (unbounded for folder-complete CalDAV/EWS, else exactly `range`)
+    // AND stamps `last_refreshed_at`, so the follow-up `cache-updated` re-read
+    // sees covers=true and fresh and re-spawns nothing. A FAILED refresh emits no
+    // `cache-updated` (spawn_item_refresh notifies only on success), so it can't
+    // drive a loop either; the `RefreshCoordinator` dedups concurrent reads of
+    // the same calendar. A genuine cold start (no snapshot) is both stale and
+    // uncovered, so it still spawns exactly once.
     let state = cache
         .get_sync_state(&account, SyncScope::Events, &request.calendar_id)
         .ok()
@@ -440,7 +443,7 @@ pub async fn get_events(
         stale,
         "get_events served from cache",
     );
-    if stale {
+    if stale || !covers {
         let ext_bg = Arc::clone(&ext);
         let cache_bg = Arc::clone(&cache);
         let acc = account.clone();
