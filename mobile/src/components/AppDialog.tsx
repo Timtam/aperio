@@ -4,6 +4,7 @@ import {
   findNodeHandle,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -48,9 +49,11 @@ export function AppDialog({
   visible: boolean;
   title: string;
   message?: string;
-  confirmLabel: string;
+  /** Omit (with `onConfirm`) for a choice-only dialog — e.g. a provider picker
+   *  whose options live in `children`; then only Cancel renders. */
+  confirmLabel?: string;
   cancelLabel: string;
-  onConfirm: () => void;
+  onConfirm?: () => void;
   onCancel: () => void;
   /** Greys + disables Confirm until the caller's validity gate passes. */
   confirmDisabled?: boolean;
@@ -95,30 +98,36 @@ export function AppDialog({
           <Text ref={titleRef} style={styles.title} accessibilityRole="header">
             {title}
           </Text>
-          {message != null && (
-            <Text style={styles.message} accessibilityRole="text">
-              {message}
-            </Text>
-          )}
-          {children}
-          {input != null && (
-            <TextInput
-              ref={inputRef}
-              style={styles.input}
-              value={input.value}
-              onChangeText={input.onChangeText}
-              placeholder={input.placeholder}
-              accessibilityLabel={input.label}
-              secureTextEntry={input.secureTextEntry}
-              autoCapitalize={input.autoCapitalize ?? 'none'}
-              autoCorrect={false}
-              returnKeyType="done"
-              editable={!busy}
-              onSubmitEditing={() => {
-                if (!blocked) onConfirm();
-              }}
-            />
-          )}
+          <ScrollView
+            style={styles.body}
+            contentContainerStyle={styles.bodyContent}
+            keyboardShouldPersistTaps="handled"
+          >
+            {message != null && (
+              <Text style={styles.message} accessibilityRole="text">
+                {message}
+              </Text>
+            )}
+            {children}
+            {input != null && (
+              <TextInput
+                ref={inputRef}
+                style={styles.input}
+                value={input.value}
+                onChangeText={input.onChangeText}
+                placeholder={input.placeholder}
+                accessibilityLabel={input.label}
+                secureTextEntry={input.secureTextEntry}
+                autoCapitalize={input.autoCapitalize ?? 'none'}
+                autoCorrect={false}
+                returnKeyType="done"
+                editable={!busy}
+                onSubmitEditing={() => {
+                  if (!blocked) onConfirm?.();
+                }}
+              />
+            )}
+          </ScrollView>
           <View style={styles.buttons}>
             <Pressable
               accessibilityRole="button"
@@ -130,22 +139,24 @@ export function AppDialog({
             >
               <Text style={styles.ghostText}>{cancelLabel}</Text>
             </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={confirmLabel}
-              accessibilityState={{ disabled: blocked, busy }}
-              disabled={blocked}
-              onPress={onConfirm}
-              style={({ pressed }) => [
-                destructive ? styles.danger : styles.primary,
-                pressed && !blocked && styles.confirmPressed,
-                blocked && styles.confirmDisabled,
-              ]}
-            >
-              <Text style={destructive ? styles.dangerText : styles.primaryText}>
-                {confirmLabel}
-              </Text>
-            </Pressable>
+            {confirmLabel != null && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={confirmLabel}
+                accessibilityState={{ disabled: blocked, busy }}
+                disabled={blocked}
+                onPress={onConfirm}
+                style={({ pressed }) => [
+                  destructive ? styles.danger : styles.primary,
+                  pressed && !blocked && styles.confirmPressed,
+                  blocked && styles.confirmDisabled,
+                ]}
+              >
+                <Text style={destructive ? styles.dangerText : styles.primaryText}>
+                  {confirmLabel}
+                </Text>
+              </Pressable>
+            )}
           </View>
         </View>
       </View>
@@ -161,6 +172,7 @@ const makeStyles = (c: ThemeColors) =>
     card: {
       width: '100%',
       maxWidth: 480,
+      maxHeight: '85%',
       gap: 14,
       padding: 20,
       borderRadius: 14,
@@ -168,6 +180,10 @@ const makeStyles = (c: ThemeColors) =>
       borderColor: c.border,
       backgroundColor: c.surfaceAlt,
     },
+    // Bounded, scrollable body so a long form (e.g. add-account credentials) or
+    // large accessibility fonts stay reachable without pushing the buttons off.
+    body: { flexShrink: 1 },
+    bodyContent: { gap: 14 },
     title: { fontSize: 19, fontWeight: '700', color: c.textPrimary },
     message: { fontSize: 15, color: c.textSecondary, lineHeight: 21 },
     input: {

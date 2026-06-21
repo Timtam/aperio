@@ -26,6 +26,7 @@ import {
 } from '../api/accounts';
 import { getUserPref, setUserPref } from '../api/prefs';
 import { reconnectOAuthAccount, type OAuthProvider } from '../api/oauth';
+import { AppDialog } from '../components/AppDialog';
 import ContactsPrivacyNoticeModal from '../components/ContactsPrivacyNoticeModal';
 import { FormScrollView } from '../components/FormScrollView';
 import OAuthConnectForm from './OAuthConnectForm';
@@ -165,7 +166,6 @@ export default function AccountsScreen() {
 
   const rowTags = useRef<Record<string, number | null>>({});
   const pendingFocusId = useRef<string | null>(null);
-  const sectionHeaderRef = useRef<Text>(null);
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
@@ -220,16 +220,6 @@ export default function AccountsScreen() {
     const tag = rowTags.current[id];
     if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
   }, [accounts]);
-
-  // On entering the picker / credential form, land SR focus on its heading so
-  // the blind user knows the add flow opened (the OAuth form self-focuses).
-  useEffect(() => {
-    if (mode !== 'picker' && mode !== 'credential') return;
-    const tag = sectionHeaderRef.current
-      ? findNodeHandle(sectionHeaderRef.current)
-      : null;
-    if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
-  }, [mode]);
 
   const form = KIND_FORMS[kind];
 
@@ -723,184 +713,134 @@ export default function AccountsScreen() {
         </Pressable>
       )}
 
-      {mode === 'picker' && (
-        <View style={styles.addSection}>
-          <Text
-            ref={sectionHeaderRef}
-            style={[styles.heading, styles.addHeading]}
-            accessibilityRole="header"
-          >
-            {t('dialogs.accounts.addHeading')}
-          </Text>
-          {PICKER_KINDS.map((k) => (
-            <Pressable
-              key={k}
-              accessibilityRole="button"
-              accessibilityLabel={t(`dialogs.accounts.kindName.${k}`)}
-              onPress={() => onPickProvider(k)}
-              style={({ pressed }) => [
-                styles.secondaryButton,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Text style={styles.secondaryButtonText}>
-                {t(`dialogs.accounts.kindName.${k}`)}
-              </Text>
-            </Pressable>
-          ))}
+      <AppDialog
+        visible={mode === 'picker'}
+        title={t('dialogs.accounts.addHeading')}
+        cancelLabel={t('mobile.cancel')}
+        onCancel={cancelAdd}
+      >
+        {PICKER_KINDS.map((k) => (
           <Pressable
+            key={k}
             accessibilityRole="button"
-            accessibilityLabel={t('mobile.cancel')}
-            onPress={cancelAdd}
+            accessibilityLabel={t(`dialogs.accounts.kindName.${k}`)}
+            onPress={() => onPickProvider(k)}
             style={({ pressed }) => [
               styles.secondaryButton,
               pressed && styles.pressed,
             ]}
           >
-            <Text style={styles.secondaryButtonText}>{t('mobile.cancel')}</Text>
+            <Text style={styles.secondaryButtonText}>
+              {t(`dialogs.accounts.kindName.${k}`)}
+            </Text>
           </Pressable>
+        ))}
+      </AppDialog>
+
+      <AppDialog
+        visible={mode === 'credential'}
+        title={t(`dialogs.accounts.kindName.${kind}`)}
+        confirmLabel={t('dialogs.accounts.add')}
+        cancelLabel={t('mobile.cancel')}
+        onConfirm={() => void add()}
+        onCancel={cancelAdd}
+        busy={submitting}
+      >
+        <View style={styles.field}>
+          <Text style={styles.label}>{t('dialogs.accounts.nameLabel')}</Text>
+          <TextInput
+            style={styles.input}
+            value={displayName}
+            onChangeText={setDisplayName}
+            placeholder={t('dialogs.accounts.namePlaceholder')}
+            accessibilityLabel={t('dialogs.accounts.nameLabel')}
+          />
         </View>
-      )}
 
-      {mode === 'credential' && (
-        <View style={styles.addSection}>
-          <Text
-            ref={sectionHeaderRef}
-            style={[styles.heading, styles.addHeading]}
-            accessibilityRole="header"
-          >
-            {t(`dialogs.accounts.kindName.${kind}`)}
-          </Text>
-
-          <View style={styles.field}>
-            <Text style={styles.label}>{t('dialogs.accounts.nameLabel')}</Text>
+        {form.configFields.map((field) => (
+          <View key={field.jsonKey} style={styles.field}>
+            <Text style={styles.label}>{t(field.labelKey)}</Text>
             <TextInput
               style={styles.input}
-              value={displayName}
-              onChangeText={setDisplayName}
-              placeholder={t('dialogs.accounts.namePlaceholder')}
-              accessibilityLabel={t('dialogs.accounts.nameLabel')}
+              value={config[field.jsonKey] ?? ''}
+              onChangeText={(v) => setConfig((c) => ({ ...c, [field.jsonKey]: v }))}
+              accessibilityLabel={t(field.labelKey)}
+              autoCapitalize={field.autoCapitalizeNone ? 'none' : 'sentences'}
+              autoCorrect={!field.autoCapitalizeNone}
             />
           </View>
+        ))}
 
-          {form.configFields.map((field) => (
-            <View key={field.jsonKey} style={styles.field}>
-              <Text style={styles.label}>{t(field.labelKey)}</Text>
-              <TextInput
-                style={styles.input}
-                value={config[field.jsonKey] ?? ''}
-                onChangeText={(v) => setConfig((c) => ({ ...c, [field.jsonKey]: v }))}
-                accessibilityLabel={t(field.labelKey)}
-                autoCapitalize={field.autoCapitalizeNone ? 'none' : 'sentences'}
-                autoCorrect={!field.autoCapitalizeNone}
-              />
-            </View>
-          ))}
+        {form.secret != null && (
+          <View style={styles.field}>
+            <Text style={styles.label}>{t(form.secret.labelKey)}</Text>
+            <TextInput
+              style={styles.input}
+              value={secret}
+              onChangeText={setSecret}
+              accessibilityLabel={t(form.secret.labelKey)}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+        )}
 
-          {form.secret != null && (
-            <View style={styles.field}>
-              <Text style={styles.label}>{t(form.secret.labelKey)}</Text>
-              <TextInput
-                style={styles.input}
-                value={secret}
-                onChangeText={setSecret}
-                accessibilityLabel={t(form.secret.labelKey)}
-                secureTextEntry
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-            </View>
-          )}
-
-          {kind === 'ews' && (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ disabled: discovering, busy: discovering }}
-              accessibilityLabel={t('dialogs.accounts.ewsDiscover')}
-              accessibilityHint={t('dialogs.accounts.ewsDiscoverSrHint')}
-              disabled={discovering}
-              onPress={() => void discover()}
-              style={({ pressed }) => [
-                styles.discoverButton,
-                pressed && styles.pressed,
-                discovering && styles.discoverButtonDisabled,
-              ]}
-            >
-              <Text style={styles.discoverButtonText}>
-                {discovering
-                  ? t('dialogs.accounts.ewsDiscovering')
-                  : t('dialogs.accounts.ewsDiscover')}
-              </Text>
-            </Pressable>
-          )}
-
+        {kind === 'ews' && (
           <Pressable
             accessibilityRole="button"
-            accessibilityState={{ disabled: testing || submitting, busy: testing }}
-            accessibilityLabel={t('dialogs.accounts.testConnection')}
-            disabled={testing || submitting}
-            onPress={() => void testConnection()}
+            accessibilityState={{ disabled: discovering, busy: discovering }}
+            accessibilityLabel={t('dialogs.accounts.ewsDiscover')}
+            accessibilityHint={t('dialogs.accounts.ewsDiscoverSrHint')}
+            disabled={discovering}
+            onPress={() => void discover()}
             style={({ pressed }) => [
               styles.discoverButton,
               pressed && styles.pressed,
-              (testing || submitting) && styles.discoverButtonDisabled,
+              discovering && styles.discoverButtonDisabled,
             ]}
           >
             <Text style={styles.discoverButtonText}>
-              {testing
-                ? t('dialogs.accounts.testing')
-                : t('dialogs.accounts.testConnection')}
+              {discovering
+                ? t('dialogs.accounts.ewsDiscovering')
+                : t('dialogs.accounts.ewsDiscover')}
             </Text>
           </Pressable>
+        )}
 
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ disabled: submitting }}
-            accessibilityLabel={t('dialogs.accounts.add')}
-            disabled={submitting}
-            onPress={() => void add()}
-            style={({ pressed }) => [
-              styles.addButton,
-              pressed && styles.addButtonPressed,
-              submitting && styles.addButtonDisabled,
-            ]}
-          >
-            <Text style={styles.addButtonText}>{t('dialogs.accounts.add')}</Text>
-          </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: testing || submitting, busy: testing }}
+          accessibilityLabel={t('dialogs.accounts.testConnection')}
+          disabled={testing || submitting}
+          onPress={() => void testConnection()}
+          style={({ pressed }) => [
+            styles.discoverButton,
+            pressed && styles.pressed,
+            (testing || submitting) && styles.discoverButtonDisabled,
+          ]}
+        >
+          <Text style={styles.discoverButtonText}>
+            {testing
+              ? t('dialogs.accounts.testing')
+              : t('dialogs.accounts.testConnection')}
+          </Text>
+        </Pressable>
+      </AppDialog>
 
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t('mobile.cancel')}
-            onPress={cancelAdd}
-            style={({ pressed }) => [
-              styles.secondaryButton,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Text style={styles.secondaryButtonText}>{t('mobile.cancel')}</Text>
-          </Pressable>
-        </View>
-      )}
-
-      {mode === 'oauth' && pickedOAuth != null && (
-        <View style={styles.addSection}>
+      <AppDialog
+        visible={mode === 'oauth' && pickedOAuth != null}
+        title={t('dialogs.accounts.addHeading')}
+        cancelLabel={t('mobile.cancel')}
+        onCancel={cancelAdd}
+      >
+        {pickedOAuth != null && (
           <OAuthConnectForm
             lockedProvider={pickedOAuth}
             onConnected={(account) => void onOAuthConnected(account)}
           />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t('mobile.cancel')}
-            onPress={cancelAdd}
-            style={({ pressed }) => [
-              styles.secondaryButton,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Text style={styles.secondaryButtonText}>{t('mobile.cancel')}</Text>
-          </Pressable>
-        </View>
-      )}
+        )}
+      </AppDialog>
     </FormScrollView>
     {/* One-shot contacts privacy notice (app-modal; overlays the screen). */}
     <ContactsPrivacyNoticeModal
@@ -983,9 +923,7 @@ const makeStyles = (c: ThemeColors) =>
       alignItems: 'center',
     },
     addButtonPressed: { backgroundColor: c.accentPressed },
-    addButtonDisabled: { backgroundColor: c.accentDisabled },
     addButtonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
-    addSection: { gap: 14 },
     secondaryButton: {
       paddingVertical: 14,
       paddingHorizontal: 18,
