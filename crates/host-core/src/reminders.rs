@@ -25,6 +25,7 @@ use rusqlite::params;
 use serde::Serialize;
 use tracing::warn;
 
+use crate::accounts::{AccountsRepo, AdapterKind};
 use crate::db::SharedConn;
 use crate::registry::AdapterRegistry;
 use crate::sound::{ContainerKind, SoundPrefs};
@@ -243,10 +244,28 @@ pub async fn enumerate_external_triggers(
     // loading it here is deadlock-free.
     let sound_prefs = SoundPrefs::load(db);
 
+    // Device-local accounts (iOS EventKit / Android CalendarProvider) are
+    // EXCLUDED from Aperio's reminder scheduling: the OS itself fires the alarms
+    // on the device's own calendar + reminders, so scheduling Aperio
+    // notifications for them — including via the calendar-default-reminder
+    // fallback below — would double-notify. Every other external provider
+    // (CalDAV / Graph / EWS / Google / Vikunja / Todoist) doesn't self-notify,
+    // so it stays in.
+    let device_accounts: std::collections::HashSet<String> = AccountsRepo::new(db)
+        .list()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|account| account.adapter_kind == AdapterKind::DeviceCalendar)
+        .map(|account| account.id)
+        .collect();
+
     let mut acc: Vec<Trigger> = Vec::new();
 
     // ── Calendars → events ────────────────────────────────────────────────
     for (account_id, adapter) in registry.snapshot_calendar_adapters() {
+        if device_accounts.contains(&account_id) {
+            continue;
+        }
         let calendars = match adapter.list_calendars().await {
             Ok(c) => c,
             Err(err) => {
@@ -269,6 +288,9 @@ pub async fn enumerate_external_triggers(
 
     // ── Task lists → tasks ────────────────────────────────────────────────
     for (account_id, adapter) in registry.snapshot_task_adapters() {
+        if device_accounts.contains(&account_id) {
+            continue;
+        }
         let lists = match adapter.list_task_lists().await {
             Ok(l) => l,
             Err(err) => {
