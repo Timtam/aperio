@@ -285,7 +285,21 @@ impl CaldavAdapter {
                     complete: true,
                 })
             }
-            Err(_) => {
+            Err(err) => {
+                // The server didn't answer the resource-enumeration PROPFIND, so we
+                // fall back to a windowed time-range read. The cached window then
+                // stays BOUNDED to `range` (complete=false), so dates outside it are
+                // a cache miss until a later read in that window refreshes — a prime
+                // suspect when events "go missing" navigating far ahead or back.
+                tracing::warn!(
+                    target: "aperio::caldav",
+                    calendar = %cal_url,
+                    ?err,
+                    range_start = %range.start.to_rfc3339(),
+                    range_end = %range.end.to_rfc3339(),
+                    "CalDAV PROPFIND enumeration failed; falling back to a windowed \
+                     range read (bounded cache window, complete=false)"
+                );
                 let events = events::get_events(&self.http, cal_url, range, &self.credentials)
                     .await
                     .map_err(to_core_error)?;
@@ -369,9 +383,9 @@ impl CaldavAdapter {
             return Err(last_err.expect("a skipped resource implies a recorded error"));
         }
         // Some resources came back but the server wouldn't serve others — their
-        // events are NOT in this snapshot. Surface it (host-side on mobile; on the
-        // desktop dlopen plugin this won't reach the host log yet — see the issue)
-        // and report the count so the caller leaves the sync-token un-advanced.
+        // events are NOT in this snapshot. Surface it (the desktop dlopen plugin
+        // now forwards its tracing to the host log) and report the count so the
+        // caller leaves the sync-token un-advanced.
         if !skipped.is_empty() {
             tracing::warn!(
                 target: "aperio::caldav",
@@ -383,6 +397,22 @@ impl CaldavAdapter {
                  the next refresh retries them instead of masking them permanently."
             );
         }
+        // Per-calendar fetch summary so a "missing events" report can be traced to
+        // the layer that dropped them: `enumerated` = resources the PROPFIND listed,
+        // `returned` = resources the server actually served, `events` = rows mapped
+        // into the snapshot, `skipped` = resources the server refused. A healthy
+        // sync has enumerated == returned + skipped; `events` may legitimately be
+        // lower (a VTODO resource maps to no event), but events far below `returned`
+        // points at the mapper.
+        tracing::info!(
+            target: "aperio::caldav",
+            calendar = %cal_url,
+            enumerated = hrefs.len(),
+            returned = fetched,
+            events = changes.len(),
+            skipped = skipped.len(),
+            "CalDAV multiget complete",
+        );
         Ok((changes, skipped.len()))
     }
 
@@ -664,6 +694,13 @@ impl CaldavAdapter {
         } else {
             sync_token
         };
+        tracing::info!(
+            target: "aperio::caldav",
+            calendar = %cal_url,
+            changed = result.changed.len(),
+            deleted = result.deleted.len(),
+            "CalDAV incremental delta applied",
+        );
         Ok(ChangeSet {
             changes,
             deletions: result.deleted,
