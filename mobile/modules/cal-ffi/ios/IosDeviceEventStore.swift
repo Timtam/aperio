@@ -117,8 +117,61 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   }
 
   // ── Reminders reads (P2) ──
-  func listReminderLists() throws -> String { "[]" }
-  func getReminders(listId: String) throws -> String { "[]" }
+  // iOS Reminders lists (EKCalendar of reminder type) map to Aperio task lists;
+  // each EKReminder maps to a Task (due date → scheduled date). Same intermediate
+  // shape; the Rust adapter does the cal_core mapping.
+
+  func listReminderLists() throws -> String {
+    let payload: [[String: Any]] = store.calendars(for: .reminder).map { list in
+      var dict: [String: Any] = [
+        "id": list.calendarIdentifier,
+        "name": list.title,
+        "read_only": !list.allowsContentModifications,
+      ]
+      if let hex = Self.hexString(from: list.cgColor) {
+        dict["color_hex"] = hex
+      }
+      return dict
+    }
+    return try Self.encode(payload)
+  }
+
+  func getReminders(listId: String) throws -> String {
+    guard let list = store.calendar(withIdentifier: listId) else {
+      return "[]"
+    }
+    // fetchReminders is completion-based — block on a semaphore across the sync
+    // FFI boundary (as for the permission request).
+    let predicate = store.predicateForReminders(in: [list])
+    let semaphore = DispatchSemaphore(value: 0)
+    var fetched: [EKReminder] = []
+    store.fetchReminders(matching: predicate) { reminders in
+      fetched = reminders ?? []
+      semaphore.signal()
+    }
+    semaphore.wait()
+    let payload: [[String: Any]] = fetched.map { reminder in
+      let due = Self.dateComponentsStrings(reminder.dueDateComponents)
+      var dict: [String: Any] = [
+        "id": reminder.calendarItemIdentifier,
+        "list_id": listId,
+        "title": reminder.title ?? "",
+        "completed": reminder.isCompleted,
+        "priority": reminder.priority,
+      ]
+      if let notes = reminder.notes { dict["description"] = notes }
+      if let date = due.date { dict["due_date"] = date }
+      if let time = due.time { dict["due_time"] = time }
+      if let completion = reminder.completionDate {
+        dict["completed_at"] = Self.iso.string(from: completion)
+      }
+      dict["created_at"] = Self.iso.string(from: reminder.creationDate ?? Date())
+      dict["updated_at"] = Self.iso.string(
+        from: reminder.lastModifiedDate ?? reminder.creationDate ?? Date())
+      return dict
+    }
+    return try Self.encode(payload)
+  }
 
   // ── Encoding helpers ──
 
@@ -142,6 +195,25 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
       throw DeviceCalError.Backend(detail: "could not encode device payload as UTF-8")
     }
     return json
+  }
+
+  /// A reminder's `dueDateComponents` → (`YYYY-MM-DD`, optional `HH:MM:SS`). A
+  /// date-only reminder (no hour) yields a nil time, so the Rust side keeps it a
+  /// plain scheduled date.
+  private static func dateComponentsStrings(
+    _ components: DateComponents?
+  ) -> (date: String?, time: String?) {
+    guard let components = components, let year = components.year,
+      let month = components.month, let day = components.day
+    else {
+      return (nil, nil)
+    }
+    let date = String(format: "%04d-%02d-%02d", year, month, day)
+    if let hour = components.hour, let minute = components.minute {
+      let second = components.second ?? 0
+      return (date, String(format: "%02d:%02d:%02d", hour, minute, second))
+    }
+    return (date, nil)
   }
 
   /// `#RRGGBB` from an EKCalendar's CGColor (RGB color spaces only; grayscale /
