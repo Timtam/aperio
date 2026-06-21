@@ -19,6 +19,7 @@ import {
 
 import { statusI18nKey, type TaskStatus } from '@aperio/shared';
 
+import { expandedA11y } from '../a11y/roles';
 import { Calendar, listCalendars } from '../api/calendar';
 import {
   search,
@@ -200,7 +201,7 @@ export default function SearchScreen({ navigation }: RootStackScreenProps<'Searc
 
       <Pressable
         accessibilityRole="button"
-        accessibilityState={{ expanded: showFilters }}
+        {...expandedA11y(showFilters, t(showFilters ? 'mobile.expandedState' : 'mobile.collapsedState'))}
         accessibilityLabel={t('dialogs.search.filtersTitle')}
         onPress={() => setShowFilters((v) => !v)}
         style={({ pressed }) => [styles.filtersToggle, pressed && styles.pressed]}

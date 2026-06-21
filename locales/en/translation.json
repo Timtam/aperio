@@ -61,6 +61,8 @@
     "groupExpanded": "{{name}} expanded.",
     "groupCollapsed": "{{name}} collapsed.",
     "groupHeaderHint": "Double-tap to expand or collapse.",
+    "expandedState": "expanded",
+    "collapsedState": "collapsed",
     "invalidDateTime": "Please use YYYY-MM-DD for the date and HH:MM for the time.",
     "eventsTitle": "Calendar",
     "eventsButtonLabel": "Calendar",

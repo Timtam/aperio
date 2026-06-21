@@ -26,6 +26,7 @@ import {
   subtaskProgressSuffix,
 } from '@aperio/shared';
 
+import { expandedA11y } from '../a11y/roles';
 import { deleteTask, duplicateTask } from '../api/client';
 import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
 import { useTabBarInset } from '../hooks/useTabBarInset';
@@ -446,12 +447,19 @@ export default function TasksScreen({
         // sections / Upcoming / Done) are reachable via the headings rotor —
         // swipe-jump between them instead of scrolling through every task. It
         // still toggles on double-tap (onPress) + announces its expanded/
-        // collapsed state; a header isn't a "button", so it carries the explicit
-        // toggle hint itself rather than relying on the native button hint.
+        // collapsed state (via expandedA11y — RN speaks the iOS state word in
+        // English regardless of locale, so we localize it ourselves); a header
+        // isn't a "button", so it carries the explicit toggle hint itself rather
+        // than relying on the native button hint.
         accessibilityRole="header"
         accessibilityLabel={entry.task.title}
         accessibilityHint={t('mobile.groupHeaderHint')}
-        accessibilityState={entry.hasChildren ? { expanded: !isCollapsed } : undefined}
+        {...(entry.hasChildren
+          ? expandedA11y(
+              !isCollapsed,
+              t(isCollapsed ? 'mobile.collapsedState' : 'mobile.expandedState'),
+            )
+          : {})}
         onPress={() => toggleCollapsed(id, entry.task.title)}
         style={({ pressed }) => [
           styles.header,
@@ -512,9 +520,12 @@ export default function TasksScreen({
         accessibilityRole="button"
         accessibilityLabel={taskLabel(task, resolved.labelName)}
         accessibilityHint={t('mobile.taskHint')}
-        accessibilityState={
-          entry.hasChildren ? { expanded: !collapsed.has(task.id) } : undefined
-        }
+        {...(entry.hasChildren
+          ? expandedA11y(
+              !collapsed.has(task.id),
+              t(collapsed.has(task.id) ? 'mobile.collapsedState' : 'mobile.expandedState'),
+            )
+          : {})}
         accessibilityActions={actions}
         onAccessibilityAction={(event) => onAction(entry, event)}
         onPress={() => openEditor(task)}

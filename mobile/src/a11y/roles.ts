@@ -34,3 +34,28 @@ export function selectableRole(role: 'radio' | 'checkbox'): AccessibilityRole {
 export function selectableCheckState(checked: boolean): AccessibilityState {
   return Platform.OS === 'ios' ? { selected: checked } : { checked };
 }
+
+/**
+ * Expand/collapse state for a collapsible header or row. On iOS RN renders
+ * `accessibilityState.expanded` through `RCTLocalizedString("expanded" /
+ * "collapsed")` — but React Native ships EMPTY localization tables
+ * (`React/I18n/strings/*.lproj/Localizable.strings` are generated stubs), so the
+ * lookup never resolves and VoiceOver always speaks the English fallback word,
+ * no matter the app's CFBundleLocalizations or the device language. (Same class
+ * of bug as the hardcoded role words above — localized in name only.) So on iOS
+ * we put the ALREADY-localized word into `accessibilityValue` and drop the
+ * `expanded` state; on Android `accessibilityState.expanded` is announced
+ * natively in the device language, so we keep it.
+ *
+ * `stateWord` is the caller's translated word (e.g.
+ * `t(expanded ? 'mobile.expandedState' : 'mobile.collapsedState')`); it is only
+ * used on iOS.
+ */
+export function expandedA11y(
+  expanded: boolean,
+  stateWord: string,
+): { accessibilityValue: { text: string } } | { accessibilityState: AccessibilityState } {
+  return Platform.OS === 'ios'
+    ? { accessibilityValue: { text: stateWord } }
+    : { accessibilityState: { expanded } };
+}

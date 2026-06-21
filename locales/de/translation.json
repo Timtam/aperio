@@ -61,6 +61,8 @@
     "groupExpanded": "{{name}} ausgeklappt.",
     "groupCollapsed": "{{name}} eingeklappt.",
     "groupHeaderHint": "Doppeltippen zum Aus- oder Einklappen.",
+    "expandedState": "ausgeklappt",
+    "collapsedState": "eingeklappt",
     "invalidDateTime": "Bitte das Datum als JJJJ-MM-TT und die Zeit als HH:MM eingeben.",
     "eventsTitle": "Kalender",
     "eventsButtonLabel": "Kalender",

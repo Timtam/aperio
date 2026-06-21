@@ -22,6 +22,7 @@ import {
   listContactLists,
   searchContacts,
 } from '../api/contacts';
+import { expandedA11y } from '../a11y/roles';
 import { useTabBarInset } from '../hooks/useTabBarInset';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useCacheReload } from '../state/cacheObserver';
@@ -491,7 +492,10 @@ export default function ContactsScreen({
                 accessibilityRole="header"
                 accessibilityLabel={label}
                 accessibilityHint={t('mobile.groupHeaderHint')}
-                accessibilityState={{ expanded: !section.collapsed }}
+                {...expandedA11y(
+                  !section.collapsed,
+                  t(section.collapsed ? 'mobile.collapsedState' : 'mobile.expandedState'),
+                )}
                 onPress={() => toggleBook(section.list.id)}
                 style={({ pressed }) => [styles.groupHeadingRow, pressed && styles.pressed]}
               >
