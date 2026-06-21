@@ -836,11 +836,8 @@ pub trait DeviceEventStoreBridge: Send + Sync {
     /// JSON `Vec<Task>` for one reminder list.
     fn get_reminders(&self, list_id: String) -> Result<String, DeviceCalError>;
     /// `task_json` is a `NewTask`; returns the created `Task` JSON.
-    fn create_reminder(
-        &self,
-        list_id: String,
-        task_json: String,
-    ) -> Result<String, DeviceCalError>;
+    fn create_reminder(&self, list_id: String, task_json: String)
+        -> Result<String, DeviceCalError>;
     /// `task_json` is a `Task`; returns the updated `Task` JSON.
     fn update_reminder(&self, task_json: String) -> Result<String, DeviceCalError>;
     fn delete_reminder(&self, task_id: String) -> Result<(), DeviceCalError>;
@@ -2115,7 +2112,8 @@ impl Host {
         let cal: Arc<dyn cal_core::CalendarFeature> = adapter.clone();
         let tasks: Option<Arc<dyn cal_core::TasksFeature>> =
             supports_reminders.then_some(adapter as Arc<dyn cal_core::TasksFeature>);
-        self.registry.register_host_adapter(account_id, Some(cal), tasks);
+        self.registry
+            .register_host_adapter(account_id, Some(cal), tasks);
     }
 }
 

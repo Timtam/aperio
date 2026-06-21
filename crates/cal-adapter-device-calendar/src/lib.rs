@@ -367,9 +367,11 @@ impl CalendarFeature for DeviceAdapter {
     }
 
     async fn get_events(&self, calendar_id: &str, range: DateRange) -> Result<Vec<Event>> {
-        let json =
-            self.provider
-                .get_events(calendar_id, &range.start.to_rfc3339(), &range.end.to_rfc3339())?;
+        let json = self.provider.get_events(
+            calendar_id,
+            &range.start.to_rfc3339(),
+            &range.end.to_rfc3339(),
+        )?;
         let devices: Vec<DeviceEvent> = parse(&json)?;
         devices.into_iter().map(map_event).collect()
     }
