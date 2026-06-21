@@ -5,17 +5,17 @@ import Foundation
 /// iOS implementation of the Rust `DeviceEventStoreBridge` foreign trait — the
 /// platform half of the device-local calendar + reminders adapter
 /// (cal-adapter-device-calendar). It reaches the device's own EventKit store
-/// (`EKEvent` / `EKReminder`); the Rust adapter maps the JSON it returns onto the
-/// `cal_core` trait surface, exactly as `IosKeychain` backs the `SecretStore`
-/// seam.
+/// (`EKEvent` / `EKReminder`); the Rust adapter maps the small intermediate JSON
+/// it exchanges here onto the full `cal_core` types, exactly as `IosKeychain`
+/// backs the `SecretStore` seam.
 ///
-/// **P0 scaffolding:** `requestAccess` runs the real OS permission prompt (so the
-/// add-account "grant access" step works end to end) and `supportsReminders` is
-/// `true`. The data reads return empty and the writes throw "later phase" — P1
-/// wires `listCalendars`/`getEvents` over `EKEvent`, P2 the reminders over
-/// `EKReminder`, P3 the writes. Marked `@unchecked Sendable` because it holds a
-/// long-lived `EKEventStore` (not `Sendable`); the store is internally
-/// thread-safe for the single-call use here.
+/// `requestAccess` runs the real OS permission prompt; `supportsReminders` is
+/// `true`. Reads (P1/P2) emit the intermediate calendar/event/reminder shape;
+/// writes (P3) decode the intermediate write shape, apply it to EventKit, and
+/// return the resulting item (which round-trips through the tested Rust read
+/// mapping). Marked `@unchecked Sendable` because it holds a long-lived
+/// `EKEventStore` (not `Sendable`); the store is internally thread-safe for the
+/// single-call use here.
 final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   private let store = EKEventStore()
 
@@ -60,10 +60,6 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   func supportsReminders() -> Bool { true }
 
   // ── Calendar reads (P1) ──
-  // Emit the device-adapter's small intermediate shape (id/name/read_only/
-  // color_hex for calendars; id/calendar_id/title/start/end/… for events). The
-  // Rust adapter maps these onto the full cal_core `Calendar`/`Event`, so the
-  // shape-correctness lives in tested Rust, not here.
 
   func listCalendars() throws -> String {
     let payload: [[String: Any]] = store.calendars(for: .event).map { cal in
@@ -92,34 +88,14 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
     }
     let predicate = store.predicateForEvents(
       withStart: startDate, end: endDate, calendars: [calendar])
-    // EventKit returns concrete (already-expanded) occurrences in the window;
-    // each is mapped to a standalone Event (recurrence: none) for P1 reads.
-    let payload: [[String: Any]] = store.events(matching: predicate).map { event in
-      var dict: [String: Any] = [
-        "id": Self.eventId(event),
-        "calendar_id": calendarId,
-        "title": event.title ?? "",
-        "start": Self.iso.string(from: event.startDate),
-        "end": Self.iso.string(from: event.endDate),
-        "all_day": event.isAllDay,
-      ]
-      if let notes = event.notes { dict["description"] = notes }
-      if let location = event.location { dict["location"] = location }
-      if let created = event.creationDate {
-        dict["created_at"] = Self.iso.string(from: created)
-      }
-      if let modified = event.lastModifiedDate {
-        dict["updated_at"] = Self.iso.string(from: modified)
-      }
-      return dict
+    // EventKit returns concrete (already-expanded) occurrences in the window.
+    let payload = store.events(matching: predicate).map {
+      Self.eventDict($0, calendarId: calendarId)
     }
     return try Self.encode(payload)
   }
 
   // ── Reminders reads (P2) ──
-  // iOS Reminders lists (EKCalendar of reminder type) map to Aperio task lists;
-  // each EKReminder maps to a Task (due date → scheduled date). Same intermediate
-  // shape; the Rust adapter does the cal_core mapping.
 
   func listReminderLists() throws -> String {
     let payload: [[String: Any]] = store.calendars(for: .reminder).map { list in
@@ -150,30 +126,187 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
       semaphore.signal()
     }
     semaphore.wait()
-    let payload: [[String: Any]] = fetched.map { reminder in
-      let due = Self.dateComponentsStrings(reminder.dueDateComponents)
-      var dict: [String: Any] = [
-        "id": reminder.calendarItemIdentifier,
-        "list_id": listId,
-        "title": reminder.title ?? "",
-        "completed": reminder.isCompleted,
-        "priority": reminder.priority,
-      ]
-      if let notes = reminder.notes { dict["description"] = notes }
-      if let date = due.date { dict["due_date"] = date }
-      if let time = due.time { dict["due_time"] = time }
-      if let completion = reminder.completionDate {
-        dict["completed_at"] = Self.iso.string(from: completion)
-      }
-      dict["created_at"] = Self.iso.string(from: reminder.creationDate ?? Date())
-      dict["updated_at"] = Self.iso.string(
-        from: reminder.lastModifiedDate ?? reminder.creationDate ?? Date())
-      return dict
-    }
+    let payload = fetched.map { Self.reminderDict($0, listId: listId) }
     return try Self.encode(payload)
   }
 
-  // ── Encoding helpers ──
+  // ── Calendar writes (P3) ──
+
+  func createEvent(calendarId: String, eventJson: String) throws -> String {
+    let write = try Self.decode(EventWrite.self, eventJson)
+    guard let calendar = store.calendar(withIdentifier: write.calendarId) else {
+      throw DeviceCalError.Backend(detail: "unknown calendar \(write.calendarId)")
+    }
+    let event = EKEvent(eventStore: store)
+    event.calendar = calendar
+    try Self.apply(write, to: event)
+    do {
+      try store.save(event, span: .thisEvent, commit: true)
+    } catch {
+      throw DeviceCalError.Backend(detail: "save event: \(error.localizedDescription)")
+    }
+    return try Self.encode(Self.eventDict(event, calendarId: calendar.calendarIdentifier))
+  }
+
+  func updateEvent(eventJson: String) throws -> String {
+    let write = try Self.decode(EventWrite.self, eventJson)
+    guard let id = write.id,
+      let event = store.event(withIdentifier: Self.baseEventId(id))
+    else {
+      throw DeviceCalError.Backend(detail: "event not found for update")
+    }
+    try Self.apply(write, to: event)
+    do {
+      try store.save(event, span: .thisEvent, commit: true)
+    } catch {
+      throw DeviceCalError.Backend(detail: "save event: \(error.localizedDescription)")
+    }
+    return try Self.encode(
+      Self.eventDict(event, calendarId: event.calendar.calendarIdentifier))
+  }
+
+  func deleteEvent(eventId: String) throws {
+    guard let event = store.event(withIdentifier: Self.baseEventId(eventId)) else {
+      // Already gone — delete is idempotent.
+      return
+    }
+    do {
+      try store.remove(event, span: .thisEvent, commit: true)
+    } catch {
+      throw DeviceCalError.Backend(detail: "remove event: \(error.localizedDescription)")
+    }
+  }
+
+  // ── Reminder writes (P3) ──
+
+  func createReminder(listId: String, taskJson: String) throws -> String {
+    let write = try Self.decode(ReminderWrite.self, taskJson)
+    guard let list = store.calendar(withIdentifier: write.listId) else {
+      throw DeviceCalError.Backend(detail: "unknown reminder list \(write.listId)")
+    }
+    let reminder = EKReminder(eventStore: store)
+    reminder.calendar = list
+    Self.apply(write, to: reminder)
+    do {
+      try store.save(reminder, commit: true)
+    } catch {
+      throw DeviceCalError.Backend(detail: "save reminder: \(error.localizedDescription)")
+    }
+    return try Self.encode(Self.reminderDict(reminder, listId: list.calendarIdentifier))
+  }
+
+  func updateReminder(taskJson: String) throws -> String {
+    let write = try Self.decode(ReminderWrite.self, taskJson)
+    guard let id = write.id,
+      let reminder = store.calendarItem(withIdentifier: id) as? EKReminder
+    else {
+      throw DeviceCalError.Backend(detail: "reminder not found for update")
+    }
+    Self.apply(write, to: reminder)
+    do {
+      try store.save(reminder, commit: true)
+    } catch {
+      throw DeviceCalError.Backend(detail: "save reminder: \(error.localizedDescription)")
+    }
+    return try Self.encode(
+      Self.reminderDict(reminder, listId: reminder.calendar.calendarIdentifier))
+  }
+
+  func deleteReminder(taskId: String) throws {
+    guard let reminder = store.calendarItem(withIdentifier: taskId) as? EKReminder else {
+      return  // Already gone — idempotent.
+    }
+    do {
+      try store.remove(reminder, commit: true)
+    } catch {
+      throw DeviceCalError.Backend(detail: "remove reminder: \(error.localizedDescription)")
+    }
+  }
+
+  // ── Write payloads (the small cal_core→native shape; snake_case) ──
+
+  private struct EventWrite: Decodable {
+    let id: String?
+    let calendarId: String
+    let title: String
+    let description: String?
+    let location: String?
+    let start: String
+    let end: String
+    let allDay: Bool
+  }
+
+  private struct ReminderWrite: Decodable {
+    let id: String?
+    let listId: String
+    let title: String
+    let description: String?
+    let completed: Bool
+    let priority: Int
+    let dueDate: String?
+    let dueTime: String?
+  }
+
+  private static func apply(_ write: EventWrite, to event: EKEvent) throws {
+    guard let start = iso.date(from: write.start), let end = iso.date(from: write.end) else {
+      throw DeviceCalError.Backend(detail: "invalid event dates: \(write.start)…\(write.end)")
+    }
+    event.title = write.title
+    event.notes = write.description
+    event.location = write.location
+    event.isAllDay = write.allDay
+    event.startDate = start
+    event.endDate = end
+  }
+
+  private static func apply(_ write: ReminderWrite, to reminder: EKReminder) {
+    reminder.title = write.title
+    reminder.notes = write.description
+    reminder.isCompleted = write.completed
+    reminder.priority = write.priority
+    reminder.dueDateComponents = dueComponents(date: write.dueDate, time: write.dueTime)
+  }
+
+  // ── Shared dict builders (read responses + write responses) ──
+
+  private static func eventDict(_ event: EKEvent, calendarId: String) -> [String: Any] {
+    var dict: [String: Any] = [
+      "id": eventId(event),
+      "calendar_id": calendarId,
+      "title": event.title ?? "",
+      "start": iso.string(from: event.startDate),
+      "end": iso.string(from: event.endDate),
+      "all_day": event.isAllDay,
+    ]
+    if let notes = event.notes { dict["description"] = notes }
+    if let location = event.location { dict["location"] = location }
+    if let created = event.creationDate { dict["created_at"] = iso.string(from: created) }
+    if let modified = event.lastModifiedDate { dict["updated_at"] = iso.string(from: modified) }
+    return dict
+  }
+
+  private static func reminderDict(_ reminder: EKReminder, listId: String) -> [String: Any] {
+    let due = dateComponentsStrings(reminder.dueDateComponents)
+    var dict: [String: Any] = [
+      "id": reminder.calendarItemIdentifier,
+      "list_id": listId,
+      "title": reminder.title ?? "",
+      "completed": reminder.isCompleted,
+      "priority": reminder.priority,
+    ]
+    if let notes = reminder.notes { dict["description"] = notes }
+    if let date = due.date { dict["due_date"] = date }
+    if let time = due.time { dict["due_time"] = time }
+    if let completion = reminder.completionDate {
+      dict["completed_at"] = iso.string(from: completion)
+    }
+    dict["created_at"] = iso.string(from: reminder.creationDate ?? Date())
+    dict["updated_at"] = iso.string(
+      from: reminder.lastModifiedDate ?? reminder.creationDate ?? Date())
+    return dict
+  }
+
+  // ── Encoding / decoding helpers ──
 
   private static let iso: ISO8601DateFormatter = {
     let formatter = ISO8601DateFormatter()
@@ -183,23 +316,70 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
 
   /// EventKit reuses `eventIdentifier` across a recurring series' occurrences, so
   /// suffix the occurrence start to give each expanded instance a distinct
-  /// cal_core `Event` id.
+  /// cal_core `Event` id. [`baseEventId`] strips it back off for writes.
   private static func eventId(_ event: EKEvent) -> String {
     let base = event.eventIdentifier ?? event.calendarItemIdentifier
     return "\(base)#\(Int(event.startDate.timeIntervalSince1970))"
   }
 
-  private static func encode(_ payload: [[String: Any]]) throws -> String {
-    let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+  /// Strip the occurrence suffix `eventId` appends, recovering the EventKit
+  /// identifier for `event(withIdentifier:)`.
+  private static func baseEventId(_ id: String) -> String {
+    if let hashIndex = id.lastIndex(of: "#") {
+      return String(id[..<hashIndex])
+    }
+    return id
+  }
+
+  /// `YYYY-MM-DD` (+ optional `HH:MM:SS`) → due `DateComponents`, or nil for no
+  /// due date.
+  private static func dueComponents(date: String?, time: String?) -> DateComponents? {
+    guard let date = date else { return nil }
+    let dateParts = date.split(separator: "-")
+    guard dateParts.count == 3, let year = Int(dateParts[0]),
+      let month = Int(dateParts[1]), let day = Int(dateParts[2])
+    else {
+      return nil
+    }
+    var components = DateComponents()
+    components.year = year
+    components.month = month
+    components.day = day
+    if let time = time {
+      let timeParts = time.split(separator: ":")
+      if timeParts.count >= 2, let hour = Int(timeParts[0]), let minute = Int(timeParts[1]) {
+        components.hour = hour
+        components.minute = minute
+        if timeParts.count >= 3, let second = Int(timeParts[2]) {
+          components.second = second
+        }
+      }
+    }
+    return components
+  }
+
+  private static func encode(_ object: Any) throws -> String {
+    let data = try JSONSerialization.data(withJSONObject: object, options: [])
     guard let json = String(data: data, encoding: .utf8) else {
       throw DeviceCalError.Backend(detail: "could not encode device payload as UTF-8")
     }
     return json
   }
 
-  /// A reminder's `dueDateComponents` → (`YYYY-MM-DD`, optional `HH:MM:SS`). A
-  /// date-only reminder (no hour) yields a nil time, so the Rust side keeps it a
-  /// plain scheduled date.
+  private static func decode<T: Decodable>(_ type: T.Type, _ json: String) throws -> T {
+    guard let data = json.data(using: .utf8) else {
+      throw DeviceCalError.Backend(detail: "write payload was not valid UTF-8")
+    }
+    let decoder = JSONDecoder()
+    decoder.keyDecodingStrategy = .convertFromSnakeCase
+    do {
+      return try decoder.decode(T.self, from: data)
+    } catch {
+      throw DeviceCalError.Backend(detail: "decode write payload: \(error.localizedDescription)")
+    }
+  }
+
+  /// A reminder's `dueDateComponents` → (`YYYY-MM-DD`, optional `HH:MM:SS`).
   private static func dateComponentsStrings(
     _ components: DateComponents?
   ) -> (date: String?, time: String?) {
@@ -226,25 +406,5 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
     let g = Int((components[1] * 255).rounded())
     let b = Int((components[2] * 255).rounded())
     return String(format: "#%02x%02x%02x", r, g, b)
-  }
-
-  // ── Writes (P3) ──
-  func createEvent(calendarId: String, eventJson: String) throws -> String {
-    throw DeviceCalError.Backend(detail: "device calendar writes arrive in a later phase")
-  }
-  func updateEvent(eventJson: String) throws -> String {
-    throw DeviceCalError.Backend(detail: "device calendar writes arrive in a later phase")
-  }
-  func deleteEvent(eventId: String) throws {
-    throw DeviceCalError.Backend(detail: "device calendar writes arrive in a later phase")
-  }
-  func createReminder(listId: String, taskJson: String) throws -> String {
-    throw DeviceCalError.Backend(detail: "device reminder writes arrive in a later phase")
-  }
-  func updateReminder(taskJson: String) throws -> String {
-    throw DeviceCalError.Backend(detail: "device reminder writes arrive in a later phase")
-  }
-  func deleteReminder(taskId: String) throws {
-    throw DeviceCalError.Backend(detail: "device reminder writes arrive in a later phase")
   }
 }

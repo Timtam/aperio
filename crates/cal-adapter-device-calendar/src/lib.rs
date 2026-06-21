@@ -27,7 +27,7 @@ use cal_core::{
     TaskPriority, TaskStatus, TasksFeature,
 };
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// `AdapterSource` tag for every row this adapter owns.
 pub const SOURCE_ID: &str = "device";
@@ -346,6 +346,119 @@ fn map_reminder(d: DeviceReminder) -> Result<Task> {
     })
 }
 
+// ── Write intermediate shapes (cal_core → native) ───────────────────────────
+//
+// The reverse of the read mapping: the adapter sends the native side only the
+// EventKit-settable fields, the native side applies them and returns the
+// resulting `DeviceEvent` / `DeviceReminder` (which maps back through the tested
+// read path). Recurrence, colour, attendees, reminders and sections are out of
+// P3 scope — they are not written (consistent with the reads dropping them).
+
+#[derive(Debug, Clone, Serialize)]
+struct DeviceEventWrite {
+    /// Present on update (the event id to modify, possibly the occurrence-suffixed
+    /// read id — the native side resolves it); absent on create.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+    calendar_id: String,
+    title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    location: Option<String>,
+    /// RFC-3339 instants.
+    start: String,
+    end: String,
+    all_day: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DeviceReminderWrite {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+    list_id: String,
+    title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    completed: bool,
+    /// EventKit priority (0 unset / 1 high / 5 medium / 9 low).
+    priority: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    due_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    due_time: Option<String>,
+}
+
+fn priority_to_ek(priority: TaskPriority) -> u8 {
+    match priority {
+        TaskPriority::High => 1,
+        TaskPriority::Medium => 5,
+        TaskPriority::Low => 9,
+    }
+}
+
+fn event_write_create(calendar_id: &str, event: &NewEvent) -> DeviceEventWrite {
+    DeviceEventWrite {
+        id: None,
+        calendar_id: calendar_id.to_string(),
+        title: event.title.clone(),
+        description: event.description.clone(),
+        location: event.location.clone(),
+        start: event.start.to_rfc3339(),
+        end: event.end.to_rfc3339(),
+        all_day: event.all_day,
+    }
+}
+
+fn event_write_update(event: &Event) -> DeviceEventWrite {
+    DeviceEventWrite {
+        id: Some(event.id.clone()),
+        calendar_id: event.calendar_id.clone(),
+        title: event.title.clone(),
+        description: event.description.clone(),
+        location: event.location.clone(),
+        start: event.start.to_rfc3339(),
+        end: event.end.to_rfc3339(),
+        all_day: event.all_day,
+    }
+}
+
+fn reminder_write_create(list_id: &str, task: &NewTask) -> DeviceReminderWrite {
+    DeviceReminderWrite {
+        id: None,
+        list_id: list_id.to_string(),
+        title: task.title.clone(),
+        description: task.description.clone(),
+        completed: task.status == TaskStatus::Completed,
+        priority: priority_to_ek(task.priority),
+        due_date: task
+            .scheduled_date
+            .map(|d| d.format("%Y-%m-%d").to_string()),
+        due_time: task
+            .scheduled_date
+            .and(task.scheduled_time)
+            .map(|t| t.format("%H:%M:%S").to_string()),
+    }
+}
+
+fn reminder_write_update(task: &Task) -> DeviceReminderWrite {
+    DeviceReminderWrite {
+        id: Some(task.id.clone()),
+        list_id: task.list_id.clone(),
+        title: task.title.clone(),
+        description: task.description.clone(),
+        completed: task.status == TaskStatus::Completed,
+        priority: priority_to_ek(task.priority),
+        due_date: task
+            .scheduled_date
+            .map(|d| d.format("%Y-%m-%d").to_string()),
+        due_time: task
+            .scheduled_date
+            .and(task.scheduled_time)
+            .map(|t| t.format("%H:%M:%S").to_string()),
+    }
+}
+
 #[async_trait]
 impl Adapter for DeviceAdapter {
     async fn authenticate(&self, _credentials: Credentials) -> Result<AuthToken> {
@@ -377,13 +490,15 @@ impl CalendarFeature for DeviceAdapter {
     }
 
     async fn create_event(&self, calendar_id: &str, event: NewEvent) -> Result<Event> {
-        let json = self.provider.create_event(calendar_id, &to_json(&event)?)?;
-        parse(&json)
+        let write = event_write_create(calendar_id, &event);
+        let json = self.provider.create_event(calendar_id, &to_json(&write)?)?;
+        map_event(parse(&json)?)
     }
 
     async fn update_event(&self, event: Event) -> Result<Event> {
-        let json = self.provider.update_event(&to_json(&event)?)?;
-        parse(&json)
+        let write = event_write_update(&event);
+        let json = self.provider.update_event(&to_json(&write)?)?;
+        map_event(parse(&json)?)
     }
 
     async fn delete_event(&self, event_id: &str, _send_cancellations: bool) -> Result<()> {
@@ -417,13 +532,15 @@ impl TasksFeature for DeviceAdapter {
     }
 
     async fn create_task(&self, list_id: &str, task: NewTask) -> Result<Task> {
-        let json = self.provider.create_reminder(list_id, &to_json(&task)?)?;
-        parse(&json)
+        let write = reminder_write_create(list_id, &task);
+        let json = self.provider.create_reminder(list_id, &to_json(&write)?)?;
+        map_reminder(parse(&json)?)
     }
 
     async fn update_task(&self, task: Task) -> Result<Task> {
-        let json = self.provider.update_reminder(&to_json(&task)?)?;
-        parse(&json)
+        let write = reminder_write_update(&task);
+        let json = self.provider.update_reminder(&to_json(&write)?)?;
+        map_reminder(parse(&json)?)
     }
 
     async fn delete_task(&self, task_id: &str) -> Result<()> {
@@ -612,5 +729,107 @@ mod tests {
         // No created_at ⇒ fall back to completed_at.
         let task = map_reminder(r).expect("maps");
         assert_eq!(task.created_at.to_rfc3339(), "2026-06-19T07:00:00+00:00");
+    }
+
+    fn new_event() -> NewEvent {
+        NewEvent {
+            title: "Meeting".into(),
+            description: Some("desc".into()),
+            location: Some("HQ".into()),
+            start: parse_instant("2026-06-21T09:00:00Z").unwrap(),
+            end: parse_instant("2026-06-21T10:00:00Z").unwrap(),
+            all_day: false,
+            recurrence: None,
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+        }
+    }
+
+    fn new_task(status: TaskStatus, priority: TaskPriority) -> NewTask {
+        NewTask {
+            title: "Task".into(),
+            description: None,
+            status,
+            priority,
+            scheduled_date: None,
+            scheduled_time: None,
+            deadline_date: None,
+            deadline_time: None,
+            recurrence: None,
+            resurface_date: None,
+            series_id: None,
+            parent_id: None,
+            section_id: None,
+            color_label: None,
+            reminders: Vec::new(),
+            sound: None,
+            assignees: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn event_write_create_has_no_id_and_maps_fields() {
+        let w = event_write_create("cal-1", &new_event());
+        assert!(w.id.is_none());
+        assert_eq!(w.calendar_id, "cal-1");
+        assert_eq!(w.title, "Meeting");
+        assert_eq!(w.description.as_deref(), Some("desc"));
+        assert_eq!(w.start, "2026-06-21T09:00:00+00:00");
+        assert!(!w.all_day);
+    }
+
+    #[test]
+    fn event_write_update_carries_id() {
+        let event = map_event(DeviceEvent {
+            id: "ev#123".into(),
+            calendar_id: "cal-1".into(),
+            title: "X".into(),
+            description: None,
+            location: None,
+            start: "2026-06-21T09:00:00Z".into(),
+            end: "2026-06-21T10:00:00Z".into(),
+            all_day: false,
+            created_at: None,
+            updated_at: None,
+        })
+        .unwrap();
+        let w = event_write_update(&event);
+        assert_eq!(w.id.as_deref(), Some("ev#123"));
+        assert_eq!(w.calendar_id, "cal-1");
+    }
+
+    #[test]
+    fn reminder_write_maps_priority_status_and_due() {
+        let mut task = new_task(TaskStatus::Completed, TaskPriority::High);
+        task.scheduled_date = NaiveDate::from_ymd_opt(2026, 6, 25);
+        task.scheduled_time = NaiveTime::from_hms_opt(14, 30, 0);
+        let w = reminder_write_create("l1", &task);
+        assert!(w.id.is_none());
+        assert!(w.completed);
+        assert_eq!(w.priority, 1);
+        assert_eq!(w.due_date.as_deref(), Some("2026-06-25"));
+        assert_eq!(w.due_time.as_deref(), Some("14:30:00"));
+    }
+
+    #[test]
+    fn reminder_write_drops_time_without_date() {
+        let mut task = new_task(TaskStatus::Open, TaskPriority::Low);
+        task.scheduled_time = NaiveTime::from_hms_opt(9, 0, 0);
+        let w = reminder_write_create("l1", &task);
+        assert_eq!(w.priority, 9);
+        assert!(!w.completed);
+        assert!(w.due_date.is_none());
+        assert!(w.due_time.is_none());
+    }
+
+    #[test]
+    fn priority_maps_to_ek_buckets() {
+        assert_eq!(priority_to_ek(TaskPriority::High), 1);
+        assert_eq!(priority_to_ek(TaskPriority::Medium), 5);
+        assert_eq!(priority_to_ek(TaskPriority::Low), 9);
     }
 }
