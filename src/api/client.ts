@@ -955,6 +955,11 @@ export const setContactsSyncInterval = (minutes: number) =>
 export interface CacheRefreshStatus {
   refreshing: boolean;
   last_refreshed_at: string | null;
+  /** Containers the running pass will refresh (null outside a pass / before
+   *  enumeration) — drives "fetched X of N" external-refresh progress. */
+  total_targets: number | null;
+  /** Containers refreshed so far in the running pass (null outside a pass). */
+  fetched_targets: number | null;
 }
 
 /** Payload of the `cache-refresh-status` Tauri event, emitted at the

@@ -66,7 +66,12 @@ export function useCacheRefresh() {
     setStatus((prev) =>
       prev
         ? { ...prev, refreshing: true }
-        : { refreshing: true, last_refreshed_at: null },
+        : {
+            refreshing: true,
+            last_refreshed_at: null,
+            total_targets: null,
+            fetched_targets: null,
+          },
     );
     try {
       await refreshExternalCache();
@@ -79,6 +84,10 @@ export function useCacheRefresh() {
   return {
     refreshing: status?.refreshing ?? false,
     lastRefreshedAt: status?.last_refreshed_at ?? null,
+    /** Containers refreshed so far in the running pass, or null. */
+    fetchedTargets: status?.fetched_targets ?? null,
+    /** Total containers the running pass will refresh, or null. */
+    totalTargets: status?.total_targets ?? null,
     refreshNow,
   };
 }

@@ -14,7 +14,8 @@ import { useCacheRefresh } from '../state/useCacheRefresh';
  */
 export function CacheRefreshIndicator() {
   const { t, i18n } = useTranslation();
-  const { refreshing, lastRefreshedAt, refreshNow } = useCacheRefresh();
+  const { refreshing, lastRefreshedAt, fetchedTargets, totalTargets, refreshNow } =
+    useCacheRefresh();
 
   const lastLabel = lastRefreshedAt
     ? t('cacheRefresh.lastUpdated', {
@@ -22,7 +23,18 @@ export function CacheRefreshIndicator() {
       })
     : t('cacheRefresh.never');
 
-  const title = refreshing ? t('cacheRefresh.refreshing') : lastLabel;
+  // While a pass runs, prefer the live "fetched X of N" once the total is known
+  // (the aria-label + tooltip then carry the progress; no aria-live chatter — a
+  // screen-reader user reads the current count when they land on the button).
+  const refreshingLabel =
+    fetchedTargets != null && totalTargets != null
+      ? t('cacheRefresh.progress', {
+          fetched: fetchedTargets,
+          total: totalTargets,
+        })
+      : t('cacheRefresh.refreshing');
+
+  const title = refreshing ? refreshingLabel : lastLabel;
 
   return (
     <button
