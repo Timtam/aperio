@@ -50,6 +50,10 @@ public class CalFfiModule: Module {
     opened.setCacheObserver(observer: JsCacheObserver(module: self))
     // Forward contact-sync pass-finished callbacks to JS. Mirrors the Android module.
     opened.setContactSyncObserver(observer: JsContactSyncObserver(module: self))
+    // Install the device calendar/reminders bridge (EventKit). The Host registers
+    // any persisted device-calendar account against it now; Android sets none, so
+    // the device kind is iOS-only. Mirrors the keychain/observer injection above.
+    opened.setDeviceEventStore(bridge: IosDeviceEventStore())
     return opened
   }()
 
@@ -148,6 +152,14 @@ public class CalFfiModule: Module {
 
     AsyncFunction("renameAccountJson") { (id: String, newName: String) -> String in
       try self.host.renameAccountJson(id: id, newName: newName)
+    }
+
+    // Run the OS calendar/reminders permission prompt for the device-calendar
+    // adapter's add-account "grant access" step. `true` ⇒ proceed to
+    // createAccountJson for the `device_calendar` kind. iOS-backed (EventKit);
+    // on Android the Host has no bridge and this rejects "not available".
+    AsyncFunction("requestDeviceCalendarAccess") { (events: Bool, reminders: Bool) -> Bool in
+      try self.host.requestDeviceCalendarAccess(events: events, reminders: reminders)
     }
 
     AsyncFunction("listAccountsMissingCredentialsJson") { () -> String in

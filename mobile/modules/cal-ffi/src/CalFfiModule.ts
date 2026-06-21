@@ -95,6 +95,14 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** Rename an account's display name; returns the updated `Account` as JSON.
    *  Rejects on an empty name / unknown id. */
   renameAccountJson(id: string, newName: string): Promise<string>;
+  /** Run the OS calendar/reminders permission prompt for the device-calendar
+   *  adapter's add-account "grant access" step. Resolves `true` iff access was
+   *  granted (then create the `device_calendar` account). iOS-backed (EventKit);
+   *  rejects "not available on this platform" on Android (no device bridge). */
+  requestDeviceCalendarAccess(
+    events: boolean,
+    reminders: boolean,
+  ): Promise<boolean>;
   /** External accounts whose required keychain secret is absent (the
    *  credential-repair banner data), as a JSON `Account[]`. */
   listAccountsMissingCredentialsJson(): Promise<string>;

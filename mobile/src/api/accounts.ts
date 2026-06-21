@@ -22,6 +22,7 @@ export type AdapterKind =
   | 'ews'
   | 'vikunja'
   | 'todoist'
+  | 'device_calendar'
   | 'zoom'
   | 'teams'
   | 'meet'
@@ -73,6 +74,15 @@ export const createAccount = async (
 export const testAccount = async (request: CreateAccountRequest): Promise<void> => {
   await CalFfi.testAccountJson(JSON.stringify(request));
 };
+
+/** Run the OS calendar/reminders permission prompt for the device-calendar
+ *  adapter — the add-account "grant access" step. Resolves `true` iff access was
+ *  granted (then create the `device_calendar` account). iOS-only: rejects "not
+ *  available on this platform" on Android (no device bridge). */
+export const requestDeviceCalendarAccess = async (
+  events: boolean,
+  reminders: boolean,
+): Promise<boolean> => CalFfi.requestDeviceCalendarAccess(events, reminders);
 
 /** Delete an account (unregister adapter + clear secrets + drop row). Rejects
  *  when deleting the implicit local account. */

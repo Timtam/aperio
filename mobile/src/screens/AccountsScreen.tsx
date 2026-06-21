@@ -4,6 +4,7 @@ import {
   AccessibilityInfo,
   Alert,
   findNodeHandle,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -21,6 +22,7 @@ import {
   listAccounts,
   listAccountsMissingCredentials,
   renameAccount,
+  requestDeviceCalendarAccess,
   setAccountSecret,
   testAccount,
 } from '../api/accounts';
@@ -57,8 +59,10 @@ interface KindForm {
   fixedConfig?: Record<string, string>;
 }
 
-// The kinds with a non-OAuth construction path — the ones the Host accepts.
-const KIND_FORMS: Record<Exclude<AdapterKind, 'google' | 'microsoft_graph' | 'zoom' | 'teams' | 'meet' | 'webex'>, KindForm> = {
+// The kinds with a non-OAuth construction path that use the credential form.
+// `device_calendar` is excluded too: it has no credentials — it's added through
+// the OS permission grant (the 'device' add mode), not a KindForm.
+const KIND_FORMS: Record<Exclude<AdapterKind, 'google' | 'microsoft_graph' | 'zoom' | 'teams' | 'meet' | 'webex' | 'device_calendar'>, KindForm> = {
   local: { configFields: [] },
   caldav: {
     configFields: [
@@ -110,6 +114,12 @@ const PICKER_KINDS: AdapterKind[] = [
 const isOAuthKind = (kind: AdapterKind): boolean =>
   kind === 'google' || kind === 'microsoft_graph';
 
+/** The device-local calendar + reminders adapter is iOS-only (EventKit; Android
+ *  has no system reminders app and the calendar half is iOS-first). Gates the
+ *  extra "Device" picker entry, which adds the account through a permission
+ *  grant rather than a credential form. */
+const DEVICE_KIND_AVAILABLE = Platform.OS === 'ios';
+
 /** Adapter kinds whose ContactsFeature pulls remote address-book data — the
  *  ones that trigger the one-shot privacy notice on first connect. Mirrors the
  *  desktop CONTACTS_CAPABLE_KINDS. */
@@ -159,9 +169,9 @@ export default function AccountsScreen() {
   // Add flow: 'list' shows the connected accounts + an "Add account" button;
   // 'picker' a provider menu; 'credential'/'oauth' the chosen provider's form —
   // replacing the old always-mounted credential + OAuth forms (one long view).
-  const [mode, setMode] = useState<'list' | 'picker' | 'credential' | 'oauth'>(
-    'list',
-  );
+  const [mode, setMode] = useState<
+    'list' | 'picker' | 'credential' | 'oauth' | 'device'
+  >('list');
   const [pickedOAuth, setPickedOAuth] = useState<OAuthProvider | null>(null);
 
   const rowTags = useRef<Record<string, number | null>>({});
@@ -240,7 +250,10 @@ export default function AccountsScreen() {
   const onPickProvider = useCallback(
     (picked: AdapterKind) => {
       setError(null);
-      if (isOAuthKind(picked)) {
+      if (picked === 'device_calendar') {
+        // No credentials — the OS permission prompt IS the auth step.
+        setMode('device');
+      } else if (isOAuthKind(picked)) {
         setPickedOAuth(picked as OAuthProvider);
         setMode('oauth');
       } else {
@@ -294,6 +307,38 @@ export default function AccountsScreen() {
       setSubmitting(false);
     }
   }, [announce, config, displayName, form, kind, load, maybeShowPrivacyNotice, resetForm, secret, t]);
+
+  // Add the device-local calendar + reminders account: run the OS permission
+  // prompt (the adapter's "auth"), then create the row on a grant. No name field
+  // — it gets a fixed localized name; the account is device-local (never synced).
+  const addDevice = useCallback(async () => {
+    setError(null);
+    setSubmitting(true);
+    try {
+      const granted = await requestDeviceCalendarAccess(true, true);
+      if (!granted) {
+        const message = t('dialogs.accounts.deviceAccessDenied');
+        setError(message);
+        announce(message);
+        return;
+      }
+      const created = await createAccount({
+        adapter_kind: 'device_calendar',
+        display_name: t('dialogs.accounts.deviceDefaultName'),
+        config_json: '{}',
+      });
+      setMode('list');
+      await load();
+      pendingFocusId.current = created.id;
+      announce(t('dialogs.accounts.created', { name: created.display_name }));
+    } catch (err) {
+      const message = errorMessage(err);
+      setError(message);
+      announce(t('mobile.error', { message }));
+    } finally {
+      setSubmitting(false);
+    }
+  }, [announce, load, t]);
 
   // Probe the entered credentials without saving — the same (kind, config,
   // secret) add() assembles, but via testAccount (persists nothing). Surfaces a
@@ -735,6 +780,21 @@ export default function AccountsScreen() {
             </Text>
           </Pressable>
         ))}
+        {DEVICE_KIND_AVAILABLE && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('dialogs.accounts.kindName.device_calendar')}
+            onPress={() => onPickProvider('device_calendar')}
+            style={({ pressed }) => [
+              styles.secondaryButton,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text style={styles.secondaryButtonText}>
+              {t('dialogs.accounts.kindName.device_calendar')}
+            </Text>
+          </Pressable>
+        )}
       </AppDialog>
 
       <AppDialog
@@ -841,6 +901,20 @@ export default function AccountsScreen() {
           />
         )}
       </AppDialog>
+
+      <AppDialog
+        visible={mode === 'device'}
+        title={t('dialogs.accounts.kindName.device_calendar')}
+        confirmLabel={t('dialogs.accounts.deviceGrantButton')}
+        cancelLabel={t('mobile.cancel')}
+        onConfirm={() => void addDevice()}
+        onCancel={cancelAdd}
+        busy={submitting}
+      >
+        <Text style={styles.deviceGrantBody}>
+          {t('dialogs.accounts.deviceGrantBody')}
+        </Text>
+      </AppDialog>
     </FormScrollView>
     {/* One-shot contacts privacy notice (app-modal; overlays the screen). */}
     <ContactsPrivacyNoticeModal
@@ -905,6 +979,7 @@ const makeStyles = (c: ThemeColors) =>
     pressed: { opacity: 0.7 },
     field: { gap: 6 },
     label: { fontSize: 15, fontWeight: '600', color: c.textLabel },
+    deviceGrantBody: { fontSize: 15, lineHeight: 21, color: c.textPrimary },
     input: {
       fontSize: 17,
       color: c.textPrimary,

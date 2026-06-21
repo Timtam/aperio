@@ -1505,6 +1505,10 @@
       "todoistApiTokenLabel": "API token",
       "todoistApiTokenRequired": "Please enter your Todoist API token.",
       "todoistApiTokenHint": "Find your token in Todoist under Settings → Integrations → Developer → API token. The token never leaves your system keychain after you press \"Add\".",
+      "deviceDefaultName": "This device",
+      "deviceGrantBody": "Aperio will ask for permission to your device's calendars and reminders. They stay on this device only — this account is never synced to your other devices.",
+      "deviceGrantButton": "Grant access",
+      "deviceAccessDenied": "Access was not granted. You can enable calendar and reminders access for Aperio later in the Settings app.",
       "kindName": {
         "local": "Local",
         "caldav": "CalDAV (iCloud, Nextcloud, …)",
@@ -1513,7 +1517,8 @@
         "microsoft_graph": "Microsoft (Outlook / To Do)",
         "ews": "Exchange on-premise (EWS)",
         "vikunja": "Vikunja",
-        "todoist": "Todoist"
+        "todoist": "Todoist",
+        "device_calendar": "This device (Calendar & Reminders)"
       }
     },
     "reminders": {

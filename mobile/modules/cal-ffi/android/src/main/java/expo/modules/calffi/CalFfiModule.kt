@@ -174,6 +174,14 @@ class CalFfiModule : Module() {
       host.renameAccountJson(id, newName)
     }
 
+    // Uniform JS surface with iOS. Android installs no device-calendar bridge
+    // (no system reminders app; the calendar adapter is iOS-first), so the Host
+    // rejects "not available on this platform" — the UI gates the device picker
+    // entry to iOS, so this is only ever reached defensively.
+    AsyncFunction("requestDeviceCalendarAccess") { events: Boolean, reminders: Boolean ->
+      host.requestDeviceCalendarAccess(events, reminders)
+    }
+
     AsyncFunction("listAccountsMissingCredentialsJson") {
       host.listAccountsMissingCredentialsJson()
     }

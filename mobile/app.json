@@ -11,7 +11,11 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.aperio.mobile",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCalendarsUsageDescription": "Aperio shows and edits the events in your device calendars alongside your other accounts.",
+        "NSCalendarsFullAccessUsageDescription": "Aperio shows and edits the events in your device calendars alongside your other accounts.",
+        "NSRemindersUsageDescription": "Aperio shows and edits your Reminders lists as tasks alongside your other accounts.",
+        "NSRemindersFullAccessUsageDescription": "Aperio shows and edits your Reminders lists as tasks alongside your other accounts."
       }
     },
     "android": {
