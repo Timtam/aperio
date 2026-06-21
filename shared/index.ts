@@ -12,6 +12,7 @@ export * from './dateKey';
 export * from './multiDay';
 export * from './birthdays';
 export * from './taskCascade';
+export * from './taskAssignment';
 export * from './dayStart';
 export * from './links';
 export * from './planTaskDates';
