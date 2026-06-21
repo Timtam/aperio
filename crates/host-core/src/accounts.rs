@@ -42,6 +42,12 @@ pub enum AdapterKind {
     Ews,
     Vikunja,
     Todoist,
+    /// Device-local calendar + reminders (iOS EventKit / Android
+    /// CalendarProvider). Mobile-only and **host-internal**: built in the
+    /// cal-ffi layer over a native bridge (not a dlopen plugin), so its
+    /// `plugin_id` is `None` like [`Self::Local`]. Its account is
+    /// device-local and is never written to the sync log.
+    DeviceCalendar,
     /// Zoom videoconference adapter (DESIGN.md §11). Currently
     /// a stub — the trait impl returns `VcError::Unsupported`
     /// until the REST layer lands.
@@ -68,6 +74,7 @@ impl AdapterKind {
             AdapterKind::Ews => "ews",
             AdapterKind::Vikunja => "vikunja",
             AdapterKind::Todoist => "todoist",
+            AdapterKind::DeviceCalendar => "device_calendar",
             AdapterKind::Zoom => "zoom",
             AdapterKind::Teams => "teams",
             AdapterKind::Meet => "meet",
@@ -82,6 +89,8 @@ impl AdapterKind {
     pub fn plugin_id(self) -> Option<&'static str> {
         Some(match self {
             AdapterKind::Local => return None,
+            // Host-internal, built in cal-ffi over a native bridge — no plugin.
+            AdapterKind::DeviceCalendar => return None,
             AdapterKind::Caldav => "com.aperio.cal-adapter-caldav",
             AdapterKind::Ical => "com.aperio.cal-adapter-ical",
             AdapterKind::Google => "com.aperio.cal-adapter-google",
@@ -106,6 +115,7 @@ impl AdapterKind {
             "ews" => AdapterKind::Ews,
             "vikunja" => AdapterKind::Vikunja,
             "todoist" => AdapterKind::Todoist,
+            "device_calendar" => AdapterKind::DeviceCalendar,
             "zoom" => AdapterKind::Zoom,
             "teams" => AdapterKind::Teams,
             "meet" => AdapterKind::Meet,

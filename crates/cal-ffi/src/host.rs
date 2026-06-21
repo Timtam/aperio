@@ -44,6 +44,7 @@ use std::sync::{Arc, Mutex};
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use cal_adapter_device_calendar::{DeviceAdapter, DeviceCalendarProvider};
 use cal_adapter_local::{prepare_fts_query, LocalAdapter, SearchFilters};
 use cal_core::{
     Calendar, CalendarFeature, ColorLabelId, ContactList, ContactsFeature, DateRange, Event,
@@ -656,6 +657,12 @@ pub struct Host {
     /// the "last synced" footer. A no-op until the JS layer registers its bridge
     /// via [`Host::set_contact_sync_observer`]; passes run regardless.
     contact_sync_observer: Arc<BridgeContactSyncObserver>,
+    /// The native device calendar/reminder provider (iOS EventKit; Android has
+    /// none yet). `None` until the native module installs it via
+    /// [`Host::set_device_event_store`] right after open. The device-calendar
+    /// adapter can't be added or registered without it, so adding such an
+    /// account fails cleanly on a platform that never sets it.
+    device_provider: std::sync::RwLock<Option<Arc<dyn DeviceCalendarProvider>>>,
     /// `<data_dir>/assets/sounds/` — the content-addressed custom-sound store
     /// (`<sha256>.<ext>`), the desktop `SoundsDir` twin. Imports write here, the
     /// sync round push/fetches it (DesktopSyncRoundHooks, already wired via
@@ -770,6 +777,159 @@ impl ContactSyncObserver for BridgeContactSyncObserver {
                 }
             }
         }
+    }
+}
+
+/// Error from the native device calendar / reminder store, surfaced across the
+/// foreign boundary. Mirrors [`KeychainError`]'s shape; the engine maps it to a
+/// [`cal_core::Error`] so a device failure reads like any other adapter's.
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum DeviceCalError {
+    /// The OS permission prompt was denied (or access was revoked).
+    #[error("device calendar permission denied")]
+    PermissionDenied,
+    /// No device calendar/reminder store on this platform (e.g. Android has no
+    /// system reminders app) or the store is otherwise unavailable.
+    #[error("device calendar/reminders unavailable")]
+    Unavailable,
+    /// The native store call failed.
+    #[error("device store error: {detail}")]
+    Backend { detail: String },
+}
+
+/// Foreign-side bridge to the native device calendar + reminders store (iOS
+/// EventKit `EKEvent`/`EKReminder`; Android `CalendarProvider` later). The
+/// mobile native module implements it (Swift `IosDeviceEventStore`) and installs
+/// it via [`Host::set_device_event_store`]. Containers + items cross as JSON in
+/// the `cal_core` wire shape — the native side maps `EKEvent`/`EKReminder` →
+/// `Event`/`Task`, so the Rust adapter only parses. Mirrors [`KeychainBridge`];
+/// the boundary is synchronous (the native side handles EventKit's async
+/// internally before returning).
+#[uniffi::export(with_foreign)]
+pub trait DeviceEventStoreBridge: Send + Sync {
+    /// Run the OS permission prompt for the selected entity types; `true` iff
+    /// access was granted. Drives the add-account "grant access" step.
+    fn request_access(&self, events: bool, reminders: bool) -> Result<bool, DeviceCalError>;
+    /// Whether this platform exposes a reminders/tasks store (iOS yes, Android
+    /// no) — gates the Tasks capability on the device adapter.
+    fn supports_reminders(&self) -> bool;
+    /// JSON `Vec<Calendar>`.
+    fn list_calendars(&self) -> Result<String, DeviceCalError>;
+    /// JSON `Vec<Event>` for `calendar_id` within `[start, end]` (RFC 3339).
+    fn get_events(
+        &self,
+        calendar_id: String,
+        start: String,
+        end: String,
+    ) -> Result<String, DeviceCalError>;
+    /// `event_json` is a `NewEvent`; returns the created `Event` JSON.
+    fn create_event(
+        &self,
+        calendar_id: String,
+        event_json: String,
+    ) -> Result<String, DeviceCalError>;
+    /// `event_json` is an `Event`; returns the updated `Event` JSON.
+    fn update_event(&self, event_json: String) -> Result<String, DeviceCalError>;
+    fn delete_event(&self, event_id: String) -> Result<(), DeviceCalError>;
+    /// JSON `Vec<TaskList>` (the device's reminder lists).
+    fn list_reminder_lists(&self) -> Result<String, DeviceCalError>;
+    /// JSON `Vec<Task>` for one reminder list.
+    fn get_reminders(&self, list_id: String) -> Result<String, DeviceCalError>;
+    /// `task_json` is a `NewTask`; returns the created `Task` JSON.
+    fn create_reminder(
+        &self,
+        list_id: String,
+        task_json: String,
+    ) -> Result<String, DeviceCalError>;
+    /// `task_json` is a `Task`; returns the updated `Task` JSON.
+    fn update_reminder(&self, task_json: String) -> Result<String, DeviceCalError>;
+    fn delete_reminder(&self, task_id: String) -> Result<(), DeviceCalError>;
+}
+
+/// Adapts a foreign [`DeviceEventStoreBridge`] to the engine-side
+/// [`DeviceCalendarProvider`] the device adapter delegates to. Mirrors
+/// [`BridgeSecretStore`].
+struct BridgeDeviceProvider {
+    bridge: Arc<dyn DeviceEventStoreBridge>,
+}
+
+fn to_core_dev_err(e: DeviceCalError) -> cal_core::Error {
+    match e {
+        DeviceCalError::PermissionDenied => {
+            cal_core::Error::Unsupported("device calendar permission denied".into())
+        }
+        DeviceCalError::Unavailable => {
+            cal_core::Error::Unsupported("device calendar/reminders unavailable".into())
+        }
+        DeviceCalError::Backend { detail } => cal_core::Error::internal(detail),
+    }
+}
+
+impl DeviceCalendarProvider for BridgeDeviceProvider {
+    fn request_access(&self, events: bool, reminders: bool) -> cal_core::Result<bool> {
+        self.bridge
+            .request_access(events, reminders)
+            .map_err(to_core_dev_err)
+    }
+
+    fn supports_reminders(&self) -> bool {
+        self.bridge.supports_reminders()
+    }
+
+    fn list_calendars(&self) -> cal_core::Result<String> {
+        self.bridge.list_calendars().map_err(to_core_dev_err)
+    }
+
+    fn get_events(&self, calendar_id: &str, start: &str, end: &str) -> cal_core::Result<String> {
+        self.bridge
+            .get_events(calendar_id.to_string(), start.to_string(), end.to_string())
+            .map_err(to_core_dev_err)
+    }
+
+    fn create_event(&self, calendar_id: &str, event_json: &str) -> cal_core::Result<String> {
+        self.bridge
+            .create_event(calendar_id.to_string(), event_json.to_string())
+            .map_err(to_core_dev_err)
+    }
+
+    fn update_event(&self, event_json: &str) -> cal_core::Result<String> {
+        self.bridge
+            .update_event(event_json.to_string())
+            .map_err(to_core_dev_err)
+    }
+
+    fn delete_event(&self, event_id: &str) -> cal_core::Result<()> {
+        self.bridge
+            .delete_event(event_id.to_string())
+            .map_err(to_core_dev_err)
+    }
+
+    fn list_reminder_lists(&self) -> cal_core::Result<String> {
+        self.bridge.list_reminder_lists().map_err(to_core_dev_err)
+    }
+
+    fn get_reminders(&self, list_id: &str) -> cal_core::Result<String> {
+        self.bridge
+            .get_reminders(list_id.to_string())
+            .map_err(to_core_dev_err)
+    }
+
+    fn create_reminder(&self, list_id: &str, task_json: &str) -> cal_core::Result<String> {
+        self.bridge
+            .create_reminder(list_id.to_string(), task_json.to_string())
+            .map_err(to_core_dev_err)
+    }
+
+    fn update_reminder(&self, task_json: &str) -> cal_core::Result<String> {
+        self.bridge
+            .update_reminder(task_json.to_string())
+            .map_err(to_core_dev_err)
+    }
+
+    fn delete_reminder(&self, task_id: &str) -> cal_core::Result<()> {
+        self.bridge
+            .delete_reminder(task_id.to_string())
+            .map_err(to_core_dev_err)
     }
 }
 
@@ -1937,6 +2097,28 @@ fn restore_adapter_from_prefs(
     }
 }
 
+/// Device-calendar helpers that take the host-internal
+/// [`DeviceCalendarProvider`] (not a UniFFI type), so they live OUTSIDE the
+/// `#[uniffi::export]` block — UniFFI must not try to expose them.
+impl Host {
+    /// Snapshot the installed device provider, if any.
+    fn device_provider(&self) -> Option<Arc<dyn DeviceCalendarProvider>> {
+        self.device_provider.read().ok().and_then(|g| g.clone())
+    }
+
+    /// Build the device adapter over `provider` and insert it into the registry
+    /// under `account_id` (Calendar always; Tasks only where the provider has a
+    /// reminders store, i.e. iOS).
+    fn register_device_adapter(&self, account_id: &str, provider: Arc<dyn DeviceCalendarProvider>) {
+        let supports_reminders = provider.supports_reminders();
+        let adapter = Arc::new(DeviceAdapter::new(provider));
+        let cal: Arc<dyn cal_core::CalendarFeature> = adapter.clone();
+        let tasks: Option<Arc<dyn cal_core::TasksFeature>> =
+            supports_reminders.then_some(adapter as Arc<dyn cal_core::TasksFeature>);
+        self.registry.register_host_adapter(account_id, Some(cal), tasks);
+    }
+}
+
 #[uniffi::export]
 impl Host {
     /// Open the on-device database at `db_path`, register every bundled
@@ -2096,6 +2278,7 @@ impl Host {
             cache_refresher,
             contact_sync,
             contact_sync_observer,
+            device_provider: std::sync::RwLock::new(None),
             sounds_dir,
         }))
     }
@@ -2134,6 +2317,7 @@ impl Host {
                 | AdapterKind::Ews
                 | AdapterKind::Vikunja
                 | AdapterKind::Todoist
+                | AdapterKind::DeviceCalendar
         ) {
             return Err(StoreError::InvalidField {
                 field: "adapter_kind".to_string(),
@@ -2144,6 +2328,25 @@ impl Host {
             });
         }
 
+        // The device-calendar account is host-internal: it carries no remote
+        // credential (access is the OS permission prompt, run via
+        // `request_device_calendar_access` before this call) and needs the native
+        // bridge to register. Bail early if the bridge isn't installed (e.g. the
+        // kind was requested on a platform without one) so we never persist a row
+        // that can't come up.
+        let is_device = req.adapter_kind == AdapterKind::DeviceCalendar;
+        let device_provider = if is_device {
+            Some(
+                self.device_provider()
+                    .ok_or_else(|| StoreError::InvalidField {
+                        field: "adapter_kind".to_string(),
+                        detail: "device calendar is not available on this platform".to_string(),
+                    })?,
+            )
+        } else {
+            None
+        };
+
         // Pre-persist credential smoke-test (desktop parity): probe the entered
         // creds with an ephemeral adapter BEFORE writing any row, so a bad
         // password / unreachable host fails here instead of leaving a
@@ -2151,8 +2354,11 @@ impl Host {
         // Gated out of unit-test builds: the probe does live network (an on-device
         // concern, like the test_account_json probe tests); the no-network
         // validation branches stay covered. Production always smoke-tests.
+        // The device adapter has no remote endpoint to probe (access is the OS
+        // permission grant, already obtained); every other non-local kind smoke-
+        // tests its credentials here.
         #[cfg(not(test))]
-        {
+        if !is_device {
             self.probe_account(req.adapter_kind, &req.config_json, req.secret.as_deref())?;
         }
 
@@ -2189,9 +2395,13 @@ impl Host {
             );
         }
 
-        // Register the freshly created external adapter. A failure is
-        // fatal: drop the secrets + row so keychain/DB/registry stay in step.
-        if req.adapter_kind != AdapterKind::Local {
+        // Register the freshly created adapter. A failure is fatal: drop the
+        // secrets + row so keychain/DB/registry stay in step.
+        if let Some(provider) = device_provider {
+            // Host-internal device adapter — insert directly (no plugin, no
+            // secret, can't fail). The provider's presence was checked above.
+            self.register_device_adapter(&created.id, provider);
+        } else if req.adapter_kind != AdapterKind::Local {
             if let Err(err) = self.registry.register(&created) {
                 let _ = self.secret_store.delete_all(&created.id);
                 let _ = repo.delete(&created.id);
@@ -2203,9 +2413,13 @@ impl Host {
 
         // Sync the new account row to other devices (non-secret metadata only;
         // the receiver surfaces the "reconnect" wizard for the device-local
-        // secret). Mirrors the desktop create_account.
-        self.writer
-            .append(SyncEvent::AccountCreated(account_payload(&created)));
+        // secret). Mirrors the desktop create_account. The device-calendar
+        // account is the exception (Option A): it is DEVICE-LOCAL and never
+        // synced, so other devices never receive a kind they can't construct.
+        if !is_device {
+            self.writer
+                .append(SyncEvent::AccountCreated(account_payload(&created)));
+        }
 
         to_json(&created)
     }
@@ -2229,10 +2443,19 @@ impl Host {
         let _ = self.secret_store.delete_all(&account_id);
         let shared = self.db.shared();
         let repo = AccountsRepo::new(&shared);
+        // A device-local account was never synced (Option A) — don't broadcast a
+        // deletion for a row the user's other devices never had. Check before the
+        // row is gone.
+        let is_device = matches!(
+            repo.get(&account_id),
+            Ok(Some(account)) if account.adapter_kind == AdapterKind::DeviceCalendar
+        );
         repo.delete(&account_id).map_err(acc_err)?;
         // Propagate the deletion to other devices (cascades secrets there too).
-        self.writer
-            .append(SyncEvent::AccountDeleted(IdPayload { id: account_id }));
+        if !is_device {
+            self.writer
+                .append(SyncEvent::AccountDeleted(IdPayload { id: account_id }));
+        }
         Ok(())
     }
 
@@ -2250,8 +2473,13 @@ impl Host {
         let account = AccountsRepo::new(&shared)
             .rename(&id, trimmed)
             .map_err(acc_err)?;
-        self.writer
-            .append(SyncEvent::AccountUpdated(account_payload(&account)));
+        // Device-local accounts are never synced (Option A): keep the rename
+        // device-local too, so no other device receives an update for a row it
+        // doesn't have.
+        if account.adapter_kind != AdapterKind::DeviceCalendar {
+            self.writer
+                .append(SyncEvent::AccountUpdated(account_payload(&account)));
+        }
         to_json(&account)
     }
 
@@ -4822,6 +5050,57 @@ impl Host {
     /// backgrounded). Same fire-and-forget warm pass as the manual refresh.
     pub fn warm_cache_on_foreground(&self) {
         self.refresh_external_cache();
+    }
+
+    // ─── Device calendar + reminders (iOS EventKit / Android CalendarProvider) ───
+    //
+    // Mobile-only, host-internal: the adapter wraps a native bridge the OS module
+    // installs after open. Its account is DEVICE-LOCAL — create/delete/rename do
+    // NOT emit `account.*` sync events (see `create_account_json`), so it never
+    // appears on the user's other devices, and the cross-device applier never
+    // sees a kind it can't construct.
+
+    /// Install the native device calendar/reminder bridge (iOS today; Android
+    /// has none yet). Stores it and registers any already-persisted
+    /// device-calendar account so it's routable without an app restart (bootstrap
+    /// at `open` skipped it — no bridge yet). The native module calls this once,
+    /// right after [`Host::open`].
+    pub fn set_device_event_store(&self, bridge: Arc<dyn DeviceEventStoreBridge>) {
+        let provider: Arc<dyn DeviceCalendarProvider> = Arc::new(BridgeDeviceProvider { bridge });
+        if let Ok(mut guard) = self.device_provider.write() {
+            *guard = Some(Arc::clone(&provider));
+        }
+        let shared = self.db.shared();
+        let repo = AccountsRepo::new(&shared);
+        if let Ok(accounts) = repo.list() {
+            for account in accounts {
+                if account.adapter_kind == AdapterKind::DeviceCalendar {
+                    self.register_device_adapter(&account.id, Arc::clone(&provider));
+                }
+            }
+        }
+    }
+
+    /// Run the OS permission prompt for the device calendar / reminders. Drives
+    /// the add-account "grant access" step: the UI calls this, and on `true`
+    /// proceeds to `create_account` for the `device_calendar` kind. An
+    /// `InvalidField` means no native bridge is installed (e.g. Android).
+    pub fn request_device_calendar_access(
+        &self,
+        events: bool,
+        reminders: bool,
+    ) -> Result<bool, StoreError> {
+        let provider = self
+            .device_provider()
+            .ok_or_else(|| StoreError::InvalidField {
+                field: "adapter_kind".to_string(),
+                detail: "device calendar is not available on this platform".to_string(),
+            })?;
+        provider
+            .request_access(events, reminders)
+            .map_err(|e| StoreError::Storage {
+                detail: e.to_string(),
+            })
     }
 
     // ─── Contact sync (§10.5) ────────────────────────────────────────────────────

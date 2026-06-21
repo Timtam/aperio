@@ -39,6 +39,11 @@ cal-core = { workspace = true }
 # re-implementation. `rusqlite` (bundled) opens the sandbox database file.
 aperio-db.workspace = true
 cal-adapter-local.workspace = true
+# The device-local calendar + reminders adapter (iOS EventKit / Android
+# CalendarProvider). Host-internal — the cal-ffi host builds it over the native
+# `DeviceEventStoreBridge` and inserts it into the registry directly (it can't be
+# a dlopen plugin; it needs the injected native seam). Mobile-only by living here.
+cal-adapter-device-calendar.workspace = true
 rusqlite.workspace = true
 # The shared, Tauri-free host (DbHandle + AccountsRepo + AdapterRegistry) and
 # the static plugin registry. `host-plugins` links the bundled adapter `-plugin`

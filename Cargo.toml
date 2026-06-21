@@ -17,6 +17,10 @@ members = [
     "crates/cal-adapter-caldav",
     "crates/cal-adapter-ical",
     "crates/cal-adapter-local",
+    # Device-local calendar + reminders (iOS EventKit / Android CalendarProvider).
+    # Host-internal like cal-adapter-local (no -plugin/-cdylib split): it needs the
+    # native EventStore bridge the cal-ffi host injects, so it is never dlopen-ed.
+    "crates/cal-adapter-device-calendar",
     "crates/cal-adapter-vikunja",
     "crates/cal-adapter-todoist",
     "crates/cal-adapter-ical-plugin",
@@ -128,6 +132,7 @@ type_complexity = "allow"
 aperio-db = { path = "crates/aperio-db" }
 cal-core = { path = "crates/cal-core" }
 cal-adapter-local = { path = "crates/cal-adapter-local" }
+cal-adapter-device-calendar = { path = "crates/cal-adapter-device-calendar" }
 host-core = { path = "crates/host-core" }
 # default-features off: the sole consumer (cal-ffi) selects adapters per-feature
 # so the mobile build can drop adapters it doesn't ship (e.g. sync-adapter-local).

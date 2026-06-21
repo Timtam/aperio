@@ -191,7 +191,12 @@ impl AdapterRegistry {
             }
         };
         for account in accounts {
-            if account.adapter_kind == AdapterKind::Local {
+            // Local is host-internal; DeviceCalendar is built + inserted by the
+            // cal-ffi layer once its native bridge is set. Neither registers here.
+            if matches!(
+                account.adapter_kind,
+                AdapterKind::Local | AdapterKind::DeviceCalendar
+            ) {
                 continue;
             }
             match self.try_register(&account) {
@@ -225,6 +230,34 @@ impl AdapterRegistry {
     /// without an app restart.
     pub fn register(&self, account: &Account) -> Result<(), RegistryError> {
         self.try_register(account)
+    }
+
+    /// Insert a host-constructed (non-plugin) adapter's feature surfaces
+    /// directly under `account_id`. The mobile device-calendar adapter is built
+    /// in the cal-ffi layer — it wraps the injected native EventStore bridge, so
+    /// it can't come through the plugin manager — and registers itself here.
+    /// `cal` and `tasks` are usually clones of the same `Arc<DeviceAdapter>`
+    /// coerced to each trait object (it implements both). Re-registering an
+    /// account id overwrites the prior entry. Routes are filled lazily by the
+    /// next `list_calendars` / `list_task_lists`, as for plugin adapters.
+    pub fn register_host_adapter(
+        &self,
+        account_id: &str,
+        cal: Option<Arc<dyn CalendarFeature>>,
+        tasks: Option<Arc<dyn TasksFeature>>,
+    ) {
+        if let Some(cal) = cal {
+            self.external_cal
+                .write()
+                .expect("registry cal poison")
+                .insert(account_id.to_string(), cal);
+        }
+        if let Some(tasks) = tasks {
+            self.external_tasks
+                .write()
+                .expect("registry tasks poison")
+                .insert(account_id.to_string(), tasks);
+        }
     }
 
     /// Drop the adapter for `account_id`. Called from
@@ -716,6 +749,10 @@ impl AdapterRegistry {
     fn try_register(&self, account: &Account) -> Result<(), RegistryError> {
         match account.adapter_kind {
             AdapterKind::Local => Ok(()),
+            // Built + inserted by the cal-ffi host layer (it needs the native
+            // EventStore bridge), so the generic plugin path is a no-op here —
+            // same shape as `Local`.
+            AdapterKind::DeviceCalendar => Ok(()),
             AdapterKind::Caldav => self.register_caldav(account),
             AdapterKind::Ical => self.register_ical(account),
             AdapterKind::Google => self.register_google(account),

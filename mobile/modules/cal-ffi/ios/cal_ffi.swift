@@ -1013,6 +1013,684 @@ public func FfiConverterTypeContactSyncObserverBridge_lower(_ value: ContactSync
 
 
 /**
+ * Foreign-side bridge to the native device calendar + reminders store (iOS
+ * EventKit `EKEvent`/`EKReminder`; Android `CalendarProvider` later). The
+ * mobile native module implements it (Swift `IosDeviceEventStore`) and installs
+ * it via [`Host::set_device_event_store`]. Containers + items cross as JSON in
+ * the `cal_core` wire shape — the native side maps `EKEvent`/`EKReminder` →
+ * `Event`/`Task`, so the Rust adapter only parses. Mirrors [`KeychainBridge`];
+ * the boundary is synchronous (the native side handles EventKit's async
+ * internally before returning).
+ */
+public protocol DeviceEventStoreBridge: AnyObject, Sendable {
+    
+    /**
+     * Run the OS permission prompt for the selected entity types; `true` iff
+     * access was granted. Drives the add-account "grant access" step.
+     */
+    func requestAccess(events: Bool, reminders: Bool) throws  -> Bool
+    
+    /**
+     * Whether this platform exposes a reminders/tasks store (iOS yes, Android
+     * no) — gates the Tasks capability on the device adapter.
+     */
+    func supportsReminders()  -> Bool
+    
+    /**
+     * JSON `Vec<Calendar>`.
+     */
+    func listCalendars() throws  -> String
+    
+    /**
+     * JSON `Vec<Event>` for `calendar_id` within `[start, end]` (RFC 3339).
+     */
+    func getEvents(calendarId: String, start: String, end: String) throws  -> String
+    
+    /**
+     * `event_json` is a `NewEvent`; returns the created `Event` JSON.
+     */
+    func createEvent(calendarId: String, eventJson: String) throws  -> String
+    
+    /**
+     * `event_json` is an `Event`; returns the updated `Event` JSON.
+     */
+    func updateEvent(eventJson: String) throws  -> String
+    
+    func deleteEvent(eventId: String) throws 
+    
+    /**
+     * JSON `Vec<TaskList>` (the device's reminder lists).
+     */
+    func listReminderLists() throws  -> String
+    
+    /**
+     * JSON `Vec<Task>` for one reminder list.
+     */
+    func getReminders(listId: String) throws  -> String
+    
+    /**
+     * `task_json` is a `NewTask`; returns the created `Task` JSON.
+     */
+    func createReminder(listId: String, taskJson: String) throws  -> String
+    
+    /**
+     * `task_json` is a `Task`; returns the updated `Task` JSON.
+     */
+    func updateReminder(taskJson: String) throws  -> String
+    
+    func deleteReminder(taskId: String) throws 
+    
+}
+/**
+ * Foreign-side bridge to the native device calendar + reminders store (iOS
+ * EventKit `EKEvent`/`EKReminder`; Android `CalendarProvider` later). The
+ * mobile native module implements it (Swift `IosDeviceEventStore`) and installs
+ * it via [`Host::set_device_event_store`]. Containers + items cross as JSON in
+ * the `cal_core` wire shape — the native side maps `EKEvent`/`EKReminder` →
+ * `Event`/`Task`, so the Rust adapter only parses. Mirrors [`KeychainBridge`];
+ * the boundary is synchronous (the native side handles EventKit's async
+ * internally before returning).
+ */
+open class DeviceEventStoreBridgeImpl: DeviceEventStoreBridge, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_cal_ffi_fn_clone_deviceeventstorebridge(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_cal_ffi_fn_free_deviceeventstorebridge(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * Run the OS permission prompt for the selected entity types; `true` iff
+     * access was granted. Drives the add-account "grant access" step.
+     */
+open func requestAccess(events: Bool, reminders: Bool)throws  -> Bool  {
+    return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeDeviceCalError_lift) {
+    uniffi_cal_ffi_fn_method_deviceeventstorebridge_request_access(
+            self.uniffiCloneHandle(),
+        FfiConverterBool.lower(events),
+        FfiConverterBool.lower(reminders),$0
+    )
+})
+}
+    
+    /**
+     * Whether this platform exposes a reminders/tasks store (iOS yes, Android
+     * no) — gates the Tasks capability on the device adapter.
+     */
+open func supportsReminders() -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_cal_ffi_fn_method_deviceeventstorebridge_supports_reminders(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * JSON `Vec<Calendar>`.
+     */
+open func listCalendars()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeDeviceCalError_lift) {
+    uniffi_cal_ffi_fn_method_deviceeventstorebridge_list_calendars(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * JSON `Vec<Event>` for `calendar_id` within `[start, end]` (RFC 3339).
+     */
+open func getEvents(calendarId: String, start: String, end: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeDeviceCalError_lift) {
+    uniffi_cal_ffi_fn_method_deviceeventstorebridge_get_events(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(calendarId),
+        FfiConverterString.lower(start),
+        FfiConverterString.lower(end),$0
+    )
+})
+}
+    
+    /**
+     * `event_json` is a `NewEvent`; returns the created `Event` JSON.
+     */
+open func createEvent(calendarId: String, eventJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeDeviceCalError_lift) {
+    uniffi_cal_ffi_fn_method_deviceeventstorebridge_create_event(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(calendarId),
+        FfiConverterString.lower(eventJson),$0
+    )
+})
+}
+    
+    /**
+     * `event_json` is an `Event`; returns the updated `Event` JSON.
+     */
+open func updateEvent(eventJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeDeviceCalError_lift) {
+    uniffi_cal_ffi_fn_method_deviceeventstorebridge_update_event(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(eventJson),$0
+    )
+})
+}
+    
+open func deleteEvent(eventId: String)throws   {try rustCallWithError(FfiConverterTypeDeviceCalError_lift) {
+    uniffi_cal_ffi_fn_method_deviceeventstorebridge_delete_event(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(eventId),$0
+    )
+}
+}
+    
+    /**
+     * JSON `Vec<TaskList>` (the device's reminder lists).
+     */
+open func listReminderLists()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeDeviceCalError_lift) {
+    uniffi_cal_ffi_fn_method_deviceeventstorebridge_list_reminder_lists(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * JSON `Vec<Task>` for one reminder list.
+     */
+open func getReminders(listId: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeDeviceCalError_lift) {
+    uniffi_cal_ffi_fn_method_deviceeventstorebridge_get_reminders(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(listId),$0
+    )
+})
+}
+    
+    /**
+     * `task_json` is a `NewTask`; returns the created `Task` JSON.
+     */
+open func createReminder(listId: String, taskJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeDeviceCalError_lift) {
+    uniffi_cal_ffi_fn_method_deviceeventstorebridge_create_reminder(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(listId),
+        FfiConverterString.lower(taskJson),$0
+    )
+})
+}
+    
+    /**
+     * `task_json` is a `Task`; returns the updated `Task` JSON.
+     */
+open func updateReminder(taskJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeDeviceCalError_lift) {
+    uniffi_cal_ffi_fn_method_deviceeventstorebridge_update_reminder(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(taskJson),$0
+    )
+})
+}
+    
+open func deleteReminder(taskId: String)throws   {try rustCallWithError(FfiConverterTypeDeviceCalError_lift) {
+    uniffi_cal_ffi_fn_method_deviceeventstorebridge_delete_reminder(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(taskId),$0
+    )
+}
+}
+    
+
+    
+}
+
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceDeviceEventStoreBridge {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // Store the vtable directly.
+    static let vtable: UniffiVTableCallbackInterfaceDeviceEventStoreBridge = UniffiVTableCallbackInterfaceDeviceEventStoreBridge(
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            do {
+                try FfiConverterTypeDeviceEventStoreBridge.handleMap.remove(handle: uniffiHandle)
+            } catch {
+                print("Uniffi callback interface DeviceEventStoreBridge: handle missing in uniffiFree")
+            }
+        },
+        uniffiClone: { (uniffiHandle: UInt64) -> UInt64 in
+            do {
+                return try FfiConverterTypeDeviceEventStoreBridge.handleMap.clone(handle: uniffiHandle)
+            } catch {
+                fatalError("Uniffi callback interface DeviceEventStoreBridge: handle missing in uniffiClone")
+            }
+        },
+        requestAccess: { (
+            uniffiHandle: UInt64,
+            events: Int8,
+            reminders: Int8,
+            uniffiOutReturn: UnsafeMutablePointer<Int8>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> Bool in
+                guard let uniffiObj = try? FfiConverterTypeDeviceEventStoreBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return try uniffiObj.requestAccess(
+                     events: try FfiConverterBool.lift(events),
+                     reminders: try FfiConverterBool.lift(reminders)
+                )
+            }
+
+            
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterBool.lower($0) }
+            uniffiTraitInterfaceCallWithError(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn,
+                lowerError: FfiConverterTypeDeviceCalError_lower
+            )
+        },
+        supportsReminders: { (
+            uniffiHandle: UInt64,
+            uniffiOutReturn: UnsafeMutablePointer<Int8>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> Bool in
+                guard let uniffiObj = try? FfiConverterTypeDeviceEventStoreBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.supportsReminders(
+                )
+            }
+
+            
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterBool.lower($0) }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        listCalendars: { (
+            uniffiHandle: UInt64,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> String in
+                guard let uniffiObj = try? FfiConverterTypeDeviceEventStoreBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return try uniffiObj.listCalendars(
+                )
+            }
+
+            
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterString.lower($0) }
+            uniffiTraitInterfaceCallWithError(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn,
+                lowerError: FfiConverterTypeDeviceCalError_lower
+            )
+        },
+        getEvents: { (
+            uniffiHandle: UInt64,
+            calendarId: RustBuffer,
+            start: RustBuffer,
+            end: RustBuffer,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> String in
+                guard let uniffiObj = try? FfiConverterTypeDeviceEventStoreBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return try uniffiObj.getEvents(
+                     calendarId: try FfiConverterString.lift(calendarId),
+                     start: try FfiConverterString.lift(start),
+                     end: try FfiConverterString.lift(end)
+                )
+            }
+
+            
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterString.lower($0) }
+            uniffiTraitInterfaceCallWithError(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn,
+                lowerError: FfiConverterTypeDeviceCalError_lower
+            )
+        },
+        createEvent: { (
+            uniffiHandle: UInt64,
+            calendarId: RustBuffer,
+            eventJson: RustBuffer,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> String in
+                guard let uniffiObj = try? FfiConverterTypeDeviceEventStoreBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return try uniffiObj.createEvent(
+                     calendarId: try FfiConverterString.lift(calendarId),
+                     eventJson: try FfiConverterString.lift(eventJson)
+                )
+            }
+
+            
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterString.lower($0) }
+            uniffiTraitInterfaceCallWithError(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn,
+                lowerError: FfiConverterTypeDeviceCalError_lower
+            )
+        },
+        updateEvent: { (
+            uniffiHandle: UInt64,
+            eventJson: RustBuffer,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> String in
+                guard let uniffiObj = try? FfiConverterTypeDeviceEventStoreBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return try uniffiObj.updateEvent(
+                     eventJson: try FfiConverterString.lift(eventJson)
+                )
+            }
+
+            
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterString.lower($0) }
+            uniffiTraitInterfaceCallWithError(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn,
+                lowerError: FfiConverterTypeDeviceCalError_lower
+            )
+        },
+        deleteEvent: { (
+            uniffiHandle: UInt64,
+            eventId: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterTypeDeviceEventStoreBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return try uniffiObj.deleteEvent(
+                     eventId: try FfiConverterString.lift(eventId)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCallWithError(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn,
+                lowerError: FfiConverterTypeDeviceCalError_lower
+            )
+        },
+        listReminderLists: { (
+            uniffiHandle: UInt64,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> String in
+                guard let uniffiObj = try? FfiConverterTypeDeviceEventStoreBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return try uniffiObj.listReminderLists(
+                )
+            }
+
+            
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterString.lower($0) }
+            uniffiTraitInterfaceCallWithError(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn,
+                lowerError: FfiConverterTypeDeviceCalError_lower
+            )
+        },
+        getReminders: { (
+            uniffiHandle: UInt64,
+            listId: RustBuffer,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> String in
+                guard let uniffiObj = try? FfiConverterTypeDeviceEventStoreBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return try uniffiObj.getReminders(
+                     listId: try FfiConverterString.lift(listId)
+                )
+            }
+
+            
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterString.lower($0) }
+            uniffiTraitInterfaceCallWithError(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn,
+                lowerError: FfiConverterTypeDeviceCalError_lower
+            )
+        },
+        createReminder: { (
+            uniffiHandle: UInt64,
+            listId: RustBuffer,
+            taskJson: RustBuffer,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> String in
+                guard let uniffiObj = try? FfiConverterTypeDeviceEventStoreBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return try uniffiObj.createReminder(
+                     listId: try FfiConverterString.lift(listId),
+                     taskJson: try FfiConverterString.lift(taskJson)
+                )
+            }
+
+            
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterString.lower($0) }
+            uniffiTraitInterfaceCallWithError(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn,
+                lowerError: FfiConverterTypeDeviceCalError_lower
+            )
+        },
+        updateReminder: { (
+            uniffiHandle: UInt64,
+            taskJson: RustBuffer,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> String in
+                guard let uniffiObj = try? FfiConverterTypeDeviceEventStoreBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return try uniffiObj.updateReminder(
+                     taskJson: try FfiConverterString.lift(taskJson)
+                )
+            }
+
+            
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterString.lower($0) }
+            uniffiTraitInterfaceCallWithError(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn,
+                lowerError: FfiConverterTypeDeviceCalError_lower
+            )
+        },
+        deleteReminder: { (
+            uniffiHandle: UInt64,
+            taskId: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterTypeDeviceEventStoreBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return try uniffiObj.deleteReminder(
+                     taskId: try FfiConverterString.lift(taskId)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCallWithError(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn,
+                lowerError: FfiConverterTypeDeviceCalError_lower
+            )
+        }
+    )
+
+    // Rust stores this pointer for future callback invocations, so it must live
+    // for the process lifetime (not just for the init function call).
+    static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceDeviceEventStoreBridge> = {
+        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceDeviceEventStoreBridge>.allocate(capacity: 1)
+        ptr.initialize(to: vtable)
+        return UnsafePointer(ptr)
+    }()
+}
+
+private func uniffiCallbackInitDeviceEventStoreBridge() {
+    uniffi_cal_ffi_fn_init_callback_vtable_deviceeventstorebridge(UniffiCallbackInterfaceDeviceEventStoreBridge.vtablePtr)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDeviceEventStoreBridge: FfiConverter {
+    fileprivate static let handleMap = UniffiHandleMap<DeviceEventStoreBridge>()
+
+    typealias FfiType = UInt64
+    typealias SwiftType = DeviceEventStoreBridge
+
+    public static func lift(_ handle: UInt64) throws -> DeviceEventStoreBridge {
+        if ((handle & 1) == 0) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return DeviceEventStoreBridgeImpl(unsafeFromHandle: handle)
+        } else {
+            // Swift-generated handle, get the object from the handle map
+            return try handleMap.remove(handle: handle)
+        }
+    }
+
+    public static func lower(_ value: DeviceEventStoreBridge) -> UInt64 {
+         if let rustImpl = value as? DeviceEventStoreBridgeImpl {
+             // Rust-implemented object.  Clone the handle and return it
+            return rustImpl.uniffiCloneHandle()
+         } else {
+            // Swift object, generate a new vtable handle and return that.
+            return handleMap.insert(obj: value)
+         }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DeviceEventStoreBridge {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: DeviceEventStoreBridge, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDeviceEventStoreBridge_lift(_ handle: UInt64) throws -> DeviceEventStoreBridge {
+    return try FfiConverterTypeDeviceEventStoreBridge.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDeviceEventStoreBridge_lower(_ value: DeviceEventStoreBridge) -> UInt64 {
+    return FfiConverterTypeDeviceEventStoreBridge.lower(value)
+}
+
+
+
+
+
+
+/**
  * The mobile app's handle to the full on-device engine.
  */
 public protocol HostProtocol: AnyObject, Sendable {
@@ -1659,6 +2337,14 @@ public protocol HostProtocol: AnyObject, Sendable {
     func reparentTaskListJson(id: String, parentId: String?) throws  -> String
     
     /**
+     * Run the OS permission prompt for the device calendar / reminders. Drives
+     * the add-account "grant access" step: the UI calls this, and on `true`
+     * proceeds to `create_account` for the `device_calendar` kind. An
+     * `InvalidField` means no native bridge is installed (e.g. Android).
+     */
+    func requestDeviceCalendarAccess(events: Bool, reminders: Bool) throws  -> Bool
+    
+    /**
      * Apply the user's resolution for conflict `id`. `choice` is `"keep_local"`
      * | `"take_remote"` | `"save_both"`. `keep_local` is pure bookkeeping (the
      * merge already kept the local value); `take_remote` writes the remote value
@@ -1772,6 +2458,15 @@ public protocol HostProtocol: AnyObject, Sendable {
      * `color_label_id` `None` clears it.
      */
     func setContainerColorLabel(containerId: String, kind: String, colorLabelId: String?) throws 
+    
+    /**
+     * Install the native device calendar/reminder bridge (iOS today; Android
+     * has none yet). Stores it and registers any already-persisted
+     * device-calendar account so it's routable without an app restart (bootstrap
+     * at `open` skipped it — no bridge yet). The native module calls this once,
+     * right after [`Host::open`].
+     */
+    func setDeviceEventStore(bridge: DeviceEventStoreBridge) 
     
     /**
      * Set or clear an EVENT's colour override (DESIGN §8.2). A LOCAL event — and
@@ -3229,6 +3924,22 @@ open func reparentTaskListJson(id: String, parentId: String?)throws  -> String  
 }
     
     /**
+     * Run the OS permission prompt for the device calendar / reminders. Drives
+     * the add-account "grant access" step: the UI calls this, and on `true`
+     * proceeds to `create_account` for the `device_calendar` kind. An
+     * `InvalidField` means no native bridge is installed (e.g. Android).
+     */
+open func requestDeviceCalendarAccess(events: Bool, reminders: Bool)throws  -> Bool  {
+    return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_request_device_calendar_access(
+            self.uniffiCloneHandle(),
+        FfiConverterBool.lower(events),
+        FfiConverterBool.lower(reminders),$0
+    )
+})
+}
+    
+    /**
      * Apply the user's resolution for conflict `id`. `choice` is `"keep_local"`
      * | `"take_remote"` | `"save_both"`. `keep_local` is pure bookkeeping (the
      * merge already kept the local value); `take_remote` writes the remote value
@@ -3431,6 +4142,21 @@ open func setContainerColorLabel(containerId: String, kind: String, colorLabelId
         FfiConverterString.lower(containerId),
         FfiConverterString.lower(kind),
         FfiConverterOptionString.lower(colorLabelId),$0
+    )
+}
+}
+    
+    /**
+     * Install the native device calendar/reminder bridge (iOS today; Android
+     * has none yet). Stores it and registers any already-persisted
+     * device-calendar account so it's routable without an app restart (bootstrap
+     * at `open` skipped it — no bridge yet). The native module calls this once,
+     * right after [`Host::open`].
+     */
+open func setDeviceEventStore(bridge: DeviceEventStoreBridge)  {try! rustCall() {
+    uniffi_cal_ffi_fn_method_host_set_device_event_store(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeDeviceEventStoreBridge_lower(bridge),$0
     )
 }
 }
@@ -5516,6 +6242,107 @@ public func FfiConverterTypeTaskRecurrence_lower(_ value: TaskRecurrence) -> Rus
 
 
 /**
+ * Error from the native device calendar / reminder store, surfaced across the
+ * foreign boundary. Mirrors [`KeychainError`]'s shape; the engine maps it to a
+ * [`cal_core::Error`] so a device failure reads like any other adapter's.
+ */
+public enum DeviceCalError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
+
+    
+    
+    /**
+     * The OS permission prompt was denied (or access was revoked).
+     */
+    case PermissionDenied
+    /**
+     * No device calendar/reminder store on this platform (e.g. Android has no
+     * system reminders app) or the store is otherwise unavailable.
+     */
+    case Unavailable
+    /**
+     * The native store call failed.
+     */
+    case Backend(detail: String
+    )
+
+    
+
+    
+
+    
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+    
+}
+
+#if compiler(>=6)
+extension DeviceCalError: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDeviceCalError: FfiConverterRustBuffer {
+    typealias SwiftType = DeviceCalError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DeviceCalError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .PermissionDenied
+        case 2: return .Unavailable
+        case 3: return .Backend(
+            detail: try FfiConverterString.read(from: &buf)
+            )
+
+         default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: DeviceCalError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        
+        case .PermissionDenied:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .Unavailable:
+            writeInt(&buf, Int32(2))
+        
+        
+        case let .Backend(detail):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(detail, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDeviceCalError_lift(_ buf: RustBuffer) throws -> DeviceCalError {
+    return try FfiConverterTypeDeviceCalError.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDeviceCalError_lower(_ value: DeviceCalError) -> RustBuffer {
+    return FfiConverterTypeDeviceCalError.lower(value)
+}
+
+
+/**
  * Errors the foreign keychain implementation can raise. Mirrors
  * [`sync_engine::SecretError`] so the `NotFound` distinction the
  * registry branches on (e.g. an absent optional iCal password) survives
@@ -7165,6 +7992,42 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_contactsyncobserverbridge_contacts_synced() != 18316) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_deviceeventstorebridge_request_access() != 25854) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_deviceeventstorebridge_supports_reminders() != 8790) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_deviceeventstorebridge_list_calendars() != 21104) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_deviceeventstorebridge_get_events() != 44133) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_deviceeventstorebridge_create_event() != 30318) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_deviceeventstorebridge_update_event() != 25028) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_deviceeventstorebridge_delete_event() != 64382) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_deviceeventstorebridge_list_reminder_lists() != 52802) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_deviceeventstorebridge_get_reminders() != 49808) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_deviceeventstorebridge_create_reminder() != 63457) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_deviceeventstorebridge_update_reminder() != 16967) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_deviceeventstorebridge_delete_reminder() != 59949) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json() != 45743) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -7384,6 +8247,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_reparent_task_list_json() != 49367) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_request_device_calendar_access() != 23788) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_resolve_sync_conflict() != 25566) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -7421,6 +8287,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_set_container_color_label() != 32220) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_set_device_event_store() != 41986) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_set_event_color() != 36971) {
@@ -7525,6 +8394,7 @@ private let initializationResult: InitializationResult = {
 
     uniffiCallbackInitCacheObserverBridge()
     uniffiCallbackInitContactSyncObserverBridge()
+    uniffiCallbackInitDeviceEventStoreBridge()
     uniffiCallbackInitKeychainBridge()
     return InitializationResult.ok
 }()

@@ -622,6 +622,42 @@ internal interface UniffiCallbackInterfaceCacheObserverBridgeMethod1 : com.sun.j
 internal interface UniffiCallbackInterfaceContactSyncObserverBridgeMethod0 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`payloadJson`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
 }
+internal interface UniffiCallbackInterfaceDeviceEventStoreBridgeMethod0 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`events`: Byte,`reminders`: Byte,`uniffiOutReturn`: ByteByReference,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfaceDeviceEventStoreBridgeMethod1 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: ByteByReference,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfaceDeviceEventStoreBridgeMethod2 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfaceDeviceEventStoreBridgeMethod3 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`calendarId`: RustBuffer.ByValue,`start`: RustBuffer.ByValue,`end`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfaceDeviceEventStoreBridgeMethod4 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`calendarId`: RustBuffer.ByValue,`eventJson`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfaceDeviceEventStoreBridgeMethod5 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`eventJson`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfaceDeviceEventStoreBridgeMethod6 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`eventId`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfaceDeviceEventStoreBridgeMethod7 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfaceDeviceEventStoreBridgeMethod8 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`listId`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfaceDeviceEventStoreBridgeMethod9 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`listId`: RustBuffer.ByValue,`taskJson`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfaceDeviceEventStoreBridgeMethod10 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`taskJson`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfaceDeviceEventStoreBridgeMethod11 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`taskId`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
+}
 internal interface UniffiCallbackInterfaceKeychainBridgeMethod0 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`accountId`: RustBuffer.ByValue,`slot`: RustBuffer.ByValue,`value`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
 }
@@ -672,6 +708,58 @@ internal open class UniffiVTableCallbackInterfaceContactSyncObserverBridge(
         `uniffiFree` = other.`uniffiFree`
         `uniffiClone` = other.`uniffiClone`
         `contactsSynced` = other.`contactsSynced`
+    }
+
+}
+@Structure.FieldOrder("uniffiFree", "uniffiClone", "requestAccess", "supportsReminders", "listCalendars", "getEvents", "createEvent", "updateEvent", "deleteEvent", "listReminderLists", "getReminders", "createReminder", "updateReminder", "deleteReminder")
+internal open class UniffiVTableCallbackInterfaceDeviceEventStoreBridge(
+    @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+    @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+    @JvmField internal var `requestAccess`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod0? = null,
+    @JvmField internal var `supportsReminders`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod1? = null,
+    @JvmField internal var `listCalendars`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod2? = null,
+    @JvmField internal var `getEvents`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod3? = null,
+    @JvmField internal var `createEvent`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod4? = null,
+    @JvmField internal var `updateEvent`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod5? = null,
+    @JvmField internal var `deleteEvent`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod6? = null,
+    @JvmField internal var `listReminderLists`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod7? = null,
+    @JvmField internal var `getReminders`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod8? = null,
+    @JvmField internal var `createReminder`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod9? = null,
+    @JvmField internal var `updateReminder`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod10? = null,
+    @JvmField internal var `deleteReminder`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod11? = null,
+) : Structure() {
+    class UniffiByValue(
+        `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+        `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+        `requestAccess`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod0? = null,
+        `supportsReminders`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod1? = null,
+        `listCalendars`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod2? = null,
+        `getEvents`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod3? = null,
+        `createEvent`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod4? = null,
+        `updateEvent`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod5? = null,
+        `deleteEvent`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod6? = null,
+        `listReminderLists`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod7? = null,
+        `getReminders`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod8? = null,
+        `createReminder`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod9? = null,
+        `updateReminder`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod10? = null,
+        `deleteReminder`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod11? = null,
+    ): UniffiVTableCallbackInterfaceDeviceEventStoreBridge(`uniffiFree`,`uniffiClone`,`requestAccess`,`supportsReminders`,`listCalendars`,`getEvents`,`createEvent`,`updateEvent`,`deleteEvent`,`listReminderLists`,`getReminders`,`createReminder`,`updateReminder`,`deleteReminder`,), Structure.ByValue
+
+   internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceDeviceEventStoreBridge) {
+        `uniffiFree` = other.`uniffiFree`
+        `uniffiClone` = other.`uniffiClone`
+        `requestAccess` = other.`requestAccess`
+        `supportsReminders` = other.`supportsReminders`
+        `listCalendars` = other.`listCalendars`
+        `getEvents` = other.`getEvents`
+        `createEvent` = other.`createEvent`
+        `updateEvent` = other.`updateEvent`
+        `deleteEvent` = other.`deleteEvent`
+        `listReminderLists` = other.`listReminderLists`
+        `getReminders` = other.`getReminders`
+        `createReminder` = other.`createReminder`
+        `updateReminder` = other.`updateReminder`
+        `deleteReminder` = other.`deleteReminder`
     }
 
 }
@@ -779,6 +867,30 @@ external fun uniffi_cal_ffi_checksum_method_cacheobserverbridge_cache_updated(
 external fun uniffi_cal_ffi_checksum_method_cacheobserverbridge_refresh_status(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_contactsyncobserverbridge_contacts_synced(
+): Short
+external fun uniffi_cal_ffi_checksum_method_deviceeventstorebridge_request_access(
+): Short
+external fun uniffi_cal_ffi_checksum_method_deviceeventstorebridge_supports_reminders(
+): Short
+external fun uniffi_cal_ffi_checksum_method_deviceeventstorebridge_list_calendars(
+): Short
+external fun uniffi_cal_ffi_checksum_method_deviceeventstorebridge_get_events(
+): Short
+external fun uniffi_cal_ffi_checksum_method_deviceeventstorebridge_create_event(
+): Short
+external fun uniffi_cal_ffi_checksum_method_deviceeventstorebridge_update_event(
+): Short
+external fun uniffi_cal_ffi_checksum_method_deviceeventstorebridge_delete_event(
+): Short
+external fun uniffi_cal_ffi_checksum_method_deviceeventstorebridge_list_reminder_lists(
+): Short
+external fun uniffi_cal_ffi_checksum_method_deviceeventstorebridge_get_reminders(
+): Short
+external fun uniffi_cal_ffi_checksum_method_deviceeventstorebridge_create_reminder(
+): Short
+external fun uniffi_cal_ffi_checksum_method_deviceeventstorebridge_update_reminder(
+): Short
+external fun uniffi_cal_ffi_checksum_method_deviceeventstorebridge_delete_reminder(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json(
 ): Short
@@ -926,6 +1038,8 @@ external fun uniffi_cal_ffi_checksum_method_host_rename_container(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_reparent_task_list_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_request_device_calendar_access(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_resolve_sync_conflict(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_respond_to_event(
@@ -951,6 +1065,8 @@ external fun uniffi_cal_ffi_checksum_method_host_set_contacts_include_read_only_
 external fun uniffi_cal_ffi_checksum_method_host_set_contacts_sync_interval(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_set_container_color_label(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_set_device_event_store(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_set_event_color(
 ): Short
@@ -1036,6 +1152,7 @@ internal object UniffiLib {
         Native.register(UniffiLib::class.java, findLibraryName(componentName = "cal_ffi"))
         uniffiCallbackInterfaceCacheObserverBridge.register(this)
         uniffiCallbackInterfaceContactSyncObserverBridge.register(this)
+        uniffiCallbackInterfaceDeviceEventStoreBridge.register(this)
         uniffiCallbackInterfaceKeychainBridge.register(this)
         
     }
@@ -1104,6 +1221,36 @@ external fun uniffi_cal_ffi_fn_free_contactsyncobserverbridge(`handle`: Long,uni
 external fun uniffi_cal_ffi_fn_init_callback_vtable_contactsyncobserverbridge(`vtable`: UniffiVTableCallbackInterfaceContactSyncObserverBridge,
 ): Unit
 external fun uniffi_cal_ffi_fn_method_contactsyncobserverbridge_contacts_synced(`ptr`: Long,`payloadJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_clone_deviceeventstorebridge(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_cal_ffi_fn_free_deviceeventstorebridge(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_init_callback_vtable_deviceeventstorebridge(`vtable`: UniffiVTableCallbackInterfaceDeviceEventStoreBridge,
+): Unit
+external fun uniffi_cal_ffi_fn_method_deviceeventstorebridge_request_access(`ptr`: Long,`events`: Byte,`reminders`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
+external fun uniffi_cal_ffi_fn_method_deviceeventstorebridge_supports_reminders(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
+external fun uniffi_cal_ffi_fn_method_deviceeventstorebridge_list_calendars(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_deviceeventstorebridge_get_events(`ptr`: Long,`calendarId`: RustBuffer.ByValue,`start`: RustBuffer.ByValue,`end`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_deviceeventstorebridge_create_event(`ptr`: Long,`calendarId`: RustBuffer.ByValue,`eventJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_deviceeventstorebridge_update_event(`ptr`: Long,`eventJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_deviceeventstorebridge_delete_event(`ptr`: Long,`eventId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_deviceeventstorebridge_list_reminder_lists(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_deviceeventstorebridge_get_reminders(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_deviceeventstorebridge_create_reminder(`ptr`: Long,`listId`: RustBuffer.ByValue,`taskJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_deviceeventstorebridge_update_reminder(`ptr`: Long,`taskJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_deviceeventstorebridge_delete_reminder(`ptr`: Long,`taskId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_clone_host(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
@@ -1257,6 +1404,8 @@ external fun uniffi_cal_ffi_fn_method_host_rename_container(`ptr`: Long,`contain
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_reparent_task_list_json(`ptr`: Long,`id`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_request_device_calendar_access(`ptr`: Long,`events`: Byte,`reminders`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
 external fun uniffi_cal_ffi_fn_method_host_resolve_sync_conflict(`ptr`: Long,`id`: Long,`choice`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_respond_to_event(`ptr`: Long,`calendarId`: RustBuffer.ByValue,`eventId`: RustBuffer.ByValue,`status`: RustBuffer.ByValue,`sendResponse`: Byte,uniffi_out_err: UniffiRustCallStatus, 
@@ -1282,6 +1431,8 @@ external fun uniffi_cal_ffi_fn_method_host_set_contacts_include_read_only_on_syn
 external fun uniffi_cal_ffi_fn_method_host_set_contacts_sync_interval(`ptr`: Long,`minutes`: Int,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
 external fun uniffi_cal_ffi_fn_method_host_set_container_color_label(`ptr`: Long,`containerId`: RustBuffer.ByValue,`kind`: RustBuffer.ByValue,`colorLabelId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_set_device_event_store(`ptr`: Long,`bridge`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_set_event_color(`ptr`: Long,`eventId`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,`colorLabelId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -1557,6 +1708,42 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_contactsyncobserverbridge_contacts_synced() != 18316.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_deviceeventstorebridge_request_access() != 25854.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_deviceeventstorebridge_supports_reminders() != 8790.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_deviceeventstorebridge_list_calendars() != 21104.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_deviceeventstorebridge_get_events() != 44133.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_deviceeventstorebridge_create_event() != 30318.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_deviceeventstorebridge_update_event() != 25028.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_deviceeventstorebridge_delete_event() != 64382.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_deviceeventstorebridge_list_reminder_lists() != 52802.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_deviceeventstorebridge_get_reminders() != 49808.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_deviceeventstorebridge_create_reminder() != 63457.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_deviceeventstorebridge_update_reminder() != 16967.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_deviceeventstorebridge_delete_reminder() != 59949.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json() != 45743.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1776,6 +1963,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_reparent_task_list_json() != 49367.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_request_device_calendar_access() != 23788.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_resolve_sync_conflict() != 25566.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1813,6 +2003,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_set_container_color_label() != 32220.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_set_device_event_store() != 41986.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_set_event_color() != 36971.toShort()) {
@@ -3039,6 +3232,770 @@ public object FfiConverterTypeContactSyncObserverBridge: FfiConverter<ContactSyn
 
 
 /**
+ * Foreign-side bridge to the native device calendar + reminders store (iOS
+ * EventKit `EKEvent`/`EKReminder`; Android `CalendarProvider` later). The
+ * mobile native module implements it (Swift `IosDeviceEventStore`) and installs
+ * it via [`Host::set_device_event_store`]. Containers + items cross as JSON in
+ * the `cal_core` wire shape — the native side maps `EKEvent`/`EKReminder` →
+ * `Event`/`Task`, so the Rust adapter only parses. Mirrors [`KeychainBridge`];
+ * the boundary is synchronous (the native side handles EventKit's async
+ * internally before returning).
+ */
+public interface DeviceEventStoreBridge {
+    
+    /**
+     * Run the OS permission prompt for the selected entity types; `true` iff
+     * access was granted. Drives the add-account "grant access" step.
+     */
+    fun `requestAccess`(`events`: kotlin.Boolean, `reminders`: kotlin.Boolean): kotlin.Boolean
+    
+    /**
+     * Whether this platform exposes a reminders/tasks store (iOS yes, Android
+     * no) — gates the Tasks capability on the device adapter.
+     */
+    fun `supportsReminders`(): kotlin.Boolean
+    
+    /**
+     * JSON `Vec<Calendar>`.
+     */
+    fun `listCalendars`(): kotlin.String
+    
+    /**
+     * JSON `Vec<Event>` for `calendar_id` within `[start, end]` (RFC 3339).
+     */
+    fun `getEvents`(`calendarId`: kotlin.String, `start`: kotlin.String, `end`: kotlin.String): kotlin.String
+    
+    /**
+     * `event_json` is a `NewEvent`; returns the created `Event` JSON.
+     */
+    fun `createEvent`(`calendarId`: kotlin.String, `eventJson`: kotlin.String): kotlin.String
+    
+    /**
+     * `event_json` is an `Event`; returns the updated `Event` JSON.
+     */
+    fun `updateEvent`(`eventJson`: kotlin.String): kotlin.String
+    
+    fun `deleteEvent`(`eventId`: kotlin.String)
+    
+    /**
+     * JSON `Vec<TaskList>` (the device's reminder lists).
+     */
+    fun `listReminderLists`(): kotlin.String
+    
+    /**
+     * JSON `Vec<Task>` for one reminder list.
+     */
+    fun `getReminders`(`listId`: kotlin.String): kotlin.String
+    
+    /**
+     * `task_json` is a `NewTask`; returns the created `Task` JSON.
+     */
+    fun `createReminder`(`listId`: kotlin.String, `taskJson`: kotlin.String): kotlin.String
+    
+    /**
+     * `task_json` is a `Task`; returns the updated `Task` JSON.
+     */
+    fun `updateReminder`(`taskJson`: kotlin.String): kotlin.String
+    
+    fun `deleteReminder`(`taskId`: kotlin.String)
+    
+    companion object
+}
+
+/**
+ * Foreign-side bridge to the native device calendar + reminders store (iOS
+ * EventKit `EKEvent`/`EKReminder`; Android `CalendarProvider` later). The
+ * mobile native module implements it (Swift `IosDeviceEventStore`) and installs
+ * it via [`Host::set_device_event_store`]. Containers + items cross as JSON in
+ * the `cal_core` wire shape — the native side maps `EKEvent`/`EKReminder` →
+ * `Event`/`Task`, so the Rust adapter only parses. Mirrors [`KeychainBridge`];
+ * the boundary is synchronous (the native side handles EventKit's async
+ * internally before returning).
+ */
+open class DeviceEventStoreBridgeImpl: Disposable, AutoCloseable, DeviceEventStoreBridge
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_cal_ffi_fn_free_deviceeventstorebridge(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_cal_ffi_fn_clone_deviceeventstorebridge(handle, status)
+        }
+    }
+
+    
+    /**
+     * Run the OS permission prompt for the selected entity types; `true` iff
+     * access was granted. Drives the add-account "grant access" step.
+     */
+    @Throws(DeviceCalException::class)override fun `requestAccess`(`events`: kotlin.Boolean, `reminders`: kotlin.Boolean): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCallWithError(DeviceCalException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_deviceeventstorebridge_request_access(
+        it,
+        FfiConverterBoolean.lower(`events`),FfiConverterBoolean.lower(`reminders`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Whether this platform exposes a reminders/tasks store (iOS yes, Android
+     * no) — gates the Tasks capability on the device adapter.
+     */override fun `supportsReminders`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_deviceeventstorebridge_supports_reminders(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * JSON `Vec<Calendar>`.
+     */
+    @Throws(DeviceCalException::class)override fun `listCalendars`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(DeviceCalException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_deviceeventstorebridge_list_calendars(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * JSON `Vec<Event>` for `calendar_id` within `[start, end]` (RFC 3339).
+     */
+    @Throws(DeviceCalException::class)override fun `getEvents`(`calendarId`: kotlin.String, `start`: kotlin.String, `end`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(DeviceCalException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_deviceeventstorebridge_get_events(
+        it,
+        FfiConverterString.lower(`calendarId`),FfiConverterString.lower(`start`),FfiConverterString.lower(`end`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * `event_json` is a `NewEvent`; returns the created `Event` JSON.
+     */
+    @Throws(DeviceCalException::class)override fun `createEvent`(`calendarId`: kotlin.String, `eventJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(DeviceCalException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_deviceeventstorebridge_create_event(
+        it,
+        FfiConverterString.lower(`calendarId`),FfiConverterString.lower(`eventJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * `event_json` is an `Event`; returns the updated `Event` JSON.
+     */
+    @Throws(DeviceCalException::class)override fun `updateEvent`(`eventJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(DeviceCalException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_deviceeventstorebridge_update_event(
+        it,
+        FfiConverterString.lower(`eventJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(DeviceCalException::class)override fun `deleteEvent`(`eventId`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(DeviceCalException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_deviceeventstorebridge_delete_event(
+        it,
+        FfiConverterString.lower(`eventId`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * JSON `Vec<TaskList>` (the device's reminder lists).
+     */
+    @Throws(DeviceCalException::class)override fun `listReminderLists`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(DeviceCalException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_deviceeventstorebridge_list_reminder_lists(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * JSON `Vec<Task>` for one reminder list.
+     */
+    @Throws(DeviceCalException::class)override fun `getReminders`(`listId`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(DeviceCalException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_deviceeventstorebridge_get_reminders(
+        it,
+        FfiConverterString.lower(`listId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * `task_json` is a `NewTask`; returns the created `Task` JSON.
+     */
+    @Throws(DeviceCalException::class)override fun `createReminder`(`listId`: kotlin.String, `taskJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(DeviceCalException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_deviceeventstorebridge_create_reminder(
+        it,
+        FfiConverterString.lower(`listId`),FfiConverterString.lower(`taskJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * `task_json` is a `Task`; returns the updated `Task` JSON.
+     */
+    @Throws(DeviceCalException::class)override fun `updateReminder`(`taskJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(DeviceCalException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_deviceeventstorebridge_update_reminder(
+        it,
+        FfiConverterString.lower(`taskJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(DeviceCalException::class)override fun `deleteReminder`(`taskId`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(DeviceCalException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_deviceeventstorebridge_delete_reminder(
+        it,
+        FfiConverterString.lower(`taskId`),_status)
+}
+    }
+    
+    
+
+    
+
+    
+
+
+    
+    
+    /**
+     * @suppress
+     */
+    companion object
+    
+}
+
+
+
+// Put the implementation in an object so we don't pollute the top-level namespace
+internal object uniffiCallbackInterfaceDeviceEventStoreBridge {
+    internal object `requestAccess`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod0 {
+        override fun callback(`uniffiHandle`: Long,`events`: Byte,`reminders`: Byte,`uniffiOutReturn`: ByteByReference,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeDeviceEventStoreBridge.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`requestAccess`(
+                    FfiConverterBoolean.lift(`events`),
+                    FfiConverterBoolean.lift(`reminders`),
+                )
+            }
+            val writeReturn = { value: kotlin.Boolean -> uniffiOutReturn.setValue(FfiConverterBoolean.lower(value)) }
+            uniffiTraitInterfaceCallWithError(
+                uniffiCallStatus,
+                makeCall,
+                writeReturn,
+                { e: DeviceCalException -> FfiConverterTypeDeviceCalError.lower(e) }
+            )
+        }
+    }
+    internal object `supportsReminders`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod1 {
+        override fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: ByteByReference,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeDeviceEventStoreBridge.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`supportsReminders`(
+                )
+            }
+            val writeReturn = { value: kotlin.Boolean -> uniffiOutReturn.setValue(FfiConverterBoolean.lower(value)) }
+            uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
+        }
+    }
+    internal object `listCalendars`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod2 {
+        override fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeDeviceEventStoreBridge.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`listCalendars`(
+                )
+            }
+            val writeReturn = { value: kotlin.String -> uniffiOutReturn.setValue(FfiConverterString.lower(value)) }
+            uniffiTraitInterfaceCallWithError(
+                uniffiCallStatus,
+                makeCall,
+                writeReturn,
+                { e: DeviceCalException -> FfiConverterTypeDeviceCalError.lower(e) }
+            )
+        }
+    }
+    internal object `getEvents`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod3 {
+        override fun callback(`uniffiHandle`: Long,`calendarId`: RustBuffer.ByValue,`start`: RustBuffer.ByValue,`end`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeDeviceEventStoreBridge.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`getEvents`(
+                    FfiConverterString.lift(`calendarId`),
+                    FfiConverterString.lift(`start`),
+                    FfiConverterString.lift(`end`),
+                )
+            }
+            val writeReturn = { value: kotlin.String -> uniffiOutReturn.setValue(FfiConverterString.lower(value)) }
+            uniffiTraitInterfaceCallWithError(
+                uniffiCallStatus,
+                makeCall,
+                writeReturn,
+                { e: DeviceCalException -> FfiConverterTypeDeviceCalError.lower(e) }
+            )
+        }
+    }
+    internal object `createEvent`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod4 {
+        override fun callback(`uniffiHandle`: Long,`calendarId`: RustBuffer.ByValue,`eventJson`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeDeviceEventStoreBridge.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`createEvent`(
+                    FfiConverterString.lift(`calendarId`),
+                    FfiConverterString.lift(`eventJson`),
+                )
+            }
+            val writeReturn = { value: kotlin.String -> uniffiOutReturn.setValue(FfiConverterString.lower(value)) }
+            uniffiTraitInterfaceCallWithError(
+                uniffiCallStatus,
+                makeCall,
+                writeReturn,
+                { e: DeviceCalException -> FfiConverterTypeDeviceCalError.lower(e) }
+            )
+        }
+    }
+    internal object `updateEvent`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod5 {
+        override fun callback(`uniffiHandle`: Long,`eventJson`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeDeviceEventStoreBridge.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`updateEvent`(
+                    FfiConverterString.lift(`eventJson`),
+                )
+            }
+            val writeReturn = { value: kotlin.String -> uniffiOutReturn.setValue(FfiConverterString.lower(value)) }
+            uniffiTraitInterfaceCallWithError(
+                uniffiCallStatus,
+                makeCall,
+                writeReturn,
+                { e: DeviceCalException -> FfiConverterTypeDeviceCalError.lower(e) }
+            )
+        }
+    }
+    internal object `deleteEvent`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod6 {
+        override fun callback(`uniffiHandle`: Long,`eventId`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeDeviceEventStoreBridge.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`deleteEvent`(
+                    FfiConverterString.lift(`eventId`),
+                )
+            }
+            val writeReturn = { _: Unit -> Unit }
+            uniffiTraitInterfaceCallWithError(
+                uniffiCallStatus,
+                makeCall,
+                writeReturn,
+                { e: DeviceCalException -> FfiConverterTypeDeviceCalError.lower(e) }
+            )
+        }
+    }
+    internal object `listReminderLists`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod7 {
+        override fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeDeviceEventStoreBridge.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`listReminderLists`(
+                )
+            }
+            val writeReturn = { value: kotlin.String -> uniffiOutReturn.setValue(FfiConverterString.lower(value)) }
+            uniffiTraitInterfaceCallWithError(
+                uniffiCallStatus,
+                makeCall,
+                writeReturn,
+                { e: DeviceCalException -> FfiConverterTypeDeviceCalError.lower(e) }
+            )
+        }
+    }
+    internal object `getReminders`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod8 {
+        override fun callback(`uniffiHandle`: Long,`listId`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeDeviceEventStoreBridge.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`getReminders`(
+                    FfiConverterString.lift(`listId`),
+                )
+            }
+            val writeReturn = { value: kotlin.String -> uniffiOutReturn.setValue(FfiConverterString.lower(value)) }
+            uniffiTraitInterfaceCallWithError(
+                uniffiCallStatus,
+                makeCall,
+                writeReturn,
+                { e: DeviceCalException -> FfiConverterTypeDeviceCalError.lower(e) }
+            )
+        }
+    }
+    internal object `createReminder`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod9 {
+        override fun callback(`uniffiHandle`: Long,`listId`: RustBuffer.ByValue,`taskJson`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeDeviceEventStoreBridge.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`createReminder`(
+                    FfiConverterString.lift(`listId`),
+                    FfiConverterString.lift(`taskJson`),
+                )
+            }
+            val writeReturn = { value: kotlin.String -> uniffiOutReturn.setValue(FfiConverterString.lower(value)) }
+            uniffiTraitInterfaceCallWithError(
+                uniffiCallStatus,
+                makeCall,
+                writeReturn,
+                { e: DeviceCalException -> FfiConverterTypeDeviceCalError.lower(e) }
+            )
+        }
+    }
+    internal object `updateReminder`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod10 {
+        override fun callback(`uniffiHandle`: Long,`taskJson`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeDeviceEventStoreBridge.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`updateReminder`(
+                    FfiConverterString.lift(`taskJson`),
+                )
+            }
+            val writeReturn = { value: kotlin.String -> uniffiOutReturn.setValue(FfiConverterString.lower(value)) }
+            uniffiTraitInterfaceCallWithError(
+                uniffiCallStatus,
+                makeCall,
+                writeReturn,
+                { e: DeviceCalException -> FfiConverterTypeDeviceCalError.lower(e) }
+            )
+        }
+    }
+    internal object `deleteReminder`: UniffiCallbackInterfaceDeviceEventStoreBridgeMethod11 {
+        override fun callback(`uniffiHandle`: Long,`taskId`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeDeviceEventStoreBridge.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`deleteReminder`(
+                    FfiConverterString.lift(`taskId`),
+                )
+            }
+            val writeReturn = { _: Unit -> Unit }
+            uniffiTraitInterfaceCallWithError(
+                uniffiCallStatus,
+                makeCall,
+                writeReturn,
+                { e: DeviceCalException -> FfiConverterTypeDeviceCalError.lower(e) }
+            )
+        }
+    }
+
+    internal object uniffiFree: UniffiCallbackInterfaceFree {
+        override fun callback(handle: Long) {
+            FfiConverterTypeDeviceEventStoreBridge.handleMap.remove(handle)
+        }
+    }
+
+    internal object uniffiClone: UniffiCallbackInterfaceClone {
+        override fun callback(handle: Long): Long {
+            return FfiConverterTypeDeviceEventStoreBridge.handleMap.clone(handle)
+        }
+    }
+
+    internal var vtable = UniffiVTableCallbackInterfaceDeviceEventStoreBridge.UniffiByValue(
+        uniffiFree,
+        uniffiClone,
+        `requestAccess`,
+        `supportsReminders`,
+        `listCalendars`,
+        `getEvents`,
+        `createEvent`,
+        `updateEvent`,
+        `deleteEvent`,
+        `listReminderLists`,
+        `getReminders`,
+        `createReminder`,
+        `updateReminder`,
+        `deleteReminder`,
+    )
+
+    // Registers the foreign callback with the Rust side.
+    // This method is generated for each callback interface.
+    internal fun register(lib: UniffiLib) {
+        lib.uniffi_cal_ffi_fn_init_callback_vtable_deviceeventstorebridge(vtable)
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDeviceEventStoreBridge: FfiConverter<DeviceEventStoreBridge, Long> {
+    internal val handleMap = UniffiHandleMap<DeviceEventStoreBridge>()
+
+    override fun lower(value: DeviceEventStoreBridge): Long {
+        if (value is DeviceEventStoreBridgeImpl) {
+             // Rust-implemented object.  Clone the handle and return it
+            return value.uniffiCloneHandle()
+         } else {
+            // Kotlin object, generate a new vtable handle and return that.
+            return handleMap.insert(value)
+         }
+    }
+
+    override fun lift(value: Long): DeviceEventStoreBridge {
+        if ((value and 1.toLong()) == 0.toLong()) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return DeviceEventStoreBridgeImpl(UniffiWithHandle, value)
+        } else {
+            // Kotlin-generated handle, get the object from the handle map
+            return handleMap.remove(value)
+        }
+    }
+
+    override fun read(buf: ByteBuffer): DeviceEventStoreBridge {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: DeviceEventStoreBridge) = 8UL
+
+    override fun write(value: DeviceEventStoreBridge, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+/**
  * The mobile app's handle to the full on-device engine.
  */
 public interface HostInterface {
@@ -3685,6 +4642,14 @@ public interface HostInterface {
     fun `reparentTaskListJson`(`id`: kotlin.String, `parentId`: kotlin.String?): kotlin.String
     
     /**
+     * Run the OS permission prompt for the device calendar / reminders. Drives
+     * the add-account "grant access" step: the UI calls this, and on `true`
+     * proceeds to `create_account` for the `device_calendar` kind. An
+     * `InvalidField` means no native bridge is installed (e.g. Android).
+     */
+    fun `requestDeviceCalendarAccess`(`events`: kotlin.Boolean, `reminders`: kotlin.Boolean): kotlin.Boolean
+    
+    /**
      * Apply the user's resolution for conflict `id`. `choice` is `"keep_local"`
      * | `"take_remote"` | `"save_both"`. `keep_local` is pure bookkeeping (the
      * merge already kept the local value); `take_remote` writes the remote value
@@ -3798,6 +4763,15 @@ public interface HostInterface {
      * `color_label_id` `None` clears it.
      */
     fun `setContainerColorLabel`(`containerId`: kotlin.String, `kind`: kotlin.String, `colorLabelId`: kotlin.String?)
+    
+    /**
+     * Install the native device calendar/reminder bridge (iOS today; Android
+     * has none yet). Stores it and registers any already-persisted
+     * device-calendar account so it's routable without an app restart (bootstrap
+     * at `open` skipped it — no bridge yet). The native module calls this once,
+     * right after [`Host::open`].
+     */
+    fun `setDeviceEventStore`(`bridge`: DeviceEventStoreBridge)
     
     /**
      * Set or clear an EVENT's colour override (DESIGN §8.2). A LOCAL event — and
@@ -5637,6 +6611,26 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Run the OS permission prompt for the device calendar / reminders. Drives
+     * the add-account "grant access" step: the UI calls this, and on `true`
+     * proceeds to `create_account` for the `device_calendar` kind. An
+     * `InvalidField` means no native bridge is installed (e.g. Android).
+     */
+    @Throws(StoreException::class)override fun `requestDeviceCalendarAccess`(`events`: kotlin.Boolean, `reminders`: kotlin.Boolean): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_request_device_calendar_access(
+        it,
+        FfiConverterBoolean.lower(`events`),FfiConverterBoolean.lower(`reminders`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Apply the user's resolution for conflict `id`. `choice` is `"keep_local"`
      * | `"take_remote"` | `"save_both"`. `keep_local` is pure bookkeeping (the
      * merge already kept the local value); `take_remote` writes the remote value
@@ -5891,6 +6885,25 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_set_container_color_label(
         it,
         FfiConverterString.lower(`containerId`),FfiConverterString.lower(`kind`),FfiConverterOptionalString.lower(`colorLabelId`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Install the native device calendar/reminder bridge (iOS today; Android
+     * has none yet). Stores it and registers any already-persisted
+     * device-calendar account so it's routable without an app restart (bootstrap
+     * at `open` skipped it — no bridge yet). The native module calls this once,
+     * right after [`Host::open`].
+     */override fun `setDeviceEventStore`(`bridge`: DeviceEventStoreBridge)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_set_device_event_store(
+        it,
+        FfiConverterTypeDeviceEventStoreBridge.lower(`bridge`),_status)
 }
     }
     
@@ -8301,6 +9314,113 @@ public object FfiConverterTypeTaskRecurrence: FfiConverterRustBuffer<TaskRecurre
             FfiConverterTypeRecurrencePlacement.write(value.`placement`, buf)
             FfiConverterOptionalSequenceTypeMonthDay.write(value.`fixedDates`, buf)
     }
+}
+
+
+
+
+
+/**
+ * Error from the native device calendar / reminder store, surfaced across the
+ * foreign boundary. Mirrors [`KeychainError`]'s shape; the engine maps it to a
+ * [`cal_core::Error`] so a device failure reads like any other adapter's.
+ */
+sealed class DeviceCalException: kotlin.Exception() {
+    
+    /**
+     * The OS permission prompt was denied (or access was revoked).
+     */
+    class PermissionDenied(
+        ) : DeviceCalException() {
+        override val message
+            get() = ""
+    }
+    
+    /**
+     * No device calendar/reminder store on this platform (e.g. Android has no
+     * system reminders app) or the store is otherwise unavailable.
+     */
+    class Unavailable(
+        ) : DeviceCalException() {
+        override val message
+            get() = ""
+    }
+    
+    /**
+     * The native store call failed.
+     */
+    class Backend(
+        
+        val `detail`: kotlin.String
+        ) : DeviceCalException() {
+        override val message
+            get() = "detail=${ `detail` }"
+    }
+    
+
+    
+
+
+    companion object ErrorHandler : UniffiRustCallStatusErrorHandler<DeviceCalException> {
+        override fun lift(error_buf: RustBuffer.ByValue): DeviceCalException = FfiConverterTypeDeviceCalError.lift(error_buf)
+    }
+
+    
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDeviceCalError : FfiConverterRustBuffer<DeviceCalException> {
+    override fun read(buf: ByteBuffer): DeviceCalException {
+        
+
+        return when(buf.getInt()) {
+            1 -> DeviceCalException.PermissionDenied()
+            2 -> DeviceCalException.Unavailable()
+            3 -> DeviceCalException.Backend(
+                FfiConverterString.read(buf),
+                )
+            else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: DeviceCalException): ULong {
+        return when(value) {
+            is DeviceCalException.PermissionDenied -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is DeviceCalException.Unavailable -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is DeviceCalException.Backend -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`detail`)
+            )
+        }
+    }
+
+    override fun write(value: DeviceCalException, buf: ByteBuffer) {
+        when(value) {
+            is DeviceCalException.PermissionDenied -> {
+                buf.putInt(1)
+                Unit
+            }
+            is DeviceCalException.Unavailable -> {
+                buf.putInt(2)
+                Unit
+            }
+            is DeviceCalException.Backend -> {
+                buf.putInt(3)
+                FfiConverterString.write(value.`detail`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+
 }
 
 

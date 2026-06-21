@@ -781,6 +781,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "cal-adapter-device-calendar"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cal-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "cal-adapter-ews"
 version = "0.1.0"
 dependencies = [
@@ -1079,6 +1089,7 @@ version = "0.1.0"
 dependencies = [
  "aperio-db",
  "base64 0.22.1",
+ "cal-adapter-device-calendar",
  "cal-adapter-local",
  "cal-core",
  "chrono",
