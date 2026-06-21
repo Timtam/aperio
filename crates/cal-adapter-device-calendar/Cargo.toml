@@ -12,6 +12,7 @@ description = "Aperio — device-local calendar + reminders adapter (iOS EventKi
 cal-core.workspace = true
 
 async-trait.workspace = true
+chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

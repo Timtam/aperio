@@ -26,6 +26,8 @@ use cal_core::{
     Credentials, DateRange, Error, Event, FreeBusy, NewEvent, NewTask, Result, Task, TaskList,
     TasksFeature,
 };
+use chrono::{DateTime, Utc};
+use serde::Deserialize;
 
 /// `AdapterSource` tag for every row this adapter owns.
 pub const SOURCE_ID: &str = "device";
@@ -113,6 +115,109 @@ fn to_json<T: serde::Serialize>(value: &T) -> Result<String> {
     serde_json::to_string(value).map_err(|e| Error::internal(format!("device adapter json: {e}")))
 }
 
+// ── Native intermediate shapes ──────────────────────────────────────────────
+//
+// The native side (Swift EventKit / Kotlin CalendarProvider) emits these
+// SMALL, EventKit-shaped objects rather than the full `cal_core` `Calendar` /
+// `Event` (16+ fields, nested colour/recurrence/reminder types, RFC-3339
+// instants). The shape-correctness then lives in this (unit-tested) Rust
+// mapping, not the un-typed native bridge — only the handful of fields EventKit
+// natively provides cross the boundary; the adapter fills the rest with the
+// "local-/read-only-source" defaults.
+
+/// One device calendar as the native side reports it.
+#[derive(Debug, Clone, Deserialize)]
+struct DeviceCalendar {
+    id: String,
+    name: String,
+    #[serde(default)]
+    read_only: bool,
+    /// `#RRGGBB`, when the platform exposes a per-calendar colour.
+    #[serde(default)]
+    color_hex: Option<String>,
+}
+
+/// One device event (an already-expanded occurrence within the queried window —
+/// EventKit's predicate fetch returns concrete occurrences, so the adapter
+/// treats each as standalone, `recurrence: None`).
+#[derive(Debug, Clone, Deserialize)]
+struct DeviceEvent {
+    id: String,
+    calendar_id: String,
+    title: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    location: Option<String>,
+    /// RFC-3339 instants.
+    start: String,
+    end: String,
+    #[serde(default)]
+    all_day: bool,
+    /// EventKit `creationDate` / `lastModifiedDate` (RFC-3339), when present —
+    /// otherwise the adapter falls back to `start`.
+    #[serde(default)]
+    created_at: Option<String>,
+    #[serde(default)]
+    updated_at: Option<String>,
+}
+
+fn parse_instant(s: &str) -> Result<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(s)
+        .map(|dt| dt.with_timezone(&Utc))
+        .map_err(|e| Error::internal(format!("device adapter: bad instant {s:?}: {e}")))
+}
+
+fn map_calendar(d: DeviceCalendar) -> Calendar {
+    Calendar {
+        id: d.id,
+        name: d.name,
+        // The colour rides the row natively (the device store owns it); it never
+        // round-trips to a remote, so no host-local override is needed.
+        color: d.color_hex.map(ContainerColor::native),
+        color_label: None,
+        read_only: d.read_only,
+        default_sound: None,
+        supports_scheduling: false,
+        supports_event_color: false,
+    }
+}
+
+fn map_event(d: DeviceEvent) -> Result<Event> {
+    let start = parse_instant(&d.start)?;
+    let end = parse_instant(&d.end)?;
+    let created_at = match &d.created_at {
+        Some(s) => parse_instant(s)?,
+        None => start,
+    };
+    let updated_at = match &d.updated_at {
+        Some(s) => parse_instant(s)?,
+        None => created_at,
+    };
+    Ok(Event {
+        id: d.id,
+        calendar_id: d.calendar_id,
+        title: d.title,
+        description: d.description,
+        location: d.location,
+        start,
+        end,
+        all_day: d.all_day,
+        recurrence: None,
+        color_label: None,
+        color_hex: None,
+        reminders: Vec::new(),
+        sound: None,
+        attendees: Vec::new(),
+        send_invitations: false,
+        created_at,
+        updated_at,
+        etag: None,
+        organizer: None,
+        attendee_responses: Vec::new(),
+    })
+}
+
 #[async_trait]
 impl Adapter for DeviceAdapter {
     async fn authenticate(&self, _credentials: Credentials) -> Result<AuthToken> {
@@ -129,14 +234,16 @@ impl Adapter for DeviceAdapter {
 #[async_trait]
 impl CalendarFeature for DeviceAdapter {
     async fn list_calendars(&self) -> Result<Vec<Calendar>> {
-        parse(&self.provider.list_calendars()?)
+        let devices: Vec<DeviceCalendar> = parse(&self.provider.list_calendars()?)?;
+        Ok(devices.into_iter().map(map_calendar).collect())
     }
 
     async fn get_events(&self, calendar_id: &str, range: DateRange) -> Result<Vec<Event>> {
         let json =
             self.provider
                 .get_events(calendar_id, &range.start.to_rfc3339(), &range.end.to_rfc3339())?;
-        parse(&json)
+        let devices: Vec<DeviceEvent> = parse(&json)?;
+        devices.into_iter().map(map_event).collect()
     }
 
     async fn create_event(&self, calendar_id: &str, event: NewEvent) -> Result<Event> {
@@ -189,5 +296,115 @@ impl TasksFeature for DeviceAdapter {
 
     async fn delete_task(&self, task_id: &str) -> Result<()> {
         self.provider.delete_reminder(task_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_calendar_with_colour() {
+        let c = map_calendar(DeviceCalendar {
+            id: "cal-1".into(),
+            name: "Work".into(),
+            read_only: true,
+            color_hex: Some("#4285f4".into()),
+        });
+        assert_eq!(c.id, "cal-1");
+        assert_eq!(c.name, "Work");
+        assert!(c.read_only);
+        let color = c.color.expect("colour mapped");
+        assert_eq!(color.hex, "#4285f4");
+        assert!(c.color_label.is_none());
+        assert!(!c.supports_event_color);
+    }
+
+    #[test]
+    fn maps_calendar_without_colour() {
+        let c = map_calendar(DeviceCalendar {
+            id: "cal-2".into(),
+            name: "Personal".into(),
+            read_only: false,
+            color_hex: None,
+        });
+        assert!(c.color.is_none());
+        assert!(!c.read_only);
+    }
+
+    #[test]
+    fn maps_event_and_falls_back_timestamps_to_start() {
+        let e = map_event(DeviceEvent {
+            id: "ev-1".into(),
+            calendar_id: "cal-1".into(),
+            title: "Standup".into(),
+            description: None,
+            location: Some("Room 4".into()),
+            start: "2026-06-21T09:00:00Z".into(),
+            end: "2026-06-21T09:30:00Z".into(),
+            all_day: false,
+            created_at: None,
+            updated_at: None,
+        })
+        .expect("event maps");
+        assert_eq!(e.id, "ev-1");
+        assert_eq!(e.title, "Standup");
+        assert_eq!(e.location.as_deref(), Some("Room 4"));
+        assert_eq!(e.start.to_rfc3339(), "2026-06-21T09:00:00+00:00");
+        // No created/updated provided ⇒ both fall back to start.
+        assert_eq!(e.created_at, e.start);
+        assert_eq!(e.updated_at, e.start);
+        assert!(e.recurrence.is_none());
+        assert!(e.reminders.is_empty());
+    }
+
+    #[test]
+    fn maps_event_with_explicit_timestamps_and_normalises_to_utc() {
+        let e = map_event(DeviceEvent {
+            id: "ev-2".into(),
+            calendar_id: "cal-1".into(),
+            title: "Review".into(),
+            description: Some("notes".into()),
+            location: None,
+            start: "2026-06-21T14:00:00+02:00".into(),
+            end: "2026-06-21T15:00:00+02:00".into(),
+            all_day: false,
+            created_at: Some("2026-06-01T10:00:00Z".into()),
+            updated_at: Some("2026-06-10T11:00:00Z".into()),
+        })
+        .expect("event maps");
+        assert_eq!(e.start.to_rfc3339(), "2026-06-21T12:00:00+00:00");
+        assert_eq!(e.created_at.to_rfc3339(), "2026-06-01T10:00:00+00:00");
+        assert_eq!(e.updated_at.to_rfc3339(), "2026-06-10T11:00:00+00:00");
+    }
+
+    #[test]
+    fn rejects_a_bad_instant() {
+        let result = map_event(DeviceEvent {
+            id: "ev-3".into(),
+            calendar_id: "cal-1".into(),
+            title: "Bad".into(),
+            description: None,
+            location: None,
+            start: "not-a-date".into(),
+            end: "2026-06-21T09:30:00Z".into(),
+            all_day: false,
+            created_at: None,
+            updated_at: None,
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parses_native_calendar_json_omitting_default_fields() {
+        // The exact shape the native side emits — omitting the serde-default
+        // fields (read_only, color_hex) must still deserialise.
+        let json = r##"[{"id":"c1","name":"Home"},
+            {"id":"c2","name":"Work","read_only":true,"color_hex":"#ff0000"}]"##;
+        let devices: Vec<DeviceCalendar> = parse(json).expect("parses");
+        assert_eq!(devices.len(), 2);
+        assert!(!devices[0].read_only);
+        assert!(devices[0].color_hex.is_none());
+        assert_eq!(devices[1].color_hex.as_deref(), Some("#ff0000"));
     }
 }
