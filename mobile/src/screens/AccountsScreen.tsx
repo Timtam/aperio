@@ -4,6 +4,7 @@ import {
   AccessibilityInfo,
   Alert,
   findNodeHandle,
+  PermissionsAndroid,
   Platform,
   Pressable,
   StyleSheet,
@@ -114,11 +115,28 @@ const PICKER_KINDS: AdapterKind[] = [
 const isOAuthKind = (kind: AdapterKind): boolean =>
   kind === 'google' || kind === 'microsoft_graph';
 
-/** The device-local calendar + reminders adapter is iOS-only (EventKit; Android
- *  has no system reminders app and the calendar half is iOS-first). Gates the
- *  extra "Device" picker entry, which adds the account through a permission
- *  grant rather than a credential form. */
-const DEVICE_KIND_AVAILABLE = Platform.OS === 'ios';
+/** The device-local calendar adapter ships on both phone platforms — iOS
+ *  (EventKit: calendars + reminders) and Android (CalendarProvider: calendars
+ *  only; no system reminders app). Gates the extra "This device" picker entry,
+ *  which adds the account through an OS permission grant rather than a
+ *  credential form. */
+const DEVICE_KIND_AVAILABLE =
+  Platform.OS === 'ios' || Platform.OS === 'android';
+
+/** Request Android's calendar read+write runtime permissions. iOS routes its
+ *  grant through the native EventKit prompt instead (requestDeviceCalendarAccess). */
+async function requestAndroidCalendarPermission(): Promise<boolean> {
+  const result = await PermissionsAndroid.requestMultiple([
+    PermissionsAndroid.PERMISSIONS.READ_CALENDAR,
+    PermissionsAndroid.PERMISSIONS.WRITE_CALENDAR,
+  ]);
+  return (
+    result[PermissionsAndroid.PERMISSIONS.READ_CALENDAR] ===
+      PermissionsAndroid.RESULTS.GRANTED &&
+    result[PermissionsAndroid.PERMISSIONS.WRITE_CALENDAR] ===
+      PermissionsAndroid.RESULTS.GRANTED
+  );
+}
 
 /** Adapter kinds whose ContactsFeature pulls remote address-book data — the
  *  ones that trigger the one-shot privacy notice on first connect. Mirrors the
@@ -315,7 +333,12 @@ export default function AccountsScreen() {
     setError(null);
     setSubmitting(true);
     try {
-      const granted = await requestDeviceCalendarAccess(true, true);
+      // iOS routes the grant through the native EventKit prompt (calendars +
+      // reminders); Android requests the CalendarProvider runtime permissions.
+      const granted =
+        Platform.OS === 'android'
+          ? await requestAndroidCalendarPermission()
+          : await requestDeviceCalendarAccess(true, true);
       if (!granted) {
         const message = t('dialogs.accounts.deviceAccessDenied');
         setError(message);
@@ -912,7 +935,11 @@ export default function AccountsScreen() {
         busy={submitting}
       >
         <Text style={styles.deviceGrantBody}>
-          {t('dialogs.accounts.deviceGrantBody')}
+          {t(
+            Platform.OS === 'android'
+              ? 'dialogs.accounts.deviceGrantBodyAndroid'
+              : 'dialogs.accounts.deviceGrantBody',
+          )}
         </Text>
       </AppDialog>
     </FormScrollView>

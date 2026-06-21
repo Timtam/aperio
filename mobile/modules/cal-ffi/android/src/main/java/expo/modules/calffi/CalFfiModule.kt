@@ -40,6 +40,11 @@ class CalFfiModule : Module() {
     // as an Expo event the RN layer subscribes to (update the "last synced"
     // footer + re-read the contact views).
     opened.setContactSyncObserver(JsContactSyncObserver())
+    // Install the device calendar bridge (CalendarProvider). Android has no
+    // system Reminders app, so it's calendar-only (supportsReminders=false). The
+    // Host registers any persisted device-calendar account against it. Mirrors
+    // the iOS module's IosDeviceEventStore injection.
+    opened.setDeviceEventStore(AndroidDeviceCalendar(context))
     opened
   }
 
