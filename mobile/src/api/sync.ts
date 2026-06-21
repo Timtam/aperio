@@ -257,6 +257,11 @@ export interface CacheRefreshStatus {
   refreshing: boolean;
   /** RFC3339 of the last completed pass, or null. */
   last_refreshed_at: string | null;
+  /** Containers the running pass will refresh (null outside a pass / before
+   *  enumeration) — drives "fetched X of N" external-refresh progress. */
+  total_targets: number | null;
+  /** Containers refreshed so far in the running pass (null outside a pass). */
+  fetched_targets: number | null;
 }
 
 /** Kick an immediate warm pass over every external account's containers (the

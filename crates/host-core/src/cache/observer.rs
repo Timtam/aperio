@@ -33,4 +33,9 @@ pub struct CacheRefreshStatus {
     pub refreshing: bool,
     /// RFC3339 of the last completed pass, if any (survives restarts).
     pub last_refreshed_at: Option<String>,
+    /// Containers the RUNNING pass will refresh (`None` outside a pass / before
+    /// enumeration). Lets the UI show "fetched X of N" external-refresh progress.
+    pub total_targets: Option<u32>,
+    /// Containers refreshed so far in the running pass (`None` outside a pass).
+    pub fetched_targets: Option<u32>,
 }

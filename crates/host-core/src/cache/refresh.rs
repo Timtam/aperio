@@ -32,7 +32,7 @@ use chrono::{DateTime, Duration, Utc};
 use tokio::sync::Notify;
 use tracing::{debug, info};
 
-use cal_core::DateRange;
+use cal_core::{CalendarFeature, ContactsFeature, DateRange, TasksFeature};
 
 use super::{
     swr, CacheObserver, CacheRefreshStatus, CacheStore, CacheUpdatedPayload, RefreshCoordinator,
@@ -73,6 +73,27 @@ pub struct CacheRefresher {
     in_flight: Arc<Mutex<bool>>,
     /// Last successful pass, kept in memory + mirrored to prefs.
     last_refreshed: Arc<Mutex<Option<DateTime<Utc>>>>,
+}
+
+/// One container queued for an items refresh in a warm pass. Collected during a
+/// cheap enumeration pass so the TOTAL is known up front (for "fetched X of N"
+/// progress) and the set can be refreshed concurrently.
+enum RefreshTarget {
+    Events {
+        account: String,
+        adapter: Arc<dyn CalendarFeature>,
+        cal_id: String,
+    },
+    Tasks {
+        account: String,
+        adapter: Arc<dyn TasksFeature>,
+        list_id: String,
+    },
+    Contacts {
+        account: String,
+        adapter: Arc<dyn ContactsFeature>,
+        list_id: String,
+    },
 }
 
 impl CacheRefresher {
@@ -151,6 +172,10 @@ impl CacheRefresher {
                 .lock()
                 .expect("cache refresher poisoned")
                 .map(|d| d.to_rfc3339()),
+            // Live progress rides the refresh_status STREAM during a pass; a
+            // point-in-time query carries no target counts.
+            total_targets: None,
+            fetched_targets: None,
         }
     }
 
@@ -177,7 +202,10 @@ impl CacheRefresher {
             }
             *guard = true;
         }
-        self.emit_status(true, self.status().last_refreshed_at);
+        let last = self.status().last_refreshed_at;
+        // Spinner on immediately; the target total isn't known until the cheap
+        // enumeration below completes.
+        self.emit_status(true, last.clone(), None, None);
 
         let now = Utc::now();
         let window = DateRange::new(
@@ -185,9 +213,23 @@ impl CacheRefresher {
             now + Duration::days(WINDOW_FUTURE_DAYS),
         );
 
-        self.warm_calendars(window).await;
-        self.warm_task_lists().await;
-        self.warm_contact_lists().await;
+        // Phase 1 — enumerate every container (cheap list calls) + replace the
+        // container lists, collecting the per-container items targets. The total
+        // is known up front so the indicator can report "fetched X of N".
+        let mut targets = Vec::new();
+        self.enumerate_calendars(&mut targets).await;
+        self.enumerate_task_lists(&mut targets).await;
+        self.enumerate_contact_lists(&mut targets).await;
+        let total = targets.len() as u32;
+        self.emit_status(true, last.clone(), Some(total), Some(0));
+
+        // Phase 2 — refresh each target's items, reporting progress per target.
+        let mut fetched: u32 = 0;
+        for target in targets {
+            self.refresh_one(target, window).await;
+            fetched += 1;
+            self.emit_status(true, last.clone(), Some(total), Some(fetched));
+        }
 
         // Stamp completion (in memory + prefs so the indicator survives a
         // restart with a meaningful "last updated").
@@ -199,100 +241,83 @@ impl CacheRefresher {
         let repo = UserPrefsRepo::new(&self.db);
         let _ = repo.set(PREF_CACHE_LAST_REFRESHED_AT, &completed.to_rfc3339());
         *self.in_flight.lock().expect("cache refresher poisoned") = false;
-        self.emit_status(false, Some(completed.to_rfc3339()));
+        self.emit_status(
+            false,
+            Some(completed.to_rfc3339()),
+            Some(total),
+            Some(total),
+        );
         debug!(target: "aperio::cache", "cache warm pass complete");
     }
 
-    async fn warm_calendars(&self, window: DateRange) {
+    async fn enumerate_calendars(&self, out: &mut Vec<RefreshTarget>) {
         for (account, adapter) in self.registry.snapshot_calendar_adapters() {
-            let cals = match adapter.list_calendars().await {
+            match adapter.list_calendars().await {
                 Ok(cals) => {
                     for c in &cals {
                         self.registry.note_calendar_route(&c.id, &account);
                     }
                     let _ = self.cache.replace_calendars(&account, &cals);
                     self.emit_updated(SyncScope::Calendars, &account, "");
-                    cals
+                    for cal in cals {
+                        out.push(RefreshTarget::Events {
+                            account: account.clone(),
+                            adapter: adapter.clone(),
+                            cal_id: cal.id,
+                        });
+                    }
                 }
                 Err(err) => {
                     let _ =
                         self.cache
                             .mark_error(&account, SyncScope::Calendars, "", &err.to_string());
-                    continue;
                 }
-            };
-            for cal in &cals {
-                let key = format!("events:{account}:{}", cal.id);
-                if !self.coord.try_claim(&key) {
-                    continue; // a per-read refresh is already handling it
-                }
-                match swr::refresh_events(&self.cache, adapter.as_ref(), &account, &cal.id, window)
-                    .await
-                {
-                    Ok(()) => self.emit_updated(SyncScope::Events, &account, &cal.id),
-                    Err(err) => {
-                        let _ = self.cache.mark_error(
-                            &account,
-                            SyncScope::Events,
-                            &cal.id,
-                            &err.to_string(),
-                        );
-                    }
-                }
-                self.coord.release(&key);
             }
         }
     }
 
-    async fn warm_task_lists(&self) {
+    async fn enumerate_task_lists(&self, out: &mut Vec<RefreshTarget>) {
         for (account, adapter) in self.registry.snapshot_task_adapters() {
-            let lists = match adapter.list_task_lists().await {
+            match adapter.list_task_lists().await {
                 Ok(lists) => {
                     for l in &lists {
                         self.registry.note_task_list_route(&l.id, &account);
                     }
                     let _ = self.cache.replace_task_lists(&account, &lists);
                     self.emit_updated(SyncScope::TaskLists, &account, "");
-                    lists
+                    for list in lists {
+                        out.push(RefreshTarget::Tasks {
+                            account: account.clone(),
+                            adapter: adapter.clone(),
+                            list_id: list.id,
+                        });
+                    }
                 }
                 Err(err) => {
                     let _ =
                         self.cache
                             .mark_error(&account, SyncScope::TaskLists, "", &err.to_string());
-                    continue;
                 }
-            };
-            for list in &lists {
-                let key = format!("tasks:{account}:{}", list.id);
-                if !self.coord.try_claim(&key) {
-                    continue;
-                }
-                match swr::refresh_tasks(&self.cache, adapter.as_ref(), &account, &list.id).await {
-                    Ok(()) => self.emit_updated(SyncScope::Tasks, &account, &list.id),
-                    Err(err) => {
-                        let _ = self.cache.mark_error(
-                            &account,
-                            SyncScope::Tasks,
-                            &list.id,
-                            &err.to_string(),
-                        );
-                    }
-                }
-                self.coord.release(&key);
             }
         }
     }
 
-    async fn warm_contact_lists(&self) {
+    async fn enumerate_contact_lists(&self, out: &mut Vec<RefreshTarget>) {
         for (account, adapter) in self.registry.snapshot_contact_adapters() {
-            let lists = match adapter.list_contact_lists().await {
+            match adapter.list_contact_lists().await {
                 Ok(lists) => {
                     for l in &lists {
                         self.registry.note_contact_list_route(&l.id, &account);
                     }
                     let _ = self.cache.replace_contact_lists(&account, &lists);
                     self.emit_updated(SyncScope::ContactLists, &account, "");
-                    lists
+                    for list in lists {
+                        out.push(RefreshTarget::Contacts {
+                            account: account.clone(),
+                            adapter: adapter.clone(),
+                            list_id: list.id,
+                        });
+                    }
                 }
                 Err(err) => {
                     let _ = self.cache.mark_error(
@@ -301,22 +326,79 @@ impl CacheRefresher {
                         "",
                         &err.to_string(),
                     );
-                    continue;
                 }
-            };
-            for list in &lists {
-                let key = format!("contacts:{account}:{}", list.id);
+            }
+        }
+    }
+
+    /// Refresh one container's items, deduped against the per-read SWR path via
+    /// the shared coordinator. A claim miss means a per-read refresh is already
+    /// handling it — skip without releasing (we never claimed).
+    async fn refresh_one(&self, target: RefreshTarget, window: DateRange) {
+        match target {
+            RefreshTarget::Events {
+                account,
+                adapter,
+                cal_id,
+            } => {
+                let key = format!("events:{account}:{cal_id}");
                 if !self.coord.try_claim(&key) {
-                    continue;
+                    return;
                 }
-                match swr::refresh_contacts(&self.cache, adapter.as_ref(), &account, &list.id).await
+                match swr::refresh_events(&self.cache, adapter.as_ref(), &account, &cal_id, window)
+                    .await
                 {
-                    Ok(()) => self.emit_updated(SyncScope::Contacts, &account, &list.id),
+                    Ok(()) => self.emit_updated(SyncScope::Events, &account, &cal_id),
+                    Err(err) => {
+                        let _ = self.cache.mark_error(
+                            &account,
+                            SyncScope::Events,
+                            &cal_id,
+                            &err.to_string(),
+                        );
+                    }
+                }
+                self.coord.release(&key);
+            }
+            RefreshTarget::Tasks {
+                account,
+                adapter,
+                list_id,
+            } => {
+                let key = format!("tasks:{account}:{list_id}");
+                if !self.coord.try_claim(&key) {
+                    return;
+                }
+                match swr::refresh_tasks(&self.cache, adapter.as_ref(), &account, &list_id).await {
+                    Ok(()) => self.emit_updated(SyncScope::Tasks, &account, &list_id),
+                    Err(err) => {
+                        let _ = self.cache.mark_error(
+                            &account,
+                            SyncScope::Tasks,
+                            &list_id,
+                            &err.to_string(),
+                        );
+                    }
+                }
+                self.coord.release(&key);
+            }
+            RefreshTarget::Contacts {
+                account,
+                adapter,
+                list_id,
+            } => {
+                let key = format!("contacts:{account}:{list_id}");
+                if !self.coord.try_claim(&key) {
+                    return;
+                }
+                match swr::refresh_contacts(&self.cache, adapter.as_ref(), &account, &list_id).await
+                {
+                    Ok(()) => self.emit_updated(SyncScope::Contacts, &account, &list_id),
                     Err(err) => {
                         let _ = self.cache.mark_error(
                             &account,
                             SyncScope::Contacts,
-                            &list.id,
+                            &list_id,
                             &err.to_string(),
                         );
                     }
@@ -334,10 +416,18 @@ impl CacheRefresher {
         });
     }
 
-    fn emit_status(&self, refreshing: bool, last_refreshed_at: Option<String>) {
+    fn emit_status(
+        &self,
+        refreshing: bool,
+        last_refreshed_at: Option<String>,
+        total_targets: Option<u32>,
+        fetched_targets: Option<u32>,
+    ) {
         self.observer.refresh_status(&CacheRefreshStatus {
             refreshing,
             last_refreshed_at,
+            total_targets,
+            fetched_targets,
         });
     }
 }

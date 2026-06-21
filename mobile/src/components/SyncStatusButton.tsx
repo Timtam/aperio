@@ -3,6 +3,10 @@ import { useTranslation } from 'react-i18next';
 import { AccessibilityInfo, Pressable, StyleSheet, Text } from 'react-native';
 
 import { refreshExternalCache, syncNow } from '../api/sync';
+import {
+  getCacheRefreshProgress,
+  subscribeCacheRefreshProgress,
+} from '../state/cacheRefreshProgress';
 import { isSyncing, subscribeSyncActivity } from '../state/syncActivity';
 import { useSyncStatusInfo } from '../state/syncStatusContext';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -23,14 +27,30 @@ export function SyncStatusButton() {
   const info = useSyncStatusInfo();
   const [syncing, setSyncing] = useState(isSyncing());
   useEffect(() => subscribeSyncActivity(setSyncing), []);
+  const [progress, setProgress] = useState(getCacheRefreshProgress());
+  useEffect(() => subscribeCacheRefreshProgress(setProgress), []);
   if (info == null) return null;
 
   const attention =
     info.tone === 'error' || info.tone === 'conflict' || info.tone === 'schema_too_old';
   // A conflict/error/schema badge outranks a transient upload (matching the
   // desktop tone priority), so only override the otherwise-benign synced/off state.
+  const externalRefreshing = progress.refreshing && !attention;
   const showSyncing = syncing && !attention;
-  const label = showSyncing ? t('syncStatus.uploading') : info.label;
+  // While a warm pass runs, the external-refresh progress (fetched X of N) takes
+  // the label, so focusing the indicator speaks the LIVE progress — no chatter.
+  const externalLabel =
+    externalRefreshing && progress.total != null && progress.fetched != null
+      ? t('cacheRefresh.progress', {
+          fetched: progress.fetched,
+          total: progress.total,
+        })
+      : externalRefreshing
+        ? t('cacheRefresh.refreshing')
+        : null;
+  const label = attention
+    ? info.label
+    : (externalLabel ?? (showSyncing ? t('syncStatus.uploading') : info.label));
 
   const onPress = () => {
     AccessibilityInfo.announceForAccessibility(t('cacheRefresh.refreshing'));
@@ -50,7 +70,11 @@ export function SyncStatusButton() {
       <Text
         style={[
           styles.glyph,
-          attention ? styles.attention : showSyncing ? styles.syncing : styles.normal,
+          attention
+            ? styles.attention
+            : showSyncing || externalRefreshing
+              ? styles.syncing
+              : styles.normal,
         ]}
         importantForAccessibility="no"
       >

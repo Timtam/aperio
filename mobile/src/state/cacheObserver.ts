@@ -15,6 +15,7 @@ import { AccessibilityInfo } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
 import type { CacheRefreshStatus } from '../api/sync';
+import { setCacheRefreshProgress } from './cacheRefreshProgress';
 import { hapticSyncEnd, hapticSyncStart, loadHapticsPref } from './haptics';
 import CalFfi from '../../modules/cal-ffi';
 
@@ -115,12 +116,16 @@ export function useCacheUpdates(): void {
     // ONE polite cue at the start of an external refresh pass + ONE at the end
     // (the user-chosen model), regardless of how many sources refresh in between.
     const subStatus = CalFfi.addListener('onCacheRefreshStatus', ({ status: json }) => {
-      let next = false;
+      let status: CacheRefreshStatus;
       try {
-        next = (JSON.parse(json) as CacheRefreshStatus).refreshing;
+        status = JSON.parse(json) as CacheRefreshStatus;
       } catch {
         return;
       }
+      // Publish progress (fetched X of N) app-wide for the sync indicator + the
+      // Sync screen — separate from the start/end announcement below.
+      setCacheRefreshProgress(status);
+      const next = status.refreshing;
       if (next === refreshing.current) return;
       refreshing.current = next;
       AccessibilityInfo.announceForAccessibility(

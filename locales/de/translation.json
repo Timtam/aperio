@@ -241,6 +241,7 @@
   "cacheRefresh": {
     "label": "Externe Daten",
     "refreshing": "Externe Daten werden aktualisiert …",
+    "progress": "Externe Daten: {{fetched}} von {{total}} aktualisiert …",
     "done": "Externe Daten aktualisiert.",
     "lastUpdated": "Externe Daten aktualisiert: {{time}}",
     "never": "Externe Daten noch nicht aktualisiert",
