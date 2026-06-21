@@ -197,6 +197,23 @@ For shared lists (e.g. Todoist) you can:
 - **manage members** from the list's context menu (invite, remove),
 - **assign a person** to individual tasks.
 
+### Letting Aperio assign you automatically
+
+When a list's backend knows who *you* are (e.g. **Vikunja**), Aperio can keep
+ownership in sync. With **Settings → Tasks → "Assign shared-list tasks to me"**
+on (the default):
+
+- Setting an **unassigned** task to **in progress** or **done** assigns it to
+  **you**; reopening it removes **only your** assignment (a colleague's stays).
+- For a **recurring** task only the completed instance gets your name — the next
+  instance comes back **unassigned**, ready for whoever picks it up.
+- The **Done** group shows a split count, e.g. *"Done – 12 by me, 3 by others"*,
+  so you can see what you finished versus what teammates did.
+- The **day-start review** only ever offers tasks that are **yours or
+  unassigned**; a task assigned to someone else is left for them to handle.
+
+Turn the toggle off to keep assignments fully manual.
+
 > **Vikunja – finding people:** In the **Manage members** dialog you search
 > for people. Vikunja matches a **username only exactly** (the full name,
 > case-insensitive) – a partial username is not enough. Partial matches work

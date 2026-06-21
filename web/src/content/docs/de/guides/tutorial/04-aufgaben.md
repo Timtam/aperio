@@ -219,6 +219,24 @@ Bei geteilten Listen (z. B. Todoist) kannst du:
   entfernen),
 - einzelnen Aufgaben eine **Person zuweisen**.
 
+### Aperio dich automatisch zuweisen lassen
+
+Wenn der Anbieter einer Liste weiß, wer *du* bist (z. B. **Vikunja**), kann
+Aperio die Zuordnung für dich pflegen. Mit **Einstellungen → Aufgaben →
+„In geteilten Listen mir zuweisen"** an (Standard):
+
+- Setzt du eine **niemandem zugewiesene** Aufgabe auf **in Arbeit** oder
+  **erledigt**, weist sie sich **dir** zu; setzt du sie zurück auf *offen*,
+  wird **nur deine** Zuweisung entfernt (die einer anderen Person bleibt).
+- Bei einer **wiederkehrenden** Aufgabe bekommt nur die erledigte Aufgabe
+  deinen Namen – die nächste Aufgabe erscheint wieder **ohne Zuweisung**.
+- Die Gruppe **Erledigt** zeigt dann eine geteilte Zahl, z. B. *„Erledigt –
+  12 von mir, 3 von anderen"*, damit du siehst, was du selbst geschafft hast.
+- Der **Tagesbeginn-Überblick** schlägt dir nur Aufgaben vor, die **dir oder
+  niemandem** zugewiesen sind; eine Aufgabe einer anderen Person bleibt bei ihr.
+
+Schalte die Option aus, wenn Zuweisungen rein manuell bleiben sollen.
+
 > **Vikunja – Personen finden:** Im Dialog **Mitglieder verwalten** suchst
 > du nach Personen. Vikunja findet einen **Benutzernamen nur exakt** (der
 > vollständige Name, Groß-/Kleinschreibung egal) – ein Teil davon genügt
