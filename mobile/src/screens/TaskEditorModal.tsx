@@ -26,7 +26,12 @@ import type {
   TaskStatus,
   TaskUser,
 } from '@aperio/shared';
-import { TASK_RECURRENCE_DEFAULT, fromBackend, toBackend } from '@aperio/shared';
+import {
+  TASK_RECURRENCE_DEFAULT,
+  fromBackend,
+  selfAssignOnStatusChange,
+  toBackend,
+} from '@aperio/shared';
 
 import {
   createTask,
@@ -53,7 +58,9 @@ import {
   parseLocalDate,
   parseLocalTime,
 } from '../intl/dateTimeField';
+import { currentUserForList } from '../state/currentUser';
 import { writeLastUsedTaskList } from '../state/lastUsedTaskList';
+import { readTaskBehaviour } from '../state/taskBehaviour';
 import { useSoundPref } from '../state/useSoundPref';
 import { useTaskStore } from '../state/taskStoreContext';
 import {
@@ -591,6 +598,24 @@ export default function TaskEditorModal({
         const statusChanged = form.status !== loaded.status;
         const familyTasks =
           listChanged || statusChanged ? await getTasks(loaded.list_id) : [];
+        // Editor self-assign (shared lists): a status change here applies the
+        // check-off rule to the ROOT too — assign me on →in_progress/→completed
+        // of an unassigned task, drop only me on →open. Gated on a real status
+        // change; the family (children) self-assign via cascadeEditorStatus below.
+        let rootAssignees = form.assignees;
+        if (statusChanged) {
+          const behaviour = await readTaskBehaviour();
+          const me = behaviour.autoSelfAssign
+            ? await currentUserForList(form.listId)
+            : null;
+          rootAssignees =
+            selfAssignOnStatusChange(
+              form.status,
+              form.assignees,
+              me,
+              behaviour.autoSelfAssign,
+            ) ?? form.assignees;
+        }
         // Spread ...loaded so store-managed fields (series_id, resurface_date,
         // etag, created_at) AND the not-yet-editable ones (per-task sound)
         // round-trip untouched; the edited fields below (incl. assignees) win.
@@ -616,7 +641,7 @@ export default function TaskEditorModal({
             deadline_time: dead.time,
             recurrence: canRecur ? toBackend(form.recurrence) : null,
             reminders: form.reminders,
-            assignees: form.assignees,
+            assignees: rootAssignees,
             description,
             // Local task: the picker drives the colour; external: leave the
             // (override-stamped) value untouched (external colour = later).

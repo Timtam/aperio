@@ -27,6 +27,7 @@ import {
   type ContextMenuItemRequest,
 } from '../api/client';
 import { invoke } from '@tauri-apps/api/core';
+import { selfAssignOnStatusChange } from '@aperio/shared';
 import { todayIsoKey } from '../intl/taskDay';
 import {
   priorityMarker,
@@ -42,6 +43,7 @@ import type {
   TaskUser,
 } from '../api/types';
 import { useCalendarStore } from '../state/calendarStoreContext';
+import { currentUserForList } from '../state/currentUser';
 import {
   canAssignSection,
   canMoveTaskBetweenLists,
@@ -141,7 +143,8 @@ export function TaskDialog({
   // toggle. The first short-circuits both planners; the second drops
   // the `todayKey` companion-write so a started backlog task isn't
   // auto-pinned to today.
-  const { enabled: cascadeEnabled, autoDate } = useTaskCascadeEnabled();
+  const { enabled: cascadeEnabled, autoDate, autoSelfAssign } =
+    useTaskCascadeEnabled();
 
   const isEdit = task !== null;
   // Subtask = a task that has a parent. The list dropdown locks
@@ -740,6 +743,18 @@ export function TaskDialog({
       setSubmitting(true);
       try {
         if (isEdit && task) {
+          // Editor self-assign (shared lists): when the user CHANGES the status
+          // here, apply the same rule as a check-off to the ROOT — assign me on
+          // →in_progress/→completed of an unassigned task, drop only me on →open.
+          // Gated on a real status change so editing other fields of an already
+          // (un)assigned task never touches ownership.
+          let rootAssignees = form.assignees;
+          if (autoSelfAssign && form.status !== task.status) {
+            const me = await currentUserForList(form.listId);
+            rootAssignees =
+              selfAssignOnStatusChange(form.status, form.assignees, me, true) ??
+              form.assignees;
+          }
           const updated: Task = {
             ...task,
             title: trimmedTitle,
@@ -758,7 +773,7 @@ export function TaskDialog({
             description: form.description.trim() || null,
             color_label: form.colorLabel,
             reminders: form.reminders,
-            assignees: form.assignees,
+            assignees: rootAssignees,
             completed_at:
               form.status === 'completed'
                 ? task.completed_at ?? new Date().toISOString()
@@ -891,6 +906,7 @@ export function TaskDialog({
       tasks,
       cascadeEnabled,
       autoDate,
+      autoSelfAssign,
       draftSubtasks,
       createSupportsSubtasks,
     ],
