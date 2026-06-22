@@ -2345,6 +2345,18 @@ public protocol HostProtocol: AnyObject, Sendable {
     func requestDeviceCalendarAccess(events: Bool, reminders: Bool) throws  -> Bool
     
     /**
+     * Force a FULL cold re-sync of one external account: clear its delta tokens
+     * + cached window across every container, then kick a warm pass so each
+     * re-bootstraps from the provider. Cached rows stay as an offline fallback
+     * until replaced; credentials are untouched (no re-auth). The recovery
+     * action for a "stuck" external cache — a bootstrap that enumerated an
+     * incomplete resource set yet persisted a sync-token, so later deltas
+     * reported "no changes" over permanently-missing events. Mirrors the desktop
+     * `reset_account_sync` command.
+     */
+    func resetAccountSync(accountId: String) throws 
+    
+    /**
      * Apply the user's resolution for conflict `id`. `choice` is `"keep_local"`
      * | `"take_remote"` | `"save_both"`. `keep_local` is pure bookkeeping (the
      * merge already kept the local value); `take_remote` writes the remote value
@@ -3937,6 +3949,24 @@ open func requestDeviceCalendarAccess(events: Bool, reminders: Bool)throws  -> B
         FfiConverterBool.lower(reminders),$0
     )
 })
+}
+    
+    /**
+     * Force a FULL cold re-sync of one external account: clear its delta tokens
+     * + cached window across every container, then kick a warm pass so each
+     * re-bootstraps from the provider. Cached rows stay as an offline fallback
+     * until replaced; credentials are untouched (no re-auth). The recovery
+     * action for a "stuck" external cache — a bootstrap that enumerated an
+     * incomplete resource set yet persisted a sync-token, so later deltas
+     * reported "no changes" over permanently-missing events. Mirrors the desktop
+     * `reset_account_sync` command.
+     */
+open func resetAccountSync(accountId: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_reset_account_sync(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(accountId),$0
+    )
+}
 }
     
     /**
@@ -8248,6 +8278,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_request_device_calendar_access() != 23788) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_reset_account_sync() != 49159) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_resolve_sync_conflict() != 25566) {

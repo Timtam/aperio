@@ -24,6 +24,7 @@ import {
   listAccountsMissingCredentials,
   renameAccount,
   requestDeviceCalendarAccess,
+  resetAccountSync,
   setAccountSecret,
   testAccount,
 } from '../api/accounts';
@@ -529,6 +530,28 @@ export default function AccountsScreen() {
     [announce, load, t],
   );
 
+  // Force a full cold re-sync of one external account: clears its delta tokens +
+  // cached window, then kicks a warm pass so each container re-bootstraps from
+  // the provider. The recovery path for a "stuck" external cache (a bootstrap
+  // that cached an incomplete set as complete → events that exist on the device
+  // never show here). Credentials are untouched — no re-auth.
+  const resyncAccount = useCallback(
+    async (account: Account) => {
+      setError(null);
+      try {
+        await resetAccountSync(account.id);
+        announce(
+          t('dialogs.accounts.resyncStarted', { name: account.display_name }),
+        );
+      } catch (err) {
+        const message = errorMessage(err);
+        setError(message);
+        announce(t('mobile.error', { message }));
+      }
+    },
+    [announce, t],
+  );
+
   const saveRepair = useCallback(
     async (account: Account) => {
       const value = repairSecret.trim();
@@ -693,12 +716,14 @@ export default function AccountsScreen() {
                           ? [{ name: 'reconnect', label: t('dialogs.accounts.reconnect') }]
                           : []),
                         { name: 'rename', label: t('mobile.rename') },
+                        { name: 'resync', label: t('dialogs.accounts.forceResyncShort') },
                         { name: 'delete', label: t('dialogs.accounts.delete') },
                       ]
                 }
                 onAccessibilityAction={(e) => {
                   if (e.nativeEvent.actionName === 'delete') void remove(account);
                   else if (e.nativeEvent.actionName === 'rename') startRename(account);
+                  else if (e.nativeEvent.actionName === 'resync') void resyncAccount(account);
                   else if (e.nativeEvent.actionName === 'reconnect') {
                     // OAuth re-runs the provider sign-in; others reveal the
                     // inline credential field.
@@ -742,6 +767,18 @@ export default function AccountsScreen() {
                       style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
                     >
                       <Text style={styles.smallButtonText}>{t('mobile.rename')}</Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={t('dialogs.accounts.forceResync', {
+                        name: account.display_name,
+                      })}
+                      onPress={() => void resyncAccount(account)}
+                      style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
+                    >
+                      <Text style={styles.smallButtonText}>
+                        {t('dialogs.accounts.forceResyncShort')}
+                      </Text>
                     </Pressable>
                     <Pressable
                       accessibilityRole="button"

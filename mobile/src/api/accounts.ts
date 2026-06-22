@@ -84,6 +84,14 @@ export const requestDeviceCalendarAccess = async (
   reminders: boolean,
 ): Promise<boolean> => CalFfi.requestDeviceCalendarAccess(events, reminders);
 
+/** Force a FULL cold re-sync of one external account: clear its delta tokens +
+ *  cached window, then kick a warm pass so each container re-bootstraps from the
+ *  provider. Cached rows stay as an offline fallback until replaced; credentials
+ *  are untouched. The recovery action for a "stuck" external cache. */
+export const resetAccountSync = async (accountId: string): Promise<void> => {
+  await CalFfi.resetAccountSync(accountId);
+};
+
 /** Delete an account (unregister adapter + clear secrets + drop row). Rejects
  *  when deleting the implicit local account. */
 export const deleteAccount = async (id: string): Promise<void> => {

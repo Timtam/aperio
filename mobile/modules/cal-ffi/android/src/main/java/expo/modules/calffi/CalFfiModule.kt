@@ -187,6 +187,13 @@ class CalFfiModule : Module() {
       host.requestDeviceCalendarAccess(events, reminders)
     }
 
+    // Force a full cold re-sync of one external account (clears its delta tokens
+    // + cached window, then kicks a warm pass). The recovery action for a "stuck"
+    // external cache; credentials are untouched.
+    AsyncFunction("resetAccountSync") { accountId: String ->
+      host.resetAccountSync(accountId)
+    }
+
     AsyncFunction("listAccountsMissingCredentialsJson") {
       host.listAccountsMissingCredentialsJson()
     }

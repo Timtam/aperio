@@ -1040,6 +1040,8 @@ external fun uniffi_cal_ffi_checksum_method_host_reparent_task_list_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_request_device_calendar_access(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_reset_account_sync(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_resolve_sync_conflict(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_respond_to_event(
@@ -1406,6 +1408,8 @@ external fun uniffi_cal_ffi_fn_method_host_reparent_task_list_json(`ptr`: Long,`
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_request_device_calendar_access(`ptr`: Long,`events`: Byte,`reminders`: Byte,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
+external fun uniffi_cal_ffi_fn_method_host_reset_account_sync(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_resolve_sync_conflict(`ptr`: Long,`id`: Long,`choice`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_respond_to_event(`ptr`: Long,`calendarId`: RustBuffer.ByValue,`eventId`: RustBuffer.ByValue,`status`: RustBuffer.ByValue,`sendResponse`: Byte,uniffi_out_err: UniffiRustCallStatus, 
@@ -1964,6 +1968,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_request_device_calendar_access() != 23788.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_reset_account_sync() != 49159.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_resolve_sync_conflict() != 25566.toShort()) {
@@ -4650,6 +4657,18 @@ public interface HostInterface {
     fun `requestDeviceCalendarAccess`(`events`: kotlin.Boolean, `reminders`: kotlin.Boolean): kotlin.Boolean
     
     /**
+     * Force a FULL cold re-sync of one external account: clear its delta tokens
+     * + cached window across every container, then kick a warm pass so each
+     * re-bootstraps from the provider. Cached rows stay as an offline fallback
+     * until replaced; credentials are untouched (no re-auth). The recovery
+     * action for a "stuck" external cache — a bootstrap that enumerated an
+     * incomplete resource set yet persisted a sync-token, so later deltas
+     * reported "no changes" over permanently-missing events. Mirrors the desktop
+     * `reset_account_sync` command.
+     */
+    fun `resetAccountSync`(`accountId`: kotlin.String)
+    
+    /**
      * Apply the user's resolution for conflict `id`. `choice` is `"keep_local"`
      * | `"take_remote"` | `"save_both"`. `keep_local` is pure bookkeeping (the
      * merge already kept the local value); `take_remote` writes the remote value
@@ -6627,6 +6646,29 @@ open class Host: Disposable, AutoCloseable, HostInterface
     }
     )
     }
+    
+
+    
+    /**
+     * Force a FULL cold re-sync of one external account: clear its delta tokens
+     * + cached window across every container, then kick a warm pass so each
+     * re-bootstraps from the provider. Cached rows stay as an offline fallback
+     * until replaced; credentials are untouched (no re-auth). The recovery
+     * action for a "stuck" external cache — a bootstrap that enumerated an
+     * incomplete resource set yet persisted a sync-token, so later deltas
+     * reported "no changes" over permanently-missing events. Mirrors the desktop
+     * `reset_account_sync` command.
+     */
+    @Throws(StoreException::class)override fun `resetAccountSync`(`accountId`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_reset_account_sync(
+        it,
+        FfiConverterString.lower(`accountId`),_status)
+}
+    }
+    
     
 
     

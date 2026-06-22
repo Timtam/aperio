@@ -5050,6 +5050,24 @@ impl Host {
         self.refresh_external_cache();
     }
 
+    /// Force a FULL cold re-sync of one external account: clear its delta tokens
+    /// + cached window across every container, then kick a warm pass so each
+    /// re-bootstraps from the provider. Cached rows stay as an offline fallback
+    /// until replaced; credentials are untouched (no re-auth). The recovery
+    /// action for a "stuck" external cache — a bootstrap that enumerated an
+    /// incomplete resource set yet persisted a sync-token, so later deltas
+    /// reported "no changes" over permanently-missing events. Mirrors the desktop
+    /// `reset_account_sync` command.
+    pub fn reset_account_sync(&self, account_id: String) -> Result<(), StoreError> {
+        self.cache
+            .reset_account_sync(&account_id)
+            .map_err(|e| StoreError::Storage {
+                detail: e.to_string(),
+            })?;
+        self.refresh_external_cache();
+        Ok(())
+    }
+
     // ─── Device calendar + reminders (iOS EventKit / Android CalendarProvider) ───
     //
     // Mobile-only, host-internal: the adapter wraps a native bridge the OS module
