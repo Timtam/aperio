@@ -14,12 +14,15 @@ import { localDateKey } from './dateKey';
  * midnight (an 11 p.m. → 1 a.m. meeting) stay anchored to their start day —
  * that's how Outlook / Google handle it too.
  *
- * Timezone handling: all-day events come in as UTC-midnight
- * (`DTSTART;VALUE=DATE:20260520` → 00:00 UTC). We anchor both endpoints at the
- * user's local midnight and walk by whole calendar days (`setDate(+1)`), so a
- * DST transition in the middle of the range never drops or duplicates a day.
- * (This replaces the desktop's old date-fns differenceInDays/addDays — the walk
- * is DST-safe and dependency-free, so the module runs on mobile too.)
+ * Timezone handling: all-day events are anchored at the user's LOCAL midnight,
+ * expressed as a UTC instant — the convention the CalDAV adapter's
+ * `naive_date_to_utc` writes (`DTSTART;VALUE=DATE:20260520` → local-midnight-as-
+ * UTC, deliberately NOT 00:00 UTC, which would render a day early west of UTC).
+ * So we read the local calendar day straight back off the instant with local-time
+ * accessors and walk by whole calendar days (`setDate(+1)`); a DST transition in
+ * the middle of the range never drops or duplicates a day. (This replaces the
+ * desktop's old date-fns differenceInDays/addDays — the walk is DST-safe and
+ * dependency-free, so the module runs on mobile too.)
  */
 
 /** The minimal event shape the day-spreaders need (CalendarEvent satisfies it

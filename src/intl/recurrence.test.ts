@@ -176,4 +176,36 @@ describe('expandAll', () => {
     const sorted = [...starts].sort();
     expect(starts).toEqual(sorted);
   });
+
+  it('applies a RECURRENCE-ID override in place of the master occurrence', () => {
+    const master = mkEvent({
+      id: 'series',
+      start: '2026-05-19T09:00:00.000Z',
+      end: '2026-05-19T09:30:00.000Z',
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=4', exceptions: [] },
+    });
+    // The 2026-05-20 occurrence was moved to 14:00. It arrives as a separate
+    // non-recurring event whose id carries the series id + the replaced
+    // occurrence (the shape the CalDAV adapter mints).
+    const override = mkEvent({
+      id: 'series::rid::2026-05-20T09:00:00Z',
+      start: '2026-05-20T14:00:00.000Z',
+      end: '2026-05-20T14:30:00.000Z',
+      title: 'Standup (moved)',
+    });
+    const out = expandAll([master, override], {
+      start: new Date('2026-05-19'),
+      end: new Date(Date.parse('2026-05-19') + 10 * ONE_DAY),
+    });
+    // 4 daily occurrences, but 05-20 09:00 is replaced by the override:
+    // 3 master occurrences + 1 override = 4.
+    expect(out.length).toBe(4);
+    // The master's own 05-20 09:00 copy is gone…
+    expect(
+      out.find((o) => o.start === '2026-05-20T09:00:00.000Z'),
+    ).toBeUndefined();
+    // …and the moved instance stands in for it.
+    const moved = out.find((o) => o.start === '2026-05-20T14:00:00.000Z');
+    expect(moved?.title).toBe('Standup (moved)');
+  });
 });

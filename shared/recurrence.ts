@@ -95,15 +95,80 @@ function buildRule(rruleBody: string, dtstart: Date): RRule {
 }
 
 /**
+ * Marker in an override instance's id, separating the recurring series'
+ * `{href}|{uid}` from the RECURRENCE-ID instant it replaces (e.g.
+ * `…|uid::rid::2026-06-14T13:00:00Z`). Mirrors `RECURRENCE_ID_MARKER` in the
+ * CalDAV adapter (`crates/cal-adapter-caldav/src/mapping.rs`), which mints these
+ * ids — keep the two in sync.
+ */
+const RECURRENCE_ID_MARKER = '::rid::';
+
+/**
+ * The original occurrence instant (ISO) a RECURRENCE-ID override replaces, or
+ * `null` for a master / plain event. Read off the id the CalDAV adapter minted.
+ */
+export function overrideRecurrenceIso<E extends RecurringEventLike>(
+  event: E,
+): string | null {
+  const i = event.id.indexOf(RECURRENCE_ID_MARKER);
+  return i < 0 ? null : event.id.slice(i + RECURRENCE_ID_MARKER.length);
+}
+
+/**
+ * The series (master) id a RECURRENCE-ID override belongs to, or `null` for a
+ * master / plain event.
+ */
+export function overrideSeriesId<E extends RecurringEventLike>(
+  event: E,
+): string | null {
+  const i = event.id.indexOf(RECURRENCE_ID_MARKER);
+  return i < 0 ? null : event.id.slice(0, i);
+}
+
+/**
  * Walk events through {@link expandEvent}, flatten, and sort chronologically.
  * The result is `E[]` (occurrences are assignment-compatible with `E`); callers
  * that need the underlying series read `series_id` via {@link seriesIdOf}.
+ *
+ * RECURRENCE-ID overrides (a recurring series' modified single instances) arrive
+ * as separate non-recurring events whose id carries both the master id and the
+ * occurrence they replace. We drop the master's own copy of each overridden
+ * occurrence so the override stands in for it (at its possibly-moved time) —
+ * otherwise the day shows the instance twice, or (before the adapter fix that
+ * stopped them colliding in the cache) not at all.
  */
 export function expandAll<E extends RecurringEventLike>(
   events: E[],
   range: { start: Date; end: Date },
 ): E[] {
-  const out = events.flatMap((ev) => expandEvent(ev, range));
+  // Per series, the original occurrence instants an override supersedes.
+  let overridden: Map<string, Set<number>> | null = null;
+  for (const ev of events) {
+    const iso = overrideRecurrenceIso(ev);
+    const seriesId = overrideSeriesId(ev);
+    if (iso == null || seriesId == null) continue;
+    const t = new Date(iso).getTime();
+    if (Number.isNaN(t)) continue;
+    (overridden ??= new Map());
+    let set = overridden.get(seriesId);
+    if (!set) {
+      set = new Set();
+      overridden.set(seriesId, set);
+    }
+    set.add(t);
+  }
+
+  const out = events.flatMap((ev) => {
+    const occs = expandEvent(ev, range);
+    const replaced = ev.recurrence?.rrule ? overridden?.get(ev.id) : undefined;
+    if (!replaced || replaced.size === 0) return occs;
+    // Drop the master occurrences an override stands in for (matched on the
+    // original occurrence instant). Keep anything we can't place — never hide.
+    return occs.filter((o) => {
+      const iso = occurrenceIsoOf(o);
+      return iso == null || !replaced.has(new Date(iso).getTime());
+    });
+  });
   out.sort((a, b) => a.start.localeCompare(b.start));
   return out;
 }

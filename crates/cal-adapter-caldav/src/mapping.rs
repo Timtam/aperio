@@ -81,6 +81,13 @@ pub fn decode_event_id(event_id: &str) -> (Option<&str>, &str) {
     }
 }
 
+/// Separator in an override instance's id between the recurring series'
+/// `{href}|{uid}` and the RECURRENCE-ID instant it replaces — e.g.
+/// `…|uid::rid::2026-06-14T13:00:00Z`. Chosen so it can't appear in a CalDAV
+/// href/UID; the frontend (`shared/recurrence.ts`, kept in sync) splits a series
+/// id back out of it and skips the master occurrence the override stands in for.
+const RECURRENCE_ID_MARKER: &str = "::rid::";
+
 fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> CaldavResult<Event> {
     let uid = ev
         .get_uid()
@@ -91,12 +98,25 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
 
     let (start, end, all_day) = resolve_range(ev)?;
 
-    let rrule = ev.property_value("RRULE").map(|s| s.to_string());
-    let exceptions = collect_exdates(ev);
-    let recurrence = rrule.map(|r| EventRecurrence {
-        rrule: r,
-        exceptions,
-    });
+    // RFC 5545 RECURRENCE-ID marks this VEVENT as a single *modified instance*
+    // (an override) of a recurring series — not the master. iCloud packs the
+    // master and its overrides into ONE resource (same href, same UID); without
+    // telling them apart they collide on the `{href}|{uid}` id and the cache
+    // upsert drops one — taking the master's RRULE, and thus the whole series,
+    // with it. Parse it like DTSTART (TZID / all-day aware) so the instant lines
+    // up with the master's expanded occurrence on the frontend.
+    let recurrence_id = ev.get_recurrence_id().map(|d| datetime_to_utc(d).0);
+
+    // An override is a single instance, so it must NOT carry a series rule (a
+    // server may still send RRULE on it; ignore it). Masters keep rule + EXDATE.
+    let recurrence = if recurrence_id.is_some() {
+        None
+    } else {
+        ev.property_value("RRULE").map(|r| EventRecurrence {
+            rrule: r.to_string(),
+            exceptions: collect_exdates(ev),
+        })
+    };
 
     // Created / updated fallback chain. icalendar exposes a few
     // typed accessors but they don't always give us UTC straight,
@@ -118,9 +138,21 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
     // Encode the server href into the id (`{href}|{uid}`) when we have
     // it, so removed hrefs from a sync-collection delta map onto the
     // cache's native_id; without it, fall back to the bare UID.
-    let id = match href {
+    let base_id = match href {
         Some(h) if !h.is_empty() => format!("{h}|{uid}"),
         _ => uid.to_string(),
+    };
+    // An override shares the master's `{href}|{uid}`; suffix the replaced
+    // occurrence instant (`…::rid::2026-06-14T13:00:00Z`) so it gets its own
+    // cache row instead of clobbering the master. The frontend strips the marker
+    // to recover the series id + the occurrence it stands in for; `native_id()`
+    // still splits at the first `|`, so a resource deletion maps to both rows.
+    let id = match &recurrence_id {
+        Some(rid) => format!(
+            "{base_id}{RECURRENCE_ID_MARKER}{}",
+            rid.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+        ),
+        None => base_id,
     };
 
     // ORGANIZER + ATTENDEE;PARTSTAT (RFC 5545). ATTENDEE is multi-valued
@@ -766,6 +798,65 @@ END:VCALENDAR\r
         );
         assert_eq!(ev.end, Utc.with_ymd_and_hms(2026, 5, 20, 8, 30, 0).unwrap());
         assert!(!ev.all_day);
+    }
+
+    #[test]
+    fn master_and_recurrence_id_override_get_distinct_ids() {
+        // A recurring series whose 2nd occurrence was edited: iCloud sends the
+        // master (RRULE) and the override (RECURRENCE-ID) as TWO VEVENTs sharing
+        // one UID in ONE resource. Before the fix they got the same `{href}|{uid}`
+        // id and the cache upsert dropped one — losing the master's RRULE, so the
+        // whole series vanished. They must now map to distinct rows.
+        let body = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:series-1@aperio\r
+SUMMARY:Daily standup\r
+DTSTART:20260519T090000Z\r
+DTEND:20260519T093000Z\r
+RRULE:FREQ=DAILY;COUNT=5\r
+END:VEVENT\r
+BEGIN:VEVENT\r
+UID:series-1@aperio\r
+RECURRENCE-ID:20260520T090000Z\r
+SUMMARY:Daily standup (moved)\r
+DTSTART:20260520T140000Z\r
+DTEND:20260520T143000Z\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let href = "/calendars/home/series-1.ics";
+        let events =
+            parse_calendar_data_with_href(body, "https://example.test/calendars/home/", Some(href))
+                .unwrap();
+        assert_eq!(events.len(), 2, "both the master and the override map");
+
+        let master = events
+            .iter()
+            .find(|e| e.recurrence.is_some())
+            .expect("the master keeps its RRULE");
+        let override_ev = events
+            .iter()
+            .find(|e| e.recurrence.is_none())
+            .expect("the override drops the series rule");
+
+        assert_eq!(master.id, format!("{href}|series-1@aperio"));
+        assert_eq!(
+            override_ev.id,
+            format!("{href}|series-1@aperio::rid::2026-05-20T09:00:00Z"),
+            "the override id carries the replaced occurrence instant"
+        );
+        assert_ne!(master.id, override_ev.id, "no id collision → no clobber");
+        // host-core's `native_id()` splits at the first `|`, so the suffix still
+        // resolves to the resource href for delta deletions.
+        assert_eq!(override_ev.id.split('|').next(), Some(href));
+        // The override renders at its moved time; the master series is intact.
+        assert_eq!(
+            override_ev.start,
+            Utc.with_ymd_and_hms(2026, 5, 20, 14, 0, 0).unwrap()
+        );
+        assert!(master.recurrence.as_ref().unwrap().rrule.contains("DAILY"));
     }
 
     #[test]
