@@ -691,6 +691,7 @@ pub fn run() {
             // toolbar indicator.
             commands::refresh_external_cache,
             commands::get_cache_refresh_status,
+            commands::reset_account_sync,
             // System tray: availability gate + close/minimize routing
             // (the title-bar buttons call these so close/minimize can hide
             // to the tray when the user opted in).

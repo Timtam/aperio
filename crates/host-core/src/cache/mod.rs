@@ -742,6 +742,30 @@ impl CacheStore {
         })
     }
 
+    /// Force a FULL cold re-sync of EVERY container owned by `account` —
+    /// across all scopes (events, tasks, contacts + their listings): clear the
+    /// delta token, the covered window and the freshness markers, so the next
+    /// refresh of each re-bootstraps from the provider. The cached rows stay as
+    /// an offline fallback until the cold fetch replaces them; credentials are
+    /// untouched. Unlike [`Self::reset_event_sync`] (events-only) this fans out
+    /// across every scope, powering the user-facing "force full re-sync"
+    /// recovery action — e.g. a CalDAV bootstrap that enumerated an INCOMPLETE
+    /// resource set yet persisted a sync-token, so later deltas reported "no
+    /// changes" over permanently-missing events. Returns the number of
+    /// containers reset.
+    pub fn reset_account_sync(&self, account: &str) -> DbResult<usize> {
+        self.db.with_conn(|c| {
+            let n = c.execute(
+                "UPDATE cache_sync_state
+                    SET sync_token = NULL, window_start = NULL, window_end = NULL,
+                        last_refreshed_at = NULL
+                  WHERE account_id = ?1",
+                params![account],
+            )?;
+            Ok(n)
+        })
+    }
+
     /// Record a failed refresh: stamp `last_error`, leave the rest
     /// (including the still-valid cached data + window) intact.
     pub fn mark_error(

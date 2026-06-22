@@ -22,6 +22,7 @@ import {
   listAccounts,
   listAccountsMissingCredentials,
   renameAccount,
+  resetAccountSync,
   setUserPref,
   testCaldavConnection,
   testEwsConnection,
@@ -715,6 +716,31 @@ export function AccountsPanel() {
     ],
   );
 
+  // Force a full cold re-sync of one external account: clears its delta tokens +
+  // cached window across every container, then kicks a warm pass so each
+  // re-bootstraps from the provider. The recovery path for a "stuck" external
+  // cache — a bootstrap that enumerated an INCOMPLETE resource set yet persisted
+  // a sync-token, so later deltas reported "no changes" over permanently-missing
+  // events. Credentials are untouched, so there's no app-specific-password
+  // re-entry (the whole reason we don't just tell the user to re-add the account).
+  const [resyncing, setResyncing] = useState(false);
+  const onResetSync = useCallback(
+    async (acc: Account) => {
+      setError(null);
+      setResyncing(true);
+      try {
+        await resetAccountSync(acc.id);
+        announce(t('dialogs.accounts.resyncStarted', { name: acc.display_name }));
+      } catch (err) {
+        if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
+        else setError(String(err));
+      } finally {
+        setResyncing(false);
+      }
+    },
+    [announce, t],
+  );
+
   const headingId = useId();
   const optionId = (i: number) => `${headingId}-acc-${i}`;
 
@@ -1094,6 +1120,27 @@ export function AccountsPanel() {
                 );
               })}
             </ul>
+          )}
+          {/* Per-account recovery: force a full cold re-sync of the FOCUSED
+              external account. Clears its delta tokens + cached window so the
+              next refresh re-bootstraps the whole collection from the provider —
+              fixes a "stuck" cache where a bootstrap cached an incomplete set as
+              complete (events that exist on the device but never show here).
+              Local accounts have no external cache, so it's offered only for
+              externals; credentials are untouched (no re-auth). */}
+          {accounts[focusIndex] && !isLocalAt(focusIndex) && (
+            <button
+              type="button"
+              className="form__action accounts-list__resync"
+              onClick={() => void onResetSync(accounts[focusIndex])}
+              aria-disabled={resyncing || undefined}
+            >
+              {resyncing
+                ? t('dialogs.accounts.resyncing')
+                : t('dialogs.accounts.forceResync', {
+                    name: accounts[focusIndex].display_name,
+                  })}
+            </button>
           )}
         </section>
 

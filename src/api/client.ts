@@ -975,6 +975,14 @@ export const refreshExternalCache = () =>
 export const getCacheRefreshStatus = () =>
   invoke<CacheRefreshStatus>('get_cache_refresh_status');
 
+/** Force a FULL cold re-sync of one external account: clear its delta tokens +
+ *  cached window across every container, then kick a warm pass so each
+ *  re-bootstraps from the provider. Cached rows stay as an offline fallback
+ *  until replaced; credentials are untouched. The recovery action for a "stuck"
+ *  external cache (a bootstrap that cached an incomplete set as complete). */
+export const resetAccountSync = (accountId: string) =>
+  invoke<void>('reset_account_sync', { accountId });
+
 // ── Cross-device sync (Phase Sd–Si, DESIGN.md §19) ───────────────────
 
 /** Adapter family the user picked. `none` is the explicit
