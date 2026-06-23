@@ -328,6 +328,12 @@ pub struct ParsedItem {
     /// `Single` when EWS omits it (e.g. older servers that don't
     /// honour the property request).
     pub item_type: Option<String>,
+    /// Windows zone id from `<t:StartTimeZone>` (e.g. "Eastern Standard Time"),
+    /// when requested + present. Translated to IANA for a recurring master's
+    /// `EventRecurrence.tzid` so the series expands DST-correctly. `#[serde(default)]`
+    /// so older persisted sync state loads without forcing a full re-sync.
+    #[serde(default)]
+    pub start_time_zone: Option<String>,
     /// On a RecurringMaster row from `SyncFolderItems`, the
     /// `<t:Recurrence>` element parses to this. `None` on singles
     /// and on read paths that don't request the field (the legacy
@@ -598,6 +604,10 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
     let mut current = ParsedItem::default();
     let mut text_target: Option<&'static str> = None;
     let mut recurrence_walker: Option<RecurrenceWalker> = None;
+    // `<t:StartTimeZone>` carries the master's Windows zone id (directly, or on
+    // a nested `<t:TimeZoneDefinition>`); track that we're inside it so the
+    // nested-form id isn't picked up from EndTimeZone.
+    let mut inside_start_timezone = false;
     let mut inside_deleted_occurrences = false;
     let mut inside_deleted_occurrence = false;
     // ModifiedOccurrences mirrors the DeletedOccurrences shape but
@@ -742,6 +752,27 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                     b"calendaritemtype" if inside_item => {
                         text_target = Some("item_type");
                     }
+                    b"starttimezone" if inside_item => {
+                        inside_start_timezone = true;
+                        // Simple form: <t:StartTimeZone Id="Eastern Standard Time" .../>.
+                        for a in e.attributes().flatten() {
+                            if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
+                                current.start_time_zone =
+                                    Some(String::from_utf8_lossy(&a.value).into_owned());
+                            }
+                        }
+                    }
+                    b"timezonedefinition"
+                        if inside_start_timezone && current.start_time_zone.is_none() =>
+                    {
+                        // Full-definition form: the id sits one level down.
+                        for a in e.attributes().flatten() {
+                            if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
+                                current.start_time_zone =
+                                    Some(String::from_utf8_lossy(&a.value).into_owned());
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -785,6 +816,7 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                     b"modifiedoccurrences" => {
                         inside_modified_occurrences = false;
                     }
+                    b"starttimezone" => inside_start_timezone = false,
                     b"occurrence" if inside_modified_occurrence => {
                         inside_modified_occurrence = false;
                         if let Some(o) = std::mem::take(&mut current_override).finish() {
@@ -1032,6 +1064,10 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
     let mut current = ParsedItem::default();
     let mut text_target: Option<&'static str> = None;
     let mut recurrence_walker: Option<RecurrenceWalker> = None;
+    // `<t:StartTimeZone>` carries the master's Windows zone id (directly, or on
+    // a nested `<t:TimeZoneDefinition>`); track that we're inside it so the
+    // nested-form id isn't picked up from EndTimeZone.
+    let mut inside_start_timezone = false;
     let mut inside_deleted_occurrences = false;
     let mut inside_deleted_occurrence = false;
     let mut inside_modified_occurrences = false;
@@ -1147,6 +1183,25 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                     b"responsetype" if inside_attendee => {
                         text_target = Some("attendee_response");
                     }
+                    b"starttimezone" if inside_item => {
+                        inside_start_timezone = true;
+                        for a in e.attributes().flatten() {
+                            if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
+                                current.start_time_zone =
+                                    Some(String::from_utf8_lossy(&a.value).into_owned());
+                            }
+                        }
+                    }
+                    b"timezonedefinition"
+                        if inside_start_timezone && current.start_time_zone.is_none() =>
+                    {
+                        for a in e.attributes().flatten() {
+                            if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
+                                current.start_time_zone =
+                                    Some(String::from_utf8_lossy(&a.value).into_owned());
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -1175,6 +1230,7 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                     b"deletedoccurrences" => inside_deleted_occurrences = false,
                     b"deletedoccurrence" => inside_deleted_occurrence = false,
                     b"modifiedoccurrences" => inside_modified_occurrences = false,
+                    b"starttimezone" => inside_start_timezone = false,
                     b"occurrence" if inside_modified_occurrence => {
                         inside_modified_occurrence = false;
                         if let Some(o) = std::mem::take(&mut current_override).finish() {
@@ -1502,7 +1558,14 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         EventRecurrence {
             rrule: r.to_rrule(),
             exceptions,
-            tzid: None,
+            // EWS reports the master's zone as a WINDOWS name; translate it to
+            // IANA so the frontend expands the series DST-correctly. Unmapped /
+            // absent → None (UTC expansion, as before).
+            tzid: item
+                .start_time_zone
+                .as_deref()
+                .and_then(crate::windows_tz::windows_to_iana)
+                .map(str::to_string),
         }
     });
 
@@ -3353,6 +3416,7 @@ mod tests {
             created: Some("2026-05-19T08:00:00Z".parse().unwrap()),
             last_modified: Some("2026-05-19T09:00:00Z".parse().unwrap()),
             item_type: None,
+            start_time_zone: None,
             recurrence: None,
             deleted_occurrence_starts: Vec::new(),
             modified_occurrences: Vec::new(),
@@ -3759,6 +3823,7 @@ mod tests {
             created: None,
             last_modified: None,
             item_type: item_type.map(String::from),
+            start_time_zone: None,
             recurrence: None,
             deleted_occurrence_starts: Vec::new(),
             modified_occurrences: Vec::new(),
@@ -4301,6 +4366,71 @@ mod tests {
         assert_eq!(
             item.deleted_occurrence_starts[1].to_rfc3339(),
             "2026-06-15T09:00:00+00:00",
+        );
+    }
+
+    #[test]
+    fn parse_sync_response_captures_start_time_zone() {
+        // A recurring master carries its WINDOWS zone in <t:StartTimeZone>; the
+        // walker must capture it (and NOT confuse it with EndTimeZone) so the
+        // mapper can translate it to IANA for DST-correct expansion.
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <soap:Body>
+    <m:SyncFolderItemsResponse>
+      <m:ResponseMessages>
+        <m:SyncFolderItemsResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:SyncState>NEW-STATE</m:SyncState>
+          <m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>
+          <m:Changes>
+            <t:Create>
+              <t:CalendarItem>
+                <t:ItemId Id="MASTER-TZ" ChangeKey="CK"/>
+                <t:Subject>OAGDU</t:Subject>
+                <t:Start>2025-12-15T00:00:00Z</t:Start>
+                <t:End>2025-12-15T01:00:00Z</t:End>
+                <t:IsRecurring>true</t:IsRecurring>
+                <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
+                <t:StartTimeZone Id="Eastern Standard Time" Name="Eastern Standard Time"/>
+                <t:EndTimeZone Id="Eastern Standard Time"/>
+                <t:Recurrence>
+                  <t:WeeklyRecurrence>
+                    <t:Interval>1</t:Interval>
+                    <t:DaysOfWeek>Sunday</t:DaysOfWeek>
+                  </t:WeeklyRecurrence>
+                  <t:NoEndRecurrence>
+                    <t:StartDate>2025-12-15</t:StartDate>
+                  </t:NoEndRecurrence>
+                </t:Recurrence>
+              </t:CalendarItem>
+            </t:Create>
+          </m:Changes>
+        </m:SyncFolderItemsResponseMessage>
+      </m:ResponseMessages>
+    </m:SyncFolderItemsResponse>
+  </soap:Body>
+</soap:Envelope>"#;
+        let r = parse_sync_folder_items_response(xml).unwrap();
+        let item = match &r.changes[0] {
+            SyncChange::Create(i) => i,
+            other => panic!("expected Create, got {other:?}"),
+        };
+        // Captured from StartTimeZone (the master's own Start also survived).
+        assert_eq!(
+            item.start_time_zone.as_deref(),
+            Some("Eastern Standard Time")
+        );
+        assert_eq!(
+            item.start.unwrap().to_rfc3339(),
+            "2025-12-15T00:00:00+00:00"
+        );
+        // …and it translates to IANA for the frontend expander.
+        assert_eq!(
+            crate::windows_tz::windows_to_iana(item.start_time_zone.as_deref().unwrap()),
+            Some("America/New_York")
         );
     }
 

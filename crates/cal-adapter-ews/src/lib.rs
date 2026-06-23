@@ -36,6 +36,7 @@ pub mod error;
 pub mod mapping;
 pub mod soap;
 pub mod tasks;
+pub mod windows_tz;
 
 use std::collections::HashMap;
 use std::path::PathBuf;

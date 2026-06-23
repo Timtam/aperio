@@ -122,6 +122,7 @@ pub fn sync_folder_items(
           <t:FieldURI FieldURI="calendar:IsRecurring"/>
           <t:FieldURI FieldURI="calendar:CalendarItemType"/>
           <t:FieldURI FieldURI="calendar:Recurrence"/>
+          <t:FieldURI FieldURI="calendar:StartTimeZone"/>
           <t:FieldURI FieldURI="calendar:ModifiedOccurrences"/>
           <t:FieldURI FieldURI="calendar:DeletedOccurrences"/>
         </t:AdditionalProperties>
@@ -572,6 +573,7 @@ pub fn get_calendar_items_with_recurrence(ids: &[(String, Option<String>)]) -> S
           <t:FieldURI FieldURI="calendar:IsRecurring"/>
           <t:FieldURI FieldURI="calendar:CalendarItemType"/>
           <t:FieldURI FieldURI="calendar:Recurrence"/>
+          <t:FieldURI FieldURI="calendar:StartTimeZone"/>
           <t:FieldURI FieldURI="calendar:ModifiedOccurrences"/>
           <t:FieldURI FieldURI="calendar:DeletedOccurrences"/>
           <t:FieldURI FieldURI="calendar:Organizer"/>
