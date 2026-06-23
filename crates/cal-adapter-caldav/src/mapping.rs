@@ -566,6 +566,26 @@ fn apply_common(
         // the local day of `event.end` is exactly the right exclusive
         // boundary.
         ical_ev.ends(event.end.with_timezone(&Local).date_naive());
+    } else if let Some(tzid) = event.recurrence.as_ref().and_then(|r| r.tzid.as_deref()) {
+        // A zoned recurring master must keep its TZID on write-back, else the
+        // next read flattens DTSTART to a bare UTC instant, drops the zone, and
+        // the rule re-expands in UTC — the DST drift returns. Emit
+        // DTSTART/DTEND;TZID=<zone>:<local wall-clock>. UNTIL + EXDATE stay UTC
+        // `Z` (RFC 5545 requires UTC there), which the read side already parses.
+        match (
+            zoned_datetime(event.start, tzid),
+            zoned_datetime(event.end, tzid),
+        ) {
+            (Some(start), Some(end)) => {
+                ical_ev.starts(start);
+                ical_ev.ends(end);
+            }
+            // A zone we can't resolve — fall back to UTC rather than a broken value.
+            _ => {
+                ical_ev.starts(event.start);
+                ical_ev.ends(event.end);
+            }
+        }
     } else {
         ical_ev.starts(event.start);
         ical_ev.ends(event.end);
@@ -664,6 +684,20 @@ fn reminder_to_alarm(reminder: &Reminder, fallback_summary: &str) -> Option<ical
 
 fn format_utc_compact(dt: DateTime<Utc>) -> String {
     dt.format("%Y%m%dT%H%M%SZ").to_string()
+}
+
+/// A `DTSTART`/`DTEND` value carrying its IANA zone (`;TZID=<zone>:<local
+/// wall-clock>`), so a zoned recurring master round-trips with its zone intact.
+/// Returns `None` for a zone `chrono-tz` can't resolve, so the caller can fall
+/// back to a plain UTC instant rather than emit a broken property.
+fn zoned_datetime(instant: DateTime<Utc>, tzid: &str) -> Option<DatePerhapsTime> {
+    let tz: chrono_tz::Tz = tzid.parse().ok()?;
+    Some(DatePerhapsTime::DateTime(
+        icalendar::CalendarDateTime::WithTimezone {
+            date_time: instant.with_timezone(&tz).naive_local(),
+            tzid: tzid.to_string(),
+        },
+    ))
 }
 
 /// Parse an RFC 7986 `COLOR` property value into a normalised `#rrggbb`
@@ -918,6 +952,38 @@ END:VCALENDAR\r
             let events = parse_calendar_data(&body, "cal-1").unwrap();
             assert_eq!(events[0].recurrence.as_ref().unwrap().tzid, None);
         }
+    }
+
+    #[test]
+    fn write_back_preserves_a_zoned_recurring_masters_timezone() {
+        // Editing a zoned recurring master in Aperio must NOT flatten its DTSTART
+        // to a bare UTC instant — that drops the zone and re-introduces the DST
+        // drift on the next read. The TZID has to round-trip.
+        let body = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:oagdu@aperio\r
+SUMMARY:OAGDU meeting\r
+DTSTART;TZID=America/New_York:20251214T190000\r
+DTEND;TZID=America/New_York:20251214T200000\r
+RRULE:FREQ=MONTHLY;BYDAY=2SU\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let ev = parse_calendar_data(body, "cal-1").unwrap().remove(0);
+        let ical = event_to_ical(&ev, None);
+        assert!(
+            ical.contains("DTSTART;TZID=America/New_York"),
+            "expected a zoned DTSTART in the PUT body, got:\n{ical}"
+        );
+        // Re-reading keeps both the exact instant and the zone (no drift on edit).
+        let reread = parse_calendar_data(&ical, "cal-1").unwrap().remove(0);
+        assert_eq!(reread.start, ev.start);
+        assert_eq!(
+            reread.recurrence.as_ref().unwrap().tzid.as_deref(),
+            Some("America/New_York")
+        );
     }
 
     #[test]
