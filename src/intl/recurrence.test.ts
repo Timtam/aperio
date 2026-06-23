@@ -310,6 +310,46 @@ describe('expandEvent timezone (DST-correct)', () => {
       '2026-05-20T09:00:00.000Z',
     ]);
   });
+
+  it('rounds a spring-forward gap occurrence forward to the first valid time', () => {
+    // DAILY 02:30 America/New_York across 2026-03-08 (02:00 EST jumps to 03:00
+    // EDT, so 02:30 does not exist that day). dtstart 02:30 EST = 07:30Z.
+    const ev = mkEvent({
+      id: 'gap',
+      start: '2026-03-01T07:30:00.000Z',
+      end: '2026-03-01T08:00:00.000Z',
+      recurrence: { rrule: 'FREQ=DAILY', exceptions: [], tzid: 'America/New_York' },
+    });
+    const out = expandEvent(ev, {
+      start: new Date('2026-03-07T00:00:00Z'),
+      end: new Date('2026-03-10T00:00:00Z'),
+    });
+    const onGapDay = out.find(
+      (o) => dayIn(o.start, 'America/New_York') === '2026-03-08',
+    );
+    // Rounds forward to 03:30 EDT = 07:30Z (not 01:30 EST, the old behaviour).
+    expect(onGapDay?.start).toBe('2026-03-08T07:30:00.000Z');
+  });
+
+  it('takes the first reading of a fall-back ambiguous occurrence', () => {
+    // DAILY 01:30 America/New_York across 2026-11-01 (02:00 EDT falls back to
+    // 01:00 EST, so 01:30 happens twice). dtstart 01:30 EDT = 05:30Z.
+    const ev = mkEvent({
+      id: 'overlap',
+      start: '2026-10-01T05:30:00.000Z',
+      end: '2026-10-01T06:00:00.000Z',
+      recurrence: { rrule: 'FREQ=DAILY', exceptions: [], tzid: 'America/New_York' },
+    });
+    const out = expandEvent(ev, {
+      start: new Date('2026-10-31T00:00:00Z'),
+      end: new Date('2026-11-03T00:00:00Z'),
+    });
+    const onFallDay = out.find(
+      (o) => dayIn(o.start, 'America/New_York') === '2026-11-01',
+    );
+    // The FIRST 01:30 (EDT) = 05:30Z, not the second 01:30 (EST) = 06:30Z.
+    expect(onFallDay?.start).toBe('2026-11-01T05:30:00.000Z');
+  });
 });
 
 describe('withCreatedRecurrenceZone', () => {

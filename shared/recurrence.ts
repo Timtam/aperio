@@ -146,9 +146,8 @@ function zonedOccurrences(
   const rule = buildRule(shiftUntilToWall(rruleBody, tzid), dtstartWall);
   // Pad the wall-clock window a day each side (any zone offset is < 24h) so no
   // occurrence near a real-range edge is missed; the precise real filter trims.
-  const DAY = 86_400_000;
-  const lo = new Date(realToWall(range.start, tzid).getTime() - DAY);
-  const hi = new Date(realToWall(range.end, tzid).getTime() + DAY);
+  const lo = new Date(realToWall(range.start, tzid).getTime() - DAY_MS);
+  const hi = new Date(realToWall(range.end, tzid).getTime() + DAY_MS);
   return rule
     .between(lo, hi, true)
     .map((wall) => wallToReal(wall, tzid))
@@ -203,14 +202,32 @@ function realToWall(instant: Date, tzid: string): Date {
   return new Date(instant.getTime() + zoneOffsetMs(instant, tzid));
 }
 
+const DAY_MS = 86_400_000;
+
 /** Inverse of {@link realToWall}: a wall-clock-as-UTC Date → the real instant in
- *  `tzid`. Two passes settle DST transitions (the offset depends on the answer);
- *  ambiguous fall-back times resolve to the later offset and spring-forward gap
- *  times round forward — both acceptable, matching common calendar behaviour. */
+ *  `tzid`, resolving DST edges deterministically. A spring-forward GAP time (no
+ *  such reading on the local clock) rounds FORWARD to the first valid instant; a
+ *  fall-back AMBIGUOUS time (two readings) takes the FIRST (earlier) instant. */
 function wallToReal(wall: Date, tzid: string): Date {
   const t = wall.getTime();
-  const approx = new Date(t - zoneOffsetMs(wall, tzid));
-  return new Date(t - zoneOffsetMs(approx, tzid));
+  // Bracket any transition near the wall time: DST changes once per ~6 months
+  // and at most once within a day, so the offsets a day before/after pin it.
+  const offBefore = zoneOffsetMs(new Date(t - DAY_MS), tzid);
+  const offAfter = zoneOffsetMs(new Date(t + DAY_MS), tzid);
+  if (offBefore === offAfter) {
+    return new Date(t - offBefore); // no transition in range → unambiguous
+  }
+  const candBefore = t - offBefore;
+  const candAfter = t - offAfter;
+  // A candidate is real iff its actual offset matches the side it came from.
+  const beforeValid = zoneOffsetMs(new Date(candBefore), tzid) === offBefore;
+  const afterValid = zoneOffsetMs(new Date(candAfter), tzid) === offAfter;
+  if (beforeValid && afterValid) {
+    return new Date(Math.min(candBefore, candAfter)); // overlap → first reading
+  }
+  if (beforeValid) return new Date(candBefore);
+  if (afterValid) return new Date(candAfter);
+  return new Date(Math.max(candBefore, candAfter)); // gap → round forward
 }
 
 /** Rewrite a real-UTC `UNTIL=…Z` bound into wall-clock space so it lines up with

@@ -208,6 +208,10 @@ pub struct EventDateTime {
     pub date_time: Option<DateTime<Utc>>,
     #[serde(default)]
     pub date: Option<NaiveDate>,
+    /// IANA zone Google attaches to `dateTime` (e.g. `America/New_York`). Kept so
+    /// a recurring master expands DST-correctly instead of drifting in flat UTC.
+    #[serde(default, rename = "timeZone")]
+    pub time_zone: Option<String>,
 }
 
 impl EventDateTime {
@@ -281,7 +285,17 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
     let recurrence = rrule.map(|r| EventRecurrence {
         rrule: r,
         exceptions,
-        tzid: None,
+        // Carry Google's IANA zone for a timed recurring master so the frontend
+        // expands it DST-correctly; all-day + plain UTC stay on the UTC path.
+        tzid: if all_day {
+            None
+        } else {
+            entry
+                .start
+                .time_zone
+                .clone()
+                .filter(|t| !t.is_empty() && t != "Etc/UTC")
+        },
     });
 
     let created = entry.created.unwrap_or_else(Utc::now);
@@ -459,12 +473,13 @@ pub struct EventRemindersWrite {
 
 /// Convert a `NewEvent` (caller's payload) into Google's wire body.
 pub fn new_event_to_body(new: &NewEvent) -> EventWriteBody {
+    let tzid = new.recurrence.as_ref().and_then(|r| r.tzid.as_deref());
     EventWriteBody {
         summary: Some(new.title.clone()),
         description: new.description.clone(),
         location: new.location.clone(),
-        start: range_to_write(new.start, new.all_day),
-        end: range_to_write(new.end, new.all_day),
+        start: range_to_write(new.start, new.all_day, tzid),
+        end: range_to_write(new.end, new.all_day, tzid),
         recurrence: new
             .recurrence
             .as_ref()
@@ -479,12 +494,13 @@ pub fn new_event_to_body(new: &NewEvent) -> EventWriteBody {
 /// replacement of the user-visible state — simpler than computing
 /// a diff and Google handles it the same.
 pub fn event_to_body(ev: &Event) -> EventWriteBody {
+    let tzid = ev.recurrence.as_ref().and_then(|r| r.tzid.as_deref());
     EventWriteBody {
         summary: Some(ev.title.clone()),
         description: ev.description.clone(),
         location: ev.location.clone(),
-        start: range_to_write(ev.start, ev.all_day),
-        end: range_to_write(ev.end, ev.all_day),
+        start: range_to_write(ev.start, ev.all_day, tzid),
+        end: range_to_write(ev.end, ev.all_day, tzid),
         recurrence: ev
             .recurrence
             .as_ref()
@@ -494,7 +510,7 @@ pub fn event_to_body(ev: &Event) -> EventWriteBody {
     }
 }
 
-fn range_to_write(when: DateTime<Utc>, all_day: bool) -> EventDateTimeWrite {
+fn range_to_write(when: DateTime<Utc>, all_day: bool, tzid: Option<&str>) -> EventDateTimeWrite {
     if all_day {
         EventDateTimeWrite {
             date_time: None,
@@ -510,7 +526,9 @@ fn range_to_write(when: DateTime<Utc>, all_day: bool) -> EventDateTimeWrite {
         EventDateTimeWrite {
             date_time: Some(when),
             date: None,
-            time_zone: "Etc/UTC".into(),
+            // A zoned recurring master keeps its IANA zone so Google expands it
+            // DST-correctly; a one-off instant is exact, so UTC is fine.
+            time_zone: tzid.unwrap_or("Etc/UTC").to_string(),
         }
     }
 }
@@ -726,6 +744,75 @@ mod tests {
             rec.exceptions[0],
             Utc.with_ymd_and_hms(2026, 6, 1, 18, 0, 0).unwrap()
         );
+    }
+
+    #[test]
+    fn map_event_carries_recurrence_timezone() {
+        // Google attaches the IANA zone to a timed recurring master; it must ride
+        // onto EventRecurrence so the frontend expands it DST-correctly instead
+        // of drifting an hour across DST.
+        let raw = r#"{
+            "id": "ev-zoned",
+            "summary": "OAGDU",
+            "start": { "dateTime": "2025-12-15T00:00:00Z", "timeZone": "America/New_York" },
+            "end":   { "dateTime": "2025-12-15T01:00:00Z", "timeZone": "America/New_York" },
+            "recurrence": ["RRULE:FREQ=MONTHLY;BYDAY=2SU"]
+        }"#;
+        let entry: EventEntry = serde_json::from_str(raw).unwrap();
+        let ev = map_event(entry, "primary").unwrap().unwrap();
+        assert_eq!(
+            ev.recurrence.unwrap().tzid.as_deref(),
+            Some("America/New_York")
+        );
+    }
+
+    #[test]
+    fn map_event_etc_utc_timezone_stays_unzoned() {
+        // Google's "Etc/UTC" default needn't trigger the zoned path (no DST).
+        let raw = r#"{
+            "id": "ev-utc",
+            "start": { "dateTime": "2026-01-01T12:00:00Z", "timeZone": "Etc/UTC" },
+            "end":   { "dateTime": "2026-01-01T12:30:00Z", "timeZone": "Etc/UTC" },
+            "recurrence": ["RRULE:FREQ=DAILY"]
+        }"#;
+        let entry: EventEntry = serde_json::from_str(raw).unwrap();
+        let ev = map_event(entry, "primary").unwrap().unwrap();
+        assert_eq!(ev.recurrence.unwrap().tzid, None);
+    }
+
+    #[test]
+    fn event_to_body_sends_recurrence_timezone() {
+        // A zoned recurring master writes its IANA zone so Google expands it
+        // DST-correctly on its side (parity with the read path).
+        let ev = Event {
+            id: "ev-z".into(),
+            calendar_id: "primary".into(),
+            title: "OAGDU".into(),
+            description: None,
+            location: None,
+            start: Utc.with_ymd_and_hms(2025, 12, 15, 0, 0, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2025, 12, 15, 1, 0, 0).unwrap(),
+            all_day: false,
+            recurrence: Some(EventRecurrence {
+                rrule: "FREQ=MONTHLY;BYDAY=2SU".into(),
+                exceptions: vec![],
+                tzid: Some("America/New_York".into()),
+            }),
+            color_label: None,
+            color_hex: None,
+            reminders: vec![],
+            sound: None,
+            attendees: vec![],
+            created_at: Utc.with_ymd_and_hms(2025, 12, 15, 0, 0, 0).unwrap(),
+            updated_at: Utc.with_ymd_and_hms(2025, 12, 15, 0, 0, 0).unwrap(),
+            etag: None,
+            organizer: None,
+            attendee_responses: vec![],
+            send_invitations: false,
+        };
+        let json = serde_json::to_value(event_to_body(&ev)).unwrap();
+        assert_eq!(json["start"]["timeZone"], "America/New_York");
+        assert_eq!(json["end"]["timeZone"], "America/New_York");
     }
 
     #[test]
