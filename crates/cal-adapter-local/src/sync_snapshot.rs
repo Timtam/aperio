@@ -153,7 +153,7 @@ impl LocalAdapter {
                 "SELECT id, calendar_id, title, description, location,
                         start_utc, end_utc, all_day, rrule, rrule_exceptions,
                         color_label_id, reminders, sound, attendees,
-                        created_at, updated_at, etag
+                        created_at, updated_at, etag, rrule_tzid
                    FROM events",
             )
             .map_err(map_sql_err)?;

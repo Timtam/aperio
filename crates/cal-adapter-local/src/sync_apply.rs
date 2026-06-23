@@ -47,17 +47,17 @@ impl LocalAdapter {
         let reminders_json = encode_json(&event.reminders)?;
         let attendees_json = encode_json(&event.attendees)?;
         let sound_json = write_sound(&event.sound)?;
-        let (rrule, exceptions) = split_recurrence(&event.recurrence)?;
+        let (rrule, exceptions, rrule_tzid) = split_recurrence(&event.recurrence)?;
 
         let conn = self.db().lock().expect("db mutex poisoned");
         ensure_color_label_ref(&conn, event.color_label.as_ref().map(|c| c.as_str()))?;
         conn.execute(
             "INSERT INTO events (
                 id, calendar_id, title, description, location,
-                start_utc, end_utc, all_day, rrule, rrule_exceptions,
+                start_utc, end_utc, all_day, rrule, rrule_exceptions, rrule_tzid,
                 color_label_id, reminders, sound, attendees,
                 created_at, updated_at, etag
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                  calendar_id      = excluded.calendar_id,
                  title            = excluded.title,
@@ -68,6 +68,7 @@ impl LocalAdapter {
                  all_day          = excluded.all_day,
                  rrule            = excluded.rrule,
                  rrule_exceptions = excluded.rrule_exceptions,
+                 rrule_tzid       = excluded.rrule_tzid,
                  color_label_id   = excluded.color_label_id,
                  reminders        = excluded.reminders,
                  sound            = excluded.sound,
@@ -85,6 +86,7 @@ impl LocalAdapter {
                 event.all_day as i64,
                 rrule,
                 exceptions,
+                rrule_tzid,
                 event.color_label.as_ref().map(|c| c.as_str()),
                 reminders_json,
                 sound_json,

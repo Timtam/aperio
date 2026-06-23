@@ -128,7 +128,7 @@ impl LocalAdapter {
                 "SELECT e.id, e.calendar_id, e.title, e.description, e.location,
                         e.start_utc, e.end_utc, e.all_day, e.rrule, e.rrule_exceptions,
                         e.color_label_id, e.reminders, e.sound, e.attendees,
-                        e.created_at, e.updated_at, e.etag
+                        e.created_at, e.updated_at, e.etag, e.rrule_tzid
                    FROM events_fts f
                    JOIN events e ON e.id = f.id
                   WHERE events_fts MATCH ?{where_extra}

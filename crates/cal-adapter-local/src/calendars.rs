@@ -135,7 +135,7 @@ impl LocalAdapter {
                 "SELECT id, calendar_id, title, description, location,
                         start_utc, end_utc, all_day, rrule, rrule_exceptions,
                         color_label_id, reminders, sound, attendees,
-                        created_at, updated_at, etag
+                        created_at, updated_at, etag, rrule_tzid
                    FROM events WHERE id = ?",
             )
             .map_err(map_sql_err)?;
@@ -333,14 +333,14 @@ impl CalendarFeature for LocalAdapter {
         let reminders_json = encode_json(&event.reminders)?;
         let attendees_json = encode_json(&event.attendees)?;
         let sound_json = write_sound(&event.sound)?;
-        let (rrule, exceptions) = split_recurrence(&event.recurrence)?;
+        let (rrule, exceptions, rrule_tzid) = split_recurrence(&event.recurrence)?;
 
         let changed = conn
             .execute(
                 "UPDATE events
                     SET calendar_id = ?, title = ?, description = ?, location = ?,
                         start_utc = ?, end_utc = ?, all_day = ?, rrule = ?,
-                        rrule_exceptions = ?, color_label_id = ?,
+                        rrule_exceptions = ?, rrule_tzid = ?, color_label_id = ?,
                         reminders = ?, sound = ?, attendees = ?,
                         updated_at = ?, etag = ?
                   WHERE id = ?",
@@ -354,6 +354,7 @@ impl CalendarFeature for LocalAdapter {
                     event.all_day as i64,
                     rrule,
                     exceptions,
+                    rrule_tzid,
                     event.color_label.as_ref().map(|c| c.as_str()),
                     reminders_json,
                     sound_json,
@@ -464,7 +465,7 @@ impl CalendarFeature for LocalAdapter {
 const EVENT_SELECT_PREFIX: &str =
     "SELECT id, calendar_id, title, description, location, start_utc, end_utc,
             all_day, rrule, rrule_exceptions, color_label_id, reminders, sound,
-            attendees, created_at, updated_at, etag
+            attendees, created_at, updated_at, etag, rrule_tzid
        FROM events
       WHERE calendar_id = ?
         AND ( (start_utc < ? AND end_utc > ?)
@@ -473,12 +474,12 @@ const EVENT_SELECT_PREFIX: &str =
 
 pub(crate) fn split_recurrence(
     rec: &Option<EventRecurrence>,
-) -> cal_core::Result<(Option<String>, Option<String>)> {
+) -> cal_core::Result<(Option<String>, Option<String>, Option<String>)> {
     match rec {
-        None => Ok((None, None)),
+        None => Ok((None, None, None)),
         Some(r) => {
             let exc = encode_json(&r.exceptions)?;
-            Ok((Some(r.rrule.clone()), Some(exc)))
+            Ok((Some(r.rrule.clone()), Some(exc), r.tzid.clone()))
         }
     }
 }
@@ -486,6 +487,7 @@ pub(crate) fn split_recurrence(
 fn combine_recurrence(
     rrule: Option<String>,
     exceptions: Option<String>,
+    tzid: Option<String>,
 ) -> cal_core::Result<Option<EventRecurrence>> {
     match rrule {
         None => Ok(None),
@@ -497,7 +499,7 @@ fn combine_recurrence(
             Ok(Some(EventRecurrence {
                 rrule,
                 exceptions,
-                tzid: None,
+                tzid,
             }))
         }
     }
@@ -513,7 +515,7 @@ fn persist_new_event(
     let reminders_json = encode_json(&event.reminders)?;
     let attendees_json = encode_json(&event.attendees)?;
     let sound_json = write_sound(&event.sound)?;
-    let (rrule, exceptions) = split_recurrence(&event.recurrence)?;
+    let (rrule, exceptions, rrule_tzid) = split_recurrence(&event.recurrence)?;
 
     let now_s = fmt_utc(&now);
     adapter
@@ -523,9 +525,10 @@ fn persist_new_event(
         .execute(
             "INSERT INTO events (
                 id, calendar_id, title, description, location, start_utc,
-                end_utc, all_day, rrule, rrule_exceptions, color_label_id,
-                reminders, sound, attendees, created_at, updated_at, etag
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+                end_utc, all_day, rrule, rrule_exceptions, rrule_tzid,
+                color_label_id, reminders, sound, attendees, created_at,
+                updated_at, etag
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
             params![
                 id,
                 calendar_id,
@@ -537,6 +540,7 @@ fn persist_new_event(
                 event.all_day as i64,
                 rrule,
                 exceptions,
+                rrule_tzid,
                 event.color_label.as_ref().map(|c| c.as_str()),
                 reminders_json,
                 sound_json,
@@ -595,7 +599,8 @@ pub(crate) fn row_to_event(row: &rusqlite::Row<'_>) -> cal_core::Result<Event> {
     let created_at = parse_utc(&req_text(row, 14)?)?;
     let updated_at = parse_utc(&req_text(row, 15)?)?;
     let etag = opt_text(row, 16)?;
-    let recurrence = combine_recurrence(rrule, exceptions)?;
+    let rrule_tzid = opt_text(row, 17)?;
+    let recurrence = combine_recurrence(rrule, exceptions, rrule_tzid)?;
 
     Ok(Event {
         send_invitations: false,
@@ -771,6 +776,55 @@ mod tests {
         assert_eq!(evs.len(), 2);
         assert_eq!(evs[0].title, "E0");
         assert_eq!(evs[1].title, "E5");
+    }
+
+    #[tokio::test]
+    async fn recurrence_timezone_round_trips_through_storage() {
+        // A zoned recurring master must persist its IANA tzid (the new synced
+        // column), so a series created in Aperio expands DST-correctly on re-read
+        // instead of drifting in UTC.
+        let a = make_adapter();
+        let cal = a.create_calendar("Work", None, None, None).unwrap();
+        let start = "2025-12-15T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        let created = a
+            .create_event(
+                &cal.id,
+                NewEvent {
+                    title: "OAGDU".into(),
+                    description: None,
+                    location: None,
+                    start,
+                    end: start + Duration::hours(1),
+                    all_day: false,
+                    recurrence: Some(EventRecurrence {
+                        rrule: "FREQ=MONTHLY;BYDAY=2SU".into(),
+                        exceptions: vec![],
+                        tzid: Some("America/New_York".into()),
+                    }),
+                    color_label: None,
+                    color_hex: None,
+                    reminders: vec![],
+                    sound: None,
+                    attendees: vec![],
+                    send_invitations: false,
+                },
+            )
+            .await
+            .unwrap();
+        // Re-read from storage (not the create return value).
+        let range = DateRange {
+            start: "2026-07-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap(),
+            end: "2026-08-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap(),
+        };
+        let evs = a.get_events(&cal.id, range).await.unwrap();
+        let master = evs
+            .iter()
+            .find(|e| e.id == created.id)
+            .expect("master read back");
+        assert_eq!(
+            master.recurrence.as_ref().unwrap().tzid.as_deref(),
+            Some("America/New_York")
+        );
     }
 
     #[tokio::test]
