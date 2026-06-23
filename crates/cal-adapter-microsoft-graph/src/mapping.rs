@@ -323,7 +323,14 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Eve
         Some(r) => recurrence_to_rrule(&r).map(|rrule| EventRecurrence {
             rrule,
             exceptions: Vec::new(), // Graph models exceptions separately
-            tzid: None,
+            // Graph attaches the IANA zone to start/end (it speaks IANA
+            // natively); carry it for a timed recurring master so the frontend
+            // expands DST-correctly. All-day + plain UTC stay on the UTC path.
+            tzid: if entry.is_all_day {
+                None
+            } else {
+                Some(entry.start.time_zone.clone()).filter(|t| !t.is_empty() && t != "UTC")
+            },
         }),
         None => None,
     };
@@ -714,14 +721,15 @@ pub struct GraphDateTimeWrite {
 }
 
 pub fn new_event_to_body(new: &NewEvent) -> GraphResult<EventWriteBody> {
+    let tzid = new.recurrence.as_ref().and_then(|r| r.tzid.as_deref());
     let body = EventWriteBody {
         subject: Some(new.title.clone()),
         body: new.description.clone().map(|c| EventBodyWrite {
             content_type: "text".into(),
             content: c,
         }),
-        start: write_datetime(new.start, new.all_day),
-        end: write_datetime(new.end, new.all_day),
+        start: write_datetime(new.start, new.all_day, tzid),
+        end: write_datetime(new.end, new.all_day, tzid),
         is_all_day: new.all_day,
         location: new
             .location
@@ -739,14 +747,15 @@ pub fn new_event_to_body(new: &NewEvent) -> GraphResult<EventWriteBody> {
 }
 
 pub fn event_to_body(ev: &Event) -> GraphResult<EventWriteBody> {
+    let tzid = ev.recurrence.as_ref().and_then(|r| r.tzid.as_deref());
     Ok(EventWriteBody {
         subject: Some(ev.title.clone()),
         body: ev.description.clone().map(|c| EventBodyWrite {
             content_type: "text".into(),
             content: c,
         }),
-        start: write_datetime(ev.start, ev.all_day),
-        end: write_datetime(ev.end, ev.all_day),
+        start: write_datetime(ev.start, ev.all_day, tzid),
+        end: write_datetime(ev.end, ev.all_day, tzid),
         is_all_day: ev.all_day,
         location: ev
             .location
@@ -762,7 +771,7 @@ pub fn event_to_body(ev: &Event) -> GraphResult<EventWriteBody> {
     })
 }
 
-fn write_datetime(when: DateTime<Utc>, all_day: bool) -> GraphDateTimeWrite {
+fn write_datetime(when: DateTime<Utc>, all_day: bool, tzid: Option<&str>) -> GraphDateTimeWrite {
     if all_day {
         // For all-day events Graph still expects a `dateTime` (not a
         // `date`) at 00:00:00 in the given zone. The DAY must be the
@@ -776,6 +785,19 @@ fn write_datetime(when: DateTime<Utc>, all_day: bool) -> GraphDateTimeWrite {
                 .format("%Y-%m-%dT00:00:00")
                 .to_string(),
             time_zone: "UTC".into(),
+        }
+    } else if let Some((name, tz)) =
+        tzid.and_then(|t| t.parse::<chrono_tz::Tz>().ok().map(|tz| (t, tz)))
+    {
+        // A zoned recurring master: send the LOCAL wall-clock + its IANA zone so
+        // Graph expands the series DST-correctly on its side (Graph accepts IANA
+        // names). A one-off is an exact instant, so it stays on the UTC branch.
+        GraphDateTimeWrite {
+            date_time: when
+                .with_timezone(&tz)
+                .format("%Y-%m-%dT%H:%M:%S")
+                .to_string(),
+            time_zone: name.to_string(),
         }
     } else {
         GraphDateTimeWrite {
@@ -1500,7 +1522,7 @@ mod tests {
     /// the previous day for users east of UTC.
     #[test]
     fn write_datetime_all_day_uses_local_day_at_midnight() {
-        let w = write_datetime(local_midnight(2026, 6, 10), true);
+        let w = write_datetime(local_midnight(2026, 6, 10), true, None);
         assert_eq!(w.date_time, "2026-06-10T00:00:00");
         assert_eq!(w.time_zone, "UTC");
     }
@@ -1520,7 +1542,7 @@ mod tests {
             NaiveDate::from_ymd_opt(2026, 6, 10).unwrap(),
         );
         // …and writing it back emits the same wire day.
-        let back = write_datetime(instant, true);
+        let back = write_datetime(instant, true, None);
         assert_eq!(back.date_time, "2026-06-10T00:00:00");
     }
 
@@ -1686,6 +1708,57 @@ mod tests {
         assert_eq!(recur.pattern.kind, "weekly");
         assert_eq!(recur.pattern.days_of_week, vec!["monday", "wednesday"]);
         assert_eq!(recur.range.number_of_occurrences, Some(10));
+    }
+
+    #[test]
+    fn map_event_carries_recurrence_timezone() {
+        // Graph attaches the IANA zone to start/end; a timed recurring master
+        // must carry it so the frontend expands it DST-correctly.
+        let raw = r#"{
+            "id": "ev-z",
+            "subject": "OAGDU",
+            "start": { "dateTime": "2025-12-14T19:00:00", "timeZone": "America/New_York" },
+            "end":   { "dateTime": "2025-12-14T20:00:00", "timeZone": "America/New_York" },
+            "isAllDay": false,
+            "recurrence": {
+                "pattern": {"type": "weekly", "interval": 1, "daysOfWeek": ["sunday"]},
+                "range": {"type": "numbered", "startDate": "2025-12-14", "numberOfOccurrences": 12}
+            }
+        }"#;
+        let entry: EventEntry = serde_json::from_str(raw).unwrap();
+        let ev = map_event(entry, "primary").unwrap().unwrap();
+        assert_eq!(
+            ev.recurrence.unwrap().tzid.as_deref(),
+            Some("America/New_York")
+        );
+    }
+
+    #[test]
+    fn new_event_to_body_sends_recurrence_timezone() {
+        // A zoned recurring master writes its LOCAL wall-clock + IANA zone so
+        // Graph expands it DST-correctly on its side.
+        let new = NewEvent {
+            title: "OAGDU".into(),
+            description: None,
+            location: None,
+            start: Utc.with_ymd_and_hms(2025, 12, 15, 0, 0, 0).unwrap(), // 19:00 EST
+            end: Utc.with_ymd_and_hms(2025, 12, 15, 1, 0, 0).unwrap(),
+            all_day: false,
+            recurrence: Some(EventRecurrence {
+                rrule: "FREQ=MONTHLY;BYDAY=2SU".into(),
+                exceptions: Vec::new(),
+                tzid: Some("America/New_York".into()),
+            }),
+            color_label: None,
+            color_hex: None,
+            reminders: vec![],
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+        };
+        let json = serde_json::to_value(new_event_to_body(&new).unwrap()).unwrap();
+        assert_eq!(json["start"]["timeZone"], "America/New_York");
+        assert_eq!(json["start"]["dateTime"], "2025-12-14T19:00:00");
     }
 
     #[test]
