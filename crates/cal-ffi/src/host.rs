@@ -2243,6 +2243,38 @@ impl Host {
         // registers its bridge; background refreshes populate the cache anyway.
         let cache = Arc::new(CacheStore::new(db.clone()));
         let coord = Arc::new(RefreshCoordinator::new());
+
+        // One-time auto re-bootstrap on a cache-generation bump (same as the
+        // desktop lib.rs): on upgrade to a version whose event mapping changed
+        // (e.g. the recurrence-timezone fix), already-cached payloads are stale
+        // and a delta sync won't re-fetch unchanged events. Clear every external
+        // account's sync state ONCE so the next warm pass re-bootstraps + re-maps.
+        // Idempotent (a `user_prefs` marker); best-effort — logs and continues.
+        {
+            let shared = db.shared();
+            let prefs = UserPrefsRepo::new(&shared);
+            match AccountsRepo::new(&shared).list() {
+                Ok(accts) => {
+                    match host_core::cache::reconcile_cache_generation(&cache, &accts, &prefs) {
+                        Ok(0) => {}
+                        Ok(n) => tracing::info!(
+                            target: "aperio::cache",
+                            containers = n,
+                            generation = host_core::cache::CACHE_GENERATION,
+                            "cache generation upgrade: cleared external sync state for a one-time re-bootstrap",
+                        ),
+                        Err(err) => tracing::warn!(
+                            %err,
+                            "cache generation reconcile failed; will retry next boot",
+                        ),
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(?err, "cache generation reconcile: couldn't list accounts")
+                }
+            }
+        }
+
         let cache_observer = Arc::new(BridgeCacheObserver::new());
         let cache_refresher = CacheRefresher::new(
             Arc::clone(&registry),

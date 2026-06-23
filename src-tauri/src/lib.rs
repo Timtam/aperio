@@ -156,6 +156,34 @@ pub fn run() {
     let cache_store = Arc::new(cache::CacheStore::new(db.clone()));
     let refresh_coordinator = Arc::new(cache::RefreshCoordinator::new());
 
+    // One-time auto re-bootstrap on a cache-generation bump: when the app is
+    // upgraded to a version whose event mapping changed (e.g. the recurrence
+    // timezone fix), already-cached payloads are stale and a delta sync won't
+    // re-fetch unchanged events. Clear every external account's sync state ONCE
+    // so the next warm pass re-bootstraps + re-maps with the new code. Idempotent
+    // (a `user_prefs` generation marker); best-effort — logs and continues.
+    {
+        let shared = db.shared();
+        let prefs = crate::user_prefs::UserPrefsRepo::new(&shared);
+        match accounts::AccountsRepo::new(&shared).list() {
+            Ok(accts) => match cache::reconcile_cache_generation(&cache_store, &accts, &prefs) {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(
+                    target: "aperio::cache",
+                    containers = n,
+                    generation = cache::CACHE_GENERATION,
+                    "cache generation upgrade: cleared external sync state for a one-time re-bootstrap",
+                ),
+                Err(err) => {
+                    tracing::warn!(%err, "cache generation reconcile failed; will retry next boot")
+                }
+            },
+            Err(err) => {
+                tracing::warn!(?err, "cache generation reconcile: couldn't list accounts")
+            }
+        }
+    }
+
     // One-time heal for the EWS cursor-desync bug: older builds let the
     // reminder scan's `get_events` drain advance + persist the EWS
     // SyncFolderItems cookie independently of the host's, so a later delta

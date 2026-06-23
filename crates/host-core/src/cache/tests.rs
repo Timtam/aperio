@@ -1018,3 +1018,65 @@ fn search_finds_cached_external_task_with_status_filter() {
         .unwrap()
         .is_empty());
 }
+
+// ── Cache-generation auto re-bootstrap (reconcile_cache_generation) ──
+
+#[test]
+fn reconcile_cache_generation_resets_external_accounts_once() {
+    use crate::accounts::AccountsRepo;
+    use crate::user_prefs::UserPrefsRepo;
+
+    let db = DbHandle::open_in_memory().unwrap();
+    let store = CacheStore::new(db.clone());
+    let shared = db.shared();
+    let prefs = UserPrefsRepo::new(&shared);
+
+    // One external (caldav) account — the implicit 'local' account already
+    // exists from the migrations. Give each a sync-state row carrying a token +
+    // window so a reset is observable as those going NULL.
+    db.with_conn(|c| {
+        c.execute(
+            "INSERT INTO accounts (id, adapter_kind, display_name, config_json, created_at, updated_at)
+             VALUES ('ext','caldav','Work','{}','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')",
+            params![],
+        )?;
+        for acc in ["ext", "local"] {
+            c.execute(
+                "INSERT INTO cache_sync_state
+                   (account_id, scope, container_id, sync_token, window_start, window_end, last_refreshed_at)
+                 VALUES (?1, 'events', 'c1', 'tok', '2026-01-01T00:00:00Z', '2026-02-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                params![acc],
+            )?;
+        }
+        Ok::<_, rusqlite::Error>(())
+    })
+    .unwrap();
+
+    let accounts = AccountsRepo::new(&shared).list().unwrap();
+    let window_of = |acc: &str| -> Option<String> {
+        db.with_conn(|c| {
+            c.query_row(
+                "SELECT window_start FROM cache_sync_state WHERE account_id = ?1",
+                params![acc],
+                |r| r.get::<_, Option<String>>(0),
+            )
+        })
+        .unwrap()
+    };
+
+    // First run: only the EXTERNAL account is reset; the generation is recorded.
+    let n = super::reconcile_cache_generation(&store, &accounts, &prefs).unwrap();
+    assert_eq!(n, 1, "exactly the external account's sync-state row reset");
+    assert!(window_of("ext").is_none(), "external sync window cleared");
+    assert!(window_of("local").is_some(), "local account left intact");
+    assert_eq!(
+        prefs.get(super::CACHE_GENERATION_KEY).unwrap().as_deref(),
+        Some(super::CACHE_GENERATION.to_string().as_str()),
+    );
+
+    // Second run is a no-op — the generation is already applied.
+    assert_eq!(
+        super::reconcile_cache_generation(&store, &accounts, &prefs).unwrap(),
+        0,
+    );
+}

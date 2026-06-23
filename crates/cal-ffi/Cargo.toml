@@ -101,6 +101,7 @@ serde.workspace = true
 serde_json.workspace = true
 # The mobile logging glue assembles the rolling-file subscriber from the
 # host-core builders (the pure helpers + redaction live in host-core::logging).
+tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-appender.workspace = true
 # Runtime only by default; the bindgen CLI is behind the `cli` feature above.

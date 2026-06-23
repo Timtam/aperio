@@ -37,6 +37,59 @@ mod swr;
 #[cfg(test)]
 mod tests;
 
+/// Bumped whenever the adapter event-mapping changes in a way that requires
+/// RE-FETCHING already-cached external events — i.e. when the same provider data
+/// would now map to a different `Event`. The first such bump is the
+/// recurrence-timezone fix: existing cached payloads lack `recurrence.tzid`, and
+/// a normal delta sync doesn't re-fetch unchanged events, so the fix would never
+/// reach them. [`reconcile_cache_generation`] re-bootstraps every external
+/// account once when this device's recorded generation is older.
+pub const CACHE_GENERATION: u32 = 1;
+
+/// `user_prefs` key holding the cache generation last applied on this device.
+pub const CACHE_GENERATION_KEY: &str = "cache.generation";
+
+/// One-time, idempotent cache-generation reconcile, run at startup by both the
+/// desktop and mobile hosts right after the cache is opened. When this device
+/// hasn't yet applied [`CACHE_GENERATION`], clear every EXTERNAL account's sync
+/// state (token + window + freshness) so the next refresh re-bootstraps and
+/// re-maps its events with the current adapter code — exactly what the per-account
+/// "Re-sync from scratch" action does, but automatic on upgrade. Cached rows
+/// survive as an offline fallback until the cold fetch replaces them.
+///
+/// Local + DeviceCalendar accounts own their data and have no provider to
+/// re-fetch from (`plugin_id() == None`), so they're skipped. The new generation
+/// is recorded only after every reset succeeds, so a mid-run failure simply
+/// retries on the next start. Returns the number of sync-state rows reset (0 when
+/// already up to date). Best-effort: callers log and continue on `Err`.
+pub fn reconcile_cache_generation(
+    cache: &CacheStore,
+    accounts: &[crate::accounts::Account],
+    prefs: &crate::user_prefs::UserPrefsRepo,
+) -> Result<usize, String> {
+    let applied = prefs
+        .get(CACHE_GENERATION_KEY)
+        .map_err(|e| e.to_string())?
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(0);
+    if applied >= CACHE_GENERATION {
+        return Ok(0);
+    }
+    let mut reset = 0;
+    for acc in accounts {
+        if acc.adapter_kind.plugin_id().is_none() {
+            continue; // Local / DeviceCalendar — nothing to re-fetch.
+        }
+        reset += cache
+            .reset_account_sync(&acc.id)
+            .map_err(|e| e.to_string())?;
+    }
+    prefs
+        .set(CACHE_GENERATION_KEY, &CACHE_GENERATION.to_string())
+        .map_err(|e| e.to_string())?;
+    Ok(reset)
+}
+
 pub use observer::{CacheObserver, CacheRefreshStatus};
 pub use refresh::{
     CacheRefresher, PREF_CACHE_LAST_REFRESHED_AT, PREF_CACHE_REFRESH_INTERVAL_MINUTES,
