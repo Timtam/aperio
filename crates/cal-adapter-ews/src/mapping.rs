@@ -1722,6 +1722,24 @@ pub fn new_event_to_calendar_item_xml(event: &NewEvent) -> EwsResult<String> {
         out.push_str(&rec_xml);
         out.push('\n');
     }
+    // A zoned recurring master: tell Exchange the series' zone (as a Windows id)
+    // so it expands DST-correctly server-side. Per the EWS CalendarItemType
+    // element order, StartTimeZone/EndTimeZone follow <t:Recurrence>.
+    if let Some(windows) = event
+        .recurrence
+        .as_ref()
+        .and_then(|r| r.tzid.as_deref())
+        .and_then(crate::windows_tz::iana_to_windows)
+    {
+        out.push_str(&format!(
+            "          <t:StartTimeZone Id=\"{}\"/>\n",
+            escape_xml(windows)
+        ));
+        out.push_str(&format!(
+            "          <t:EndTimeZone Id=\"{}\"/>\n",
+            escape_xml(windows)
+        ));
+    }
     out.push_str("        </t:CalendarItem>");
     Ok(out)
 }
@@ -1853,6 +1871,20 @@ pub fn event_to_update_field_xml(event: &Event) -> EwsResult<(String, String)> {
         ));
     } else {
         del.push_str(delete_item_field_xml("calendar:Recurrence").as_str());
+    }
+    // Keep the zone on a zoned recurring master so a server-side edit doesn't
+    // drop it and re-expand the series in UTC. Field-by-field SetItemField, so
+    // ordering is irrelevant; only when the IANA zone maps to a Windows id.
+    if let Some(windows) = event
+        .recurrence
+        .as_ref()
+        .and_then(|r| r.tzid.as_deref())
+        .and_then(crate::windows_tz::iana_to_windows)
+    {
+        let win = escape_xml(windows);
+        set.push_str(&format!(
+            "            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:StartTimeZone\"/>\n              <t:CalendarItem>\n                <t:StartTimeZone Id=\"{win}\"/>\n              </t:CalendarItem>\n            </t:SetItemField>\n            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:EndTimeZone\"/>\n              <t:CalendarItem>\n                <t:EndTimeZone Id=\"{win}\"/>\n              </t:CalendarItem>\n            </t:SetItemField>\n",
+        ));
     }
 
     Ok((set, del))
@@ -3496,6 +3528,63 @@ mod tests {
         let xml = new_event_to_calendar_item_xml(&ev).unwrap();
         assert!(xml.contains("<t:ReminderIsSet>true</t:ReminderIsSet>"));
         assert!(xml.contains("<t:ReminderMinutesBeforeStart>10</t:ReminderMinutesBeforeStart>"));
+    }
+
+    #[test]
+    fn new_event_to_calendar_item_xml_emits_start_time_zone_for_zoned_master() {
+        let mut ev = new_event_min("OAGDU");
+        ev.recurrence = Some(EventRecurrence {
+            rrule: "FREQ=MONTHLY;BYDAY=2SU".into(),
+            exceptions: Vec::new(),
+            tzid: Some("America/New_York".into()),
+        });
+        let xml = new_event_to_calendar_item_xml(&ev).unwrap();
+        // IANA → the Windows id Exchange expects, emitted AFTER <t:Recurrence>
+        // (the CalendarItemType element order).
+        assert!(
+            xml.contains(r#"<t:StartTimeZone Id="Eastern Standard Time"/>"#),
+            "{xml}"
+        );
+        assert!(xml.contains(r#"<t:EndTimeZone Id="Eastern Standard Time"/>"#));
+        let rec_pos = xml.find("<t:Recurrence>").expect("recurrence present");
+        let tz_pos = xml.find("<t:StartTimeZone").expect("StartTimeZone present");
+        assert!(tz_pos > rec_pos, "StartTimeZone must follow Recurrence");
+    }
+
+    #[test]
+    fn event_to_update_field_xml_sets_start_time_zone_for_zoned_master() {
+        let ev = Event {
+            id: "IID|CK".into(),
+            calendar_id: "FID|FK".into(),
+            title: "Weekly".into(),
+            description: None,
+            location: None,
+            start: "2026-05-20T08:00:00Z".parse().unwrap(),
+            end: "2026-05-20T09:00:00Z".parse().unwrap(),
+            all_day: false,
+            recurrence: Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY".into(),
+                exceptions: Vec::new(),
+                tzid: Some("Europe/Berlin".into()),
+            }),
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+            created_at: "2026-05-19T00:00:00Z".parse().unwrap(),
+            updated_at: "2026-05-19T00:00:00Z".parse().unwrap(),
+            etag: Some("CK".into()),
+            organizer: None,
+            attendee_responses: Vec::new(),
+        };
+        let (set, _del) = event_to_update_field_xml(&ev).unwrap();
+        assert!(
+            set.contains(r#"FieldURI="calendar:StartTimeZone""#),
+            "{set}"
+        );
+        assert!(set.contains(r#"<t:StartTimeZone Id="W. Europe Standard Time"/>"#));
     }
 
     #[test]
