@@ -10,6 +10,7 @@
 // pass (so the desktop shares them too), the same path the task types took.
 
 import CalFfi from '../../modules/cal-ffi';
+import { withCreatedRecurrenceZone } from '@aperio/shared';
 import type {
   ContainerColor,
   RecurrenceCapabilities,
@@ -157,8 +158,18 @@ export const getEventById = async (
 export const createEvent = async (
   request: { calendar_id: string } & NewEvent,
 ): Promise<CalendarEvent> => {
+  // Stamp the device's local zone onto a brand-new timed recurring rule so it
+  // expands DST-correctly (parity with zoned CalDAV series); no-op otherwise.
   const created = JSON.parse(
-    await CalFfi.createEventJson(JSON.stringify(request)),
+    await CalFfi.createEventJson(
+      JSON.stringify({
+        ...request,
+        recurrence: withCreatedRecurrenceZone(
+          request.recurrence,
+          request.all_day,
+        ),
+      }),
+    ),
   ) as CalendarEvent;
   scheduleBackgroundPush();
   notifyCalendarChanged();

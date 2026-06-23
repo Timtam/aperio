@@ -477,14 +477,26 @@ fn collect_exdates(ev: &icalendar::Event) -> Vec<DateTime<Utc>> {
     };
     let mut out = Vec::new();
     for prop in props {
+        // A zoned series' EXDATE carries a TZID param (`EXDATE;TZID=…:<naive>`),
+        // exactly like its DTSTART. Resolve the naive values in that zone — else
+        // they parse to nothing and the deleted occurrence reappears, because its
+        // instant has to match the now zone-correct expansion.
+        let tzid = prop.params().get("TZID").map(|p| p.value());
         for token in prop.value().split(',') {
             let trimmed = token.trim();
             if trimmed.is_empty() {
                 continue;
             }
-            if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(trimmed, "%Y%m%dT%H%M%SZ") {
+            if let Ok(dt) = NaiveDateTime::parse_from_str(trimmed, "%Y%m%dT%H%M%SZ") {
                 out.push(Utc.from_utc_datetime(&dt));
-            } else if let Ok(d) = chrono::NaiveDate::parse_from_str(trimmed, "%Y%m%d") {
+            } else if let Ok(naive) = NaiveDateTime::parse_from_str(trimmed, "%Y%m%dT%H%M%S") {
+                // Naive date-time: resolve in the EXDATE's TZID when present,
+                // else read as UTC (the floating-DTSTART convention).
+                out.push(
+                    tzid.and_then(|tz| resolve_with_tzid(naive, tz))
+                        .unwrap_or_else(|| Utc.from_utc_datetime(&naive)),
+                );
+            } else if let Ok(d) = NaiveDate::parse_from_str(trimmed, "%Y%m%d") {
                 out.push(naive_date_to_utc(d));
             }
         }
@@ -983,6 +995,34 @@ END:VCALENDAR\r
         assert_eq!(
             reread.recurrence.as_ref().unwrap().tzid.as_deref(),
             Some("America/New_York")
+        );
+    }
+
+    #[test]
+    fn zoned_exdate_is_resolved_in_its_timezone() {
+        // EXDATE;TZID on a zoned series must resolve to the same UTC instant the
+        // zone-correct expansion produces, so a deleted occurrence stays deleted
+        // instead of reappearing. Before the fix the naive value parsed to
+        // nothing and was dropped.
+        let body = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:oagdu@aperio\r
+SUMMARY:OAGDU meeting\r
+DTSTART;TZID=America/New_York:20251214T190000\r
+RRULE:FREQ=MONTHLY;BYDAY=2SU\r
+EXDATE;TZID=America/New_York:20260712T190000\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let ev = parse_calendar_data(body, "cal-1").unwrap().remove(0);
+        let rec = ev.recurrence.as_ref().unwrap();
+        // 2026-07-12 19:00 EDT = 23:00 UTC — the same instant the July occurrence
+        // expands to.
+        assert_eq!(
+            rec.exceptions,
+            vec![Utc.with_ymd_and_hms(2026, 7, 12, 23, 0, 0).unwrap()]
         );
     }
 

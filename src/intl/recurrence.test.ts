@@ -3,6 +3,8 @@ import {
   expandEvent,
   expandAll,
   isExpandedOccurrence,
+  localTimeZone,
+  withCreatedRecurrenceZone,
 } from './recurrence';
 import type { CalendarEvent } from '../api/types';
 
@@ -307,5 +309,32 @@ describe('expandEvent timezone (DST-correct)', () => {
       '2026-05-19T09:00:00.000Z',
       '2026-05-20T09:00:00.000Z',
     ]);
+  });
+});
+
+describe('withCreatedRecurrenceZone', () => {
+  const rule: { rrule: string; exceptions: string[]; tzid?: string | null } = {
+    rrule: 'FREQ=WEEKLY',
+    exceptions: [],
+  };
+
+  it('stamps the host zone onto a new timed recurring rule', () => {
+    const out = withCreatedRecurrenceZone(rule, false);
+    // localTimeZone() is null on a UTC host (then no stamp); equal otherwise.
+    expect(out?.tzid ?? null).toBe(localTimeZone());
+    expect(rule.tzid).toBeUndefined(); // input untouched
+  });
+
+  it('leaves an all-day rule unzoned (it uses the date-based path)', () => {
+    expect(withCreatedRecurrenceZone(rule, true)?.tzid).toBeUndefined();
+  });
+
+  it('keeps an already-zoned rule exactly as-is', () => {
+    const zoned = { rrule: 'FREQ=WEEKLY', exceptions: [], tzid: 'America/New_York' };
+    expect(withCreatedRecurrenceZone(zoned, false)).toBe(zoned);
+  });
+
+  it('passes a non-recurring event (null) through', () => {
+    expect(withCreatedRecurrenceZone(null, false)).toBeNull();
   });
 });

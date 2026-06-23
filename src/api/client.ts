@@ -5,6 +5,7 @@
 // `Request` structs.
 
 import { invoke } from '@tauri-apps/api/core';
+import { withCreatedRecurrenceZone } from '../intl/recurrence';
 import type {
   Account,
   AdapterKind,
@@ -83,7 +84,14 @@ export interface CreateEventRequest extends NewEvent {
 }
 
 export const createEvent = (request: CreateEventRequest) =>
-  invoke<CalendarEvent>('create_event', { request });
+  invoke<CalendarEvent>('create_event', {
+    // Stamp the host's local zone onto a brand-new timed recurring rule so it
+    // expands DST-correctly (parity with zoned CalDAV series); no-op otherwise.
+    request: {
+      ...request,
+      recurrence: withCreatedRecurrenceZone(request.recurrence, request.all_day),
+    },
+  });
 
 /** Update an event in place, OR move it to a different calendar.
  *

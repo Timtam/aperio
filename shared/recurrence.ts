@@ -241,6 +241,36 @@ function shiftUntilToWall(rruleBody: string, tzid: string): string {
 }
 
 /**
+ * The host's current IANA time zone (e.g. `America/New_York`), or `null` when
+ * the runtime can't report a usable one (or only reports plain UTC).
+ */
+export function localTimeZone(): string | null {
+  try {
+    const tz = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return tz && tz.toUpperCase() !== 'UTC' ? tz : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Stamp the host's local zone onto a freshly-created TIMED recurring rule so it
+ * expands DST-correctly — a series created here at 19:00 keeps 19:00 across DST,
+ * the same guarantee a zoned CalDAV series gets. Leaves all-day rules (they use
+ * the date-based path), already-zoned rules, and non-recurring events untouched.
+ * Use at CREATE time only; editing keeps whatever zone the series already has.
+ */
+export function withCreatedRecurrenceZone<
+  R extends { rrule: string; exceptions: string[]; tzid?: string | null },
+>(recurrence: R | null, allDay: boolean): R | null {
+  if (!recurrence || allDay || recurrence.tzid) {
+    return recurrence;
+  }
+  const tz = localTimeZone();
+  return tz ? { ...recurrence, tzid: tz } : recurrence;
+}
+
+/**
  * Marker in an override instance's id, separating the recurring series'
  * `{href}|{uid}` from the RECURRENCE-ID instant it replaces (e.g.
  * `…|uid::rid::2026-06-14T13:00:00Z`). Mirrors `RECURRENCE_ID_MARKER` in the
