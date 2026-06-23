@@ -323,6 +323,7 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Eve
         Some(r) => recurrence_to_rrule(&r).map(|rrule| EventRecurrence {
             rrule,
             exceptions: Vec::new(), // Graph models exceptions separately
+            tzid: None,
         }),
         None => None,
     };
@@ -1754,6 +1755,7 @@ mod tests {
             recurrence: Some(EventRecurrence {
                 rrule: "FREQ=WEEKLY;BYDAY=MO".into(),
                 exceptions: Vec::new(),
+                tzid: None,
             }),
             color_label: None,
             color_hex: None,

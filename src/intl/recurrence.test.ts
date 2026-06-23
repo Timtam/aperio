@@ -209,3 +209,103 @@ describe('expandAll', () => {
     expect(moved?.title).toBe('Standup (moved)');
   });
 });
+
+describe('expandEvent timezone (DST-correct)', () => {
+  /** The local calendar day of an instant in a given IANA zone — system-TZ
+   *  independent (uses Intl with an explicit timeZone). */
+  const dayIn = (iso: string, tz: string) =>
+    new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date(iso));
+
+  it('keeps a zoned monthly series on the right local day + time across DST (oagdu)', () => {
+    // 2nd Sunday monthly, 19:00 America/New_York, authored in winter (EST):
+    // 2025-12-14 19:00 EST = 2025-12-15T00:00:00Z.
+    const ev = mkEvent({
+      id: 'oagdu',
+      start: '2025-12-15T00:00:00.000Z',
+      end: '2025-12-15T01:00:00.000Z',
+      recurrence: {
+        rrule: 'FREQ=MONTHLY;BYDAY=2SU',
+        exceptions: [],
+        tzid: 'America/New_York',
+      },
+    });
+    const out = expandEvent(ev, {
+      start: new Date('2026-07-01T00:00:00Z'),
+      end: new Date('2026-08-01T00:00:00Z'),
+    });
+    expect(out.length).toBe(1);
+    // 19:00 EDT (UTC-4) on Sunday the 12th = 23:00Z — NOT 00:00Z (which is
+    // Saturday the 11th, the pre-fix bug that hid the event from Sunday).
+    expect(out[0].start).toBe('2026-07-12T23:00:00.000Z');
+    expect(dayIn(out[0].start, 'America/New_York')).toBe('2026-07-12');
+  });
+
+  it('preserves wall-clock time across the spring-forward boundary', () => {
+    // Weekly Monday 09:00 America/New_York, dtstart in winter (09:00 EST = 14:00Z).
+    const ev = mkEvent({
+      id: 'wk',
+      start: '2026-02-02T14:00:00.000Z',
+      end: '2026-02-02T14:30:00.000Z',
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;BYDAY=MO',
+        exceptions: [],
+        tzid: 'America/New_York',
+      },
+    });
+    const out = expandEvent(ev, {
+      start: new Date('2026-03-01T00:00:00Z'),
+      end: new Date('2026-03-16T00:00:00Z'),
+    });
+    const starts = out.map((o) => o.start);
+    // Mar 2 is still EST (09:00 = 14:00Z); Mar 9 is EDT after the Mar 8 change
+    // (09:00 = 13:00Z, NOT 14:00Z which would be 10:00 EDT — the drift bug).
+    expect(starts).toContain('2026-03-02T14:00:00.000Z');
+    expect(starts).toContain('2026-03-09T13:00:00.000Z');
+    // Every occurrence stays on Monday 09:00 local.
+    out.forEach((o) =>
+      expect(
+        new Intl.DateTimeFormat('en-US', {
+          timeZone: 'America/New_York',
+          hour: '2-digit',
+          hourCycle: 'h23',
+        }).format(new Date(o.start)),
+      ).toBe('09'),
+    );
+  });
+
+  it('falls back to UTC expansion for an unresolvable tzid (no crash)', () => {
+    const ev = mkEvent({
+      id: 'bad',
+      start: '2026-05-19T09:00:00.000Z',
+      end: '2026-05-19T09:30:00.000Z',
+      recurrence: {
+        rrule: 'FREQ=DAILY;COUNT=3',
+        exceptions: [],
+        tzid: 'Not/ARealZone',
+      },
+    });
+    const out = expandEvent(ev, {
+      start: new Date('2026-05-19'),
+      end: new Date('2026-05-30'),
+    });
+    // Degrades to the UTC path — still produces all occurrences, never drops.
+    expect(out.length).toBe(3);
+    expect(out[0].start).toBe('2026-05-19T09:00:00.000Z');
+  });
+
+  it('leaves a tzid-less recurring event on the unchanged UTC path', () => {
+    const zoned = mkEvent({
+      id: 'z',
+      start: '2026-05-19T09:00:00.000Z',
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=2', exceptions: [] },
+    });
+    const out = expandEvent(zoned, {
+      start: new Date('2026-05-19'),
+      end: new Date('2026-05-30'),
+    });
+    expect(out.map((o) => o.start)).toEqual([
+      '2026-05-19T09:00:00.000Z',
+      '2026-05-20T09:00:00.000Z',
+    ]);
+  });
+});

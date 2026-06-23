@@ -1502,6 +1502,7 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         EventRecurrence {
             rrule: r.to_rrule(),
             exceptions,
+            tzid: None,
         }
     });
 

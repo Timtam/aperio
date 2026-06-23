@@ -144,6 +144,7 @@ pub fn enumerate_local_triggers(
                 let recurrence = rrule.map(|rule| EventRecurrence {
                     rrule: rule,
                     exceptions: parse_rrule_exceptions(exceptions_json.as_deref()),
+                    tzid: None,
                 });
                 acc.extend(occurrence_triggers(
                     &id,
@@ -200,6 +201,7 @@ pub fn enumerate_local_triggers(
                         task_recurrence_to_rrule_body(&rec).map(|rrule| EventRecurrence {
                             rrule,
                             exceptions: Vec::new(),
+                            tzid: None,
                         })
                     });
 
@@ -708,6 +710,7 @@ fn task_triggers(
             task_recurrence_to_rrule_body(rec).map(|rrule| EventRecurrence {
                 rrule,
                 exceptions: Vec::new(),
+                tzid: None,
             })
         });
         out.extend(occurrence_triggers(
@@ -1104,6 +1107,7 @@ mod tests {
         ev.recurrence = Some(EventRecurrence {
             rrule: rrule.to_string(),
             exceptions,
+            tzid: None,
         });
         ev
     }

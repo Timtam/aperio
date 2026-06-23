@@ -281,6 +281,7 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
     let recurrence = rrule.map(|r| EventRecurrence {
         rrule: r,
         exceptions,
+        tzid: None,
     });
 
     let created = entry.created.unwrap_or_else(Utc::now);
@@ -870,6 +871,7 @@ mod tests {
             recurrence: Some(EventRecurrence {
                 rrule: "FREQ=WEEKLY;BYDAY=MO".into(),
                 exceptions: vec![Utc.with_ymd_and_hms(2026, 6, 1, 18, 0, 0).unwrap()],
+                tzid: None,
             }),
             color_label: None,
             color_hex: None,

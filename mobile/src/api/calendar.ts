@@ -24,6 +24,9 @@ import { scheduleBackgroundPush } from './syncTriggers';
 export interface EventRecurrence {
   rrule: string;
   exceptions: string[];
+  /** IANA zone of the master DTSTART, when the source carried one; drives
+   *  DST-correct expansion in `@aperio/shared` recurrence.ts. */
+  tzid?: string | null;
 }
 
 /** RSVP state of an attendee, where the provider reports it (read-only). */

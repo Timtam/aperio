@@ -184,6 +184,14 @@ pub struct EventRecurrence {
     pub rrule: String,
     /// Exception dates that should be skipped.
     pub exceptions: Vec<DateTime<Utc>>,
+    /// IANA time zone of the master DTSTART (e.g. `America/New_York`), when the
+    /// source carried one. The frontend expands the rule in this zone so every
+    /// occurrence keeps its local wall-clock time across DST (otherwise a series
+    /// authored in winter drifts an hour — and can slip a day — once it crosses
+    /// into summer). `None` = expand in UTC (floating / `Z` / all-day), which
+    /// preserves the prior behaviour for those shapes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tzid: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

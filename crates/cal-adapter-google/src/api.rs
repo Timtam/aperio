@@ -772,6 +772,7 @@ pub async fn add_event_exdate(
         .unwrap_or_else(|| cal_core::EventRecurrence {
             rrule: String::new(),
             exceptions: Vec::new(),
+            tzid: None,
         });
     rec.exceptions.push(occurrence);
     master.recurrence = Some(rec);

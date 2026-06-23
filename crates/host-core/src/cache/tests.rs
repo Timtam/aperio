@@ -208,6 +208,7 @@ fn recurring_master(id: &str, rrule: &str) -> Event {
     ev.recurrence = Some(EventRecurrence {
         rrule: rrule.into(),
         exceptions: Vec::new(),
+        tzid: None,
     });
     ev
 }

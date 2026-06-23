@@ -13,7 +13,14 @@ export interface RecurringEventLike {
   /** RFC-3339 (UTC) start/end of the master event. */
   start: string;
   end: string;
-  recurrence: { rrule: string; exceptions: string[] } | null;
+  recurrence: {
+    rrule: string;
+    exceptions: string[];
+    /** IANA zone of the master DTSTART (e.g. `America/New_York`), when the
+     *  source carried one. Present → expand in this zone so occurrences keep
+     *  their local wall-clock across DST; absent/null → expand in UTC. */
+    tzid?: string | null;
+  } | null;
 }
 
 /** An expanded per-occurrence copy of `E`: same fields, but `start`/`end`
@@ -48,21 +55,20 @@ export function expandEvent<E extends RecurringEventLike>(
   const dtstart = new Date(event.start);
   const dtend = new Date(event.end);
   const duration = dtend.getTime() - dtstart.getTime();
+  const tzid = zoneOrNull(event.recurrence.tzid);
 
-  let rule: RRule;
+  let occurrences: Date[];
   try {
-    rule = buildRule(event.recurrence.rrule, dtstart);
+    occurrences = tzid
+      ? zonedOccurrences(event.recurrence.rrule, dtstart, tzid, range)
+      : utcOccurrences(event.recurrence.rrule, dtstart, range);
   } catch (err) {
     // Bad rule string — fall back to showing the master at its stored start so
     // the user can still see and edit it.
     // eslint-disable-next-line no-console
-    console.warn('failed to parse RRULE', event.recurrence.rrule, err);
+    console.warn('failed to expand RRULE', event.recurrence.rrule, err);
     return [event];
   }
-
-  // `between` is start-exclusive by default; `inc = true` makes the range
-  // boundaries inclusive so an event starting exactly on a boundary appears.
-  const occurrences = rule.between(range.start, range.end, true);
   if (occurrences.length === 0) {
     return [];
   }
@@ -86,12 +92,152 @@ export function expandEvent<E extends RecurringEventLike>(
     });
 }
 
+/** The recurrence zone, or `null` to expand in UTC (floating / `Z` / all-day). */
+function zoneOrNull(tzid: string | null | undefined): string | null {
+  return !tzid || tzid.toUpperCase() === 'UTC' ? null : tzid;
+}
+
 function buildRule(rruleBody: string, dtstart: Date): RRule {
   // rrulestr accepts a full RFC-5545 "RRULE:..." block; if the stored string is
   // just the body (FREQ=...;BYDAY=...) prepend the marker.
   const body = rruleBody.trim();
   const text = body.toUpperCase().startsWith('RRULE:') ? body : `RRULE:${body}`;
   return rrulestr(text, { dtstart }) as RRule;
+}
+
+/** Occurrences of a zone-less rule: rrule.js iterates the UTC instant directly
+ *  (floating times read as UTC) — the historical behaviour, unchanged. */
+function utcOccurrences(
+  rruleBody: string,
+  dtstart: Date,
+  range: { start: Date; end: Date },
+): Date[] {
+  // `inc = true` makes the boundaries inclusive so an event starting exactly on
+  // a boundary appears.
+  return buildRule(rruleBody, dtstart).between(range.start, range.end, true);
+}
+
+/**
+ * Occurrences of a zoned rule — DST-correct AND independent of the process's own
+ * time zone. rrule.js's built-in `tzid` mode is neither (its output is offset by
+ * the host's zone), so we iterate the rule purely in the event's WALL-CLOCK space
+ * — rrule.js with no tzid treats the dtstart's UTC fields as the recurrence
+ * anchor — then convert each wall-clock occurrence back to a real UTC instant in
+ * `tzid` ourselves via `Intl`. Every emitted instant is real UTC, so day
+ * bucketing and EXDATE / RECURRENCE-ID matching keep comparing real instants.
+ */
+function zonedOccurrences(
+  rruleBody: string,
+  dtstart: Date,
+  tzid: string,
+  range: { start: Date; end: Date },
+): Date[] {
+  let dtstartWall: Date;
+  try {
+    dtstartWall = realToWall(dtstart, tzid); // probes the zone (throws if bad)
+  } catch {
+    // Unresolvable IANA zone (a typo, a Windows zone name, or a custom VTIMEZONE
+    // id `Intl` can't load) — degrade to UTC expansion rather than dropping the
+    // series. Worst case is the pre-fix behaviour, never worse.
+    return utcOccurrences(rruleBody, dtstart, range);
+  }
+  // Iterate UNTIL in wall-clock space too, else a bounded series' final cutoff is
+  // off by the zone offset.
+  const rule = buildRule(shiftUntilToWall(rruleBody, tzid), dtstartWall);
+  // Pad the wall-clock window a day each side (any zone offset is < 24h) so no
+  // occurrence near a real-range edge is missed; the precise real filter trims.
+  const DAY = 86_400_000;
+  const lo = new Date(realToWall(range.start, tzid).getTime() - DAY);
+  const hi = new Date(realToWall(range.end, tzid).getTime() + DAY);
+  return rule
+    .between(lo, hi, true)
+    .map((wall) => wallToReal(wall, tzid))
+    .filter((real) => real >= range.start && real <= range.end);
+}
+
+// `Intl.DateTimeFormat` construction is comparatively costly and we call it once
+// per occurrence; memoise one formatter per zone. Constructing it throws
+// `RangeError` for a zone Intl can't resolve, which is how `zonedOccurrences`
+// detects a bad zone.
+const zoneFormatters = new Map<string, Intl.DateTimeFormat>();
+function zoneFormatter(tzid: string): Intl.DateTimeFormat {
+  let f = zoneFormatters.get(tzid);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-US', {
+      timeZone: tzid,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    zoneFormatters.set(tzid, f);
+  }
+  return f;
+}
+
+/**
+ * Offset in ms such that `wall-clock = instant + offset` for `tzid` at `instant`
+ * (e.g. −4h for America/New_York in summer). Computed via `Intl` with an
+ * explicit `timeZone`, so it never depends on the process's own zone.
+ */
+function zoneOffsetMs(instant: Date, tzid: string): number {
+  const parts = zoneFormatter(tzid).formatToParts(instant);
+  const get = (type: string): number =>
+    Number(parts.find((p) => p.type === type)?.value);
+  const asIfUtc = Date.UTC(
+    get('year'),
+    get('month') - 1,
+    get('day'),
+    get('hour') % 24, // some engines report midnight as 24 under h23
+    get('minute'),
+    get('second'),
+  );
+  return asIfUtc - instant.getTime();
+}
+
+/** Real UTC instant → a Date whose UTC fields hold its wall-clock in `tzid`. */
+function realToWall(instant: Date, tzid: string): Date {
+  return new Date(instant.getTime() + zoneOffsetMs(instant, tzid));
+}
+
+/** Inverse of {@link realToWall}: a wall-clock-as-UTC Date → the real instant in
+ *  `tzid`. Two passes settle DST transitions (the offset depends on the answer);
+ *  ambiguous fall-back times resolve to the later offset and spring-forward gap
+ *  times round forward — both acceptable, matching common calendar behaviour. */
+function wallToReal(wall: Date, tzid: string): Date {
+  const t = wall.getTime();
+  const approx = new Date(t - zoneOffsetMs(wall, tzid));
+  return new Date(t - zoneOffsetMs(approx, tzid));
+}
+
+/** Rewrite a real-UTC `UNTIL=…Z` bound into wall-clock space so it lines up with
+ *  the wall-clock iteration above; other UNTIL forms are left untouched. */
+function shiftUntilToWall(rruleBody: string, tzid: string): string {
+  return rruleBody.replace(
+    /UNTIL=(\d{8})T(\d{6})Z/i,
+    (whole, d: string, t: string) => {
+      const real = new Date(
+        Date.UTC(
+          Number(d.slice(0, 4)),
+          Number(d.slice(4, 6)) - 1,
+          Number(d.slice(6, 8)),
+          Number(t.slice(0, 2)),
+          Number(t.slice(2, 4)),
+          Number(t.slice(4, 6)),
+        ),
+      );
+      if (Number.isNaN(real.getTime())) return whole;
+      const w = realToWall(real, tzid);
+      const p2 = (n: number): string => String(n).padStart(2, '0');
+      return (
+        `UNTIL=${w.getUTCFullYear()}${p2(w.getUTCMonth() + 1)}${p2(w.getUTCDate())}` +
+        `T${p2(w.getUTCHours())}${p2(w.getUTCMinutes())}${p2(w.getUTCSeconds())}Z`
+      );
+    },
+  );
 }
 
 /**

@@ -506,6 +506,7 @@ mod tests {
         recurring.recurrence = Some(cal_core::EventRecurrence {
             rrule: "FREQ=WEEKLY".into(),
             exceptions: vec![],
+            tzid: None,
         });
         block(a.create_event(&cal, recurring)).unwrap();
 

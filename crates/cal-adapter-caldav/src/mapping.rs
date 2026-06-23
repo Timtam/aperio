@@ -96,7 +96,7 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
     let description = ev.get_description().map(|s| s.to_string());
     let location = ev.get_location().map(|s| s.to_string());
 
-    let (start, end, all_day) = resolve_range(ev)?;
+    let (start, end, all_day, start_tzid) = resolve_range(ev)?;
 
     // RFC 5545 RECURRENCE-ID marks this VEVENT as a single *modified instance*
     // (an override) of a recurring series — not the master. iCloud packs the
@@ -115,6 +115,9 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
         ev.property_value("RRULE").map(|r| EventRecurrence {
             rrule: r.to_string(),
             exceptions: collect_exdates(ev),
+            // Carry the master DTSTART's zone so the frontend expands the rule in
+            // local wall-clock time (DST-correct). `None` for floating/Z/all-day.
+            tzid: start_tzid,
         })
     };
 
@@ -373,11 +376,13 @@ fn parse_iso_duration_to_minutes_before(raw: &str) -> Option<i64> {
 ///     (icalendar already does this when it can; we accept naive
 ///     and assume UTC as a last-resort fallback)
 ///   - DATE without time — all-day event; we anchor at 00:00 UTC
-fn resolve_range(ev: &icalendar::Event) -> CaldavResult<(DateTime<Utc>, DateTime<Utc>, bool)> {
+fn resolve_range(
+    ev: &icalendar::Event,
+) -> CaldavResult<(DateTime<Utc>, DateTime<Utc>, bool, Option<String>)> {
     let start = ev
         .get_start()
         .ok_or_else(|| CaldavError::Protocol("VEVENT without DTSTART".into()))?;
-    let (start_utc, all_day) = datetime_to_utc(start);
+    let (start_utc, all_day, start_tzid) = datetime_to_utc(start);
     // Fall back to DTSTART when DTEND is missing — RFC 5545 §3.8.2.2
     // says a missing DTEND means a zero-duration event for date-time
     // and "until end of day" for date. We honour both.
@@ -391,26 +396,29 @@ fn resolve_range(ev: &icalendar::Event) -> CaldavResult<(DateTime<Utc>, DateTime
             }
         }
     };
-    Ok((start_utc, end_utc, all_day))
+    Ok((start_utc, end_utc, all_day, start_tzid))
 }
 
-fn datetime_to_utc(value: DatePerhapsTime) -> (DateTime<Utc>, bool) {
+/// Resolve a DATE/DATE-TIME to a UTC instant, the all-day flag, and — only for
+/// the zoned (`WithTimezone`) shape — the IANA tzid, so a recurring master can
+/// be expanded in its own zone (DST-correct) rather than flattened to UTC.
+fn datetime_to_utc(value: DatePerhapsTime) -> (DateTime<Utc>, bool, Option<String>) {
     match value {
-        DatePerhapsTime::Date(d) => (naive_date_to_utc(d), true),
+        DatePerhapsTime::Date(d) => (naive_date_to_utc(d), true, None),
         DatePerhapsTime::DateTime(dt) => {
             // icalendar's CalendarDateTime is an enum with three
             // shapes (UTC / local-with-tz / floating). We normalise
             // each to UTC; floating times are read as UTC because
             // there's no better answer without per-event tz config.
             match dt {
-                icalendar::CalendarDateTime::Utc(u) => (u, false),
+                icalendar::CalendarDateTime::Utc(u) => (u, false, None),
                 icalendar::CalendarDateTime::WithTimezone { date_time, tzid } => {
                     let resolved = resolve_with_tzid(date_time, &tzid)
                         .unwrap_or_else(|| Utc.from_utc_datetime(&date_time));
-                    (resolved, false)
+                    (resolved, false, Some(tzid))
                 }
                 icalendar::CalendarDateTime::Floating(naive) => {
-                    (Utc.from_utc_datetime(&naive), false)
+                    (Utc.from_utc_datetime(&naive), false, None)
                 }
             }
         }
@@ -860,6 +868,59 @@ END:VCALENDAR\r
     }
 
     #[test]
+    fn zoned_recurring_master_carries_its_dtstart_timezone() {
+        // The reporter's "oagdu" shape: a monthly 2nd-Sunday 19:00 Eastern series.
+        // The DTSTART tzid must ride onto EventRecurrence so the frontend expands
+        // in local wall-clock time instead of flattening to UTC and drifting an
+        // hour (and a day) once the series crosses the EST->EDT boundary.
+        let body = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:oagdu@aperio\r
+SUMMARY:OAGDU meeting\r
+DTSTART;TZID=America/New_York:20251214T190000\r
+DTEND;TZID=America/New_York:20251214T200000\r
+RRULE:FREQ=MONTHLY;BYDAY=2SU\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let events = parse_calendar_data(body, "cal-1").unwrap();
+        let ev = &events[0];
+        // 19:00 EST (UTC-5) -> 00:00 UTC the next day.
+        assert_eq!(
+            ev.start,
+            Utc.with_ymd_and_hms(2025, 12, 15, 0, 0, 0).unwrap()
+        );
+        let rec = ev.recurrence.as_ref().expect("recurring master");
+        assert_eq!(rec.tzid.as_deref(), Some("America/New_York"));
+        assert!(rec.rrule.contains("BYDAY=2SU"));
+    }
+
+    #[test]
+    fn utc_and_floating_recurring_masters_carry_no_timezone() {
+        // UTC (`Z`) and floating DTSTART have no DST ambiguity; leaving tzid None
+        // keeps them on the unchanged UTC expansion path (no behaviour change).
+        for dtstart in ["20260101T120000Z", "20260101T120000"] {
+            let body = format!(
+                "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:u@aperio\r
+SUMMARY:Daily\r
+DTSTART:{dtstart}\r
+RRULE:FREQ=DAILY\r
+END:VEVENT\r
+END:VCALENDAR\r
+"
+            );
+            let events = parse_calendar_data(&body, "cal-1").unwrap();
+            assert_eq!(events[0].recurrence.as_ref().unwrap().tzid, None);
+        }
+    }
+
+    #[test]
     fn event_to_ical_writes_bare_uid_not_the_composite_row_id() {
         // A synced iCloud event whose resource href differs from its UID
         // (the normal case for anything created on an iPhone): the row id is
@@ -966,6 +1027,7 @@ END:VCALENDAR\r
             recurrence: Some(EventRecurrence {
                 rrule: "FREQ=WEEKLY;BYDAY=WE".into(),
                 exceptions: vec![Utc.with_ymd_and_hms(2026, 6, 3, 8, 0, 0).unwrap()],
+                tzid: None,
             }),
             color_label: None,
             color_hex: None,

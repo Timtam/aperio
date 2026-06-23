@@ -494,7 +494,11 @@ fn combine_recurrence(
                 None => Vec::new(),
                 Some(s) => decode_json(&s)?,
             };
-            Ok(Some(EventRecurrence { rrule, exceptions }))
+            Ok(Some(EventRecurrence {
+                rrule,
+                exceptions,
+                tzid: None,
+            }))
         }
     }
 }
@@ -787,6 +791,7 @@ mod tests {
                 recurrence: Some(EventRecurrence {
                     rrule: "FREQ=WEEKLY".into(),
                     exceptions: vec![],
+                    tzid: None,
                 }),
                 color_label: None,
                 color_hex: None,
@@ -899,6 +904,7 @@ mod tests {
                     recurrence: Some(EventRecurrence {
                         rrule: "FREQ=WEEKLY".into(),
                         exceptions: vec![],
+                        tzid: None,
                     }),
                     color_label: None,
                     color_hex: None,
