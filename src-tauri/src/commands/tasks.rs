@@ -996,10 +996,30 @@ pub async fn update_task(
     }
 
     // Plain in-place update.
-    let is_local = target_account == LOCAL_ID;
-    let updated = if is_local {
-        // The local adapter spawns the next on-demand instance itself.
-        adapter.update_task(task).await?
+    if target_account == LOCAL_ID {
+        // The local adapter spawns the next on-demand instance itself AND
+        // returns it, so we can emit a `task.created` for the spawned row —
+        // without that, a recurrence completed here never reaches other
+        // devices until the next snapshot/backfill.
+        let (updated, spawned) = adapter.update_task_with_spawn(task)?;
+        if let Ok(fields) = serde_json::to_value(&updated) {
+            event_log.append(SyncEvent::TaskUpdated(EventPayload {
+                id: updated.id.clone(),
+                fields,
+            }));
+        }
+        // Emit AFTER the completion's TaskUpdated so receivers see "completed,
+        // then next instance appeared" in order.
+        if let Some(next) = spawned {
+            if let Ok(fields) = serde_json::to_value(&next) {
+                event_log.append(SyncEvent::TaskCreated(EventPayload {
+                    id: next.id.clone(),
+                    fields,
+                }));
+            }
+        }
+        scheduler.invalidate();
+        Ok(updated)
     } else {
         let Some(ext) = registry.task_adapter(&target_account) else {
             return Err(CommandError {
@@ -1014,20 +1034,10 @@ pub async fn update_task(
         // DESIGN §9.12: providers don't understand backlog/on-demand
         // recurrence, so Aperio spawns the next instance for external lists.
         spawn_external_on_demand(ext.as_ref(), &cache, &target_account, &completed).await;
-        updated
-    };
-    if is_local {
-        if let Ok(fields) = serde_json::to_value(&updated) {
-            event_log.append(SyncEvent::TaskUpdated(EventPayload {
-                id: updated.id.clone(),
-                fields,
-            }));
-        }
-    } else {
         let _ = cache.invalidate(&target_account, SyncScope::Tasks, &updated.list_id);
+        scheduler.invalidate();
+        Ok(updated)
     }
-    scheduler.invalidate();
-    Ok(updated)
 }
 
 /// DESIGN §9.12: run Aperio's recurrence spawner for an external list. A

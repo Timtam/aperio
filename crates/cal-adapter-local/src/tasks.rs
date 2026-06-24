@@ -309,9 +309,22 @@ impl LocalAdapter {
     }
 
     /// Synchronous task update — the implementation behind the async
-    /// [`TasksFeature::update_task`] and the FFI store. Carries the
-    /// completion → next-instance recurrence spawn (DESIGN §9.12).
+    /// [`TasksFeature::update_task`]. Returns the updated task only; the
+    /// recurrence spawn (if any) is dropped, so callers that emit sync events
+    /// should prefer [`Self::update_task_with_spawn`] instead — otherwise a
+    /// recurrence completed on this device never reaches the others.
     pub fn update_task_sync(&self, task: Task) -> cal_core::Result<Task> {
+        Ok(self.update_task_with_spawn(task)?.0)
+    }
+
+    /// Like [`Self::update_task_sync`], but also returns the next recurring
+    /// instance spawned by completing a recurring task (`None` when nothing
+    /// was spawned). The caller MUST emit a `task.created` sync event for the
+    /// returned instance: the spawn writes a brand-new row that no other event
+    /// describes, so without that event the new occurrence stays invisible to
+    /// every other device until the next snapshot/backfill. Carries the
+    /// completion → next-instance recurrence spawn (DESIGN §9.12).
+    pub fn update_task_with_spawn(&self, task: Task) -> cal_core::Result<(Task, Option<Task>)> {
         // If this update completes a recurring task, generate the next
         // instance afterwards. We snapshot the previous status before
         // the write so we can detect the transition reliably.
@@ -379,21 +392,19 @@ impl LocalAdapter {
         // Recurrence: when a recurring task transitions into Completed
         // (and was not already there) the template generates its next
         // instance. The "post-completion, not pre" semantics matches
-        // DESIGN.md section 9.6.
-        if task.status == TaskStatus::Completed
+        // DESIGN.md section 9.6. We RETURN the spawned instance so the caller
+        // emits a `task.created` sync event for it; the new row is otherwise
+        // invisible to other devices until the next snapshot/backfill.
+        let spawned = if task.status == TaskStatus::Completed
             && prev_status != Some(TaskStatus::Completed)
             && task.recurrence.is_some()
         {
-            if let Some(next) = self.spawn_next_recurring_task(&task)? {
-                // We don't return the next task — the caller wired
-                // the existing one. The new row shows up on the
-                // next list refresh, which views already trigger
-                // on dialog close.
-                let _ = next;
-            }
-        }
+            self.spawn_next_recurring_task(&task)?
+        } else {
+            None
+        };
 
-        Ok(task)
+        Ok((task, spawned))
     }
 
     /// Synchronous task delete — the implementation behind the async
@@ -1094,6 +1105,53 @@ mod tests {
         assert_eq!(
             next.scheduled_date,
             Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()),
+        );
+    }
+
+    #[tokio::test]
+    async fn update_task_with_spawn_returns_the_spawned_instance() {
+        // Regression (recurring task missing on a second device): completing a
+        // recurring task must SURFACE the spawned next instance to the caller
+        // so it can emit a `task.created` sync event — otherwise the new
+        // occurrence never reaches other devices until the next snapshot.
+        let (a, list) = adapter_with_list();
+        let anchor = NaiveDate::from_ymd_opt(2026, 5, 19).unwrap();
+        let mut nt = mk_task("Take pills");
+        nt.scheduled_date = Some(anchor);
+        nt.recurrence = Some(TaskRecurrence {
+            anchor: Default::default(),
+            placement: Default::default(),
+            fixed_dates: None,
+            frequency: RecurrenceFrequency::Daily,
+            interval: 1,
+            day_of_week: None,
+            day_of_month: None,
+            end: None,
+        });
+        let original = a.create_task(&list.id, nt).await.unwrap();
+
+        // Completing it returns BOTH the completed task and the spawned next.
+        let mut completed = original.clone();
+        completed.status = TaskStatus::Completed;
+        completed.completed_at = Some(Utc::now());
+        let (updated, spawned) = a.update_task_with_spawn(completed).unwrap();
+        assert_eq!(updated.status, TaskStatus::Completed);
+        let next = spawned.expect("completing a recurring task surfaces the next instance");
+        assert_eq!(next.status, TaskStatus::Open);
+        assert_ne!(next.id, updated.id);
+        assert_eq!(
+            next.scheduled_date,
+            Some(NaiveDate::from_ymd_opt(2026, 5, 20).unwrap()),
+        );
+
+        // A plain edit of the already-completed task must NOT spawn again
+        // (no double-emit; the idempotent guard already holds it down).
+        let mut renamed = updated.clone();
+        renamed.title = "Take pills (morning)".into();
+        let (_, none) = a.update_task_with_spawn(renamed).unwrap();
+        assert!(
+            none.is_none(),
+            "re-updating a completed task must not re-spawn"
         );
     }
 

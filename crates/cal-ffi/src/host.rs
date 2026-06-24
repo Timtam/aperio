@@ -3769,12 +3769,29 @@ impl Host {
         // Plain in-place update — no list change.
         match self.route_task_list(&task.list_id)? {
             None => {
-                let updated = self.adapter.update_task_sync(task).map_err(map_store_err)?;
+                // The local adapter spawns the next on-demand instance and
+                // returns it; emit a `task.created` for that row too, or the
+                // recurrence never reaches other devices until the next
+                // snapshot/backfill.
+                let (updated, spawned) = self
+                    .adapter
+                    .update_task_with_spawn(task)
+                    .map_err(map_store_err)?;
                 if let Ok(fields) = serde_json::to_value(&updated) {
                     self.writer.append(SyncEvent::TaskUpdated(EventPayload {
                         id: updated.id.clone(),
                         fields,
                     }));
+                }
+                // After the completion's TaskUpdated, so receivers apply
+                // "completed" before "next instance created".
+                if let Some(next) = spawned {
+                    if let Ok(fields) = serde_json::to_value(&next) {
+                        self.writer.append(SyncEvent::TaskCreated(EventPayload {
+                            id: next.id.clone(),
+                            fields,
+                        }));
+                    }
                 }
                 to_json(&updated)
             }
