@@ -53,7 +53,14 @@ use crate::reminders::SchedulerHandle;
 /// from the local DB (the source of truth) repushes them; receivers dedupe,
 /// so devices already in sync just no-op. Needs one app restart on the
 /// device that still holds the missing lists.
-const PREF_LOCAL_TASKS_BACKFILLED: &str = "sync.localTasks.eventBackfillDone.v3";
+///
+/// `.v4`: recover recurrence next-instances spawned BEFORE the
+/// completion-spawn sync fix. Completing a recurring local task wrote its next
+/// instance to the DB but emitted no `task.created`, so the new occurrence
+/// never reached other devices (symptom: a recurring task completed on the
+/// desktop is missing on the phone). The forward fix emits it now; this
+/// one-time replay carries the already-spawned-but-unsynced rows across.
+const PREF_LOCAL_TASKS_BACKFILLED: &str = "sync.localTasks.eventBackfillDone.v4";
 
 /// Catch-up emit for local task lists + their tasks. Idempotent:
 /// gated by [`PREF_LOCAL_TASKS_BACKFILLED`], and receivers dedupe
