@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { CalendarActions } from '../components/CalendarActions';
 import { CalendarDayList } from '../components/CalendarDayList';
 import { CalendarPager } from '../components/CalendarPager';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
@@ -113,6 +114,7 @@ export default function MonthScreen({ navigation, route }: RootStackScreenProps<
         {/* A real button that opens the picker on tap (any day in a month
             selects that month). */}
         <JumpToDateButton value={anchor} onSelect={(date) => setAnchor(localMidnight(date))} />
+        <CalendarActions navigation={navigation} anchorDay={anchor} />
       </View>
 
       {/* Three-finger swipe (VoiceOver) / horizontal flick pages between months;

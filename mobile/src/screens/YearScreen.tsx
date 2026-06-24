@@ -12,6 +12,7 @@ import {
 import { expandAll } from '@aperio/shared';
 
 import { getEvents, listCalendars } from '../api/calendar';
+import { CalendarActions } from '../components/CalendarActions';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import { useTabBarInset } from '../hooks/useTabBarInset';
@@ -161,6 +162,7 @@ export default function YearScreen({ navigation, route }: RootStackScreenProps<'
         >
           <Text style={styles.ghostButtonText}>{t('mobile.today')}</Text>
         </Pressable>
+        <CalendarActions navigation={navigation} anchorDay={new Date(year, 0, 1)} />
       </View>
 
       {error != null && (

@@ -25,6 +25,7 @@ import {
   listCalendars,
 } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
+import { CalendarActions } from '../components/CalendarActions';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { JumpToDateButton } from '../components/JumpToDateButton';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
@@ -317,6 +318,7 @@ export default function AgendaScreen({
             setAnchor(localMidnight(date));
           }}
         />
+        <CalendarActions navigation={navigation} anchorDay={anchor} />
       </View>
 
       {error != null && (

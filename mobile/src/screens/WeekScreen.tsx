@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { CalendarActions } from '../components/CalendarActions';
 import { CalendarDayList } from '../components/CalendarDayList';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { JumpToDateButton } from '../components/JumpToDateButton';
@@ -135,6 +136,7 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
         </Pressable>
         {/* A real button that opens the picker on tap (any day selects its week). */}
         <JumpToDateButton value={anchor} onSelect={(date) => setAnchor(localMidnight(date))} />
+        <CalendarActions navigation={navigation} anchorDay={anchor} />
       </View>
 
       <CalendarDayList
