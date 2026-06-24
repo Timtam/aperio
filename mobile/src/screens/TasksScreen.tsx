@@ -656,7 +656,15 @@ export default function TasksScreen({
           // sibling after a delete/complete) sit well inside the window.
           initialNumToRender={20}
           windowSize={11}
-          removeClippedSubviews
+          // NOT removeClippedSubviews: detaching off-screen rows from the native
+          // view tree breaks BACKWARD VoiceOver/TalkBack navigation — a
+          // previous-element swipe from the top of the viewport finds no
+          // attached row above and escapes the list into the toolbar (forward
+          // works because FlatList renders ahead as VoiceOver scrolls down).
+          // windowSize alone keeps the a11y tree bounded; the kept window gives
+          // backward swipes a buffer so they reveal earlier rows instead of
+          // falling out.
+          removeClippedSubviews={false}
         />
       )}
     </View>

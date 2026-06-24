@@ -470,7 +470,11 @@ export default function ContactsScreen({
           stickySectionHeadersEnabled={false}
           initialNumToRender={20}
           windowSize={11}
-          removeClippedSubviews
+          // NOT removeClippedSubviews: it detaches off-screen rows and breaks
+          // BACKWARD VoiceOver/TalkBack navigation (a previous-element swipe
+          // escapes the list into the chrome above); windowSize keeps the a11y
+          // tree bounded. See TasksScreen for the full rationale.
+          removeClippedSubviews={false}
           renderSectionHeader={({ section }) => {
             const label = t('views.contacts.groupLabel', {
               name: section.list.name,
