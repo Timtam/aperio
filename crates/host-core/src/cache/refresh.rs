@@ -144,7 +144,14 @@ impl CacheRefresher {
     pub fn start_periodic(self: &Arc<Self>, rt: &tokio::runtime::Handle) {
         let worker = self.clone();
         rt.spawn(async move {
-            tokio::time::sleep(APP_START_DELAY).await;
+            // Let the UI settle before the first (network-heavy) warm pass — but a
+            // manual trigger short-circuits the wait, so a cache-generation reset
+            // (or the user hitting "Re-sync from scratch") in these first seconds
+            // re-fetches AT ONCE instead of after the full delay.
+            tokio::select! {
+                _ = tokio::time::sleep(APP_START_DELAY) => {}
+                _ = worker.notify.notified() => {}
+            }
             info!(target: "aperio::cache", "running app-start cache warm pass");
             worker.warm_all().await;
 
