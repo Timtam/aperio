@@ -1697,7 +1697,10 @@
       "tasksHeading": "Aufgaben",
       "empty": "Keine Termine an diesem Tag.",
       "eventLabel": "Termin: {{title}}, {{start}} bis {{end}}, Kalender: {{calendar}}",
-      "taskLabel": "Aufgabe: {{title}}, {{time}}, {{state}}{{priority}}{{progress}}{{assignee}}"
+      "taskLabel": "Aufgabe: {{title}}, {{time}}, {{state}}{{priority}}{{progress}}{{assignee}}",
+      "gridLabel": "Einträge des Tages",
+      "dayAnnounce_one": "{{day}}, 1 Eintrag",
+      "dayAnnounce_other": "{{day}}, {{count}} Einträge"
     },
     "month": {
       "title": "Monatsansicht",

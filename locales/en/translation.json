@@ -1697,7 +1697,10 @@
       "empty": "No events on this day.",
       "eventLabel": "Event: {{title}}, {{start}} to {{end}}, calendar: {{calendar}}",
       "taskLabel": "Task: {{title}}, {{time}}, {{state}}{{priority}}{{progress}}{{assignee}}",
-      "tasksHeading": "Tasks"
+      "tasksHeading": "Tasks",
+      "gridLabel": "Day's items",
+      "dayAnnounce_one": "{{day}}, 1 item",
+      "dayAnnounce_other": "{{day}}, {{count}} items"
     },
     "month": {
       "title": "Month view",

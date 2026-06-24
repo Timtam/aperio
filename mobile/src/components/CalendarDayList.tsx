@@ -107,6 +107,13 @@ export interface CalendarDayListProps {
   emptyText: string;
   /** i18n key for the per-day header announce (`{{day}}, {{count}} items`). */
   dayAnnounceKey: string;
+  /**
+   * Render the per-day header row (the date + item count). Default `true`.
+   * The single-day view passes `false`: it already shows the date in its own
+   * nav-bar heading, so the list's per-day header would be a redundant second
+   * heading for a screen-reader user.
+   */
+  showDayHeaders?: boolean;
 }
 
 export function CalendarDayList({
@@ -116,6 +123,7 @@ export function CalendarDayList({
   gridLabel,
   emptyText,
   dayAnnounceKey,
+  showDayHeaders = true,
 }: CalendarDayListProps) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
@@ -658,19 +666,22 @@ export function CalendarDayList({
           keyboardShouldPersistTaps="handled"
         >
           {buckets.map((b) => {
-            const rows: ReactNode[] = [
-              <Text
-                key={`h-${b.key}`}
-                accessibilityRole="header"
-                accessibilityLabel={t(dayAnnounceKey, {
-                  day: fmtFullDate(b.date),
-                  count: b.count,
-                })}
-                style={styles.dayHeader}
-              >
-                {fmtFullDate(b.date)}
-              </Text>,
-            ];
+            const rows: ReactNode[] = [];
+            if (showDayHeaders) {
+              rows.push(
+                <Text
+                  key={`h-${b.key}`}
+                  accessibilityRole="header"
+                  accessibilityLabel={t(dayAnnounceKey, {
+                    day: fmtFullDate(b.date),
+                    count: b.count,
+                  })}
+                  style={styles.dayHeader}
+                >
+                  {fmtFullDate(b.date)}
+                </Text>,
+              );
+            }
             for (const ev of b.allDay) {
               rows.push(renderEventRow(ev, b.date, multiDayInfo(ev, b.date)));
             }
