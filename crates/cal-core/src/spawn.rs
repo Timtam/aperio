@@ -35,6 +35,39 @@ pub fn next_recurrence_instance(template: &Task, completion_date: NaiveDate) -> 
     }
 }
 
+/// Build the COMPLETED snapshot ("completion record") to leave behind when a
+/// recurring task is checked off on a provider whose NATIVE recurrence keeps no
+/// completion history (Vikunja just advances the dates of the same task). The
+/// provider advances the live task to its next occurrence; this record keeps
+/// the just-completed turn visible under "Done".
+///
+/// It's a terminal, non-recurring copy: same content + date(s) + assignees,
+/// status `Completed`, with `recurrence`/`series_id`/`resurface_date` cleared so
+/// the provider can't repeat it and Aperio can't try to spawn from it. No
+/// section (let the provider file it in its done state) and no reminders (a
+/// finished task fires nothing).
+pub fn completion_record_for(completed: &Task) -> NewTask {
+    NewTask {
+        title: completed.title.clone(),
+        description: completed.description.clone(),
+        status: TaskStatus::Completed,
+        priority: completed.priority,
+        scheduled_date: completed.scheduled_date,
+        scheduled_time: completed.scheduled_time,
+        deadline_date: completed.deadline_date,
+        deadline_time: completed.deadline_time,
+        recurrence: None,
+        resurface_date: None,
+        series_id: None,
+        parent_id: None,
+        section_id: None,
+        color_label: completed.color_label.clone(),
+        reminders: Vec::new(),
+        sound: None,
+        assignees: completed.assignees.clone(),
+    }
+}
+
 /// True when a date-ended rule (`OnDate`) has run past its boundary.
 /// `After { occurrences }` isn't tracked here (no per-row counter) and
 /// `Never`/absent never end.
@@ -323,6 +356,36 @@ mod tests {
         );
         t.recurrence = None;
         assert!(spawn(&t).is_none());
+    }
+
+    #[test]
+    fn completion_record_is_a_terminal_done_copy() {
+        let mut t = template(
+            rule(
+                RecurrenceFrequency::Daily,
+                1,
+                RecurrenceAnchor::FromDate,
+                RecurrencePlacement::Schedule,
+                None,
+            ),
+            NaiveDate::from_ymd_opt(2026, 5, 10).unwrap(),
+        );
+        t.title = "Take pills".into();
+        t.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 5, 10).unwrap());
+        let rec = completion_record_for(&t);
+        // Same content + date as the completed turn …
+        assert_eq!(rec.title, "Take pills");
+        assert_eq!(rec.status, TaskStatus::Completed);
+        assert_eq!(
+            rec.scheduled_date,
+            Some(NaiveDate::from_ymd_opt(2026, 5, 10).unwrap())
+        );
+        // … but a TERMINAL snapshot: no recurrence/series/resurface, so the
+        // provider can't repeat it and Aperio can't try to spawn from it.
+        assert!(rec.recurrence.is_none());
+        assert!(rec.series_id.is_none());
+        assert!(rec.resurface_date.is_none());
+        assert!(rec.reminders.is_empty());
     }
 
     #[test]

@@ -32,6 +32,7 @@ pub mod sound;
 pub mod sound_assets;
 pub mod sync;
 pub mod sync_log;
+pub mod tasks;
 pub mod user_prefs;
 
 pub use db::{DbError, DbHandle, DbResult, SharedConn, CURRENT_SCHEMA_VERSION};

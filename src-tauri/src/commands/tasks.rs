@@ -2,8 +2,7 @@
 
 use cal_adapter_local::LocalAdapter;
 use cal_core::{
-    MemberRight, NewTask, Section, Task, TaskList, TaskListShare, TaskStatus, TaskUser,
-    TasksFeature,
+    MemberRight, NewTask, Section, Task, TaskList, TaskListShare, TaskUser, TasksFeature,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -1038,82 +1037,19 @@ pub async fn update_task(
         // provider write — the Aperio-side spawn needs it.
         let completed = task.clone();
         let updated = ext.update_task(task).await?;
-        // DESIGN §9.12: providers don't understand backlog/on-demand
-        // recurrence, so Aperio spawns the next instance for external lists.
-        spawn_external_on_demand(ext.as_ref(), &cache, &target_account, &completed).await;
+        // DESIGN §9.12: reconcile the provider's recurrence with Aperio's model
+        // — spawn the next instance for on-demand/backlog rules, or leave a
+        // completion record for a native rule the provider only advances.
+        host_core::tasks::record_external_recurrence_completion(
+            ext.as_ref(),
+            &cache,
+            &target_account,
+            &completed,
+        )
+        .await;
         let _ = cache.invalidate(&target_account, SyncScope::Tasks, &updated.list_id);
         scheduler.invalidate();
         Ok(updated)
-    }
-}
-
-/// DESIGN §9.12: run Aperio's recurrence spawner for an external list. A
-/// provider only understands its own (scheduled) recurrence, so when an
-/// on-demand / backlog task completes there, Aperio creates the next instance
-/// via the same adapter.
-///
-/// Best-effort: a failure here is logged, not surfaced — the user's task is
-/// already marked done, and the next sync still reflects that. Plain
-/// scheduled recurrence is left to the provider (no `series_id`, no spawn).
-async fn spawn_external_on_demand(
-    ext: &dyn TasksFeature,
-    cache: &Arc<CacheStore>,
-    account: &str,
-    completed: &Task,
-) {
-    if completed.status != TaskStatus::Completed {
-        return;
-    }
-    let Some(rec) = completed.recurrence.as_ref() else {
-        return;
-    };
-    if !cal_core::recurrence_needs_extras(rec) {
-        return;
-    }
-
-    // The cached snapshot reflects the pre-update state, so it tells us both
-    // whether this completion is a fresh transition and whether the series
-    // already has an open instance (idempotency).
-    let cached = cache
-        .read_tasks(account, &completed.list_id)
-        .unwrap_or_default();
-    let is_open = |status| matches!(status, TaskStatus::Open | TaskStatus::InProgress);
-
-    // Re-saving an already-completed task must not spawn again.
-    if cached
-        .iter()
-        .any(|t| t.id == completed.id && t.status == TaskStatus::Completed)
-    {
-        return;
-    }
-    // A series spawns at most one open instance — if another client already
-    // created the next turn (and it's synced into our cache), do nothing.
-    if let Some(sid) = completed.series_id.as_deref() {
-        if cached.iter().any(|t| {
-            t.id != completed.id && t.series_id.as_deref() == Some(sid) && is_open(t.status)
-        }) {
-            return;
-        }
-    }
-
-    // Anchor on the LOCAL completion day (the user's timezone): a "+1 day
-    // backlog" task completed just after local midnight must resurface TOMORROW.
-    // Deriving from the UTC `completed_at` lands it on today (UTC is still
-    // yesterday at that hour) → it never leaves the active backlog.
-    let completion_date = completed
-        .completed_at
-        .map(|dt| dt.with_timezone(&chrono::Local).date_naive())
-        .unwrap_or_else(|| chrono::Local::now().date_naive());
-    let Some(next) = cal_core::next_recurrence_instance(completed, completion_date) else {
-        return;
-    };
-    if let Err(err) = ext.create_task(&completed.list_id, next).await {
-        tracing::warn!(
-            account = %account,
-            list = %completed.list_id,
-            ?err,
-            "external on-demand recurrence spawn failed",
-        );
     }
 }
 
