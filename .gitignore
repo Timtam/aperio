@@ -33,6 +33,10 @@ desktop.ini
 /data/
 /plugins/user/
 
+# A user's encrypted sync folder dropped in for diagnosis — NEVER commit
+# (contains their real, decryptable calendar/task data).
+/Aperio/
+
 # Environment
 .env
 .env.local
