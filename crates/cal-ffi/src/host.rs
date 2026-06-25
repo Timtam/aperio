@@ -2387,6 +2387,10 @@ impl Host {
                 .append(SyncEvent::AccountCreated(account_payload(&created)));
         }
 
+        // Kick a warm so the new account's calendars/lists (or the device
+        // calendar's events) load now instead of only on the next foreground /
+        // manual refresh — the mobile twin of the desktop create_account trigger.
+        self.refresh_external_cache();
         to_json(&created)
     }
 
@@ -6611,6 +6615,8 @@ impl Host {
         self.writer
             .append(SyncEvent::AccountCreated(account_payload(&created)));
 
+        // Kick a warm so the newly-connected account's calendars/lists load now.
+        self.refresh_external_cache();
         to_json(&created)
     }
 

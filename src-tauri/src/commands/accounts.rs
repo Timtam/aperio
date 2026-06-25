@@ -12,6 +12,7 @@ use super::{
     plugin_id_for_adapter_kind, run_plugin_auth, run_plugin_discover, CommandError, CommandResult,
 };
 use crate::accounts::{Account, AccountsError, AccountsRepo, AdapterKind};
+use crate::cache::CacheRefresher;
 use crate::db::DbHandle;
 use crate::event_log::EventLogWriter;
 use crate::registry::AdapterRegistry;
@@ -255,6 +256,7 @@ pub async fn create_account(
     registry: State<'_, Arc<AdapterRegistry>>,
     plugin_manager: State<'_, Arc<PluginManager>>,
     event_log: State<'_, Arc<EventLogWriter>>,
+    refresher: State<'_, Arc<CacheRefresher>>,
     request: CreateAccountRequest,
 ) -> CommandResult<Account> {
     // Reject adapter kinds we have no construction path for yet.
@@ -440,6 +442,9 @@ pub async fn create_account(
     // non-secret metadata, and the receiver surfaces the
     // "credentials missing" wizard for the device-local secret.
     event_log.append(SyncEvent::AccountCreated(account_payload(&created)));
+    // The boot warm pass may already have run; kick a warm so the new account's
+    // calendars/lists load now instead of only after the next pass / restart.
+    refresher.trigger();
     Ok(created)
 }
 
@@ -876,6 +881,7 @@ pub async fn connect_google_account(
     registry: State<'_, Arc<AdapterRegistry>>,
     plugin_manager: State<'_, Arc<PluginManager>>,
     event_log: State<'_, Arc<EventLogWriter>>,
+    refresher: State<'_, Arc<CacheRefresher>>,
     request: ConnectGoogleRequest,
 ) -> CommandResult<Account> {
     let name = request.display_name.trim();
@@ -979,6 +985,9 @@ pub async fn connect_google_account(
         });
     }
     event_log.append(SyncEvent::AccountCreated(account_payload(&created)));
+    // The boot warm pass may already have run; kick a warm so the new account's
+    // calendars/lists load now instead of only after the next pass / restart.
+    refresher.trigger();
     Ok(created)
 }
 
@@ -999,6 +1008,7 @@ pub async fn connect_microsoft_account(
     registry: State<'_, Arc<AdapterRegistry>>,
     plugin_manager: State<'_, Arc<PluginManager>>,
     event_log: State<'_, Arc<EventLogWriter>>,
+    refresher: State<'_, Arc<CacheRefresher>>,
     request: ConnectMicrosoftRequest,
 ) -> CommandResult<Account> {
     let name = request.display_name.trim();
@@ -1084,6 +1094,9 @@ pub async fn connect_microsoft_account(
         });
     }
     event_log.append(SyncEvent::AccountCreated(account_payload(&created)));
+    // The boot warm pass may already have run; kick a warm so the new account's
+    // calendars/lists load now instead of only after the next pass / restart.
+    refresher.trigger();
     Ok(created)
 }
 
