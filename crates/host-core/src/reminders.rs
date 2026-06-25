@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use cal_core::{
     DateRange, Event, EventRecurrence, RecurrenceEnd, RecurrenceFrequency, Reminder, ReminderKind,
-    SoundConfig, Task, TaskRecurrence,
+    SoundConfig, Task, TaskRecurrence, TaskUser,
 };
 use chrono::{DateTime, Duration as ChronoDuration, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use rrule::{RRule, RRuleSet, Tz as RruleTz};
@@ -225,11 +225,24 @@ pub fn enumerate_local_triggers(
     acc
 }
 
+/// Mirror of the TS `isMineOrUnassigned` (shared/taskAssignment.ts): a task is
+/// "mine to be reminded about" when the account has no identity (`me` is `None`
+/// — local-style adapters), the task is unassigned, or I'm one of its assignees.
+/// A colleague's task in a shared list (Vikunja/Todoist) is NOT, so it produces
+/// no reminder — matching the day-start ownership filter and the calendar views.
+fn is_mine_or_unassigned(assignees: &[TaskUser], me: Option<&TaskUser>) -> bool {
+    match me {
+        None => true,
+        Some(me) => assignees.is_empty() || assignees.iter().any(|a| a.id == me.id),
+    }
+}
+
 /// Fan out across every registered external adapter and pull a snapshot of
 /// every event + task reminder trigger within the fixed `now ± EXTERNAL_*_DAYS`
 /// horizon. Per-adapter errors are logged and skipped — one dead account never
 /// blanks the rest. Events with no VALARM fall back to the calendar's stored
-/// default reminders (the iOS "Default Alert Times" behaviour).
+/// default reminders (the iOS "Default Alert Times" behaviour). Tasks assigned
+/// only to OTHERS in a shared list are dropped (the day-start ownership rule).
 pub async fn enumerate_external_triggers(
     registry: &Arc<AdapterRegistry>,
     db: &SharedConn,
@@ -293,6 +306,11 @@ pub async fn enumerate_external_triggers(
         if device_accounts.contains(&account_id) {
             continue;
         }
+        // "me" for this account, so a shared list's tasks assigned only to
+        // OTHERS produce no reminder. `None` for local-style adapters with no
+        // identity → nothing is filtered. Fetched once per account; on the
+        // desktop this whole pass is wrapped in the external TTL cache.
+        let me = adapter.current_user().await.ok().flatten();
         let lists = match adapter.list_task_lists().await {
             Ok(l) => l,
             Err(err) => {
@@ -308,7 +326,11 @@ pub async fn enumerate_external_triggers(
                     continue;
                 }
             };
-            acc.extend(task_triggers(&tasks, &sound_prefs, from, to));
+            let mine: Vec<Task> = tasks
+                .into_iter()
+                .filter(|t| is_mine_or_unassigned(&t.assignees, me.as_ref()))
+                .collect();
+            acc.extend(task_triggers(&mine, &sound_prefs, from, to));
         }
     }
 
@@ -946,8 +968,34 @@ fn format_task_body(due: &DateTime<Utc>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cal_core::{EventRecurrence, Reminder, ReminderKind, Task, TaskStatus};
+    use cal_core::{EventRecurrence, Reminder, ReminderKind, Task, TaskStatus, TaskUser};
     use chrono::{NaiveDate, NaiveTime};
+
+    fn user(id: &str) -> TaskUser {
+        TaskUser {
+            id: id.to_string(),
+            name: id.to_string(),
+            email: None,
+        }
+    }
+
+    #[test]
+    fn ownership_filter_matches_day_start_rule() {
+        let me = user("me");
+        let other = user("other");
+        // No account identity → everything is "mine" (local / personal lists).
+        assert!(is_mine_or_unassigned(std::slice::from_ref(&other), None));
+        // Unassigned → mine.
+        assert!(is_mine_or_unassigned(&[], Some(&me)));
+        // Assigned to me (possibly alongside others) → mine.
+        assert!(is_mine_or_unassigned(std::slice::from_ref(&me), Some(&me)));
+        assert!(is_mine_or_unassigned(
+            &[me.clone(), other.clone()],
+            Some(&me)
+        ));
+        // Assigned only to others → NOT mine (no reminder fires).
+        assert!(!is_mine_or_unassigned(&[other], Some(&me)));
+    }
 
     /// Test wrappers that inject an empty `SoundPrefs` so the existing
     /// trigger-shape assertions stay terse. These tests assert on timing
