@@ -43,6 +43,7 @@ import {
   parseLocalTime,
 } from '../intl/dateTimeField';
 import type { RootStackScreenProps } from '../navigation/types';
+import { useCalendarVisibility } from '../state/calendarVisibility';
 import { useSoundPref } from '../state/useSoundPref';
 import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
@@ -123,6 +124,7 @@ export default function EventEditorModal({
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
+  const { hidden: hiddenCalendars } = useCalendarVisibility();
   useCancelHeader(navigation);
   const { eventId, calendarId, occurrence, anchor } = route.params;
   const editing = eventId != null;
@@ -451,13 +453,17 @@ export default function EventEditorModal({
         <RadioGroup<string>
           label={t('dialogs.event.fields.calendar')}
           value={calId}
-          // Read-only calendars (iCal feeds) can't accept events; drop them but
-          // keep the event's own calendar so editing one that lives on a
-          // read-only source still shows it. (Mobile has no sidebar visibility
-          // toggle, so there's nothing else to filter.)
-          options={selectableEventCalendars(calendars, { currentId: calId }).map(
-            (c) => ({ value: c.id, label: c.name }),
-          )}
+          // Offer only calendars the user can write to AND hasn't hidden (the
+          // Calendars-screen toggles), plus the event's own calendar so editing
+          // one on a read-only / hidden source still shows it.
+          options={selectableEventCalendars(calendars, {
+            selectedIds: new Set(
+              calendars
+                .filter((c) => !hiddenCalendars.has(c.id))
+                .map((c) => c.id),
+            ),
+            currentId: calId,
+          }).map((c) => ({ value: c.id, label: c.name }))}
           onChange={setCalId}
         />
       )}

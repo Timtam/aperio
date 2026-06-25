@@ -32,6 +32,7 @@ import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import { useTabBarInset } from '../hooks/useTabBarInset';
 import { resolveEventColor } from '../intl/eventColor';
 import { useCacheReload } from '../state/cacheObserver';
+import { useCalendarVisibility } from '../state/calendarVisibility';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -73,6 +74,7 @@ export default function AgendaScreen({
 }: RootStackScreenProps<'Agenda'>) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
+  const { hidden } = useCalendarVisibility();
   const tabBarInset = useTabBarInset();
 
   // Window anchor (local midnight); seeded from the switcher's `anchor` param so
@@ -154,7 +156,9 @@ export default function AgendaScreen({
       // Expand recurring series across the whole window first, then spread
       // multi-day all-day events into one occurrence per covered day.
       const expanded = expandAll(perCalendar.flat(), { start: range.start, end: range.end });
-      setOccurrences(expandToDayOccurrences(expanded, range));
+      // Drop events from calendars the user hid (the Calendars-screen toggles).
+      const visible = expanded.filter((e) => !hidden.has(e.calendar_id));
+      setOccurrences(expandToDayOccurrences(visible, range));
     } catch (err) {
       const message = errorMessage(err);
       setError(message);
@@ -162,7 +166,7 @@ export default function AgendaScreen({
     } finally {
       setLoading(false);
     }
-  }, [announce, range, t]);
+  }, [announce, range, t, hidden]);
 
   // Reload when the window changes or the screen regains focus (after the editor).
   useEffect(() => {

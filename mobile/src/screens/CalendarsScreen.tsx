@@ -6,6 +6,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -19,7 +20,8 @@ import { Calendar, createCalendar, listCalendars } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useCacheReload } from '../state/cacheObserver';
-import { useThemedStyles, type ThemeColors } from '../theme';
+import { useCalendarVisibility } from '../state/calendarVisibility';
+import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
 // Calendar catalog: read the calendars (local + external), create a local one,
 // and open the editor to rename / recolour / delete a LOCAL calendar. External
@@ -39,6 +41,10 @@ export default function CalendarsScreen({
 }: RootStackScreenProps<'Calendars'>) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
+  // Per-device calendar visibility (hide a calendar from every calendar view +
+  // the event-target pickers).
+  const { hidden, toggle: toggleVisibility } = useCalendarVisibility();
 
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [colorLabels, setColorLabels] = useState<ColorLabel[]>([]);
@@ -175,6 +181,25 @@ export default function CalendarsScreen({
               (colourName ? t('mobile.colorLabelSuffix', { name: colourName }) : '');
             return (
               <View key={cal.id} style={styles.row}>
+                <Pressable
+                  accessible
+                  accessibilityRole="switch"
+                  accessibilityState={{ checked: !hidden.has(cal.id) }}
+                  accessibilityLabel={t('mobile.calendarVisible', { name: cal.name })}
+                  onPress={() => toggleVisibility(cal.id)}
+                  style={({ pressed }) => [styles.visToggle, pressed && styles.pressed]}
+                >
+                  {/* Visual only — the Pressable owns the toggle + the switch
+                      a11y trait (announced on toggle). */}
+                  <View pointerEvents="none">
+                    <Switch
+                      value={!hidden.has(cal.id)}
+                      trackColor={{ false: colors.border, true: colors.accent }}
+                      importantForAccessibility="no"
+                      accessibilityElementsHidden
+                    />
+                  </View>
+                </Pressable>
                 <View
                   ref={(node) => {
                     rowTags.current[cal.id] = node ? findNodeHandle(node) : null;
@@ -269,6 +294,8 @@ const makeStyles = (c: ThemeColors) =>
       paddingHorizontal: 6,
     },
     rowPressed: { backgroundColor: c.surfacePressed },
+    pressed: { opacity: 0.7 },
+    visToggle: { paddingVertical: 8, paddingHorizontal: 2 },
     colorDot: {
       width: 12,
       height: 12,

@@ -50,6 +50,7 @@
     "manageMembersLabel": "Mitglieder verwalten",
     "manageContactLists": "Kontaktbücher",
     "contactBookVisible": "{{name}} in Kontakten anzeigen",
+    "calendarVisible": "{{name}} im Kalender anzeigen",
     "sectionsHeading": "Abschnitte",
     "edit": "Bearbeiten",
     "colorHexInvalid": "Gib eine Farbe als #RRGGBB ein.",

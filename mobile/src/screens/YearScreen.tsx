@@ -18,6 +18,7 @@ import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import { useTabBarInset } from '../hooks/useTabBarInset';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useCacheReload } from '../state/cacheObserver';
+import { useCalendarVisibility } from '../state/calendarVisibility';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Accessible Year view — the screen-reader-first port of the desktop YearView.
@@ -36,6 +37,7 @@ function errorMessage(err: unknown): string {
 export default function YearScreen({ navigation, route }: RootStackScreenProps<'Year'>) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
+  const { hidden } = useCalendarVisibility();
   const tabBarInset = useTabBarInset();
 
   const [year, setYear] = useState(() => {
@@ -75,6 +77,7 @@ export default function YearScreen({ navigation, route }: RootStackScreenProps<'
       const expanded = expandAll(perCalendar.flat(), { start, end });
       const next = Array<number>(12).fill(0);
       for (const ev of expanded) {
+        if (hidden.has(ev.calendar_id)) continue;
         const d = new Date(ev.start);
         if (d.getFullYear() === year) {
           const m = d.getMonth();
@@ -90,7 +93,7 @@ export default function YearScreen({ navigation, route }: RootStackScreenProps<'
     } finally {
       if (reqToken.current === token) setLoading(false);
     }
-  }, [announce, t, year]);
+  }, [announce, t, year, hidden]);
 
   // Reload when the year changes or the screen regains focus (after a drill-in).
   useEffect(() => {

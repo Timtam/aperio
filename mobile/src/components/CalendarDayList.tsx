@@ -55,6 +55,7 @@ import { resolveEventColor } from '../intl/eventColor';
 import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
 import type { RootStackParamList } from '../navigation/types';
 import { useCacheReload } from '../state/cacheObserver';
+import { useCalendarVisibility } from '../state/calendarVisibility';
 import { useCurrentUserByList } from '../state/currentUser';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
 import { applyTaskToggle, statusAnnounce } from '../state/taskToggle';
@@ -129,6 +130,7 @@ export function CalendarDayList({
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const tabBarInset = useTabBarInset();
+  const { hidden: hiddenCalendars } = useCalendarVisibility();
 
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [colorLabels, setColorLabels] = useState<ColorLabel[]>([]);
@@ -281,13 +283,18 @@ export function CalendarDayList({
   // per list, the "show completed in calendar" opt-in (toggled on the Lists
   // screen, shared with the desktop's `tasks.showCompletedInCalendar` pref)
   // keeps them visible.
+  // Calendars the user hid (the Calendars-screen toggles) drop out of the view.
+  const visibleEvents = useMemo(
+    () => events.filter((ev) => !hiddenCalendars.has(ev.calendar_id)),
+    [events, hiddenCalendars],
+  );
   const buckets = useMemo<DayBucket[]>(() => {
     return days.map((date, i) => {
       const key = dayKeys[i];
-      const allDay = events.filter(
+      const allDay = visibleEvents.filter(
         (ev) => ev.all_day && daysCoveredKeys(ev).includes(key),
       );
-      const timedEvents = events.filter(
+      const timedEvents = visibleEvents.filter(
         (ev) => !ev.all_day && localDateKey(new Date(ev.start)) === key,
       );
       const dayTasks = filterTasksOnDay(tasks, key, showCompletedForList, meFor);
@@ -306,7 +313,7 @@ export function CalendarDayList({
         count: allDay.length + timed.length + untimed.length,
       };
     });
-  }, [days, dayKeys, events, tasks, showCompletedForList, meFor]);
+  }, [days, dayKeys, visibleEvents, tasks, showCompletedForList, meFor]);
 
   const totalItems = useMemo(
     () => buckets.reduce((sum, b) => sum + b.count, 0),

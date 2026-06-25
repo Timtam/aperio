@@ -23,6 +23,7 @@ import {
   type MoveCopyMode,
   type MoveCopyScope,
 } from '../state/moveActions';
+import { useCalendarVisibility } from '../state/calendarVisibility';
 import { useTaskStore } from '../state/taskStoreContext';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -47,6 +48,7 @@ export default function MoveCopyModal({
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { taskLists, invalidateData } = useTaskStore();
+  const { hidden: hiddenCalendars } = useCalendarVisibility();
   useCancelHeader(navigation);
 
   const [task, setTask] = useState<Task | null>(null);
@@ -101,7 +103,9 @@ export default function MoveCopyModal({
     const writable =
       params.kind === 'task'
         ? taskLists.filter((l) => !l.read_only).map((l) => ({ id: l.id, name: l.name }))
-        : calendars.filter((c) => !c.read_only).map((c) => ({ id: c.id, name: c.name }));
+        : calendars
+            .filter((c) => !c.read_only && !hiddenCalendars.has(c.id))
+            .map((c) => ({ id: c.id, name: c.name }));
     return writable.map((c) => ({
       value: c.id,
       label:
@@ -109,7 +113,7 @@ export default function MoveCopyModal({
           ? `${c.name} ${t('dialogs.moveCopy.currentSuffix')}`
           : c.name,
     }));
-  }, [params.kind, taskLists, calendars, initialContainerId, t]);
+  }, [params.kind, taskLists, calendars, hiddenCalendars, initialContainerId, t]);
 
   const itemTitle = params.kind === 'task' ? (task?.title ?? '') : params.event.title;
 

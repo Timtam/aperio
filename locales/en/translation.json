@@ -50,6 +50,7 @@
     "manageMembersLabel": "Manage members",
     "manageContactLists": "Address books",
     "contactBookVisible": "Show {{name}} in Contacts",
+    "calendarVisible": "Show {{name}} in calendar",
     "sectionsHeading": "Sections",
     "edit": "Edit",
     "colorHexInvalid": "Enter a colour as #RRGGBB.",
