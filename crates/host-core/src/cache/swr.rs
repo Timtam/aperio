@@ -35,6 +35,47 @@ pub fn is_stale(state: &Option<SyncState>, ttl_secs: i64) -> bool {
     }
 }
 
+/// Cooldown (seconds) suppressing a coverage-miss event self-warm for a
+/// calendar refreshed this recently — see [`event_self_warm_needed`].
+const COVERAGE_REFRESH_COOLDOWN_SECS: i64 = 5;
+
+/// Whether a cached event read should kick a background self-warm. Shared by
+/// the desktop `get_events` command and the mobile cal-ffi host so both
+/// self-warm IDENTICALLY (one source of truth for the loop-prevention below).
+///
+/// Refresh when the snapshot is STALE, or when its window doesn't COVER the
+/// requested `range` — EXCEPT skip the coverage-miss case for a calendar
+/// refreshed within [`COVERAGE_REFRESH_COOLDOWN_SECS`]. On a COLD cache every
+/// read is a coverage miss, and a refresh's `cache-updated` makes the host
+/// re-read all calendars; without the cooldown the still-cold calendars
+/// re-spawn on every re-read — a sub-second feedback loop (the coverage branch
+/// is intentionally NOT TTL-gated, so `SWR_TTL_SECS` never bounds it; a warm
+/// cache simply has no uncovered calendars to fuel it, which is why the loop
+/// only appears on a freshly-wiped cache). A just-refreshed calendar's window
+/// was just written, so an immediate re-fetch can't change coverage; skip it
+/// briefly. `stale` still refreshes on its own cadence, and a genuine range
+/// navigation refreshes once the cooldown lapses.
+pub fn event_self_warm_needed(state: &Option<SyncState>, range: DateRange) -> bool {
+    if is_stale(state, SWR_TTL_SECS) {
+        return true;
+    }
+    let covers = matches!(
+        state.as_ref().map(|s| (s.window_start, s.window_end)),
+        Some((Some(ws), Some(we))) if ws <= range.start && we >= range.end
+    );
+    if covers {
+        return false;
+    }
+    let recently_refreshed = state
+        .as_ref()
+        .and_then(|s| s.last_refreshed_at)
+        .is_some_and(|t| {
+            Utc::now().signed_duration_since(t)
+                < chrono::Duration::seconds(COVERAGE_REFRESH_COOLDOWN_SECS)
+        });
+    !recently_refreshed
+}
+
 /// Spawn a deduplicated, fire-and-forget background refresh: `fetch`
 /// pulls fresh data from the adapter, `write` persists it into the
 /// snapshot cache, then the observer is notified. On a fetch
@@ -316,5 +357,61 @@ pub async fn refresh_contacts(
             Ok(())
         }
         Err(err) => Err(err),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Duration;
+
+    /// A `SyncState` refreshed `refreshed_secs_ago` seconds ago, with an optional
+    /// window expressed as day offsets from now.
+    fn state(refreshed_secs_ago: i64, window_days: Option<(i64, i64)>) -> Option<SyncState> {
+        let now = Utc::now();
+        Some(SyncState {
+            last_refreshed_at: Some(now - Duration::seconds(refreshed_secs_ago)),
+            window_start: window_days.map(|(s, _)| now + Duration::days(s)),
+            window_end: window_days.map(|(_, e)| now + Duration::days(e)),
+            ..Default::default()
+        })
+    }
+
+    /// The viewed range: now .. now + 1 day.
+    fn range() -> DateRange {
+        let now = Utc::now();
+        DateRange::new(now, now + Duration::days(1))
+    }
+
+    #[test]
+    fn cold_state_warms() {
+        // No snapshot at all → stale → warm (the genuine first cold load).
+        assert!(event_self_warm_needed(&None, range()));
+    }
+
+    #[test]
+    fn fresh_and_covered_does_not_warm() {
+        // Refreshed 1s ago, window -1..+2 days covers the 0..+1 view.
+        assert!(!event_self_warm_needed(&state(1, Some((-1, 2))), range()));
+    }
+
+    #[test]
+    fn fresh_uncovered_within_cooldown_does_not_warm() {
+        // Refreshed 1s ago (inside the cooldown), window +10..+20 days misses the
+        // view — this is the cold-cache loop case the cooldown suppresses.
+        assert!(!event_self_warm_needed(&state(1, Some((10, 20))), range()));
+    }
+
+    #[test]
+    fn fresh_uncovered_past_cooldown_warms() {
+        // Refreshed 10s ago (past the 5s cooldown, still < 60s TTL), uncovered →
+        // a genuine navigation to an out-of-window range refreshes.
+        assert!(event_self_warm_needed(&state(10, Some((10, 20))), range()));
+    }
+
+    #[test]
+    fn stale_warms_even_if_covered() {
+        // Refreshed 120s ago (> 60s TTL) → stale regardless of coverage.
+        assert!(event_self_warm_needed(&state(120, Some((-1, 2))), range()));
     }
 }

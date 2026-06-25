@@ -52,9 +52,9 @@ use cal_core::{
 };
 use host_core::accounts::{AccountsRepo, AdapterKind};
 use host_core::cache::{
-    has_snapshot, is_stale, refresh_contacts, refresh_events, refresh_tasks, spawn_item_refresh,
-    spawn_refresh, CacheObserver, CacheRefresher, CacheStore, RefreshCoordinator, SyncScope,
-    SWR_TTL_SECS,
+    event_self_warm_needed, has_snapshot, is_stale, refresh_contacts, refresh_events,
+    refresh_tasks, spawn_item_refresh, spawn_refresh, CacheObserver, CacheRefresher, CacheStore,
+    RefreshCoordinator, SyncScope, SWR_TTL_SECS,
 };
 use host_core::conflicts::{
     ConflictKind, ConflictRecord, ConflictsError, ConflictsRepo, ResolutionChoice,
@@ -2758,13 +2758,12 @@ impl Host {
             // yet, or one just invalidated by a write) does a LIVE read so the
             // first paint is never blank, and warms the cache in the background
             // for next time — the mobile stand-in until the cache-updated push
-            // (a later step) can fill an empty snapshot in place. Gating the
-            // refresh on stale|cold (not coverage) breaks the refresh→re-read
-            // loop: a just-refreshed container stamps last_refreshed_at so it's
-            // neither cold nor stale for the TTL. The background refresh runs on
-            // the Host's one worker thread (it advances between block_on calls,
-            // like the writer drain task). Mirrors the desktop get_events, plus
-            // the cold-live fallback.
+            // can fill an empty snapshot in place. Whether to self-warm (stale,
+            // OR a coverage miss outside the brief cooldown that prevents the
+            // cold-cache refresh -> re-read feedback loop) is the SHARED
+            // `event_self_warm_needed`, identical to the desktop get_events. The
+            // background refresh runs on the Host's one worker thread (it advances
+            // between block_on calls, like the writer drain task).
             Some(ext) => {
                 let account = self
                     .registry
@@ -2776,7 +2775,6 @@ impl Host {
                     .ok()
                     .flatten();
                 let warm = has_snapshot(&state);
-                let stale = is_stale(&state, SWR_TTL_SECS);
                 let mut events = if warm {
                     self.cache
                         .read_events(&account, &req.calendar_id, range)
@@ -2799,7 +2797,7 @@ impl Host {
                 }
                 let shared = self.db.shared();
                 apply_color_to_events(&OverridesRepo::new(&shared), &mut events);
-                if !warm || stale {
+                if event_self_warm_needed(&state, range) {
                     let cache_bg = Arc::clone(&self.cache);
                     let ext_bg = Arc::clone(&ext);
                     let acc = account.clone();

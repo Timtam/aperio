@@ -14,8 +14,8 @@ use crate::cache::{CacheObserver, CacheRefreshStatus, CacheUpdatedPayload};
 // Re-export the host-core SWR helpers so existing `cache_swr::*` call
 // sites across the command layer resolve unchanged.
 pub use crate::cache::{
-    has_snapshot, is_stale, refresh_contacts, refresh_events, refresh_tasks, spawn_item_refresh,
-    spawn_refresh, SWR_TTL_SECS,
+    event_self_warm_needed, has_snapshot, is_stale, refresh_contacts, refresh_events,
+    refresh_tasks, spawn_item_refresh, spawn_refresh, SWR_TTL_SECS,
 };
 
 /// Desktop [`CacheObserver`]: forwards cache-refresh notifications to the

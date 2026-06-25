@@ -30,18 +30,6 @@ use crate::overrides::{
 use crate::registry::{AdapterRegistry, LOCAL_ID};
 use crate::reminders::SchedulerHandle;
 
-/// Cooldown (seconds) suppressing a coverage-miss (`!covers`) event self-warm
-/// for a calendar refreshed this recently. On a COLD cache EVERY read is a
-/// coverage miss, and a refresh's `cache-updated` makes the frontend re-read all
-/// calendars (a global `invalidateData`); without this guard the still-cold
-/// calendars re-spawn a refresh on every re-read — a sub-second feedback loop
-/// (the `!covers` branch is deliberately NOT TTL-gated, so the 60s `SWR_TTL`
-/// doesn't bound it). A just-refreshed calendar's window can't gain coverage
-/// from an immediate re-fetch, so skip the coverage-miss spawn for a few
-/// seconds. `stale` still refreshes on its own cadence, and a genuine
-/// navigation to an uncovered range refreshes once the brief cooldown lapses.
-const COVERAGE_REFRESH_COOLDOWN_SECS: i64 = 5;
-
 /// Wire-format Calendar enriched with the owning account id. Lets
 /// the frontend group containers by source without a second
 /// round-trip to fetch the registry's route map.
@@ -415,22 +403,13 @@ pub async fn get_events(
     // blocks on the network), and queue a background refresh when the snapshot
     // is STALE *or* doesn't COVER the requested range.
     //
-    // Refreshing on a coverage miss — not just staleness — is what stops events
-    // "going missing" when the view moves to a date the cached window never
-    // reached (issue #1): an uncovered read used to serve a partial snapshot and
-    // spawn nothing, so those events never arrived. In the common case the
-    // refresh fetches THIS `range`, `refresh_events` records a window that covers
-    // it (unbounded for folder-complete CalDAV/EWS, else exactly `range`) AND
-    // stamps `last_refreshed_at`, so the follow-up `cache-updated` re-read sees
-    // covers=true and re-spawns nothing. But on a COLD cache EVERY calendar is a
-    // coverage miss, and `cache-updated` triggers a GLOBAL frontend re-read of
-    // all calendars — so a calendar whose window doesn't (yet) cover the view
-    // would re-spawn on every re-read, a sub-second feedback loop (the coverage
-    // branch is intentionally not TTL-gated). `recently_refreshed`
-    // (COVERAGE_REFRESH_COOLDOWN_SECS) breaks that: a calendar refreshed in the
-    // last few seconds isn't re-spawned on a coverage miss. A FAILED refresh
-    // emits no `cache-updated` (spawn_item_refresh notifies only on success), and
-    // the `RefreshCoordinator` dedups concurrent reads of the same calendar.
+    // Refreshing on a coverage miss — not just staleness — stops events "going
+    // missing" when the view moves to a date the cached window never reached
+    // (issue #1). The whole decision, INCLUDING the cold-cache feedback-loop
+    // cooldown, lives in the shared `cache_swr::event_self_warm_needed` so the
+    // desktop command and the mobile cal-ffi host self-warm identically; see its
+    // doc for the loop rationale. `covers`/`stale` here only feed the diagnostic
+    // log below.
     let state = cache
         .get_sync_state(&account, SyncScope::Events, &request.calendar_id)
         .ok()
@@ -440,16 +419,6 @@ pub async fn get_events(
         Some((Some(ws), Some(we))) if ws <= range.start && we >= range.end
     );
     let stale = cache_swr::is_stale(&state, cache_swr::SWR_TTL_SECS);
-    // See COVERAGE_REFRESH_COOLDOWN_SECS: suppress a coverage-miss self-warm for
-    // a calendar refreshed within the cooldown, breaking the cold-cache
-    // re-read → refresh feedback loop. `stale` is unaffected.
-    let recently_refreshed = state
-        .as_ref()
-        .and_then(|s| s.last_refreshed_at)
-        .is_some_and(|t| {
-            Utc::now().signed_duration_since(t)
-                < chrono::Duration::seconds(COVERAGE_REFRESH_COOLDOWN_SECS)
-        });
     let mut cached = cache
         .read_events(&account, &request.calendar_id, range)
         .unwrap_or_default();
@@ -467,10 +436,9 @@ pub async fn get_events(
         count = cached.len(),
         covers,
         stale,
-        recently_refreshed,
         "get_events served from cache",
     );
-    if stale || (!covers && !recently_refreshed) {
+    if cache_swr::event_self_warm_needed(&state, range) {
         let ext_bg = Arc::clone(&ext);
         let cache_bg = Arc::clone(&cache);
         let acc = account.clone();
