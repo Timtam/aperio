@@ -7,6 +7,8 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { selectableEventCalendars } from '@aperio/shared';
+
 import { useAnnouncer } from '../a11y/announcerContext';
 import { createEvent as apiCreateEvent, isCommandError } from '../api/client';
 import { useCalendarStore } from '../state/calendarStoreContext';
@@ -37,13 +39,19 @@ export function QuickAddDialog({
 }) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
-  const { calendars } = useCalendarStore();
+  const { calendars, selectedCalendarIds } = useCalendarStore();
   const { anchor } = useViewState();
   const { openEventDialog } = useDialogState();
 
+  // Only writable calendars the sidebar still shows can host a new event.
+  const selectable = useMemo(
+    () =>
+      selectableEventCalendars(calendars, { selectedIds: selectedCalendarIds }),
+    [calendars, selectedCalendarIds],
+  );
   const initial = useMemo(
-    () => buildInitial(calendars, anchor),
-    [calendars, anchor],
+    () => buildInitial(selectable, anchor),
+    [selectable, anchor],
   );
 
   const [title, setTitle] = useState(initial.title);
@@ -180,7 +188,7 @@ export function QuickAddDialog({
             <option value="" disabled>
               {t('dialogs.event.pickCalendar')}
             </option>
-            {calendars.map((cal) => (
+            {selectable.map((cal) => (
               <option key={cal.id} value={cal.id}>
                 {cal.name}
               </option>

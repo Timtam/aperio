@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 
 import type { ColorLabel, Reminder } from '@aperio/shared';
+import { selectableEventCalendars } from '@aperio/shared';
 
 import { AttendeesEditor } from '../components/AttendeesEditor';
 import { AvailabilityChecker } from '../components/AvailabilityChecker';
@@ -450,7 +451,13 @@ export default function EventEditorModal({
         <RadioGroup<string>
           label={t('dialogs.event.fields.calendar')}
           value={calId}
-          options={calendars.map((c) => ({ value: c.id, label: c.name }))}
+          // Read-only calendars (iCal feeds) can't accept events; drop them but
+          // keep the event's own calendar so editing one that lives on a
+          // read-only source still shows it. (Mobile has no sidebar visibility
+          // toggle, so there's nothing else to filter.)
+          options={selectableEventCalendars(calendars, { currentId: calId }).map(
+            (c) => ({ value: c.id, label: c.name }),
+          )}
           onChange={setCalId}
         />
       )}

@@ -8,6 +8,8 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { selectableEventCalendars } from '@aperio/shared';
+
 import { useAnnouncer } from '../a11y/announcerContext';
 import { FocusableNote } from '../a11y/FocusableNote';
 import { DescriptionLinks } from './DescriptionLinks';
@@ -144,7 +146,7 @@ export function EventDialog({
 }: EventDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
-  const { calendars, colorLabels } = useCalendarStore();
+  const { calendars, colorLabels, selectedCalendarIds } = useCalendarStore();
 
   const isEdit = event !== null;
   // Stable id for the attendees-picker label — used as the
@@ -185,6 +187,7 @@ export function EventDialog({
       defaultCalendarId,
       defaultDate,
       calendars,
+      selectedCalendarIds,
     );
     if (remindersWereFromDefault && event) {
       return {
@@ -198,6 +201,7 @@ export function EventDialog({
     defaultCalendarId,
     defaultDate,
     calendars,
+    selectedCalendarIds,
     remindersWereFromDefault,
     getDefaultsFor,
   ]);
@@ -654,20 +658,20 @@ export function EventDialog({
             <option value="" disabled>
               {t('dialogs.event.pickCalendar')}
             </option>
-            {/* Read-only calendars (iCal feeds, future shared
-                read-only sources) can't accept new events. Filter
-                them out of the picker so the user doesn't pick one
-                and then hit "Unsupported" on save. The event that
-                triggered the edit might *be* on a read-only
-                calendar, though — keep it in the list in that case
-                so the picker matches `form.calendarId`. */}
-            {calendars
-              .filter((cal) => !cal.read_only || cal.id === form.calendarId)
-              .map((cal) => (
-                <option key={cal.id} value={cal.id}>
-                  {cal.name}
-                </option>
-              ))}
+            {/* Offer only calendars the user can write to AND still shows in
+                the sidebar (`selectableEventCalendars`): a read-only feed
+                rejects new events, and a hidden calendar is a confusing
+                target. The event being edited might itself live on a read-only
+                or hidden calendar — `currentId` keeps it so the picker still
+                matches `form.calendarId`. */}
+            {selectableEventCalendars(calendars, {
+              selectedIds: selectedCalendarIds,
+              currentId: form.calendarId,
+            }).map((cal) => (
+              <option key={cal.id} value={cal.id}>
+                {cal.name}
+              </option>
+            ))}
           </select>
         </label>
 
@@ -969,6 +973,7 @@ function buildInitialState(
   defaultCalendarId: string | undefined,
   defaultDate: string | undefined,
   calendars: { id: string; read_only: boolean }[],
+  selectedIds: ReadonlySet<string>,
 ): FormState {
   if (event) {
     const start = new Date(event.start);
@@ -1013,16 +1018,16 @@ function buildInitialState(
   //   4. first calendar regardless of read-only-ness (degenerate case
   //      where the only available calendar is a subscription feed; the
   //      dropdown filter will still hide it and the submit blocks)
-  const writableCalendars = calendars.filter((c) => !c.read_only);
+  // Prefer a calendar the user can create in AND still shows in the sidebar —
+  // the same set `selectableEventCalendars` offers in the dropdown.
+  const selectable = selectableEventCalendars(calendars, { selectedIds });
   const lastUsed = readLastUsedCalendar();
   const lastUsedIfValid =
-    lastUsed && writableCalendars.some((c) => c.id === lastUsed)
-      ? lastUsed
-      : null;
+    lastUsed && selectable.some((c) => c.id === lastUsed) ? lastUsed : null;
   const fallbackCalendar =
     defaultCalendarId ??
     lastUsedIfValid ??
-    writableCalendars[0]?.id ??
+    selectable[0]?.id ??
     calendars[0]?.id ??
     '';
 
