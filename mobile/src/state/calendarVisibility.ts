@@ -36,6 +36,16 @@ async function persist(): Promise<void> {
 }
 
 /**
+ * Non-hook read of the hidden-calendar set, for background / non-React callers
+ * (the reminder scheduler runs as a free async fn, not inside a component).
+ * Awaits the one-time AsyncStorage load so a cold call still sees the stored set.
+ */
+export async function getHiddenCalendars(): Promise<Set<string>> {
+  await load();
+  return new Set(cached);
+}
+
+/**
  * Reactive calendar visibility. Returns the current HIDDEN set — a FRESH
  * reference on every change, so a memo keyed on it re-runs — plus a `toggle`.
  * Loads the stored set on first mount; updates propagate to every mounted caller

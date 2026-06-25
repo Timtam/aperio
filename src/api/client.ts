@@ -769,6 +769,16 @@ export const deleteCustomSound = (sha256: string) =>
 export const invalidateReminders = () =>
   invoke<void>('invalidate_reminders');
 
+/**
+ * Push the set of HIDDEN (sidebar-unchecked) calendar ids to the reminder
+ * scheduler so event reminders on those calendars are suppressed — hiding a
+ * calendar silences its reminders too. The visibility lives in localStorage
+ * (frontend-only), so the Rust scheduler can't read it; this bridges it. Called
+ * on startup + whenever the sidebar selection changes.
+ */
+export const setReminderHiddenCalendars = (hiddenCalendarIds: string[]) =>
+  invoke<void>('set_reminder_hidden_calendars', { hiddenCalendarIds });
+
 // ── Native context menu ──────────────────────────────────────────────────
 
 /** One entry in the native context menu. The shape supports four

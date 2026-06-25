@@ -570,6 +570,7 @@ pub fn run() {
             commands::search,
             commands::list_upcoming_reminders,
             commands::invalidate_reminders,
+            commands::set_reminder_hidden_calendars,
             // §14.4 custom notification sounds: import a user audio
             // file into the content-addressed store, list/delete the
             // stored sounds, and preview one (the SoundPicker's Test

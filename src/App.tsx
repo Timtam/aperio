@@ -22,6 +22,7 @@ import { useStoredLanguage } from './intl/useStoredLanguage';
 import { useTrayMenuLabels } from './intl/useTrayMenuLabels';
 import { CacheSyncListener } from './state/CacheSyncListener';
 import { CalendarStoreProvider } from './state/CalendarStore';
+import { ReminderVisibilitySync } from './state/ReminderVisibilitySync';
 import { DialogStateProvider } from './state/DialogState';
 import { useDialogState } from './state/dialogStateContext';
 import { TaskCascadeProvider } from './state/TaskCascadeProvider';
@@ -96,6 +97,9 @@ export function App() {
                       invalidation so external views refresh when a
                       background snapshot refresh lands. Renders nothing. */}
                   <CacheSyncListener />
+                  {/* Mirrors the sidebar's calendar visibility to the reminder
+                      scheduler so a hidden calendar fires no reminders. */}
+                  <ReminderVisibilitySync />
                 </ToastProvider>
               </TaskCascadeProvider>
             </DialogStateProvider>

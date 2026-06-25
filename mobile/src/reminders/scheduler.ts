@@ -6,6 +6,7 @@ import CalFfi from '../../modules/cal-ffi';
 import i18n from '../../i18n';
 import { UpcomingReminder, upcomingReminders } from '../api/reminders';
 import { customSoundPath } from '../api/sounds';
+import { getHiddenCalendars } from '../state/calendarVisibility';
 
 // Mobile reminder delivery. The desktop fires reminders from a live tokio
 // worker that sleeps until the next trigger; iOS suspends background JS, so
@@ -117,12 +118,16 @@ export async function rescheduleReminders(): Promise<void> {
     if (!(await ensurePermission())) return;
     await ensureAndroidChannel();
     const items = await upcomingReminders(HORIZON_MINUTES);
+    const hidden = await getHiddenCalendars();
     // Cancel-then-reschedule: the cheapest way to stay consistent with the
     // current data (a deleted/rescheduled item simply isn't in the new list).
     await Notifications.cancelAllScheduledNotificationsAsync();
     const now = Date.now();
     const due = items
       .filter((r) => new Date(r.trigger_at).getTime() > now)
+      // Hidden calendars (the Calendars-screen toggles) silence their event
+      // reminders; tasks are unaffected (visibility is calendar-only).
+      .filter((r) => !(r.item_kind === 'event' && hidden.has(r.container_id)))
       .slice(0, MAX_SCHEDULED);
     for (const r of due) {
       // §14.4: the channel carries the sound on Android (silent / custom / default);

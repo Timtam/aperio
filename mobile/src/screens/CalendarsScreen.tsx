@@ -19,6 +19,7 @@ import { listAccounts, type Account } from '../api/accounts';
 import { Calendar, createCalendar, listCalendars } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
 import type { RootStackScreenProps } from '../navigation/types';
+import { refreshRemindersSoon } from '../reminders/scheduler';
 import { useCacheReload } from '../state/cacheObserver';
 import { useCalendarVisibility } from '../state/calendarVisibility';
 import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
@@ -186,7 +187,11 @@ export default function CalendarsScreen({
                   accessibilityRole="switch"
                   accessibilityState={{ checked: !hidden.has(cal.id) }}
                   accessibilityLabel={t('mobile.calendarVisible', { name: cal.name })}
-                  onPress={() => toggleVisibility(cal.id)}
+                  onPress={() => {
+                    toggleVisibility(cal.id);
+                    // Re-filter scheduled OS notifications for the new visibility.
+                    refreshRemindersSoon();
+                  }}
                   style={({ pressed }) => [styles.visToggle, pressed && styles.pressed]}
                 >
                   {/* Visual only — the Pressable owns the toggle + the switch

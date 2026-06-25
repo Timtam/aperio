@@ -64,6 +64,12 @@ pub struct ReminderScheduler {
     invalidate: Arc<Notify>,
     fired: Arc<Mutex<HashSet<FiredKey>>>,
     external_cache: Arc<Mutex<Option<ExternalTriggerCache>>>,
+    /// Calendar ids the user UNCHECKED in the sidebar (device-local
+    /// localStorage, pushed from the frontend via `set_hidden_calendars`). Event
+    /// reminders on these calendars are suppressed — hiding a calendar silences
+    /// its reminders too. Empty until the frontend pushes; tasks are unaffected
+    /// (a task list isn't a calendar).
+    hidden_calendars: Arc<Mutex<HashSet<String>>>,
     /// `<data_dir>/assets/sounds/` — where custom sound files live.
     /// Used by `fire` to resolve a `SoundSource::Custom` hash to a path.
     sounds_dir: PathBuf,
@@ -93,6 +99,7 @@ impl ReminderScheduler {
             invalidate: Arc::new(Notify::new()),
             fired: Arc::new(Mutex::new(HashSet::new())),
             external_cache: Arc::new(Mutex::new(None)),
+            hidden_calendars: Arc::new(Mutex::new(HashSet::new())),
             sounds_dir,
             audio,
         });
@@ -128,6 +135,38 @@ impl ReminderScheduler {
         *guard = None;
     }
 
+    /// Replace the set of hidden (sidebar-unchecked) calendars and wake the
+    /// worker so the change takes effect at once. Pushed by the frontend
+    /// whenever the sidebar calendar selection changes (+ on startup). Event
+    /// reminders on a hidden calendar are then dropped; task reminders are
+    /// unaffected.
+    pub fn set_hidden_calendars(&self, ids: Vec<String>) {
+        {
+            let mut guard = self
+                .hidden_calendars
+                .lock()
+                .expect("hidden calendars poison");
+            *guard = ids.into_iter().collect();
+        }
+        self.invalidate.notify_one();
+    }
+
+    /// A clone of the hidden-calendar set, for filtering a trigger list without
+    /// holding the lock across the scan.
+    fn hidden_calendars_snapshot(&self) -> HashSet<String> {
+        self.hidden_calendars
+            .lock()
+            .expect("hidden calendars poison")
+            .clone()
+    }
+
+    /// True when this trigger is an EVENT reminder on a hidden calendar — the
+    /// one case visibility suppresses. Task triggers carry a list_id in
+    /// `container_id`; visibility is calendar-only, so they always pass.
+    fn suppressed_by_visibility(t: &Trigger, hidden: &HashSet<String>) -> bool {
+        t.item_kind == ItemKind::Event && hidden.contains(&t.container_id)
+    }
+
     /// Snapshot reminder triggers for the Ctrl+Shift+R overview dialog.
     /// Includes both already-passed and upcoming triggers within a generous
     /// window so the user can review what fired recently and what's pending.
@@ -137,6 +176,8 @@ impl ReminderScheduler {
         let earliest = now - ChronoDuration::days(OVERVIEW_PAST_DAYS);
         let latest = now + ChronoDuration::days(OVERVIEW_FUTURE_DAYS);
         let mut triggers = self.collect_triggers_in_window(earliest, latest).await;
+        let hidden = self.hidden_calendars_snapshot();
+        triggers.retain(|t| !Self::suppressed_by_visibility(t, &hidden));
         triggers.sort_by_key(|t| t.trigger_at);
         triggers
             .into_iter()
@@ -250,6 +291,7 @@ impl ReminderScheduler {
         out.retain(|t| catchup_eligible(t, now, CATCH_UP_GRACE));
 
         // Filter out anything we already fired in this process.
+        let hidden = self.hidden_calendars_snapshot();
         let fired = self.fired.lock().expect("fired set poisoned");
         out.retain(|t| {
             !fired.contains(&FiredKey {
@@ -257,6 +299,8 @@ impl ReminderScheduler {
                 trigger_iso: t.trigger_at.to_rfc3339(),
             })
         });
+        // Hidden calendars (sidebar-unchecked) silence their event reminders.
+        out.retain(|t| !Self::suppressed_by_visibility(t, &hidden));
         out
     }
 
@@ -306,7 +350,14 @@ impl ReminderScheduler {
     /// them at startup. The local-only scan lives in [`host_core::reminders`];
     /// this just dispatches each.
     fn fire_app_start_reminders<R: Runtime>(&self, app: &AppHandle<R>) {
+        // Empty until the frontend's first push, so a hidden calendar's
+        // (local-only) app_start reminder may still fire once on a cold launch
+        // before the push lands; the periodic loop suppresses it thereafter.
+        let hidden = self.hidden_calendars_snapshot();
         for t in enumerate_app_start_triggers(&self.db) {
+            if Self::suppressed_by_visibility(&t, &hidden) {
+                continue;
+            }
             self.fire(app, &t);
         }
     }

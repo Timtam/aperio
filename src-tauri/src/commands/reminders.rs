@@ -38,3 +38,17 @@ pub async fn invalidate_reminders(scheduler: State<'_, SchedulerHandle>) -> Comm
     scheduler.invalidate();
     Ok(())
 }
+
+/// Push the set of hidden (sidebar-unchecked) calendar ids to the reminder
+/// scheduler so event reminders on those calendars are suppressed — hiding a
+/// calendar silences its reminders too. The frontend calls this on startup and
+/// whenever the sidebar calendar selection changes. The set is device-local (it
+/// mirrors the localStorage selection) and never synced.
+#[tauri::command]
+pub async fn set_reminder_hidden_calendars(
+    scheduler: State<'_, SchedulerHandle>,
+    hidden_calendar_ids: Vec<String>,
+) -> CommandResult<()> {
+    scheduler.set_hidden_calendars(hidden_calendar_ids);
+    Ok(())
+}
