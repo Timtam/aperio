@@ -1,11 +1,12 @@
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { localDateKey } from '@aperio/shared';
 
-import { listCalendars } from '../api/calendar';
+import { listCalendars, type Calendar } from '../api/calendar';
+import { useCalendarVisibility } from '../state/calendarVisibility';
 import type { RootStackParamList } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -29,19 +30,31 @@ interface Props {
 export function CalendarActions({ navigation, anchorDay }: Props) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
-  const [firstCalendarId, setFirstCalendarId] = useState<string | null>(null);
+  const { hidden } = useCalendarVisibility();
+  const [calendars, setCalendars] = useState<Calendar[]>([]);
 
-  // Refresh the first-calendar id on focus (calendars can be added/removed on
-  // the Calendars screen and on other devices via sync).
+  // Refresh the calendar list on focus (calendars can be added/removed on the
+  // Calendars screen and on other devices via sync).
   useEffect(() => {
     const read = () =>
       void listCalendars()
-        .then((cals) => setFirstCalendarId(cals[0]?.id ?? null))
-        .catch(() => setFirstCalendarId(null));
+        .then(setCalendars)
+        .catch(() => setCalendars([]));
     const unsubscribe = navigation.addListener('focus', read);
     read();
     return unsubscribe;
   }, [navigation]);
+
+  // Seed "New Event" on a writable calendar the user hasn't hidden, so a new
+  // event never defaults to a read-only or hidden one; fall back to any writable
+  // calendar (the picker still lets the user change it).
+  const firstCalendarId = useMemo(
+    () =>
+      calendars.find((c) => !c.read_only && !hidden.has(c.id))?.id ??
+      calendars.find((c) => !c.read_only)?.id ??
+      null,
+    [calendars, hidden],
+  );
 
   const addEvent = useCallback(() => {
     if (firstCalendarId == null) return;

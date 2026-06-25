@@ -197,8 +197,11 @@ export default function AgendaScreen({
   // First writable calendar — the seed target for the per-day "+ new event"
   // affordance (the day-anchored create, mirroring the desktop calendar views).
   const firstWritableCalendarId = useMemo(
-    () => calendars.find((c) => !c.read_only)?.id ?? null,
-    [calendars],
+    () =>
+      calendars.find((c) => !c.read_only && !hidden.has(c.id))?.id ??
+      calendars.find((c) => !c.read_only)?.id ??
+      null,
+    [calendars, hidden],
   );
   const addEventOnDay = useCallback(
     (dayKey: string) => {

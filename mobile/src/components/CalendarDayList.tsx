@@ -373,8 +373,11 @@ export function CalendarDayList({
   // Per-day "+ new event": seed a new event on that day (first writable
   // calendar) — the mobile twin of the desktop's day-anchored create.
   const firstWritableCalendarId = useMemo(
-    () => calendars.find((c) => !c.read_only)?.id ?? null,
-    [calendars],
+    () =>
+      calendars.find((c) => !c.read_only && !hiddenCalendars.has(c.id))?.id ??
+      calendars.find((c) => !c.read_only)?.id ??
+      null,
+    [calendars, hiddenCalendars],
   );
   const addEventOnDay = useCallback(
     (dayKey: string) => {
