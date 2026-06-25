@@ -30,6 +30,7 @@ import {
 } from '../api/accounts';
 import { getUserPref, setUserPref } from '../api/prefs';
 import { reconnectOAuthAccount, type OAuthProvider } from '../api/oauth';
+import { refreshExternalCache } from '../api/sync';
 import { AppDialog } from '../components/AppDialog';
 import ContactsPrivacyNoticeModal from '../components/ContactsPrivacyNoticeModal';
 import { FormScrollView } from '../components/FormScrollView';
@@ -317,6 +318,10 @@ export default function AccountsScreen() {
       await load();
       pendingFocusId.current = created.id;
       announce(t('dialogs.accounts.created', { name }));
+      // Pull the new account's calendars/lists into the cache now. The cal-ffi
+      // command intentionally no longer self-warms (a background warm there
+      // raced the Rust unit tests), so the UI kicks it. Fire-and-forget.
+      void refreshExternalCache().catch(() => undefined);
       await maybeShowPrivacyNotice(kind);
     } catch (err) {
       const message = errorMessage(err);
@@ -355,6 +360,8 @@ export default function AccountsScreen() {
       await load();
       pendingFocusId.current = created.id;
       announce(t('dialogs.accounts.created', { name: created.display_name }));
+      // Warm the device calendar's events into the cache now (see `add`).
+      void refreshExternalCache().catch(() => undefined);
     } catch (err) {
       const message = errorMessage(err);
       setError(message);

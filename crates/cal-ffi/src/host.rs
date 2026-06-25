@@ -2387,10 +2387,6 @@ impl Host {
                 .append(SyncEvent::AccountCreated(account_payload(&created)));
         }
 
-        // Kick a warm so the new account's calendars/lists (or the device
-        // calendar's events) load now instead of only on the next foreground /
-        // manual refresh — the mobile twin of the desktop create_account trigger.
-        self.refresh_external_cache();
         to_json(&created)
     }
 
@@ -4318,11 +4314,6 @@ impl Host {
             // Joining a plaintext dataset clears any stale flag.
             let _ = prefs.delete(host_core::credential_sync::PREF_E2E_ENABLED);
         }
-        // Onboarding just created this device's EXTERNAL accounts; kick a warm
-        // pass so their calendars/lists populate immediately. The desktop twin
-        // (`accept_remote_dataset`) triggers its periodic refresher here; mobile
-        // has no periodic loop, so warm directly (the manual-refresh path).
-        self.refresh_external_cache();
         to_json(&report)
     }
 
@@ -6615,8 +6606,6 @@ impl Host {
         self.writer
             .append(SyncEvent::AccountCreated(account_payload(&created)));
 
-        // Kick a warm so the newly-connected account's calendars/lists load now.
-        self.refresh_external_cache();
         to_json(&created)
     }
 

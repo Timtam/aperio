@@ -497,6 +497,9 @@ export default function SyncScreen() {
         setJoinPassphrase('');
         setCreateE2e(false);
         await refresh();
+        // Onboarding restored this device's external accounts — warm their
+        // calendars/lists now (the cal-ffi command no longer self-warms).
+        void refreshExternalCache().catch(() => undefined);
         announce(
           t('dialogs.settings.sync.onboardingDone', { count: report.device_count }),
         );
@@ -554,6 +557,8 @@ export default function SyncScreen() {
       setJoinPassphrase('');
       setCreateE2e(false);
       await refresh();
+      // Onboarding restored this device's external accounts — warm now.
+      void refreshExternalCache().catch(() => undefined);
       announce(
         t('dialogs.settings.sync.onboardingDone', { count: report.device_count }),
       );
