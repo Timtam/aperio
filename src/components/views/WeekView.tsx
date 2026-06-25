@@ -45,6 +45,7 @@ import {
   mergeDayItems,
   taskTimeOnDay,
 } from '../../intl/taskDay';
+import { useCurrentUserByList } from '../../state/currentUser';
 import {
   assigneeSuffix,
   priorityMarker,
@@ -107,6 +108,13 @@ export function WeekView() {
   );
   const { events, calendarById, loading } = useEvents(range);
   const { tasks, taskListById } = useTasks();
+  const currentUserByList = useCurrentUserByList(tasks);
+  // Hide tasks assigned to a concrete OTHER user from MY calendar (mine +
+  // unassigned stay) — the day-start review's ownership filter (DESIGN §9.7).
+  const meFor = useCallback(
+    (listId: string) => currentUserByList[listId] ?? null,
+    [currentUserByList],
+  );
   const toggleTaskStatus = useTaskStatusToggle();
   const { shouldShow: shouldShowCompletedForList } =
     useTaskListShowCompleted();
@@ -151,8 +159,8 @@ export function WeekView() {
   // a single chip.
   const tasksByDay = useMemo(() => {
     const dayKeys = days.map((d) => keyOf(d));
-    return groupTasksByDay(tasks, dayKeys, shouldShowCompletedForList);
-  }, [tasks, days, shouldShowCompletedForList]);
+    return groupTasksByDay(tasks, dayKeys, shouldShowCompletedForList, meFor);
+  }, [tasks, days, shouldShowCompletedForList, meFor]);
 
   // Pre-merge each day's events + timed tasks into a single time-sorted
   // list, then split that list back into timed and untimed buckets.

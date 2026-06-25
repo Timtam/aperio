@@ -55,6 +55,7 @@ import { resolveEventColor } from '../intl/eventColor';
 import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
 import type { RootStackParamList } from '../navigation/types';
 import { useCacheReload } from '../state/cacheObserver';
+import { useCurrentUserByList } from '../state/currentUser';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
 import { applyTaskToggle, statusAnnounce } from '../state/taskToggle';
 import { useTaskListShowCompleted } from '../state/useTaskListShowCompleted';
@@ -268,6 +269,13 @@ export function CalendarDayList({
   // Per-list "show completed in calendar" opt-in (default hide). Shared store, so
   // a toggle on the Lists screen reflects here on the next render.
   const { shouldShow: showCompletedForList } = useTaskListShowCompleted();
+  const currentUserByList = useCurrentUserByList(tasks);
+  // Hide tasks assigned to a concrete OTHER user from MY calendar (mine +
+  // unassigned stay) — the day-start review's ownership filter (DESIGN §9.7).
+  const meFor = useCallback(
+    (listId: string) => currentUserByList[listId] ?? null,
+    [currentUserByList],
+  );
 
   // Bucket each day's events + tasks. Completed tasks stay hidden by default;
   // per list, the "show completed in calendar" opt-in (toggled on the Lists
@@ -282,7 +290,7 @@ export function CalendarDayList({
       const timedEvents = events.filter(
         (ev) => !ev.all_day && localDateKey(new Date(ev.start)) === key,
       );
-      const dayTasks = filterTasksOnDay(tasks, key, showCompletedForList);
+      const dayTasks = filterTasksOnDay(tasks, key, showCompletedForList, meFor);
       const { timed, untimed } = mergeDayItems(
         timedEvents,
         dayTasks,
@@ -298,7 +306,7 @@ export function CalendarDayList({
         count: allDay.length + timed.length + untimed.length,
       };
     });
-  }, [days, dayKeys, events, tasks, showCompletedForList]);
+  }, [days, dayKeys, events, tasks, showCompletedForList, meFor]);
 
   const totalItems = useMemo(
     () => buckets.reduce((sum, b) => sum + b.count, 0),

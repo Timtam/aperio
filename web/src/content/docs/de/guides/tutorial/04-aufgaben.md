@@ -234,6 +234,9 @@ Aperio die Zuordnung für dich pflegen. Mit **Einstellungen → Aufgaben →
   12 von mir, 3 von anderen"*, damit du siehst, was du selbst geschafft hast.
 - Der **Tagesbeginn-Überblick** schlägt dir nur Aufgaben vor, die **dir oder
   niemandem** zugewiesen sind; eine Aufgabe einer anderen Person bleibt bei ihr.
+- Die **Kalenderansichten** (Tag, Woche, Monat) zeigen ebenso nur Aufgaben, die
+  **dir oder niemandem** zugewiesen sind – eine Aufgabe einer anderen Person
+  erscheint nicht in deinem Kalender.
 
 Schalte die Option aus, wenn Zuweisungen rein manuell bleiben sollen.
 

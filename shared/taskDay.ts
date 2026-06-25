@@ -1,4 +1,5 @@
-import type { Task } from './types';
+import { isMineOrUnassigned } from './taskAssignment';
+import type { Task, TaskUser } from './types';
 
 // Pure date + calendar-bucketing helpers shared by the desktop and mobile
 // frontends. The Day/Week calendar views surface tasks alongside events; these
@@ -51,11 +52,18 @@ export function todayIsoKey(): string {
  *
  * `dayIsoKey` is the local `YYYY-MM-DD` key, matching `localDateKey()`
  * in `dateKey.ts`, so the Week/Day callers share one bucket loop.
+ *
+ * `meFor` (optional) gates by ownership: on a shared list a task assigned to a
+ * concrete OTHER user is theirs to handle, so it's hidden from MY calendar
+ * (mine + unassigned stay). A list with no known identity (`meFor` → null) keeps
+ * everything; omitting `meFor` keeps the historical "show all". Mirrors the
+ * day-start review's ownership filter (DESIGN §9.7).
  */
 export function filterTasksOnDay(
   tasks: Task[],
   dayIsoKey: string,
   isCompletedVisible?: (listId: string) => boolean,
+  meFor?: (listId: string) => TaskUser | null,
 ): Task[] {
   return tasks.filter((task) => {
     if (task.parent_id) return false;
@@ -64,6 +72,9 @@ export function filterTasksOnDay(
       if (!isCompletedVisible || !isCompletedVisible(task.list_id)) {
         return false;
       }
+    }
+    if (meFor && !isMineOrUnassigned(task.assignees, meFor(task.list_id))) {
+      return false;
     }
     if (task.scheduled_date === dayIsoKey) return true;
     if (task.deadline_date === dayIsoKey) return true;
@@ -79,10 +90,11 @@ export function groupTasksByDay(
   tasks: Task[],
   dayKeys: string[],
   isCompletedVisible?: (listId: string) => boolean,
+  meFor?: (listId: string) => TaskUser | null,
 ): Map<string, Task[]> {
   const out = new Map<string, Task[]>();
   for (const key of dayKeys) {
-    out.set(key, filterTasksOnDay(tasks, key, isCompletedVisible));
+    out.set(key, filterTasksOnDay(tasks, key, isCompletedVisible, meFor));
   }
   return out;
 }

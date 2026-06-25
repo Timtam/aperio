@@ -39,6 +39,7 @@ import {
   multiDayInfo,
 } from '../../intl/multiDay';
 import { filterTasksOnDay, isDeadlineChip } from '../../intl/taskDay';
+import { useCurrentUserByList } from '../../state/currentUser';
 import {
   assigneeSuffix,
   priorityMarker,
@@ -117,6 +118,13 @@ export function MonthView() {
   const range = useMemo(() => visibleRange('month', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
   const { tasks, taskListById } = useTasks();
+  const currentUserByList = useCurrentUserByList(tasks);
+  // Hide tasks assigned to a concrete OTHER user from MY calendar (mine +
+  // unassigned stay) — the day-start review's ownership filter (DESIGN §9.7).
+  const meFor = useCallback(
+    (listId: string) => currentUserByList[listId] ?? null,
+    [currentUserByList],
+  );
   const toggleTaskStatus = useTaskStatusToggle();
   const { shouldShow: shouldShowCompletedForList } = useTaskListShowCompleted();
   const { colorLabels, sectionColorById, sectionsByList, loadSections } =
@@ -158,6 +166,7 @@ export function MonthView() {
         tasks,
         key,
         shouldShowCompletedForList,
+        meFor,
       ).map((task) => ({
         kind: 'task',
         id: `task-${task.id}`,
@@ -177,7 +186,7 @@ export function MonthView() {
       ]);
     }
     return map;
-  }, [cells, eventsByDay, tasks, shouldShowCompletedForList]);
+  }, [cells, eventsByDay, tasks, shouldShowCompletedForList, meFor]);
 
   const focusIndex = useMemo(() => {
     const i = cells.findIndex((c) => isSameDay(c, anchor));

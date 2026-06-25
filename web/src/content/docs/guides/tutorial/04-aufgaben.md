@@ -211,6 +211,9 @@ on (the default):
   so you can see what you finished versus what teammates did.
 - The **day-start review** only ever offers tasks that are **yours or
   unassigned**; a task assigned to someone else is left for them to handle.
+- The **calendar views** (day, week, month) likewise show only tasks that are
+  **yours or unassigned** — a task assigned to someone else stays off your
+  calendar.
 
 Turn the toggle off to keep assignments fully manual.
 
