@@ -955,6 +955,9 @@
       "snooze": "Später erinnern",
       "snoozed": "Erinnerung für 4 Stunden verschoben.",
       "allHandled": "Alle Einträge bearbeitet.",
+      "delete": "Löschen",
+      "confirmDelete": "„{{title}}“ löschen? Das lässt sich nicht rückgängig machen.",
+      "announceDeleted": "„{{title}}“ gelöscht.",
       "deadlines": {
         "heading_one": "Verpasste Deadline (1)",
         "heading_other": "Verpasste Deadlines ({{count}})",

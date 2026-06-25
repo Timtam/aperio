@@ -958,6 +958,9 @@
       "snooze": "Remind me later",
       "snoozed": "Reminder snoozed for 4 hours.",
       "allHandled": "All review items handled.",
+      "delete": "Delete",
+      "confirmDelete": "Delete \"{{title}}\"? This can't be undone.",
+      "announceDeleted": "\"{{title}}\" deleted.",
       "deadlines": {
         "heading_one": "Past deadline (1)",
         "heading_other": "Past deadline ({{count}})",

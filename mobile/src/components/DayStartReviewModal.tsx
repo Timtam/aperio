@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
   ActivityIndicator,
+  Alert,
   findNodeHandle,
   Modal,
   Pressable,
@@ -23,7 +24,7 @@ import {
 } from '@aperio/shared';
 import type { Task } from '@aperio/shared';
 
-import { updateTask } from '../api/client';
+import { deleteTask as apiDeleteTask, updateTask } from '../api/client';
 import { snoozeDayStartReview } from '../state/dayStartSnooze';
 import {
   effectiveForList,
@@ -373,6 +374,42 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
     [bulkCarry],
   );
 
+  // ── Delete ───────────────────────────────────────────────────────────────────
+  // The only irreversible row action (done / backlog / today / tomorrow all
+  // undo), so it confirms first — same as the calendar list's task delete.
+  const deleteTaskAction = useCallback(
+    (task: Task) => {
+      Alert.alert(
+        t('dialogs.dayStartReview.delete'),
+        t('dialogs.dayStartReview.confirmDelete', { title: task.title }),
+        [
+          { text: t('dialogs.confirm.cancel'), style: 'cancel' },
+          {
+            text: t('dialogs.dayStartReview.delete'),
+            style: 'destructive',
+            onPress: () => {
+              void (async () => {
+                setBusy(true);
+                queueFocusAfter([task.id]);
+                try {
+                  await apiDeleteTask(task.id, task.list_id);
+                  setResolvedIds((s) => new Set(s).add(task.id));
+                  announce(
+                    t('dialogs.dayStartReview.announceDeleted', { title: task.title }),
+                  );
+                  invalidateData();
+                } finally {
+                  setBusy(false);
+                }
+              })();
+            },
+          },
+        ],
+      );
+    },
+    [announce, invalidateData, queueFocusAfter, t],
+  );
+
   // ── Snooze ───────────────────────────────────────────────────────────────────
 
   const snoozeLater = useCallback(() => {
@@ -408,7 +445,7 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   const renderRow = (
     task: Task,
     kind: 'deadline' | 'carryOver',
-    actions: { label: string; primary?: boolean; onPress: () => void }[],
+    actions: { label: string; primary?: boolean; destructive?: boolean; onPress: () => void }[],
   ) => {
     const meta = dateMeta(task, kind);
     const marker = priorityMarker(task.priority);
@@ -447,7 +484,11 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
               onPress={action.onPress}
               style={({ pressed }) => [
                 styles.actionButton,
-                action.primary ? styles.actionPrimary : styles.actionGhost,
+                action.primary
+                  ? styles.actionPrimary
+                  : action.destructive
+                    ? styles.actionDestructive
+                    : styles.actionGhost,
                 pressed && !busy && styles.actionPressed,
                 busy && styles.actionDisabled,
               ]}
@@ -455,7 +496,11 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
               <Text
                 style={[
                   styles.actionText,
-                  action.primary ? styles.actionTextPrimary : styles.actionTextGhost,
+                  action.primary
+                    ? styles.actionTextPrimary
+                    : action.destructive
+                      ? styles.actionTextDestructive
+                      : styles.actionTextGhost,
                 ]}
                 importantForAccessibility="no"
               >
@@ -514,6 +559,11 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
                       label: t('dialogs.dayStartReview.deadlines.actions.backlog'),
                       onPress: () => void backToBacklog(task),
                     },
+                    {
+                      label: t('dialogs.dayStartReview.delete'),
+                      destructive: true,
+                      onPress: () => deleteTaskAction(task),
+                    },
                   ]),
                 )}
                 <Pressable
@@ -560,6 +610,11 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
                     {
                       label: t('dialogs.dayStartReview.carryOver.actions.done'),
                       onPress: () => void markCompleted(task),
+                    },
+                    {
+                      label: t('dialogs.dayStartReview.delete'),
+                      destructive: true,
+                      onPress: () => deleteTaskAction(task),
                     },
                   ]),
                 )}
@@ -664,11 +719,13 @@ const makeStyles = (c: ThemeColors) =>
     },
     actionPrimary: { backgroundColor: c.accent },
     actionGhost: { borderWidth: 1, borderColor: c.border, backgroundColor: c.surface },
+    actionDestructive: { borderWidth: 1, borderColor: c.danger, backgroundColor: c.surface },
     actionPressed: { backgroundColor: c.surfacePressed },
     actionDisabled: { opacity: 0.5 },
     actionText: { fontSize: 15, fontWeight: '600' },
     actionTextPrimary: { color: c.textOnAccent },
     actionTextGhost: { color: c.link },
+    actionTextDestructive: { color: c.danger },
     bulkRow: { flexDirection: 'row', gap: 8 },
     bulkButton: {
       paddingVertical: 12,

@@ -151,6 +151,54 @@ export function DayStartReviewDialog({
     [setTaskStatus],
   );
 
+  // Delete a task that's no longer relevant. The ONLY irreversible action in
+  // this dialog (done / backlog / today / tomorrow are all reversible), so it
+  // confirms first — matching how task deletion is gated elsewhere in the app.
+  const deleteTask = useCallback(
+    async (task: Task): Promise<void> => {
+      if (
+        !window.confirm(
+          t('dialogs.dayStartReview.confirmDelete', { title: task.title }),
+        )
+      ) {
+        return;
+      }
+      setBusy(true);
+      try {
+        await invoke<void>('delete_task', { id: task.id, listId: task.list_id });
+        setResolvedIds((s) => new Set(s).add(task.id));
+        announce(
+          t('dialogs.dayStartReview.announceDeleted', { title: task.title }),
+        );
+        invalidateData();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('delete_task failed', err);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [t, announce, invalidateData],
+  );
+
+  // The row title + date were plain <span>s inside the role="application" Modal,
+  // so NVDA's focus-mode traversal (it only stops on focusable elements) skipped
+  // them — the user had to drop into object navigation to read which task a row
+  // was. Make the title container focusable with an aria-label carrying the whole
+  // row (title, priority, date); the child spans go aria-hidden so it isn't read
+  // twice. Same idea as FocusableNote, kept inline so the visible priority dot +
+  // date styling survive for sighted users.
+  const rowAriaLabel = useCallback(
+    (task: Task, dateText: string | null): string => {
+      const parts = [task.title];
+      const pk = priorityI18nKey(task.priority);
+      if (pk) parts.push(t(pk));
+      if (dateText) parts.push(dateText);
+      return parts.join(', ');
+    },
+    [t],
+  );
+
   const backToBacklog = useCallback(
     async (task: Task): Promise<void> => {
       setBusy(true);
@@ -445,46 +493,62 @@ export function DayStartReviewDialog({
             className="missed-tasks__list"
             aria-label={t('dialogs.dayStartReview.deadlines.listLabel')}
           >
-            {remainingOverdue.map((task) => (
-              <li key={task.id} className="missed-tasks__row">
-                <div className="missed-tasks__title">
-                  <span className="missed-tasks__name">{task.title}</span>
-                  {priorityMarker(task.priority) && (
-                    <span
-                      className="missed-tasks__priority"
-                      aria-label={t(priorityI18nKey(task.priority) ?? '')}
+            {remainingOverdue.map((task) => {
+              const dateText = task.deadline_date
+                ? t('dialogs.dayStartReview.deadlines.dateLabel', {
+                    date: formatIsoDate(task.deadline_date, i18n.language),
+                  })
+                : null;
+              return (
+                <li key={task.id} className="missed-tasks__row">
+                  <div
+                    className="missed-tasks__title"
+                    tabIndex={0}
+                    aria-label={rowAriaLabel(task, dateText)}
+                  >
+                    <span className="missed-tasks__name" aria-hidden="true">
+                      {task.title}
+                    </span>
+                    {priorityMarker(task.priority) && (
+                      <span className="missed-tasks__priority" aria-hidden="true">
+                        {priorityMarker(task.priority)}
+                      </span>
+                    )}
+                    {dateText && (
+                      <span className="missed-tasks__deadline" aria-hidden="true">
+                        {dateText}
+                      </span>
+                    )}
+                  </div>
+                  <div className="missed-tasks__actions">
+                    <button
+                      type="button"
+                      className="form__action form__action--primary"
+                      onClick={() => void markCompleted(task)}
+                      aria-disabled={busy || undefined}
                     >
-                      {priorityMarker(task.priority)}
-                    </span>
-                  )}
-                  {task.deadline_date && (
-                    <span className="missed-tasks__deadline">
-                      {t('dialogs.dayStartReview.deadlines.dateLabel', {
-                        date: formatIsoDate(task.deadline_date, i18n.language),
-                      })}
-                    </span>
-                  )}
-                </div>
-                <div className="missed-tasks__actions">
-                  <button
-                    type="button"
-                    className="form__action form__action--primary"
-                    onClick={() => void markCompleted(task)}
-                    aria-disabled={busy || undefined}
-                  >
-                    {t('dialogs.dayStartReview.deadlines.actions.done')}
-                  </button>
-                  <button
-                    type="button"
-                    className="form__action"
-                    onClick={() => void backToBacklog(task)}
-                    aria-disabled={busy || undefined}
-                  >
-                    {t('dialogs.dayStartReview.deadlines.actions.backlog')}
-                  </button>
-                </div>
-              </li>
-            ))}
+                      {t('dialogs.dayStartReview.deadlines.actions.done')}
+                    </button>
+                    <button
+                      type="button"
+                      className="form__action"
+                      onClick={() => void backToBacklog(task)}
+                      aria-disabled={busy || undefined}
+                    >
+                      {t('dialogs.dayStartReview.deadlines.actions.backlog')}
+                    </button>
+                    <button
+                      type="button"
+                      className="form__action form__action--danger"
+                      onClick={() => void deleteTask(task)}
+                      aria-disabled={busy || undefined}
+                    >
+                      {t('dialogs.dayStartReview.delete')}
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
           <div className="day-start-review__section-actions">
             <button
@@ -512,62 +576,78 @@ export function DayStartReviewDialog({
             className="missed-tasks__list"
             aria-label={t('dialogs.dayStartReview.carryOver.listLabel')}
           >
-            {remainingSlipped.map((task) => (
-              <li key={task.id} className="missed-tasks__row">
-                <div className="missed-tasks__title">
-                  <span className="missed-tasks__name">{task.title}</span>
-                  {priorityMarker(task.priority) && (
-                    <span
-                      className="missed-tasks__priority"
-                      aria-label={t(priorityI18nKey(task.priority) ?? '')}
+            {remainingSlipped.map((task) => {
+              const dateText = task.scheduled_date
+                ? t('dialogs.dayStartReview.carryOver.dateLabel', {
+                    date: formatIsoDate(task.scheduled_date, i18n.language),
+                  })
+                : null;
+              return (
+                <li key={task.id} className="missed-tasks__row">
+                  <div
+                    className="missed-tasks__title"
+                    tabIndex={0}
+                    aria-label={rowAriaLabel(task, dateText)}
+                  >
+                    <span className="missed-tasks__name" aria-hidden="true">
+                      {task.title}
+                    </span>
+                    {priorityMarker(task.priority) && (
+                      <span className="missed-tasks__priority" aria-hidden="true">
+                        {priorityMarker(task.priority)}
+                      </span>
+                    )}
+                    {dateText && (
+                      <span className="missed-tasks__deadline" aria-hidden="true">
+                        {dateText}
+                      </span>
+                    )}
+                  </div>
+                  <div className="missed-tasks__actions">
+                    <button
+                      type="button"
+                      className="form__action form__action--primary"
+                      onClick={() => void carryToToday(task)}
+                      aria-disabled={busy || undefined}
                     >
-                      {priorityMarker(task.priority)}
-                    </span>
-                  )}
-                  {task.scheduled_date && (
-                    <span className="missed-tasks__deadline">
-                      {t('dialogs.dayStartReview.carryOver.dateLabel', {
-                        date: formatIsoDate(task.scheduled_date, i18n.language),
-                      })}
-                    </span>
-                  )}
-                </div>
-                <div className="missed-tasks__actions">
-                  <button
-                    type="button"
-                    className="form__action form__action--primary"
-                    onClick={() => void carryToToday(task)}
-                    aria-disabled={busy || undefined}
-                  >
-                    {t('dialogs.dayStartReview.carryOver.actions.today')}
-                  </button>
-                  <button
-                    type="button"
-                    className="form__action"
-                    onClick={() => void carryToTomorrow(task)}
-                    aria-disabled={busy || undefined}
-                  >
-                    {t('dialogs.dayStartReview.carryOver.actions.tomorrow')}
-                  </button>
-                  <button
-                    type="button"
-                    className="form__action"
-                    onClick={() => void sendToBacklog(task)}
-                    aria-disabled={busy || undefined}
-                  >
-                    {t('dialogs.dayStartReview.carryOver.actions.backlog')}
-                  </button>
-                  <button
-                    type="button"
-                    className="form__action"
-                    onClick={() => void markCompleted(task)}
-                    aria-disabled={busy || undefined}
-                  >
-                    {t('dialogs.dayStartReview.carryOver.actions.done')}
-                  </button>
-                </div>
-              </li>
-            ))}
+                      {t('dialogs.dayStartReview.carryOver.actions.today')}
+                    </button>
+                    <button
+                      type="button"
+                      className="form__action"
+                      onClick={() => void carryToTomorrow(task)}
+                      aria-disabled={busy || undefined}
+                    >
+                      {t('dialogs.dayStartReview.carryOver.actions.tomorrow')}
+                    </button>
+                    <button
+                      type="button"
+                      className="form__action"
+                      onClick={() => void sendToBacklog(task)}
+                      aria-disabled={busy || undefined}
+                    >
+                      {t('dialogs.dayStartReview.carryOver.actions.backlog')}
+                    </button>
+                    <button
+                      type="button"
+                      className="form__action"
+                      onClick={() => void markCompleted(task)}
+                      aria-disabled={busy || undefined}
+                    >
+                      {t('dialogs.dayStartReview.carryOver.actions.done')}
+                    </button>
+                    <button
+                      type="button"
+                      className="form__action form__action--danger"
+                      onClick={() => void deleteTask(task)}
+                      aria-disabled={busy || undefined}
+                    >
+                      {t('dialogs.dayStartReview.delete')}
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
           <div className="day-start-review__section-actions">
             <button
