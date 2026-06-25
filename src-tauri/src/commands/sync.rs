@@ -42,6 +42,7 @@ use sync_core::{
 use tauri::State;
 
 use super::{run_plugin_auth, run_plugin_probe_host_key, CommandError, CommandResult};
+use crate::cache::CacheRefresher;
 use crate::db::{DbHandle, SharedConn};
 use crate::event_log::{
     CompactionReport, OnboardingReport, OnboardingService, SyncOrchestrator, SyncPreview,
@@ -1272,6 +1273,7 @@ pub async fn accept_remote_dataset(
     scheduler: State<'_, Arc<SyncScheduler>>,
     onboarding: State<'_, Arc<OnboardingService>>,
     plugin_manager: State<'_, Arc<PluginManager>>,
+    refresher: State<'_, Arc<CacheRefresher>>,
     config: SyncAdapterConfig,
     device_name: Option<String>,
     passphrase: Option<String>,
@@ -1359,6 +1361,11 @@ pub async fn accept_remote_dataset(
         let _ = prefs.delete(PREF_E2E_ENABLED);
     }
     scheduler.kick();
+    // Onboarding just created this device's EXTERNAL accounts; the boot warm
+    // pass already ran (before they existed), so without a kick their calendars
+    // and lists wouldn't populate until the next app start re-runs it. Trigger a
+    // warm now so the sidebar fills immediately.
+    refresher.trigger();
     Ok(report)
 }
 
