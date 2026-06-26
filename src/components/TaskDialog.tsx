@@ -748,8 +748,25 @@ export function TaskDialog({
           // →in_progress/→completed of an unassigned task, drop only me on →open.
           // Gated on a real status change so editing other fields of an already
           // (un)assigned task never touches ownership.
+          // A subtask toggled while THIS editor was open can cascade this task's
+          // OWN status in the store (a child → in_progress lifts the parent to
+          // in_progress). The form still holds the status from when the editor
+          // opened, so writing it back blindly would REVERT that cascade. Only
+          // overwrite the status (+ completed_at + self-assign) when the user
+          // actually changed the Status field here; otherwise keep the live value.
+          const statusChanged = form.status !== task.status;
+          const liveRow = tasks.find((tt) => tt.id === task.id);
+          const statusToWrite = statusChanged
+            ? form.status
+            : liveRow?.status ?? task.status;
+          const completedAtToWrite =
+            statusToWrite === 'completed'
+              ? liveRow?.completed_at ??
+                task.completed_at ??
+                new Date().toISOString()
+              : null;
           let rootAssignees = form.assignees;
-          if (autoSelfAssign && form.status !== task.status) {
+          if (autoSelfAssign && statusChanged) {
             const me = await currentUserForList(form.listId);
             rootAssignees =
               selfAssignOnStatusChange(form.status, form.assignees, me, true) ??
@@ -763,7 +780,7 @@ export function TaskDialog({
             // clear it; an in-place edit takes the picker's value.
             section_id:
               form.listId !== task.list_id ? null : form.sectionId || null,
-            status: form.status,
+            status: statusToWrite,
             priority: form.priority,
             scheduled_date: rootScheduledDate,
             scheduled_time,
@@ -774,10 +791,7 @@ export function TaskDialog({
             color_label: form.colorLabel,
             reminders: form.reminders,
             assignees: rootAssignees,
-            completed_at:
-              form.status === 'completed'
-                ? task.completed_at ?? new Date().toISOString()
-                : null,
+            completed_at: completedAtToWrite,
           };
           // Pass the *original* list_id as the move hint so the
           // backend can tell an in-place edit (list picker
@@ -819,7 +833,7 @@ export function TaskDialog({
           // above with the full field set. The snapshot we hand the
           // planner reflects the *new* status so up-cascade reads
           // a coherent state.
-          if (form.status !== task.status) {
+          if (statusChanged) {
             const snapshot = tasks.map((row) =>
               row.id === task.id ? { ...row, status: form.status } : row,
             );
