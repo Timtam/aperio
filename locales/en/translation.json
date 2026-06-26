@@ -1758,6 +1758,8 @@
       "collapse": "Collapse subtasks of \"{{title}}\"",
       "optionLabel": "{{title}}, {{state}}{{priority}}{{progress}}, {{due}}{{assignee}}",
       "subtaskProgress": ", {{done}} of {{total}} subtasks done",
+      "subtaskParent": ", subtask of \"{{parent}}\"",
+      "subtaskOf": "Subtask of \"{{parent}}\"",
       "priorityHigh": "high priority",
       "priorityLow": "low priority",
       "subtaskProgressBadge": "{{done}}/{{total}}",

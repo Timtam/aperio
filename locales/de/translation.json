@@ -1758,6 +1758,8 @@
       "collapse": "Unteraufgaben von „{{title}}\" einklappen",
       "optionLabel": "{{title}}, {{state}}{{priority}}{{progress}}, {{due}}{{assignee}}",
       "subtaskProgress": ", {{done}} von {{total}} Unteraufgaben erledigt",
+      "subtaskParent": ", Unteraufgabe von „{{parent}}\"",
+      "subtaskOf": "Unteraufgabe von „{{parent}}\"",
       "priorityHigh": "hohe Priorität",
       "priorityLow": "niedrige Priorität",
       "subtaskProgressBadge": "{{done}}/{{total}}",

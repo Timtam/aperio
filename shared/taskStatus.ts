@@ -145,6 +145,33 @@ export function subtaskProgressSuffix(
 }
 
 /**
+ * The parent task's title when `task` is a subtask whose parent is present in
+ * `allTasks`, else null. Used to label a subtask chip in context wherever it
+ * surfaces on its own (calendar grid, backlog rail).
+ */
+export function subtaskParentTitle(
+  task: Task,
+  allTasks: Task[],
+): string | null {
+  if (!task.parent_id) return null;
+  return allTasks.find((p) => p.id === task.parent_id)?.title ?? null;
+}
+
+/**
+ * SR-friendly suffix naming a subtask's parent (", Unteraufgabe von X"), or ''
+ * when the task isn't a subtask. Resolves through `views.tasks.subtaskParent`,
+ * which starts with a comma separator — mirrors {@link subtaskProgressSuffix}.
+ */
+export function subtaskParentSuffix(
+  t: (key: string, vars?: Record<string, unknown>) => string,
+  task: Task,
+  allTasks: Task[],
+): string {
+  const parent = subtaskParentTitle(task, allTasks);
+  return parent ? t('views.tasks.subtaskParent', { parent }) : '';
+}
+
+/**
  * SR-friendly assignee suffix for aria-labels. Empty string when the task has
  * no assignees. Resolves through `views.tasks.assigneeSuffix`, which starts
  * with a comma separator. Shared across every task surface so an assignment is

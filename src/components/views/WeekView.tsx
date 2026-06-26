@@ -52,6 +52,7 @@ import {
   prioritySuffix,
   statusI18nKey,
   statusMarker,
+  subtaskParentSuffix,
   subtaskProgressSuffix,
 } from '../../intl/taskStatus';
 import type { CalendarEvent, Task } from '../../api/types';
@@ -1293,7 +1294,7 @@ function WeekDayTasks({
                 priority: prioritySuffix(t, task.priority),
                 progress: subtaskProgressSuffix(t, task.id, allTasks),
                 assignee: assigneeSuffix(t, task.assignees),
-              })}
+              }) + subtaskParentSuffix(t, task, allTasks)}
             >
               <span className="week-task__body">
                 <span
@@ -1342,5 +1343,5 @@ function taskChipAriaLabel(
     priority: prioritySuffix(t, task.priority),
     progress: subtaskProgressSuffix(t, task.id, allTasks),
     assignee: assigneeSuffix(t, task.assignees),
-  });
+  }) + subtaskParentSuffix(t, task, allTasks);
 }

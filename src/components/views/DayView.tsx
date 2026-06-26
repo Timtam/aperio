@@ -41,6 +41,7 @@ import {
   prioritySuffix,
   statusI18nKey,
   statusMarker,
+  subtaskParentSuffix,
   subtaskProgressSuffix,
 } from '../../intl/taskStatus';
 import { duplicateEvent } from '../duplicateActions';
@@ -404,14 +405,16 @@ export function DayView() {
                   id={itemId(i)}
                   role="option"
                   aria-selected={focused}
-                  aria-label={t('views.day.taskLabel', {
-                    title: task.title,
-                    time: timeStr,
-                    state,
-                    priority: prioritySuffix(t, task.priority),
-                    progress: subtaskProgressSuffix(t, task.id, tasks),
-                    assignee: assigneeSuffix(t, task.assignees),
-                  })}
+                  aria-label={
+                    t('views.day.taskLabel', {
+                      title: task.title,
+                      time: timeStr,
+                      state,
+                      priority: prioritySuffix(t, task.priority),
+                      progress: subtaskProgressSuffix(t, task.id, tasks),
+                      assignee: assigneeSuffix(t, task.assignees),
+                    }) + subtaskParentSuffix(t, task, tasks)
+                  }
                   className={
                     'day-list__item day-list__item--task' +
                     (focused ? ' day-list__item--focused' : '') +
@@ -635,7 +638,7 @@ export function DayView() {
                       priority: prioritySuffix(t, task.priority),
                       progress: subtaskProgressSuffix(t, task.id, tasks),
                       assignee: assigneeSuffix(t, task.assignees),
-                    })}
+                    }) + subtaskParentSuffix(t, task, tasks)}
                   >
                     <span
                       className="day-task__marker day-task__marker--clickable"

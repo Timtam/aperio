@@ -46,6 +46,7 @@ import {
   prioritySuffix,
   statusI18nKey,
   statusMarker,
+  subtaskParentSuffix,
   subtaskProgressSuffix,
 } from '../../intl/taskStatus';
 import { useCalendarStore } from '../../state/calendarStoreContext';
@@ -762,7 +763,7 @@ export function MonthView() {
                               progress: subtaskProgressSuffix(t, task.id, tasks),
                               assignee: assigneeSuffix(t, task.assignees),
                             },
-                          );
+                          ) + subtaskParentSuffix(t, task, tasks);
                           return (
                             <span
                               key={item.id}
