@@ -661,13 +661,18 @@ export function TaskView() {
           } as React.CSSProperties
         }
         onClick={(ev) => {
-          // The header toggles its own group; clicks that land on a child row
-          // or the ⋮ button have their own handlers and must not also collapse.
-          const target = ev.target as HTMLElement;
-          if (
-            target.closest('.task-list__group-children') ||
-            target.closest('.task-list__section-menu')
-          ) {
+          // The header toggles its own group; a click on one of THIS header's
+          // own child rows must NOT also collapse it (the child has its own
+          // handler). We test this header's OWN children container directly
+          // (`:scope >`) rather than `target.closest('.group-children')`,
+          // because a NESTED header (a list under Backlog) lives inside its
+          // PARENT's `.group-children` — the broad `closest` matched that and
+          // swallowed the nested header's own twisty click. The ⋮ button stops
+          // propagation itself, so it never reaches here.
+          const ownChildren = ev.currentTarget.querySelector(
+            ':scope > .task-list__group-children',
+          );
+          if (ownChildren?.contains(ev.target as Node)) {
             return;
           }
           setFocusIndex(entry.index);
