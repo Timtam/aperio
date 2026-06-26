@@ -1297,6 +1297,12 @@ export const compactNow = () =>
 
 // ── Onboarding flow (§19.11) ──
 
+/** Whether this is a FRESH instance that should be offered the first-launch
+ *  wizard: no external account, no sync target configured, and an empty local
+ *  store. DATA-based (not a stored flag), so an established install is never
+ *  prompted; the frontend pairs it with a device-local "already shown" marker. */
+export const isFreshInstance = () => invoke<boolean>('is_fresh_instance');
+
 /** Probe a remote without committing the orchestrator state.
  *  Returns `{kind: 'empty'}` for a fresh remote or `{kind: 'existing', ...}`
  *  with the device list + snapshot metadata. */

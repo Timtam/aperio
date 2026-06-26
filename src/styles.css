@@ -470,6 +470,44 @@ button[aria-disabled='true'] {
   max-width: 820px;
 }
 
+/* First-launch wizard (§19.11). Wide enough to host the full sync config
+   form on its sync step. */
+.modal--first-launch-wizard {
+  max-width: 640px;
+}
+
+.first-launch-wizard__step-indicator {
+  display: block;
+  margin-bottom: 0.75rem;
+  font-size: 0.85em;
+  opacity: 0.8;
+}
+
+.first-launch-wizard__step h3 {
+  margin-top: 0;
+}
+
+.first-launch-wizard__hint {
+  display: block;
+  margin-bottom: 0.75rem;
+}
+
+.first-launch-wizard__radiogroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0 0 1rem;
+  border: 0;
+  padding: 0;
+}
+
+.first-launch-wizard__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+}
+
 /* Settings layout — vertical tablist on the left, panel on the right.
    The tablist is its own scroll region only if it ever outgrows the
    viewport; the panel scrolls independently so a long form (e.g. the

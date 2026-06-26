@@ -20,14 +20,18 @@ Aperio wird als Archiv (ZIP) bereitgestellt:
 
 ## Der Erststart-Assistent
 
-Beim ersten Start führt dich ein kurzer Assistent durch die wichtigsten
-Punkte:
+Beim ersten Start – bei einer frischen Installation ohne Konten, Sync oder
+Daten – führt dich ein kurzer, barrierefreier Assistent durch die
+wichtigsten Punkte:
 
-- **Sprache** der Oberfläche.
+- **Sprache** der Oberfläche (Standard: deine Systemsprache).
+- **Synchronisierung** – stelle deine Daten von einem vorhandenen Sync-Ziel
+  wieder her, richte ein neues für die Synchronisierung über mehrere Geräte
+  ein, oder überspringe den Schritt vorerst. Verbindest du dich mit einem
+  Ziel, das bereits einen Aperio-Datensatz enthält, werden deine Daten und
+  Konten wiederhergestellt und der Assistent endet dort.
 - **Erstes Konto** (oder du überspringst das und legst später eines an –
   siehe [Kapitel 02](/de/guides/tutorial/02-konten-verbinden/)).
-- **Systemintegration** – ob Aperio z. B. beim Anmelden automatisch
-  starten soll.
 
 Du kannst alles später in den **Einstellungen** ändern.
 

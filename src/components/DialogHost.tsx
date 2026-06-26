@@ -2,6 +2,7 @@ import { useDialogState } from '../state/dialogStateContext';
 import { ContactDialog } from './ContactDialog';
 import { DayStartReviewDialog } from './DayStartReviewDialog';
 import { EventDialog } from './EventDialog';
+import { FirstLaunchWizardDialog } from './FirstLaunchWizardDialog';
 import { MoveCopyDialog } from './MoveCopyDialog';
 import { PlanTaskDialog } from './PlanTaskDialog';
 import { QuickAddDialog } from './QuickAddDialog';
@@ -132,6 +133,8 @@ export function DialogHost() {
           accounts={mode.accounts}
         />
       );
+    case 'firstLaunchWizard':
+      return <FirstLaunchWizardDialog isOpen onClose={close} />;
     case 'none':
     default:
       return null;

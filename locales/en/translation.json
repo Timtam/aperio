@@ -323,6 +323,25 @@
     }
   },
   "dialogs": {
+    "firstLaunchWizard": {
+      "title": "Welcome to Aperio",
+      "stepIndicator": "Step {{current}} of {{total}}",
+      "languageHeading": "Language",
+      "languageHint": "Choose the language Aperio uses. You can change this any time in Settings.",
+      "languageLegend": "Display language",
+      "language_system": "Use system language",
+      "language_de": "German",
+      "language_en": "English",
+      "syncHeading": "Synchronisation",
+      "syncHint": "Restore your data from an existing sync target, or set up a new one to sync across your devices. You can also skip this and set it up later in Settings. If you connect to a target that already holds an Aperio dataset, your data and accounts are restored and the wizard finishes.",
+      "syncSkip": "Skip for now",
+      "accountHeading": "Add your first account",
+      "accountHint": "Connect a calendar or task account (CalDAV, Google, Microsoft, Vikunja, Todoist, …), or skip and add one later in Settings.",
+      "accountAdd": "Add an account",
+      "next": "Next",
+      "back": "Back",
+      "finish": "Finish"
+    },
     "contact": {
       "birthdayClear": "Clear birthday",
       "birthdayCleared": "Birthday removed.",

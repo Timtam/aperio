@@ -78,7 +78,8 @@ export type DialogMode =
   | { kind: 'syncConflicts' }
   | { kind: 'syncSchemaTooOld'; required: string; running: string }
   | { kind: 'syncStaleResume'; snapshotAt: string }
-  | { kind: 'syncAccountsConnect'; accounts: Account[] };
+  | { kind: 'syncAccountsConnect'; accounts: Account[] }
+  | { kind: 'firstLaunchWizard' };
 
 /**
  * Optional context the caller can pass when opening a *create* dialog
@@ -171,6 +172,10 @@ export interface DialogStateValue {
    *  have their secrets on this device. The dialog walks the
    *  user through re-attaching credentials per account. */
   openSyncAccountsConnect: (accounts: Account[]) => void;
+  /** §19.11 first-launch wizard. Opened by `FirstLaunchWizardChecker` on a
+   *  fresh instance: language → sync (restore / create / skip) → first
+   *  account. */
+  openFirstLaunchWizard: () => void;
   close: () => void;
   /**
    * Counter that bumps whenever data on the wire might have changed.
@@ -337,6 +342,10 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     (accounts: Account[]) => push({ kind: 'syncAccountsConnect', accounts }),
     [push],
   );
+  const openFirstLaunchWizard = useCallback(
+    () => push({ kind: 'firstLaunchWizard' }),
+    [push],
+  );
 
   const close = useCallback(() => {
     const target = triggerStackRef.current.pop() ?? null;
@@ -396,6 +405,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openSyncSchemaTooOld,
       openSyncStaleResume,
       openSyncAccountsConnect,
+      openFirstLaunchWizard,
       close,
       dataVersion,
       invalidateData,
@@ -421,6 +431,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openSyncSchemaTooOld,
       openSyncStaleResume,
       openSyncAccountsConnect,
+      openFirstLaunchWizard,
       close,
       dataVersion,
       invalidateData,

@@ -3,60 +3,40 @@ import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import { FocusableNote } from '../a11y/FocusableNote';
-import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 
 import {
-  acceptRemoteDataset,
-  adoptLocalDataset,
   adoptRemoteEncryption,
   changeSyncPassphrase,
   compactNow,
   configureSyncAdapter,
-  connectDropboxOauth,
-  connectGoogledriveOauth,
   disableSyncEncryption,
   enableSyncEncryption,
-  forgetSftpHostKey,
-  getPinnedSftpHostKey,
   getSyncAdapterSummary,
-  hasDropboxRefreshToken,
-  hasGoogledriveRefreshToken,
   isCommandError,
-  previewSftpHostKey,
-  previewSyncTarget,
-  refreshExternalCache,
   setSyncInterval,
-  testSyncAdapter,
-  trustSftpHostKey,
-  type HostKeyPreview,
-  type SyncAdapterConfig,
   type SyncAdapterSummary,
-  type SyncPreview,
 } from '../api/client';
 import { useDateFormat } from '../intl/dateFormat';
 import { useDialogState } from '../state/dialogStateContext';
-import { useCalendarStore } from '../state/calendarStoreContext';
 import { useSync } from '../state/useSync';
-import { fetchAccountsNeedingConnect } from './accountsNeedingConnect';
 import { SyncProtocolSection } from './SyncProtocolSection';
-import { SyncSftpTrustDialog } from './SyncSftpTrustDialog';
+import {
+  SyncTargetConfigForm,
+  type SyncConnectOutcome,
+} from './sync/SyncTargetConfigForm';
+import { useSyncErrorMessage } from './sync/syncErrorMessage';
 
 /**
  * Settings → Synchronisation panel (DESIGN.md §19, Phase Si).
  *
- * Four sections:
- *
  *   1. **State** — connection state + last successful sync + manual
  *      `Sync now` / `Compact now`.
- *   2. **Interval** — slider/select over a preset list, defaulting
- *      to 5 minutes per §19.8.
- *   3. **Adapter** — kind picker + path input + Connect / Disconnect.
- *   4. **Onboarding** — preview button + accept/adopt buttons when
- *      a preview has run. Only visible while no adapter is
- *      configured (otherwise the user is already onboarded).
- *
- * The conflicts dialog isn't rendered inline — it's a separate
- * modal reachable from the status badge + a button at the bottom.
+ *   2. **Interval** — periodic-sync preset.
+ *   3. **Adapter** — when unconfigured, the shared
+ *      [`SyncTargetConfigForm`](./sync/SyncTargetConfigForm.tsx) (also used by
+ *      the first-launch wizard); when configured, a summary + Disconnect.
+ *   4. **E2E** — adopt / enable / change-passphrase / disable encryption.
+ *   5. **Protocol** — the §19.9 sync history.
  */
 
 const INTERVAL_PRESETS: readonly number[] = [1, 5, 15, 30, 60, 240];
@@ -65,34 +45,7 @@ export function SyncPanel() {
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const fmt = useDateFormat();
-  const { openSyncConflicts, openSyncAccountsConnect, invalidateData } =
-    useDialogState();
-  // The sidebar's container catalogs (calendars / task lists / contact
-  // books / labels / accounts) load once at mount and DON'T re-read on a
-  // `dataVersion` bump — only on a background cache-updated event. After
-  // onboarding pulls a whole dataset into the local DB, nothing emits that,
-  // so we refresh the catalogs explicitly (otherwise the sidebar stays empty
-  // until an app restart re-mounts the store).
-  const {
-    refreshCalendars,
-    refreshTaskLists,
-    refreshContactLists,
-    refreshColorLabels,
-    refreshAccounts,
-  } = useCalendarStore();
-  const refreshCatalogs = useCallback(() => {
-    void refreshCalendars();
-    void refreshTaskLists();
-    void refreshContactLists();
-    void refreshColorLabels();
-    void refreshAccounts();
-  }, [
-    refreshAccounts,
-    refreshCalendars,
-    refreshColorLabels,
-    refreshContactLists,
-    refreshTaskLists,
-  ]);
+  const { openSyncConflicts, openSyncAccountsConnect } = useDialogState();
   const {
     status,
     lastReport,
@@ -101,142 +54,26 @@ export function SyncPanel() {
     triggering,
     triggerSync,
   } = useSync();
+  // Shared sync error → message mapping, used by the E2E sections below. The
+  // adapter config form (extracted to `SyncTargetConfigForm`) uses the same
+  // hook internally.
+  const messageForError = useSyncErrorMessage();
 
   const stateHeadingId = useId();
   const adapterHeadingId = useId();
   const intervalHeadingId = useId();
   const protocolHeadingId = useId();
   const passphraseHeadingId = useId();
-  // §19.7 — heading id for the "enable encryption on an existing
-  // (unencrypted) dataset" section. Mirrors `passphraseHeadingId`
-  // but the section it labels only appears in the inverse state
-  // (configured && !e2e_enabled).
   const enableE2eHeadingId = useId();
 
-  // Adapter draft state. Seeded from current backend state on mount
-  // so the inputs reflect the persisted choice.
-  const [kindDraft, setKindDraft] = useState<
-    'local' | 'webdav' | 'sftp' | 'ftp' | 'dropbox' | 'googledrive' | 'none'
-  >('local');
-  const [pathDraft, setPathDraft] = useState('');
-  // WebDAV-only fields. `passwordDraft` is empty on first render —
-  // the persisted password lives in the OS keychain and we don't
-  // surface it back. Submitting with an empty password reuses the
-  // keychain entry.
-  const [urlDraft, setUrlDraft] = useState('');
-  const [userDraft, setUserDraft] = useState('');
-  const [passwordDraft, setPasswordDraft] = useState('');
-  // SFTP-only fields. `sftpPortDraft` is a string so the input
-  // doesn't fight with React on every keystroke; we parse to u16
-  // at submit time. Default port 22 is filled in on first render.
-  const [sftpHostDraft, setSftpHostDraft] = useState('');
-  const [sftpPortDraft, setSftpPortDraft] = useState('22');
-  const [sftpUserDraft, setSftpUserDraft] = useState('');
-  const [sftpPathDraft, setSftpPathDraft] = useState('');
-  const [sftpPasswordDraft, setSftpPasswordDraft] = useState('');
-  // Phase Sm-2: auth method radio + SSH-key fields. Password is
-  // the default. The two key inputs only render when
-  // `sftpAuthDraft === 'key'`.
-  const [sftpAuthDraft, setSftpAuthDraft] = useState<'password' | 'key'>(
-    'password',
-  );
-  const [sftpKeyPathDraft, setSftpKeyPathDraft] = useState('');
-  const [sftpKeyPassphraseDraft, setSftpKeyPassphraseDraft] = useState('');
-  // FTPS-only fields. Mirrors the SFTP shape but flatter (no
-  // SSH-key auth, no host-key TOFU). Port default flips with
-  // the mode dropdown: 21 for explicit, 990 for implicit.
-  const [ftpHostDraft, setFtpHostDraft] = useState('');
-  const [ftpPortDraft, setFtpPortDraft] = useState('21');
-  const [ftpUserDraft, setFtpUserDraft] = useState('');
-  const [ftpPathDraft, setFtpPathDraft] = useState('');
-  const [ftpPasswordDraft, setFtpPasswordDraft] = useState('');
-  const [ftpModeDraft, setFtpModeDraft] = useState<
-    'explicit' | 'implicit' | 'plain'
-  >('explicit');
-  // Dropbox-only fields. `clientId` / `clientSecret` are from
-  // the user's own app at dropbox.com/developers/apps;
-  // `client_secret` stays empty for public PKCE-only apps. The
-  // refresh token doesn't surface here — it lives in the OS
-  // keychain after the OAuth dance completes.
-  const [dropboxClientIdDraft, setDropboxClientIdDraft] = useState('');
-  const [dropboxClientSecretDraft, setDropboxClientSecretDraft] =
-    useState('');
-  const [dropboxPathDraft, setDropboxPathDraft] = useState('');
-  const [busyDropboxOauth, setBusyDropboxOauth] = useState(false);
-  /** Whether a refresh token is already in the keychain.
-   *  Refreshed on mount + after the OAuth round-trip finishes
-   *  so the "Sign in" button flips to "Re-sign in" once auth
-   *  has happened. */
-  const [dropboxSignedIn, setDropboxSignedIn] = useState(false);
-  // Google Drive-only fields. Same shape as the Dropbox block,
-  // but Google requires both `client_id` and `client_secret`
-  // for installed apps and addresses files by ID rather than
-  // path — the user picks a folder name instead of a path.
-  const [gdriveClientIdDraft, setGdriveClientIdDraft] = useState('');
-  const [gdriveClientSecretDraft, setGdriveClientSecretDraft] =
-    useState('');
-  const [gdriveFolderNameDraft, setGdriveFolderNameDraft] = useState('');
-  const [busyGdriveOauth, setBusyGdriveOauth] = useState(false);
-  /** Whether a Google refresh token is already in the keychain.
-   *  Same role as `dropboxSignedIn` — toggles the OAuth button
-   *  between "Sign in" / "Re-sign in" / "Signed in ✓". */
-  const [gdriveSignedIn, setGdriveSignedIn] = useState(false);
-  // Phase Sk: E2E passphrase. Two roles depending on the
-  // onboarding branch:
-  //   - `adopt_local` with non-empty value → mints a fresh dataset
-  //     with E2E enabled.
-  //   - `accept_remote` against a preview that says `e2e_enabled`
-  //     → the passphrase the user types to unlock the existing
-  //     dataset's key.
-  // `enableE2eDraft` is the explicit "I want to turn on
-  // encryption for the new dataset" checkbox, used only on
-  // adopt_local.
-  const [passphraseDraft, setPassphraseDraft] = useState('');
-  const [enableE2eDraft, setEnableE2eDraft] = useState(false);
-  const [deviceNameDraft, setDeviceNameDraft] = useState('');
+  // The adapter-target CONFIGURATION form (kind picker, per-kind fields,
+  // OAuth, SFTP trust, preview→join/init) lives in `SyncTargetConfigForm`,
+  // shared with the first-launch wizard. SyncPanel keeps only the
+  // periodic-interval + compaction + E2E-rotation controls here.
   const [intervalDraft, setIntervalDraft] = useState<number | null>(null);
-  const [busyAdapter, setBusyAdapter] = useState(false);
-  const [busyTest, setBusyTest] = useState(false);
-  // Result of the last "Verbindung testen" / "Verbinden" attempt,
-  // rendered as a VISIBLE message next to the buttons. Previously these
-  // outcomes were only spoken via the live-region announcer, so sighted
-  // users saw nothing — especially on failure. Mirrors the visible
-  // `previewError` pattern below (role="alert"/"status" doubles as the
-  // screen-reader live region, so a separate announce() isn't needed).
-  const [adapterFeedback, setAdapterFeedback] = useState<{
-    kind: 'ok' | 'error';
-    message: string;
-  } | null>(null);
-  const [busyAdopt, setBusyAdopt] = useState(false);
   const [busyCompact, setBusyCompact] = useState(false);
-  const [preview, setPreview] = useState<SyncPreview | null>(null);
-  // Phase Sm-3: SFTP host-key trust dialog. `trustPreview` holds
-  // the snapshot the backend returned from `previewSftpHostKey`;
-  // when non-null and `status.kind !== 'unchanged'` the dialog is
-  // open. `pendingSftpConfig` carries the configure payload that
-  // was on the wire when we paused for the trust gesture — once
-  // the user accepts, we commit the pin then resume configure
-  // with this same payload.
-  const [trustPreview, setTrustPreview] = useState<HostKeyPreview | null>(
-    null,
-  );
-  const [pendingSftpConfig, setPendingSftpConfig] =
-    useState<SyncAdapterConfig | null>(null);
-  // The fingerprint currently pinned for the host:port the user
-  // has typed into the SFTP fields. Lets the SyncPanel render a
-  // "Pin vergessen" button when one exists, without probing the
-  // server. Refreshed whenever host/port change or after a
-  // trust/forget gesture so the UI doesn't go stale.
-  const [pinnedFingerprint, setPinnedFingerprint] = useState<string | null>(
-    null,
-  );
-  // §19.7 passphrase rotation. `oldPassphraseDraft` is what the
-  // user types to authorise the change; `newPassphraseDraft`
-  // becomes the new wrap key after a successful round-trip.
-  // Both clear on success so a stray window-leave doesn't leave
-  // them sitting in memory. `passphraseChangeError` /
-  // `passphraseChangeOk` drive the visible feedback line in the
-  // section.
+  const [busyDisconnect, setBusyDisconnect] = useState(false);
+  // §19.7 passphrase rotation.
   const [oldPassphraseDraft, setOldPassphraseDraft] = useState('');
   const [newPassphraseDraft, setNewPassphraseDraft] = useState('');
   const [busyPassphraseChange, setBusyPassphraseChange] = useState(false);
@@ -244,242 +81,24 @@ export function SyncPanel() {
     string | null
   >(null);
   const [passphraseChangeOk, setPassphraseChangeOk] = useState(false);
-  // §19.7 disable-E2E flow. Reuses the same `oldPassphraseDraft`
-  // input (top of the section) — the user types their current
-  // passphrase once and can either change it or turn encryption
-  // off entirely. `busyDisable` gates the button + the change
-  // button so the two flows can't fire concurrently.
+  // §19.7 disable-E2E flow (reuses the same current-passphrase input).
   const [busyDisable, setBusyDisable] = useState(false);
   const [disableError, setDisableError] = useState<string | null>(null);
-  // §19.7 enable-E2E flow on an already-configured but
-  // unencrypted dataset. `enableNewPpDraft` is the passphrase the
-  // user picks; success migrates every blob on the remote to
-  // ciphertext. The button stays separate from the
-  // passphrase-change section because they're mutually exclusive
-  // (one renders only when e2e is OFF, the other only when it's
-  // ON).
+  // §19.7 enable-E2E flow on an already-configured but unencrypted dataset.
   const [enableNewPpDraft, setEnableNewPpDraft] = useState('');
   const [busyEnable, setBusyEnable] = useState(false);
   const [enableError, setEnableError] = useState<string | null>(null);
   const [enableOk, setEnableOk] = useState(false);
-  // §19.7 cross-device adoption. State for the banner that
-  // appears when another device flipped encryption on and our
-  // next sync round failed with `last_error_code =
-  // encryption_required`. The user types the dataset passphrase
-  // once; backend unlocks the DEK + swaps adapters; a follow-up
-  // sync_now should succeed without re-onboarding.
+  // §19.7 cross-device adoption banner.
   const [adoptRemotePpDraft, setAdoptRemotePpDraft] = useState('');
   const [busyAdoptRemote, setBusyAdoptRemote] = useState(false);
-  const [adoptRemoteError, setAdoptRemoteError] = useState<
-    string | null
-  >(null);
-  // Compact non-secret summary of the persisted adapter config.
-  // Rendered in place of the full editable form when
-  // `status?.configured`, so the "you can have multiple
-  // adapters" reading of the editable form goes away. `null`
-  // when no adapter is configured (the form takes over).
+  const [adoptRemoteError, setAdoptRemoteError] = useState<string | null>(null);
+  // Compact non-secret summary of the persisted adapter config. `null` when no
+  // adapter is configured (the form takes over).
   const [adapterSummary, setAdapterSummary] =
     useState<SyncAdapterSummary | null>(null);
 
   const interval = intervalDraft ?? status?.interval_minutes ?? 5;
-
-  // Translate a `CommandError`-shaped error into a frontend message
-  // keyed off the stable `code`. Falls back to the raw message when
-  // the code is unknown so we never silently swallow context.
-  const messageForError = useCallback(
-    (err: unknown): string => {
-      if (isCommandError(err)) {
-        switch (err.code) {
-          case 'auth':
-            // SFTP host-key mismatch is surfaced as `auth` with a
-            // distinctive message prefix — promote it to a
-            // dedicated warning so the user sees the §19.5
-            // verify-out-of-band guidance instead of a generic
-            // "auth failed" string.
-            if (err.message.includes('host key mismatch')) {
-              return t(
-                'dialogs.settings.sync.adapterSftpHostKeyMismatch',
-              );
-            }
-            return t('dialogs.settings.sync.errorAuth');
-          case 'io':
-            return t('dialogs.settings.sync.errorIo');
-          case 'network':
-            return t('dialogs.settings.sync.errorNetwork');
-          case 'not_found':
-            return t('dialogs.settings.sync.errorNotFound');
-          case 'encryption_required':
-            return t('dialogs.settings.sync.errorEncryption');
-          case 'schema_too_old':
-            return t('dialogs.settings.sync.errorSchemaTooOld');
-          default:
-            return err.message;
-        }
-      }
-      return err instanceof Error ? err.message : String(err);
-    },
-    [t],
-  );
-
-  const buildConfig = useCallback((): SyncAdapterConfig => {
-    if (kindDraft === 'local') return { kind: 'local', path: pathDraft.trim() };
-    if (kindDraft === 'webdav') {
-      return {
-        kind: 'webdav',
-        url: urlDraft.trim(),
-        user: userDraft.trim(),
-        // Empty string → backend reuses keychain entry. Sending
-        // `undefined` would serialize to `null` via serde's default;
-        // either form is fine on the wire.
-        password: passwordDraft.trim() || null,
-      };
-    }
-    if (kindDraft === 'sftp') {
-      // Parse the port; fall back to 22 on garbage. Backend
-      // re-validates so anything we miss surfaces as
-      // `invalid_input`.
-      const port = Number.parseInt(sftpPortDraft, 10);
-      return {
-        kind: 'sftp',
-        host: sftpHostDraft.trim(),
-        port: Number.isFinite(port) && port > 0 ? port : 22,
-        user: sftpUserDraft.trim(),
-        path: sftpPathDraft.trim(),
-        auth_method: sftpAuthDraft,
-        // Only one side of the password vs key fields is
-        // populated per round-trip; the unused fields go as
-        // null. The backend ignores the inactive side.
-        password:
-          sftpAuthDraft === 'password'
-            ? sftpPasswordDraft.trim() || null
-            : null,
-        key_path:
-          sftpAuthDraft === 'key' ? sftpKeyPathDraft.trim() || null : null,
-        key_passphrase:
-          sftpAuthDraft === 'key'
-            ? sftpKeyPassphraseDraft.trim() || null
-            : null,
-      };
-    }
-    if (kindDraft === 'dropbox') {
-      return {
-        kind: 'dropbox',
-        client_id: dropboxClientIdDraft.trim(),
-        // Empty string for PKCE-only public apps; the backend
-        // honours both shapes.
-        client_secret: dropboxClientSecretDraft.trim(),
-        path: dropboxPathDraft.trim(),
-      };
-    }
-    if (kindDraft === 'googledrive') {
-      return {
-        kind: 'googledrive',
-        client_id: gdriveClientIdDraft.trim(),
-        client_secret: gdriveClientSecretDraft.trim(),
-        // Empty string lets the adapter fall back to its
-        // built-in "Aperio" default — matches the backend
-        // `GoogleDriveAccountConfig` contract.
-        folder_name: gdriveFolderNameDraft.trim(),
-      };
-    }
-    if (kindDraft === 'ftp') {
-      // Same parse-or-default port pattern as SFTP. The
-      // backend's `default_ftp_port` is 21 (explicit FTPS); we
-      // honour the user's input where reasonable.
-      const port = Number.parseInt(ftpPortDraft, 10);
-      // Implicit defaults to 990; explicit + plain share 21
-      // (AUTH TLS lives on the explicit-FTP port, plain talks
-      // the same port without the upgrade command).
-      const fallback = ftpModeDraft === 'implicit' ? 990 : 21;
-      return {
-        kind: 'ftp',
-        host: ftpHostDraft.trim(),
-        port: Number.isFinite(port) && port > 0 ? port : fallback,
-        user: ftpUserDraft.trim(),
-        path: ftpPathDraft.trim(),
-        mode: ftpModeDraft,
-        // Empty → backend reuses keychain entry, same
-        // contract as WebDAV / SFTP.
-        password: ftpPasswordDraft.trim() || null,
-      };
-    }
-    return { kind: 'none' };
-  }, [
-    kindDraft,
-    pathDraft,
-    urlDraft,
-    userDraft,
-    passwordDraft,
-    sftpHostDraft,
-    sftpPortDraft,
-    sftpUserDraft,
-    sftpPathDraft,
-    sftpPasswordDraft,
-    sftpAuthDraft,
-    sftpKeyPathDraft,
-    sftpKeyPassphraseDraft,
-    ftpHostDraft,
-    ftpPortDraft,
-    ftpUserDraft,
-    ftpPathDraft,
-    ftpPasswordDraft,
-    ftpModeDraft,
-    dropboxClientIdDraft,
-    dropboxClientSecretDraft,
-    dropboxPathDraft,
-    gdriveClientIdDraft,
-    gdriveClientSecretDraft,
-    gdriveFolderNameDraft,
-  ]);
-
-  // Validation: the Connect button needs a path for `local`, a URL +
-  // user for `webdav`, and host + user + path for `sftp`. Per-kind
-  // feedback steers the user before they hit the backend's error
-  // code path.
-  const configMissingRequired = (() => {
-    if (kindDraft === 'local') return !pathDraft.trim();
-    if (kindDraft === 'webdav') return !urlDraft.trim() || !userDraft.trim();
-    if (kindDraft === 'sftp') {
-      if (
-        !sftpHostDraft.trim() ||
-        !sftpUserDraft.trim() ||
-        !sftpPathDraft.trim()
-      ) {
-        return true;
-      }
-      // Key auth needs a path on first connect; subsequent edits
-      // reuse the previously-saved path so the empty-but-
-      // configured case stays valid.
-      if (sftpAuthDraft === 'key' && !sftpKeyPathDraft.trim() && !status?.configured) {
-        return true;
-      }
-      return false;
-    }
-    if (kindDraft === 'ftp') {
-      // FTP requires host + user. Path is optional (defaults
-      // to the server's home directory when blank). Password
-      // can be reused from the keychain on subsequent edits.
-      return !ftpHostDraft.trim() || !ftpUserDraft.trim();
-    }
-    if (kindDraft === 'dropbox') {
-      // Dropbox requires the client_id and a completed OAuth
-      // sign-in. client_secret + path are optional. Without a
-      // refresh token the Connect step would build an adapter
-      // that can't mint access tokens, so we gate on it here.
-      return !dropboxClientIdDraft.trim() || !dropboxSignedIn;
-    }
-    if (kindDraft === 'googledrive') {
-      // Google's installed-app flow needs both id + secret AND
-      // a finished OAuth dance. Folder name is optional (the
-      // adapter defaults it to "Aperio").
-      return (
-        !gdriveClientIdDraft.trim()
-        || !gdriveClientSecretDraft.trim()
-        || !gdriveSignedIn
-      );
-    }
-    return false;
-  })();
 
   const onIntervalChange = useCallback(
     async (raw: string) => {
@@ -495,375 +114,24 @@ export function SyncPanel() {
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('set_sync_interval failed', err);
-        // Restore the previous value so the select doesn't lie.
         setIntervalDraft(status?.interval_minutes ?? 5);
       }
     },
     [announce, status?.interval_minutes, t],
   );
 
-  // The unified "Verbinden": inspect what's at the target and do the right
-  // thing in one gesture, replacing the old configure→error→"Datensatz
-  // prüfen"→adopt dance. The flow is:
-  //   - empty target          → reveal the optional "enable encryption"
-  //                             setup, then (on the next click) initialize
-  //                             the dataset from this device;
-  //   - existing, unencrypted → join it immediately;
-  //   - existing, encrypted   → reveal the passphrase field, then join.
-  // Re-previews on every call so a stale config or a just-typed passphrase
-  // is always reflected. `preview` (the prior result) gates whether an
-  // empty target has already surfaced its options.
-  const runConnect = useCallback(
-    async (config: SyncAdapterConfig) => {
-      setBusyAdapter(true);
-      setAdapterFeedback(null);
-      const priorPreview = preview;
-      try {
-        const p = await previewSyncTarget(config);
-        setPreview(p);
-        const device = deviceNameDraft.trim() || null;
-
-        if (p.kind === 'existing') {
-          if (p.e2e_enabled && !passphraseDraft.trim()) {
-            // Encrypted target — the passphrase prompt is now visible
-            // (driven by `preview`); ask for it and wait for the next click.
-            setAdapterFeedback({
-              kind: 'error',
-              message: t('dialogs.settings.sync.e2eRemoteRequiresPassphrase'),
-            });
-            return;
-          }
-          const report = await acceptRemoteDataset(
-            config,
-            device,
-            p.e2e_enabled ? passphraseDraft.trim() : null,
-          );
-          announce(
-            report.device_count === 1
-              ? t('dialogs.settings.sync.onboardingDone_one')
-              : t('dialogs.settings.sync.onboardingDone_other', {
-                  count: report.device_count,
-                }),
-          );
-          // §19.11 step 8: surface accounts whose secrets didn't arrive so
-          // the user can attach them in one go (no-op when all are present).
-          const needConnect = await fetchAccountsNeedingConnect();
-          if (needConnect && needConnect.length > 0) {
-            openSyncAccountsConnect(needConnect);
-          }
-        } else {
-          // Empty target → this device initializes the dataset. On first
-          // surface, reveal the optional encryption setup and let the user
-          // confirm with a second click; don't silently create a plaintext
-          // dataset behind their back.
-          if (priorPreview?.kind !== 'empty') {
-            setAdapterFeedback({
-              kind: 'ok',
-              message: t('dialogs.settings.sync.connectEmptyReveal'),
-            });
-            return;
-          }
-          if (enableE2eDraft && !passphraseDraft.trim()) {
-            setAdapterFeedback({
-              kind: 'error',
-              message: t('dialogs.settings.sync.e2ePassphraseRequired'),
-            });
-            return;
-          }
-          await adoptLocalDataset(
-            config,
-            device,
-            enableE2eDraft ? passphraseDraft.trim() : null,
-          );
-          announce(t('dialogs.settings.sync.onboardingFresh'));
-        }
-
-        // Shared success bookkeeping. Clear the password/passphrase drafts
-        // (the keychain is canonical now), drop the preview, and refresh the
-        // "Verbunden mit X" card immediately.
-        if (config.kind === 'webdav') setPasswordDraft('');
-        if (config.kind === 'sftp') {
-          setSftpPasswordDraft('');
-          setSftpKeyPassphraseDraft('');
-        }
-        setPassphraseDraft('');
-        setEnableE2eDraft(false);
-        setPreview(null);
-        getSyncAdapterSummary()
-          .then(setAdapterSummary)
-          .catch((err) => {
-            // eslint-disable-next-line no-console
-            console.warn('get_sync_adapter_summary failed', err);
-          });
-        // Make the just-onboarded data visible WITHOUT a restart:
-        //   - refreshCatalogs() re-reads the sidebar's container lists
-        //     (calendars / task lists / contacts / labels / accounts) — the
-        //     store doesn't re-read these on a dataVersion bump, so the LOCAL
-        //     containers the snapshot applied would otherwise stay hidden;
-        //   - invalidateData() bumps dataVersion so the views re-read the
-        //     events/tasks inside those containers;
-        //   - refreshExternalCache() warms the restored external accounts'
-        //     containers from their providers (credentials are in the
-        //     keychain now); each cache-updated event then re-refreshes the
-        //     catalogs as that scope lands.
-        // We deliberately do NOT trigger a sync round here: the backend
-        // already kicks the scheduler at the end of accept/adopt, and a
-        // second manual round racing it produced a spurious "failed" then
-        // "succeeded" pair in the Protokoll.
-        refreshCatalogs();
-        invalidateData();
-        void refreshExternalCache();
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('connect failed', err);
-        setAdapterFeedback({
-          kind: 'error',
-          message: `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
-        });
-        setPreview(null);
-      } finally {
-        setBusyAdapter(false);
-      }
-    },
-    [
-      announce,
-      deviceNameDraft,
-      enableE2eDraft,
-      invalidateData,
-      messageForError,
-      openSyncAccountsConnect,
-      passphraseDraft,
-      preview,
-      refreshCatalogs,
-      t,
-    ],
-  );
-
-  const onConnect = useCallback(async () => {
-    setAdapterFeedback(null);
-    if (configMissingRequired) {
-      setAdapterFeedback({
-        kind: 'error',
-        message: t('dialogs.settings.sync.adapterNeedPath'),
-      });
-      return;
-    }
-    const config = buildConfig();
-    // SFTP: probe the host key BEFORE connecting. The user gets a
-    // deliberate trust gesture on first use or on key rotation (§19.5).
-    // `unchanged` skips the gesture — we already trust this server.
-    if (config.kind === 'sftp') {
-      setBusyAdapter(true);
-      let previewResult: HostKeyPreview;
-      try {
-        previewResult = await previewSftpHostKey(config.host, config.port);
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('preview_sftp_host_key failed', err);
-        setAdapterFeedback({
-          kind: 'error',
-          message: `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
-        });
-        setBusyAdapter(false);
-        return;
-      }
-      if (previewResult.status.kind === 'unchanged') {
-        // Pin matches the stored one — skip the dialog. `setBusyAdapter`
-        // is reset inside `runConnect`.
-        setBusyAdapter(false);
-        await runConnect(config);
-        return;
-      }
-      // Hand off to the dialog. Park the config so the accept handler can
-      // resume the connect with exactly the same payload the user submitted.
-      setBusyAdapter(false);
-      setPendingSftpConfig(config);
-      setTrustPreview(previewResult);
-      return;
-    }
-    // Non-SFTP backends connect directly.
-    await runConnect(config);
-  }, [
-    buildConfig,
-    configMissingRequired,
-    messageForError,
-    runConnect,
-    t,
-  ]);
-
-  // Trust dialog: user accepted the fingerprint. Pin it via the
-  // backend then resume the parked connect.
-  const onTrustAccept = useCallback(
-    async (fingerprint: string) => {
-      const config = pendingSftpConfig;
-      const preview = trustPreview;
-      // Close the dialog before the configure round so the
-      // backdrop / inert doesn't hover over the spinner.
-      setTrustPreview(null);
-      setPendingSftpConfig(null);
-      if (!config || !preview) return;
-      try {
-        await trustSftpHostKey(preview.host_port, fingerprint);
-        // Reflect the new pin in the UI immediately so the
-        // "Vergessen" button shows up without waiting for the
-        // host/port effect to re-fire.
-        setPinnedFingerprint(fingerprint);
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('trust_sftp_host_key failed', err);
-        setAdapterFeedback({
-          kind: 'error',
-          message: `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
-        });
-        return;
-      }
-      await runConnect(config);
-    },
-    [
-      messageForError,
-      pendingSftpConfig,
-      runConnect,
-      t,
-      trustPreview,
-    ],
-  );
-
-  const onTrustCancel = useCallback(() => {
-    setTrustPreview(null);
-    setPendingSftpConfig(null);
-  }, []);
-
-  // "Verbindung testen" — build the adapter, run `test_connection`,
-  // throw the handle away. Never persists, never mutates the
-  // active orchestrator. Both outcomes land in `adapterFeedback`, shown
-  // as a visible message (and live region) beside the buttons.
-  const onTest = useCallback(async () => {
-    setAdapterFeedback(null);
-    if (configMissingRequired) {
-      setAdapterFeedback({
-        kind: 'error',
-        message: t('dialogs.settings.sync.adapterNeedPath'),
-      });
-      return;
-    }
-    setBusyTest(true);
-    try {
-      await testSyncAdapter(buildConfig());
-      setAdapterFeedback({
-        kind: 'ok',
-        message: t('dialogs.settings.sync.adapterTestOk'),
-      });
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('test_sync_adapter failed', err);
-      setAdapterFeedback({
-        kind: 'error',
-        message: `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
-      });
-    } finally {
-      setBusyTest(false);
-    }
-  }, [
-    buildConfig,
-    configMissingRequired,
-    messageForError,
-    t,
-  ]);
-
   const onDisconnect = useCallback(async () => {
-    setBusyAdapter(true);
+    setBusyDisconnect(true);
     try {
       await configureSyncAdapter({ kind: 'none' });
-      setPreview(null);
       setAdapterSummary(null);
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('configure_sync_adapter(none) failed', err);
     } finally {
-      setBusyAdapter(false);
+      setBusyDisconnect(false);
     }
   }, []);
-
-  // Destructive secondary action for an EXISTING remote dataset: discard
-  // it and re-initialize from this device. Behind an explicit confirm; not
-  // the default (the default "Verbinden" joins, non-destructively). Creates
-  // a plaintext dataset — the user can enable encryption afterwards.
-  const onOverwrite = useCallback(async () => {
-    if (!window.confirm(t('dialogs.settings.sync.previewAdoptConfirm'))) return;
-    setBusyAdopt(true);
-    setAdapterFeedback(null);
-    try {
-      await adoptLocalDataset(
-        buildConfig(),
-        deviceNameDraft.trim() || null,
-        null,
-      );
-      announce(t('dialogs.settings.sync.onboardingFresh'));
-      setPreview(null);
-      setPassphraseDraft('');
-      setEnableE2eDraft(false);
-      getSyncAdapterSummary()
-        .then(setAdapterSummary)
-        .catch((err) => {
-          // eslint-disable-next-line no-console
-          console.warn('get_sync_adapter_summary failed', err);
-        });
-    } catch (err) {
-      setAdapterFeedback({
-        kind: 'error',
-        message: `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
-      });
-    } finally {
-      setBusyAdopt(false);
-    }
-  }, [announce, buildConfig, deviceNameDraft, messageForError, t]);
-
-  // Native directory picker for the local-FS adapter path.
-  // Same plugin / failure-mode contract as `onBrowseKey` below —
-  // the text input keeps working if the dialog plugin is
-  // unavailable.
-  const onBrowseLocalPath = useCallback(async () => {
-    try {
-      const selected = await openFileDialog({
-        multiple: false,
-        directory: true,
-        title: t('dialogs.settings.sync.adapterPathDialogTitle'),
-        defaultPath: pathDraft.trim() || undefined,
-      });
-      if (typeof selected === 'string' && selected.length > 0) {
-        setPathDraft(selected);
-      }
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('local path picker failed', err);
-    }
-  }, [pathDraft, t]);
-
-  // Native file picker for the SSH key path. Uses
-  // `tauri-plugin-dialog` so the user gets the platform-native
-  // picker idiom; falls back silently on the (unlikely) error so
-  // the bare text input remains usable.
-  const onBrowseKey = useCallback(async () => {
-    try {
-      const selected = await openFileDialog({
-        multiple: false,
-        directory: false,
-        title: t('dialogs.settings.sync.adapterSftpKeyPathDialogTitle'),
-        // No platform-specific extension filters — SSH keys
-        // commonly carry no extension (`id_ed25519`) or `.pem`
-        // depending on origin. A filter would hide the file the
-        // user is looking for as often as it would help.
-      });
-      // `open` returns `string | string[] | null`. With
-      // `multiple: false` we only ever see a single path or null.
-      if (typeof selected === 'string' && selected.length > 0) {
-        setSftpKeyPathDraft(selected);
-      }
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('SSH key picker failed', err);
-    }
-  }, [t]);
 
   const onCompact = useCallback(async () => {
     setBusyCompact(true);
@@ -872,9 +140,12 @@ export function SyncPanel() {
       announce(
         t('dialogs.settings.sync.compactDone', {
           deleted: report.deleted_logs,
+          stale: report.stale_devices,
         }),
       );
     } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('compact_now failed', err);
       announce(
         `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
         'assertive',
@@ -884,11 +155,7 @@ export function SyncPanel() {
     }
   }, [announce, messageForError, t]);
 
-  // §19.7 — drive the passphrase change. Inline validation
-  // first (both fields filled, new differs from old), then call
-  // the backend. Empties the inputs on success so they don't
-  // sit in memory; surfaces auth failures from the underlying
-  // wrap unwrap as the "wrong current passphrase" message.
+  // §19.7 — drive the passphrase change.
   const onChangePassphrase = useCallback(async () => {
     setPassphraseChangeOk(false);
     setPassphraseChangeError(null);
@@ -916,10 +183,6 @@ export function SyncPanel() {
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('change_sync_passphrase failed', err);
-      // Map `auth` to a user-friendly "wrong current passphrase"
-      // message; everything else goes through the standard
-      // messageForError translation. The auth case is by far the
-      // most likely user-visible failure.
       if (isCommandError(err) && err.code === 'auth') {
         setPassphraseChangeError(
           t('dialogs.settings.sync.passphraseChangeErrorAuth'),
@@ -930,20 +193,9 @@ export function SyncPanel() {
     } finally {
       setBusyPassphraseChange(false);
     }
-  }, [
-    announce,
-    messageForError,
-    newPassphraseDraft,
-    oldPassphraseDraft,
-    t,
-  ]);
+  }, [announce, messageForError, newPassphraseDraft, oldPassphraseDraft, t]);
 
-  // §19.7 — turn off E2E on the dataset. Gated by the same
-  // "current passphrase" input as the change flow, plus a
-  // window.confirm whose message names the cluster-wide
-  // consequence (other devices need to re-onboard). Success
-  // clears the inputs + announces the outcome; failure surfaces
-  // inline.
+  // §19.7 — turn off E2E on the dataset.
   const onDisableEncryption = useCallback(async () => {
     setDisableError(null);
     const oldPp = oldPassphraseDraft.trim();
@@ -971,9 +223,7 @@ export function SyncPanel() {
       // eslint-disable-next-line no-console
       console.warn('disable_sync_encryption failed', err);
       if (isCommandError(err) && err.code === 'auth') {
-        setDisableError(
-          t('dialogs.settings.sync.passphraseChangeErrorAuth'),
-        );
+        setDisableError(t('dialogs.settings.sync.passphraseChangeErrorAuth'));
       } else {
         setDisableError(messageForError(err));
       }
@@ -982,22 +232,13 @@ export function SyncPanel() {
     }
   }, [announce, messageForError, oldPassphraseDraft, t]);
 
-  // §19.7 — turn ON encryption for a dataset that was originally
-  // adopted without it. Mirrors `onDisableEncryption` in shape:
-  // validate the new passphrase, gate behind a window.confirm
-  // (the bulk re-encryption is destructive of the remote's
-  // plaintext copies + other devices need the new passphrase to
-  // keep syncing), then call into the backend. Success clears
-  // the input + flips the inline ok message; failure surfaces
-  // the message.
+  // §19.7 — turn ON encryption for a dataset adopted without it.
   const onEnableEncryption = useCallback(async () => {
     setEnableError(null);
     setEnableOk(false);
     const newPp = enableNewPpDraft.trim();
     if (!newPp) {
-      setEnableError(
-        t('dialogs.settings.sync.enableE2eErrorNeedsPassphrase'),
-      );
+      setEnableError(t('dialogs.settings.sync.enableE2eErrorNeedsPassphrase'));
       return;
     }
     const confirmed = window.confirm(
@@ -1017,14 +258,8 @@ export function SyncPanel() {
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('enable_sync_encryption failed', err);
-      // `conflict` is the "another device flipped it first" race;
-      // surface a dedicated hint so the user knows to re-onboard
-      // via the standard passphrase prompt instead of retrying
-      // this command.
       if (isCommandError(err) && err.code === 'conflict') {
-        setEnableError(
-          t('dialogs.settings.sync.enableE2eErrorConflict'),
-        );
+        setEnableError(t('dialogs.settings.sync.enableE2eErrorConflict'));
       } else {
         setEnableError(messageForError(err));
       }
@@ -1033,13 +268,7 @@ export function SyncPanel() {
     }
   }, [announce, enableNewPpDraft, messageForError, t]);
 
-  // §19.7 — adopt encryption that was activated on another
-  // device. Triggered from the cross-device banner that mounts
-  // when local thinks e2e is off but the last sync round failed
-  // with `encryption_required` (= remote meta says it's on).
-  // Pure unlock; a `kick()`-style refresh after success would be
-  // nice but a manual "Sync now" by the user is also fine since
-  // the orchestrator is already swapped over.
+  // §19.7 — adopt encryption activated on another device.
   const onAdoptRemoteEncryption = useCallback(async () => {
     setAdoptRemoteError(null);
     const pp = adoptRemotePpDraft.trim();
@@ -1054,16 +283,12 @@ export function SyncPanel() {
       await adoptRemoteEncryption(pp);
       setAdoptRemotePpDraft('');
       announce(t('dialogs.settings.sync.adoptRemoteE2eOk'));
-      // Kick a fresh sync round so the indicator + lastError
-      // clear without the user having to click Sync now.
       void triggerSync();
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('adopt_remote_encryption failed', err);
       if (isCommandError(err) && err.code === 'auth') {
-        setAdoptRemoteError(
-          t('dialogs.settings.sync.passphraseChangeErrorAuth'),
-        );
+        setAdoptRemoteError(t('dialogs.settings.sync.passphraseChangeErrorAuth'));
       } else {
         setAdoptRemoteError(messageForError(err));
       }
@@ -1072,115 +297,9 @@ export function SyncPanel() {
     }
   }, [adoptRemotePpDraft, announce, messageForError, t, triggerSync]);
 
-  // §19.6 — Dropbox OAuth handlers.
-  const refreshDropboxSignedIn = useCallback(() => {
-    hasDropboxRefreshToken()
-      .then(setDropboxSignedIn)
-      .catch((err) => {
-        // eslint-disable-next-line no-console
-        console.warn('has_dropbox_refresh_token failed', err);
-        setDropboxSignedIn(false);
-      });
-  }, []);
-
-  useEffect(() => {
-    refreshDropboxSignedIn();
-  }, [refreshDropboxSignedIn]);
-
-  const onConnectDropbox = useCallback(async () => {
-    setAdapterFeedback(null);
-    const clientId = dropboxClientIdDraft.trim();
-    if (!clientId) {
-      setAdapterFeedback({
-        kind: 'error',
-        message: t('dialogs.settings.sync.adapterDropboxNeedsClientId'),
-      });
-      return;
-    }
-    setBusyDropboxOauth(true);
-    try {
-      await connectDropboxOauth(
-        clientId,
-        dropboxClientSecretDraft.trim(),
-      );
-      announce(t('dialogs.settings.sync.adapterDropboxSignedInAnnouncement'));
-      refreshDropboxSignedIn();
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('connect_dropbox_oauth failed', err);
-      setAdapterFeedback({
-        kind: 'error',
-        message: `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
-      });
-    } finally {
-      setBusyDropboxOauth(false);
-    }
-  }, [
-    announce,
-    dropboxClientIdDraft,
-    dropboxClientSecretDraft,
-    messageForError,
-    refreshDropboxSignedIn,
-    t,
-  ]);
-
-  // §19.6 — Google Drive OAuth handlers. Same flow as Dropbox
-  // (probe on mount, run the dance, refresh the flag) but with
-  // a different missing-input announcement: Google needs both
-  // id AND secret before the dance can even start.
-  const refreshGdriveSignedIn = useCallback(() => {
-    hasGoogledriveRefreshToken()
-      .then(setGdriveSignedIn)
-      .catch((err) => {
-        // eslint-disable-next-line no-console
-        console.warn('has_googledrive_refresh_token failed', err);
-        setGdriveSignedIn(false);
-      });
-  }, []);
-
-  useEffect(() => {
-    refreshGdriveSignedIn();
-  }, [refreshGdriveSignedIn]);
-
-  const onConnectGoogledrive = useCallback(async () => {
-    setAdapterFeedback(null);
-    const clientId = gdriveClientIdDraft.trim();
-    const clientSecret = gdriveClientSecretDraft.trim();
-    if (!clientId || !clientSecret) {
-      setAdapterFeedback({
-        kind: 'error',
-        message: t('dialogs.settings.sync.adapterGoogledriveNeedsClientId'),
-      });
-      return;
-    }
-    setBusyGdriveOauth(true);
-    try {
-      await connectGoogledriveOauth(clientId, clientSecret);
-      announce(
-        t('dialogs.settings.sync.adapterGoogledriveSignedInAnnouncement'),
-      );
-      refreshGdriveSignedIn();
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('connect_googledrive_oauth failed', err);
-      setAdapterFeedback({
-        kind: 'error',
-        message: `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
-      });
-    } finally {
-      setBusyGdriveOauth(false);
-    }
-  }, [
-    announce,
-    gdriveClientIdDraft,
-    gdriveClientSecretDraft,
-    messageForError,
-    refreshGdriveSignedIn,
-    t,
-  ]);
-
   const lastSyncedLabel = (() => {
-    if (!status?.last_synced_at) return t('dialogs.settings.sync.stateNeverSynced');
+    if (!status?.last_synced_at)
+      return t('dialogs.settings.sync.stateNeverSynced');
     try {
       const dt = new Date(status.last_synced_at);
       return t('dialogs.settings.sync.stateLastSynced', {
@@ -1191,52 +310,7 @@ export function SyncPanel() {
     }
   })();
 
-  // When the adapter becomes (un)configured externally — via a
-  // second app instance, or the onboarding sub-flow above — keep
-  // the preview clean. A configured adapter doesn't need an
-  // onboarding card.
-  useEffect(() => {
-    if (status?.configured) {
-      setPreview(null);
-    }
-  }, [status?.configured]);
-
-  // Look up the currently-pinned fingerprint whenever the SFTP
-  // host/port pair changes — so the "Aktueller Pin" line + the
-  // "Vergessen" button update without a manual refresh. Debounced
-  // via the natural typing cadence; an extra short delay isn't
-  // worth the complexity for a fingerprint readout.
-  useEffect(() => {
-    if (kindDraft !== 'sftp') {
-      setPinnedFingerprint(null);
-      return;
-    }
-    const host = sftpHostDraft.trim();
-    if (!host) {
-      setPinnedFingerprint(null);
-      return;
-    }
-    const port = Number.parseInt(sftpPortDraft, 10);
-    const resolvedPort = Number.isFinite(port) && port > 0 ? port : 22;
-    const hostPort = `${host}:${resolvedPort}`;
-    let cancelled = false;
-    getPinnedSftpHostKey(hostPort)
-      .then((fp) => {
-        if (!cancelled) setPinnedFingerprint(fp);
-      })
-      .catch((err) => {
-        // eslint-disable-next-line no-console
-        console.warn('get_pinned_sftp_host_key failed', err);
-        if (!cancelled) setPinnedFingerprint(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [kindDraft, sftpHostDraft, sftpPortDraft]);
-
-  // Reload the persisted-adapter summary. Called on mount, after
-  // configure succeeds (form → summary), and after disconnect
-  // (summary → form). Cheap: no IO, just a few pref reads.
+  // Reload the persisted-adapter summary (mount + after configure/disconnect).
   const refreshAdapterSummary = useCallback(() => {
     getSyncAdapterSummary()
       .then(setAdapterSummary)
@@ -1251,33 +325,17 @@ export function SyncPanel() {
     refreshAdapterSummary();
   }, [refreshAdapterSummary, status?.configured]);
 
-  // "Pin vergessen" — drop the stored fingerprint so the next
-  // connect goes through the first-use trust dialog again. Used
-  // when the user knows their server key was rotated and wants
-  // to avoid the mismatch warning on the next round.
-  const onForgetPin = useCallback(async () => {
-    const host = sftpHostDraft.trim();
-    if (!host) return;
-    const port = Number.parseInt(sftpPortDraft, 10);
-    const resolvedPort = Number.isFinite(port) && port > 0 ? port : 22;
-    const hostPort = `${host}:${resolvedPort}`;
-    const confirmed = window.confirm(
-      t('dialogs.settings.sync.sftpForgetPinConfirm', { hostPort }),
-    );
-    if (!confirmed) return;
-    try {
-      await forgetSftpHostKey(hostPort);
-      setPinnedFingerprint(null);
-      announce(t('dialogs.settings.sync.sftpForgetPinDone'));
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('forget_sftp_host_key failed', err);
-      announce(
-        `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
-        'assertive',
-      );
-    }
-  }, [announce, messageForError, sftpHostDraft, sftpPortDraft, t]);
+  // Refresh the summary card after the embedded config form connects, and
+  // prompt for any account credentials a restore couldn't recover.
+  const onTargetConnected = useCallback(
+    (outcome: SyncConnectOutcome) => {
+      refreshAdapterSummary();
+      if (outcome.accountsNeedingConnect.length > 0) {
+        openSyncAccountsConnect(outcome.accountsNeedingConnect);
+      }
+    },
+    [openSyncAccountsConnect, refreshAdapterSummary],
+  );
 
   return (
     <div className="sync-panel">
@@ -1302,7 +360,9 @@ export function SyncPanel() {
               : t('dialogs.settings.sync.credentialsLocalNote')}
           </FocusableNote>
         )}
-        <FocusableNote className="sync-panel__hint">{lastSyncedLabel}</FocusableNote>
+        <FocusableNote className="sync-panel__hint">
+          {lastSyncedLabel}
+        </FocusableNote>
         {lastReport && (
           <FocusableNote className="sync-panel__hint">
             {t('dialogs.settings.sync.lastReport', {
@@ -1329,17 +389,11 @@ export function SyncPanel() {
         )}
         <div className="sync-panel__actions">
           {(() => {
-            // Use `aria-disabled` + a no-op handler instead of the
-            // native `disabled` attribute. Browsers strip focus
-            // from a button the moment it becomes disabled, which
-            // would leave NVDA in focus mode with no anchor and
-            // (worse) silently kill the user's tab cursor while
-            // the sync runs. Keeping the button focusable + busy
-            // preserves the tab stop and lets the screen reader
-            // announce the state change via aria-busy on the
-            // section.
-            const busy =
-              !status?.configured || triggering || status?.in_flight;
+            // `aria-disabled` + a no-op handler instead of native `disabled`:
+            // browsers strip focus from a disabling button, which would leave
+            // NVDA in focus mode with no anchor. Keeping it focusable + busy
+            // preserves the tab stop.
+            const busy = !status?.configured || triggering || status?.in_flight;
             return (
               <button
                 type="button"
@@ -1356,8 +410,6 @@ export function SyncPanel() {
             );
           })()}
           {(() => {
-            // Same aria-disabled pattern as Sync now — see the
-            // comment above for why we avoid the native disabled.
             const busy = !status?.configured || busyCompact;
             return (
               <button
@@ -1395,10 +447,6 @@ export function SyncPanel() {
         >
           {INTERVAL_PRESETS.map((min) => (
             <option key={min} value={min}>
-              {/* `count` lets i18next pick `_one` / `_other`
-                  automatically; `minutes` is the actual
-                  interpolation. Reads identically to the manual
-                  ternary this replaced. */}
               {t('dialogs.settings.sync.intervalOption', {
                 count: min,
                 minutes: min,
@@ -1410,27 +458,26 @@ export function SyncPanel() {
 
       <section aria-labelledby={adapterHeadingId}>
         <h3 id={adapterHeadingId}>{t('dialogs.settings.sync.adapterTitle')}</h3>
-        {/* When configured: show a non-editable summary card plus
-            a single Disconnect button. The full form below is
-            hidden so the UI no longer reads as "you can have
-            multiple adapters" / "type into these fields to
-            switch". To swap adapters, the user has to disconnect
-            first. */}
+        {/* When configured: a non-editable summary + Disconnect. To swap
+            adapters, the user disconnects first. Otherwise: the shared config
+            form. */}
         {status?.configured && adapterSummary ? (
           <div className="sync-panel__connected-summary">
             <FocusableNote className="sync-panel__hint">
               {t('dialogs.settings.sync.connectedSummary', {
-                kind: t(`dialogs.settings.sync.adapterKind${
-                  adapterSummary.kind.charAt(0).toUpperCase() +
-                  adapterSummary.kind.slice(1)
-                }`),
+                kind: t(
+                  `dialogs.settings.sync.adapterKind${
+                    adapterSummary.kind.charAt(0).toUpperCase() +
+                    adapterSummary.kind.slice(1)
+                  }`,
+                ),
                 detail: adapterSummary.detail || '–',
               })}
             </FocusableNote>
             <div className="sync-panel__actions">
               <button
                 type="button"
-                disabled={busyAdapter}
+                disabled={busyDisconnect}
                 onClick={() => void onDisconnect()}
               >
                 {t('dialogs.settings.sync.adapterDisconnect')}
@@ -1438,729 +485,19 @@ export function SyncPanel() {
             </div>
           </div>
         ) : (
-          <>
-        <FocusableNote className="sync-panel__hint">
-          {t('dialogs.settings.sync.adapterBody')}
-        </FocusableNote>
-        <div className="sync-panel__field">
-          <label>
-            {t('dialogs.settings.sync.adapterKind')}
-            <select
-              value={kindDraft}
-              onChange={(e) =>
-                setKindDraft(
-                  e.target.value as
-                    | 'local'
-                    | 'webdav'
-                    | 'sftp'
-                    | 'ftp'
-                    | 'dropbox'
-                    | 'googledrive'
-                    | 'none',
-                )
-              }
-            >
-              <option value="local">
-                {t('dialogs.settings.sync.adapterKindLocal')}
-              </option>
-              <option value="webdav">
-                {t('dialogs.settings.sync.adapterKindWebdav')}
-              </option>
-              <option value="sftp">
-                {t('dialogs.settings.sync.adapterKindSftp')}
-              </option>
-              <option value="ftp">
-                {t('dialogs.settings.sync.adapterKindFtp')}
-              </option>
-              <option value="dropbox">
-                {t('dialogs.settings.sync.adapterKindDropbox')}
-              </option>
-              <option value="googledrive">
-                {t('dialogs.settings.sync.adapterKindGoogledrive')}
-              </option>
-              <option value="none">
-                {t('dialogs.settings.sync.adapterKindNone')}
-              </option>
-            </select>
-          </label>
-        </div>
-        {kindDraft === 'local' && (
-          <div className="sync-panel__field">
-            <label>
-              {t('dialogs.settings.sync.adapterPath')}
-              <div className="sync-panel__filepicker">
-                <input
-                  type="text"
-                  value={pathDraft}
-                  onChange={(e) => setPathDraft(e.target.value)}
-                  placeholder="/Volumes/NAS/aperio"
-                />
-                <button
-                  type="button"
-                  onClick={() => void onBrowseLocalPath()}
-                  aria-label={t(
-                    'dialogs.settings.sync.adapterPathBrowseAria',
-                  )}
-                >
-                  {t('dialogs.settings.sync.adapterPathBrowse')}
-                </button>
-              </div>
-            </label>
-            <FocusableNote className="sync-panel__hint">
-              {t('dialogs.settings.sync.adapterPathHint')}
-            </FocusableNote>
-          </div>
-        )}
-        {kindDraft === 'webdav' && (
-          <>
-            <div className="sync-panel__field">
-              <label>
-                {t('dialogs.settings.sync.adapterWebdavUrl')}
-                <input
-                  type="url"
-                  value={urlDraft}
-                  onChange={(e) => setUrlDraft(e.target.value)}
-                  placeholder="https://cloud.example.com/remote.php/dav/files/alice/aperio/"
-                />
-              </label>
-              <FocusableNote className="sync-panel__hint">
-                {t('dialogs.settings.sync.adapterWebdavUrlHint')}
-              </FocusableNote>
-            </div>
-            <div className="sync-panel__field">
-              <label>
-                {t('dialogs.settings.sync.adapterWebdavUser')}
-                <input
-                  type="text"
-                  value={userDraft}
-                  onChange={(e) => setUserDraft(e.target.value)}
-                  autoComplete="username"
-                />
-              </label>
-            </div>
-            <div className="sync-panel__field">
-              <label>
-                {t('dialogs.settings.sync.adapterWebdavPassword')}
-                <input
-                  type="password"
-                  value={passwordDraft}
-                  onChange={(e) => setPasswordDraft(e.target.value)}
-                  autoComplete="new-password"
-                  placeholder={
-                    status?.configured
-                      ? t('dialogs.settings.sync.adapterWebdavPasswordKept')
-                      : undefined
-                  }
-                />
-              </label>
-              <FocusableNote className="sync-panel__hint">
-                {t('dialogs.settings.sync.adapterWebdavPasswordHint')}
-              </FocusableNote>
-            </div>
-          </>
-        )}
-        {kindDraft === 'sftp' && (
-          <>
-            <div className="sync-panel__field">
-              <label>
-                {t('dialogs.settings.sync.adapterSftpHost')}
-                <input
-                  type="text"
-                  value={sftpHostDraft}
-                  onChange={(e) => setSftpHostDraft(e.target.value)}
-                  placeholder="nas.example.com"
-                />
-              </label>
-            </div>
-            <div className="sync-panel__field">
-              <label>
-                {t('dialogs.settings.sync.adapterSftpPort')}
-                <input
-                  type="number"
-                  value={sftpPortDraft}
-                  onChange={(e) => setSftpPortDraft(e.target.value)}
-                  min={1}
-                  max={65535}
-                />
-              </label>
-              <FocusableNote className="sync-panel__hint">
-                {t('dialogs.settings.sync.adapterSftpPortHint')}
-              </FocusableNote>
-            </div>
-            <div className="sync-panel__field">
-              <label>
-                {t('dialogs.settings.sync.adapterSftpUser')}
-                <input
-                  type="text"
-                  value={sftpUserDraft}
-                  onChange={(e) => setSftpUserDraft(e.target.value)}
-                  autoComplete="username"
-                />
-              </label>
-            </div>
-            <div className="sync-panel__field">
-              <label>
-                {t('dialogs.settings.sync.adapterSftpPath')}
-                <input
-                  type="text"
-                  value={sftpPathDraft}
-                  onChange={(e) => setSftpPathDraft(e.target.value)}
-                  placeholder="/home/alice/aperio"
-                />
-              </label>
-              <FocusableNote className="sync-panel__hint">
-                {t('dialogs.settings.sync.adapterSftpPathHint')}
-              </FocusableNote>
-            </div>
-            <fieldset className="sync-panel__field sync-panel__authmethod">
-              <legend>
-                {t('dialogs.settings.sync.adapterSftpAuthMethod')}
-              </legend>
-              <label>
-                <input
-                  type="radio"
-                  name="sftp-auth"
-                  value="password"
-                  checked={sftpAuthDraft === 'password'}
-                  onChange={() => setSftpAuthDraft('password')}
-                />{' '}
-                {t('dialogs.settings.sync.adapterSftpAuthPassword')}
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  name="sftp-auth"
-                  value="key"
-                  checked={sftpAuthDraft === 'key'}
-                  onChange={() => setSftpAuthDraft('key')}
-                />{' '}
-                {t('dialogs.settings.sync.adapterSftpAuthKey')}
-              </label>
-            </fieldset>
-            {sftpAuthDraft === 'password' && (
-              <div className="sync-panel__field">
-                <label>
-                  {t('dialogs.settings.sync.adapterSftpPassword')}
-                  <input
-                    type="password"
-                    value={sftpPasswordDraft}
-                    onChange={(e) =>
-                      setSftpPasswordDraft(e.target.value)
-                    }
-                    autoComplete="new-password"
-                    placeholder={
-                      status?.configured
-                        ? t(
-                            'dialogs.settings.sync.adapterWebdavPasswordKept',
-                          )
-                        : undefined
-                    }
-                  />
-                </label>
-                <FocusableNote className="sync-panel__hint">
-                  {t('dialogs.settings.sync.adapterSftpPasswordHint')}
-                </FocusableNote>
-              </div>
-            )}
-            {pinnedFingerprint && (
-              <div className="sync-panel__field sync-panel__pin">
-                <FocusableNote className="sync-panel__hint">
-                  {t('dialogs.settings.sync.sftpPinCurrentWithValue', {
-                    fingerprint: pinnedFingerprint,
-                  })}
-                </FocusableNote>
-                <FocusableNote className="sync-panel__hint">
-                  {t('dialogs.settings.sync.sftpPinHint')}
-                </FocusableNote>
-                <button type="button" onClick={() => void onForgetPin()}>
-                  {t('dialogs.settings.sync.sftpForgetPin')}
-                </button>
-              </div>
-            )}
-            {sftpAuthDraft === 'key' && (
-              <>
-                <div className="sync-panel__field">
-                  <label>
-                    {t('dialogs.settings.sync.adapterSftpKeyPath')}
-                    <div className="sync-panel__filepicker">
-                      <input
-                        type="text"
-                        value={sftpKeyPathDraft}
-                        onChange={(e) =>
-                          setSftpKeyPathDraft(e.target.value)
-                        }
-                        placeholder="/home/alice/.ssh/id_ed25519"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => void onBrowseKey()}
-                        aria-label={t(
-                          'dialogs.settings.sync.adapterSftpKeyPathBrowseAria',
-                        )}
-                      >
-                        {t('dialogs.settings.sync.adapterSftpKeyPathBrowse')}
-                      </button>
-                    </div>
-                  </label>
-                  <FocusableNote className="sync-panel__hint">
-                    {t('dialogs.settings.sync.adapterSftpKeyPathHint')}
-                  </FocusableNote>
-                </div>
-                <div className="sync-panel__field">
-                  <label>
-                    {t('dialogs.settings.sync.adapterSftpKeyPassphrase')}
-                    <input
-                      type="password"
-                      value={sftpKeyPassphraseDraft}
-                      onChange={(e) =>
-                        setSftpKeyPassphraseDraft(e.target.value)
-                      }
-                      autoComplete="new-password"
-                      placeholder={
-                        status?.configured
-                          ? t(
-                              'dialogs.settings.sync.adapterWebdavPasswordKept',
-                            )
-                          : undefined
-                      }
-                    />
-                  </label>
-                  <FocusableNote className="sync-panel__hint">
-                    {t(
-                      'dialogs.settings.sync.adapterSftpKeyPassphraseHint',
-                    )}
-                  </FocusableNote>
-                </div>
-              </>
-            )}
-          </>
-        )}
-        {kindDraft === 'ftp' && (
-          <>
-            <div className="sync-panel__field">
-              <label>
-                {t('dialogs.settings.sync.adapterFtpHost')}
-                <input
-                  type="text"
-                  value={ftpHostDraft}
-                  onChange={(e) => setFtpHostDraft(e.target.value)}
-                  placeholder="ftp.example.com"
-                />
-              </label>
-            </div>
-            <fieldset className="sync-panel__field sync-panel__authmethod">
-              <legend>
-                {t('dialogs.settings.sync.adapterFtpMode')}
-              </legend>
-              <label>
-                <input
-                  type="radio"
-                  name="ftp-mode"
-                  value="explicit"
-                  checked={ftpModeDraft === 'explicit'}
-                  onChange={() => {
-                    setFtpModeDraft('explicit');
-                    // Swap the port default if the user
-                    // hasn't customised it away from the
-                    // implicit value yet.
-                    if (ftpPortDraft === '990') setFtpPortDraft('21');
-                  }}
-                />{' '}
-                {t('dialogs.settings.sync.adapterFtpModeExplicit')}
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  name="ftp-mode"
-                  value="implicit"
-                  checked={ftpModeDraft === 'implicit'}
-                  onChange={() => {
-                    setFtpModeDraft('implicit');
-                    if (ftpPortDraft === '21') setFtpPortDraft('990');
-                  }}
-                />{' '}
-                {t('dialogs.settings.sync.adapterFtpModeImplicit')}
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  name="ftp-mode"
-                  value="plain"
-                  checked={ftpModeDraft === 'plain'}
-                  onChange={() => {
-                    setFtpModeDraft('plain');
-                    // Plain shares the explicit FTPS port
-                    // (server-side they're the same listener;
-                    // plain just skips AUTH TLS).
-                    if (ftpPortDraft === '990') setFtpPortDraft('21');
-                  }}
-                />{' '}
-                {t('dialogs.settings.sync.adapterFtpModePlain')}
-              </label>
-              <FocusableNote className="sync-panel__hint">
-                {t('dialogs.settings.sync.adapterFtpModeHint')}
-              </FocusableNote>
-              {/* Plain mode gets an additional, stronger
-                  warning rendered as role="alert" so the
-                  user understands the privacy trade-off
-                  before they click Connect. */}
-              {ftpModeDraft === 'plain' && (
-                <p
-                  className="sync-panel__warning"
-                  role="alert"
-                >
-                  {t('dialogs.settings.sync.adapterFtpModePlainWarning')}
-                </p>
-              )}
-            </fieldset>
-            <div className="sync-panel__field">
-              <label>
-                {t('dialogs.settings.sync.adapterFtpPort')}
-                <input
-                  type="number"
-                  value={ftpPortDraft}
-                  onChange={(e) => setFtpPortDraft(e.target.value)}
-                  min={1}
-                  max={65535}
-                />
-              </label>
-            </div>
-            <div className="sync-panel__field">
-              <label>
-                {t('dialogs.settings.sync.adapterFtpUser')}
-                <input
-                  type="text"
-                  value={ftpUserDraft}
-                  onChange={(e) => setFtpUserDraft(e.target.value)}
-                  autoComplete="username"
-                />
-              </label>
-            </div>
-            <div className="sync-panel__field">
-              <label>
-                {t('dialogs.settings.sync.adapterFtpPath')}
-                <input
-                  type="text"
-                  value={ftpPathDraft}
-                  onChange={(e) => setFtpPathDraft(e.target.value)}
-                  placeholder="/aperio"
-                />
-              </label>
-              <FocusableNote className="sync-panel__hint">
-                {t('dialogs.settings.sync.adapterFtpPathHint')}
-              </FocusableNote>
-            </div>
-            <div className="sync-panel__field">
-              <label>
-                {t('dialogs.settings.sync.adapterFtpPassword')}
-                <input
-                  type="password"
-                  value={ftpPasswordDraft}
-                  onChange={(e) => setFtpPasswordDraft(e.target.value)}
-                  autoComplete="new-password"
-                  placeholder={
-                    status?.configured
-                      ? t(
-                          'dialogs.settings.sync.adapterWebdavPasswordKept',
-                        )
-                      : undefined
-                  }
-                />
-              </label>
-              {/* The TLS-recommended hint is purely
-                  informational; with the Plain radio
-                  available the user might genuinely want to
-                  pick it for a LAN setup, but the surrounding
-                  warning above makes the trade-off
-                  explicit. */}
-              <FocusableNote className="sync-panel__hint">
-                {ftpModeDraft === 'plain'
-                  ? t(
-                      'dialogs.settings.sync.adapterFtpPlainPasswordHint',
-                    )
-                  : t('dialogs.settings.sync.adapterFtpTlsRequiredHint')}
-              </FocusableNote>
-            </div>
-          </>
-        )}
-        {kindDraft === 'dropbox' && (
-          <>
-            <FocusableNote className="sync-panel__hint">
-              {t('dialogs.settings.sync.adapterDropboxIntro')}
-            </FocusableNote>
-            <div className="sync-panel__field">
-              <label>
-                {t('dialogs.settings.sync.adapterDropboxClientId')}
-                <input
-                  type="text"
-                  value={dropboxClientIdDraft}
-                  onChange={(e) =>
-                    setDropboxClientIdDraft(e.target.value)
-                  }
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </label>
-              <FocusableNote className="sync-panel__hint">
-                {t('dialogs.settings.sync.adapterDropboxClientIdHint')}
-              </FocusableNote>
-            </div>
-            <div className="sync-panel__field">
-              <label>
-                {t('dialogs.settings.sync.adapterDropboxClientSecret')}
-                <input
-                  type="password"
-                  value={dropboxClientSecretDraft}
-                  onChange={(e) =>
-                    setDropboxClientSecretDraft(e.target.value)
-                  }
-                  autoComplete="off"
-                />
-              </label>
-              <FocusableNote className="sync-panel__hint">
-                {t('dialogs.settings.sync.adapterDropboxClientSecretHint')}
-              </FocusableNote>
-            </div>
-            <div className="sync-panel__field">
-              <label>
-                {t('dialogs.settings.sync.adapterDropboxPath')}
-                <input
-                  type="text"
-                  value={dropboxPathDraft}
-                  onChange={(e) => setDropboxPathDraft(e.target.value)}
-                  placeholder="/aperio"
-                  spellCheck={false}
-                />
-              </label>
-              <FocusableNote className="sync-panel__hint">
-                {t('dialogs.settings.sync.adapterDropboxPathHint')}
-              </FocusableNote>
-            </div>
-            <div className="sync-panel__actions">
-              <button
-                type="button"
-                disabled={busyDropboxOauth}
-                onClick={() => void onConnectDropbox()}
-              >
-                {busyDropboxOauth
-                  ? t('dialogs.settings.sync.adapterDropboxSigningIn')
-                  : dropboxSignedIn
-                    ? t('dialogs.settings.sync.adapterDropboxResignIn')
-                    : t('dialogs.settings.sync.adapterDropboxSignIn')}
-              </button>
-              {dropboxSignedIn && (
-                <span
-                  className="sync-panel__hint"
-                  role="status"
-                  aria-live="polite"
-                >
-                  {t('dialogs.settings.sync.adapterDropboxSignedIn')}
-                </span>
-              )}
-            </div>
-          </>
-        )}
-        {kindDraft === 'googledrive' && (
-          <>
-            <FocusableNote className="sync-panel__hint">
-              {t('dialogs.settings.sync.adapterGoogledriveIntro')}
-            </FocusableNote>
-            <div className="sync-panel__field">
-              <label>
-                {t('dialogs.settings.sync.adapterGoogledriveClientId')}
-                <input
-                  type="text"
-                  value={gdriveClientIdDraft}
-                  onChange={(e) =>
-                    setGdriveClientIdDraft(e.target.value)
-                  }
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </label>
-              <FocusableNote className="sync-panel__hint">
-                {t(
-                  'dialogs.settings.sync.adapterGoogledriveClientIdHint',
-                )}
-              </FocusableNote>
-            </div>
-            <div className="sync-panel__field">
-              <label>
-                {t('dialogs.settings.sync.adapterGoogledriveClientSecret')}
-                <input
-                  type="password"
-                  value={gdriveClientSecretDraft}
-                  onChange={(e) =>
-                    setGdriveClientSecretDraft(e.target.value)
-                  }
-                  autoComplete="off"
-                />
-              </label>
-              <FocusableNote className="sync-panel__hint">
-                {t(
-                  'dialogs.settings.sync.adapterGoogledriveClientSecretHint',
-                )}
-              </FocusableNote>
-            </div>
-            <div className="sync-panel__field">
-              <label>
-                {t('dialogs.settings.sync.adapterGoogledriveFolderName')}
-                <input
-                  type="text"
-                  value={gdriveFolderNameDraft}
-                  onChange={(e) =>
-                    setGdriveFolderNameDraft(e.target.value)
-                  }
-                  placeholder="Aperio"
-                  spellCheck={false}
-                />
-              </label>
-              <FocusableNote className="sync-panel__hint">
-                {t(
-                  'dialogs.settings.sync.adapterGoogledriveFolderNameHint',
-                )}
-              </FocusableNote>
-            </div>
-            <div className="sync-panel__actions">
-              <button
-                type="button"
-                disabled={busyGdriveOauth}
-                onClick={() => void onConnectGoogledrive()}
-              >
-                {busyGdriveOauth
-                  ? t('dialogs.settings.sync.adapterGoogledriveSigningIn')
-                  : gdriveSignedIn
-                    ? t('dialogs.settings.sync.adapterGoogledriveResignIn')
-                    : t('dialogs.settings.sync.adapterGoogledriveSignIn')}
-              </button>
-              {gdriveSignedIn && (
-                <span
-                  className="sync-panel__hint"
-                  role="status"
-                  aria-live="polite"
-                >
-                  {t('dialogs.settings.sync.adapterGoogledriveSignedIn')}
-                </span>
-              )}
-            </div>
-          </>
-        )}
-        {/* Device name — registers this device when joining or
-            initializing a dataset. */}
-        <div className="sync-panel__field">
-          <label>
-            {t('dialogs.settings.sync.deviceName')}
-            <input
-              type="text"
-              value={deviceNameDraft}
-              onChange={(e) => setDeviceNameDraft(e.target.value)}
-              placeholder="Desktop"
-            />
-          </label>
-          <FocusableNote className="sync-panel__hint">
-            {t('dialogs.settings.sync.deviceNameHint')}
-          </FocusableNote>
-        </div>
-
-        {/* Inputs the connect preview reveals on demand:
-            - empty target → optional "enable encryption" setup;
-            - existing + encrypted → passphrase to unlock;
-            - existing → a short summary of what's there. */}
-        {preview?.kind === 'empty' && (
-          <E2eEnableInput
-            enabled={enableE2eDraft}
-            onToggle={setEnableE2eDraft}
-            passphrase={passphraseDraft}
-            onPassphraseChange={setPassphraseDraft}
-            t={t}
-          />
-        )}
-        {preview?.kind === 'existing' && (
-          <>
-            {preview.e2e_enabled && (
-              <E2ePassphrasePrompt
-                passphrase={passphraseDraft}
-                onPassphraseChange={setPassphraseDraft}
-                t={t}
-              />
-            )}
-            <SyncExistingInfo preview={preview} t={t} fmt={fmt} />
-          </>
-        )}
-
-        <div className="sync-panel__actions">
-          <button
-            type="button"
-            disabled={busyAdapter}
-            onClick={() => void onConnect()}
-          >
-            {busyAdapter
-              ? t('dialogs.settings.sync.adapterConnecting')
-              : t('dialogs.settings.sync.adapterConfigure')}
-          </button>
-          {/* "Verbindung testen" verifies host / URL / credentials
-              without committing anything. */}
-          {kindDraft !== 'none' && (
-            <button
-              type="button"
-              disabled={busyAdapter || busyTest}
-              onClick={() => void onTest()}
-            >
-              {busyTest
-                ? t('dialogs.settings.sync.adapterTesting')
-                : t('dialogs.settings.sync.adapterTest')}
-            </button>
-          )}
-        </div>
-
-        {/* Secondary, destructive: discard the existing remote dataset and
-            re-initialize from this device. Never the default — "Verbinden"
-            above joins non-destructively. */}
-        {preview?.kind === 'existing' && (
-          <button
-            type="button"
-            className="sync-panel__overwrite form__action--danger"
-            disabled={busyAdopt}
-            onClick={() => void onOverwrite()}
-          >
-            {t('dialogs.settings.sync.previewAdoptButton')}
-          </button>
-        )}
-
-        {/* Visible outcome of connect / test — also the screen-reader live
-            region (red error / muted hint), as AccountsPanel does. */}
-        {adapterFeedback && (
-          <p
-            className={
-              adapterFeedback.kind === 'error' ? 'form__error' : 'form__hint'
-            }
-            role={adapterFeedback.kind === 'error' ? 'alert' : 'status'}
-          >
-            {adapterFeedback.message}
-          </p>
-        )}
-          </>
+          <SyncTargetConfigForm status={status} onConnected={onTargetConnected} />
         )}
       </section>
 
-      {/* §19.7 — cross-device adoption banner. Appears when
-          local thinks E2E is off but the last sync round failed
-          with `encryption_required` (= another device just
-          flipped meta.json to `e2e_enabled = true`). The user
-          enters the dataset passphrase; the backend unlocks the
-          DEK + swaps adapters; the follow-up sync_now resumes
-          syncing transparently. */}
+      {/* §19.7 — cross-device adoption banner. */}
       {status?.configured &&
         !status?.e2e_enabled &&
         status?.last_error_code === 'encryption_required' && (
-          <section
-            className="sync-panel__remote-e2e-banner"
-            role="alert"
-          >
-            <h3>
-              {t('dialogs.settings.sync.adoptRemoteE2eTitle')}
-            </h3>
-            <FocusableNote>{t('dialogs.settings.sync.adoptRemoteE2eHint')}</FocusableNote>
+          <section className="sync-panel__remote-e2e-banner" role="alert">
+            <h3>{t('dialogs.settings.sync.adoptRemoteE2eTitle')}</h3>
+            <FocusableNote>
+              {t('dialogs.settings.sync.adoptRemoteE2eHint')}
+            </FocusableNote>
             <div className="sync-panel__field">
               <label>
                 {t('dialogs.settings.sync.adoptRemoteE2ePassphraseLabel')}
@@ -2174,8 +511,7 @@ export function SyncPanel() {
             </div>
             {adoptRemoteError && (
               <p className="sync-panel__error" role="alert">
-                {t('dialogs.settings.sync.errorPrefix')}:{' '}
-                {adoptRemoteError}
+                {t('dialogs.settings.sync.errorPrefix')}: {adoptRemoteError}
               </p>
             )}
             <div className="sync-panel__actions">
@@ -2191,11 +527,8 @@ export function SyncPanel() {
             </div>
           </section>
         )}
-      {/* §19.7 — turn on encryption for an existing,
-          unencrypted dataset. Only visible when the dataset is
-          configured but `e2e_enabled` is false. Mirror image of
-          the passphrase-change section below: never both at
-          once. */}
+
+      {/* §19.7 — turn on encryption for an existing unencrypted dataset. */}
       {status?.configured && !status?.e2e_enabled && (
         <section aria-labelledby={enableE2eHeadingId}>
           <h3 id={enableE2eHeadingId}>
@@ -2241,13 +574,8 @@ export function SyncPanel() {
           </div>
         </section>
       )}
-      {/* §19.7 — change passphrase. Only visible when the
-          dataset is actually encrypted and configured; a
-          non-E2E or unconfigured sync setup has nothing to
-          rotate. The DEK doesn't change so other devices
-          keep syncing without interruption — the new
-          passphrase is only needed to onboard a fresh
-          device after this point. */}
+
+      {/* §19.7 — change / disable passphrase (encrypted + configured only). */}
       {status?.configured && status?.e2e_enabled && (
         <section aria-labelledby={passphraseHeadingId}>
           <h3 id={passphraseHeadingId}>
@@ -2280,8 +608,7 @@ export function SyncPanel() {
           </div>
           {passphraseChangeError && (
             <p className="sync-panel__error" role="alert">
-              {t('dialogs.settings.sync.errorPrefix')}:{' '}
-              {passphraseChangeError}
+              {t('dialogs.settings.sync.errorPrefix')}: {passphraseChangeError}
             </p>
           )}
           {passphraseChangeOk && (
@@ -2304,11 +631,6 @@ export function SyncPanel() {
                 ? t('dialogs.settings.sync.passphraseChangeRunning')
                 : t('dialogs.settings.sync.passphraseChangeAction')}
             </button>
-            {/* "Disable encryption" — destructive, gated by the
-                same "current passphrase" input + a window.confirm.
-                Lives in the same section because both flows need
-                the user to type their current passphrase
-                first. */}
             <button
               type="button"
               disabled={busyPassphraseChange || busyDisable}
@@ -2324,147 +646,9 @@ export function SyncPanel() {
           </FocusableNote>
         </section>
       )}
-      {/* §19.9 detailed Sync-Protokoll. Always rendered (no
-          gating on `configured`) so users can still see the
-          history of past attempts after a disconnect. */}
+
+      {/* §19.9 detailed Sync-Protokoll. Always rendered. */}
       <SyncProtocolSection headingId={protocolHeadingId} />
-      <SyncSftpTrustDialog
-        isOpen={trustPreview !== null}
-        preview={trustPreview}
-        onAccept={(fp) => void onTrustAccept(fp)}
-        onCancel={onTrustCancel}
-      />
-    </div>
-  );
-}
-
-/** Read-only summary of what's already in an existing remote dataset,
- *  shown under the connect form once a preview detects one. The actions
- *  (join / overwrite) live on the unified "Verbinden" + the secondary
- *  destructive button in the main panel. */
-function SyncExistingInfo({
-  preview,
-  t,
-  fmt,
-}: {
-  preview: Extract<SyncPreview, { kind: 'existing' }>;
-  t: ReturnType<typeof useTranslation>['t'];
-  fmt: ReturnType<typeof useDateFormat>;
-}) {
-  const summary =
-    preview.snapshot_timestamp !== null
-      ? t('dialogs.settings.sync.previewExisting', {
-          time: (() => {
-            try {
-              return fmt.format(
-                new Date(preview.snapshot_timestamp as string),
-                'PPP',
-              );
-            } catch {
-              return preview.snapshot_timestamp;
-            }
-          })(),
-        })
-      : t('dialogs.settings.sync.previewNeverCompacted');
-  const names = preview.devices
-    .map((d) =>
-      d.is_this_device
-        ? `${d.name ?? d.id} (${t('dialogs.settings.sync.previewThisDevice')})`
-        : (d.name ?? d.id),
-    )
-    .join(', ');
-  return (
-    <div className="sync-panel__preview">
-      <FocusableNote>{summary}</FocusableNote>
-      <FocusableNote>
-        {t('dialogs.settings.sync.previewDevices', {
-          count: preview.devices.length,
-          names,
-        })}
-      </FocusableNote>
-    </div>
-  );
-}
-
-/** Sub-form rendered above the "Start fresh" button when the
- *  remote is empty. Checkbox + passphrase input that wire to the
- *  adopt_local flow's optional `passphrase` argument. The
- *  passphrase is intentionally NOT confirmed twice — §19.7 makes
- *  the irreversibility clear in the surrounding copy and the user
- *  is the only person who can ever recover the dataset anyway. */
-function E2eEnableInput({
-  enabled,
-  onToggle,
-  passphrase,
-  onPassphraseChange,
-  t,
-}: {
-  enabled: boolean;
-  onToggle: (next: boolean) => void;
-  passphrase: string;
-  onPassphraseChange: (next: string) => void;
-  t: ReturnType<typeof useTranslation>['t'];
-}) {
-  return (
-    <div className="sync-panel__e2e">
-      <label className="sync-panel__field">
-        <input
-          type="checkbox"
-          checked={enabled}
-          onChange={(e) => onToggle(e.target.checked)}
-        />{' '}
-        {t('dialogs.settings.sync.e2eEnableLabel')}
-      </label>
-      <FocusableNote className="sync-panel__hint">
-        {t('dialogs.settings.sync.e2eEnableHint')}
-      </FocusableNote>
-      {enabled && (
-        <div className="sync-panel__field">
-          <label>
-            {t('dialogs.settings.sync.e2ePassphrase')}
-            <input
-              type="password"
-              value={passphrase}
-              onChange={(e) => onPassphraseChange(e.target.value)}
-              autoComplete="new-password"
-            />
-          </label>
-          <FocusableNote className="sync-panel__hint sync-panel__hint--warning">
-            {t('dialogs.settings.sync.e2eIrreversibleWarning')}
-          </FocusableNote>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** Sub-form rendered above the accept/adopt cards when the
- *  preview reports `e2e_enabled = true`. The user MUST type the
- *  dataset's passphrase to derive the key and decrypt anything
- *  during onboarding. */
-function E2ePassphrasePrompt({
-  passphrase,
-  onPassphraseChange,
-  t,
-}: {
-  passphrase: string;
-  onPassphraseChange: (next: string) => void;
-  t: ReturnType<typeof useTranslation>['t'];
-}) {
-  return (
-    <div className="sync-panel__e2e">
-      <FocusableNote>{t('dialogs.settings.sync.e2eRemoteRequiresPassphrase')}</FocusableNote>
-      <div className="sync-panel__field">
-        <label>
-          {t('dialogs.settings.sync.e2ePassphrase')}
-          <input
-            type="password"
-            value={passphrase}
-            onChange={(e) => onPassphraseChange(e.target.value)}
-            autoComplete="current-password"
-          />
-        </label>
-      </div>
     </div>
   );
 }

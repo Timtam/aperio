@@ -652,6 +652,8 @@ pub fn run() {
             commands::preview_sync_target,
             commands::accept_remote_dataset,
             commands::adopt_local_dataset,
+            // §19.11: first-launch wizard gate (fresh-instance detection).
+            commands::is_fresh_instance,
             // §19.7: rotate the dataset's E2E passphrase.
             commands::change_sync_passphrase,
             // §19.7: turn off E2E encryption on the dataset (in-place).

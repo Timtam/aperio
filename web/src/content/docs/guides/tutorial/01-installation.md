@@ -20,14 +20,16 @@ Aperio is distributed as an archive (ZIP):
 
 ## The first-launch wizard
 
-The first time you start Aperio, a short wizard walks you through the most
-important points:
+The first time you start Aperio – on a fresh install with no accounts, sync
+or data yet – a short, accessible wizard walks you through the essentials:
 
-- The interface **language**.
+- The interface **language** (default: your system language).
+- **Synchronisation** – restore your data from an existing sync target, set
+  up a new one to sync across your devices, or skip it for now. If you
+  connect to a target that already holds an Aperio dataset, your data and
+  accounts are restored and the wizard finishes there.
 - A **first account** (or skip it and add one later – see
   [Chapter 02](/guides/tutorial/02-konten-verbinden/)).
-- **System integration** – for example, whether Aperio should start
-  automatically when you log in.
 
 You can change everything later in the **settings**.
 

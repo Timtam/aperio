@@ -42,6 +42,7 @@ use sync_core::{
 use tauri::State;
 
 use super::{run_plugin_auth, run_plugin_probe_host_key, CommandError, CommandResult};
+use crate::accounts::{AccountsRepo, AdapterKind};
 use crate::cache::CacheRefresher;
 use crate::db::{DbHandle, SharedConn};
 use crate::event_log::{
@@ -52,6 +53,8 @@ use crate::secrets::{self, SecretSlot};
 use crate::sftp_host_keys::UserPrefsHostKeyVerifier;
 use crate::sync_log::{SyncLogEntry, SyncLogRepo, MAX_LOG_ROWS};
 use crate::user_prefs::UserPrefsRepo;
+use cal_adapter_local::LocalAdapter;
+use cal_core::CalendarFeature;
 
 // ── Plugin-id constants ──────────────────────────────────────
 //
@@ -118,6 +121,52 @@ fn open_sync_plugin(
 /// `user_prefs` key naming the currently-configured adapter
 /// family. Empty / missing → no adapter, sync disabled.
 const PREF_ADAPTER_KIND: &str = "sync.adapter.kind";
+
+/// Whether this looks like a FRESH instance that should be offered the
+/// first-launch wizard (§19.11): no EXTERNAL account configured, no sync
+/// target set, and an empty local store (no task lists, no calendars).
+///
+/// DATA-based on purpose, not a stored flag: an established install that
+/// already has real data — or that already set up sync/accounts — must never
+/// be re-prompted. The implicit `local` account (migration 0003) is always
+/// present and doesn't count. The frontend pairs this with a device-local
+/// "already shown" marker so an empty instance that dismissed the wizard
+/// isn't offered it again.
+#[tauri::command]
+pub async fn is_fresh_instance(
+    db: State<'_, DbHandle>,
+    adapter: State<'_, LocalAdapter>,
+) -> CommandResult<bool> {
+    let shared = db.shared();
+
+    // Any non-local account → not fresh.
+    let accounts = AccountsRepo::new(&shared).list()?;
+    if accounts
+        .iter()
+        .any(|a| a.adapter_kind != AdapterKind::Local)
+    {
+        return Ok(false);
+    }
+
+    // A sync target configured (anything other than unset / empty / "none").
+    let kind = UserPrefsRepo::new(&shared)
+        .get(PREF_ADAPTER_KIND)
+        .ok()
+        .flatten();
+    if matches!(kind, Some(k) if !k.is_empty() && k != "none") {
+        return Ok(false);
+    }
+
+    // Any local task list or calendar → the user has already created data.
+    if !adapter.list_task_lists_sync()?.is_empty() {
+        return Ok(false);
+    }
+    if !adapter.list_calendars().await?.is_empty() {
+        return Ok(false);
+    }
+
+    Ok(true)
+}
 
 /// Family-specific config (per-kind sub-key). For `kind="local"`
 /// we just need a filesystem path.

@@ -323,6 +323,25 @@
     }
   },
   "dialogs": {
+    "firstLaunchWizard": {
+      "title": "Willkommen bei Aperio",
+      "stepIndicator": "Schritt {{current}} von {{total}}",
+      "languageHeading": "Sprache",
+      "languageHint": "Wähle die Sprache, die Aperio verwendet. Du kannst sie jederzeit in den Einstellungen ändern.",
+      "languageLegend": "Anzeigesprache",
+      "language_system": "Systemsprache verwenden",
+      "language_de": "Deutsch",
+      "language_en": "Englisch",
+      "syncHeading": "Synchronisierung",
+      "syncHint": "Stelle deine Daten von einem vorhandenen Sync-Ziel wieder her oder richte ein neues ein, um über mehrere Geräte zu synchronisieren. Du kannst diesen Schritt auch überspringen und die Synchronisierung später in den Einstellungen einrichten. Wenn du dich mit einem Ziel verbindest, das bereits einen Aperio-Datensatz enthält, werden deine Daten und Konten wiederhergestellt und der Assistent wird beendet.",
+      "syncSkip": "Vorerst überspringen",
+      "accountHeading": "Erstes Konto hinzufügen",
+      "accountHint": "Verbinde ein Kalender- oder Aufgabenkonto (CalDAV, Google, Microsoft, Vikunja, Todoist, …) oder überspringe diesen Schritt und füge später in den Einstellungen eines hinzu.",
+      "accountAdd": "Konto hinzufügen",
+      "next": "Weiter",
+      "back": "Zurück",
+      "finish": "Fertig"
+    },
     "contact": {
       "birthdayClear": "Geburtstag entfernen",
       "birthdayCleared": "Geburtstag entfernt.",
