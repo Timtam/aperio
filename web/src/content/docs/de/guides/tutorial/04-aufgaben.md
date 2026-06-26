@@ -119,6 +119,21 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
 > Screenreader-Nutzung bleibt der Verschieben/Kopieren-Dialog (bzw. das
 > Abschnitt-Feld) der Weg.
 
+## Die Liste gruppieren
+
+Im Kopf der Aufgabenansicht gibt es einen **Gruppieren nach**-Schalter:
+
+- **Zustand** (Standard): Aufgaben werden nach ihrem Lebenszyklus gruppiert —
+  **Backlog**, die geplanten **Listen-Gruppen**, **Zukünftig** (aufgeschobene
+  Aufgaben, die wieder auftauchen) und **Erledigt**.
+- **Liste**: jede offene / begonnene Aufgabe wird unter **ihrer Liste** (samt
+  Abschnitten) gruppiert — egal ob geplant, im Backlog oder aufgeschoben, alles an
+  einer Stelle pro Liste. **Erledigt** bleibt unten separat, genau wie in der
+  Zustands-Gruppierung. Eine eigene Zukünftig-Gruppe gibt es hier nicht;
+  aufgeschobene Aufgaben stehen einfach in ihrer Liste.
+
+Die Auswahl wird **pro Gerät** gemerkt.
+
 ## Aufgaben einplanen
 
 Aperio unterscheidet zwischen Aufgaben mit und ohne festen Termin:

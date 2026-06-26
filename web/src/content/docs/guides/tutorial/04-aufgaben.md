@@ -107,6 +107,21 @@ your day or week, and work through them.
 > For keyboard and screen-reader use, the Move/Copy dialog (or the Section
 > field) remains the way.
 
+## Grouping the list
+
+The task-view header has a **Group by** selector:
+
+- **State** (default): tasks are grouped by where they are in their lifecycle —
+  the **Backlog**, the per-list **scheduled** groups, **Upcoming** (deferred tasks
+  waiting to resurface), and **Done**.
+- **List**: every open / in-progress task is grouped under **its own list** (and
+  sections), regardless of whether it's scheduled, in the backlog, or deferred —
+  one place per list. **Done** still sits separately at the bottom, exactly as in
+  the State grouping. There is no separate Upcoming group here; deferred tasks
+  simply appear in their list.
+
+The choice is remembered **per device**.
+
 ## Scheduling tasks
 
 Aperio distinguishes between tasks with and without a fixed date:
