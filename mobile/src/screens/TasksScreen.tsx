@@ -24,9 +24,14 @@ import {
   statusI18nKey,
   statusMarker,
   subtaskProgressSuffix,
+  type TaskGroupBy,
 } from '@aperio/shared';
 
-import { expandedA11y } from '../a11y/roles';
+import {
+  expandedA11y,
+  selectableCheckState,
+  selectableRole,
+} from '../a11y/roles';
 import { deleteTask, duplicateTask } from '../api/client';
 import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
 import { useTabBarInset } from '../hooks/useTabBarInset';
@@ -54,6 +59,7 @@ import type { RootStackScreenProps } from '../navigation/types';
 // per-section and subtask twisties stay session-local.
 const DONE_COLLAPSE_KEY = 'aperio.tasks.doneCollapsed';
 const DEFERRED_COLLAPSE_KEY = 'aperio.tasks.deferredCollapsed';
+const GROUP_BY_KEY = 'aperio.tasks.groupBy';
 
 export default function TasksScreen({
   navigation,
@@ -124,6 +130,25 @@ export default function TasksScreen({
     };
   }, []);
 
+  // "Group by" mode — state (lifecycle) vs list. Device-local persisted; the
+  // async read can only switch to 'list' (mirrors the collapsed hydration so a
+  // not-yet-loaded read never flickers the grouping).
+  const [groupBy, setGroupBy] = useState<TaskGroupBy>('state');
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const raw = await AsyncStorage.getItem(GROUP_BY_KEY);
+      if (!cancelled && raw === 'list') setGroupBy('list');
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const changeGroupBy = useCallback((next: TaskGroupBy) => {
+    setGroupBy(next);
+    void AsyncStorage.setItem(GROUP_BY_KEY, next);
+  }, []);
+
   // Spoken feedback (plain announce, not a live region).
   const announce = useCallback((message: string) => {
     AccessibilityInfo.announceForAccessibility(message);
@@ -162,8 +187,18 @@ export default function TasksScreen({
         sectionsByList,
         today,
         currentUserByList,
+        groupBy,
       ).entries,
-    [tasks, taskListById, tr, collapsed, sectionsByList, today, currentUserByList],
+    [
+      tasks,
+      taskListById,
+      tr,
+      collapsed,
+      sectionsByList,
+      today,
+      currentUserByList,
+      groupBy,
+    ],
   );
 
   // What the virtualized list renders: only the NON-hidden entries (children of
@@ -626,6 +661,41 @@ export default function TasksScreen({
             buttons — the Tasks toolbar keeps only its own actions (Add + Lists). */}
       </View>
 
+      <View style={styles.groupByBar}>
+        <Text style={styles.groupByLabel} importantForAccessibility="no">
+          {t('views.tasks.groupBy.label')}
+        </Text>
+        {(['state', 'list'] as const).map((mode) => {
+          const selected = groupBy === mode;
+          return (
+            <Pressable
+              key={mode}
+              accessibilityRole={selectableRole('radio')}
+              accessibilityState={selectableCheckState(selected)}
+              accessibilityLabel={`${t('views.tasks.groupBy.label')}: ${t(
+                `views.tasks.groupBy.${mode}`,
+              )}`}
+              onPress={() => changeGroupBy(mode)}
+              style={({ pressed }) => [
+                styles.groupByOption,
+                selected && styles.groupByOptionActive,
+                pressed && styles.rowPressed,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.groupByOptionText,
+                  selected && styles.groupByOptionTextActive,
+                ]}
+                importantForAccessibility="no"
+              >
+                {t(`views.tasks.groupBy.${mode}`)}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
       {loading ? (
         <View
           style={styles.center}
@@ -713,6 +783,25 @@ const makeStyles = (c: ThemeColors) =>
       paddingHorizontal: 16,
       paddingVertical: 12,
     },
+    groupByBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingHorizontal: 16,
+      paddingBottom: 8,
+    },
+    groupByLabel: { fontSize: 14, color: c.textSecondary, marginRight: 4 },
+    groupByOption: {
+      paddingVertical: 6,
+      paddingHorizontal: 14,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    groupByOptionActive: { backgroundColor: c.accent, borderColor: c.accent },
+    groupByOptionText: { fontSize: 15, fontWeight: '600', color: c.link },
+    groupByOptionTextActive: { color: c.textOnAccent },
     list: { gap: 8, padding: 16 },
     button: {
       paddingVertical: 12,
