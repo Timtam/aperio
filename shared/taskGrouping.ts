@@ -158,6 +158,18 @@ export function buildEntries(
   // natural title) — so a parent's children also read A→Z, not add-order.
   childrenByParent.forEach((bucket) => bucket.sort(taskOrder));
 
+  // Total tasks contained under one task (its whole subtask subtree) and under
+  // a list of tasks (each task + its subtree) — drives the "(N)" count
+  // indicators on group headers and tasks-with-subtasks, matching the existing
+  // Done / Zukünftig group counts.
+  const countSubtasks = (taskId: string): number =>
+    (childrenByParent.get(taskId) ?? []).reduce(
+      (n, s) => n + 1 + countSubtasks(s.id),
+      0,
+    );
+  const totalUnder = (items: Task[]): number =>
+    items.reduce((n, task) => n + 1 + countSubtasks(task.id), 0);
+
   // Completed top-level tasks (with their subtree) collapse into a single
   // "Done (N)" group; the active groups show only open work. A completed
   // *subtask* under an open parent stays inline.
@@ -234,7 +246,7 @@ export function buildEntries(
         out.push({
           t: 'group',
           id: `grp:sec:${idScope}:${section.id}`,
-          title: section.name,
+          title: `${section.name} (${totalUnder(secTasks)})`,
           meta: { kind: 'section', sectionId: section.id, listId, section },
           children: secTasks.map((task) => ({ t: 'task', task }) as GNode),
         });
@@ -259,14 +271,14 @@ export function buildEntries(
       .map(([listId, items]) => ({
         t: 'group',
         id: `grp:bl:list:${listId}`,
-        title: nameOf(listId),
+        title: `${nameOf(listId)} (${totalUnder(items)})`,
         meta: { kind: 'list', listId },
         children: listChildren(listId, items, `bl:${listId}`),
       }));
     forest.push({
       t: 'group',
       id: BACKLOG_GROUP_ID,
-      title: t('views.tasks.backlog'),
+      title: `${t('views.tasks.backlog')} (${totalUnder(backlog)})`,
       meta: { kind: 'backlog' },
       children: listNodes,
     });
@@ -279,7 +291,7 @@ export function buildEntries(
       forest.push({
         t: 'group',
         id: `grp:sc:list:${listId}`,
-        title: nameOf(listId),
+        title: `${nameOf(listId)} (${totalUnder(items)})`,
         meta: { kind: 'list', listId },
         children: listChildren(listId, items, `sc:${listId}`),
       });

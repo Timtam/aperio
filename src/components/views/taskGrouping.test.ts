@@ -125,14 +125,32 @@ describe('buildEntries section grouping', () => {
     // List head (depth 0), then the section sub-headers in order. No
     // sub-header precedes the ungrouped task — it just follows the list
     // head, one level in.
+    // Headers now carry their contained-task count, like Done / Zukünftig.
     expect(headers(result)).toEqual([
-      { label: 'Inbox', level: 0, kind: 'list' },
-      { label: 'To Do', level: 1, kind: 'section' },
-      { label: 'Doing', level: 1, kind: 'section' },
+      { label: 'Inbox (3)', level: 0, kind: 'list' },
+      { label: 'To Do (1)', level: 1, kind: 'section' },
+      { label: 'Doing (1)', level: 1, kind: 'section' },
     ]);
 
     // Task order: ungrouped (c), then s1 (b), then s2 (a).
     expect(taskRows(result).map((e) => e.task.id)).toEqual(['c', 'b', 'a']);
+  });
+
+  it('annotates group + section headers with the contained-task count', () => {
+    const tasks = [
+      baseTask({ id: 'a', section_id: 's1' }),
+      baseTask({ id: 'b', section_id: 's1' }),
+      // A subtask of b counts toward its section + list (recursive total).
+      baseTask({ id: 'b1', parent_id: 'b', section_id: 's1' }),
+    ];
+    const result = build(tasks, new Set(), {
+      L1: [section('s1', 'To Do', 1)],
+    });
+    // List Inbox = a + b + b1 = 3; section To Do likewise = 3.
+    expect(headers(result).map((h) => h.label)).toEqual([
+      'Inbox (3)',
+      'To Do (3)',
+    ]);
   });
 
   it('omits headers for empty sections', () => {
@@ -140,7 +158,7 @@ describe('buildEntries section grouping', () => {
     const result = build(tasks, new Set(), {
       L1: [section('s1', 'To Do', 1), section('s2', 'Empty', 2)],
     });
-    expect(headers(result).map((h) => h.label)).toEqual(['Inbox', 'To Do']);
+    expect(headers(result).map((h) => h.label)).toEqual(['Inbox (1)', 'To Do (1)']);
   });
 
   it('renders flat (just the list head) when the list has no sections', () => {
@@ -151,7 +169,7 @@ describe('buildEntries section grouping', () => {
     const result = build(tasks);
     // Only the list head — section_id is ignored when no sections exist.
     expect(headers(result)).toEqual([
-      { label: 'Inbox', level: 0, kind: 'list' },
+      { label: 'Inbox (2)', level: 0, kind: 'list' },
     ]);
     expect(taskRows(result).map((e) => e.task.id)).toEqual(['a', 'b']);
   });
@@ -254,9 +272,9 @@ describe('buildEntries section grouping', () => {
       L1: [section('s1', 'To Do', 1)],
     });
     expect(headers(result)).toEqual([
-      { label: 'views.tasks.backlog', level: 0, kind: 'backlog' },
-      { label: 'Inbox', level: 1, kind: 'list' },
-      { label: 'To Do', level: 2, kind: 'section' },
+      { label: 'views.tasks.backlog (2)', level: 0, kind: 'backlog' },
+      { label: 'Inbox (2)', level: 1, kind: 'list' },
+      { label: 'To Do (1)', level: 2, kind: 'section' },
     ]);
     // Ungrouped (b) leads, then the section task (a).
     expect(taskRows(result).map((e) => e.task.id)).toEqual(['b', 'a']);
@@ -266,8 +284,8 @@ describe('buildEntries section grouping', () => {
     const tasks = [baseTask({ id: 'a', scheduled_date: null })];
     const result = build(tasks);
     expect(headers(result)).toEqual([
-      { label: 'views.tasks.backlog', level: 0, kind: 'backlog' },
-      { label: 'Inbox', level: 1, kind: 'list' },
+      { label: 'views.tasks.backlog (1)', level: 0, kind: 'backlog' },
+      { label: 'Inbox (1)', level: 1, kind: 'list' },
     ]);
   });
 
