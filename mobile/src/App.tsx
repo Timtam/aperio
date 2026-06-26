@@ -13,6 +13,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useSyncTriggers } from './api/syncTriggers';
 import DayStartReviewModal from './components/DayStartReviewModal';
+import { FirstLaunchWizardGate } from './components/FirstLaunchWizardGate';
 import { SyncStatusButton } from './components/SyncStatusButton';
 import { useCacheUpdates } from './state/cacheObserver';
 import { SyncStatusContext } from './state/syncStatusContext';
@@ -482,6 +483,10 @@ function AppContent() {
               store, so they mount inside the provider; the review modal overlays
               the focused tab when the gate opens it. */}
           <DayStartChecks />
+          {/* §19.11 first-launch wizard gate. On a genuinely fresh instance (no
+              account / no sync / empty store) it opens the wizard once;
+              otherwise it's a no-op. */}
+          <FirstLaunchWizardGate />
           {/* App-icon badge: today's open tasks + upcoming events. */}
           <AppBadge />
           {/* The root sync-status poll feeds the per-screen header indicator
