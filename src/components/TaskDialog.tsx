@@ -211,6 +211,11 @@ export function TaskDialog({
   // the date is empty, so focus would otherwise fall to <body>).
   const scheduledDateRef = useRef<HTMLInputElement>(null);
   const deadlineDateRef = useRef<HTMLInputElement>(null);
+  // Tracks whether the user changed the Status field by hand. While false, the
+  // sync effect below keeps the field mirroring the live store status (so a
+  // subtask cascade shows up in the dropdown); once true, the field is the
+  // user's and Save treats the status as an explicit change.
+  const statusTouched = useRef(false);
   // Assignee picker data (DESIGN §9.7): the targeted list's member pool
   // + the connected account's own id, loaded per list when open.
   const [members, setMembers] = useState<TaskUser[]>([]);
@@ -219,11 +224,25 @@ export function TaskDialog({
   useEffect(() => {
     if (isOpen) {
       setForm(initialState);
+      statusTouched.current = false;
       setError(null);
       setDraftSubtasks([]);
       setNewSubtaskTitle('');
     }
   }, [isOpen, initialState]);
+
+  // Mirror a subtask-cascade-updated status into the Status field while the
+  // editor is open — the DISPLAY half of the fix (the persistence half is in
+  // onSubmit). Matches the mobile editor's `syncParent`. Edit mode only (a
+  // brand-new task has no store row), and only until the user changes the field
+  // by hand.
+  const liveStatus = task
+    ? tasks.find((tt) => tt.id === task.id)?.status
+    : undefined;
+  useEffect(() => {
+    if (liveStatus === undefined || statusTouched.current) return;
+    setForm((f) => (f.status === liveStatus ? f : { ...f, status: liveStatus }));
+  }, [liveStatus]);
 
   // Section assignment (TASKS-11): the list the form currently targets
   // drives which sections are offered and whether the picker shows at
@@ -750,15 +769,17 @@ export function TaskDialog({
           // (un)assigned task never touches ownership.
           // A subtask toggled while THIS editor was open can cascade this task's
           // OWN status in the store (a child → in_progress lifts the parent to
-          // in_progress). The form still holds the status from when the editor
-          // opened, so writing it back blindly would REVERT that cascade. Only
-          // overwrite the status (+ completed_at + self-assign) when the user
-          // actually changed the Status field here; otherwise keep the live value.
-          const statusChanged = form.status !== task.status;
+          // in_progress). The Status field follows it live (the `statusTouched`
+          // sync effect mirrors the store value into the form). On Save we keep
+          // that live value UNLESS the user actually changed the Status field
+          // themselves — only then do we overwrite + cascade + self-assign.
+          // Gating on `statusTouched` (rather than form-vs-snapshot) is robust
+          // against the sync effect's render timing.
           const liveRow = tasks.find((tt) => tt.id === task.id);
-          const statusToWrite = statusChanged
-            ? form.status
-            : liveRow?.status ?? task.status;
+          const liveStatusNow = liveRow?.status ?? task.status;
+          const statusChanged =
+            statusTouched.current && form.status !== liveStatusNow;
+          const statusToWrite = statusChanged ? form.status : liveStatusNow;
           const completedAtToWrite =
             statusToWrite === 'completed'
               ? liveRow?.completed_at ??
@@ -1158,9 +1179,10 @@ export function TaskDialog({
             </span>
             <select
               value={form.status}
-              onChange={(e) =>
-                update('status', e.target.value as TaskStatus)
-              }
+              onChange={(e) => {
+                statusTouched.current = true;
+                update('status', e.target.value as TaskStatus);
+              }}
             >
               <option value="open">{t('dialogs.task.status.open')}</option>
               <option value="in_progress">
