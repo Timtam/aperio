@@ -26,7 +26,9 @@ your day or week, and work through them.
   in place of its due date, and the editor shows a *“Completed on”* line.
   It syncs both ways with every provider (Apple Reminders, Google, Vikunja,
   Microsoft To Do, Exchange, Todoist).
-- **Edit:** Open it with `Enter`.
+- **Edit:** Open it with `Enter` or a **double-click**. A single mouse click
+  only **selects/focuses** the task, so you can pick one without the editor
+  popping open.
 - **Delete:** Choose **Delete** (default: `Delete`).
 
 > **Quick status & priority:** Right-click a task — or press the Menu key

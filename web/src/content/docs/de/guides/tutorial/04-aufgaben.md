@@ -28,7 +28,9 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
   im Editor erscheint eine Zeile *„Erledigt am“*. Es wird mit jedem Anbieter
   in beide Richtungen synchronisiert (Apple Erinnerungen, Google, Vikunja,
   Microsoft To Do, Exchange, Todoist).
-- **Bearbeiten:** mit `Eingabe` öffnen.
+- **Bearbeiten:** mit `Eingabe` oder per **Doppelklick** öffnen. Ein einfacher
+  Mausklick **markiert/fokussiert** die Aufgabe nur, sodass du sie auswählen
+  kannst, ohne dass der Editor aufspringt.
 - **Löschen:** **Löschen** wählen (Standard: `Entf`).
 
 > **Status & Priorität schnell ändern:** Rechtsklick auf eine Aufgabe – oder
