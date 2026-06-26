@@ -14,10 +14,12 @@
 -- migration small and avoids the trigger-recreation dance migration
 -- 0006 had to do for tasks.
 --
--- Seed: every account that has Capability::Contacts gets a default
--- "Contacts" list at first registration. The local account gets one
--- inserted right here so the implicit local-only flow has a
--- destination on day one.
+-- No seed: a fresh install starts with no local address book. The
+-- user creates one on demand (Sidebar "new address book" /
+-- create_contact_list) and contacts are added to a list of their
+-- choosing. Earlier revisions seeded a hard-coded
+-- 'local-default-contacts' list here; existing installs keep theirs
+-- (this migration already ran for them — user_version is past 7).
 
 CREATE TABLE contact_lists (
     id              TEXT NOT NULL PRIMARY KEY,
@@ -65,22 +67,3 @@ CREATE INDEX contacts_birthday_idx    ON contacts(birthday);
 -- listing query stable even when a user accumulates thousands of
 -- contacts across address books.
 CREATE INDEX contacts_display_name_idx ON contacts(display_name);
-
--- Seed a default local contact list. The id is hard-coded so the
--- local adapter can find it without a name lookup; the same pattern
--- the local calendar / task-list seeding uses.
-INSERT INTO contact_lists (
-    id, account_id, source, name, color_hex, color_source,
-    read_only, etag, created_at, updated_at
-) VALUES (
-    'local-default-contacts',
-    'local',
-    'local',
-    'Contacts',
-    NULL,
-    NULL,
-    0,
-    NULL,
-    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-    strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-);

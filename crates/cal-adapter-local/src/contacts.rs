@@ -614,7 +614,32 @@ mod tests {
     use chrono::NaiveDate;
 
     fn fixture_adapter() -> LocalAdapter {
-        LocalAdapter::new(open_test_db())
+        let adapter = LocalAdapter::new(open_test_db());
+        // Migration 0007 no longer seeds a default local contacts list
+        // (a fresh install has none — the user creates one on demand).
+        // The contacts tests below exercise a known list id, so seed it
+        // test-side here.
+        seed_default_contact_list(&adapter);
+        adapter
+    }
+
+    /// Insert the historical `local-default-contacts` list directly, so
+    /// the existing contacts tests have their well-known list id without
+    /// relying on the (now-removed) migration seed.
+    fn seed_default_contact_list(adapter: &LocalAdapter) {
+        adapter
+            .db()
+            .lock()
+            .expect("db mutex poisoned")
+            .execute(
+                "INSERT INTO contact_lists (
+                    id, account_id, source, name,
+                    read_only, created_at, updated_at
+                 ) VALUES (?, 'local', 'local', 'Contacts', 0,
+                    '2024-01-01T00:00:00.000Z', '2024-01-01T00:00:00.000Z')",
+                [LOCAL_DEFAULT_CONTACT_LIST_ID],
+            )
+            .expect("seed default contact list");
     }
 
     fn sample_new_contact() -> NewContact {
@@ -653,13 +678,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn seed_list_is_present_at_startup() {
-        let adapter = fixture_adapter();
+    async fn migration_does_not_seed_a_contact_list() {
+        // A fresh install starts with NO local contacts list — the user
+        // creates one on demand. (Migration 0007 used to seed a default
+        // "Contacts" list; it no longer does.) Use a bare adapter here,
+        // not `fixture_adapter` (which seeds test-side).
+        let adapter = LocalAdapter::new(open_test_db());
         let lists = adapter.list_contact_lists().await.unwrap();
-        assert_eq!(lists.len(), 1);
-        assert_eq!(lists[0].id, LOCAL_DEFAULT_CONTACT_LIST_ID);
-        assert_eq!(lists[0].name, "Contacts");
-        assert!(!lists[0].read_only);
+        assert!(lists.is_empty());
     }
 
     #[tokio::test]

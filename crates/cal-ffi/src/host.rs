@@ -7141,15 +7141,23 @@ mod tests {
         ));
     }
 
+    /// Seed a local contacts list and return its id. Migration 0007 no
+    /// longer seeds a default address book, so contacts tests create one
+    /// explicitly (the user does this from the Sidebar on a real install).
+    fn seed_contact_list(host: &Host) -> String {
+        let created: serde_json::Value = serde_json::from_str(
+            &host
+                .create_contact_list_json("Contacts".to_string())
+                .unwrap(),
+        )
+        .unwrap();
+        created["id"].as_str().unwrap().to_string()
+    }
+
     #[test]
     fn search_contacts_finds_a_local_contact() {
         let (_dir, host, _kc) = open_host();
-        let books: serde_json::Value =
-            serde_json::from_str(&host.contact_lists_json().unwrap()).unwrap();
-        let list_id = books.as_array().unwrap()[0]["id"]
-            .as_str()
-            .unwrap()
-            .to_string();
+        let list_id = seed_contact_list(&host);
         let contact = r#"{
             "display_name": "Alice Example",
             "given_name": "Alice",
@@ -7181,12 +7189,7 @@ mod tests {
     #[test]
     fn contact_photo_round_trips_set_get_and_delete() {
         let (_dir, host, _kc) = open_host();
-        let books: serde_json::Value =
-            serde_json::from_str(&host.contact_lists_json().unwrap()).unwrap();
-        let list_id = books.as_array().unwrap()[0]["id"]
-            .as_str()
-            .unwrap()
-            .to_string();
+        let list_id = seed_contact_list(&host);
         let contact = r#"{
             "display_name": "Bob Example",
             "given_name": "Bob",
@@ -9617,13 +9620,8 @@ mod tests {
     #[test]
     fn birthday_calendar_synthesises_a_local_contacts_birthday() {
         let (_dir, host, _kc) = open_host();
-        // The seeded local address book (migration 0007).
-        let lists: serde_json::Value =
-            serde_json::from_str(&host.contact_lists_json().unwrap()).unwrap();
-        let list_id = lists.as_array().unwrap()[0]["id"]
-            .as_str()
-            .unwrap()
-            .to_string();
+        // Migration 0007 no longer seeds an address book; create one.
+        let list_id = seed_contact_list(&host);
         // A contact with a June birthday (so the existing covering_range hits it).
         let new_contact = r#"{"display_name":"Ada Lovelace","given_name":null,"family_name":null,"organization":null,"emails":[],"phone_numbers":[],"birthday":"1990-06-15","notes":null,"addresses":[],"members":null,"photo":null}"#;
         host.create_contact_json(list_id.clone(), new_contact.to_string())
@@ -9661,12 +9659,15 @@ mod tests {
     #[test]
     fn contacts_round_trip_through_the_local_address_book() {
         let (_dir, host, _kc) = open_host();
-        // Migration 0007 seeds the default local address book.
+        // Migration 0007 no longer seeds an address book; create one and
+        // confirm it lists back on the local account.
+        let seeded_id = seed_contact_list(&host);
         let lists: serde_json::Value =
             serde_json::from_str(&host.contact_lists_json().unwrap()).unwrap();
         let arr = lists.as_array().unwrap();
-        assert!(!arr.is_empty(), "the seeded local address book should list");
+        assert!(!arr.is_empty(), "the created address book should list");
         let list_id = arr[0]["id"].as_str().unwrap().to_string();
+        assert_eq!(list_id, seeded_id);
         assert_eq!(arr[0]["account_id"], serde_json::json!("local"));
 
         // Create a contact (every NewContact field supplied so serde can't trip
