@@ -204,6 +204,16 @@ fn is_stale_empty_stub(file_session: DateTime<Utc>, boot_at: DateTime<Utc>) -> b
         < boot_at.with_nanosecond(0).unwrap_or(boot_at)
 }
 
+/// True when a sync round must RESUME via snapshot rather than fetch-and-replay:
+/// the device's fetch `cursor` predates the dataset's `snapshot_ts` horizon, so
+/// the compactor may have GC'd the pre-snapshot logs the device never consumed.
+/// A cursor at or after the horizon is caught up (or freshly resumed) and passes
+/// — so the §19.10 coverage gate fires at most once per device per snapshot.
+/// Free fn so the boundary is unit-testable without a full orchestrator.
+fn needs_snapshot_resume(cursor: DateTime<Utc>, snapshot_ts: DateTime<Utc>) -> bool {
+    cursor < snapshot_ts
+}
+
 impl SyncOrchestrator {
     pub fn new(
         store: Arc<dyn SyncStore>,
@@ -404,6 +414,33 @@ impl SyncOrchestrator {
                         snapshot_at: meta.snapshot_timestamp.to_rfc3339(),
                     });
                 }
+            }
+
+            // §19.10 coverage backstop. The compactor GCs every log older than
+            // the snapshot horizon, so a device whose fetch cursor still
+            // predates that horizon would silently SKIP the deleted range and
+            // lose those events. The per-device `stale` flag above is NOT enough
+            // on its own: a behind device can heartbeat itself non-stale (the
+            // heartbeat stamps `now` even when its fetch/apply failed), be absent
+            // from `meta.devices` (the compactor can't flag a device it can't
+            // see), or have its flag clobbered by a concurrent compactor's
+            // last-write-wins meta push. So gate on the REAL cursor instead: any
+            // sub-snapshot cursor means "consume the snapshot, don't replay" —
+            // which `resume_from_stale` does, advancing the cursor to the
+            // snapshot horizon. A cursor already at/after the horizon (caught up,
+            // or freshly resumed) passes, so this fires at most once per device
+            // per snapshot, exactly like the §19.10 gate it backstops.
+            if needs_snapshot_resume(
+                self.cursor_for_fetch().last_seen_log,
+                meta.snapshot_timestamp,
+            ) {
+                *self
+                    .stale_device_since
+                    .lock()
+                    .expect("stale_device_since mutex poison") = Some(meta.snapshot_timestamp);
+                return Err(sync_core::SyncError::StaleDevice {
+                    snapshot_at: meta.snapshot_timestamp.to_rfc3339(),
+                });
             }
 
             // §19.7 encryption gate. The dataset is end-to-end encrypted but
@@ -748,8 +785,21 @@ impl Drop for InFlightGuard<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::is_stale_empty_stub;
+    use super::{is_stale_empty_stub, needs_snapshot_resume};
     use chrono::{Duration, TimeZone, Timelike, Utc};
+
+    #[test]
+    fn needs_snapshot_resume_boundary() {
+        let snap = Utc.with_ymd_and_hms(2026, 6, 1, 12, 0, 0).unwrap();
+        // Cursor BEFORE the snapshot horizon → must resume (pre-snapshot logs
+        // may have been GC'd by the compactor; replaying would skip them).
+        assert!(needs_snapshot_resume(snap - Duration::seconds(1), snap));
+        // Cursor EXACTLY at the horizon (caught up / freshly resumed) → pass, so
+        // the gate can't latch forever after a resume advances cursor = horizon.
+        assert!(!needs_snapshot_resume(snap, snap));
+        // Cursor AHEAD of the horizon → pass.
+        assert!(!needs_snapshot_resume(snap + Duration::seconds(1), snap));
+    }
 
     #[test]
     fn empty_stub_cleanup_keeps_live_session_file_and_reaps_older() {

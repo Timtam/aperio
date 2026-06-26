@@ -14,12 +14,16 @@
 //!    the remote (replacing any prior snapshot.json).
 //! 2. Update meta.json.snapshot_timestamp to the snapshot's
 //!    timestamp; mark this device's heartbeat at the same point.
-//! 3. Compute safe_cutoff = min(snapshot_ts, min_device_last_seen).
-//!    Log files with timestamp < safe_cutoff are redundant for
-//!    every known device.
-//! 4. Delete those log files via adapter.delete_log.
-//! 5. Mark devices whose last_seen_log < snapshot_ts as stale —
-//!    they need to consume the snapshot on next sync.
+//! 3. Mark devices whose last_seen_log < snapshot_ts as stale —
+//!    they consume the snapshot (not the old logs) on next sync,
+//!    gated by the §19.10 stale check in the orchestrator.
+//! 4. Compute safe_cutoff = min(snapshot_ts, last_seen_log of each
+//!    NON-stale device). Stale/offline devices DON'T hold the cutoff
+//!    back — the snapshot already supersedes every earlier log for
+//!    them — so this resolves to snapshot_ts and a chronically-offline
+//!    device can't keep the log files piling up. Log files older than
+//!    safe_cutoff are redundant for every device.
+//! 5. Delete those log files via adapter.delete_log.
 //! 6. Reset the local "bytes/logs since snapshot" counters so the
 //!    threshold check doesn't immediately re-fire.
 //! ```
@@ -270,24 +274,34 @@ impl Compactor {
             },
         );
 
-        // 3. Compute safe cutoff = min(snapshot_ts, every device's
-        //    last_seen_log). Anything older than that is fold-
-        //    safe.
-        let min_device_seen = meta
-            .devices
-            .values()
-            .map(|d| d.last_seen_log)
-            .min()
-            .unwrap_or(snapshot_ts);
-        let safe_cutoff = snapshot_ts.min(min_device_seen);
-
-        // 4. Mark stale devices (last_seen_log < snapshot_ts).
+        // 3. Mark stale devices (last_seen_log < snapshot_ts). A behind/offline
+        //    device hits the §19.10 stale gate on its next sync (orchestrator
+        //    sees its own `stale` flag → `StaleDevice` BEFORE fetching) and
+        //    consumes the fresh SNAPSHOT, not the per-round logs — so from here
+        //    it neither needs nor should pin the pre-snapshot logs.
         for record in meta.devices.values_mut() {
             if record.last_seen_log < snapshot_ts {
                 record.stale = true;
                 report.stale_devices += 1;
             }
         }
+
+        // 4. Compute safe cutoff = min(snapshot_ts, last_seen_log of every
+        //    NON-stale device). Stale devices no longer hold the cutoff back:
+        //    the snapshot already supersedes every log before snapshot_ts for
+        //    them. Non-stale devices sit at/after snapshot_ts, so in practice
+        //    the cutoff resolves to snapshot_ts — every pre-snapshot log becomes
+        //    fold-safe and a chronically-offline device can't keep the folder
+        //    growing without bound. (`unwrap_or` is a belt: the just-upserted
+        //    local device is non-stale at snapshot_ts, so there's always one.)
+        let min_device_seen = meta
+            .devices
+            .values()
+            .filter(|d| !d.stale)
+            .map(|d| d.last_seen_log)
+            .min()
+            .unwrap_or(snapshot_ts);
+        let safe_cutoff = snapshot_ts.min(min_device_seen);
 
         adapter.push_meta(&meta).await?;
 
@@ -637,6 +651,51 @@ mod tests {
         let remaining = adapter.logs.lock().unwrap();
         assert_eq!(remaining.len(), 1);
         assert!(remaining[0].name.timestamp > Utc::now());
+    }
+
+    #[tokio::test]
+    async fn stale_device_no_longer_pins_pre_snapshot_logs() {
+        // A device offline longer than the compaction window used to hold
+        // safe_cutoff back to its old last_seen_log, so every log newer than that
+        // piled up indefinitely. Now it's marked stale (it consumes the snapshot
+        // on return via the §19.10 gate), so the cutoff is the snapshot itself
+        // and those pre-snapshot logs get GC'd.
+        let (_store, compactor) = build_compactor();
+        let adapter = FakeAdapter::new();
+
+        // A log from 5 days ago — AFTER the offline device's last_seen (11 days
+        // ago) but BEFORE the snapshot the compactor is about to build (~now).
+        let log_ts: DateTime<Utc> = Utc::now() - ChronoDuration::days(5);
+        adapter.logs.lock().unwrap().push(LogFile {
+            name: LogFileName::new(log_ts, DeviceId::from_string("dev-other".into())),
+            bytes: b"{}".to_vec(),
+        });
+
+        // The other device hasn't synced in 11 days.
+        let mut meta = MetaJson::fresh("1.0.0-test");
+        meta.upsert_device(
+            &DeviceId::from_string("dev-other".into()),
+            DeviceRecord {
+                name: None,
+                last_seen_log: Utc::now() - ChronoDuration::days(11),
+                app_version: "1.0.0".into(),
+                stale: false,
+            },
+        );
+        *adapter.meta.lock().unwrap() = Some(meta);
+
+        let report = compactor.compact_now(&adapter).await.unwrap();
+
+        // Old behaviour KEPT this log (cutoff pinned to 11 days ago); now it's
+        // deleted (cutoff = snapshot_ts) and the offline device is marked stale.
+        assert_eq!(report.deleted_logs, 1);
+        assert!(adapter.logs.lock().unwrap().is_empty());
+        let meta = adapter.meta.lock().unwrap().clone().unwrap();
+        assert!(
+            meta.device(&DeviceId::from_string("dev-other".into()))
+                .unwrap()
+                .stale
+        );
     }
 
     #[tokio::test]
