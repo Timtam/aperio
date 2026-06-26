@@ -450,9 +450,13 @@ export function TaskView() {
           e.preventDefault();
           const task = flatTasks[focusIndex];
           if (task) {
-            void duplicateTask(task).then(() =>
-              announce(t('actions.duplicated', { title: task.title })),
-            );
+            void duplicateTask(task).then(() => {
+              // The duplicate lands in task.list_id — the list currently in
+              // view — so it must show without waiting for an unrelated bump.
+              // (No dialog closes here to do it for us; mobile bumps too.)
+              invalidateData();
+              announce(t('actions.duplicated', { title: task.title }));
+            });
           }
         }
         return;
@@ -579,6 +583,7 @@ export function TaskView() {
       entries,
       collapsed,
       toggleCollapsed,
+      invalidateData,
     ],
   );
 
