@@ -3537,6 +3537,16 @@ button[aria-disabled='true'] {
 .backlog-rail__chip-deadline--overdue {
   color: var(--color-danger);
 }
+/* "↳ Parent" line on a subtask chip in the rail (the deadline section can hold
+   subtasks that carry their own deadline). */
+.backlog-rail__chip-parent {
+  font-size: 0.85em;
+  opacity: 0.7;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* Overdue chips get a danger-toned accent stripe (sighted cue; the label also
    says "overdue"). */
 .backlog-rail__chip--overdue {

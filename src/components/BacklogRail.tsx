@@ -18,6 +18,7 @@ import {
   priorityMarker,
   priorityRank,
   prioritySuffix,
+  subtaskParentTitle,
 } from '../intl/taskStatus';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
@@ -132,8 +133,10 @@ export function BacklogRail() {
     () =>
       tasks
         .filter(
-          (row) =>
-            row.status !== 'completed' && !!row.deadline_date && isTopLevel(row),
+          // Include subtasks WITH their own deadline (each chip is labelled by
+          // its parent); an undated subtask still travels with its parent and
+          // stays out of the rail.
+          (row) => row.status !== 'completed' && !!row.deadline_date,
         )
         .sort(
           (a, b) =>
@@ -141,7 +144,7 @@ export function BacklogRail() {
             priorityRank(a.priority) - priorityRank(b.priority) ||
             a.created_at.localeCompare(b.created_at),
         ),
-    [tasks, isTopLevel],
+    [tasks],
   );
 
   // Priority backlog: the classic active backlog MINUS deadline tasks (those are
@@ -381,6 +384,7 @@ function BacklogList({
             sectionColorById,
           );
           const priorityGlyph = priorityMarker(task.priority);
+          const parentTitle = subtaskParentTitle(task, tasks);
           const due =
             showDeadline && task.deadline_date
               ? fmt.format(parseDayKey(task.deadline_date), 'P')
@@ -411,7 +415,12 @@ function BacklogList({
               id={optionId(i)}
               role="option"
               aria-selected={i === activeIdx}
-              aria-label={ariaLabel}
+              aria-label={
+                ariaLabel +
+                (parentTitle
+                  ? t('views.tasks.subtaskParent', { parent: parentTitle })
+                  : '')
+              }
               className={
                 'backlog-rail__chip' +
                 (i === activeIdx ? ' backlog-rail__chip--active' : '') +
@@ -445,6 +454,11 @@ function BacklogList({
                   </span>
                 )}
               </span>
+              {parentTitle && (
+                <span className="backlog-rail__chip-parent" aria-hidden="true">
+                  ↳ {parentTitle}
+                </span>
+              )}
               <span className="backlog-rail__chip-meta">
                 {due && (
                   <span
