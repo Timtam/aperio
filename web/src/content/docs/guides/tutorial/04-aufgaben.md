@@ -128,6 +128,29 @@ Aperio distinguishes between tasks with and without a fixed date:
   a bar spanning every day until then. As long as no work day is set, it
   **also stays in the backlog**, so you can drag it onto a concrete work day.
 
+## Projects: a parent task with its own subtasks
+
+When a task has its own **subtasks**, Aperio treats the parent as a **project**
+and shifts the day-to-day work onto the subtasks:
+
+- **The parent stops nagging.** As long as the project still has open subtasks,
+  the **day-start review never asks you about the parent** — you work the project
+  through its subtasks. The parent simply keeps its **deadline**, shown as a due
+  marker on its deadline day in the planner. It is never auto-pinned to today.
+- **Plan the subtasks, not the parent.** Give each subtask its own day. A dated
+  subtask now appears as its **own chip** in the week/month/day planner, marked
+  with a leading **"↳"** and labelled with its parent ("subtask of …"); a subtask
+  that carries its own deadline also shows in the backlog's **Deadline** column.
+  So the daily review only ever asks you about the **subtask due that day**, not
+  the whole project.
+- **Closing the project.** Once **every** subtask is done (or cancelled), the
+  parent returns to the day-start review so you can close it out — Aperio does
+  **not** auto-complete it for you.
+
+A term paper (deadline in three weeks, a growing list of subtasks spread across
+the days) therefore plans itself through its subtasks, while the parent quietly
+holds the final deadline and stays out of your way until the work is finished.
+
 ## Recurring tasks
 
 Like events, tasks can recur (daily, weekly, monthly, yearly). When you

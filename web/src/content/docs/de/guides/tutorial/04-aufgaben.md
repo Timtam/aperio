@@ -142,6 +142,33 @@ Aperio unterscheidet zwischen Aufgaben mit und ohne festen Termin:
   Solange kein Arbeitstag gesetzt ist, liegt sie **zusätzlich im Backlog**,
   damit du sie auf einen konkreten Arbeitstag ziehen kannst.
 
+## Projekte: eine Elternaufgabe mit eigenen Unteraufgaben
+
+Hat eine Aufgabe eigene **Unteraufgaben**, behandelt Aperio die Elternaufgabe als
+**Projekt** und verlagert die tägliche Arbeit auf die Unteraufgaben:
+
+- **Die Elternaufgabe nervt nicht mehr.** Solange das Projekt noch offene
+  Unteraufgaben hat, **fragt dich der Tagesstart-Dialog nicht nach der
+  Elternaufgabe** — du arbeitest das Projekt über seine Unteraufgaben ab. Die
+  Elternaufgabe behält einfach ihre **Deadline**, sichtbar als Fälligkeitsmarker
+  an ihrem Deadline-Tag in der Planung. Sie wird auch nicht automatisch auf heute
+  gepinnt.
+- **Plane die Unteraufgaben, nicht die Elternaufgabe.** Gib jeder Unteraufgabe
+  ihren eigenen Tag. Eine datierte Unteraufgabe erscheint jetzt als **eigener
+  Eintrag** in der Wochen-/Monats-/Tagesplanung, gekennzeichnet mit einem
+  vorangestellten **„↳"** und ihrer Elternaufgabe („Unteraufgabe von …"); eine
+  Unteraufgabe mit eigener Deadline taucht zusätzlich oben im **Deadline**-Teil
+  des Backlogs auf. So fragt dich das tägliche Review nur noch nach der **an
+  diesem Tag fälligen Unteraufgabe**, nicht nach dem ganzen Projekt.
+- **Projekt abschließen.** Sobald **alle** Unteraufgaben erledigt (oder
+  abgebrochen) sind, taucht die Elternaufgabe wieder im Tagesstart-Dialog auf,
+  damit du sie abschließen kannst — Aperio erledigt sie **nicht** automatisch.
+
+Eine Hausarbeit (Deadline in drei Wochen, eine wachsende Liste von Unteraufgaben
+über die Tage verteilt) plant sich damit über ihre Unteraufgaben, während die
+Elternaufgabe im Hintergrund nur die End-Deadline hält und dich in Ruhe lässt,
+bis die Arbeit fertig ist.
+
 ## Wiederkehrende Aufgaben
 
 Wie Termine können auch Aufgaben sich wiederholen (täglich, wöchentlich,
