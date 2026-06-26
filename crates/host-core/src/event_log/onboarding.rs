@@ -234,11 +234,10 @@ impl OnboardingService {
                 SyncPreview::Existing {
                     schema_version: meta.schema_version,
                     min_app_version: meta.min_app_version.clone(),
-                    // §19.10 leaves the snapshot timestamp at "now" when
-                    // the dataset was freshly minted with no snapshot yet
-                    // — we surface that as None so the UI can say
-                    // "noch kein Snapshot" instead of misleading the
-                    // user with an empty-state pseudo-timestamp.
+                    // A freshly-minted dataset carries the MIN_UTC sentinel
+                    // (no snapshot yet) — surface that as None so the UI shows
+                    // "noch kein Snapshot" instead of an empty-state
+                    // pseudo-timestamp.
                     snapshot_timestamp: snapshot_ts_if_real(&meta),
                     e2e_enabled: meta.e2e_enabled,
                     devices: meta
@@ -447,21 +446,37 @@ impl OnboardingService {
             SyncError::not_found("remote meta.json disappeared between stale detection and resume")
         })?;
 
-        // Fetch + apply the current snapshot. Unlike the
-        // first-onboard path we expect a snapshot to exist
-        // (otherwise the compactor couldn't have flagged us
-        // stale); a missing snapshot here is a protocol error.
-        let snapshot = adapter.fetch_snapshot().await?.ok_or_else(|| {
-            SyncError::protocol("remote has no snapshot.json despite stale-device flag")
-        })?;
-        info!(
-            snapshot_ts = %snapshot.metadata.snapshot_timestamp,
-            "applying snapshot during stale-device resume",
-        );
-        self.snapshot_builder
-            .apply(&snapshot)
-            .map_err(|err| SyncError::internal(format!("stale resume snapshot apply: {err}")))?;
-        let mut starting_cursor = snapshot.metadata.snapshot_timestamp;
+        // Fetch + apply the current snapshot. Usually one exists
+        // (a compaction is what flags devices stale), but a MISSING
+        // snapshot must NOT wedge the device: a dataset can carry a
+        // `gc_horizon` (logs deleted) with no `snapshot.json` if the
+        // snapshot was removed out-of-band, and a legacy/transient
+        // latch can fire too. So fall back to a log-only catch-up,
+        // but advance PAST `gc_horizon`: the logs below it are gone,
+        // so there is nothing to fetch there, and leaving the cursor
+        // below it would just re-trip the backstop next round (the
+        // wedge). The alternative — erroring here — left the device
+        // permanently stuck, since the inline compaction that mints a
+        // snapshot sits behind the bailing round.
+        let mut starting_cursor = match adapter.fetch_snapshot().await? {
+            Some(snapshot) => {
+                info!(
+                    snapshot_ts = %snapshot.metadata.snapshot_timestamp,
+                    "applying snapshot during stale-device resume",
+                );
+                self.snapshot_builder.apply(&snapshot).map_err(|err| {
+                    SyncError::internal(format!("stale resume snapshot apply: {err}"))
+                })?;
+                snapshot.metadata.snapshot_timestamp
+            }
+            None => {
+                warn!(
+                    "stale resume found no snapshot.json; proceeding with log-only catch-up \
+                     past the GC horizon",
+                );
+                self.read_cursor().max(meta.gc_horizon_or_min())
+            }
+        };
 
         // Pull + apply any logs that landed after the snapshot.
         let logs = adapter
@@ -789,6 +804,20 @@ impl OnboardingService {
         Ok(())
     }
 
+    /// Read the persisted fetch cursor, or the `MIN_UTC` "fetch
+    /// everything" floor when none has been written yet. Used by the
+    /// tolerant stale-resume path to catch up via logs when there's no
+    /// snapshot to anchor on.
+    fn read_cursor(&self) -> DateTime<Utc> {
+        UserPrefsRepo::new(&self.db)
+            .get(SYNC_CURSOR_PREF_KEY)
+            .ok()
+            .flatten()
+            .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or(DateTime::<Utc>::MIN_UTC)
+    }
+
     fn mark_onboarded(&self) -> SyncResult<()> {
         UserPrefsRepo::new(&self.db)
             .set(PREF_ONBOARDED, "true")
@@ -798,17 +827,14 @@ impl OnboardingService {
 }
 
 /// Decide whether `meta.snapshot_timestamp` represents a real
-/// compaction or just the "freshly minted" placeholder
-/// `MetaJson::fresh()` writes. We use "older than 1 second from
-/// now" as the cutoff — anything newer is plausibly a fresh meta
-/// with no snapshot, anything older is a real snapshot timestamp.
-///
-/// A nicer signal would be a dedicated `Option<DateTime>` field, but
-/// the meta schema is frozen at v1 already; this heuristic is good
-/// enough until Phase Sg adds the proper flag.
+/// compaction or just the [`MetaJson::fresh`] "no snapshot yet"
+/// sentinel. Delegates to [`MetaJson::has_real_snapshot`], which checks
+/// the snapshot timestamp against the `MIN_UTC` sentinel a fresh dataset
+/// carries. (The old "older than 1 second from now" heuristic was a
+/// stopgap from when `fresh()` stamped `Utc::now()`; the sentinel is
+/// exact.)
 fn snapshot_ts_if_real(meta: &MetaJson) -> Option<String> {
-    let now = Utc::now();
-    if (now - meta.snapshot_timestamp).num_seconds() > 1 {
+    if meta.has_real_snapshot() {
         Some(meta.snapshot_timestamp.to_rfc3339())
     } else {
         None
@@ -1101,6 +1127,45 @@ mod tests {
             .device(&DeviceId::from_string("dev-this".into()))
             .expect("self entry");
         assert_eq!(rec.app_version, "1.0.0-test");
+    }
+
+    #[tokio::test]
+    async fn resume_from_stale_tolerates_a_missing_snapshot() {
+        // A never-compacted dataset has no snapshot.json. If the §19.10
+        // backstop ever latches against one (e.g. a legacy now()-baseline
+        // meta read as a real snapshot, or a transient race), resume must NOT
+        // error — erroring left the device permanently wedged, since the
+        // inline compaction that would mint a snapshot sits behind the bailing
+        // round. It falls back to a log-only catch-up and clears the stale
+        // flag instead. (FakeAdapter::fetch_snapshot returns None.)
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.snapshot_timestamp = Utc::now() - chrono::Duration::days(1);
+        meta.upsert_device(
+            svc.device_id(),
+            DeviceRecord {
+                name: None,
+                last_seen_log: Utc::now() - chrono::Duration::days(2),
+                app_version: "1.0.0".into(),
+                stale: true,
+            },
+        );
+        adapter.install_meta(meta);
+
+        let report = svc.resume_from_stale(&adapter).await;
+        assert!(
+            report.is_ok(),
+            "a missing snapshot.json must not error during resume: {report:?}",
+        );
+        // The stale flag is cleared so subsequent rounds proceed.
+        let after = adapter.fetch_meta().await.unwrap().unwrap();
+        assert!(
+            !after.device(svc.device_id()).unwrap().stale,
+            "resume must clear the stale flag even without a snapshot",
+        );
     }
 
     #[tokio::test]

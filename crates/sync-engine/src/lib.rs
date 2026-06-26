@@ -42,6 +42,7 @@ pub use compactor::{
 };
 pub use orchestrator::{
     SyncOrchestrator, SyncRoundHooks, SYNC_CURSOR_PREF_KEY, SYNC_LAST_ROUND_PREF_KEY,
+    SYNC_OWN_NEWEST_LOG_PREF_KEY,
 };
 pub use snapshot::{
     AperioSnapshotBody, SnapshotAccount, SnapshotApplyOutcome, SnapshotBuilder, SnapshotCredential,

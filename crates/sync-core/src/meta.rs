@@ -97,10 +97,24 @@ pub struct MetaJson {
     /// invalid and rejected by the adapter wrapper.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub e2e_params: Option<EncryptionParams>,
-    /// Timestamp of the current snapshot. Logs older than this are
-    /// already folded into the snapshot and can be GC'd once every
-    /// device has caught up.
+    /// Timestamp of the current snapshot — the content horizon the
+    /// `snapshot.json` actually covers (`max(own newest log, fetch cursor)`
+    /// of the compacting device). A joining device adopts this as its
+    /// starting cursor.
     pub snapshot_timestamp: DateTime<Utc>,
+    /// The GC high-water mark: every log file with `timestamp < gc_horizon`
+    /// has been deleted from the remote and can no longer be fetched
+    /// incrementally. Monotonic (a compaction only ever raises it). This is
+    /// DISTINCT from `snapshot_timestamp`: the snapshot may cover more recent
+    /// content than has been GC'd (recent logs are retained so a briefly-behind
+    /// device can still catch up across them), so a device is "stale" — needs
+    /// to consume the snapshot rather than replay logs — exactly when its held
+    /// horizon `< gc_horizon`, NOT `< snapshot_timestamp`. `None`/absent means
+    /// no compaction has ever GC'd a log (a fresh OR legacy dataset), so the
+    /// stale gate can't fire — which is what keeps a legacy `now()`-baseline
+    /// meta (real `snapshot_timestamp`, no `snapshot.json`) from wedging.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gc_horizon: Option<DateTime<Utc>>,
     /// Per-device registry. Keyed by [`DeviceId`] (the bare string
     /// form). BTreeMap so the on-disk order is deterministic per
     /// device id — useful for git-style diffing if someone hosts
@@ -112,15 +126,41 @@ pub struct MetaJson {
 impl MetaJson {
     /// Construct an empty meta document for a brand-new dataset.
     /// Used by the onboarding "Neu beginnen" path (§19.11).
+    ///
+    /// `snapshot_timestamp` is the [`DateTime::<Utc>::MIN_UTC`] sentinel,
+    /// not `Utc::now()`: a fresh dataset has no snapshot yet, and stamping
+    /// "now" made every freshly-minted meta look like it carried a real
+    /// snapshot a hair in the past. The compactor's age trigger and the
+    /// §19.10 stale backstop both gate on [`Self::has_real_snapshot`] so
+    /// the sentinel reads cleanly as "no compaction has happened".
     pub fn fresh(app_version: impl Into<String>) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
             min_app_version: app_version.into(),
             e2e_enabled: false,
             e2e_params: None,
-            snapshot_timestamp: Utc::now(),
+            snapshot_timestamp: DateTime::<Utc>::MIN_UTC,
+            gc_horizon: None,
             devices: BTreeMap::new(),
         }
+    }
+
+    /// Whether `snapshot_timestamp` represents a real compaction rather
+    /// than the [`Self::fresh`] "no snapshot yet" sentinel. A dataset that
+    /// has never been compacted carries [`DateTime::<Utc>::MIN_UTC`]; any
+    /// later value is a genuine snapshot horizon. Used to gate the age-based
+    /// compaction trigger and the §19.10 stale-device backstop so neither
+    /// fires against a dataset that has no `snapshot.json` to resume from.
+    pub fn has_real_snapshot(&self) -> bool {
+        self.snapshot_timestamp > DateTime::<Utc>::MIN_UTC
+    }
+
+    /// The GC high-water mark as a concrete timestamp — [`Self::gc_horizon`]
+    /// or the `MIN_UTC` floor when no compaction has ever deleted a log. The
+    /// §19.10 stale gate fires exactly when a device's held horizon is below
+    /// this, so a dataset that has never GC'd (`None`) never flags anyone.
+    pub fn gc_horizon_or_min(&self) -> DateTime<Utc> {
+        self.gc_horizon.unwrap_or(DateTime::<Utc>::MIN_UTC)
     }
 
     /// Read a `MetaJson` from raw bytes (the JSON the storage
@@ -179,6 +219,7 @@ mod tests {
             e2e_enabled: false,
             e2e_params: None,
             snapshot_timestamp: Utc::now(),
+            gc_horizon: None,
             devices: BTreeMap::from([(
                 "dev-a".into(),
                 DeviceRecord {

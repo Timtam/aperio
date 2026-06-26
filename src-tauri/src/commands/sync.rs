@@ -1167,9 +1167,9 @@ pub fn get_sync_adapter_summary(
 
 /// Manually trigger a compaction round (Phase Sg, §19.10). Snapshots
 /// the current local state, pushes `snapshot.json`, advances
-/// `meta.json.snapshot_timestamp`, and GCs every log file older than
-/// the new snapshot horizon (clamped by the slowest device's
-/// `last_seen_log`).
+/// `meta.json.snapshot_timestamp`, and GCs log files below the GC
+/// cutoff `max(lowest device held horizon, snapshot_ts - retention)`,
+/// publishing the resulting monotonic `gc_horizon`.
 ///
 /// Returns counters the Settings UI can render directly. The
 /// scheduler also dispatches this same code path automatically when

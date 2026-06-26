@@ -7820,6 +7820,80 @@ mod tests {
     }
 
     #[test]
+    fn compaction_does_not_flag_caught_up_peers_stale() {
+        // §19.10 end-to-end regression. After one device compacts, a fully
+        // caught-up PEER must keep syncing normally — the held-horizon
+        // backstop must NOT mistake it for a device that fell behind the
+        // snapshot. The reverted cursor-only backstop sent healthy peers to
+        // the resume dialog on every round (snapshot_ts = now-1s sat a hair
+        // above every foreign log a caught-up cursor could reach); this drives
+        // a real foreign cursor against a real compactor snapshot_ts and
+        // asserts NO StaleDevice. It's the integration coverage whose absence
+        // let that bug ship.
+        let remote = tempfile::tempdir().unwrap();
+        let cfg = format!(
+            r#"{{"kind":"local","path":{}}}"#,
+            serde_json::to_string(&remote.path().to_string_lossy()).unwrap()
+        );
+
+        let dir_a = tempfile::tempdir().unwrap();
+        let host_a = open_named(&dir_a, "a");
+        let dir_b = tempfile::tempdir().unwrap();
+        let host_b = open_named(&dir_b, "b");
+        host_a.configure_sync_adapter_json(cfg.clone()).unwrap();
+        host_b.configure_sync_adapter_json(cfg).unwrap();
+
+        let task = r#"{"title":"t","description":null,"status":"open","priority":"medium","scheduled_date":null,"scheduled_time":null,"deadline_date":null,"deadline_time":null,"recurrence":null,"parent_id":null,"color_label":null,"reminders":[],"sound":null}"#;
+
+        // A writes a list + task; both round so B catches up to A.
+        let list = host_a.create_task_list_json("Shared".to_string()).unwrap();
+        let list_id = serde_json::from_str::<serde_json::Value>(&list).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        host_a
+            .create_task_json(list_id.clone(), task.to_string())
+            .unwrap();
+        wait_for_pending(&dir_a);
+        host_a.sync_now_json("manual".to_string()).unwrap();
+        host_b.sync_now_json("manual".to_string()).unwrap();
+
+        // B writes a task; both round so A catches up to B. Now BOTH hold
+        // every log in the dataset (own-written + foreign-applied).
+        host_b
+            .create_task_json(list_id.clone(), task.to_string())
+            .unwrap();
+        wait_for_pending(&dir_b);
+        host_b.sync_now_json("manual".to_string()).unwrap();
+        host_a.sync_now_json("manual".to_string()).unwrap();
+
+        // A compacts: snapshot_ts = max(own_a, cursor_a) = the dataset's real
+        // content horizon, which both caught-up devices' held horizons reach.
+        host_a.compact_now_json().unwrap();
+
+        // The regression assertion: neither device is flagged stale on its
+        // next round. A StaleDevice surfaces as `Err` (code "stale_device").
+        let b_round = host_b.sync_now_json("manual".to_string());
+        assert!(
+            b_round.is_ok(),
+            "a caught-up peer must not be flagged stale after a compaction; got {b_round:?}",
+        );
+        let a_round = host_a.sync_now_json("manual".to_string());
+        assert!(
+            a_round.is_ok(),
+            "the compacting device must not flag itself stale; got {a_round:?}",
+        );
+        // No stale latch on B's status either.
+        let status_b: serde_json::Value =
+            serde_json::from_str(&host_b.sync_status_json().unwrap()).unwrap();
+        assert_eq!(
+            status_b["stale_device_since"],
+            serde_json::Value::Null,
+            "B must carry no stale latch after syncing past a compaction",
+        );
+    }
+
+    #[test]
     fn configured_local_target_is_restored_on_reopen() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir

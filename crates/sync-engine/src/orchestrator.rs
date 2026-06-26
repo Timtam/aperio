@@ -74,6 +74,20 @@ pub const SYNC_CURSOR_PREF_KEY: &str = "sync.cursor.lastSeenLog";
 /// was nothing to fetch.
 pub const SYNC_LAST_ROUND_PREF_KEY: &str = "sync.lastSuccessfulRound";
 
+/// `user_prefs` key holding the RFC 3339 timestamp of the newest log
+/// file THIS device has written (its own session files). Distinct from
+/// [`SYNC_CURSOR_PREF_KEY`], which only tracks *foreign* logs: own logs
+/// are filtered out before the cursor advances, so the cursor
+/// structurally sits below this device's own newest log.
+///
+/// Together they give the device's TRUE held horizon —
+/// `max(cursor, own_newest_log)` — the point up to which it holds every
+/// event (foreign-applied + own-written). The §19.10 stale backstop and
+/// the compactor's snapshot horizon both reason in terms of this held
+/// horizon, so a caught-up device whose own logs are the newest in the
+/// dataset isn't mistaken for one that fell behind the snapshot.
+pub const SYNC_OWN_NEWEST_LOG_PREF_KEY: &str = "sync.cursor.ownNewestLog";
+
 /// `SyncRoundReport` (what one round did) and `SyncStatus` (the read-only
 /// state snapshot) are defined in the crate root so the desktop app and
 /// the engine share one definition; this module owns the orchestration
@@ -202,6 +216,25 @@ pub struct SyncOrchestrator {
 fn is_stale_empty_stub(file_session: DateTime<Utc>, boot_at: DateTime<Utc>) -> bool {
     file_session.with_nanosecond(0).unwrap_or(file_session)
         < boot_at.with_nanosecond(0).unwrap_or(boot_at)
+}
+
+/// Whether the §19.10 held-horizon backstop must force a snapshot resume:
+/// this device's `held` horizon — `max(foreign cursor, own newest log)` — is
+/// below the dataset's GC high-water mark, i.e. the compactor has DELETED
+/// pre-snapshot logs this device never consumed, so it can't catch up
+/// incrementally and must consume the snapshot.
+///
+/// Keying on `gc_horizon` rather than `snapshot_timestamp` is deliberate on two
+/// counts: (1) a device merely behind the snapshot but at/above the GC mark can
+/// still replay the RETAINED logs — flagging it would be a spurious resume
+/// (the over-fire); (2) `gc_horizon` is `None` (→ `MIN_UTC`) on any dataset
+/// that has never GC'd a log, including a LEGACY meta that carries a real
+/// `now()`-baseline `snapshot_timestamp` but has no `snapshot.json`. Gating on
+/// `snapshot_timestamp` there wedged such datasets in an endless resume loop;
+/// gating on `gc_horizon` can't, because `held >= MIN_UTC` always. Free fn so
+/// the boundary is unit-testable without standing up a full orchestrator.
+fn snapshot_backstop_trips(held: DateTime<Utc>, meta: &sync_core::MetaJson) -> bool {
+    held < meta.gc_horizon_or_min()
 }
 
 impl SyncOrchestrator {
@@ -406,6 +439,41 @@ impl SyncOrchestrator {
                 }
             }
 
+            // §19.10 held-horizon backstop. The per-device `stale` flag
+            // above can miss: a behind device may be absent from
+            // `meta.devices` (the compactor can't flag what it can't see),
+            // or a concurrent compactor's last-write-wins meta push can
+            // clobber the flag. So independently gate on OUR OWN true held
+            // horizon — `max(foreign cursor, own newest log)` — against the
+            // dataset's GC high-water mark (`gc_horizon`). When our horizon
+            // is below it, the compactor has DELETED pre-snapshot logs we
+            // never consumed, so we resume via snapshot instead of silently
+            // skipping them.
+            //
+            // Three things keep this precise:
+            //   - `gc_horizon`, not `snapshot_timestamp`: a device behind the
+            //     snapshot but at/above the GC mark still replays the RETAINED
+            //     logs, so flagging it would be a spurious resume. And a
+            //     never-GC'd dataset (`gc_horizon == None → MIN_UTC`) never
+            //     trips — which is what stops a fresh OR legacy single-device
+            //     dataset (real `snapshot_timestamp`, no `snapshot.json`) from
+            //     wedging in an endless resume loop.
+            //   - the HELD horizon, not the bare foreign cursor: a caught-up
+            //     device whose own logs are the newest in the dataset reaches
+            //     the mark via `own_newest`, even though its foreign cursor
+            //     structurally sits below it. Comparing the bare cursor was the
+            //     regression that sent healthy devices to the resume dialog
+            //     every round.
+            if snapshot_backstop_trips(self.held_horizon(), &meta) {
+                *self
+                    .stale_device_since
+                    .lock()
+                    .expect("stale_device_since mutex poison") = Some(meta.snapshot_timestamp);
+                return Err(sync_core::SyncError::StaleDevice {
+                    snapshot_at: meta.snapshot_timestamp.to_rfc3339(),
+                });
+            }
+
             // §19.7 encryption gate. The dataset is end-to-end encrypted but
             // this device isn't in E2E mode — i.e. another device flipped
             // encryption on after we onboarded in plaintext. Refuse the round
@@ -488,16 +556,26 @@ impl SyncOrchestrator {
             }
         }
 
-        // 4. Heartbeat: refresh our own entry in `meta.json` so
-        // other devices see our `last_seen_log` advance. We use
-        // `Utc::now()` rather than `newest` because the heartbeat
-        // is "this device is alive and current", not "the newest
-        // log I observed" — even an empty round still counts.
+        // 4. Heartbeat: refresh our own `last_seen_log` in `meta.json`.
+        // We stamp our HELD HORIZON — `max(cursor, own_newest_log)` — not
+        // `Utc::now()`. `last_seen_log` is the compactor's input for
+        // deciding which devices fell behind the snapshot (and which logs
+        // are GC-safe), so it must mean "the point up to which I actually
+        // hold every event", not "I'm alive". A wall-clock heartbeat
+        // decoupled the two: a device whose fetch failed still stamped
+        // `now`, so the compactor judged it caught up and GC'd logs it
+        // never consumed. (Liveness — the "Letzter Abgleich: vor 2 Min"
+        // display — comes from `SYNC_LAST_ROUND_PREF_KEY` below, which DOES
+        // bump every round.)
         //
-        // Failures here are non-fatal: the next round retries, and
-        // a missed heartbeat at worst means our entry looks
-        // slightly stale in someone else's UI until then.
-        if let Err(err) = self.hooks.heartbeat(adapter.as_ref(), Utc::now()).await {
+        // Failures here are non-fatal: the next round retries, and a missed
+        // heartbeat at worst means our entry looks slightly behind in
+        // someone else's UI until then.
+        if let Err(err) = self
+            .hooks
+            .heartbeat(adapter.as_ref(), self.held_horizon())
+            .await
+        {
             warn!(?err, "meta.json heartbeat failed");
         }
 
@@ -603,6 +681,12 @@ impl SyncOrchestrator {
         };
 
         let mut pushed = 0usize;
+        // Track the newest own-written session file we see so the held
+        // horizon (max(cursor, own_newest)) stays current. We record EVERY
+        // own session file's timestamp — even an empty current-session stub
+        // we skip pushing below — because the file's mere existence means
+        // this device holds events up to that session's start.
+        let mut newest_own: Option<DateTime<Utc>> = None;
         while let Some(entry) = entries
             .next_entry()
             .await
@@ -619,6 +703,10 @@ impl SyncOrchestrator {
                     continue;
                 }
             };
+            if parsed.device_id == self.local_device_id {
+                newest_own =
+                    Some(newest_own.map_or(parsed.timestamp, |cur| cur.max(parsed.timestamp)));
+            }
             let bytes = match tokio::fs::read(&path).await {
                 Ok(b) => b,
                 Err(err) => {
@@ -669,7 +757,44 @@ impl SyncOrchestrator {
                 Err(err) => warn!(name = name, ?err, "push_log failed"),
             }
         }
+        // Persist the newest own-written session timestamp so the held
+        // horizon and the compactor's content-bounded snapshot timestamp
+        // can read it without re-scanning the pending dir. Monotonic: only
+        // advance, never regress (a swept/rotated-away file mustn't lower it).
+        if let Some(ts) = newest_own {
+            if ts > self.read_own_newest_log() {
+                if let Err(err) = self
+                    .store
+                    .set_pref(SYNC_OWN_NEWEST_LOG_PREF_KEY, &ts.to_rfc3339())
+                {
+                    warn!(?err, "couldn't persist own-newest-log horizon");
+                }
+            }
+        }
         Ok(pushed)
+    }
+
+    /// This device's held horizon: the newest point up to which it holds
+    /// every event, foreign-applied OR own-written. `max(cursor,
+    /// own_newest_log)`. The §19.10 stale backstop compares this against the
+    /// dataset's snapshot horizon — a device is behind only when BOTH its
+    /// foreign cursor and its own newest log predate the snapshot.
+    fn held_horizon(&self) -> DateTime<Utc> {
+        self.cursor_for_fetch()
+            .last_seen_log
+            .max(self.read_own_newest_log())
+    }
+
+    /// Read the persisted newest own-written log timestamp, or `MIN_UTC`
+    /// when this device has never written one.
+    fn read_own_newest_log(&self) -> DateTime<Utc> {
+        self.store
+            .get_pref(SYNC_OWN_NEWEST_LOG_PREF_KEY)
+            .ok()
+            .flatten()
+            .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or(DateTime::<Utc>::MIN_UTC)
     }
 
     fn cursor_for_fetch(&self) -> DeviceCursor {
@@ -748,8 +873,73 @@ impl Drop for InFlightGuard<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::is_stale_empty_stub;
-    use chrono::{Duration, TimeZone, Timelike, Utc};
+    use super::{is_stale_empty_stub, snapshot_backstop_trips};
+    use chrono::{DateTime, Duration, TimeZone, Timelike, Utc};
+    use sync_core::{DeviceId, DeviceRecord, MetaJson};
+
+    /// Build a meta whose GC high-water mark sits at `gc_horizon` — i.e. logs
+    /// below it have been deleted from the remote.
+    fn meta_with_gc_horizon(gc_horizon: DateTime<Utc>) -> MetaJson {
+        let mut meta = MetaJson::fresh("1.0.0-test");
+        meta.gc_horizon = Some(gc_horizon);
+        meta
+    }
+
+    #[test]
+    fn backstop_keys_on_the_gc_horizon_not_the_snapshot() {
+        let gc = Utc.with_ymd_and_hms(2026, 6, 1, 12, 0, 0).unwrap();
+        let meta = meta_with_gc_horizon(gc);
+        // Held horizon BELOW the GC mark → must resume: the logs needed to
+        // catch up incrementally have been deleted.
+        assert!(snapshot_backstop_trips(gc - Duration::seconds(1), &meta));
+        // Held horizon EXACTLY at the mark (a caught-up device) → pass.
+        assert!(!snapshot_backstop_trips(gc, &meta));
+        // Held horizon AHEAD of the mark → pass.
+        assert!(!snapshot_backstop_trips(gc + Duration::seconds(1), &meta));
+    }
+
+    #[test]
+    fn backstop_does_not_trip_on_a_behind_device_above_the_gc_horizon() {
+        // The over-fire guard: a snapshot exists and the device is BEHIND it,
+        // but it sits at/above the GC mark — the retained logs let it catch up
+        // incrementally, so it must NOT be forced into a snapshot resume.
+        let mut meta = MetaJson::fresh("1.0.0-test");
+        meta.snapshot_timestamp = Utc.with_ymd_and_hms(2026, 6, 1, 12, 0, 0).unwrap();
+        meta.gc_horizon = Some(Utc.with_ymd_and_hms(2026, 5, 20, 0, 0, 0).unwrap());
+        // Held horizon is below the snapshot but above the GC mark.
+        let held = Utc.with_ymd_and_hms(2026, 5, 25, 0, 0, 0).unwrap();
+        assert!(held < meta.snapshot_timestamp && held > meta.gc_horizon_or_min());
+        assert!(!snapshot_backstop_trips(held, &meta));
+    }
+
+    #[test]
+    fn backstop_never_trips_on_a_never_gced_dataset() {
+        // No compaction has ever deleted a log → `gc_horizon` is None
+        // (→ MIN_UTC), so even a MIN_UTC held horizon must NOT trip. This is
+        // what keeps a fresh single-device setup — AND a LEGACY meta that
+        // carries a real now()-baseline `snapshot_timestamp` but has no
+        // snapshot.json — from wedging in an endless resume loop.
+        let fresh = MetaJson::fresh("1.0.0-test");
+        assert!(fresh.gc_horizon.is_none());
+        assert!(!snapshot_backstop_trips(DateTime::<Utc>::MIN_UTC, &fresh));
+        // A legacy-style meta: real snapshot_timestamp, but no GC has happened.
+        let mut legacy = MetaJson::fresh("1.0.0-test");
+        legacy.snapshot_timestamp = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        legacy.upsert_device(
+            &DeviceId::from_string("dev-a".into()),
+            DeviceRecord {
+                name: None,
+                last_seen_log: Utc::now(),
+                app_version: "1.0.0-test".into(),
+                stale: false,
+            },
+        );
+        assert!(legacy.has_real_snapshot());
+        assert!(
+            !snapshot_backstop_trips(DateTime::<Utc>::MIN_UTC, &legacy),
+            "a legacy real-baseline meta with no GC must not wedge",
+        );
+    }
 
     #[test]
     fn empty_stub_cleanup_keeps_live_session_file_and_reaps_older() {

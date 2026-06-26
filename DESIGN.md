@@ -2635,6 +2635,7 @@ sync/
   "min_app_version": "1.0.0",
   "e2e_enabled": false,
   "snapshot_timestamp": "2025-05-01T00:00:00Z",
+  "gc_horizon": "2025-04-17T00:00:00Z",
   "devices": {
     "device-a": {
       "name": "Desktop-PC",
@@ -2652,7 +2653,7 @@ sync/
 }
 ```
 
-Nach jedem erfolgreichen Sync-Durchlauf aktualisiert ein Gerät seinen eigenen `last_seen_log`- und `app_version`-Eintrag. `stale: true` wird gesetzt, wenn ein Gerät nach der Kompaktierung noch Logs benötigt, die bereits gelöscht wurden (Schritt 6 des Kompaktierungs-Algorithmus). `min_app_version` wird bei einem Schema-Upgrade auf die aktuelle App-Version gesetzt (Abschnitt 19.13).
+Nach jedem erfolgreichen Sync-Durchlauf aktualisiert ein Gerät seinen eigenen `last_seen_log`- und `app_version`-Eintrag. `last_seen_log` ist der **„held horizon"** des Geräts — `max(Fetch-Cursor, eigenes neuestes Log)`, also der Zeitpunkt, bis zu dem es jedes Ereignis hält (angewendete fremde + selbst geschriebene). `stale: true` wird gesetzt, wenn der `last_seen_log` eines Geräts unter den `gc_horizon` fällt — die Logs, die es zum inkrementellen Aufholen bräuchte, sind bereits gelöscht (Schritt 6 des Kompaktierungs-Algorithmus). `gc_horizon` ist die (monoton steigende) **GC-Obergrenze**: jede Log-Datei mit `timestamp < gc_horizon` wurde gelöscht und kann nicht mehr inkrementell nachgeladen werden — abwesend (`null`) bedeutet, dass noch nie ein Log gelöscht wurde (frischer ODER Alt-Datensatz), sodass die Stale-Prüfung niemandem auslöst. `min_app_version` wird bei einem Schema-Upgrade auf die aktuelle App-Version gesetzt (Abschnitt 19.13).
 
 #### Kompaktierungs-Trigger
 
@@ -2672,16 +2673,38 @@ Die Prüfung erfolgt bei jedem Sync-Durchlauf. Auslösendes Gerät ist dasjenige
 1. Alle Log-Dateien seit dem letzten Snapshot herunterladen
 2. Log-Ereignisse chronologisch sortieren und auf den letzten
    Snapshot-Zustand anwenden → neuer Gesamtzustand
-3. Neuen Snapshot generieren und hochladen (snapshot.json)
-4. meta.json aktualisieren: neuer snapshot_timestamp
+3. Neuen Snapshot generieren und hochladen (snapshot.json),
+   gestempelt mit snapshot_ts = max(eigenes neuestes Log,
+   Fetch-Cursor) — dem tatsächlich gehaltenen Inhalt, nicht
+   Utc::now(). Ein beitretendes Gerät übernimmt diesen Wert als
+   Start-Cursor.
+4. meta.json aktualisieren: snapshot_timestamp = snapshot_ts.
 
-5. Für jede bestehende Log-Datei prüfen:
-   → Ist log_timestamp < snapshot_timestamp?
-   → UND haben ALLE Geräte (last_seen_log >= log_timestamp)?
-   → Wenn ja: Log-Datei löschen
+5. GC-Schnitt berechnen:
+   safe_cutoff = max(niedrigster held_horizon aller Geräte,
+                     snapshot_ts − Aufbewahrungsfenster)   [Default 14 Tage]
+   → Der erste Term (konservativ) löscht NIE ein Log, das ein noch
+     bekanntes Gerät — auch ein parallel kompaktierendes mit
+     niedrigerem Horizont — noch nicht hat (Datenverlust-Schutz bei
+     gleichzeitiger Kompaktierung ohne ETag-Sperre).
+   → Der zweite Term begrenzt, wie weit EIN zurückliegendes Gerät den
+     Schnitt zurückhält: ein länger als das Fenster offline gewesenes
+     Gerät wird aufgegeben (seine alten Logs werden gelöscht, es
+     übernimmt bei Rückkehr den Snapshot) — so wachsen die Logs nicht
+     unbegrenzt hinter einem dauerhaft offline Gerät (der ursprüngliche
+     Report).
+   gc_horizon = max(bisheriger gc_horizon, safe_cutoff) — MONOTON
+   (Löschungen sind endgültig), in meta.json veröffentlicht.
 
-6. Geräte, deren last_seen_log älter als snapshot_timestamp ist,
-   werden in meta.json als "stale" markiert
+6. Geräte, deren held_horizon (last_seen_log) < gc_horizon ist,
+   als "stale" markieren: die Logs zum inkrementellen Aufholen sind
+   gelöscht. Ein Gerät nur HINTER dem Snapshot, aber ≥ gc_horizon,
+   bleibt unmarkiert (es holt über die aufbewahrten Logs auf).
+
+7. Jede Log-Datei mit Zeitstempel STRIKT < safe_cutoff löschen, die
+   der Snapshot abdeckt (eigene Logs immer; fremde nur bis zum Cursor —
+   ein fremdes Log neuer als der Cursor wurde nie angewendet und steckt
+   nicht im Snapshot).
 ```
 
 #### Umgang mit veralteten Geräten ("stale")
