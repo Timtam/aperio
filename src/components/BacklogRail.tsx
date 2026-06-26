@@ -10,6 +10,8 @@ import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import { isCommandError } from '../api/client';
+import type { Task } from '../api/types';
+import { useDateFormat } from '../intl/dateFormat';
 import { labelsLookup, resolveTaskColor } from '../intl/eventColor';
 import {
   assigneeSuffix,
@@ -35,39 +37,41 @@ import { useTasks } from '../state/useTasks';
 import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
 import { isTaskDeferred } from './views/taskGrouping';
 
+/** Parse a `YYYY-MM-DD` day key into a LOCAL Date (no UTC drift). */
+function parseDayKey(key: string): Date {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
 /**
- * Backlog rail for the week / month planner.
+ * Backlog rail for the week / month planner — split in two.
  *
- * Lists the unscheduled backlog — open, top-level tasks with no
- * `scheduled_date` (the same bucket the task view's "Backlog" group shows). A
- * deadline-only task stays here too — it has no planned work day yet — while
- * also showing as a due marker on its deadline day. Three roles in one:
+ *   - **Deadline** (top): EVERY open / in-progress task that has a deadline,
+ *     earliest deadline first. Independent of the day plan, so a task already
+ *     scheduled onto a day still shows here (it also keeps its grid due-marker)
+ *     and a started task is included — the rail becomes the one place to see
+ *     what's due soonest.
+ *   - **By priority** (bottom): the classic active backlog — open / in-progress,
+ *     top-level tasks with no `scheduled_date` AND no deadline (those moved up),
+ *     not deferred, high → low priority.
  *
- *   - **Drag source** — each option is draggable; drop it on a day cell to
- *     schedule it there (the planner's existing day-drop handles it).
- *   - **Drop target** — drop a *scheduled* task onto the rail to send it
- *     back to the backlog (clears the date/deadline).
- *   - **Keyboard / screen-reader** — a single-tab-stop `listbox`: Tab lands
- *     on the list once, Arrow/Home/End move the active option (via
- *     `aria-activedescendant`, not one tab-stop per task), Enter opens it,
- *     Shift+D opens the plan dialog (schedule), ContextMenu / Shift+F10
- *     opens the task menu. So the rail is fully usable without a mouse.
+ * Both lists are drag sources (drop a chip on a day cell to schedule it) and the
+ * rail is a drop target (drop a scheduled task back here to clear its plan).
+ * Each list is its own single-tab-stop `listbox` (Arrow/Home/End move the active
+ * option via `aria-activedescendant`, Enter opens, Shift+D plans, ContextMenu /
+ * Shift+F10 opens the task menu), so the rail stays fully keyboard/SR usable.
  *
- * Rendered as a fixed-width vertical list to the left of the week / month
- * grid; it joins the F6 region cycle (via `data-region`). Each chip carries
- * its hierarchical color (task → section → list) and a priority marker, and
- * the list is ordered high → low priority.
+ * Rendered as a fixed-width resizable column left of the grid; it joins the F6
+ * region cycle. Each chip carries its hierarchical color (task → section → list)
+ * and a priority marker; deadline chips additionally show the due date.
  */
 export function BacklogRail() {
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const todayKey = useCurrentDayKey();
-  const { tasks, taskListById } = useTasks();
-  const { openTaskDialog, openPlanTask, invalidateData } = useDialogState();
-  const { openForTask } = useChipContextMenu();
-  const { colorLabels, sectionColorById, sectionsByList, loadSections } =
-    useCalendarStore();
-  const [activeIndex, setActiveIndex] = useState(0);
+  const { tasks } = useTasks();
+  const { invalidateData } = useDialogState();
+  const { colorLabels, sectionsByList, loadSections } = useCalendarStore();
   const headingId = useId();
   const { width, setWidth } = useBacklogWidth();
   const rootRef = useRef<HTMLElement>(null);
@@ -114,47 +118,70 @@ export function BacklogRail() {
     [setWidth, width],
   );
 
-  const backlog = useMemo(() => {
-    const ids = new Set(tasks.map((row) => row.id));
-    return tasks
-      .filter(
-        (row) =>
-          row.status !== 'completed' &&
-          // No planned WORK day yet. A deadline-only task still belongs here
-          // so it can be dragged onto a work day — it also shows as a due
-          // marker on its deadline day in the grid.
-          !row.scheduled_date &&
-          // DESIGN §9.3/§9.12: a deferred backlog task (resurfaces on a
-          // future day) waits in the task view's "Zukünftig" group, not in
-          // the active backlog — keep it out of the rail too so it doesn't
-          // appear in both places.
-          !isTaskDeferred(row, todayKey) &&
-          // top-level (or orphaned) — subtasks travel with their parent
-          (!row.parent_id || !ids.has(row.parent_id)),
-      )
-      // High priority to the top, low to the bottom (stable → existing order
-      // is the tiebreaker within one priority band).
-      .sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority));
-  }, [tasks, todayKey]);
+  const ids = useMemo(() => new Set(tasks.map((row) => row.id)), [tasks]);
+  // top-level (or orphaned) — subtasks travel with their parent.
+  const isTopLevel = useCallback(
+    (row: Task) => !row.parent_id || !ids.has(row.parent_id),
+    [ids],
+  );
+
+  // Deadline section: ALL open / in-progress tasks with a deadline (scheduled or
+  // not, started or not), earliest deadline first; priority then created-order
+  // break ties within one date.
+  const deadlineTasks = useMemo(
+    () =>
+      tasks
+        .filter(
+          (row) =>
+            row.status !== 'completed' && !!row.deadline_date && isTopLevel(row),
+        )
+        .sort(
+          (a, b) =>
+            (a.deadline_date ?? '').localeCompare(b.deadline_date ?? '') ||
+            priorityRank(a.priority) - priorityRank(b.priority) ||
+            a.created_at.localeCompare(b.created_at),
+        ),
+    [tasks, isTopLevel],
+  );
+
+  // Priority backlog: the classic active backlog MINUS deadline tasks (those are
+  // in the section above), high → low priority.
+  const priorityBacklog = useMemo(
+    () =>
+      tasks
+        .filter(
+          (row) =>
+            row.status !== 'completed' &&
+            !row.scheduled_date &&
+            // deadline tasks live in the section above — keep them out of here
+            // so a task never appears in both halves.
+            !row.deadline_date &&
+            // a deferred backlog task (resurfaces on a future day) waits in the
+            // task view's "Zukünftig" group, not the active rail.
+            !isTaskDeferred(row, todayKey) &&
+            isTopLevel(row),
+        )
+        .sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority)),
+    [tasks, todayKey, isTopLevel],
+  );
 
   // Per-chip color follows the task → section → list chain. Sections load
-  // lazily, so trigger a load for every list that has a backlog task.
+  // lazily, so trigger a load for every list that has a rail task.
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
   const listIds = useMemo(
-    () => Array.from(new Set(backlog.map((task) => task.list_id))),
-    [backlog],
+    () =>
+      Array.from(
+        new Set(
+          [...deadlineTasks, ...priorityBacklog].map((task) => task.list_id),
+        ),
+      ),
+    [deadlineTasks, priorityBacklog],
   );
   useEffect(() => {
     for (const listId of listIds) {
       if (!(listId in sectionsByList)) void loadSections(listId);
     }
   }, [listIds, sectionsByList, loadSections]);
-
-  // Clamp the active option to the current list (it shrinks as tasks are
-  // scheduled away). Derived, so it never points past the end.
-  const activeIdx =
-    backlog.length === 0 ? -1 : Math.min(activeIndex, backlog.length - 1);
-  const optionId = (i: number) => `backlog-opt-${i}`;
 
   const dropToBacklog = async (e: React.DragEvent) => {
     e.preventDefault();
@@ -173,13 +200,121 @@ export function BacklogRail() {
     }
   };
 
+  const total = deadlineTasks.length + priorityBacklog.length;
+
+  return (
+    <section
+      ref={rootRef}
+      className="backlog-rail"
+      data-region="backlog"
+      aria-labelledby={headingId}
+      style={{ flexBasis: `${width}px` }}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes(TASK_DND_TYPE)) return;
+        // A task dragged over the rail → valid "back to backlog" drop.
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+      }}
+      onDrop={(e) => void dropToBacklog(e)}
+    >
+      <h2 id={headingId} className="backlog-rail__heading">
+        {t('views.backlog.heading', { count: total })}
+      </h2>
+      <div className="backlog-rail__body">
+        {total === 0 ? (
+          <p className="backlog-rail__empty">{t('views.backlog.empty')}</p>
+        ) : (
+          <>
+            {deadlineTasks.length > 0 && (
+              <BacklogList
+                items={deadlineTasks}
+                heading={t('views.backlog.deadlineHeading', {
+                  count: deadlineTasks.length,
+                })}
+                listLabel={t('views.backlog.deadlineListLabel')}
+                optionPrefix="backlog-deadline"
+                labelById={labelById}
+                todayKey={todayKey}
+                showDeadline
+              />
+            )}
+            {priorityBacklog.length > 0 && (
+              <BacklogList
+                items={priorityBacklog}
+                heading={t('views.backlog.priorityHeading', {
+                  count: priorityBacklog.length,
+                })}
+                listLabel={t('views.backlog.listLabel')}
+                optionPrefix="backlog-priority"
+                labelById={labelById}
+                todayKey={todayKey}
+              />
+            )}
+          </>
+        )}
+      </div>
+      {/* Drag (or arrow-key) the right edge to resize the column. */}
+      <div
+        className="backlog-rail__resizer"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={t('views.backlog.resize')}
+        aria-valuenow={width}
+        aria-valuemin={BACKLOG_WIDTH_MIN}
+        aria-valuemax={BACKLOG_WIDTH_MAX}
+        tabIndex={0}
+        onPointerDown={beginResize}
+        onKeyDown={onResizeKey}
+      />
+    </section>
+  );
+}
+
+interface BacklogListProps {
+  items: Task[];
+  heading: string;
+  listLabel: string;
+  /** Unique id prefix so each list's `aria-activedescendant` targets are
+   *  distinct across the two listboxes in the rail. */
+  optionPrefix: string;
+  labelById: ReturnType<typeof labelsLookup>;
+  todayKey: string;
+  /** Render the due date on each chip (the deadline section). */
+  showDeadline?: boolean;
+}
+
+/** One labelled `listbox` section of the rail (deadline or priority). */
+function BacklogList({
+  items,
+  heading,
+  listLabel,
+  optionPrefix,
+  labelById,
+  todayKey,
+  showDeadline = false,
+}: BacklogListProps) {
+  const { t } = useTranslation();
+  const fmt = useDateFormat();
+  const { tasks, taskListById } = useTasks();
+  const { openTaskDialog, openPlanTask } = useDialogState();
+  const { sectionColorById } = useCalendarStore();
+  const { openForTask } = useChipContextMenu();
+  const [activeIndex, setActiveIndex] = useState(0);
+  const headingId = useId();
+
+  // Clamp the active option to the current list (it shrinks as tasks are
+  // scheduled away). Derived, so it never points past the end.
+  const activeIdx =
+    items.length === 0 ? -1 : Math.min(activeIndex, items.length - 1);
+  const optionId = (i: number) => `${optionPrefix}-opt-${i}`;
+
   const onListKeyDown = (e: React.KeyboardEvent) => {
     if (activeIdx < 0) return;
-    const task = backlog[activeIdx];
+    const task = items[activeIdx];
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
-        setActiveIndex(Math.min(activeIdx + 1, backlog.length - 1));
+        setActiveIndex(Math.min(activeIdx + 1, items.length - 1));
         return;
       case 'ArrowUp':
         e.preventDefault();
@@ -191,7 +326,7 @@ export function BacklogRail() {
         return;
       case 'End':
         e.preventDefault();
-        setActiveIndex(backlog.length - 1);
+        setActiveIndex(items.length - 1);
         return;
       case 'Enter':
       case ' ':
@@ -223,112 +358,111 @@ export function BacklogRail() {
   };
 
   return (
-    <section
-      ref={rootRef}
-      className="backlog-rail"
-      data-region="backlog"
-      aria-labelledby={headingId}
-      style={{ flexBasis: `${width}px` }}
-      onDragOver={(e) => {
-        if (!e.dataTransfer.types.includes(TASK_DND_TYPE)) return;
-        // A task dragged over the rail → valid "back to backlog" drop.
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-      }}
-      onDrop={(e) => void dropToBacklog(e)}
-    >
-      <h2 id={headingId} className="backlog-rail__heading">
-        {t('views.backlog.heading', { count: backlog.length })}
-      </h2>
-      <div className="backlog-rail__body">
-        {backlog.length === 0 ? (
-          <p className="backlog-rail__empty">{t('views.backlog.empty')}</p>
-        ) : (
-          <ul
-            className="backlog-rail__list"
-            role="listbox"
-            aria-label={t('views.backlog.listLabel')}
-            tabIndex={0}
-            aria-activedescendant={optionId(activeIdx)}
-            onKeyDown={onListKeyDown}
-          >
-            {backlog.map((task, i) => {
-              const children = tasks.filter((c) => c.parent_id === task.id);
-              const listName =
-                taskListById.get(task.list_id)?.name ?? task.list_id;
-              const color = resolveTaskColor(
-                task,
-                taskListById,
-                labelById,
-                sectionColorById,
-              );
-              const priorityGlyph = priorityMarker(task.priority);
-              return (
-                <li
-                  key={task.id}
-                  id={optionId(i)}
-                  role="option"
-                  aria-selected={i === activeIdx}
-                  aria-label={t('views.backlog.chipLabel', {
-                    title: task.title,
-                    list: listName,
-                    priority: prioritySuffix(t, task.priority),
-                    assignee: assigneeSuffix(t, task.assignees),
-                  })}
-                  className={
-                    'backlog-rail__chip' +
-                    (i === activeIdx ? ' backlog-rail__chip--active' : '')
-                  }
-                  style={
-                    color.hex
-                      ? ({ '--event-color': color.hex } as React.CSSProperties)
-                      : undefined
-                  }
-                  draggable
-                  onDragStart={(e) => setTaskDrag(e.dataTransfer, task, children)}
-                  onClick={() => {
-                    setActiveIndex(i);
-                    openTaskDialog(task);
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setActiveIndex(i);
-                    void openForTask(task, { x: e.clientX, y: e.clientY });
-                  }}
-                >
-                  <span className="backlog-rail__chip-main">
-                    <span className="backlog-rail__chip-title">
-                      {task.title}
-                    </span>
-                    {priorityGlyph && (
-                      <span
-                        className="backlog-rail__chip-priority"
-                        aria-hidden="true"
-                      >
-                        {priorityGlyph}
-                      </span>
-                    )}
-                  </span>
-                  <span className="backlog-rail__chip-list">{listName}</span>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
-      {/* Drag (or arrow-key) the right edge to resize the column. */}
-      <div
-        className="backlog-rail__resizer"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label={t('views.backlog.resize')}
-        aria-valuenow={width}
-        aria-valuemin={BACKLOG_WIDTH_MIN}
-        aria-valuemax={BACKLOG_WIDTH_MAX}
+    <div className="backlog-rail__section">
+      <h3 id={headingId} className="backlog-rail__subheading">
+        {heading}
+      </h3>
+      <ul
+        className="backlog-rail__list"
+        role="listbox"
+        aria-labelledby={headingId}
+        aria-label={listLabel}
         tabIndex={0}
-        onPointerDown={beginResize}
-        onKeyDown={onResizeKey}
-      />
-    </section>
+        aria-activedescendant={optionId(activeIdx)}
+        onKeyDown={onListKeyDown}
+      >
+        {items.map((task, i) => {
+          const children = tasks.filter((c) => c.parent_id === task.id);
+          const listName = taskListById.get(task.list_id)?.name ?? task.list_id;
+          const color = resolveTaskColor(
+            task,
+            taskListById,
+            labelById,
+            sectionColorById,
+          );
+          const priorityGlyph = priorityMarker(task.priority);
+          const due =
+            showDeadline && task.deadline_date
+              ? fmt.format(parseDayKey(task.deadline_date), 'P')
+              : null;
+          const overdue =
+            showDeadline &&
+            !!task.deadline_date &&
+            task.deadline_date < todayKey;
+          const ariaLabel =
+            showDeadline && due
+              ? t('views.backlog.deadlineChipLabel', {
+                  title: task.title,
+                  list: listName,
+                  deadline: due,
+                  overdue: overdue ? t('views.backlog.overdueSuffix') : '',
+                  priority: prioritySuffix(t, task.priority),
+                  assignee: assigneeSuffix(t, task.assignees),
+                })
+              : t('views.backlog.chipLabel', {
+                  title: task.title,
+                  list: listName,
+                  priority: prioritySuffix(t, task.priority),
+                  assignee: assigneeSuffix(t, task.assignees),
+                });
+          return (
+            <li
+              key={task.id}
+              id={optionId(i)}
+              role="option"
+              aria-selected={i === activeIdx}
+              aria-label={ariaLabel}
+              className={
+                'backlog-rail__chip' +
+                (i === activeIdx ? ' backlog-rail__chip--active' : '') +
+                (overdue ? ' backlog-rail__chip--overdue' : '')
+              }
+              style={
+                color.hex
+                  ? ({ '--event-color': color.hex } as React.CSSProperties)
+                  : undefined
+              }
+              draggable
+              onDragStart={(e) => setTaskDrag(e.dataTransfer, task, children)}
+              onClick={() => {
+                setActiveIndex(i);
+                openTaskDialog(task);
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setActiveIndex(i);
+                void openForTask(task, { x: e.clientX, y: e.clientY });
+              }}
+            >
+              <span className="backlog-rail__chip-main">
+                <span className="backlog-rail__chip-title">{task.title}</span>
+                {priorityGlyph && (
+                  <span
+                    className="backlog-rail__chip-priority"
+                    aria-hidden="true"
+                  >
+                    {priorityGlyph}
+                  </span>
+                )}
+              </span>
+              <span className="backlog-rail__chip-meta">
+                {due && (
+                  <span
+                    className={
+                      'backlog-rail__chip-deadline' +
+                      (overdue ? ' backlog-rail__chip-deadline--overdue' : '')
+                    }
+                    aria-hidden="true"
+                  >
+                    {due}
+                  </span>
+                )}
+                <span className="backlog-rail__chip-list">{listName}</span>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }

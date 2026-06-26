@@ -45,6 +45,26 @@ The state is remembered across restarts.
 > Tab skips it. Press `F6` to jump between regions (sidebar, toolbar, view,
 > backlog).
 
+## The backlog (week & month planner)
+
+To the left of the week/month grid sits the **backlog** — your top-level tasks
+that have **no day** assigned yet. It is split into two parts:
+
+- **Deadline** (top): every open or in-progress task **with a deadline**, the
+  **earliest deadline first** (overdue ones at the very top). A task already
+  scheduled onto a day still appears here, so this is your one place to see what
+  is due soonest. Each chip shows its due date.
+- **By priority** (bottom): the remaining backlog (tasks **without** a deadline),
+  **highest priority first**.
+
+Drag a chip onto a day cell to **schedule** it there, or drop a scheduled task
+back onto the backlog to **clear** its day and deadline.
+
+> **Keyboard & screen reader:** Each part is its own single-stop **listbox**:
+> Tab lands on it once, `Arrow`/`Home`/`End` move between tasks, `Enter` opens a
+> task, `Shift+D` opens the plan dialog (assign a day), and the context-menu key
+> (or `Shift+F10`) opens the task menu.
+
 ## The month view
 
 In the month view, every day cell is **the same size**, and the grid fills

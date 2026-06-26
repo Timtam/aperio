@@ -1672,10 +1672,15 @@
     "eventMovedToDay": "Moved \"{{title}}\" to {{date}}.",
     "backlog": {
       "heading": "Backlog ({{count}})",
+      "deadlineHeading": "Deadline ({{count}})",
+      "priorityHeading": "By priority ({{count}})",
       "listLabel": "Backlog tasks",
+      "deadlineListLabel": "Tasks with a deadline",
       "resize": "Resize the backlog column",
       "empty": "No tasks in the backlog.",
       "chipLabel": "{{title}}, list {{list}}{{priority}}{{assignee}}",
+      "deadlineChipLabel": "{{title}}, list {{list}}, due {{deadline}}{{overdue}}{{priority}}{{assignee}}",
+      "overdueSuffix": ", overdue",
       "movedToBacklog": "\"{{title}}\" moved to the backlog.",
       "scheduled": "\"{{title}}\" scheduled for {{date}}."
     },

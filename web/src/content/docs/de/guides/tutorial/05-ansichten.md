@@ -45,6 +45,29 @@ Platz**. Der Zustand bleibt über Neustarts erhalten.
 > mit einem weiteren Tab, eingeklappt überspringst du sie. Mit `F6` springst du
 > zwischen den Bereichen (Seitenleiste, Symbolleiste, Ansicht, Backlog).
 
+## Der Backlog (Wochen- und Monatsplanung)
+
+Links neben dem Wochen-/Monatsraster liegt der **Backlog** – deine
+übergeordneten Aufgaben, die noch **keinem Tag** zugeordnet sind. Er ist
+zweigeteilt:
+
+- **Deadline** (oben): alle offenen oder begonnenen Aufgaben **mit Deadline**,
+  das **früheste Datum zuerst** (überfällige ganz oben). Eine bereits auf einen
+  Tag geplante Aufgabe erscheint hier ebenfalls – so siehst du an einer Stelle,
+  was als Nächstes fällig ist. Jeder Eintrag zeigt sein Fälligkeitsdatum.
+- **Nach Priorität** (unten): der übrige Backlog (Aufgaben **ohne** Deadline),
+  **höchste Priorität zuerst**.
+
+Ziehe einen Eintrag auf eine Tageszelle, um ihn dort **einzuplanen**, oder lege
+eine geplante Aufgabe wieder auf dem Backlog ab, um Tag und Deadline zu
+**entfernen**.
+
+> **Tastatur & Screenreader:** Jeder Teil ist eine eigene **Listbox** mit einem
+> Tabstopp: Tab landet einmal darauf, `Pfeil`/`Pos1`/`Ende` bewegen zwischen den
+> Aufgaben, `Eingabe` öffnet eine Aufgabe, `Umschalt+D` öffnet den Plan-Dialog
+> (Tag zuweisen), und die Kontextmenü-Taste (oder `Umschalt+F10`) öffnet das
+> Aufgabenmenü.
+
 ## Die Monatsansicht
 
 In der Monatsansicht ist jede Tageszelle **gleich groß**, und das Raster

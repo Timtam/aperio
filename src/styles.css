@@ -3498,6 +3498,49 @@ button[aria-disabled='true'] {
 .backlog-rail__chip-list {
   font-size: 0.85em;
   opacity: 0.7;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The two stacked sections of the rail (Deadline above, By-priority below). */
+.backlog-rail__section {
+  margin-bottom: var(--space-2);
+}
+.backlog-rail__section:last-child {
+  margin-bottom: 0;
+}
+.backlog-rail__subheading {
+  margin: 0 0 var(--space-1);
+  padding: var(--space-1) 0 0;
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-fg-muted);
+  font-weight: 600;
+}
+/* Second chip line: due date (deadline section) + list name. */
+.backlog-rail__chip-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1);
+  width: 100%;
+  min-width: 0;
+}
+.backlog-rail__chip-deadline {
+  font-size: 0.85em;
+  font-weight: 600;
+  color: var(--color-fg-muted);
+  flex-shrink: 0;
+}
+.backlog-rail__chip-deadline--overdue {
+  color: var(--color-danger);
+}
+/* Overdue chips get a danger-toned accent stripe (sighted cue; the label also
+   says "overdue"). */
+.backlog-rail__chip--overdue {
+  border-left-color: var(--color-danger);
 }
 
 .task-list__group-swatch {
