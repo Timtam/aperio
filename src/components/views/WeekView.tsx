@@ -758,6 +758,18 @@ export function WeekView() {
                       : '')
                   }
                   onClick={() => setAnchor(day)}
+                  onDoubleClick={(e) => {
+                    // Double-click on an empty part of the day opens a new event
+                    // anchored to it. Skip clicks on a chip (events/tasks are
+                    // draggable and have their own double-click → editor).
+                    // Keyboard equivalent: Enter on the focused day.
+                    if (
+                      (e.target as HTMLElement).closest('[draggable="true"]')
+                    ) {
+                      return;
+                    }
+                    openEventDialog(null, { defaultDate: keyOf(day) });
+                  }}
                   onDragOver={(e) => {
                     // Drop-target gate: react when an Aperio task OR event
                     // drag is in flight. The payload values aren't readable
