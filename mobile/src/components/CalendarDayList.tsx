@@ -33,6 +33,7 @@ import {
   seriesIdOf,
   statusI18nKey,
   statusMarker,
+  subtaskParentSuffix,
   subtaskProgressSuffix,
   taskTimeOnDay,
 } from '@aperio/shared';
@@ -503,7 +504,7 @@ export function CalendarDayList({
       if (colourName) {
         label += t('mobile.colorLabelSuffix', { name: colourName });
       }
-      return label;
+      return label + subtaskParentSuffix(tr, task, tasks);
     },
     [fmtDateOnly, fmtTime, t, tasks, tr],
   );
@@ -647,6 +648,7 @@ export function CalendarDayList({
             style={[styles.itemTitle, done && styles.itemTitleDone]}
             importantForAccessibility="no"
           >
+            {task.parent_id ? '↳ ' : ''}
             {task.title}
           </Text>
           <Text style={styles.itemMeta} importantForAccessibility="no">
