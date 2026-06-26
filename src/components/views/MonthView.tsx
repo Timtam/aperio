@@ -631,7 +631,10 @@ export function MonthView() {
                           onDragStart={(dev) => {
                             setEventDrag(dev.dataTransfer, bar.event);
                           }}
-                          onClick={() => openEventDialog(bar.event)}
+                          onDoubleClick={(e) => {
+                            e.stopPropagation();
+                            openEventDialog(bar.event);
+                          }}
                           title={bar.event.title}
                         >
                           {bar.continuesBefore && (
@@ -792,6 +795,10 @@ export function MonthView() {
                                 setDraggingTaskId(task.id);
                               }}
                               onDragEnd={() => setDraggingTaskId(null)}
+                              onDoubleClick={(e) => {
+                                e.stopPropagation();
+                                openTaskDialog(task);
+                              }}
                               onContextMenu={(cmev) => {
                                 cmev.preventDefault();
                                 cmev.stopPropagation();

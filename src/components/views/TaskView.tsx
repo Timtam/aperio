@@ -956,9 +956,13 @@ function renderTreeItem(
         } as React.CSSProperties
       }
       onClick={() => {
-        // Clicking the row opens the editor — consistent with the task
-        // chips in the calendar views. Checking off is the marker's job
-        // (below), so a stray click doesn't flip a task's status.
+        // Single click only FOCUSES the row, so a sighted user can select a
+        // task without launching the editor; double click opens it (keyboard
+        // Enter still opens). Checking off is the marker's job (below), so a
+        // stray click never flips a task's status.
+        setFocusIndex(index);
+      }}
+      onDoubleClick={() => {
         setFocusIndex(index);
         openTaskDialog(task);
       }}

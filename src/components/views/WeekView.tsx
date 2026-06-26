@@ -700,7 +700,10 @@ export function WeekView() {
                     onDragStart={(dev) => {
                       setEventDrag(dev.dataTransfer, bar.event);
                     }}
-                    onClick={() => openEventDialog(bar.event)}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      openEventDialog(bar.event);
+                    }}
                     title={
                       span
                         ? `${bar.event.title} (${span.dayIndex}/${span.totalDays})`
@@ -904,11 +907,14 @@ export function WeekView() {
                                 setDraggingTaskId(null);
                                 setDragOverDayKey(null);
                               }}
-                              // Mouse: clicking outside the checkbox
-                              // opens the editor; the marker's onClick
-                              // below stops the bubble so toggling
-                              // doesn't also open the dialog.
-                              onClick={() => openTaskDialog(task)}
+                              // Mouse: single click only focuses the day (the
+                              // click bubbles to the cell); double click opens
+                              // the editor. The marker (below) stops the bubble
+                              // so toggling the checkbox doesn't move the anchor.
+                              onDoubleClick={(e) => {
+                                e.stopPropagation();
+                                openTaskDialog(task);
+                              }}
                               onContextMenu={(ev) => {
                                 ev.preventDefault();
                                 ev.stopPropagation();
@@ -1272,7 +1278,10 @@ function WeekDayTasks({
               draggable
               onDragStart={(ev) => onDragStart(task, ev)}
               onDragEnd={onDragEnd}
-              onClick={() => onOpen(task)}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                onOpen(task);
+              }}
               onContextMenu={(ev) => {
                 ev.preventDefault();
                 ev.stopPropagation();

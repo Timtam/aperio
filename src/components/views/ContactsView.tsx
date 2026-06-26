@@ -361,7 +361,8 @@ export function ContactsView() {
                   'contacts-list__item' +
                   (focused ? ' contacts-list__item--focused' : '')
                 }
-                onClick={() => {
+                onClick={() => setFocusIndex(entry.index)}
+                onDoubleClick={() => {
                   setFocusIndex(entry.index);
                   openEdit(entry.contact);
                 }}

@@ -436,6 +436,10 @@ export function DayView() {
                     );
                   }}
                   onClick={() => setFocusIndex(i)}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    openTaskDialog(task);
+                  }}
                   onContextMenu={(ev) => {
                     ev.preventDefault();
                     ev.stopPropagation();
@@ -614,7 +618,10 @@ export function DayView() {
                         });
                       }
                     }}
-                    onClick={() => openTaskDialog(task)}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      openTaskDialog(task);
+                    }}
                     onContextMenu={(ev) => {
                       ev.preventDefault();
                       ev.stopPropagation();

@@ -433,7 +433,8 @@ function BacklogList({
               }
               draggable
               onDragStart={(e) => setTaskDrag(e.dataTransfer, task, children)}
-              onClick={() => {
+              onClick={() => setActiveIndex(i)}
+              onDoubleClick={() => {
                 setActiveIndex(i);
                 openTaskDialog(task);
               }}
