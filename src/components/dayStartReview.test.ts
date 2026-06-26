@@ -8,6 +8,10 @@ import {
   isDayStartReviewSnoozed,
   snoozeDayStartReview,
 } from './dayStartReview';
+import {
+  filterDeadlinePinTargets,
+  hasActionableDescendants,
+} from '@aperio/shared';
 
 const baseTask: Task = {
   id: 't1',
@@ -89,6 +93,68 @@ describe('filterOverdue', () => {
     ];
     // in_progress is NOT terminal — still a missed commitment.
     expect(filterOverdue(tasks).map((t) => t.id)).toEqual(['inprogress']);
+  });
+});
+
+describe('project-parent suppression (parents with open subtasks)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 4, 20, 12, 0, 0)); // 2026-05-20
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('filterOverdue suppresses a deadline parent while it has open subtasks', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'paper', deadline_date: '2026-05-18' }, // past deadline
+      {
+        ...baseTask,
+        id: 'sub-a',
+        parent_id: 'paper',
+        status: 'open',
+        scheduled_date: '2026-05-19',
+      },
+      { ...baseTask, id: 'sub-b', parent_id: 'paper', status: 'completed' },
+    ];
+    // The parent is a project (sub-a still open) → not nagged about here; the
+    // subtasks are the surfaced units.
+    expect(filterOverdue(tasks).map((t) => t.id)).toEqual([]);
+  });
+
+  it('filterOverdue surfaces the parent again once all subtasks are settled', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'paper', deadline_date: '2026-05-18' },
+      { ...baseTask, id: 'sub-a', parent_id: 'paper', status: 'completed' },
+      { ...baseTask, id: 'sub-b', parent_id: 'paper', status: 'cancelled' },
+    ];
+    // No open subtasks left → the parent returns so its deadline can be closed.
+    expect(filterOverdue(tasks).map((t) => t.id)).toEqual(['paper']);
+  });
+
+  it('filterDeadlinePinTargets never pins a project parent on its deadline day', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'paper', deadline_date: '2026-05-20' }, // deadline today
+      {
+        ...baseTask,
+        id: 'sub-a',
+        parent_id: 'paper',
+        status: 'in_progress',
+      },
+    ];
+    expect(filterDeadlinePinTargets(tasks).map((t) => t.id)).toEqual([]);
+  });
+
+  it('hasActionableDescendants walks nested subtrees and early-exits', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'root' },
+      { ...baseTask, id: 'mid', parent_id: 'root', status: 'completed' },
+      { ...baseTask, id: 'leaf', parent_id: 'mid', status: 'open' },
+    ];
+    // An open grandchild under a completed child still counts.
+    expect(hasActionableDescendants('root', tasks)).toBe(true);
+    expect(hasActionableDescendants('mid', tasks)).toBe(true);
+    expect(hasActionableDescendants('leaf', tasks)).toBe(false);
   });
 });
 

@@ -108,18 +108,28 @@ describe('filterTasksOnDay', () => {
     ]);
   });
 
-  it('excludes subtasks (tasks with parent_id set)', () => {
+  it('shows a subtask only when it carries its own date', () => {
     const tasks: Task[] = [
       { ...baseTask, id: 'parent', scheduled_date: '2026-05-20' },
       {
         ...baseTask,
-        id: 'child',
+        id: 'dated-child',
         parent_id: 'parent',
         scheduled_date: '2026-05-20',
       },
+      {
+        ...baseTask,
+        id: 'undated-child',
+        parent_id: 'parent',
+        scheduled_date: null,
+        deadline_date: null,
+      },
     ];
+    // The dated subtask surfaces as its own chip; the undated one stays hidden
+    // (it travels with its parent).
     expect(filterTasksOnDay(tasks, '2026-05-20').map((t) => t.id)).toEqual([
       'parent',
+      'dated-child',
     ]);
   });
 

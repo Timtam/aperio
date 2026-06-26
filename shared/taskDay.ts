@@ -42,9 +42,11 @@ export function todayIsoKey(): string {
  * on the same day it appears once: see {@link isDeadlineChip}, where the
  * scheduled chip wins (matching `taskTimeOnDay`'s "schedule wins" rule).
  *
- * Subtasks (`parent_id` set) are unconditionally hidden — they're scoped
- * to their parent and managed via TaskDialog / TaskView, never as
- * standalone chips. Cancelled tasks never appear. Completed tasks are
+ * Subtasks (`parent_id` set) are hidden UNLESS they carry their OWN
+ * `scheduled_date` or `deadline_date` — then the planned/due subtask
+ * surfaces as its own chip on that day (the chip names its parent so it
+ * reads in context). An undated subtask still travels with its parent and
+ * stays hidden. Cancelled tasks never appear. Completed tasks are
  * hidden by default — they're done — but the caller can opt back in per
  * task-list via `isCompletedVisible`, the sidebar setting "Erledigte
  * Aufgaben in der Kalenderansicht anzeigen". When the callback is
@@ -66,7 +68,12 @@ export function filterTasksOnDay(
   meFor?: (listId: string) => TaskUser | null,
 ): Task[] {
   return tasks.filter((task) => {
-    if (task.parent_id) return false;
+    // A subtask surfaces only when it carries its own date — an undated subtask
+    // travels with its parent and stays hidden; a scheduled/deadline-bearing one
+    // becomes its own day chip (labelled as a subtask of its parent).
+    if (task.parent_id && !task.scheduled_date && !task.deadline_date) {
+      return false;
+    }
     if (task.status === 'cancelled') return false;
     if (task.status === 'completed') {
       if (!isCompletedVisible || !isCompletedVisible(task.list_id)) {

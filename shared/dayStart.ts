@@ -21,6 +21,9 @@ export function filterOverdue(
     if (!task.deadline_date) return false;
     if (task.status === 'completed' || task.status === 'cancelled') return false;
     if (task.deadline_date >= today) return false;
+    // A "project" parent (still has open subtasks) is managed via its subtasks —
+    // don't nag about the container; it returns here once they're all settled.
+    if (hasActionableDescendants(task.id, tasks)) return false;
     // Don't offer a task owned by a concrete OTHER user — someone else handles it.
     return meFor ? isMineOrUnassigned(task.assignees, meFor(task.list_id)) : true;
   });
@@ -48,6 +51,11 @@ export function filterCarriedOver(
     if (task.status === 'completed' || task.status === 'cancelled') return false;
     if (overdueIds.has(task.id)) return false;
     if (task.scheduled_date >= today) return false;
+    // NB: project parents are NOT suppressed here. A term-paper parent has no
+    // scheduled_date of its own (only a deadline), so it never reaches this
+    // slipped set — its dated SUBTASKS do, and they're what we want surfaced.
+    // A parent the user DID schedule onto a work day still flows through the
+    // cascade-coupling below (decide-at-the-root), so we leave that intact.
     // Don't offer a task owned by a concrete OTHER user — someone else handles it.
     return meFor ? isMineOrUnassigned(task.assignees, meFor(task.list_id)) : true;
   });
@@ -89,6 +97,28 @@ export function actionableDescendants(rootId: string, tasks: Task[]): Task[] {
 }
 
 /**
+ * True when `rootId` still has at least one actionable (`open` / `in_progress`)
+ * descendant — i.e. it's a "project" parent whose real work lives in its
+ * subtasks. The day-start selectors suppress such a parent (the SUBTASKS are the
+ * surfaced, asked-about units, and they keep their own day plan); once every
+ * subtask is settled the parent is no longer suppressed and returns to normal
+ * review behaviour so its own deadline can be closed out. Early-exits.
+ */
+export function hasActionableDescendants(rootId: string, tasks: Task[]): boolean {
+  const stack: string[] = [rootId];
+  while (stack.length > 0) {
+    const id = stack.pop() as string;
+    for (const t of tasks) {
+      if (t.parent_id !== id) continue;
+      if (t.status === 'open' || t.status === 'in_progress') return true;
+      // a settled node can still host an actionable grandchild — keep walking.
+      stack.push(t.id);
+    }
+  }
+  return false;
+}
+
+/**
  * Open / in_progress tasks whose `deadline_date` is today and that aren't
  * already pinned to today (`scheduled_date !== today`) — the silent
  * "by"-deadline auto-pin. The scheduled-date check keeps the batch idempotent
@@ -104,6 +134,8 @@ export function filterDeadlinePinTargets(
     if (task.deadline_date !== today) return false;
     if (task.status === 'completed' || task.status === 'cancelled') return false;
     if (task.scheduled_date === today) return false;
+    // Never pin a project parent to today — its subtasks carry the day plan.
+    if (hasActionableDescendants(task.id, tasks)) return false;
     // Don't silently pin a task owned by a concrete OTHER user to my today.
     return meFor ? isMineOrUnassigned(task.assignees, meFor(task.list_id)) : true;
   });
