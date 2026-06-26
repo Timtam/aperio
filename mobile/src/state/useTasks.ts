@@ -25,7 +25,11 @@ const tasksCache = new Map<CacheKey, Task[]>();
 let cachedDataVersion = -1;
 
 function ensureCacheVersion(version: number): void {
-  if (version !== cachedDataVersion) {
+  // Monotonic: only ever ADVANCE. dataVersion increments on every mutation, so
+  // a refetch that resolves late with a stale closure version must never rewind
+  // the cache — rewinding would clear the fresh batch and re-admit the stale
+  // one. (`!==` allowed exactly that backward step.)
+  if (version > cachedDataVersion) {
     tasksCache.clear();
     cachedDataVersion = version;
   }
@@ -37,6 +41,9 @@ function cacheGet(key: CacheKey, version: number): Task[] | undefined {
 }
 
 function cacheSet(key: CacheKey, version: number, tasks: Task[]): void {
+  // Drop a write from a superseded refetch: its batch predates a mutation that
+  // already bumped the version, so it must not overwrite the current data.
+  if (version < cachedDataVersion) return;
   ensureCacheVersion(version);
   tasksCache.set(key, tasks);
 }
@@ -96,7 +103,11 @@ export function useTasks() {
         }),
       ),
     ).then((batches) => {
-      if (cancelled) return;
+      // `cancelled` covers the effect re-running; the version check additionally
+      // drops a fetch that a newer bump superseded mid-flight (calendar screens
+      // churn dataVersion via background event refreshes, widening this window)
+      // so a stale read can't replace the fresh task set.
+      if (cancelled || dataVersion < cachedDataVersion) return;
       const flat = batches.flat();
       flat.sort(taskOrder);
       cacheSet(idsKey, dataVersion, flat);
