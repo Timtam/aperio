@@ -459,6 +459,7 @@ export function DayView() {
                     >
                       {statusMarker(task.status)}{' '}
                     </span>
+                    {task.parent_id ? '↳ ' : ''}
                     {task.title}
                     {priorityGlyph && (
                       <span className="day-task__priority" aria-hidden="true">
@@ -650,7 +651,10 @@ export function DayView() {
                     >
                       {statusMarker(task.status)}
                     </span>
-                    <span className="day-task__title">{task.title}</span>
+                    <span className="day-task__title">
+                      {task.parent_id ? '↳ ' : ''}
+                      {task.title}
+                    </span>
                     {priorityGlyph && (
                       <span className="day-task__priority" aria-hidden="true">
                         {priorityGlyph}

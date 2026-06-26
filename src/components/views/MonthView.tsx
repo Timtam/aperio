@@ -814,6 +814,7 @@ export function MonthView() {
                                 {statusMarker(task.status)}
                               </span>
                               <span className="month-task__title">
+                                {task.parent_id ? '↳ ' : ''}
                                 {task.title}
                               </span>
                               {priorityGlyph && (

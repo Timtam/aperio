@@ -928,6 +928,7 @@ export function WeekView() {
                                   {statusMarker(task.status)}
                                 </span>
                                 <span className="week-task__title">
+                                  {task.parent_id ? '↳ ' : ''}
                                   {task.title}
                                 </span>
                                 {priorityGlyph && (
@@ -1307,7 +1308,10 @@ function WeekDayTasks({
                 >
                   {statusMarker(task.status)}
                 </span>
-                <span className="week-task__title">{task.title}</span>
+                <span className="week-task__title">
+                  {task.parent_id ? '↳ ' : ''}
+                  {task.title}
+                </span>
                 {priorityGlyph && (
                   <span className="week-task__priority" aria-hidden="true">
                     {priorityGlyph}
