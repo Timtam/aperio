@@ -11,6 +11,15 @@ export const BACKLOG_GROUP_ID = '__aperio_backlog_group__';
 export const DEFERRED_GROUP_ID = '__aperio_deferred_group__';
 
 /**
+ * How the task view groups its top level:
+ *  - `'state'` — by lifecycle: Backlog → per-list scheduled groups → Zukünftig
+ *    → Done (the historical grouping).
+ *  - `'list'` — every NON-completed task in its own list (+ sections),
+ *    regardless of backlog/scheduled/deferred state; only Done stays separate.
+ */
+export type TaskGroupBy = 'state' | 'list';
+
+/**
  * A backlog task is **deferred** when its `resurface_date` is strictly after
  * `today` (`YYYY-MM-DD`): it's waiting to come back and must be held out of
  * the active backlog (DESIGN §9.3 / §9.12). The single source of truth for
@@ -138,6 +147,9 @@ export function buildEntries(
    *  into "mine vs others". Lists without an identity are absent/null and never
    *  split. */
   currentUserByList: Record<string, TaskUser | null> = {},
+  /** Top-level grouping (see {@link TaskGroupBy}). Defaults to `'state'` so
+   *  existing callers keep the historical lifecycle grouping. */
+  groupBy: TaskGroupBy = 'state',
 ): { entries: Entry[]; flatTasks: Task[] } {
   // Bucket children under their parent for O(1) subtask lookup. Tasks whose
   // parent_id points at a missing row are orphans → surfaced at top level.
@@ -256,10 +268,35 @@ export function buildEntries(
 
   const forest: GNode[] = [];
 
+  // 'list' mode: every non-completed task in its own list (+ sections),
+  // regardless of backlog/scheduled/deferred state — only Done stays separate
+  // (appended below, same as the state grouping). `openTopLevel` is already the
+  // full non-completed set (the deferred/backlog split happened after it), so
+  // grouping it by list folds Backlog + scheduled + Zukünftig into one list row.
+  if (groupBy === 'list') {
+    const byListAll = new Map<string, Task[]>();
+    openTopLevel.forEach((task) => {
+      const arr = byListAll.get(task.list_id) ?? [];
+      arr.push(task);
+      byListAll.set(task.list_id, arr);
+    });
+    Array.from(byListAll.entries())
+      .sort(([a], [b]) => byName(a, b))
+      .forEach(([listId, items]) => {
+        forest.push({
+          t: 'group',
+          id: `grp:list:${listId}`,
+          title: `${nameOf(listId)} (${totalUnder(items)})`,
+          meta: { kind: 'list', listId },
+          children: listChildren(listId, items, `ls:${listId}`),
+        });
+      });
+  }
+
   // Backlog → list → section. Grouping the backlog (not just the scheduled
   // tasks) is what makes e.g. a Vikunja project's buckets visible even when
   // nothing is scheduled.
-  if (backlog.length > 0) {
+  if (groupBy === 'state' && backlog.length > 0) {
     const backlogByList = new Map<string, Task[]>();
     backlog.forEach((task) => {
       const arr = backlogByList.get(task.list_id) ?? [];
@@ -285,21 +322,24 @@ export function buildEntries(
   }
 
   // Scheduled per-list groups, sorted by list name.
-  Array.from(byList.entries())
-    .sort(([a], [b]) => byName(a, b))
-    .forEach(([listId, items]) => {
-      forest.push({
-        t: 'group',
-        id: `grp:sc:list:${listId}`,
-        title: `${nameOf(listId)} (${totalUnder(items)})`,
-        meta: { kind: 'list', listId },
-        children: listChildren(listId, items, `sc:${listId}`),
+  if (groupBy === 'state') {
+    Array.from(byList.entries())
+      .sort(([a], [b]) => byName(a, b))
+      .forEach(([listId, items]) => {
+        forest.push({
+          t: 'group',
+          id: `grp:sc:list:${listId}`,
+          title: `${nameOf(listId)} (${totalUnder(items)})`,
+          meta: { kind: 'list', listId },
+          children: listChildren(listId, items, `sc:${listId}`),
+        });
       });
-    });
+  }
 
   // "Zukünftig" group: backlog tasks waiting to resurface, soonest first.
   // Sits just before Done — both are end-of-list, navigable, collapsible.
-  if (deferred.length > 0) {
+  // (State mode only — in list mode these live in their list group above.)
+  if (groupBy === 'state' && deferred.length > 0) {
     deferred.sort((a, b) =>
       (a.resurface_date ?? '').localeCompare(b.resurface_date ?? ''),
     );

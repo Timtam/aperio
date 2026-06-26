@@ -111,6 +111,38 @@ describe('buildEntries done-count split', () => {
   });
 });
 
+describe('buildEntries group-by list', () => {
+  const lists = new Map([
+    ['L1', { name: 'Inbox' }],
+    ['L2', { name: 'Work' }],
+  ]);
+  const listMode = (tasks: Task[]) =>
+    buildEntries(tasks, lists, t, new Set(), {}, TODAY, {}, 'list');
+
+  it('folds every non-completed task into its list regardless of state; Done stays separate', () => {
+    const tasks = [
+      baseTask({ id: 'a', list_id: 'L1', scheduled_date: null }), // backlog
+      baseTask({ id: 'b', list_id: 'L1', scheduled_date: '2026-05-21' }), // scheduled
+      baseTask({ id: 'c', list_id: 'L2', resurface_date: '2099-01-01' }), // deferred
+      baseTask({
+        id: 'd',
+        list_id: 'L1',
+        status: 'completed',
+        completed_at: '2026-05-20T10:00:00Z',
+      }),
+    ];
+    const hs = headers(listMode(tasks));
+    // No Backlog / Zukünftig buckets — just per-list groups + Done.
+    expect(hs.map((h) => h.kind)).toEqual(['list', 'list', 'done']);
+    expect(
+      hs.filter((h) => h.kind === 'list').map((h) => h.label),
+    ).toEqual([
+      'Inbox (2)', // a (backlog) + b (scheduled) folded into L1
+      'Work (1)', // c, the deferred task, lives in its list — not a Zukünftig group
+    ]);
+  });
+});
+
 describe('buildEntries section grouping', () => {
   it('groups tasks by section in declared order, ungrouped first', () => {
     const tasks = [
