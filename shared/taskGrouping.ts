@@ -109,6 +109,22 @@ type GNode =
     }
   | { t: 'task'; task: Task };
 
+/** Natural (numeric-aware) ascending title compare: "Aufgabe 2" sorts before
+ *  "Aufgabe 10", not after. */
+function naturalCompare(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { numeric: true });
+}
+
+/** Sibling order within a group / under a parent: high priority floats up
+ *  (unchanged), then natural ascending title — replacing the old insertion-order
+ *  tiebreaker so each group reads A→Z within a priority band. */
+function taskOrder(a: Task, b: Task): number {
+  return (
+    priorityRank(a.priority) - priorityRank(b.priority) ||
+    naturalCompare(a.title, b.title)
+  );
+}
+
 export function buildEntries(
   tasks: Task[],
   taskListById: Map<string, { name: string }>,
@@ -138,6 +154,9 @@ export function buildEntries(
       topLevel.push(task);
     }
   });
+  // Subtask siblings sort the same way as top-level tasks (priority band, then
+  // natural title) — so a parent's children also read A→Z, not add-order.
+  childrenByParent.forEach((bucket) => bucket.sort(taskOrder));
 
   // Completed top-level tasks (with their subtree) collapse into a single
   // "Done (N)" group; the active groups show only open work. A completed
@@ -149,12 +168,11 @@ export function buildEntries(
     else openTopLevel.push(task);
   });
 
-  // High priority floats up, low sinks. Stable sort keeps existing order as
-  // the tiebreaker within a band. Every downstream bucket is filled by
-  // walking `openTopLevel` in order, so this one sort is enough.
-  openTopLevel.sort(
-    (a, b) => priorityRank(a.priority) - priorityRank(b.priority),
-  );
+  // High priority floats up, low sinks; within a band, natural ascending title
+  // (`taskOrder`) — so each group reads A→Z instead of add-order. Every
+  // downstream bucket is filled by walking `openTopLevel` in order, so this one
+  // sort covers backlog + scheduled lists + sections + ungrouped alike.
+  openTopLevel.sort(taskOrder);
 
   // Deferred (DESIGN §9.12): a backlog task whose resurface day is still in
   // the future is held out of the active groups and collected under

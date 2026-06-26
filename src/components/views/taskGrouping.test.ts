@@ -323,6 +323,61 @@ describe('buildEntries section grouping', () => {
   });
 });
 
+describe('buildEntries natural ordering', () => {
+  it('sorts tasks within a section natural-ascending by title', () => {
+    const tasks = [
+      baseTask({ id: 'a', section_id: 's1', title: 'Aufgabe 10' }),
+      baseTask({ id: 'b', section_id: 's1', title: 'Aufgabe 2' }),
+      baseTask({ id: 'c', section_id: 's1', title: 'Aufgabe 1' }),
+    ];
+    const result = build(tasks, new Set(), {
+      L1: [section('s1', 'To Do', 1)],
+    });
+    // Numeric-aware: "2" sorts before "10", not lexicographically after it.
+    expect(taskRows(result).map((e) => e.task.title)).toEqual([
+      'Aufgabe 1',
+      'Aufgabe 2',
+      'Aufgabe 10',
+    ]);
+  });
+
+  it('floats higher priority above natural order within a section', () => {
+    const tasks = [
+      baseTask({ id: 'a', section_id: 's1', title: 'Apple', priority: 'medium' }),
+      baseTask({ id: 'b', section_id: 's1', title: 'Zebra', priority: 'high' }),
+    ];
+    const result = build(tasks, new Set(), {
+      L1: [section('s1', 'To Do', 1)],
+    });
+    // High priority wins the band; natural order only orders within a band.
+    expect(taskRows(result).map((e) => e.task.title)).toEqual(['Zebra', 'Apple']);
+  });
+
+  it('sorts ungrouped backlog tasks naturally too', () => {
+    const tasks = [
+      baseTask({ id: 'a', scheduled_date: null, title: 'Item 10' }),
+      baseTask({ id: 'b', scheduled_date: null, title: 'Item 2' }),
+    ];
+    expect(taskRows(build(tasks)).map((e) => e.task.title)).toEqual([
+      'Item 2',
+      'Item 10',
+    ]);
+  });
+
+  it('sorts subtask siblings naturally', () => {
+    const tasks = [
+      baseTask({ id: 'p', title: 'Parent' }),
+      baseTask({ id: 'c10', parent_id: 'p', title: 'Step 10' }),
+      baseTask({ id: 'c2', parent_id: 'p', title: 'Step 2' }),
+    ];
+    expect(taskRows(build(tasks)).map((e) => e.task.title)).toEqual([
+      'Parent',
+      'Step 2',
+      'Step 10',
+    ]);
+  });
+});
+
 describe('isTaskDeferred', () => {
   it('is true only for a future resurface date', () => {
     expect(
