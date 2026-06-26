@@ -1740,6 +1740,11 @@
     },
     "tasks": {
       "title": "Aufgaben",
+      "groupBy": {
+        "label": "Gruppieren nach",
+        "state": "Zustand",
+        "list": "Liste"
+      },
       "empty": "Keine Aufgaben.",
       "backlog": "Backlog",
       "done": "Erledigt ({{count}})",

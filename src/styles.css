@@ -2678,6 +2678,25 @@ button[aria-disabled='true'] {
   font-size: var(--font-size-lg);
 }
 
+.view__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* "Group by" selector in the task-view header (Zustand / Liste). */
+.view__group-by {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+  font-size: var(--font-size-sm);
+  color: var(--color-fg-muted);
+}
+.view__group-by select {
+  font: inherit;
+}
+
 /*
  * `.view` sections are programmatically focused on view-switch
  * (useAutoFocus). The screen reader announces the section via its

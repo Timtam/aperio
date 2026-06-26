@@ -37,6 +37,7 @@ import {
   DEFERRED_GROUP_ID,
   DONE_GROUP_ID,
   type Entry,
+  type TaskGroupBy,
 } from './taskGrouping';
 import { suppressGroupHeaderKey } from './taskTreeKeys';
 import { ConfirmDialog } from '../ConfirmDialog';
@@ -133,6 +134,13 @@ export function TaskView() {
     });
   }, []);
 
+  // "Group by" mode — state (lifecycle) vs list. Device-local persisted.
+  const [groupBy, setGroupBy] = useState<TaskGroupBy>(loadGroupBy);
+  const changeGroupBy = useCallback((next: TaskGroupBy) => {
+    setGroupBy(next);
+    saveGroupBy(next);
+  }, []);
+
   // Local day key (refreshes at the date rollover) gates which backlog
   // tasks are still "future" and so live in the Zukünftig group.
   const todayKey = useCurrentDayKey();
@@ -153,6 +161,7 @@ export function TaskView() {
         sectionsByList,
         todayKey,
         currentUserByList,
+        groupBy,
       ),
     [
       tasks,
@@ -162,6 +171,7 @@ export function TaskView() {
       sectionsByList,
       todayKey,
       currentUserByList,
+      groupBy,
     ],
   );
 
@@ -769,6 +779,16 @@ export function TaskView() {
     <section className="view view--tasks" aria-label={t('views.tasks.title')}>
       <header className="view__header">
         <h2>{t('views.tasks.title')}</h2>
+        <label className="view__group-by">
+          <span>{t('views.tasks.groupBy.label')}</span>
+          <select
+            value={groupBy}
+            onChange={(e) => changeGroupBy(e.target.value as TaskGroupBy)}
+          >
+            <option value="state">{t('views.tasks.groupBy.state')}</option>
+            <option value="list">{t('views.tasks.groupBy.list')}</option>
+          </select>
+        </label>
       </header>
 
       {showLoading && (
@@ -1088,6 +1108,26 @@ function loadDeferredCollapsed(): boolean {
 function saveDeferredCollapsed(value: boolean): void {
   try {
     localStorage.setItem(DEFERRED_COLLAPSED_KEY, String(value));
+  } catch {
+    // Non-fatal — see saveDoneCollapsed.
+  }
+}
+
+const GROUP_BY_KEY = 'aperio.tasks.groupBy';
+
+/** Read the persisted "group by" mode (device-local). Defaults to `'state'`,
+ *  the historical lifecycle grouping, and tolerates a missing/unreadable store. */
+function loadGroupBy(): TaskGroupBy {
+  try {
+    return localStorage.getItem(GROUP_BY_KEY) === 'list' ? 'list' : 'state';
+  } catch {
+    return 'state';
+  }
+}
+
+function saveGroupBy(value: TaskGroupBy): void {
+  try {
+    localStorage.setItem(GROUP_BY_KEY, value);
   } catch {
     // Non-fatal — see saveDoneCollapsed.
   }
