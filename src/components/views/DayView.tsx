@@ -428,6 +428,10 @@ export function DayView() {
                     'day-list__item day-list__item--task' +
                     (focused ? ' day-list__item--focused' : '') +
                     ` day-list__item--${task.status.replace('_', '-')}` +
+                    // Deliberately reuses the `day-task--effort-*` size family
+                    // (not a `day-list__item--*` one) so both DayView task
+                    // surfaces — this agenda row + the grid chip — resize
+                    // identically by effort.
                     (effortMod ? ` day-task--effort-${effortMod}` : '')
                   }
                   style={

@@ -11,7 +11,12 @@ import {
 } from 'react-native';
 
 import type { Task, TaskList, TaskPriority, TaskStatus } from '@aperio/shared';
-import { prioritySuffix, statusI18nKey, statusMarker } from '@aperio/shared';
+import {
+  effortSuffix,
+  prioritySuffix,
+  statusI18nKey,
+  statusMarker,
+} from '@aperio/shared';
 
 import { createTask, deleteTask, getTasks, updateTask } from '../api/client';
 import { useListFocusManager } from '../a11y/useListFocusManager';
@@ -276,11 +281,13 @@ export function SubtaskSection({
                 ref={registerRow(i)}
                 accessible
                 accessibilityRole="button"
-                accessibilityLabel={t('dialogs.task.subtasks.rowLabel', {
-                  title: sub.title,
-                  state: t(statusI18nKey(sub.status)),
-                  priority: prioritySuffix(t, sub.priority),
-                })}
+                accessibilityLabel={
+                  t('dialogs.task.subtasks.rowLabel', {
+                    title: sub.title,
+                    state: t(statusI18nKey(sub.status)),
+                    priority: prioritySuffix(t, sub.priority),
+                  }) + effortSuffix(t, sub.effort)
+                }
                 accessibilityHint={t('mobile.subtaskRowHint')}
                 accessibilityActions={actions}
                 onAccessibilityAction={(e) => onAction(sub, i, e)}

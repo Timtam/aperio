@@ -30,6 +30,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { selfAssignOnStatusChange } from '@aperio/shared';
 import { todayIsoKey } from '../intl/taskDay';
 import {
+  effortSuffix,
   priorityMarker,
   prioritySuffix,
   statusI18nKey,
@@ -1442,11 +1443,13 @@ export function TaskDialog({
                       role="option"
                       aria-selected={focused}
                       aria-checked={isCompleted}
-                      aria-label={t('dialogs.task.subtasks.rowLabel', {
-                        title: sub.title,
-                        state: stateLabel,
-                        priority: prioritySuffix(t, sub.priority),
-                      })}
+                      aria-label={
+                        t('dialogs.task.subtasks.rowLabel', {
+                          title: sub.title,
+                          state: stateLabel,
+                          priority: prioritySuffix(t, sub.priority),
+                        }) + effortSuffix(t, sub.effort)
+                      }
                       className={
                         'subtasks__row' +
                         (focused ? ' subtasks__row--focused' : '')
