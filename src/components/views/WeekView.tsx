@@ -100,7 +100,7 @@ export function WeekView() {
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { anchor, setAnchor, goPrev, goNext, weekStartsOn } = useViewState();
-  const { openEventDialog, openTaskDialog, invalidateData } =
+  const { openEventDialog, openTaskDialog, openCreateChooser, invalidateData } =
     useDialogState();
 
   const range = useMemo(
@@ -560,18 +560,16 @@ export function WeekView() {
         case ' ':
         case 'Spacebar': {
           // Enter on a focused cell with events: open the first one.
-          // Pressing Enter on an empty cell opens the create-event
-          // dialog pre-seeded with that day so the form reflects what
-          // the user is looking at.
+          // Pressing Enter on an empty cell opens the "Termin oder Aufgabe?"
+          // chooser, anchored to that day so the form reflects what the user
+          // is looking at.
           e.preventDefault();
           const focusedDay = days[focusIndex];
           const evs = eventsByDay.get(keyOf(focusedDay)) ?? [];
           if (evs.length > 0) {
             openEventDialog(evs[0]);
           } else {
-            openEventDialog(null, {
-              defaultDate: keyOf(focusedDay),
-            });
+            openCreateChooser(keyOf(focusedDay));
           }
           return;
         }
@@ -592,6 +590,7 @@ export function WeekView() {
       focusedDayItems,
       openEventDialog,
       openTaskDialog,
+      openCreateChooser,
       handleTab,
       clearEventIndex,
       requestDelete,
@@ -763,16 +762,17 @@ export function WeekView() {
                   }
                   onClick={() => setAnchor(day)}
                   onDoubleClick={(e) => {
-                    // Double-click on an empty part of the day opens a new event
-                    // anchored to it. Skip clicks on a chip (events/tasks are
-                    // draggable and have their own double-click → editor).
-                    // Keyboard equivalent: Enter on the focused day.
+                    // Double-click on an empty part of the day opens the
+                    // "Termin oder Aufgabe?" chooser, anchored to it. Skip
+                    // clicks on a chip (events/tasks are draggable and have
+                    // their own double-click → editor). Keyboard equivalent:
+                    // Enter on the focused day.
                     if (
                       (e.target as HTMLElement).closest('[draggable="true"]')
                     ) {
                       return;
                     }
-                    openEventDialog(null, { defaultDate: keyOf(day) });
+                    openCreateChooser(keyOf(day));
                   }}
                   onDragOver={(e) => {
                     // Drop-target gate: react when an Aperio task OR event

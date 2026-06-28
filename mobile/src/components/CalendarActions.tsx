@@ -58,8 +58,8 @@ export function CalendarActions({ navigation, anchorDay }: Props) {
 
   const addEvent = useCallback(() => {
     if (firstCalendarId == null) return;
-    navigation.navigate('EventEditor', {
-      eventId: null,
+    // → the event quick-add (expands to the full editor via "More details …").
+    navigation.navigate('QuickAddEvent', {
       calendarId: firstCalendarId,
       anchor: localDateKey(anchorDay),
     });

@@ -43,6 +43,7 @@ import LogsScreen from './screens/LogsScreen';
 import MonthScreen from './screens/MonthScreen';
 import MoveCopyModal from './screens/MoveCopyModal';
 import PlanTaskModal from './screens/PlanTaskModal';
+import QuickAddEventModal from './screens/QuickAddEventModal';
 import QuickAddTaskModal from './screens/QuickAddTaskModal';
 import RemindersScreen from './screens/RemindersScreen';
 import SearchScreen from './screens/SearchScreen';
@@ -215,6 +216,19 @@ function CalendarStackNav() {
         name="EventEditor"
         component={EventEditorModal}
         options={{ presentation: 'modal', title: t('dialogs.event.newTitle') }}
+      />
+      {/* Quick-adds reachable from the calendar create affordances (header
+          "New Event", per-day "+ new event / + new task", day activation) so
+          the modal stays in the calendar tab instead of bubbling to Tasks. */}
+      <CalendarStack.Screen
+        name="QuickAddEvent"
+        component={QuickAddEventModal}
+        options={{ presentation: 'modal', title: t('dialogs.quickAdd.title') }}
+      />
+      <CalendarStack.Screen
+        name="QuickAdd"
+        component={QuickAddTaskModal}
+        options={{ presentation: 'modal', title: t('dialogs.quickAddTask.title') }}
       />
       <CalendarStack.Screen
         name="MoveCopy"

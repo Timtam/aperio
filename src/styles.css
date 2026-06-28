@@ -1618,6 +1618,26 @@ button[aria-disabled='true'] {
   border-color: var(--color-accent);
 }
 
+/* Day-activation chooser ("Termin oder Aufgabe?"). Two big, equal-weight
+ * choice buttons stacked above the Cancel row. */
+.create-chooser__day {
+  margin: 0 0 var(--space-3);
+  color: var(--color-fg-muted);
+  font-size: var(--font-size-sm);
+}
+
+.create-chooser__choices {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.create-chooser__choice {
+  flex: 1;
+  padding: var(--space-3) var(--space-2);
+  font-size: var(--font-size-base, 1rem);
+  font-weight: 600;
+}
+
 .form__action--danger {
   background: var(--color-danger);
   color: var(--color-accent-fg);

@@ -108,7 +108,8 @@ export function MonthView() {
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { anchor, setAnchor, goPrev, goNext, weekStartsOn } = useViewState();
-  const { openEventDialog, openTaskDialog, invalidateData } = useDialogState();
+  const { openEventDialog, openTaskDialog, openCreateChooser, invalidateData } =
+    useDialogState();
   const { openForEvent: openEventMenu, openForTask: openTaskMenu } =
     useChipContextMenu();
 
@@ -462,9 +463,8 @@ export function MonthView() {
           } else if (first?.kind === 'task') {
             openTaskDialog(first.task);
           } else {
-            openEventDialog(null, {
-              defaultDate: keyOf(focusedDay),
-            });
+            // Empty day → the "Termin oder Aufgabe?" chooser, anchored here.
+            openCreateChooser(keyOf(focusedDay));
           }
           return;
         }
@@ -485,6 +485,7 @@ export function MonthView() {
       itemsByDay,
       openEventDialog,
       openTaskDialog,
+      openCreateChooser,
       toggleTaskStatus,
       handleTab,
       clearEventIndex,
@@ -697,17 +698,17 @@ export function MonthView() {
                       }
                       onClick={() => setAnchor(day)}
                       onDoubleClick={(e) => {
-                        // Double-click on an empty part of the day opens a new
-                        // event anchored to it. Skip clicks that land on a chip
-                        // (events/tasks are draggable and have their own
-                        // double-click → editor). Keyboard equivalent: Enter on
-                        // the focused day (handleKeyDown).
+                        // Double-click on an empty part of the day opens the
+                        // "Termin oder Aufgabe?" chooser, anchored to it. Skip
+                        // clicks that land on a chip (events/tasks are draggable
+                        // and have their own double-click → editor). Keyboard
+                        // equivalent: Enter on the focused day (handleKeyDown).
                         if (
                           (e.target as HTMLElement).closest('[draggable="true"]')
                         ) {
                           return;
                         }
-                        openEventDialog(null, { defaultDate: keyOf(day) });
+                        openCreateChooser(keyOf(day));
                       }}
                       onDragOver={(e) => {
                         const types = e.dataTransfer.types;

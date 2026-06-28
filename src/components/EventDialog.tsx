@@ -100,6 +100,10 @@ export interface EventDialogProps {
    * defaults are "next full hour on that day". Ignored when editing.
    */
   defaultDate?: string;
+  /** Pre-fill the title when creating — carries the in-progress title over
+   *  from the event quick-add's "weitere Details" hand-off. Ignored when
+   *  editing. */
+  defaultTitle?: string;
 }
 
 interface FormState {
@@ -143,6 +147,7 @@ export function EventDialog({
   event,
   defaultCalendarId,
   defaultDate,
+  defaultTitle,
 }: EventDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
@@ -186,6 +191,7 @@ export function EventDialog({
       event,
       defaultCalendarId,
       defaultDate,
+      defaultTitle,
       calendars,
       selectedCalendarIds,
     );
@@ -200,6 +206,7 @@ export function EventDialog({
     event,
     defaultCalendarId,
     defaultDate,
+    defaultTitle,
     calendars,
     selectedCalendarIds,
     remindersWereFromDefault,
@@ -972,6 +979,7 @@ function buildInitialState(
   event: CalendarEvent | null,
   defaultCalendarId: string | undefined,
   defaultDate: string | undefined,
+  defaultTitle: string | undefined,
   calendars: { id: string; read_only: boolean }[],
   selectedIds: ReadonlySet<string>,
 ): FormState {
@@ -1032,7 +1040,7 @@ function buildInitialState(
     '';
 
   return {
-    title: '',
+    title: defaultTitle ?? '',
     calendarId: fallbackCalendar,
     startDate: dateInput(start),
     startTime: timeInput(start),
