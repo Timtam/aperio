@@ -35,13 +35,7 @@ export function Toolbar() {
   const { t } = useTranslation();
   const fmt = useDateFormat();
   const { view, setView, anchor, jumpToToday, goPrev, goNext } = useViewState();
-  const {
-    openEventDialog,
-    openTaskDialog,
-    openQuickAdd,
-    openQuickAddTask,
-    openSearch,
-  } = useDialogState();
+  const { openQuickAdd, openQuickAddTask, openSearch } = useDialogState();
 
   return (
     <div
@@ -113,33 +107,21 @@ export function Toolbar() {
         >
           🔎
         </button>
+        {/* One create button per kind. Each opens the quick-add (the "schnell
+            anlegen" editor), which expands to the full editor via "weitere
+            Details" — so the old standalone quick-add buttons are gone. The
+            full editor stays one keystroke away (Ctrl+Shift+N / Alt+Shift+N). */}
         <button
           type="button"
-          onClick={() => openQuickAdd()}
-          title={t('toolbar.quickAdd') + ' (Ctrl+N)'}
-        >
-          {t('toolbar.quickAdd')}
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            openEventDialog(null, { defaultDate: localDateKey(anchor) })
-          }
-          title={t('toolbar.newEvent') + ' (Ctrl+Shift+N)'}
+          onClick={() => openQuickAdd({ defaultDate: localDateKey(anchor) })}
+          title={t('toolbar.newEvent') + ' (Ctrl+N)'}
         >
           {t('toolbar.newEvent')}
         </button>
         <button
           type="button"
           onClick={() => openQuickAddTask()}
-          title={t('toolbar.quickAddTask') + ' (Alt+N)'}
-        >
-          {t('toolbar.quickAddTask')}
-        </button>
-        <button
-          type="button"
-          onClick={() => openTaskDialog(null)}
-          title={t('toolbar.newTask') + ' (Alt+Shift+N)'}
+          title={t('toolbar.newTask') + ' (Alt+N)'}
         >
           {t('toolbar.newTask')}
         </button>

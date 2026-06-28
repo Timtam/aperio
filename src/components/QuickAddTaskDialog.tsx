@@ -25,16 +25,23 @@ import { Modal } from './Modal';
 export function QuickAddTaskDialog({
   isOpen,
   onClose,
+  defaultDate,
 }: {
   isOpen: boolean;
   onClose: () => void;
+  /** YYYY-MM-DD to schedule the new task on (an activated calendar day).
+   *  When omitted the task starts dateless (backlog). */
+  defaultDate?: string;
 }) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const { taskLists } = useCalendarStore();
   const { openTaskDialog } = useDialogState();
 
-  const initial = useMemo(() => buildInitial(taskLists), [taskLists]);
+  const initial = useMemo(
+    () => buildInitial(taskLists, defaultDate),
+    [taskLists, defaultDate],
+  );
 
   const [title, setTitle] = useState(initial.title);
   const [date, setDate] = useState(initial.date);
@@ -210,6 +217,7 @@ interface Initial {
 
 function buildInitial(
   taskLists: { id: string; read_only: boolean }[],
+  defaultDate?: string,
 ): Initial {
   // Default list mirrors TaskDialog: last-used (if still present + writable),
   // else the first writable list, else any list.
@@ -219,8 +227,8 @@ function buildInitial(
     lastUsed && writable.some((l) => l.id === lastUsed) ? lastUsed : null;
   return {
     title: '',
-    // Empty by default — no date means the task goes to the backlog.
-    date: '',
+    // Dateless by default → backlog; an activated calendar day schedules it.
+    date: defaultDate ?? '',
     listId: lastUsedValid ?? writable[0]?.id ?? taskLists[0]?.id ?? '',
   };
 }

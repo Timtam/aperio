@@ -44,6 +44,8 @@ export type DialogMode =
       calendarId?: string;
       /** Pre-fill start/end around this date when creating a new event. */
       defaultDate?: string;
+      /** Pre-fill the title when creating (quick-add → "weitere Details"). */
+      defaultTitle?: string;
     }
   | {
       kind: 'task';
@@ -54,8 +56,15 @@ export type DialogMode =
        *  details" so the in-progress title isn't lost on the hand-off. */
       defaultTitle?: string;
     }
-  | { kind: 'quickAdd' }
-  | { kind: 'quickAddTask' }
+  | { kind: 'quickAdd'; defaultDate?: string }
+  | { kind: 'quickAddTask'; defaultDate?: string }
+  | {
+      // The day-activation chooser: "Termin oder Aufgabe?" on a calendar
+      // day (double-click / Enter). Routes to the matching quick-add,
+      // carrying the activated day forward as `defaultDate`.
+      kind: 'createChooser';
+      defaultDate?: string;
+    }
   | { kind: 'settings'; initialTab?: SettingsTabId }
   | { kind: 'search' }
   | { kind: 'reminders' }
@@ -93,6 +102,9 @@ export interface OpenEventOptions {
   calendarId?: string;
   /** Pre-fill start/end around this date (ISO string). */
   defaultDate?: string;
+  /** Pre-fill the title when creating — carries the in-progress title over
+   *  from the event quick-add's "weitere Details" hand-off. */
+  defaultTitle?: string;
 }
 
 export interface OpenTaskOptions {
@@ -107,6 +119,12 @@ export interface OpenContactOptions {
   listId?: string;
 }
 
+export interface OpenQuickAddOptions {
+  /** YYYY-MM-DD the quick-add should anchor to. For an event this pre-fills
+   *  the start day; for a task it pre-fills the scheduled day. */
+  defaultDate?: string;
+}
+
 export interface DialogStateValue {
   mode: DialogMode;
   openEventDialog: (
@@ -114,8 +132,17 @@ export interface DialogStateValue {
     options?: OpenEventOptions,
   ) => void;
   openTaskDialog: (task?: Task | null, options?: OpenTaskOptions) => void;
-  openQuickAdd: () => void;
-  openQuickAddTask: () => void;
+  /** Quick-add EVENT. `defaultDate` (YYYY-MM-DD) anchors it to a chosen day
+   *  (the day-activation chooser / a calendar day); omit to use the view's
+   *  focused day. Expands to the full event editor via "weitere Details". */
+  openQuickAdd: (options?: OpenQuickAddOptions) => void;
+  /** Quick-add TASK. `defaultDate` (YYYY-MM-DD) schedules it on a chosen day;
+   *  omit to start it dateless (backlog). Expands to the full task editor. */
+  openQuickAddTask: (options?: OpenQuickAddOptions) => void;
+  /** Day-activation chooser ("Termin oder Aufgabe?"). `defaultDate`
+   *  (YYYY-MM-DD) is the activated calendar day, carried into the chosen
+   *  quick-add. */
+  openCreateChooser: (defaultDate?: string) => void;
   /**
    * Open the unified Settings dialog. Pass an `initialTab` to land on a
    * specific category — used by the legacy entry points that used to
@@ -261,6 +288,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
         event,
         calendarId: options?.calendarId,
         defaultDate: options?.defaultDate,
+        defaultTitle: options?.defaultTitle,
       });
     },
     [push],
@@ -277,9 +305,18 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     },
     [push],
   );
-  const openQuickAdd = useCallback(() => push({ kind: 'quickAdd' }), [push]);
+  const openQuickAdd = useCallback(
+    (options?: OpenQuickAddOptions) =>
+      push({ kind: 'quickAdd', defaultDate: options?.defaultDate }),
+    [push],
+  );
   const openQuickAddTask = useCallback(
-    () => push({ kind: 'quickAddTask' }),
+    (options?: OpenQuickAddOptions) =>
+      push({ kind: 'quickAddTask', defaultDate: options?.defaultDate }),
+    [push],
+  );
+  const openCreateChooser = useCallback(
+    (defaultDate?: string) => push({ kind: 'createChooser', defaultDate }),
     [push],
   );
   const openSettings = useCallback(
@@ -396,6 +433,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openTaskDialog,
       openQuickAdd,
       openQuickAddTask,
+      openCreateChooser,
       openSettings,
       openColorLabels,
       openAccounts,
@@ -422,6 +460,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openTaskDialog,
       openQuickAdd,
       openQuickAddTask,
+      openCreateChooser,
       openSettings,
       openColorLabels,
       openAccounts,

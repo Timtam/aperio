@@ -206,8 +206,8 @@ export default function AgendaScreen({
   const addEventOnDay = useCallback(
     (dayKey: string) => {
       if (firstWritableCalendarId == null) return;
-      navigation.navigate('EventEditor', {
-        eventId: null,
+      // → the event quick-add (expands to the full editor via "More details …").
+      navigation.navigate('QuickAddEvent', {
         calendarId: firstWritableCalendarId,
         anchor: dayKey,
       });

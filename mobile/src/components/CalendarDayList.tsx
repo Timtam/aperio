@@ -383,8 +383,8 @@ export function CalendarDayList({
   const addEventOnDay = useCallback(
     (dayKey: string) => {
       if (firstWritableCalendarId == null) return;
-      navigation.navigate('EventEditor', {
-        eventId: null,
+      // → the event quick-add (expands to the full editor via "More details …").
+      navigation.navigate('QuickAddEvent', {
         calendarId: firstWritableCalendarId,
         anchor: dayKey,
       });
@@ -401,14 +401,12 @@ export function CalendarDayList({
   );
   const addTaskOnDay = useCallback(
     (dayKey: string) => {
-      if (firstWritableTaskListId == null) return;
-      navigation.navigate('TaskEditor', {
-        taskId: null,
-        listId: firstWritableTaskListId,
-        initialScheduledDate: dayKey,
-      });
+      // → the task quick-add, anchored to the tapped day (expands to the full
+      //   editor via "More details …"). The quick-add picks the list itself
+      //   (last-used), mirroring the desktop day-activation create flow.
+      navigation.navigate('QuickAdd', { initialScheduledDate: dayKey });
     },
-    [firstWritableTaskListId, navigation],
+    [navigation],
   );
 
   // Check off a task via the shared toggle path (honours the synced

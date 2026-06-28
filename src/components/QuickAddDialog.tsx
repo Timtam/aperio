@@ -33,9 +33,13 @@ import { Modal } from './Modal';
 export function QuickAddDialog({
   isOpen,
   onClose,
+  defaultDate,
 }: {
   isOpen: boolean;
   onClose: () => void;
+  /** YYYY-MM-DD to anchor the new event on (an activated calendar day).
+   *  When omitted the dialog falls back to the view's focused day. */
+  defaultDate?: string;
 }) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
@@ -50,8 +54,8 @@ export function QuickAddDialog({
     [calendars, selectedCalendarIds],
   );
   const initial = useMemo(
-    () => buildInitial(selectable, anchor),
-    [selectable, anchor],
+    () => buildInitial(selectable, anchor, defaultDate),
+    [selectable, anchor, defaultDate],
   );
 
   const [title, setTitle] = useState(initial.title);
@@ -126,8 +130,10 @@ export function QuickAddDialog({
     openEventDialog(null, {
       calendarId: calendarId || undefined,
       defaultDate: date || undefined,
+      // Carry the in-progress title over so it isn't lost on the hand-off.
+      defaultTitle: title || undefined,
     });
-  }, [onClose, openEventDialog, calendarId, date]);
+  }, [onClose, openEventDialog, calendarId, date, title]);
 
   return (
     <Modal
@@ -242,10 +248,15 @@ interface Initial {
 function buildInitial(
   calendars: { id: string }[],
   anchor: Date,
+  defaultDate?: string,
 ): Initial {
   // Same default-time policy as the full dialog: next :00/:30 slot when
-  // the focused day is today, 09:00 otherwise.
-  const { start } = defaultNewEventTimes(dateInput(anchor), new Date());
+  // the focused day is today, 09:00 otherwise. An activated calendar day
+  // (`defaultDate`) overrides the view's focused day when present.
+  const { start } = defaultNewEventTimes(
+    defaultDate || dateInput(anchor),
+    new Date(),
+  );
   return {
     title: '',
     date: dateInput(start),

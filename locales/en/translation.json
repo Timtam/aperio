@@ -1400,6 +1400,12 @@
     "quickAddTask": {
       "title": "Quick add task"
     },
+    "createChooser": {
+      "title": "What would you like to create?",
+      "onDay": "On {{date}}",
+      "event": "Event",
+      "task": "Task"
+    },
     "moveCopy": {
       "titleEvent": "Move or copy event \"{{title}}\"",
       "titleTask": "Move or copy task \"{{title}}\"",

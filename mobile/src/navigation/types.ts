@@ -35,7 +35,12 @@ export type RootStackParamList = {
   };
   // One-tap task capture (title + optional day + list); "More details …" hands
   // off to TaskEditor. The mobile twin of the desktop QuickAddTaskDialog.
-  QuickAdd: undefined;
+  // `initialScheduledDate` (YYYY-MM-DD) anchors it to a tapped calendar day.
+  QuickAdd: { initialScheduledDate?: string } | undefined;
+  // One-tap EVENT capture (title + date/time + calendar); "More details …" hands
+  // off to EventEditor. The mobile twin of the desktop QuickAddDialog. `anchor`
+  // (YYYY-MM-DD) seeds the day; `calendarId` pre-selects the calendar.
+  QuickAddEvent: { calendarId: string; anchor?: string };
   // Plan-from-backlog quick scheduler (Today / Tomorrow / Next Monday / custom /
   // back-to-backlog). The mobile twin of the desktop PlanTaskDialog.
   PlanTask: { taskId: string; listId: string };
@@ -72,6 +77,9 @@ export type RootStackParamList = {
     // `anchor` (YYYY-MM-DD) seeds a NEW event's date from the tapped calendar
     // day instead of today (the per-day "+ new event" affordance).
     anchor?: string;
+    // `initialTitle` seeds a fresh event with the title typed into the
+    // event quick-add before "More details …".
+    initialTitle?: string;
   };
   Calendars: undefined;
   CalendarEditor: { calendarId: string };

@@ -41,7 +41,10 @@ function dateInvalid(date: string): boolean {
   return probe.getFullYear() !== y || probe.getMonth() !== m - 1 || probe.getDate() !== day;
 }
 
-export default function QuickAddTaskModal({ navigation }: RootStackScreenProps<'QuickAdd'>) {
+export default function QuickAddTaskModal({
+  navigation,
+  route,
+}: RootStackScreenProps<'QuickAdd'>) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { taskLists, invalidateData } = useTaskStore();
@@ -49,7 +52,8 @@ export default function QuickAddTaskModal({ navigation }: RootStackScreenProps<'
   const writable = useMemo(() => taskLists.filter((l) => !l.read_only), [taskLists]);
 
   const [title, setTitle] = useState('');
-  const [date, setDate] = useState('');
+  // A tapped calendar day pre-schedules the task; otherwise dateless (backlog).
+  const [date, setDate] = useState(route.params?.initialScheduledDate ?? '');
   const [listId, setListId] = useState<string>(
     () => writable[0]?.id ?? taskLists[0]?.id ?? '',
   );

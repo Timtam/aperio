@@ -1,5 +1,6 @@
 import { useDialogState } from '../state/dialogStateContext';
 import { ContactDialog } from './ContactDialog';
+import { CreateChooserDialog } from './CreateChooserDialog';
 import { DayStartReviewDialog } from './DayStartReviewDialog';
 import { EventDialog } from './EventDialog';
 import { FirstLaunchWizardDialog } from './FirstLaunchWizardDialog';
@@ -35,6 +36,7 @@ export function DialogHost() {
           event={mode.event}
           defaultCalendarId={mode.calendarId}
           defaultDate={mode.defaultDate}
+          defaultTitle={mode.defaultTitle}
         />
       );
     case 'task':
@@ -49,9 +51,25 @@ export function DialogHost() {
         />
       );
     case 'quickAdd':
-      return <QuickAddDialog isOpen onClose={close} />;
+      return (
+        <QuickAddDialog isOpen onClose={close} defaultDate={mode.defaultDate} />
+      );
     case 'quickAddTask':
-      return <QuickAddTaskDialog isOpen onClose={close} />;
+      return (
+        <QuickAddTaskDialog
+          isOpen
+          onClose={close}
+          defaultDate={mode.defaultDate}
+        />
+      );
+    case 'createChooser':
+      return (
+        <CreateChooserDialog
+          isOpen
+          onClose={close}
+          defaultDate={mode.defaultDate}
+        />
+      );
     case 'settings':
       return (
         <SettingsDialog
