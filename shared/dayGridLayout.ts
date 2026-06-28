@@ -1,0 +1,136 @@
+// Pure geometry for a proportional day/week time-grid, shared by the desktop
+// and mobile calendars so the overlap math lives in ONE tested place. Given a
+// day's timed items (each a [startMin, endMin] span in minutes from local
+// midnight), it returns each item's fractional top + height within the day and
+// its side-by-side column placement when items overlap — the classic calendar
+// "columns" layout (Google/Outlook/Apple). The renderer turns the fractions
+// into pixels and clamps a minimum height so a 5-minute event stays legible.
+//
+// This is PURELY visual: it never reorders items (the caller keeps its
+// chronological DOM order for screen-reader + keyboard navigation), it just
+// tells the renderer where to draw each one.
+
+/** Minutes in a day — the denominator for every fraction. */
+export const MINUTES_PER_DAY = 24 * 60;
+
+export interface TimedSpan {
+  /** Minutes from local midnight of the start, clamped to [0, 1440]. */
+  startMin: number;
+  /** Minutes from local midnight of the end, clamped to [startMin, 1440]. A
+   *  zero-duration point (a timed task, which has a time but no duration) has
+   *  `endMin === startMin`; it still gets a column + a min-height chip. */
+  endMin: number;
+}
+
+export interface PositionedSpan {
+  /** Top edge as a fraction [0, 1) of the full-day height. */
+  topFraction: number;
+  /** Height as a fraction (0, 1] of the full-day height. May be ~0 for a
+   *  zero-duration point — the renderer applies a px minimum. */
+  heightFraction: number;
+  /** This item's column within its overlap cluster (0-based). */
+  columnIndex: number;
+  /** Total columns in this item's overlap cluster (≥ 1); width = 1/columnCount. */
+  columnCount: number;
+}
+
+/** Clamp a raw minute value into a valid in-day position. */
+function clampMinute(min: number): number {
+  if (!Number.isFinite(min)) return 0;
+  if (min < 0) return 0;
+  if (min > MINUTES_PER_DAY) return MINUTES_PER_DAY;
+  return min;
+}
+
+/**
+ * Lay out a single day-column's timed items. Input order is preserved in the
+ * OUTPUT (result[i] positions input[i]); the algorithm sorts internally only to
+ * compute overlaps. Overlap rule: two spans overlap when one starts strictly
+ * before the other ends (touching edges — one ends exactly when the next starts
+ * — do NOT overlap, so back-to-back meetings sit full-width). A zero-duration
+ * point is treated as an infinitesimally short span for overlap, so two tasks
+ * at the same minute share two columns but a task at the boundary of an event
+ * stays clear.
+ */
+export function layoutDayColumn(spans: TimedSpan[]): PositionedSpan[] {
+  const n = spans.length;
+  // A zero-duration point gets an infinitesimal EFFECTIVE end (< 1 minute, the
+  // smallest real gap) used ONLY for overlap math, so two coincident points
+  // split into side-by-side columns while a point at an event's edge — or two
+  // back-to-back events — still read as non-overlapping. The real `endMin`
+  // (which may equal startMin) still drives the rendered height.
+  const EPSILON = 1e-3;
+  const items = spans.map((s, i) => {
+    const startMin = clampMinute(s.startMin);
+    const endMin = Math.max(startMin, clampMinute(s.endMin));
+    const effEnd = endMin === startMin ? startMin + EPSILON : endMin;
+    return { i, startMin, endMin, effEnd };
+  });
+
+  // Sort by start, then by effective end (longer first on a tie) for a stable
+  // greedy column pass.
+  const order = items
+    .slice()
+    .sort((a, b) => a.startMin - b.startMin || b.effEnd - a.effEnd);
+
+  const result: PositionedSpan[] = new Array(n);
+
+  // Walk the sorted items, accumulating a "cluster" of transitively-overlapping
+  // items. A cluster closes when the next item starts at/after the max effective
+  // end seen so far — then every item in it shares the same columnCount.
+  let cluster: { i: number; col: number }[] = [];
+  let clusterMaxEnd = -1;
+
+  const flush = () => {
+    if (cluster.length === 0) return;
+    const cols = cluster.reduce((m, it) => Math.max(m, it.col + 1), 0);
+    for (const it of cluster) {
+      const item = items[it.i];
+      result[item.i] = {
+        topFraction: item.startMin / MINUTES_PER_DAY,
+        heightFraction: (item.endMin - item.startMin) / MINUTES_PER_DAY,
+        columnIndex: it.col,
+        columnCount: cols,
+      };
+    }
+    cluster = [];
+    clusterMaxEnd = -1;
+  };
+
+  // `colEnds[c]` = effective end of the last span placed in column c (current
+  // cluster only). A span goes in the first column whose last span has ended.
+  let colEnds: number[] = [];
+
+  for (const cur of order) {
+    const startsNewCluster = cluster.length > 0 && cur.startMin >= clusterMaxEnd;
+    if (startsNewCluster) {
+      flush();
+      colEnds = [];
+    }
+
+    // First column whose last span ended at/before this start (touching is OK).
+    let col = colEnds.findIndex((end) => end <= cur.startMin);
+    if (col === -1) {
+      col = colEnds.length;
+    }
+    colEnds[col] = cur.effEnd;
+    cluster.push({ i: cur.i, col });
+    clusterMaxEnd = Math.max(clusterMaxEnd, cur.effEnd);
+  }
+  flush();
+
+  return result;
+}
+
+/**
+ * Convert a local wall-clock `HH:MM[:SS]` (or a Date) to minutes from midnight.
+ * Returns null for an unparseable time. Seconds are floored into the minute.
+ */
+export function minutesFromMidnight(time: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(time.trim());
+  if (!m) return null;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (hh > 23 || mm > 59) return null;
+  return hh * 60 + mm;
+}

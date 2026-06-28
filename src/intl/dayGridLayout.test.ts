@@ -1,0 +1,108 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+  layoutDayColumn,
+  minutesFromMidnight,
+  MINUTES_PER_DAY,
+  type TimedSpan,
+} from '@aperio/shared';
+
+// Helper: minutes for HH:MM.
+const at = (h: number, m = 0): number => h * 60 + m;
+const span = (startMin: number, endMin: number): TimedSpan => ({
+  startMin,
+  endMin,
+});
+
+describe('layoutDayColumn', () => {
+  it('positions a single event by start + duration (full width)', () => {
+    const [p] = layoutDayColumn([span(at(9), at(10, 30))]);
+    expect(p.topFraction).toBeCloseTo(at(9) / MINUTES_PER_DAY);
+    expect(p.heightFraction).toBeCloseTo(90 / MINUTES_PER_DAY);
+    expect(p.columnIndex).toBe(0);
+    expect(p.columnCount).toBe(1);
+  });
+
+  it('keeps non-overlapping events full width', () => {
+    const out = layoutDayColumn([span(at(9), at(10)), span(at(11), at(12))]);
+    expect(out.every((p) => p.columnCount === 1)).toBe(true);
+  });
+
+  it('treats back-to-back (touching) events as NON-overlapping', () => {
+    // 9–10 and 10–11 share an edge but must not overlap → both full width.
+    const out = layoutDayColumn([span(at(9), at(10)), span(at(10), at(11))]);
+    expect(out.map((p) => p.columnCount)).toEqual([1, 1]);
+  });
+
+  it('splits two overlapping events into two columns', () => {
+    const out = layoutDayColumn([span(at(9), at(10, 30)), span(at(10), at(11))]);
+    expect(out.map((p) => p.columnCount)).toEqual([2, 2]);
+    expect(out.map((p) => p.columnIndex).sort()).toEqual([0, 1]);
+  });
+
+  it('gives a three-way overlap three columns', () => {
+    const out = layoutDayColumn([
+      span(at(9), at(12)),
+      span(at(9, 30), at(11)),
+      span(at(10), at(10, 30)),
+    ]);
+    expect(out.every((p) => p.columnCount === 3)).toBe(true);
+    expect(out.map((p) => p.columnIndex).sort()).toEqual([0, 1, 2]);
+  });
+
+  it('chains a transitive (staircase) overlap into one cluster', () => {
+    // A 9–10, B 9:30–10:30, C 10:15–11. A∩B and B∩C overlap but A∩C do not;
+    // they still form ONE cluster, so all three report columnCount 3... no —
+    // A and C don't overlap, so C can REUSE A's column. Cluster width is the
+    // peak concurrency (2 at any instant), so columnCount is 2.
+    const out = layoutDayColumn([
+      span(at(9), at(10)),
+      span(at(9, 30), at(10, 30)),
+      span(at(10, 15), at(11)),
+    ]);
+    // Peak concurrency is 2 (B overlaps both A and C, but A and C are disjoint).
+    expect(out.map((p) => p.columnCount)).toEqual([2, 2, 2]);
+    // A in col 0; B forced to col 1; C reuses col 0 (A has ended by 10:15).
+    expect(out[0].columnIndex).toBe(0);
+    expect(out[1].columnIndex).toBe(1);
+    expect(out[2].columnIndex).toBe(0);
+  });
+
+  it('preserves INPUT order in the output array', () => {
+    // Pass them out of chronological order; result[i] must position input[i].
+    const out = layoutDayColumn([span(at(14), at(15)), span(at(9), at(10))]);
+    expect(out[0].topFraction).toBeCloseTo(at(14) / MINUTES_PER_DAY);
+    expect(out[1].topFraction).toBeCloseTo(at(9) / MINUTES_PER_DAY);
+  });
+
+  it('gives zero-duration points (timed tasks) their own columns when coincident', () => {
+    const out = layoutDayColumn([span(at(9), at(9)), span(at(9), at(9))]);
+    expect(out.every((p) => p.columnCount === 2)).toBe(true);
+    expect(out.map((p) => p.columnIndex).sort()).toEqual([0, 1]);
+    expect(out[0].heightFraction).toBe(0);
+  });
+
+  it('clamps out-of-range minutes', () => {
+    const [p] = layoutDayColumn([span(-30, MINUTES_PER_DAY + 120)]);
+    expect(p.topFraction).toBe(0);
+    expect(p.heightFraction).toBe(1);
+  });
+
+  it('handles an empty day', () => {
+    expect(layoutDayColumn([])).toEqual([]);
+  });
+});
+
+describe('minutesFromMidnight', () => {
+  it('parses HH:MM and HH:MM:SS', () => {
+    expect(minutesFromMidnight('09:30')).toBe(570);
+    expect(minutesFromMidnight('9:05')).toBe(545);
+    expect(minutesFromMidnight('23:59:45')).toBe(23 * 60 + 59);
+    expect(minutesFromMidnight('00:00')).toBe(0);
+  });
+  it('rejects garbage', () => {
+    expect(minutesFromMidnight('24:00')).toBeNull();
+    expect(minutesFromMidnight('9')).toBeNull();
+    expect(minutesFromMidnight('foo')).toBeNull();
+  });
+});

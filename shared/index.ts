@@ -5,6 +5,7 @@ export * from './types';
 export * from './taskStatus';
 export * from './taskGrouping';
 export * from './taskDay';
+export * from './dayGridLayout';
 export * from './taskRecurrence';
 export * from './recurrence';
 export * from './rrule';
