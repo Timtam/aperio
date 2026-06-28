@@ -906,6 +906,11 @@
         "label": "In geteilten Listen mir zuweisen",
         "hint": "Wenn aktiviert, weist sich eine noch niemandem zugewiesene Aufgabe in einer geteilten Liste (z.B. Vikunja) automatisch mir zu, sobald ich sie auf in Arbeit oder erledigt setze; setze ich sie zurück auf offen, wird nur meine Zuweisung wieder entfernt. Bei wiederkehrenden Aufgaben gilt das nur für die erledigte Aufgabe — die neue Aufgabe bleibt ohne Zuweisung. Deaktiviert: Zuweisungen bleiben manuell."
       },
+      "visualEffortSizing": {
+        "heading": "Aufwand als Kachelgröße",
+        "label": "Aufgaben je nach Aufwand größer/kleiner darstellen",
+        "hint": "Wenn aktiviert, werden Aufgabenkacheln je nach eingestelltem Aufwand (klein/mittel/groß) unterschiedlich groß dargestellt, damit auf einen Blick sichtbar ist, wie voll ein Tag ist. Rein visuell — der Aufwand wird unabhängig davon immer im Aufgaben-Label angesagt. Deaktiviert: alle Kacheln gleich groß."
+      },
       "carryOverDefault": {
         "heading": "Übernahme-Standard",
         "hint": "Beim App-Start entscheiden, was mit Aufgaben passiert, deren geplanter Tag in der Vergangenheit liegt und die noch offen sind. „Jedes Mal fragen\" öffnet den Übernahme-Dialog; die anderen Optionen laufen im Hintergrund und melden das Ergebnis über die Live-Region.",
@@ -1262,6 +1267,7 @@
         "assignees": "Zugewiesen an",
         "status": "Status",
         "priority": "Priorität",
+        "effort": "Aufwand",
         "completedAt": "Erledigt am {{date}}",
         "scheduled": {
           "legend": "Geplant für",
@@ -1311,6 +1317,11 @@
         "low": "Niedrig",
         "medium": "Mittel",
         "high": "Hoch"
+      },
+      "effort": {
+        "small": "Klein",
+        "medium": "Mittel",
+        "large": "Groß"
       },
       "recurrence": {
         "label": "Wiederholung",
@@ -1791,6 +1802,8 @@
       "subtaskOf": "Unteraufgabe von „{{parent}}\"",
       "priorityHigh": "hohe Priorität",
       "priorityLow": "niedrige Priorität",
+      "effortSmall": "geringer Aufwand",
+      "effortLarge": "großer Aufwand",
       "subtaskProgressBadge": "{{done}}/{{total}}",
       "subtaskProgressBadgeAria": "{{done}} von {{total}} Unteraufgaben erledigt",
       "assigneeSuffix": ", zugewiesen an {{names}}",

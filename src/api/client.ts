@@ -313,6 +313,7 @@ export interface CreateTaskRequest {
   description: string | null;
   status: Task['status'];
   priority: Task['priority'];
+  effort: Task['effort'];
   scheduled_date: string | null;
   scheduled_time: string | null;
   deadline_date: string | null;

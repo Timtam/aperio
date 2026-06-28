@@ -62,6 +62,8 @@ export function TasksPanel() {
     setAutoDate,
     autoSelfAssign,
     setAutoSelfAssign,
+    visualEffortSizing,
+    setVisualEffortSizing,
     carryOverDefault,
     setCarryOverDefault,
     dayStartTrigger,
@@ -108,6 +110,8 @@ export function TasksPanel() {
   const autoDateHintId = useId();
   const autoSelfAssignHeadingId = useId();
   const autoSelfAssignHintId = useId();
+  const visualEffortSizingHeadingId = useId();
+  const visualEffortSizingHintId = useId();
   const carryOverHeadingId = useId();
   const carryOverHintId = useId();
   const carryOverGroupId = useId();
@@ -232,6 +236,30 @@ export function TasksPanel() {
             onChange={(e) => setAutoSelfAssign(e.target.checked)}
           />
           <span>{t('dialogs.tasks.autoSelfAssign.label')}</span>
+        </label>
+      </section>
+
+      <section
+        aria-labelledby={visualEffortSizingHeadingId}
+        className="tasks-settings__section"
+      >
+        <h3
+          id={visualEffortSizingHeadingId}
+          className="color-labels__heading"
+        >
+          {t('dialogs.tasks.visualEffortSizing.heading')}
+        </h3>
+        <p id={visualEffortSizingHintId} className="tasks-settings__hint">
+          {t('dialogs.tasks.visualEffortSizing.hint')}
+        </p>
+        <label className="tasks-settings__toggle">
+          <input
+            type="checkbox"
+            checked={visualEffortSizing}
+            aria-describedby={visualEffortSizingHintId}
+            onChange={(e) => setVisualEffortSizing(e.target.checked)}
+          />
+          <span>{t('dialogs.tasks.visualEffortSizing.label')}</span>
         </label>
       </section>
 

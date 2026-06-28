@@ -79,6 +79,7 @@ export function QuickAddTaskDialog({
           description: null,
           status: 'open',
           priority: 'medium',
+          effort: 'medium',
           // Empty date → backlog; a chosen day schedules it.
           scheduled_date: date || null,
           scheduled_time: null,

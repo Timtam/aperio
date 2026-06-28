@@ -48,6 +48,7 @@ const CARRY_OVER_KEY = 'tasks.carryOverDefault';
 const DAY_START_TRIGGER_KEY = 'tasks.dayStartTrigger';
 const CHECKOFF_MODE_KEY = 'tasks.checkoffMode';
 const AUTO_SELF_ASSIGN_KEY = 'tasks.autoSelfAssign';
+const VISUAL_EFFORT_SIZING_KEY = 'tasks.visualEffortSizing';
 /**
  * Single JSON pref holding the per-list override map. Keyed by
  * task-list id, value is a `ListOverrides` record carrying any
@@ -168,6 +169,11 @@ export interface TaskCascadeContextValue {
   autoSelfAssign: boolean;
   /** Set the auto-self-assign preference. Debounced-persisted. */
   setAutoSelfAssign: (value: boolean) => void;
+  /** True when task tiles render at a size keyed off their effort. Purely
+   *  visual; the effort is always in the SR label regardless. */
+  visualEffortSizing: boolean;
+  /** Set the visual-effort-sizing preference. Debounced-persisted (synced). */
+  setVisualEffortSizing: (value: boolean) => void;
   /** Carry-over default action used by `CarryOverChecker`. */
   carryOverDefault: CarryOverDefault;
   /** Set the carry-over default. Debounced-persisted. */
@@ -204,6 +210,8 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
   const [enabled, setEnabledState] = useState(true);
   const [autoDate, setAutoDateState] = useState(true);
   const [autoSelfAssign, setAutoSelfAssignState] = useState(true);
+  // Visual effort-sizing defaults ON; only a literal stored 'false' disables.
+  const [visualEffortSizing, setVisualEffortSizingState] = useState(true);
   const [carryOverDefault, setCarryOverDefaultState] =
     useState<CarryOverDefault>('ask');
   // Default '00:00' means "as soon as the local date rolls over",
@@ -227,6 +235,7 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       getUserPref(DAY_START_TRIGGER_KEY).catch(() => null),
       getUserPref(CHECKOFF_MODE_KEY).catch(() => null),
       getUserPref(AUTO_SELF_ASSIGN_KEY).catch(() => null),
+      getUserPref(VISUAL_EFFORT_SIZING_KEY).catch(() => null),
       getUserPref(LIST_OVERRIDES_KEY).catch(() => null),
     ])
       .then(
@@ -237,6 +246,7 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
           triggerRaw,
           checkoffRaw,
           autoSelfAssignRaw,
+          visualEffortSizingRaw,
           listOverridesRaw,
         ]) => {
           if (cancelled) return;
@@ -245,6 +255,8 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
           if (cascadeRaw === 'false') setEnabledState(false);
           if (autoDateRaw === 'false') setAutoDateState(false);
           if (autoSelfAssignRaw === 'false') setAutoSelfAssignState(false);
+          if (visualEffortSizingRaw === 'false')
+            setVisualEffortSizingState(false);
           // Carry-over default is a tri-state enum; reject anything
           // that doesn't match the allowed values and keep the default.
           if (isCarryOverDefault(carryOverRaw)) {
@@ -362,6 +374,26 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
     };
   }, [autoSelfAssign, hydrating]);
 
+  const visualEffortSizingTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (hydrating) return;
+    if (visualEffortSizingTimer.current !== null) {
+      window.clearTimeout(visualEffortSizingTimer.current);
+    }
+    visualEffortSizingTimer.current = window.setTimeout(() => {
+      void setUserPref(
+        VISUAL_EFFORT_SIZING_KEY,
+        visualEffortSizing ? 'true' : 'false',
+      );
+    }, WRITE_DEBOUNCE_MS);
+    return () => {
+      if (visualEffortSizingTimer.current !== null) {
+        window.clearTimeout(visualEffortSizingTimer.current);
+        visualEffortSizingTimer.current = null;
+      }
+    };
+  }, [visualEffortSizing, hydrating]);
+
   const carryOverTimer = useRef<number | null>(null);
   useEffect(() => {
     if (hydrating) return;
@@ -442,6 +474,9 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
   const setAutoSelfAssign = useCallback((value: boolean) => {
     setAutoSelfAssignState(value);
   }, []);
+  const setVisualEffortSizing = useCallback((value: boolean) => {
+    setVisualEffortSizingState(value);
+  }, []);
   const setCarryOverDefault = useCallback((value: CarryOverDefault) => {
     setCarryOverDefaultState(value);
   }, []);
@@ -501,6 +536,8 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       setAutoDate,
       autoSelfAssign,
       setAutoSelfAssign,
+      visualEffortSizing,
+      setVisualEffortSizing,
       carryOverDefault,
       setCarryOverDefault,
       dayStartTrigger,
@@ -519,6 +556,8 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       setAutoDate,
       autoSelfAssign,
       setAutoSelfAssign,
+      visualEffortSizing,
+      setVisualEffortSizing,
       carryOverDefault,
       setCarryOverDefault,
       dayStartTrigger,

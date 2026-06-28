@@ -17,6 +17,8 @@ import { useDateFormat } from '../../intl/dateFormat';
 import { labelsLookup, resolveTaskColor } from '../../intl/eventColor';
 import {
   assigneeSuffix,
+  effortSizeModifier,
+  effortSuffix,
   priorityMarker,
   prioritySuffix,
   statusI18nKey,
@@ -25,6 +27,7 @@ import {
   subtaskProgressSuffix,
 } from '../../intl/taskStatus';
 import { useCalendarStore } from '../../state/calendarStoreContext';
+import { useTaskCascadeEnabled } from '../../state/taskCascadeContext';
 import { useCurrentUserByList } from '../../state/currentUser';
 import { useChipContextMenu } from '../../state/useChipContextMenu';
 import { useDialogState } from '../../state/dialogStateContext';
@@ -80,6 +83,7 @@ export function TaskView() {
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { tasks, taskListById, loading } = useTasks();
+  const { visualEffortSizing } = useTaskCascadeEnabled();
   const { colorLabels, sectionsByList, loadSections, sectionColorById } =
     useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
@@ -615,6 +619,7 @@ export function TaskView() {
     openTaskMenu,
     itemId,
     today: todayKey,
+    visualEffortSizing,
   };
 
   // Dispatch a row. A real task delegates to renderTreeItem (which renders
@@ -883,6 +888,8 @@ interface RenderTreeCtx {
   itemId: (i: number) => string;
   /** Local `YYYY-MM-DD` — lets a row show its future resurface date. */
   today: string;
+  /** Synced pref: when true, a task row gets an effort-size tile modifier. */
+  visualEffortSizing: boolean;
 }
 
 /**
@@ -912,8 +919,10 @@ function renderTreeItem(
     openTaskMenu,
     itemId,
     today,
+    visualEffortSizing,
   } = ctx;
   const { task, index, depth, hasChildren } = entry;
+  const effortMod = visualEffortSizing ? effortSizeModifier(task.effort) : '';
   const focused = index === focusIndex;
   const isCollapsed = collapsed.has(task.id);
   // Direct children (depth+1, same parent_id) — discovered via the
@@ -938,14 +947,15 @@ function renderTreeItem(
   // the surrounding group-header treeitems (a screen-reader user lands on
   // "Backlog → Inbox → To Do" before reaching the task), so the row's own
   // label no longer repeats them.
-  const aria = t('views.tasks.optionLabel', {
-    title: task.title,
-    state: t(statusI18nKey(task.status)),
-    priority: prioritySuffix(t, task.priority),
-    progress: subtaskProgressSuffix(t, task.id, tasks),
-    due,
-    assignee: assigneeSuffix(t, task.assignees),
-  });
+  const aria =
+    t('views.tasks.optionLabel', {
+      title: task.title,
+      state: t(statusI18nKey(task.status)),
+      priority: prioritySuffix(t, task.priority),
+      progress: subtaskProgressSuffix(t, task.id, tasks),
+      due,
+      assignee: assigneeSuffix(t, task.assignees),
+    }) + effortSuffix(t, task.effort);
   return (
     <li
       key={task.id}
@@ -964,7 +974,8 @@ function renderTreeItem(
         'task-list__item' +
         (focused ? ' task-list__item--focused' : '') +
         ` task-list__item--${task.status.replace('_', '-')}` +
-        (depth > 0 ? ' task-list__item--child' : '')
+        (depth > 0 ? ' task-list__item--child' : '') +
+        (effortMod ? ` task-list__item--effort-${effortMod}` : '')
       }
       style={
         {

@@ -21,6 +21,7 @@ const baseTask = (over: Partial<Task>): Task => ({
   description: null,
   status: 'open',
   priority: 'medium',
+  effort: 'medium',
   // A date keeps the task out of the cross-list "backlog" bucket so it
   // lands in its per-list group, where section grouping applies.
   scheduled_date: '2026-05-22',

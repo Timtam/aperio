@@ -1,4 +1,10 @@
-import type { Task, TaskPriority, TaskStatus, TaskUser } from './types';
+import type {
+  Task,
+  TaskEffort,
+  TaskPriority,
+  TaskStatus,
+  TaskUser,
+} from './types';
 
 /**
  * Per-status glyph for the on-chip / on-row marker.
@@ -87,6 +93,45 @@ export function prioritySuffix(
 ): string {
   const key = priorityI18nKey(priority);
   return key ? `, ${t(key)}` : '';
+}
+
+/**
+ * i18n key for the SR-announced effort label, or `null` for `medium` (the
+ * neutral default — no announcement, mirroring `priorityI18nKey`).
+ */
+export function effortI18nKey(effort: TaskEffort): string | null {
+  switch (effort) {
+    case 'small':
+      return 'views.tasks.effortSmall';
+    case 'large':
+      return 'views.tasks.effortLarge';
+    case 'medium':
+      return null;
+  }
+}
+
+/**
+ * SR-friendly effort suffix for aria-labels (", großer Aufwand"). Empty string
+ * for `medium` so it appends unconditionally. Comma-prefixed like
+ * {@link prioritySuffix}. Always present regardless of the visual-sizing toggle,
+ * so a screen-reader user always hears the effort.
+ */
+export function effortSuffix(
+  t: (key: string, vars?: Record<string, unknown>) => string,
+  effort: TaskEffort,
+): string {
+  const key = effortI18nKey(effort);
+  return key ? `, ${t(key)}` : '';
+}
+
+/**
+ * The chip-class modifier token for an effort's visual tile size, or '' for
+ * `medium` (the neutral base size needs no class). Single source of truth for
+ * the effort→size hook: a caller builds `${prefix}--effort-${token}` only when
+ * the token is non-empty AND the user's `visualEffortSizing` pref is on.
+ */
+export function effortSizeModifier(effort: TaskEffort): string {
+  return effort === 'medium' ? '' : effort;
 }
 
 /**

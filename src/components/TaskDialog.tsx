@@ -38,6 +38,7 @@ import {
 import type {
   Reminder,
   Task,
+  TaskEffort,
   TaskPriority,
   TaskStatus,
   TaskUser,
@@ -104,6 +105,7 @@ interface FormState {
   sectionId: string;
   status: TaskStatus;
   priority: TaskPriority;
+  effort: TaskEffort;
   // Two independent date+time slots — replacing the old `deadlineMode`
   // + single date/time fields. Each pair maps directly onto the
   // matching wire fields (`scheduled_*` / `deadline_*`); an empty
@@ -478,6 +480,7 @@ export function TaskDialog({
         description: null,
         status: 'open',
         priority: 'medium',
+        effort: 'medium',
         scheduled_date: null,
         scheduled_time: null,
         deadline_date: null,
@@ -807,6 +810,7 @@ export function TaskDialog({
               form.listId !== task.list_id ? null : form.sectionId || null,
             status: statusToWrite,
             priority: form.priority,
+            effort: form.effort,
             scheduled_date: rootScheduledDate,
             scheduled_time,
             deadline_date,
@@ -881,6 +885,7 @@ export function TaskDialog({
             description: form.description.trim() || null,
             status: form.status,
             priority: form.priority,
+            effort: form.effort,
             scheduled_date: rootScheduledDate,
             scheduled_time,
             deadline_date,
@@ -904,6 +909,7 @@ export function TaskDialog({
                 description: null,
                 status: 'open',
                 priority: 'medium',
+                effort: 'medium',
                 scheduled_date: null,
                 scheduled_time: null,
                 deadline_date: null,
@@ -1216,6 +1222,24 @@ export function TaskDialog({
                 {t('dialogs.task.priority.medium')}
               </option>
               <option value="high">{t('dialogs.task.priority.high')}</option>
+            </select>
+          </label>
+
+          <label className="form__field">
+            <span className="form__label">
+              {t('dialogs.task.fields.effort')}
+            </span>
+            <select
+              value={form.effort}
+              onChange={(e) =>
+                update('effort', e.target.value as TaskEffort)
+              }
+            >
+              <option value="small">{t('dialogs.task.effort.small')}</option>
+              <option value="medium">
+                {t('dialogs.task.effort.medium')}
+              </option>
+              <option value="large">{t('dialogs.task.effort.large')}</option>
             </select>
           </label>
         </div>
@@ -1627,6 +1651,7 @@ function buildInitialState(
       sectionId: task.section_id ?? '',
       status: task.status,
       priority: task.priority,
+      effort: task.effort,
       scheduledDate: task.scheduled_date ?? '',
       scheduledTime: task.scheduled_time?.slice(0, 5) ?? '',
       deadlineDate: task.deadline_date ?? '',
@@ -1662,6 +1687,7 @@ function buildInitialState(
     sectionId: '',
     status: 'open',
     priority: 'medium',
+    effort: 'medium',
     scheduledDate: anchored,
     scheduledTime: '',
     deadlineDate: '',
