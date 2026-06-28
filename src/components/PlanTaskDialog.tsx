@@ -23,8 +23,8 @@ import { Modal } from './Modal';
  *     style buttons, the dominant interaction for backlog grooming
  *   - **Custom date** — native `<input type="date">` for any other
  *     date; tab-accessible, screen reader friendly via aria-label
- *   - **Back to backlog** — clears `scheduled_date` *and*
- *     `deadline_date`; reopens the task as pure backlog. Status flips
+ *   - **Back to backlog** — clears `scheduled_date` only (KEEPS the
+ *     deadline — it's independent data); reopens the task. Status flips
  *     to `Open` if it was anything else.
  *
  * Save dispatches `update_task` against the backend; the dialog
@@ -88,13 +88,13 @@ export function PlanTaskDialog({
           // minute (if any) doesn't transfer to the new date.
           scheduled_time:
             choice.kind === 'date' ? null : task.scheduled_time,
-          // "Back to backlog" also clears the deadline so the task is
-          // truly unscheduled — otherwise a "by" deadline alone would
-          // keep pulling it into upcoming views.
-          deadline_date:
-            choice.kind === 'backlog' ? null : task.deadline_date,
-          deadline_time:
-            choice.kind === 'backlog' ? null : task.deadline_time,
+          // "Back to backlog" only UNSCHEDULES — it keeps the deadline. A
+          // deadline is independent data (when it's due, not when you planned
+          // to do it); a backlog task with a deadline still shows on its
+          // deadline day + the backlog deadline rail. (Dropping it here was a
+          // data-loss bug.)
+          deadline_date: task.deadline_date,
+          deadline_time: task.deadline_time,
           status:
             choice.kind === 'backlog' && task.status === 'completed'
               ? 'open'

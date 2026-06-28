@@ -109,7 +109,7 @@ describe('moveActions time-axis moves', () => {
     expect(args.task.scheduled_date).toBe('2026-06-15');
   });
 
-  it('moveTaskToBacklog clears all dates and reopens a completed task', async () => {
+  it('moveTaskToBacklog unschedules + reopens a completed task but KEEPS the deadline', async () => {
     await moveTaskToBacklog({
       id: 't',
       scheduled_date: '2026-06-15',
@@ -121,8 +121,9 @@ describe('moveActions time-axis moves', () => {
     const { task } = invokeMock.mock.calls[0][1];
     expect(task.scheduled_date).toBeNull();
     expect(task.scheduled_time).toBeNull();
-    expect(task.deadline_date).toBeNull();
-    expect(task.deadline_time).toBeNull();
+    // The deadline is independent data — unscheduling must not drop it.
+    expect(task.deadline_date).toBe('2026-06-20');
+    expect(task.deadline_time).toBe('17:00');
     expect(task.status).toBe('open');
   });
 

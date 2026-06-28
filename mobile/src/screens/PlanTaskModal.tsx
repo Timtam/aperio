@@ -116,10 +116,12 @@ export default function PlanTaskModal({ route, navigation }: RootStackScreenProp
           // Picking a specific day drops the per-day time — the task moves as a
           // whole, so the previously planned minute doesn't transfer.
           scheduled_time: choice.kind === 'date' ? null : task.scheduled_time,
-          // "Back to backlog" also clears the deadline so the task is truly
-          // unscheduled (a lone "by" deadline would keep pulling it forward).
-          deadline_date: isBacklog ? null : task.deadline_date,
-          deadline_time: isBacklog ? null : task.deadline_time,
+          // "Back to backlog" only UNSCHEDULES — it keeps the deadline (a
+          // deadline is independent data; a backlog task can still be due, and
+          // shows on its deadline day + the backlog deadline rail). Dropping it
+          // here was a data-loss bug.
+          deadline_date: task.deadline_date,
+          deadline_time: task.deadline_time,
           status: nextStatus,
           // Keep the completed/completed_at invariant in lock-step (the mobile
           // editor's convention): a reopened task has no completion stamp.

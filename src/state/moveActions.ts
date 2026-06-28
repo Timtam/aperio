@@ -148,10 +148,13 @@ export async function surfaceTaskNow(task: Task): Promise<Task> {
 }
 
 /**
- * Send a task back to the **backlog**: clears the scheduled date/time and
- * the deadline so it is truly unscheduled (a lingering deadline would keep
- * pulling it into upcoming views). Mirrors the plan dialog's "back to
- * backlog" — a completed task reopens to `open`.
+ * Send a task back to the **backlog**: clears the scheduled date/time so it's
+ * unscheduled, but KEEPS the deadline. A deadline is independent data (when the
+ * task is *due*, not when you planned to work on it), so unscheduling must not
+ * silently drop it — that was a data-loss bug. A backlog task with a deadline
+ * still surfaces on its deadline day in the calendar + the backlog's deadline
+ * rail, and the day-start review still flags it as the deadline nears. Mirrors
+ * the plan dialog's "back to backlog" — a completed task reopens to `open`.
  */
 export async function moveTaskToBacklog(task: Task): Promise<Task> {
   return invoke<Task>('update_task', {
@@ -159,8 +162,6 @@ export async function moveTaskToBacklog(task: Task): Promise<Task> {
       ...task,
       scheduled_date: null,
       scheduled_time: null,
-      deadline_date: null,
-      deadline_time: null,
       status: task.status === 'completed' ? 'open' : task.status,
       updated_at: new Date().toISOString(),
     },
