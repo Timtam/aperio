@@ -4,9 +4,9 @@ import { getUserPref, setUserPref } from '../api/prefs';
 
 // The task-behaviour knobs (Settings → Tasks), SYNCED across the user's devices
 // via the `tasks.*` user-prefs (§19.2.1 always-sync keys) — the mobile twin of
-// the desktop TaskCascadeProvider. SIX globals (check-off mode, status
-// coupling, auto-date, auto-self-assign, carry-over default, day-start trigger)
-// + a per-list
+// the desktop TaskCascadeProvider. SEVEN globals (check-off mode, status
+// coupling, auto-date, auto-self-assign, visual effort sizing, carry-over
+// default, day-start trigger) + a per-list
 // override map (`tasks.listOverrides`). The check-off path reads the EFFECTIVE
 // (per-list-resolved) cascade/auto-date, so a per-list override set on ANY
 // device applies here. carryOverDefault + dayStartTrigger drive the day-start
@@ -40,6 +40,8 @@ export interface TaskBehaviour {
   autoDate: boolean;
   /** Self-assign me on status change in shared lists that know "me". Default on. */
   autoSelfAssign: boolean;
+  /** Render task tiles at different sizes by effort (small/medium/large). Default on. */
+  visualEffortSizing: boolean;
   /** What a check-off does: flip open↔completed, or cycle through in_progress. */
   checkoffMode: CheckoffMode;
   /** Day-start action for tasks whose scheduled day passed + still open. */
@@ -53,6 +55,7 @@ export interface TaskBehaviour {
 const CASCADE_KEY = 'tasks.cascadeStatusCoupling';
 const AUTO_DATE_KEY = 'tasks.autoDateOnStart';
 const AUTO_SELF_ASSIGN_KEY = 'tasks.autoSelfAssign';
+const VISUAL_EFFORT_SIZING_KEY = 'tasks.visualEffortSizing';
 const CHECKOFF_KEY = 'tasks.checkoffMode';
 const CARRY_OVER_KEY = 'tasks.carryOverDefault';
 const DAY_START_TRIGGER_KEY = 'tasks.dayStartTrigger';
@@ -63,6 +66,7 @@ export const TASK_BEHAVIOUR_DEFAULTS: TaskBehaviour = {
   cascadeEnabled: true,
   autoDate: true,
   autoSelfAssign: true,
+  visualEffortSizing: true,
   checkoffMode: 'toggle',
   carryOverDefault: 'ask',
   dayStartTrigger: '00:00',
@@ -124,24 +128,34 @@ function parseListOverrides(stored: string | null): Record<string, ListOverrides
   }
 }
 
-/** Read all six synced knobs + the per-list override map, or the desktop
+/** Read all seven synced knobs + the per-list override map, or the desktop
  *  defaults when unset/unreadable. */
 export async function readTaskBehaviour(): Promise<TaskBehaviour> {
   try {
-    const [cascade, autoDate, selfAssign, checkoff, carryOver, trigger, overrides] =
-      await Promise.all([
-        getUserPref(CASCADE_KEY),
-        getUserPref(AUTO_DATE_KEY),
-        getUserPref(AUTO_SELF_ASSIGN_KEY),
-        getUserPref(CHECKOFF_KEY),
-        getUserPref(CARRY_OVER_KEY),
-        getUserPref(DAY_START_TRIGGER_KEY),
-        getUserPref(LIST_OVERRIDES_KEY),
-      ]);
+    const [
+      cascade,
+      autoDate,
+      selfAssign,
+      effortSizing,
+      checkoff,
+      carryOver,
+      trigger,
+      overrides,
+    ] = await Promise.all([
+      getUserPref(CASCADE_KEY),
+      getUserPref(AUTO_DATE_KEY),
+      getUserPref(AUTO_SELF_ASSIGN_KEY),
+      getUserPref(VISUAL_EFFORT_SIZING_KEY),
+      getUserPref(CHECKOFF_KEY),
+      getUserPref(CARRY_OVER_KEY),
+      getUserPref(DAY_START_TRIGGER_KEY),
+      getUserPref(LIST_OVERRIDES_KEY),
+    ]);
     return {
       cascadeEnabled: parseBool(cascade),
       autoDate: parseBool(autoDate),
       autoSelfAssign: parseBool(selfAssign),
+      visualEffortSizing: parseBool(effortSizing),
       checkoffMode: parseCheckoff(checkoff),
       carryOverDefault: isCarryOverDefault(carryOver) ? carryOver : 'ask',
       dayStartTrigger: isDayStartTrigger(trigger) ? trigger : '00:00',
@@ -166,6 +180,8 @@ export const writeAutoDate = (v: boolean): Promise<void> =>
   writeBest(AUTO_DATE_KEY, v ? 'true' : 'false');
 export const writeAutoSelfAssign = (v: boolean): Promise<void> =>
   writeBest(AUTO_SELF_ASSIGN_KEY, v ? 'true' : 'false');
+export const writeVisualEffortSizing = (v: boolean): Promise<void> =>
+  writeBest(VISUAL_EFFORT_SIZING_KEY, v ? 'true' : 'false');
 export const writeCheckoffMode = (m: CheckoffMode): Promise<void> =>
   writeBest(CHECKOFF_KEY, m);
 export const writeCarryOverDefault = (v: CarryOverDefault): Promise<void> =>

@@ -130,6 +130,7 @@ export default function QuickAddTaskModal({
         description: null,
         status: 'open',
         priority: 'medium',
+        effort: 'medium',
         // Empty day → backlog; a chosen day schedules it.
         scheduled_date: date.trim() || null,
         scheduled_time: null,

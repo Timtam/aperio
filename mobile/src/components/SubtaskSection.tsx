@@ -119,6 +119,7 @@ export function SubtaskSection({
         description: null,
         status: 'open',
         priority: 'medium',
+        effort: 'medium',
         scheduled_date: null,
         scheduled_time: null,
         deadline_date: null,

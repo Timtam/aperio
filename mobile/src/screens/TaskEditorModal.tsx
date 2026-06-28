@@ -21,6 +21,7 @@ import {
 import type {
   Reminder,
   Task,
+  TaskEffort,
   TaskPriority,
   TaskRecurrenceValue,
   TaskStatus,
@@ -85,6 +86,7 @@ interface FormState {
   sectionId: string; // '' = ungrouped
   status: TaskStatus;
   priority: TaskPriority;
+  effort: TaskEffort;
   scheduledDate: string;
   scheduledTime: string;
   deadlineDate: string;
@@ -108,6 +110,7 @@ function buildInitialState(
       sectionId: '',
       status: 'open',
       priority: 'medium',
+      effort: 'medium',
       scheduledDate: seed?.scheduledDate ?? '',
       scheduledTime: '',
       deadlineDate: '',
@@ -125,6 +128,7 @@ function buildInitialState(
     sectionId: loaded.section_id ?? '',
     status: loaded.status,
     priority: loaded.priority,
+    effort: loaded.effort,
     scheduledDate: loaded.scheduled_date ?? '',
     scheduledTime: loaded.scheduled_time ? loaded.scheduled_time.slice(0, 5) : '',
     deadlineDate: loaded.deadline_date ?? '',
@@ -480,6 +484,14 @@ export default function TaskEditorModal({
     ],
     [t],
   );
+  const effortOptions = useMemo(
+    () => [
+      { value: 'small' as const, label: t('dialogs.task.effort.small') },
+      { value: 'medium' as const, label: t('dialogs.task.effort.medium') },
+      { value: 'large' as const, label: t('dialogs.task.effort.large') },
+    ],
+    [t],
+  );
 
   // A subtask must stay in its parent's list (the bridge has no list-move hint)
   // — both when editing an existing subtask and when creating a new one.
@@ -536,6 +548,7 @@ export default function TaskEditorModal({
           description,
           status: form.status,
           priority: form.priority,
+          effort: form.effort,
           scheduled_date: sched.date,
           scheduled_time: sched.time,
           deadline_date: dead.date,
@@ -561,6 +574,7 @@ export default function TaskEditorModal({
               description: null,
               status: 'open',
               priority: 'medium',
+              effort: 'medium',
               scheduled_date: null,
               scheduled_time: null,
               deadline_date: null,
@@ -635,6 +649,7 @@ export default function TaskEditorModal({
                 : form.sectionId || null,
             status: form.status,
             priority: form.priority,
+            effort: form.effort,
             scheduled_date: sched.date,
             scheduled_time: sched.time,
             deadline_date: dead.date,
@@ -790,6 +805,13 @@ export default function TaskEditorModal({
         value={form.priority}
         options={priorityOptions}
         onChange={(v) => update('priority', v)}
+      />
+
+      <SegmentedSelect<TaskEffort>
+        label={t('dialogs.task.fields.effort')}
+        value={form.effort}
+        options={effortOptions}
+        onChange={(v) => update('effort', v)}
       />
 
       <DateTimeField
