@@ -766,8 +766,15 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
     let mut recurrence = None;
     let mut resurface_date = None;
     let mut series_id = None;
+    let mut effort = cal_core::TaskEffort::default();
     if let Some(extras) = &extras {
-        cal_core::apply_task_extras(extras, &mut recurrence, &mut resurface_date, &mut series_id);
+        cal_core::apply_task_extras(
+            extras,
+            &mut recurrence,
+            &mut resurface_date,
+            &mut series_id,
+            &mut effort,
+        );
     }
 
     Task {
@@ -778,6 +785,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         description: clean_description.filter(|s| !s.is_empty()),
         status,
         priority,
+        effort,
         scheduled_date,
         scheduled_time,
         deadline_date,
@@ -812,8 +820,9 @@ fn todoist_description(
     recurrence: Option<&TaskRecurrence>,
     resurface_date: Option<NaiveDate>,
     series_id: Option<&str>,
+    effort: cal_core::TaskEffort,
 ) -> Option<String> {
-    let extras = cal_core::extras_for_task(recurrence, resurface_date, series_id);
+    let extras = cal_core::extras_for_task(recurrence, resurface_date, series_id, effort);
     cal_core::extras::embed(description, &extras).filter(|s| !s.is_empty())
 }
 
@@ -839,6 +848,7 @@ fn new_task_to_create_body(list_id: &str, new: &NewTask) -> CreateTaskBody {
             new.recurrence.as_ref(),
             new.resurface_date,
             new.series_id.as_deref(),
+            new.effort,
         ),
         priority: Some(aperio_priority_to_todoist(new.priority)),
         assignee_id: first_assignee_id(&new.assignees),
@@ -864,6 +874,7 @@ fn task_to_update_body(task: &Task) -> UpdateTaskBody {
             task.recurrence.as_ref(),
             task.resurface_date,
             task.series_id.as_deref(),
+            task.effort,
         ),
         priority: Some(aperio_priority_to_todoist(task.priority)),
         assignee_id: first_assignee_id(&task.assignees),
@@ -1265,6 +1276,7 @@ mod tests {
             description: Some("Bakery".into()),
             status: TaskStatus::Open,
             priority: TaskPriority::High,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()),
             scheduled_time: None,
             deadline_date: Some(NaiveDate::from_ymd_opt(2026, 5, 23).unwrap()),
@@ -1498,6 +1510,7 @@ mod tests {
             description: None,
             status: TaskStatus::Completed,
             priority: TaskPriority::Medium,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,
@@ -1555,6 +1568,7 @@ mod tests {
             description: None,
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,
@@ -1614,6 +1628,7 @@ mod tests {
             description: None,
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,
@@ -1663,6 +1678,7 @@ mod tests {
             description: None,
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,
@@ -1932,6 +1948,7 @@ mod tests {
             description: None,
             status: TaskStatus::Open,
             priority: TaskPriority::Low,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,

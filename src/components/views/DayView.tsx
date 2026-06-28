@@ -37,6 +37,8 @@ import {
 import { useCurrentUserByList } from '../../state/currentUser';
 import {
   assigneeSuffix,
+  effortSizeModifier,
+  effortSuffix,
   priorityMarker,
   prioritySuffix,
   statusI18nKey,
@@ -44,6 +46,7 @@ import {
   subtaskParentSuffix,
   subtaskProgressSuffix,
 } from '../../intl/taskStatus';
+import { useTaskCascadeEnabled } from '../../state/taskCascadeContext';
 import { duplicateEvent } from '../duplicateActions';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
@@ -80,6 +83,7 @@ export function DayView() {
   const range = useMemo(() => visibleRange('day', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
   const { tasks, taskListById } = useTasks();
+  const { visualEffortSizing } = useTaskCascadeEnabled();
   const currentUserByList = useCurrentUserByList(tasks);
   // Hide tasks assigned to a concrete OTHER user from MY calendar (mine +
   // unassigned stay) — the day-start review's ownership filter (DESIGN §9.7).
@@ -399,6 +403,9 @@ export function DayView() {
               );
               const state = t(statusI18nKey(task.status));
               const priorityGlyph = priorityMarker(task.priority);
+              const effortMod = visualEffortSizing
+                ? effortSizeModifier(task.effort)
+                : '';
               return (
                 <li
                   key={`task-${task.id}`}
@@ -413,12 +420,19 @@ export function DayView() {
                       priority: prioritySuffix(t, task.priority),
                       progress: subtaskProgressSuffix(t, task.id, tasks),
                       assignee: assigneeSuffix(t, task.assignees),
-                    }) + subtaskParentSuffix(t, task, tasks)
+                    }) +
+                    subtaskParentSuffix(t, task, tasks) +
+                    effortSuffix(t, task.effort)
                   }
                   className={
                     'day-list__item day-list__item--task' +
                     (focused ? ' day-list__item--focused' : '') +
-                    ` day-list__item--${task.status.replace('_', '-')}`
+                    ` day-list__item--${task.status.replace('_', '-')}` +
+                    // Deliberately reuses the `day-task--effort-*` size family
+                    // (not a `day-list__item--*` one) so both DayView task
+                    // surfaces — this agenda row + the grid chip — resize
+                    // identically by effort.
+                    (effortMod ? ` day-task--effort-${effortMod}` : '')
                   }
                   style={
                     color.hex
@@ -595,6 +609,9 @@ export function DayView() {
               );
               const state = t(statusI18nKey(task.status));
               const priorityGlyph = priorityMarker(task.priority);
+              const effortMod = visualEffortSizing
+                ? effortSizeModifier(task.effort)
+                : '';
               return (
                 <li key={task.id} className="day-tasks__item">
                   <button
@@ -602,7 +619,8 @@ export function DayView() {
                     className={
                       'day-task' +
                       ` day-task--${task.status.replace('_', '-')}` +
-                      (isBy ? ' day-task--by' : '')
+                      (isBy ? ' day-task--by' : '') +
+                      (effortMod ? ` day-task--effort-${effortMod}` : '')
                     }
                     // Default <button> would fire onClick on both
                     // Space and Enter. We need different actions:
@@ -645,19 +663,23 @@ export function DayView() {
                           } as React.CSSProperties)
                         : undefined
                     }
-                    aria-label={t(labelKey, {
-                      title: task.title,
-                      deadline: task.deadline_date
-                        ? fmt.format(
-                            new Date(`${task.deadline_date}T00:00:00`),
-                            'PPP',
-                          )
-                        : '',
-                      state,
-                      priority: prioritySuffix(t, task.priority),
-                      progress: subtaskProgressSuffix(t, task.id, tasks),
-                      assignee: assigneeSuffix(t, task.assignees),
-                    }) + subtaskParentSuffix(t, task, tasks)}
+                    aria-label={
+                      t(labelKey, {
+                        title: task.title,
+                        deadline: task.deadline_date
+                          ? fmt.format(
+                              new Date(`${task.deadline_date}T00:00:00`),
+                              'PPP',
+                            )
+                          : '',
+                        state,
+                        priority: prioritySuffix(t, task.priority),
+                        progress: subtaskProgressSuffix(t, task.id, tasks),
+                        assignee: assigneeSuffix(t, task.assignees),
+                      }) +
+                      subtaskParentSuffix(t, task, tasks) +
+                      effortSuffix(t, task.effort)
+                    }
                   >
                     <span
                       className="day-task__marker day-task__marker--clickable"

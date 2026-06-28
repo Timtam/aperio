@@ -183,11 +183,11 @@ impl LocalAdapter {
         conn.execute(
             "INSERT INTO tasks (
                 id, list_id, parent_id, section_id, title, description, status, priority,
-                scheduled_date, scheduled_time, deadline_date, deadline_time,
+                effort, scheduled_date, scheduled_time, deadline_date, deadline_time,
                 recurrence, color_label_id, reminders, sound,
                 created_at, updated_at, completed_at, etag,
                 resurface_date, series_id
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                  list_id        = excluded.list_id,
                  parent_id      = excluded.parent_id,
@@ -196,6 +196,7 @@ impl LocalAdapter {
                  description    = excluded.description,
                  status         = excluded.status,
                  priority       = excluded.priority,
+                 effort         = excluded.effort,
                  scheduled_date = excluded.scheduled_date,
                  scheduled_time = excluded.scheduled_time,
                  deadline_date  = excluded.deadline_date,
@@ -218,6 +219,7 @@ impl LocalAdapter {
                 task.description,
                 task_status_to_text(task.status),
                 task_priority_to_text(task.priority),
+                task_effort_to_text(task.effort),
                 task.scheduled_date.as_ref().map(fmt_date),
                 task.scheduled_time.as_ref().map(fmt_time),
                 task.deadline_date.as_ref().map(fmt_date),
@@ -413,5 +415,14 @@ fn task_priority_to_text(p: cal_core::TaskPriority) -> &'static str {
         Low => "low",
         Medium => "medium",
         High => "high",
+    }
+}
+
+fn task_effort_to_text(e: cal_core::TaskEffort) -> &'static str {
+    use cal_core::TaskEffort::*;
+    match e {
+        Small => "small",
+        Medium => "medium",
+        Large => "large",
     }
 }

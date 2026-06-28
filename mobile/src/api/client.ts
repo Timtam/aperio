@@ -41,6 +41,7 @@ export interface CreateTaskRequest {
   description: string | null;
   status: Task['status'];
   priority: Task['priority'];
+  effort: Task['effort'];
   scheduled_date: string | null;
   scheduled_time: string | null;
   deadline_date: string | null;
@@ -122,6 +123,7 @@ export const createTask = async (request: CreateTaskRequest): Promise<Task> => {
     description: request.description,
     status: request.status,
     priority: request.priority,
+    effort: request.effort,
     scheduled_date: request.scheduled_date,
     scheduled_time: request.scheduled_time,
     deadline_date: request.deadline_date,
@@ -154,6 +156,7 @@ export const duplicateTask = async (task: Task): Promise<Task> =>
     description: task.description,
     status: task.status,
     priority: task.priority,
+    effort: task.effort,
     scheduled_date: task.scheduled_date,
     scheduled_time: task.scheduled_time,
     deadline_date: task.deadline_date,

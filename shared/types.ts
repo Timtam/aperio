@@ -150,6 +150,10 @@ export interface TaskList {
 
 export type TaskStatus = 'open' | 'in_progress' | 'completed' | 'cancelled';
 export type TaskPriority = 'low' | 'medium' | 'high';
+/** Aperio-only effort estimate, modelled like `priority`. Drives a purely
+ *  visual, toggleable tile size. Host-only: it rides the AperioExtras bag on
+ *  external providers (no provider has a native effort field). */
+export type TaskEffort = 'small' | 'medium' | 'large';
 
 export interface Task {
   id: string;
@@ -158,6 +162,7 @@ export interface Task {
   description: string | null;
   status: TaskStatus;
   priority: TaskPriority;
+  effort: TaskEffort;
   /** The day the task is to be done. */
   scheduled_date: string | null;
   /** Optional time-of-day on `scheduled_date`. Requires `scheduled_date`; the

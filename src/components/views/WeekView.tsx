@@ -48,6 +48,8 @@ import {
 import { useCurrentUserByList } from '../../state/currentUser';
 import {
   assigneeSuffix,
+  effortSizeModifier,
+  effortSuffix,
   priorityMarker,
   prioritySuffix,
   statusI18nKey,
@@ -55,6 +57,7 @@ import {
   subtaskParentSuffix,
   subtaskProgressSuffix,
 } from '../../intl/taskStatus';
+import { useTaskCascadeEnabled } from '../../state/taskCascadeContext';
 import type { CalendarEvent, Task } from '../../api/types';
 import { BacklogRail } from '../BacklogRail';
 import { ConfirmDialog } from '../ConfirmDialog';
@@ -109,6 +112,7 @@ export function WeekView() {
   );
   const { events, calendarById, loading } = useEvents(range);
   const { tasks, taskListById } = useTasks();
+  const { visualEffortSizing } = useTaskCascadeEnabled();
   const currentUserByList = useCurrentUserByList(tasks);
   // Hide tasks assigned to a concrete OTHER user from MY calendar (mine +
   // unassigned stay) — the day-start review's ownership filter (DESIGN §9.7).
@@ -850,6 +854,9 @@ export function WeekView() {
                           sectionColorById,
                         );
                         const priorityGlyph = priorityMarker(task.priority);
+                        const effortMod = visualEffortSizing
+                          ? effortSizeModifier(task.effort)
+                          : '';
                         // All four TaskStatus values need their own
                         // glyph + class. The legacy `=== 'completed'`
                         // shortcut would render in_progress and
@@ -871,7 +878,10 @@ export function WeekView() {
                                 (draggingTaskId === task.id
                                   ? ' week-task--dragging'
                                   : '') +
-                                ` week-task--${task.status.replace('_', '-')}`
+                                ` week-task--${task.status.replace('_', '-')}` +
+                                (effortMod
+                                  ? ` week-task--effort-${effortMod}`
+                                  : '')
                               }
                               // The aria-label carries the status as a
                               // word suffix so SR users hear it on focus
@@ -1227,6 +1237,7 @@ function WeekDayTasks({
   const { t } = useTranslation();
   const fmt = useDateFormat();
   const { sectionColorById } = useCalendarStore();
+  const { visualEffortSizing } = useTaskCascadeEnabled();
   if (tasks.length === 0) return null;
   return (
     <ul
@@ -1258,6 +1269,9 @@ function WeekDayTasks({
         );
         const state = t(statusI18nKey(task.status));
         const priorityGlyph = priorityMarker(task.priority);
+        const effortMod = visualEffortSizing
+          ? effortSizeModifier(task.effort)
+          : '';
         // Bucket index of this untimed chip (after the timed lane). The
         // grid's keyboard nav focuses it via aria-activedescendant, so it's
         // a focus *target* (a span) like the timed chips — not a separate
@@ -1280,7 +1294,8 @@ function WeekDayTasks({
                 (isBy ? ' week-task--by' : '') +
                 (draggingTaskId === task.id
                   ? ' week-task--dragging'
-                  : '')
+                  : '') +
+                (effortMod ? ` week-task--effort-${effortMod}` : '')
               }
               aria-selected={isFocused}
               draggable
@@ -1300,19 +1315,23 @@ function WeekDayTasks({
                   ? ({ '--event-color': color.hex } as React.CSSProperties)
                   : undefined
               }
-              aria-label={t(labelKey, {
-                title: task.title,
-                deadline: task.deadline_date
-                  ? fmt.format(
-                      new Date(`${task.deadline_date}T00:00:00`),
-                      'PPP',
-                    )
-                  : '',
-                state,
-                priority: prioritySuffix(t, task.priority),
-                progress: subtaskProgressSuffix(t, task.id, allTasks),
-                assignee: assigneeSuffix(t, task.assignees),
-              }) + subtaskParentSuffix(t, task, allTasks)}
+              aria-label={
+                t(labelKey, {
+                  title: task.title,
+                  deadline: task.deadline_date
+                    ? fmt.format(
+                        new Date(`${task.deadline_date}T00:00:00`),
+                        'PPP',
+                      )
+                    : '',
+                  state,
+                  priority: prioritySuffix(t, task.priority),
+                  progress: subtaskProgressSuffix(t, task.id, allTasks),
+                  assignee: assigneeSuffix(t, task.assignees),
+                }) +
+                subtaskParentSuffix(t, task, allTasks) +
+                effortSuffix(t, task.effort)
+              }
             >
               <span className="week-task__body">
                 <span
@@ -1364,12 +1383,16 @@ function taskChipAriaLabel(
   allTasks: Task[],
 ): string {
   const state = t(statusI18nKey(task.status));
-  return t('views.week.taskChipTimed', {
-    title: task.title,
-    time,
-    state,
-    priority: prioritySuffix(t, task.priority),
-    progress: subtaskProgressSuffix(t, task.id, allTasks),
-    assignee: assigneeSuffix(t, task.assignees),
-  }) + subtaskParentSuffix(t, task, allTasks);
+  return (
+    t('views.week.taskChipTimed', {
+      title: task.title,
+      time,
+      state,
+      priority: prioritySuffix(t, task.priority),
+      progress: subtaskProgressSuffix(t, task.id, allTasks),
+      assignee: assigneeSuffix(t, task.assignees),
+    }) +
+    subtaskParentSuffix(t, task, allTasks) +
+    effortSuffix(t, task.effort)
+  );
 }

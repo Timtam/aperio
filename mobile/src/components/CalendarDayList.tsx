@@ -22,6 +22,8 @@ import type {
 import {
   assigneeSuffix,
   daysCoveredKeys,
+  effortSizeModifier,
+  effortSuffix,
   expandAll,
   filterTasksOnDay,
   isDeadlineChip,
@@ -59,6 +61,7 @@ import { useCacheReload } from '../state/cacheObserver';
 import { useCalendarVisibility } from '../state/calendarVisibility';
 import { useCurrentUserByList } from '../state/currentUser';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
+import { readTaskBehaviour } from '../state/taskBehaviour';
 import { applyTaskToggle, statusAnnounce } from '../state/taskToggle';
 import { useTaskListShowCompleted } from '../state/useTaskListShowCompleted';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -141,6 +144,17 @@ export function CalendarDayList({
   const [sections, setSections] = useState<Section[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // The synced "show effort as tile size" pref (default on). Hydrated on mount
+  // and re-read on focus so a Settings toggle / peer sync reflects without a
+  // restart. Purely visual — the SR effort suffix is always appended below.
+  const [effortSizing, setEffortSizing] = useState(true);
+  useEffect(() => {
+    const read = () =>
+      void readTaskBehaviour().then((b) => setEffortSizing(b.visualEffortSizing));
+    read();
+    const unsubscribe = navigation.addListener('focus', read);
+    return unsubscribe;
+  }, [navigation]);
 
   const tr = useCallback(
     (key: string, vars?: Record<string, unknown>): string => t(key, vars) as string,
@@ -506,7 +520,9 @@ export function CalendarDayList({
       if (colourName) {
         label += t('mobile.colorLabelSuffix', { name: colourName });
       }
-      return label + subtaskParentSuffix(tr, task, tasks);
+      // Effort suffix appended unconditionally (regardless of the visual-sizing
+      // toggle) so a screen reader always hears it; '' for medium.
+      return label + effortSuffix(tr, task.effort) + subtaskParentSuffix(tr, task, tasks);
     },
     [fmtDateOnly, fmtTime, t, tasks, tr],
   );
@@ -592,6 +608,16 @@ export function CalendarDayList({
     const done = task.status === 'completed';
     const resolved = resolveTaskColor(task, listsById, labelsById, sectionColorById);
     const hex = resolved.hex;
+    // Visual tile-size by effort (sighted users), only when the synced pref is
+    // on; medium = neutral base row height. Purely cosmetic — the effort is
+    // always in the row's accessibilityLabel via effortSuffix.
+    const effortStyle = effortSizing
+      ? effortSizeModifier(task.effort) === 'small'
+        ? styles.rowEffortSmall
+        : effortSizeModifier(task.effort) === 'large'
+          ? styles.rowEffortLarge
+          : null
+      : null;
     // Day-aware visible meta (the row's reason for being on THIS day): its time
     // if timed here, else a "due"/"planned" marker for this day. (Task-level
     // describeDue would show the scheduled day on a deadline-day row.)
@@ -628,7 +654,7 @@ export function CalendarDayList({
           else if (name === 'moveCopy') moveCopyTask(task);
           else openTask(task);
         }}
-        style={styles.row}
+        style={[styles.row, effortStyle]}
       >
         {/* Sighted tap target to complete/reopen the task; the row otherwise
             opens the task on tap, so the marker needs its own Pressable. SR
@@ -798,6 +824,10 @@ const makeStyles = (c: ThemeColors) =>
       borderColor: c.border,
       backgroundColor: c.surfaceAlt,
     },
+    // Effort-driven chip height (gated on the visualEffortSizing pref). Medium
+    // uses the base `row` size; small is more compact, large a bit taller.
+    rowEffortSmall: { paddingVertical: 8, minHeight: 0 },
+    rowEffortLarge: { paddingVertical: 24, minHeight: 96 },
     rowText: { flex: 1, gap: 2 },
     taskCheckButton: { borderRadius: 8, padding: 4 },
     taskCheck: { fontSize: 20, width: 26, textAlign: 'center', color: c.textPrimary },

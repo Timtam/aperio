@@ -1072,6 +1072,7 @@ mod tests {
             description: None,
             status: TaskStatus::Open,
             priority: cal_core::TaskPriority::Medium,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date,
             scheduled_time,
             deadline_date,

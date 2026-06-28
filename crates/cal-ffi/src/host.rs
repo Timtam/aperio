@@ -3630,6 +3630,7 @@ impl Host {
                 description: task.description.clone(),
                 status: task.status,
                 priority: task.priority,
+                effort: task.effort,
                 scheduled_date: task.scheduled_date,
                 scheduled_time: task.scheduled_time,
                 deadline_date: task.deadline_date,

@@ -20,6 +20,8 @@ import {
   buildEntries,
   DEFERRED_GROUP_ID,
   DONE_GROUP_ID,
+  effortSizeModifier,
+  effortSuffix,
   prioritySuffix,
   statusI18nKey,
   statusMarker,
@@ -41,6 +43,7 @@ import { useCacheReload } from '../state/cacheObserver';
 import { useCurrentUserByList } from '../state/currentUser';
 import { useTaskStore } from '../state/taskStoreContext';
 import { surfaceTaskNow } from '../state/moveActions';
+import { readTaskBehaviour } from '../state/taskBehaviour';
 import { applyTaskToggle, recomputeAncestors, statusAnnounce } from '../state/taskToggle';
 import { useTasks } from '../state/useTasks';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -101,6 +104,19 @@ export default function TasksScreen({
   }, [i18n.language]);
 
   const today = useCurrentDayKey();
+
+  // The synced "show effort as tile size" pref (default on). Hydrated on mount
+  // and re-read whenever the screen regains focus, so toggling it in Settings —
+  // or a peer's sync — reflects here without an app restart. Purely visual; the
+  // SR effort suffix is appended unconditionally below regardless of this flag.
+  const [effortSizing, setEffortSizing] = useState(true);
+  useEffect(() => {
+    const read = () =>
+      void readTaskBehaviour().then((b) => setEffortSizing(b.visualEffortSizing));
+    read();
+    const unsubscribe = navigation.addListener('focus', read);
+    return unsubscribe;
+  }, [navigation]);
 
   // Collapsed group/subtask ids. Done + Upcoming start collapsed (desktop
   // default); hydrated from storage, which can only EXPAND them (explicit
@@ -474,14 +490,18 @@ export default function TasksScreen({
   );
 
   const taskLabel = (task: Task, colourName: string | null): string => {
-    const base = t('views.tasks.optionLabel', {
-      title: task.title,
-      state: t(statusI18nKey(task.status)),
-      priority: prioritySuffix(tr, task.priority),
-      progress: subtaskProgressSuffix(tr, task.id, tasks),
-      due: describeDue(task, tr, today, formatDate),
-      assignee: assigneeSuffix(tr, task.assignees),
-    });
+    // The shared label interpolates the priority suffix; effort is appended
+    // after it (always, regardless of the visual-sizing toggle) so a screen
+    // reader always hears the task's effort. effortSuffix is '' for medium.
+    const base =
+      t('views.tasks.optionLabel', {
+        title: task.title,
+        state: t(statusI18nKey(task.status)),
+        priority: prioritySuffix(tr, task.priority),
+        progress: subtaskProgressSuffix(tr, task.id, tasks),
+        due: describeDue(task, tr, today, formatDate),
+        assignee: assigneeSuffix(tr, task.assignees),
+      }) + effortSuffix(tr, task.effort);
     // A bound colour is meaningless to a screen reader as a colour, so announce
     // its label NAME instead — only the task's OWN explicit label is named (an
     // inherited section/list tint is a grouping cue, not a per-task signal).
@@ -537,6 +557,16 @@ export default function TasksScreen({
   const renderTask = (entry: Entry) => {
     const task = entry.task;
     const done = task.status === 'completed';
+    // Visual tile-size by effort (sighted users), only when the synced pref is
+    // on; medium = neutral base size (no extra style). Purely cosmetic — the
+    // effort is always in the row's accessibilityLabel via effortSuffix.
+    const effortStyle = effortSizing
+      ? effortSizeModifier(task.effort) === 'small'
+        ? styles.taskEffortSmall
+        : effortSizeModifier(task.effort) === 'large'
+          ? styles.taskEffortLarge
+          : null
+      : null;
     // The task's resolved colour (own label → section → list) — a coloured dot
     // for sighted users; SR users get the OWN label's name in taskLabel().
     const resolved = resolveTaskColor(task, taskListById, labelsById, sectionColorById);
@@ -588,6 +618,7 @@ export default function TasksScreen({
         onPress={() => openEditor(task)}
         style={({ pressed }) => [
           styles.task,
+          effortStyle,
           { marginLeft: entry.depth * 16 },
           pressed && styles.rowPressed,
         ]}
@@ -845,6 +876,10 @@ const makeStyles = (c: ThemeColors) =>
       borderColor: c.border,
       backgroundColor: c.surfaceAlt,
     },
+    // Effort-driven tile sizing (gated on the visualEffortSizing pref). Medium
+    // uses the base `task` size; small is more compact, large a bit taller.
+    taskEffortSmall: { paddingVertical: 8, minHeight: 0 },
+    taskEffortLarge: { paddingVertical: 24, minHeight: 96 },
     rowPressed: { backgroundColor: c.surfacePressed },
     taskCheckButton: { borderRadius: 8, padding: 4 },
     taskCheck: { fontSize: 20, width: 26, textAlign: 'center', color: c.textPrimary },

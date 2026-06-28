@@ -909,6 +909,11 @@
         "label": "Assign shared-list tasks to me",
         "hint": "When enabled, an unassigned task in a shared list (e.g. Vikunja) is assigned to me automatically the moment I set it in progress or done; setting it back to open removes only my assignment. For recurring tasks only the completed instance is assigned — the next instance stays unassigned. Disable to keep assignments manual."
       },
+      "visualEffortSizing": {
+        "heading": "Effort as tile size",
+        "label": "Show tasks larger/smaller by effort",
+        "hint": "When enabled, task tiles render at different sizes depending on the task's effort (small/medium/large), so you can see at a glance how full a day is. Purely visual — the effort is always announced in the task's label regardless. Disable to render every tile the same size."
+      },
       "carryOverDefault": {
         "heading": "Carry-over default",
         "hint": "On startup, decide what happens to tasks whose scheduled day has passed and that are still open. \"Ask\" opens the carry-over dialog; the other options run silently and announce the result.",
@@ -1262,6 +1267,7 @@
         "assignees": "Assigned to",
         "status": "Status",
         "priority": "Priority",
+        "effort": "Effort",
         "completedAt": "Completed on {{date}}",
         "scheduled": {
           "legend": "Scheduled for",
@@ -1311,6 +1317,11 @@
         "low": "Low",
         "medium": "Medium",
         "high": "High"
+      },
+      "effort": {
+        "small": "Small",
+        "medium": "Medium",
+        "large": "Large"
       },
       "recurrence": {
         "label": "Repeat",
@@ -1790,6 +1801,8 @@
       "subtaskParent": ", subtask of \"{{parent}}\"",
       "subtaskOf": "Subtask of \"{{parent}}\"",
       "priorityHigh": "high priority",
+      "effortSmall": "low effort",
+      "effortLarge": "high effort",
       "priorityLow": "low priority",
       "subtaskProgressBadge": "{{done}}/{{total}}",
       "subtaskProgressBadgeAria": "{{done}} of {{total}} subtasks done",

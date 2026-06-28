@@ -13,6 +13,7 @@ import {
   writeCascadeEnabled,
   writeCheckoffMode,
   writeDayStartTrigger,
+  writeVisualEffortSizing,
   type CarryOverDefault,
   type CheckoffMode,
   type DayStartTrigger,
@@ -71,6 +72,7 @@ export default function TaskSettingsScreen() {
   const [cascade, setCascade] = useState(true);
   const [autoDate, setAutoDate] = useState(true);
   const [autoSelfAssign, setAutoSelfAssign] = useState(true);
+  const [visualEffortSizing, setVisualEffortSizing] = useState(true);
   const [carryOver, setCarryOver] = useState<CarryOverDefault>('ask');
   const [dayStart, setDayStart] = useState<DayStartTrigger>('00:00');
 
@@ -83,6 +85,7 @@ export default function TaskSettingsScreen() {
         setCascade(b.cascadeEnabled);
         setAutoDate(b.autoDate);
         setAutoSelfAssign(b.autoSelfAssign);
+        setVisualEffortSizing(b.visualEffortSizing);
         setCarryOver(b.carryOverDefault);
         setDayStart(b.dayStartTrigger);
       });
@@ -124,6 +127,14 @@ export default function TaskSettingsScreen() {
     setAutoSelfAssign((prev) => {
       const next = !prev;
       void writeAutoSelfAssign(next);
+      return next;
+    });
+  }, []);
+
+  const onVisualEffortSizingToggle = useCallback(() => {
+    setVisualEffortSizing((prev) => {
+      const next = !prev;
+      void writeVisualEffortSizing(next);
       return next;
     });
   }, []);
@@ -189,6 +200,20 @@ export default function TaskSettingsScreen() {
         />
         <Text style={styles.hint} accessibilityRole="text">
           {t('dialogs.tasks.autoSelfAssign.hint')}
+        </Text>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.heading} accessibilityRole="header">
+          {t('dialogs.tasks.visualEffortSizing.heading')}
+        </Text>
+        <SwitchRow
+          label={t('dialogs.tasks.visualEffortSizing.label')}
+          value={visualEffortSizing}
+          onToggle={onVisualEffortSizingToggle}
+        />
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.tasks.visualEffortSizing.hint')}
         </Text>
       </View>
 

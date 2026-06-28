@@ -234,7 +234,7 @@ impl LocalAdapter {
                         priority, scheduled_date, scheduled_time, deadline_date,
                         deadline_time, recurrence, color_label_id, reminders, sound,
                         created_at, updated_at, completed_at, etag, section_id,
-                        resurface_date, series_id
+                        resurface_date, series_id, effort
                    FROM tasks",
             )
             .map_err(map_sql_err)?;
@@ -449,8 +449,8 @@ mod tests {
     use super::*;
     use crate::test_support::open_test_db;
     use cal_core::{
-        Calendar, CalendarFeature, ColorLabel, ColorLabelId, ContainerColor, Event, Task, TaskList,
-        TaskPriority, TaskStatus,
+        Calendar, CalendarFeature, ColorLabel, ColorLabelId, ContainerColor, Event, Task,
+        TaskEffort, TaskList, TaskPriority, TaskStatus,
     };
     use chrono::{TimeZone, Utc};
 
@@ -500,6 +500,7 @@ mod tests {
             description: None,
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
+            effort: TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,

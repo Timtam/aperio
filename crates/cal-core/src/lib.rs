@@ -30,6 +30,6 @@ pub use types::{
     AttendeeResponse, AttendeeStatus, Calendar, Contact, ContactAddress, ContactList, ContactPhoto,
     DateRange, Event, EventRecurrence, FreeBusy, FreeBusySlot, GroupMember, MemberRight, MonthDay,
     NewContact, NewEvent, NewTask, RecurrenceAnchor, RecurrenceEnd, RecurrenceFrequency,
-    RecurrencePlacement, Section, Task, TaskList, TaskListShare, TaskPriority, TaskRecurrence,
-    TaskStatus, TaskUser, Weekday,
+    RecurrencePlacement, Section, Task, TaskEffort, TaskList, TaskListShare, TaskPriority,
+    TaskRecurrence, TaskStatus, TaskUser, Weekday,
 };

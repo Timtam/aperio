@@ -15,12 +15,15 @@ import { useDateFormat } from '../intl/dateFormat';
 import { labelsLookup, resolveTaskColor } from '../intl/eventColor';
 import {
   assigneeSuffix,
+  effortSizeModifier,
+  effortSuffix,
   priorityMarker,
   priorityRank,
   prioritySuffix,
   subtaskParentTitle,
 } from '../intl/taskStatus';
 import { useCalendarStore } from '../state/calendarStoreContext';
+import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
 import { useDialogState } from '../state/dialogStateContext';
 import {
   moveTaskToBacklog,
@@ -302,6 +305,7 @@ function BacklogList({
   const { openTaskDialog, openPlanTask } = useDialogState();
   const { sectionColorById } = useCalendarStore();
   const { openForTask } = useChipContextMenu();
+  const { visualEffortSizing } = useTaskCascadeEnabled();
   const [activeIndex, setActiveIndex] = useState(0);
   const headingId = useId();
 
@@ -384,6 +388,9 @@ function BacklogList({
             sectionColorById,
           );
           const priorityGlyph = priorityMarker(task.priority);
+          const effortMod = visualEffortSizing
+            ? effortSizeModifier(task.effort)
+            : '';
           const parentTitle = subtaskParentTitle(task, tasks);
           const due =
             showDeadline && task.deadline_date
@@ -419,12 +426,14 @@ function BacklogList({
                 ariaLabel +
                 (parentTitle
                   ? t('views.tasks.subtaskParent', { parent: parentTitle })
-                  : '')
+                  : '') +
+                effortSuffix(t, task.effort)
               }
               className={
                 'backlog-rail__chip' +
                 (i === activeIdx ? ' backlog-rail__chip--active' : '') +
-                (overdue ? ' backlog-rail__chip--overdue' : '')
+                (overdue ? ' backlog-rail__chip--overdue' : '') +
+                (effortMod ? ` backlog-rail__chip--effort-${effortMod}` : '')
               }
               style={
                 color.hex

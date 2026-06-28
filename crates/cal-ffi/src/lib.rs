@@ -408,6 +408,35 @@ impl From<TaskPriority> for cal_core::TaskPriority {
     }
 }
 
+/// Task effort. Mirrors [`cal_core::TaskEffort`].
+#[derive(uniffi::Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskEffort {
+    Small,
+    Medium,
+    Large,
+}
+
+impl From<cal_core::TaskEffort> for TaskEffort {
+    fn from(e: cal_core::TaskEffort) -> Self {
+        use cal_core::TaskEffort as C;
+        match e {
+            C::Small => Self::Small,
+            C::Medium => Self::Medium,
+            C::Large => Self::Large,
+        }
+    }
+}
+
+impl From<TaskEffort> for cal_core::TaskEffort {
+    fn from(e: TaskEffort) -> Self {
+        match e {
+            TaskEffort::Small => Self::Small,
+            TaskEffort::Medium => Self::Medium,
+            TaskEffort::Large => Self::Large,
+        }
+    }
+}
+
 // ───────────────────────────── Reminders & sound ────────────────────────────
 
 /// Where a notification sound comes from. Mirrors [`cal_core::SoundSource`].
@@ -589,6 +618,7 @@ pub struct TaskDto {
     pub description: Option<String>,
     pub status: TaskStatus,
     pub priority: TaskPriority,
+    pub effort: TaskEffort,
     /// `YYYY-MM-DD`. The day the task is planned for.
     pub scheduled_date: Option<String>,
     /// `HH:MM:SS`. Requires `scheduled_date`.
@@ -630,6 +660,7 @@ impl From<cal_core::Task> for TaskDto {
             description: t.description,
             status: t.status.into(),
             priority: t.priority.into(),
+            effort: t.effort.into(),
             scheduled_date: t.scheduled_date.map(date_to_string),
             scheduled_time: t.scheduled_time.map(time_to_string),
             deadline_date: t.deadline_date.map(date_to_string),
@@ -661,6 +692,7 @@ impl TryFrom<TaskDto> for cal_core::Task {
             description: t.description,
             status: t.status.into(),
             priority: t.priority.into(),
+            effort: t.effort.into(),
             scheduled_date: opt_date_field("scheduled_date", t.scheduled_date)?,
             scheduled_time: opt_time_field("scheduled_time", t.scheduled_time)?,
             deadline_date: opt_date_field("deadline_date", t.deadline_date)?,
@@ -702,6 +734,7 @@ pub struct NewTaskDto {
     pub description: Option<String>,
     pub status: TaskStatus,
     pub priority: TaskPriority,
+    pub effort: TaskEffort,
     pub scheduled_date: Option<String>,
     pub scheduled_time: Option<String>,
     pub deadline_date: Option<String>,
@@ -723,6 +756,7 @@ impl TryFrom<NewTaskDto> for cal_core::NewTask {
             description: t.description,
             status: t.status.into(),
             priority: t.priority.into(),
+            effort: t.effort.into(),
             scheduled_date: opt_date_field("scheduled_date", t.scheduled_date)?,
             scheduled_time: opt_time_field("scheduled_time", t.scheduled_time)?,
             deadline_date: opt_date_field("deadline_date", t.deadline_date)?,
@@ -1261,6 +1295,7 @@ mod tests {
             description: None,
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
+            effort: TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,

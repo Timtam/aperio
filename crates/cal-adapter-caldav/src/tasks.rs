@@ -348,6 +348,7 @@ pub async fn create_task(
         description: new.description,
         status: new.status,
         priority: new.priority,
+        effort: new.effort,
         scheduled_date: new.scheduled_date,
         scheduled_time: new.scheduled_time,
         deadline_date: new.deadline_date,
@@ -480,6 +481,7 @@ fn build_vtodo_from_task(task: &Task) -> String {
         description: task.description.clone(),
         status: task.status,
         priority: task.priority,
+        effort: task.effort,
         scheduled_date: task.scheduled_date,
         scheduled_time: task.scheduled_time,
         deadline_date: task.deadline_date,
@@ -578,6 +580,7 @@ fn apply_common(todo: &mut Todo, uid: &str, task: &NewTask, completed_at: Option
         task.recurrence.as_ref(),
         task.resurface_date,
         task.series_id.as_deref(),
+        task.effort,
     );
     if let Some(payload) = encode_payload(&extras) {
         todo.add_property("X-APERIO-EXTRAS", payload);
@@ -642,6 +645,7 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
         .and_then(rrule_to_task_recurrence);
     let mut resurface_date = None;
     let mut series_id = None;
+    let mut effort = cal_core::TaskEffort::default();
     if let Some(extras) = todo
         .property_value("X-APERIO-EXTRAS")
         .and_then(decode_payload)
@@ -651,6 +655,7 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
             &mut recurrence,
             &mut resurface_date,
             &mut series_id,
+            &mut effort,
         );
     }
 
@@ -662,6 +667,7 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
         description,
         status,
         priority,
+        effort,
         scheduled_date,
         scheduled_time,
         deadline_date,
@@ -849,6 +855,7 @@ mod tests {
             description: None,
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 20).unwrap()),
             scheduled_time: None,
             deadline_date: None,
@@ -962,6 +969,7 @@ END:VCALENDAR</c:calendar-data>
             description: None,
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 21).unwrap()),
             scheduled_time: None,
             deadline_date: Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()),
@@ -997,6 +1005,7 @@ END:VCALENDAR</c:calendar-data>
             description: None,
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()),
@@ -1040,6 +1049,7 @@ END:VCALENDAR</c:calendar-data>
             description: None,
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 21).unwrap()),
             scheduled_time: None,
             deadline_date: None,

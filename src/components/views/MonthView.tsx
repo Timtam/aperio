@@ -42,6 +42,8 @@ import { filterTasksOnDay, isDeadlineChip } from '../../intl/taskDay';
 import { useCurrentUserByList } from '../../state/currentUser';
 import {
   assigneeSuffix,
+  effortSizeModifier,
+  effortSuffix,
   priorityMarker,
   prioritySuffix,
   statusI18nKey,
@@ -49,6 +51,7 @@ import {
   subtaskParentSuffix,
   subtaskProgressSuffix,
 } from '../../intl/taskStatus';
+import { useTaskCascadeEnabled } from '../../state/taskCascadeContext';
 import { useCalendarStore } from '../../state/calendarStoreContext';
 import { useChipContextMenu } from '../../state/useChipContextMenu';
 import { useDialogState } from '../../state/dialogStateContext';
@@ -120,6 +123,7 @@ export function MonthView() {
   const range = useMemo(() => visibleRange('month', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
   const { tasks, taskListById } = useTasks();
+  const { visualEffortSizing } = useTaskCascadeEnabled();
   const currentUserByList = useCurrentUserByList(tasks);
   // Hide tasks assigned to a concrete OTHER user from MY calendar (mine +
   // unassigned stay) — the day-start review's ownership filter (DESIGN §9.7).
@@ -750,6 +754,9 @@ export function MonthView() {
                             sectionColorById,
                           );
                           const priorityGlyph = priorityMarker(task.priority);
+                          const effortMod = visualEffortSizing
+                            ? effortSizeModifier(task.effort)
+                            : '';
                           // Visible deadline badge on the SCHEDULED chip (a
                           // deadline-only marker, `isBy`, already sits on its
                           // own day).
@@ -763,24 +770,31 @@ export function MonthView() {
                           // The scheduled chip now announces its deadline too
                           // (the deadline-day duplicate is suppressed), so use
                           // the "fällig bis …" label whenever there's a deadline.
-                          const aria = t(
-                            task.deadline_date
-                              ? 'views.week.taskChipBy'
-                              : 'views.week.taskChip',
-                            {
-                              title: task.title,
-                              deadline: task.deadline_date
-                                ? fmt.format(
-                                    new Date(`${task.deadline_date}T00:00:00`),
-                                    'PPP',
-                                  )
-                                : '',
-                              state: t(statusI18nKey(task.status)),
-                              priority: prioritySuffix(t, task.priority),
-                              progress: subtaskProgressSuffix(t, task.id, tasks),
-                              assignee: assigneeSuffix(t, task.assignees),
-                            },
-                          ) + subtaskParentSuffix(t, task, tasks);
+                          const aria =
+                            t(
+                              task.deadline_date
+                                ? 'views.week.taskChipBy'
+                                : 'views.week.taskChip',
+                              {
+                                title: task.title,
+                                deadline: task.deadline_date
+                                  ? fmt.format(
+                                      new Date(`${task.deadline_date}T00:00:00`),
+                                      'PPP',
+                                    )
+                                  : '',
+                                state: t(statusI18nKey(task.status)),
+                                priority: prioritySuffix(t, task.priority),
+                                progress: subtaskProgressSuffix(
+                                  t,
+                                  task.id,
+                                  tasks,
+                                ),
+                                assignee: assigneeSuffix(t, task.assignees),
+                              },
+                            ) +
+                            subtaskParentSuffix(t, task, tasks) +
+                            effortSuffix(t, task.effort);
                           return (
                             <span
                               key={item.id}
@@ -795,7 +809,10 @@ export function MonthView() {
                                 (draggingTaskId === task.id
                                   ? ' month-task--dragging'
                                   : '') +
-                                ` month-task--${task.status.replace('_', '-')}`
+                                ` month-task--${task.status.replace('_', '-')}` +
+                                (effortMod
+                                  ? ` month-task--effort-${effortMod}`
+                                  : '')
                               }
                               aria-label={aria}
                               aria-selected={isFocusedItem}

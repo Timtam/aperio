@@ -326,6 +326,8 @@ fn map_reminder(d: DeviceReminder) -> Result<Task> {
         description: d.description,
         status,
         priority: map_priority(d.priority),
+        // Device calendars (EventKit / CalendarProvider) have no effort concept.
+        effort: Default::default(),
         scheduled_date,
         scheduled_time,
         deadline_date: None,
@@ -755,6 +757,7 @@ mod tests {
             description: None,
             status,
             priority,
+            effort: Default::default(),
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,

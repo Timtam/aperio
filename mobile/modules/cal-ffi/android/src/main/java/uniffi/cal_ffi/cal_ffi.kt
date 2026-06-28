@@ -8825,6 +8825,8 @@ data class NewTaskDto (
     , 
     var `priority`: TaskPriority
     , 
+    var `effort`: TaskEffort
+    , 
     var `scheduledDate`: kotlin.String?
     , 
     var `scheduledTime`: kotlin.String?
@@ -8864,6 +8866,7 @@ public object FfiConverterTypeNewTaskDto: FfiConverterRustBuffer<NewTaskDto> {
             FfiConverterOptionalString.read(buf),
             FfiConverterTypeTaskStatus.read(buf),
             FfiConverterTypeTaskPriority.read(buf),
+            FfiConverterTypeTaskEffort.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
@@ -8882,6 +8885,7 @@ public object FfiConverterTypeNewTaskDto: FfiConverterRustBuffer<NewTaskDto> {
             FfiConverterOptionalString.allocationSize(value.`description`) +
             FfiConverterTypeTaskStatus.allocationSize(value.`status`) +
             FfiConverterTypeTaskPriority.allocationSize(value.`priority`) +
+            FfiConverterTypeTaskEffort.allocationSize(value.`effort`) +
             FfiConverterOptionalString.allocationSize(value.`scheduledDate`) +
             FfiConverterOptionalString.allocationSize(value.`scheduledTime`) +
             FfiConverterOptionalString.allocationSize(value.`deadlineDate`) +
@@ -8899,6 +8903,7 @@ public object FfiConverterTypeNewTaskDto: FfiConverterRustBuffer<NewTaskDto> {
             FfiConverterOptionalString.write(value.`description`, buf)
             FfiConverterTypeTaskStatus.write(value.`status`, buf)
             FfiConverterTypeTaskPriority.write(value.`priority`, buf)
+            FfiConverterTypeTaskEffort.write(value.`effort`, buf)
             FfiConverterOptionalString.write(value.`scheduledDate`, buf)
             FfiConverterOptionalString.write(value.`scheduledTime`, buf)
             FfiConverterOptionalString.write(value.`deadlineDate`, buf)
@@ -9073,6 +9078,8 @@ data class TaskDto (
     , 
     var `priority`: TaskPriority
     , 
+    var `effort`: TaskEffort
+    , 
     /**
      * `YYYY-MM-DD`. The day the task is planned for.
      */
@@ -9160,6 +9167,7 @@ public object FfiConverterTypeTaskDto: FfiConverterRustBuffer<TaskDto> {
             FfiConverterOptionalString.read(buf),
             FfiConverterTypeTaskStatus.read(buf),
             FfiConverterTypeTaskPriority.read(buf),
+            FfiConverterTypeTaskEffort.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
@@ -9186,6 +9194,7 @@ public object FfiConverterTypeTaskDto: FfiConverterRustBuffer<TaskDto> {
             FfiConverterOptionalString.allocationSize(value.`description`) +
             FfiConverterTypeTaskStatus.allocationSize(value.`status`) +
             FfiConverterTypeTaskPriority.allocationSize(value.`priority`) +
+            FfiConverterTypeTaskEffort.allocationSize(value.`effort`) +
             FfiConverterOptionalString.allocationSize(value.`scheduledDate`) +
             FfiConverterOptionalString.allocationSize(value.`scheduledTime`) +
             FfiConverterOptionalString.allocationSize(value.`deadlineDate`) +
@@ -9211,6 +9220,7 @@ public object FfiConverterTypeTaskDto: FfiConverterRustBuffer<TaskDto> {
             FfiConverterOptionalString.write(value.`description`, buf)
             FfiConverterTypeTaskStatus.write(value.`status`, buf)
             FfiConverterTypeTaskPriority.write(value.`priority`, buf)
+            FfiConverterTypeTaskEffort.write(value.`effort`, buf)
             FfiConverterOptionalString.write(value.`scheduledDate`, buf)
             FfiConverterOptionalString.write(value.`scheduledTime`, buf)
             FfiConverterOptionalString.write(value.`deadlineDate`, buf)
@@ -10393,6 +10403,44 @@ public object FfiConverterTypeStoreError : FfiConverterRustBuffer<StoreException
     }
 
 }
+
+
+
+/**
+ * Task effort. Mirrors [`cal_core::TaskEffort`].
+ */
+
+enum class TaskEffort {
+    
+    SMALL,
+    MEDIUM,
+    LARGE;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTaskEffort: FfiConverterRustBuffer<TaskEffort> {
+    override fun read(buf: ByteBuffer) = try {
+        TaskEffort.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: TaskEffort) = 4UL
+
+    override fun write(value: TaskEffort, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
 
 
 

@@ -5611,6 +5611,7 @@ public struct NewTaskDto: Equatable, Hashable {
     public var description: String?
     public var status: TaskStatus
     public var priority: TaskPriority
+    public var effort: TaskEffort
     public var scheduledDate: String?
     public var scheduledTime: String?
     public var deadlineDate: String?
@@ -5624,11 +5625,12 @@ public struct NewTaskDto: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(title: String, description: String?, status: TaskStatus, priority: TaskPriority, scheduledDate: String?, scheduledTime: String?, deadlineDate: String?, deadlineTime: String?, recurrence: TaskRecurrence?, parentId: String?, sectionId: String?, colorLabel: String?, reminders: [Reminder], sound: SoundConfig?) {
+    public init(title: String, description: String?, status: TaskStatus, priority: TaskPriority, effort: TaskEffort, scheduledDate: String?, scheduledTime: String?, deadlineDate: String?, deadlineTime: String?, recurrence: TaskRecurrence?, parentId: String?, sectionId: String?, colorLabel: String?, reminders: [Reminder], sound: SoundConfig?) {
         self.title = title
         self.description = description
         self.status = status
         self.priority = priority
+        self.effort = effort
         self.scheduledDate = scheduledDate
         self.scheduledTime = scheduledTime
         self.deadlineDate = deadlineDate
@@ -5661,6 +5663,7 @@ public struct FfiConverterTypeNewTaskDto: FfiConverterRustBuffer {
                 description: FfiConverterOptionString.read(from: &buf), 
                 status: FfiConverterTypeTaskStatus.read(from: &buf), 
                 priority: FfiConverterTypeTaskPriority.read(from: &buf), 
+                effort: FfiConverterTypeTaskEffort.read(from: &buf), 
                 scheduledDate: FfiConverterOptionString.read(from: &buf), 
                 scheduledTime: FfiConverterOptionString.read(from: &buf), 
                 deadlineDate: FfiConverterOptionString.read(from: &buf), 
@@ -5679,6 +5682,7 @@ public struct FfiConverterTypeNewTaskDto: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.description, into: &buf)
         FfiConverterTypeTaskStatus.write(value.status, into: &buf)
         FfiConverterTypeTaskPriority.write(value.priority, into: &buf)
+        FfiConverterTypeTaskEffort.write(value.effort, into: &buf)
         FfiConverterOptionString.write(value.scheduledDate, into: &buf)
         FfiConverterOptionString.write(value.scheduledTime, into: &buf)
         FfiConverterOptionString.write(value.deadlineDate, into: &buf)
@@ -5921,6 +5925,7 @@ public struct TaskDto: Equatable, Hashable {
     public var description: String?
     public var status: TaskStatus
     public var priority: TaskPriority
+    public var effort: TaskEffort
     /**
      * `YYYY-MM-DD`. The day the task is planned for.
      */
@@ -5974,7 +5979,7 @@ public struct TaskDto: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, listId: String, title: String, description: String?, status: TaskStatus, priority: TaskPriority, 
+    public init(id: String, listId: String, title: String, description: String?, status: TaskStatus, priority: TaskPriority, effort: TaskEffort, 
         /**
          * `YYYY-MM-DD`. The day the task is planned for.
          */scheduledDate: String?, 
@@ -6015,6 +6020,7 @@ public struct TaskDto: Equatable, Hashable {
         self.description = description
         self.status = status
         self.priority = priority
+        self.effort = effort
         self.scheduledDate = scheduledDate
         self.scheduledTime = scheduledTime
         self.deadlineDate = deadlineDate
@@ -6055,6 +6061,7 @@ public struct FfiConverterTypeTaskDto: FfiConverterRustBuffer {
                 description: FfiConverterOptionString.read(from: &buf), 
                 status: FfiConverterTypeTaskStatus.read(from: &buf), 
                 priority: FfiConverterTypeTaskPriority.read(from: &buf), 
+                effort: FfiConverterTypeTaskEffort.read(from: &buf), 
                 scheduledDate: FfiConverterOptionString.read(from: &buf), 
                 scheduledTime: FfiConverterOptionString.read(from: &buf), 
                 deadlineDate: FfiConverterOptionString.read(from: &buf), 
@@ -6081,6 +6088,7 @@ public struct FfiConverterTypeTaskDto: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.description, into: &buf)
         FfiConverterTypeTaskStatus.write(value.status, into: &buf)
         FfiConverterTypeTaskPriority.write(value.priority, into: &buf)
+        FfiConverterTypeTaskEffort.write(value.effort, into: &buf)
         FfiConverterOptionString.write(value.scheduledDate, into: &buf)
         FfiConverterOptionString.write(value.scheduledTime, into: &buf)
         FfiConverterOptionString.write(value.deadlineDate, into: &buf)
@@ -7279,6 +7287,83 @@ public func FfiConverterTypeStoreError_lift(_ buf: RustBuffer) throws -> StoreEr
 public func FfiConverterTypeStoreError_lower(_ value: StoreError) -> RustBuffer {
     return FfiConverterTypeStoreError.lower(value)
 }
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Task effort. Mirrors [`cal_core::TaskEffort`].
+ */
+
+public enum TaskEffort: Equatable, Hashable {
+    
+    case small
+    case medium
+    case large
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension TaskEffort: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTaskEffort: FfiConverterRustBuffer {
+    typealias SwiftType = TaskEffort
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TaskEffort {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .small
+        
+        case 2: return .medium
+        
+        case 3: return .large
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: TaskEffort, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .small:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .medium:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .large:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTaskEffort_lift(_ buf: RustBuffer) throws -> TaskEffort {
+    return try FfiConverterTypeTaskEffort.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTaskEffort_lower(_ value: TaskEffort) -> RustBuffer {
+    return FfiConverterTypeTaskEffort.lower(value)
+}
+
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.

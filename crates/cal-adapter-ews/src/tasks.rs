@@ -839,12 +839,14 @@ pub fn to_task(item: ParsedTask, list_id: &str) -> EwsResult<Task> {
         .and_then(|r| rrule_to_task_recurrence(&r.to_rrule()));
     let mut resurface_date = None;
     let mut series_id = None;
+    let mut effort = cal_core::TaskEffort::default();
     if let Some(extras) = item.extras_payload.as_deref().and_then(decode_payload) {
         apply_task_extras(
             &extras,
             &mut recurrence,
             &mut resurface_date,
             &mut series_id,
+            &mut effort,
         );
     }
 
@@ -856,6 +858,7 @@ pub fn to_task(item: ParsedTask, list_id: &str) -> EwsResult<Task> {
         description: item.body,
         status,
         priority,
+        effort,
         scheduled_date,
         scheduled_time,
         deadline_date,
@@ -921,6 +924,7 @@ pub fn new_task_to_task_item_xml(task: &NewTask) -> String {
         task.recurrence.as_ref(),
         task.resurface_date,
         task.series_id.as_deref(),
+        task.effort,
     ) {
         out.push_str("          ");
         out.push_str(&prop);
@@ -983,8 +987,9 @@ fn aperio_extras_property_xml(
     recurrence: Option<&cal_core::TaskRecurrence>,
     resurface_date: Option<NaiveDate>,
     series_id: Option<&str>,
+    effort: cal_core::TaskEffort,
 ) -> Option<String> {
-    let extras = extras_for_task(recurrence, resurface_date, series_id);
+    let extras = extras_for_task(recurrence, resurface_date, series_id, effort);
     let payload = encode_payload(&extras)?;
     Some(format!(
         "<t:ExtendedProperty>{}<t:Value>{}</t:Value></t:ExtendedProperty>",
@@ -1070,6 +1075,7 @@ pub fn task_to_update_field_xml(task: &Task) -> (String, String) {
         task.recurrence.as_ref(),
         task.resurface_date,
         task.series_id.as_deref(),
+        task.effort,
     ) {
         Some(prop) => {
             let field_uri = aperio_extras_field_uri();
@@ -1242,6 +1248,7 @@ fn build_task_from_new(
         description: new.description.clone(),
         status: new.status,
         priority: new.priority,
+        effort: new.effort,
         scheduled_date: new.scheduled_date,
         scheduled_time: new.scheduled_time,
         deadline_date: new.deadline_date,
@@ -1435,6 +1442,7 @@ mod tests {
             description: None,
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 21).unwrap()),
             scheduled_time: None,
             deadline_date: None,
@@ -1495,6 +1503,7 @@ mod tests {
             description: None,
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,
@@ -1692,6 +1701,7 @@ mod tests {
             description: Some("Q2 client work".into()),
             status: TaskStatus::Open,
             priority: TaskPriority::High,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 20).unwrap()),
             scheduled_time: None,
             deadline_date: Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()),
@@ -1739,6 +1749,7 @@ mod tests {
             description: None,
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,
@@ -1890,6 +1901,7 @@ mod tests {
             description: None,
             status: TaskStatus::Completed,
             priority: TaskPriority::Medium,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,

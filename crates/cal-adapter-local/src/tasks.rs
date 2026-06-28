@@ -2,8 +2,8 @@
 
 use async_trait::async_trait;
 use cal_core::{
-    ColorLabelId, ContainerColor, NewTask, Reminder, Section, SoundConfig, Task, TaskList,
-    TaskPriority, TaskRecurrence, TaskStatus, TasksFeature,
+    ColorLabelId, ContainerColor, NewTask, Reminder, Section, SoundConfig, Task, TaskEffort,
+    TaskList, TaskPriority, TaskRecurrence, TaskStatus, TasksFeature,
 };
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
@@ -229,6 +229,7 @@ impl LocalAdapter {
         let sound_json = write_sound(&task.sound)?;
         let status = task_status_str(task.status);
         let priority = task_priority_str(task.priority);
+        let effort = effort_str(task.effort);
 
         self.db()
             .lock()
@@ -236,10 +237,10 @@ impl LocalAdapter {
             .execute(
                 "INSERT INTO tasks (
                     id, list_id, parent_id, section_id, title, description, status, priority,
-                    scheduled_date, scheduled_time, deadline_date, deadline_time,
+                    effort, scheduled_date, scheduled_time, deadline_date, deadline_time,
                     recurrence, resurface_date, series_id, color_label_id, reminders, sound,
                     created_at, updated_at, completed_at, etag
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
                 params![
                     id,
                     list_id,
@@ -249,6 +250,7 @@ impl LocalAdapter {
                     task.description,
                     status,
                     priority,
+                    effort,
                     task.scheduled_date.as_ref().map(fmt_date),
                     task.scheduled_time.as_ref().map(fmt_time),
                     task.deadline_date.as_ref().map(fmt_date),
@@ -273,6 +275,7 @@ impl LocalAdapter {
             description: task.description,
             status: task.status,
             priority: task.priority,
+            effort: task.effort,
             scheduled_date: task.scheduled_date,
             scheduled_time: task.scheduled_time,
             deadline_date: task.deadline_date,
@@ -338,6 +341,7 @@ impl LocalAdapter {
         let sound_json = write_sound(&task.sound)?;
         let status = task_status_str(task.status);
         let priority = task_priority_str(task.priority);
+        let effort = effort_str(task.effort);
 
         let changed = self
             .db()
@@ -351,7 +355,7 @@ impl LocalAdapter {
                 // idempotent spawner (DESIGN §9.12) has nothing to dedup on.
                 "UPDATE tasks
                     SET list_id = ?, parent_id = ?, section_id = ?, title = ?, description = ?,
-                        status = ?, priority = ?, scheduled_date = ?, scheduled_time = ?,
+                        status = ?, priority = ?, effort = ?, scheduled_date = ?, scheduled_time = ?,
                         deadline_date = ?, deadline_time = ?,
                         recurrence = ?, resurface_date = ?, series_id = ?, color_label_id = ?,
                         reminders = ?, sound = ?,
@@ -365,6 +369,7 @@ impl LocalAdapter {
                     task.description,
                     status,
                     priority,
+                    effort,
                     task.scheduled_date.as_ref().map(fmt_date),
                     task.scheduled_time.as_ref().map(fmt_time),
                     task.deadline_date.as_ref().map(fmt_date),
@@ -564,7 +569,7 @@ impl LocalAdapter {
                         priority, scheduled_date, scheduled_time, deadline_date,
                         deadline_time, recurrence, color_label_id, reminders, sound,
                         created_at, updated_at, completed_at, etag, section_id,
-                        resurface_date, series_id
+                        resurface_date, series_id, effort
                    FROM tasks WHERE id = ?",
             )
             .map_err(map_sql_err)?;
@@ -760,7 +765,7 @@ const TASK_SELECT: &str = "SELECT id, list_id, parent_id, title, description, st
             priority, scheduled_date, scheduled_time, deadline_date,
             deadline_time, recurrence, color_label_id, reminders, sound,
             created_at, updated_at, completed_at, etag, section_id,
-            resurface_date, series_id
+            resurface_date, series_id, effort
        FROM tasks
       WHERE list_id = ?
       ORDER BY COALESCE(scheduled_date, deadline_date, ''), created_at";
@@ -858,6 +863,23 @@ fn parse_task_priority(s: &str) -> cal_core::Result<TaskPriority> {
     })
 }
 
+fn effort_str(e: TaskEffort) -> &'static str {
+    match e {
+        TaskEffort::Small => "small",
+        TaskEffort::Medium => "medium",
+        TaskEffort::Large => "large",
+    }
+}
+
+fn parse_task_effort(s: &str) -> cal_core::Result<TaskEffort> {
+    Ok(match s {
+        "small" => TaskEffort::Small,
+        "medium" => TaskEffort::Medium,
+        "large" => TaskEffort::Large,
+        other => return Err(unknown_enum("task effort", other)),
+    })
+}
+
 pub(crate) fn row_to_task(row: &rusqlite::Row<'_>) -> cal_core::Result<Task> {
     let id = req_text(row, 0)?;
     let list_id = req_text(row, 1)?;
@@ -902,6 +924,7 @@ pub(crate) fn row_to_task(row: &rusqlite::Row<'_>) -> cal_core::Result<Task> {
         None => None,
     };
     let series_id = opt_text(row, 21)?;
+    let effort = parse_task_effort(&req_text(row, 22)?)?;
 
     Ok(Task {
         assignees: Vec::new(),
@@ -911,6 +934,7 @@ pub(crate) fn row_to_task(row: &rusqlite::Row<'_>) -> cal_core::Result<Task> {
         description,
         status,
         priority,
+        effort,
         scheduled_date,
         scheduled_time,
         deadline_date,
@@ -953,6 +977,7 @@ mod tests {
             description: None,
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
+            effort: TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,

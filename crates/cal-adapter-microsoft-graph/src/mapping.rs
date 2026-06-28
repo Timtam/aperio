@@ -883,8 +883,9 @@ pub fn aperio_extension_write(
     recurrence: Option<&cal_core::TaskRecurrence>,
     resurface_date: Option<NaiveDate>,
     series_id: Option<&str>,
+    effort: cal_core::TaskEffort,
 ) -> Option<OpenExtensionWrite> {
-    let extras = extras_for_task(recurrence, resurface_date, series_id);
+    let extras = extras_for_task(recurrence, resurface_date, series_id, effort);
     let payload = encode_payload(&extras)?;
     Some(OpenExtensionWrite {
         odata_type: OPEN_EXTENSION_ODATA_TYPE,
@@ -1072,6 +1073,7 @@ pub fn map_task(entry: TodoTaskEntry, list_id: &str) -> GraphResult<Task> {
         .and_then(graph_recurrence_to_task_recurrence);
     let mut resurface_date = None;
     let mut series_id = None;
+    let mut effort = cal_core::TaskEffort::default();
     if let Some(extras) = entry
         .extensions
         .iter()
@@ -1084,6 +1086,7 @@ pub fn map_task(entry: TodoTaskEntry, list_id: &str) -> GraphResult<Task> {
             &mut recurrence,
             &mut resurface_date,
             &mut series_id,
+            &mut effort,
         );
     }
 
@@ -1108,6 +1111,7 @@ pub fn map_task(entry: TodoTaskEntry, list_id: &str) -> GraphResult<Task> {
         description,
         status,
         priority,
+        effort,
         scheduled_date,
         scheduled_time,
         deadline_date,
@@ -1233,6 +1237,7 @@ pub fn new_task_to_body(new: &NewTask) -> GraphResult<TodoTaskWriteBody> {
             new.recurrence.as_ref(),
             new.resurface_date,
             new.series_id.as_deref(),
+            new.effort,
         )
         .into_iter()
         .collect(),
@@ -1991,6 +1996,7 @@ mod tests {
             description: Some("clear out".into()),
             status: TaskStatus::Open,
             priority: TaskPriority::Low,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,
@@ -2042,6 +2048,7 @@ mod tests {
             description: None,
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,
@@ -2094,6 +2101,7 @@ mod tests {
             description: None,
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: Some(NaiveDate::from_ymd_opt(2026, 7, 1).unwrap()),

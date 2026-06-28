@@ -3888,6 +3888,49 @@ button[aria-disabled='true'] {
   margin-left: var(--space-1);
 }
 
+/* ── Effort tile sizing (DESIGN: visual effort estimate) ───────────────────
+ * A task's `effort` ('small' | 'medium' | 'large') optionally drives the
+ * chip's tile size when the synced `visualEffortSizing` pref is on. `medium`
+ * is the neutral base size (no class), so only `--effort-small` (compact) and
+ * `--effort-large` (taller) are defined here, for every task-chip surface.
+ *
+ * Only `min-height` + the vertical padding vary — the horizontal padding,
+ * the task-list `--task-depth` indent (a `padding-left`), and the backlog
+ * accent stripe (also a `padding-left`) are untouched, so the grid/flex
+ * alignment of each surface is preserved. The visible progression is roughly
+ * 1.0 / 1.4 / 1.9em across small / medium / large. SR users get the effort
+ * spoken via the aria-label suffix regardless of this toggle. */
+.task-list__item--effort-small {
+  min-height: 1.4em;
+  padding-block: calc(var(--space-1) / 2);
+}
+.task-list__item--effort-large {
+  min-height: 2.6em;
+  padding-block: calc(var(--space-1) * 2);
+}
+
+.day-task--effort-small,
+.week-task--effort-small,
+.month-task--effort-small {
+  min-height: 1em;
+  padding-block: 1px;
+}
+.day-task--effort-large,
+.week-task--effort-large,
+.month-task--effort-large {
+  min-height: 1.9em;
+  padding-block: 6px;
+}
+
+.backlog-rail__chip--effort-small {
+  min-height: 1.6em;
+  padding-block: calc(var(--space-1) / 2);
+}
+.backlog-rail__chip--effort-large {
+  min-height: 3em;
+  padding-block: calc(var(--space-1) * 2);
+}
+
 /* Deadline badge on a SCHEDULED calendar chip ("bis 01.07."). A task with a
  * scheduled day no longer gets its own marker on the deadline day, so its plan
  * chip carries the due date instead. Small + secondary, following the chip's
