@@ -225,8 +225,6 @@
     "today": "Heute",
     "create": "Erstellen",
     "search": "Suchen",
-    "quickAdd": "Termin schnell anlegen",
-    "quickAddTask": "Aufgabe schnell anlegen",
     "newEvent": "Neuer Termin",
     "newTask": "Neue Aufgabe",
     "views": {
@@ -1402,7 +1400,7 @@
     },
     "createChooser": {
       "title": "Was möchten Sie anlegen?",
-      "onDay": "Am {{date}}",
+      "titleOnDay": "Was möchten Sie am {{date}} anlegen?",
       "event": "Termin",
       "task": "Aufgabe"
     },

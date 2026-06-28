@@ -42,32 +42,38 @@ export function CreateChooserDialog({
     }
   })();
 
-  // Pop this chooser first, then push the chosen quick-add. Same hand-off
-  // pattern the quick-add dialogs use for "weitere Details".
+  // Hand off by REPLACING this chooser frame with the chosen quick-add (not
+  // pop-then-push), so the quick-add inherits the chooser's focus-return target
+  // — closing it returns focus to the calendar grid the user activated, not to
+  // the now-unmounted chooser button.
   const chooseEvent = useCallback(() => {
-    onClose();
-    openQuickAdd({ defaultDate });
-  }, [onClose, openQuickAdd, defaultDate]);
+    openQuickAdd({ defaultDate, replace: true });
+  }, [openQuickAdd, defaultDate]);
 
   const chooseTask = useCallback(() => {
-    onClose();
-    openQuickAddTask({ defaultDate });
-  }, [onClose, openQuickAddTask, defaultDate]);
+    openQuickAddTask({ defaultDate, replace: true });
+  }, [openQuickAddTask, defaultDate]);
+
+  // Fold the anchored day into the dialog title so it's part of the on-open
+  // announcement (the title is the dialog's accessible name), not just a
+  // visually-separate line a screen reader might skip past.
+  const title = dayLabel
+    ? t('dialogs.createChooser.titleOnDay', { date: dayLabel })
+    : t('dialogs.createChooser.title');
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={t('dialogs.createChooser.title')}
+      title={title}
       className="modal--form modal--narrow create-chooser"
       dismissOnBackdrop={false}
     >
-      {dayLabel && (
-        <p className="create-chooser__day">
-          {t('dialogs.createChooser.onDay', { date: dayLabel })}
-        </p>
-      )}
-      <div className="create-chooser__choices">
+      <div
+        role="group"
+        aria-label={t('dialogs.createChooser.title')}
+        className="create-chooser__choices"
+      >
         <button
           type="button"
           onClick={chooseEvent}

@@ -225,8 +225,6 @@
     "today": "Today",
     "create": "Create",
     "search": "Search",
-    "quickAdd": "Quick add event",
-    "quickAddTask": "Quick add task",
     "newEvent": "New event",
     "newTask": "New task",
     "views": {
@@ -1402,7 +1400,7 @@
     },
     "createChooser": {
       "title": "What would you like to create?",
-      "onDay": "On {{date}}",
+      "titleOnDay": "What would you like to create on {{date}}?",
       "event": "Event",
       "task": "Task"
     },

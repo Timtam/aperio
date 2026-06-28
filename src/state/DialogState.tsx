@@ -123,6 +123,10 @@ export interface OpenQuickAddOptions {
   /** YYYY-MM-DD the quick-add should anchor to. For an event this pre-fills
    *  the start day; for a task it pre-fills the scheduled day. */
   defaultDate?: string;
+  /** Replace the current top dialog frame instead of stacking on top — used by
+   *  the create chooser's hand-off so focus still returns to the original
+   *  opener (the activated calendar grid) when the quick-add closes. */
+  replace?: boolean;
 }
 
 export interface DialogStateValue {
@@ -276,6 +280,15 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     setStack((s) => [...s, next]);
   }, []);
 
+  // Swap the top stack frame in place WITHOUT capturing a new trigger, so the
+  // replacement inherits the original opener's focus-return target. The create
+  // chooser uses this to hand off to a quick-add: closing the quick-add still
+  // returns focus to the calendar grid the user activated, not to the
+  // now-unmounted chooser button (which would strand focus on <body>).
+  const replaceTop = useCallback((next: DialogMode) => {
+    setStack((s) => (s.length === 0 ? [next] : [...s.slice(0, -1), next]));
+  }, []);
+
   const mode: DialogMode = useMemo(
     () => (stack.length === 0 ? { kind: 'none' } : stack[stack.length - 1]),
     [stack],
@@ -306,14 +319,26 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     [push],
   );
   const openQuickAdd = useCallback(
-    (options?: OpenQuickAddOptions) =>
-      push({ kind: 'quickAdd', defaultDate: options?.defaultDate }),
-    [push],
+    (options?: OpenQuickAddOptions) => {
+      const next: DialogMode = {
+        kind: 'quickAdd',
+        defaultDate: options?.defaultDate,
+      };
+      if (options?.replace) replaceTop(next);
+      else push(next);
+    },
+    [push, replaceTop],
   );
   const openQuickAddTask = useCallback(
-    (options?: OpenQuickAddOptions) =>
-      push({ kind: 'quickAddTask', defaultDate: options?.defaultDate }),
-    [push],
+    (options?: OpenQuickAddOptions) => {
+      const next: DialogMode = {
+        kind: 'quickAddTask',
+        defaultDate: options?.defaultDate,
+      };
+      if (options?.replace) replaceTop(next);
+      else push(next);
+    },
+    [push, replaceTop],
   );
   const openCreateChooser = useCallback(
     (defaultDate?: string) => push({ kind: 'createChooser', defaultDate }),

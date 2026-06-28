@@ -68,7 +68,10 @@ export function useDialogShortcuts(): void {
       }
       if (cmd && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'n') {
         e.preventDefault();
-        openQuickAdd();
+        // Anchor explicitly to the focused day, mirroring the Ctrl+Shift+N
+        // full-event path + the toolbar button (the dialog would fall back to
+        // the same view anchor anyway, but be explicit).
+        openQuickAdd({ defaultDate: localDateKey(anchorRef.current) });
         return;
       }
       if (e.altKey && !cmd && e.shiftKey && e.key.toLowerCase() === 'n') {
