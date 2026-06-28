@@ -573,9 +573,20 @@ export function DayView() {
               // deadline marker ("fällig bis …"). A task scheduled today
               // stays a plain work chip even with a later deadline.
               const isBy = isDeadlineChip(task, dayKey);
-              const labelKey = isBy
+              // The scheduled chip now also announces its deadline (the
+              // deadline-day duplicate is suppressed in filterTasksOnDay), so
+              // use the "fällig bis …" label whenever the task carries a
+              // deadline — not only on a pure deadline marker.
+              const hasDeadline = task.deadline_date != null;
+              const labelKey = hasDeadline
                 ? 'views.week.taskChipBy'
                 : 'views.week.taskChip';
+              // Visible deadline badge on the SCHEDULED chip (a deadline-only
+              // marker, `isBy`, already sits on its own day so it needs none).
+              const deadlineBadge =
+                !isBy && task.deadline_date
+                  ? fmt.format(new Date(`${task.deadline_date}T00:00:00`), 'P')
+                  : '';
               const color = resolveTaskColor(
                 task,
                 taskListById,
@@ -665,6 +676,13 @@ export function DayView() {
                     {priorityGlyph && (
                       <span className="day-task__priority" aria-hidden="true">
                         {priorityGlyph}
+                      </span>
+                    )}
+                    {deadlineBadge && (
+                      <span className="day-task__deadline" aria-hidden="true">
+                        {t('views.week.taskChipDeadlineBadge', {
+                          deadline: deadlineBadge,
+                        })}
                       </span>
                     )}
                   </button>

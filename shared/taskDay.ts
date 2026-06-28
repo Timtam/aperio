@@ -31,16 +31,18 @@ export function todayIsoKey(): string {
  *   1. `scheduled_date == day` — the user committed to working on the
  *      task that day ("Geplant für", or the legacy concrete date the
  *      old `deadline_type='on'` migrated into this slot).
- *   2. `deadline_date == day` — the task is DUE that day. The deadline
- *      shows as a single point marker on the deadline day, not as a
- *      span across every day until then. (That Gantt-style strip grew
- *      unbounded for far-future deadlines and cluttered the planner;
- *      mainstream task managers show a deadline as a point on its day.)
+ *   2. `deadline_date == day` AND the task has NO `scheduled_date` —
+ *      the task is DUE that day and the user hasn't planned a work day,
+ *      so the deadline day IS its calendar home (a single point marker,
+ *      not a Gantt-style strip across every day until then).
  *
- * A task with both fields set surfaces twice — a "work" chip on its
- * scheduled day and a "due" marker on its deadline day. When both fall
- * on the same day it appears once: see {@link isDeadlineChip}, where the
- * scheduled chip wins (matching `taskTimeOnDay`'s "schedule wins" rule).
+ * A task that has BOTH a scheduled day and a deadline surfaces ONCE — on
+ * its scheduled day. It does NOT also appear on the deadline day: the
+ * plan is its home, and the chip announces its deadline there ("fällig
+ * bis …"). Showing it on the deadline day too read as a duplicate / a
+ * second task. (A scheduled task that slips past its day is still surfaced
+ * by the day-start review + carry-over, so suppressing the deadline-day
+ * marker doesn't lose it.)
  *
  * Subtasks (`parent_id` set) are hidden UNLESS they carry their OWN
  * `scheduled_date` or `deadline_date` — then the planned/due subtask
@@ -84,7 +86,11 @@ export function filterTasksOnDay(
       return false;
     }
     if (task.scheduled_date === dayIsoKey) return true;
-    if (task.deadline_date === dayIsoKey) return true;
+    // A deadline surfaces as its own day marker ONLY for a task with no
+    // scheduled day. A scheduled task lives on its scheduled day and
+    // announces its deadline there, so it does not also appear on the
+    // deadline day (that duplicate read as a second task / a recurrence).
+    if (!task.scheduled_date && task.deadline_date === dayIsoKey) return true;
     return false;
   });
 }

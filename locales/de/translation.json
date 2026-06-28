@@ -1716,6 +1716,7 @@
       "tasksOnDay_other": "{{count}} Aufgaben",
       "taskChip": "Aufgabe: {{title}}, {{state}}{{priority}}{{progress}}{{assignee}}",
       "taskChipBy": "Aufgabe: {{title}}, fällig bis {{deadline}}, {{state}}{{priority}}{{progress}}{{assignee}}",
+      "taskChipDeadlineBadge": "bis {{deadline}}",
       "taskChipTimed": "Aufgabe: {{title}}, {{time}}, {{state}}{{priority}}{{progress}}{{assignee}}",
       "taskRescheduled": "Aufgabe „{{title}}“ auf {{date}} verschoben."
     },

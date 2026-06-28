@@ -74,9 +74,10 @@ describe('filterTasksOnDay', () => {
     expect(filterTasksOnDay(tasks, '2026-05-23')).toEqual([]);
   });
 
-  it('surfaces a scheduled+deadline task on BOTH its days', () => {
-    // Scheduled Wed, due Fri → a work chip on Wed and a due marker on
-    // Fri; nothing on the day in between.
+  it('surfaces a scheduled+deadline task ONLY on its scheduled day', () => {
+    // Scheduled Wed, due Fri → a single work chip on Wed (which announces
+    // the deadline). It does NOT also appear on the deadline day: the plan
+    // is its home, so the deadline-day duplicate is suppressed.
     const tasks: Task[] = [
       {
         ...baseTask,
@@ -89,9 +90,8 @@ describe('filterTasksOnDay', () => {
       'both',
     ]);
     expect(filterTasksOnDay(tasks, '2026-05-21')).toEqual([]);
-    expect(filterTasksOnDay(tasks, '2026-05-22').map((t) => t.id)).toEqual([
-      'both',
-    ]);
+    // Suppressed on the deadline day — it's already shown on the plan day.
+    expect(filterTasksOnDay(tasks, '2026-05-22')).toEqual([]);
   });
 
   it('surfaces a scheduled==deadline task once on that day', () => {

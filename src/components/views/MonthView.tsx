@@ -749,8 +749,21 @@ export function MonthView() {
                             sectionColorById,
                           );
                           const priorityGlyph = priorityMarker(task.priority);
+                          // Visible deadline badge on the SCHEDULED chip (a
+                          // deadline-only marker, `isBy`, already sits on its
+                          // own day).
+                          const deadlineBadge =
+                            !item.isBy && task.deadline_date
+                              ? fmt.format(
+                                  new Date(`${task.deadline_date}T00:00:00`),
+                                  'P',
+                                )
+                              : '';
+                          // The scheduled chip now announces its deadline too
+                          // (the deadline-day duplicate is suppressed), so use
+                          // the "fällig bis …" label whenever there's a deadline.
                           const aria = t(
-                            item.isBy
+                            task.deadline_date
                               ? 'views.week.taskChipBy'
                               : 'views.week.taskChip',
                             {
@@ -830,6 +843,16 @@ export function MonthView() {
                                   aria-hidden="true"
                                 >
                                   {priorityGlyph}
+                                </span>
+                              )}
+                              {deadlineBadge && (
+                                <span
+                                  className="month-task__deadline"
+                                  aria-hidden="true"
+                                >
+                                  {t('views.week.taskChipDeadlineBadge', {
+                                    deadline: deadlineBadge,
+                                  })}
                                 </span>
                               )}
                             </span>

@@ -493,7 +493,11 @@ export function CalendarDayList({
           ...common,
           time: fmtTime(buildTimeDate(key, time)),
         });
-      } else if (isDeadlineChip(task, key) && task.deadline_date) {
+      } else if (task.deadline_date) {
+        // Any untimed task with a deadline announces "fällig bis …": a pure
+        // deadline-only marker on its due day, OR a scheduled task carrying its
+        // deadline on its plan row (the deadline-day duplicate is suppressed in
+        // filterTasksOnDay, so the plan row is where the due date is spoken).
         label = t('views.week.taskChipBy', {
           ...common,
           deadline: fmtDateOnly(task.deadline_date),
@@ -594,11 +598,18 @@ export function CalendarDayList({
     // if timed here, else a "due"/"planned" marker for this day. (Task-level
     // describeDue would show the scheduled day on a deadline-day row.)
     const time = taskTimeOnDay(task, key);
-    const meta = time
+    let meta = time
       ? fmtTime(buildTimeDate(key, time))
       : isDeadlineChip(task, key)
         ? t('views.tasks.dueDeadline', { date: fmtDateOnly(key) })
         : t('views.tasks.dueScheduled', { date: fmtDateOnly(key) });
+    // A scheduled task now carries its deadline on its plan row (no separate
+    // deadline-day row), so surface the due date visibly alongside the meta.
+    if (!isDeadlineChip(task, key) && task.deadline_date) {
+      meta += ` · ${t('views.week.taskChipDeadlineBadge', {
+        deadline: fmtDateOnly(task.deadline_date),
+      })}`;
+    }
     return (
       <View
         key={`t-${task.id}@${key}`}
