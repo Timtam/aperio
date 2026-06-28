@@ -7894,6 +7894,80 @@ mod tests {
     }
 
     #[test]
+    fn a_stale_device_auto_resumes_without_a_prompt() {
+        // §19.10 regression: a device that fell behind the GC horizon must
+        // recover FULLY AUTOMATICALLY on its next round (re-pull the snapshot
+        // inline) — never surfacing "device offline too long" / a failed round,
+        // and never requiring a manual Fortfahren. We simulate the stale flag
+        // the compactor would have set, then assert B's next sync_now
+        // auto-resumes (Ok), leaves no stale latch, and still holds the data.
+        let remote = tempfile::tempdir().unwrap();
+        let cfg = format!(
+            r#"{{"kind":"local","path":{}}}"#,
+            serde_json::to_string(&remote.path().to_string_lossy()).unwrap()
+        );
+
+        let dir_a = tempfile::tempdir().unwrap();
+        let host_a = open_named(&dir_a, "a");
+        let dir_b = tempfile::tempdir().unwrap();
+        let host_b = open_named(&dir_b, "b");
+        host_a.configure_sync_adapter_json(cfg.clone()).unwrap();
+        host_b.configure_sync_adapter_json(cfg).unwrap();
+
+        let task = r#"{"title":"t","description":null,"status":"open","priority":"medium","scheduled_date":null,"scheduled_time":null,"deadline_date":null,"deadline_time":null,"recurrence":null,"parent_id":null,"color_label":null,"reminders":[],"sound":null}"#;
+        let list = host_a.create_task_list_json("Shared".to_string()).unwrap();
+        let list_id = serde_json::from_str::<serde_json::Value>(&list).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        host_a
+            .create_task_json(list_id.clone(), task.to_string())
+            .unwrap();
+        wait_for_pending(&dir_a);
+        host_a.sync_now_json("manual".to_string()).unwrap();
+        host_b.sync_now_json("manual".to_string()).unwrap();
+
+        // A compacts so a snapshot.json exists for the resume to pull.
+        host_a.compact_now_json().unwrap();
+
+        // Simulate the compactor flagging devices stale (B fell behind the GC
+        // horizon): set stale=true on every device entry in meta.json.
+        let meta_path = remote.path().join("meta.json");
+        let mut meta: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&meta_path).unwrap()).unwrap();
+        for (_id, dev) in meta["devices"].as_object_mut().unwrap() {
+            dev["stale"] = serde_json::Value::Bool(true);
+        }
+        std::fs::write(&meta_path, serde_json::to_vec(&meta).unwrap()).unwrap();
+
+        // B's next round must AUTO-RESUME — Ok, not StaleDevice.
+        let b_round = host_b.sync_now_json("manual".to_string());
+        assert!(
+            b_round.is_ok(),
+            "a stale device must auto-resume without a manual prompt; got {b_round:?}",
+        );
+        // No stale latch surfaced to the UI.
+        let status_b: serde_json::Value =
+            serde_json::from_str(&host_b.sync_status_json().unwrap()).unwrap();
+        assert_eq!(
+            status_b["stale_device_since"],
+            serde_json::Value::Null,
+            "auto-resume must leave no stale latch for the UI to prompt on",
+        );
+        // B still has the shared list (the snapshot re-pull preserved it).
+        let lists: serde_json::Value =
+            serde_json::from_str(&host_b.task_lists_json().unwrap()).unwrap();
+        assert!(
+            lists
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|l| l["id"] == serde_json::json!(list_id)),
+            "B must still have the shared list after auto-resume; got {lists}",
+        );
+    }
+
+    #[test]
     fn configured_local_target_is_restored_on_reopen() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir

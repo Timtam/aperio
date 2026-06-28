@@ -125,6 +125,21 @@ pub trait SyncRoundHooks: Send + Sync {
     async fn sync_sound_assets(&self, _adapter: &dyn SyncAdapter) -> SyncResult<()> {
         Ok(())
     }
+    /// §19.10 — recover a device that fell behind the GC horizon: re-pull the
+    /// current `snapshot.json`, apply it, replay this device's own pending logs
+    /// over it (preserving offline edits), and clear its `stale` flag in
+    /// `meta.json`. Invoked AUTOMATICALLY by the round the moment the device is
+    /// detected stale, so the user never has to confirm — the platform wraps
+    /// its onboarding service's `resume_from_stale`.
+    ///
+    /// The default errors: a platform that doesn't wire this up falls back to
+    /// the old behaviour (the round surfaces `StaleDevice` and the manual
+    /// resume dialog handles it).
+    async fn resume_from_stale(&self, _adapter: &dyn SyncAdapter) -> SyncResult<()> {
+        Err(SyncError::internal(
+            "auto-resume not supported on this platform",
+        ))
+    }
     /// Cache the device names announced in `meta.json` locally so a UI
     /// (the §20.8 Plugins panel's "Used on: <Name>") can render them
     /// without a round-trip. Best-effort; default no-op.
@@ -421,57 +436,59 @@ impl SyncOrchestrator {
             // platform hook owns the table; best-effort, errors swallowed.
             self.hooks.cache_device_names(&meta);
 
-            // §19.10 stale gate. The compactor marks devices
-            // whose `last_seen_log` predates the snapshot
-            // horizon; we surface that as `StaleDevice` so the
-            // frontend can pop the §19.10 resume dialog. The
-            // user clicks Fortfahren → `resume_stale_device`
-            // command clears the latch + re-pulls the snapshot.
-            if let Some(entry) = meta.devices.get(self.local_device_id.as_str()) {
-                if entry.stale {
-                    *self
-                        .stale_device_since
-                        .lock()
-                        .expect("stale_device_since mutex poison") = Some(meta.snapshot_timestamp);
-                    return Err(sync_core::SyncError::StaleDevice {
-                        snapshot_at: meta.snapshot_timestamp.to_rfc3339(),
-                    });
-                }
-            }
-
-            // §19.10 held-horizon backstop. The per-device `stale` flag
-            // above can miss: a behind device may be absent from
-            // `meta.devices` (the compactor can't flag what it can't see),
-            // or a concurrent compactor's last-write-wins meta push can
-            // clobber the flag. So independently gate on OUR OWN true held
-            // horizon — `max(foreign cursor, own newest log)` — against the
-            // dataset's GC high-water mark (`gc_horizon`). When our horizon
-            // is below it, the compactor has DELETED pre-snapshot logs we
-            // never consumed, so we resume via snapshot instead of silently
-            // skipping them.
+            // §19.10 stale detection + AUTO-RESUME. A device is stale when
+            // either the compactor flagged its `meta.devices[me].stale`, OR our
+            // own held-horizon backstop trips — `max(foreign cursor, own newest
+            // log)` below the dataset's GC high-water mark (`gc_horizon`),
+            // meaning the compactor DELETED pre-snapshot logs we never consumed.
             //
-            // Three things keep this precise:
-            //   - `gc_horizon`, not `snapshot_timestamp`: a device behind the
-            //     snapshot but at/above the GC mark still replays the RETAINED
-            //     logs, so flagging it would be a spurious resume. And a
-            //     never-GC'd dataset (`gc_horizon == None → MIN_UTC`) never
-            //     trips — which is what stops a fresh OR legacy single-device
-            //     dataset (real `snapshot_timestamp`, no `snapshot.json`) from
-            //     wedging in an endless resume loop.
-            //   - the HELD horizon, not the bare foreign cursor: a caught-up
-            //     device whose own logs are the newest in the dataset reaches
-            //     the mark via `own_newest`, even though its foreign cursor
-            //     structurally sits below it. Comparing the bare cursor was the
-            //     regression that sent healthy devices to the resume dialog
-            //     every round.
-            if snapshot_backstop_trips(self.held_horizon(), &meta) {
-                *self
-                    .stale_device_since
-                    .lock()
-                    .expect("stale_device_since mutex poison") = Some(meta.snapshot_timestamp);
-                return Err(sync_core::SyncError::StaleDevice {
-                    snapshot_at: meta.snapshot_timestamp.to_rfc3339(),
-                });
+            // Why two signals: the per-device flag can miss (we may be absent
+            // from `meta.devices`, or a concurrent compactor's last-write-wins
+            // meta push clobbers the flag), and the backstop keys on
+            // `gc_horizon` not `snapshot_timestamp` so a device merely behind
+            // the snapshot but still able to replay the RETAINED logs isn't
+            // flagged, and a never-GC'd dataset (`gc_horizon == None → MIN_UTC`)
+            // never trips (a fresh OR legacy single-device dataset can't wedge).
+            // The HELD horizon (not the bare foreign cursor) keeps a caught-up
+            // device whose own logs are the newest from being flagged.
+            //
+            // Rather than bail with `StaleDevice` and make the user click
+            // Fortfahren, we AUTO-RESUME inline: re-pull the snapshot, replay
+            // our own pending logs over it (offline edits preserved), clear the
+            // flag, then continue the round normally. The user never sees a
+            // "device offline too long" prompt. Only when the auto-resume
+            // FAILS (e.g. offline, or an unsupported platform) do we latch +
+            // surface `StaleDevice`, so the next round retries and the manual
+            // resume dialog stays as a fallback.
+            let flagged_stale = meta
+                .devices
+                .get(self.local_device_id.as_str())
+                .is_some_and(|entry| entry.stale);
+            if flagged_stale || snapshot_backstop_trips(self.held_horizon(), &meta) {
+                match self.hooks.resume_from_stale(adapter.as_ref()).await {
+                    Ok(()) => {
+                        info!("§19.10: device was stale; auto-resumed via snapshot re-pull");
+                        // Drop any prior latch — the resume cleared the flag,
+                        // advanced our cursor past `gc_horizon`, and pushed an
+                        // updated meta, so the rest of the round proceeds as a
+                        // caught-up device.
+                        self.clear_stale_device();
+                    }
+                    Err(err) => {
+                        warn!(
+                            ?err,
+                            "§19.10 auto-resume failed; surfacing StaleDevice for retry",
+                        );
+                        *self
+                            .stale_device_since
+                            .lock()
+                            .expect("stale_device_since mutex poison") =
+                            Some(meta.snapshot_timestamp);
+                        return Err(sync_core::SyncError::StaleDevice {
+                            snapshot_at: meta.snapshot_timestamp.to_rfc3339(),
+                        });
+                    }
+                }
             }
 
             // §19.7 encryption gate. The dataset is end-to-end encrypted but

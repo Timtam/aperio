@@ -52,6 +52,13 @@ impl SyncRoundHooks for DesktopSyncRoundHooks {
         self.onboarding.heartbeat_meta(adapter, last_seen_log).await
     }
 
+    async fn resume_from_stale(&self, adapter: &dyn SyncAdapter) -> SyncResult<()> {
+        // §19.10 auto-resume: re-pull the snapshot, replay our pending logs over
+        // it, and clear the stale flag. The report (rows applied etc.) isn't
+        // needed by the round — it just needs to know the recovery succeeded.
+        self.onboarding.resume_from_stale(adapter).await.map(|_| ())
+    }
+
     async fn sync_sound_assets(&self, adapter: &dyn SyncAdapter) -> SyncResult<()> {
         let report = crate::sound_assets::sync_assets(&self.db, &self.sounds_dir, adapter).await?;
         if report.pushed > 0 || report.fetched > 0 || report.missing_on_remote > 0 {
