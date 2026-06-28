@@ -2783,13 +2783,26 @@ button[aria-disabled='true'] {
 /* ── Week view ──────────────────────────────────────────────────────────── */
 
 .week-grid {
+  /* Pixels per hour in the timed grid — the whole day column is 24× this. */
+  --hour-px: 40px;
   display: flex;
   flex-direction: column;
   flex: 1;
   min-width: 0;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  overflow: hidden;
+  /* The 24h timed grid is tall, so the grid scrolls vertically; the day-name
+     header stays pinned (sticky) so columns stay identifiable while scrolling.
+     Keep x clipped (a non-visible y axis would otherwise compute x to auto and
+     a stray inset shadow could surface a spurious horizontal scrollbar). */
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.week-grid__head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 
 .week-grid__head,
@@ -2884,9 +2897,34 @@ button[aria-disabled='true'] {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  /* Proportional hour-grid: a 24h-tall positioned canvas. Timed chips are
+     absolutely placed (top/height by start + duration, side-by-side on
+     overlap); all-day chips stay clipped via `display: contents` on their
+     <li>. Faint hour gridlines via a repeating background so it reads as a
+     time grid. */
+  position: relative;
+  height: calc(24 * var(--hour-px, 40px));
+  background-image: repeating-linear-gradient(
+    to bottom,
+    var(--color-border) 0,
+    var(--color-border) 1px,
+    transparent 1px,
+    transparent var(--hour-px, 40px)
+  );
+}
+
+/* A positioned timed chip's <li>. Inline style sets top/height/left/width from
+   the layout algorithm; a min-height keeps a very short event legible (it
+   overflows its slot downward). The inner chip fills the slot. */
+.week-grid__slot {
+  min-height: 1.2em;
+  padding-right: 1px;
+  box-sizing: border-box;
+}
+.week-grid__slot > .week-event,
+.week-grid__slot > .week-task {
+  height: 100%;
+  overflow: hidden;
 }
 
 .week-event {

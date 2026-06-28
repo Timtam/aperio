@@ -67,6 +67,39 @@ import {
   deleteEventById,
   isCommandError,
 } from '../../api/client';
+import {
+  layoutDayColumn,
+  minutesFromMidnight,
+  MINUTES_PER_DAY,
+  type PositionedSpan,
+  type TimedSpan,
+} from '@aperio/shared';
+
+/** Local minutes-from-midnight span an event occupies on `day`, clamped to the
+ *  day so a multi-day event clips to [0, 1440]. */
+function eventSpanForDay(ev: CalendarEvent, day: Date): TimedSpan {
+  const base = new Date(day);
+  base.setHours(0, 0, 0, 0);
+  const baseMs = base.getTime();
+  const start = Math.round((new Date(ev.start).getTime() - baseMs) / 60000);
+  const end = Math.round((new Date(ev.end).getTime() - baseMs) / 60000);
+  return {
+    startMin: Math.max(0, Math.min(MINUTES_PER_DAY, start)),
+    endMin: Math.max(0, Math.min(MINUTES_PER_DAY, end)),
+  };
+}
+
+/** Absolute placement of a timed chip's `<li>` inside the day column's
+ *  24h-tall hour-grid (positioning is purely visual; DOM order is unchanged). */
+function slotStyle(p: PositionedSpan): React.CSSProperties {
+  return {
+    position: 'absolute',
+    top: `${p.topFraction * 100}%`,
+    height: `${p.heightFraction * 100}%`,
+    left: `${(p.columnIndex / p.columnCount) * 100}%`,
+    width: `${(1 / p.columnCount) * 100}%`,
+  };
+}
 
 /**
  * Week view — the workhorse calendar surface.
@@ -459,6 +492,18 @@ export function WeekView() {
     if (showLoading) announce(t('views.loading'));
   }, [showLoading, announce, t]);
 
+  // The timed grid is a 24h-tall internal scroll region now, and
+  // aria-activedescendant (unlike a real DOM .focus()) does NOT auto-scroll the
+  // active chip into view — so a chip on a scrolled-away hour would be off-screen
+  // for sighted / low-vision keyboard users. Scroll it into view whenever the
+  // active timed chip changes.
+  useEffect(() => {
+    if (eventIndex === null) return;
+    document
+      .getElementById(eventOptionId(focusIndex, eventIndex))
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [focusIndex, eventIndex, eventOptionId]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       // Tab / Shift+Tab walk through *all* events of the visible week
@@ -738,6 +783,38 @@ export function WeekView() {
               const merged = dayItemsByDay.get(dayKey);
               const timedItems = merged?.timed ?? [];
               const untimedTasks = merged?.untimed ?? [];
+              // Hour-grid placement: each non-all-day timed item gets an
+              // absolute slot (top/height by start+duration, side-by-side on
+              // overlap). All-day chips stay clipped in the lane (no slot).
+              // Keyed by the item's index so the chip map applies it; DOM order
+              // (and therefore SR/keyboard nav) is untouched.
+              const slotByIdx = new Map<number, PositionedSpan>();
+              {
+                const spans: TimedSpan[] = [];
+                const slotIdxs: number[] = [];
+                timedItems.forEach((item, idx) => {
+                  let s: TimedSpan | null = null;
+                  if (item.kind === 'event') {
+                    if (!item.event.all_day) s = eventSpanForDay(item.event, day);
+                  } else {
+                    // A timed task is a zero-duration point; an unparseable time
+                    // falls back to midnight so it ALWAYS gets a slot and never
+                    // flows static inside the positioned canvas (which would
+                    // corrupt the grid). All-day events are the only no-slot
+                    // items (they stay clipped in the lane).
+                    const m = minutesFromMidnight(
+                      taskTimeOnDay(item.task, dayKey) ?? '',
+                    );
+                    s = { startMin: m ?? 0, endMin: m ?? 0 };
+                  }
+                  if (s) {
+                    spans.push(s);
+                    slotIdxs.push(idx);
+                  }
+                });
+                const positions = layoutDayColumn(spans);
+                slotIdxs.forEach((idx, k) => slotByIdx.set(idx, positions[k]));
+              }
               // The timedItems array is the same one the Tab-navigation
               // buckets see, so `itemIdx` below matches the hook's
               // `eventIndex`. That keeps `aria-activedescendant`,
@@ -831,6 +908,7 @@ export function WeekView() {
                     {timedItems.map((item, itemIdx) => {
                       const isFocusedItem =
                         focused && eventIndex === itemIdx;
+                      const slot = slotByIdx.get(itemIdx);
                       if (item.kind === 'task') {
                         const task = item.task;
                         // Pull the effective time-of-day for this row
@@ -868,7 +946,11 @@ export function WeekView() {
                           <li
                             key={`task-${task.id}`}
                             role="listitem"
-                            className="week-grid__task-item"
+                            className={
+                              'week-grid__task-item' +
+                              (slot ? ' week-grid__slot' : '')
+                            }
+                            style={slot ? slotStyle(slot) : undefined}
                           >
                             <span
                               id={eventOptionId(i, itemIdx)}
@@ -965,7 +1047,17 @@ export function WeekView() {
                       const color = resolveEventColor(ev, calendarById, labelById);
                       const time = ev.all_day
                         ? t('views.allDay')
-                        : `${fmt.format(new Date(ev.start), 'p')}`;
+                        : fmt.format(new Date(ev.start), 'p');
+                      // The chip shows the start; the label speaks the full
+                      // start–end range so an SR user hears the DURATION (it
+                      // was start-only before — duration is the point of the
+                      // hour-grid).
+                      const timeAria = ev.all_day
+                        ? t('views.allDay')
+                        : `${fmt.format(new Date(ev.start), 'p')} – ${fmt.format(
+                            new Date(ev.end),
+                            'p',
+                          )}`;
                       const span = multiDayInfo(ev, day);
                       // Color label is purely visual — it's a visible
                       // accent strip on the chip, not extra information
@@ -973,7 +1065,7 @@ export function WeekView() {
                       // affiliation stays in the label.
                       const ariaBase = t('views.week.eventLabel', {
                         title: ev.title,
-                        time,
+                        time: timeAria,
                         calendar: cal?.name ?? '—',
                       });
                       const aria = span
@@ -990,7 +1082,12 @@ export function WeekView() {
                       // events. The bar's focused state is driven from
                       // here via `focusedEvId`.
                       return (
-                        <li key={ev.id} role="listitem">
+                        <li
+                          key={ev.id}
+                          role="listitem"
+                          className={slot ? 'week-grid__slot' : undefined}
+                          style={slot ? slotStyle(slot) : undefined}
+                        >
                           <span
                             id={eventOptionId(i, itemIdx)}
                             className={
