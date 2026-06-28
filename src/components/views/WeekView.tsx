@@ -1234,14 +1234,22 @@ function WeekDayTasks({
       aria-label={t('views.week.tasksOnDay', { count: tasks.length })}
     >
       {tasks.map((task, idx) => {
-        // "Due here" when the task lands on this day because of its
-        // deadline (not its scheduled day) — that chip is the deadline
-        // marker and reads "fällig bis …"; a scheduled chip stays a
-        // plain work chip even if the task also has a later deadline.
+        // `isBy` = the task is here as a pure deadline marker (a deadline-only
+        // task on its due day) — it keeps the hard-edge `--by` ring. A task
+        // with a scheduled day now shows ONLY on that day and announces its
+        // deadline there, so the "fällig bis …" label is used whenever the
+        // task carries a deadline.
         const isBy = isDeadlineChip(task, dayKey);
-        const labelKey = isBy
+        const hasDeadline = task.deadline_date != null;
+        const labelKey = hasDeadline
           ? 'views.week.taskChipBy'
           : 'views.week.taskChip';
+        // Visible deadline badge on the SCHEDULED chip (the deadline-only
+        // marker already sits on its own day, so it needs none).
+        const deadlineBadge =
+          !isBy && task.deadline_date
+            ? fmt.format(new Date(`${task.deadline_date}T00:00:00`), 'P')
+            : '';
         const color = resolveTaskColor(
           task,
           taskListById,
@@ -1324,6 +1332,13 @@ function WeekDayTasks({
                 {priorityGlyph && (
                   <span className="week-task__priority" aria-hidden="true">
                     {priorityGlyph}
+                  </span>
+                )}
+                {deadlineBadge && (
+                  <span className="week-task__deadline" aria-hidden="true">
+                    {t('views.week.taskChipDeadlineBadge', {
+                      deadline: deadlineBadge,
+                    })}
                   </span>
                 )}
               </span>

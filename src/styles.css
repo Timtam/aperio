@@ -3874,6 +3874,22 @@ button[aria-disabled='true'] {
   margin-left: var(--space-1);
 }
 
+/* Deadline badge on a SCHEDULED calendar chip ("bis 01.07."). A task with a
+ * scheduled day no longer gets its own marker on the deadline day, so its plan
+ * chip carries the due date instead. Small + secondary, following the chip's
+ * own text colour; the full "fällig bis …" date is in the chip's aria-label,
+ * so the badge itself is aria-hidden. */
+.day-task__deadline,
+.week-task__deadline,
+.month-task__deadline {
+  flex-shrink: 0;
+  margin-left: var(--space-1);
+  font-size: var(--font-size-xs);
+  color: inherit;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
 .task-list__assignees {
   /* Muted assignee pill, same restraint as the subtask-progress badge —
    * present at a glance without competing with the title. Clips long
