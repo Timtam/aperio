@@ -760,6 +760,7 @@ async fn reconcile_task_extension(
         task.recurrence.as_ref(),
         task.resurface_date,
         task.series_id.as_deref(),
+        task.effort,
     ) {
         Some(ext) => {
             ignore_not_found(state.delete_request(&ext_path).await)?;

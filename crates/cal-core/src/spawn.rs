@@ -52,6 +52,7 @@ pub fn completion_record_for(completed: &Task) -> NewTask {
         description: completed.description.clone(),
         status: TaskStatus::Completed,
         priority: completed.priority,
+        effort: completed.effort,
         scheduled_date: completed.scheduled_date,
         scheduled_time: completed.scheduled_time,
         deadline_date: completed.deadline_date,
@@ -167,9 +168,9 @@ fn next_backlog_instance(
 }
 
 /// Shared constructor for a spawned instance: inherits the template's
-/// content (title, description, priority, section, color, reminders, sound,
-/// recurrence rule and `series_id`), resets completion state, and takes the
-/// caller's date placement. Times survive only alongside their date.
+/// content (title, description, priority, effort, section, color, reminders,
+/// sound, recurrence rule and `series_id`), resets completion state, and takes
+/// the caller's date placement. Times survive only alongside their date.
 fn instance_skeleton(
     template: &Task,
     rule: &TaskRecurrence,
@@ -183,6 +184,7 @@ fn instance_skeleton(
         description: template.description.clone(),
         status: TaskStatus::Open,
         priority: template.priority,
+        effort: template.effort,
         scheduled_date,
         scheduled_time: scheduled_date.and(template.scheduled_time),
         deadline_date,
@@ -285,7 +287,7 @@ fn last_day_of_month(year: i32, month: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::TaskPriority;
+    use crate::{TaskEffort, TaskPriority};
     use chrono::{TimeZone, Utc};
 
     /// Spawn the next instance anchoring on the template's recorded completion
@@ -304,6 +306,7 @@ mod tests {
             description: None,
             status: TaskStatus::Completed,
             priority: TaskPriority::Medium,
+            effort: TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,

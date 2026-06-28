@@ -309,6 +309,13 @@ pub struct Task {
     pub description: Option<String>,
     pub status: TaskStatus,
     pub priority: TaskPriority,
+    /// Aperio-only "effort" estimate (small/medium/large), modelled exactly
+    /// like `priority`. No external provider has a native effort field, so on
+    /// an external list it rides the AperioExtras bag (`extras.rs`); on a local
+    /// list it's an ordinary column. `#[serde(default)]` so task JSON synced
+    /// before this field existed still deserializes (→ `Medium`).
+    #[serde(default)]
+    pub effort: TaskEffort,
 
     // Scheduling
     //
@@ -369,6 +376,9 @@ pub struct NewTask {
     pub description: Option<String>,
     pub status: TaskStatus,
     pub priority: TaskPriority,
+    /// See `Task::effort`. `#[serde(default)]` → `Medium` when absent.
+    #[serde(default)]
+    pub effort: TaskEffort,
     pub scheduled_date: Option<NaiveDate>,
     pub scheduled_time: Option<NaiveTime>,
     pub deadline_date: Option<NaiveDate>,
@@ -408,6 +418,18 @@ pub enum TaskPriority {
     Low,
     Medium,
     High,
+}
+
+/// Aperio-only effort estimate, modelled exactly like `TaskPriority` (three
+/// levels). `Default` is `Medium` — the neutral middle — so `#[serde(default)]`
+/// fields and task JSON synced before this field existed resolve to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskEffort {
+    Small,
+    #[default]
+    Medium,
+    Large,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -289,8 +289,15 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
     let mut recurrence = None;
     let mut resurface_date = None;
     let mut series_id = None;
+    let mut effort = cal_core::TaskEffort::default();
     if let Some(extras) = &extras {
-        cal_core::apply_task_extras(extras, &mut recurrence, &mut resurface_date, &mut series_id);
+        cal_core::apply_task_extras(
+            extras,
+            &mut recurrence,
+            &mut resurface_date,
+            &mut series_id,
+            &mut effort,
+        );
     }
 
     Task {
@@ -304,6 +311,10 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         // round-trips through the local UI don't show every task as
         // "low priority".
         priority: TaskPriority::Medium,
+        // Unlike priority, effort survives the round-trip via the
+        // extras block in `notes`, so carry the value read from the
+        // bag rather than defaulting.
+        effort,
         // Google has ONE date slot. By DESIGN.md §9.7 it maps to
         // scheduled_date on read; deadline_date stays empty. On
         // write the inverse fallback kicks in if the user only set
@@ -339,8 +350,9 @@ fn google_notes(
     recurrence: Option<&TaskRecurrence>,
     resurface_date: Option<NaiveDate>,
     series_id: Option<&str>,
+    effort: cal_core::TaskEffort,
 ) -> Option<String> {
-    let extras = cal_core::extras_for_task(recurrence, resurface_date, series_id);
+    let extras = cal_core::extras_for_task(recurrence, resurface_date, series_id, effort);
     cal_core::extras::embed(notes, &extras).filter(|s| !s.is_empty())
 }
 
@@ -377,6 +389,7 @@ fn new_task_to_body(new: &NewTask) -> TaskEntry {
             new.recurrence.as_ref(),
             new.resurface_date,
             new.series_id.as_deref(),
+            new.effort,
         ),
         status: Some(task_status_to_google(new.status).to_string()),
         due,
@@ -415,6 +428,7 @@ fn task_to_body(task: &Task) -> TaskEntry {
             task.recurrence.as_ref(),
             task.resurface_date,
             task.series_id.as_deref(),
+            task.effort,
         ),
         status: Some(task_status_to_google(task.status).to_string()),
         due,
@@ -607,6 +621,7 @@ mod tests {
             description: Some("Q2 client".into()),
             status: TaskStatus::Open,
             priority: TaskPriority::High,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()),
             scheduled_time: None,
             deadline_date: None,

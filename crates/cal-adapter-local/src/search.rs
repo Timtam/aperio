@@ -189,7 +189,7 @@ impl LocalAdapter {
                         t.status, t.priority, t.scheduled_date, t.scheduled_time,
                         t.deadline_date, t.deadline_time, t.recurrence, t.color_label_id,
                         t.reminders, t.sound, t.created_at, t.updated_at, t.completed_at,
-                        t.etag, t.section_id, t.resurface_date, t.series_id
+                        t.etag, t.section_id, t.resurface_date, t.series_id, t.effort
                    FROM tasks_fts f
                    JOIN tasks t ON t.id = f.id
                   WHERE tasks_fts MATCH ?{where_extra}
@@ -261,7 +261,8 @@ mod tests {
     use super::*;
     use crate::test_support::open_test_db;
     use cal_core::{
-        CalendarFeature, ContainerColor, NewEvent, NewTask, TaskPriority, TaskStatus, TasksFeature,
+        CalendarFeature, ContainerColor, NewEvent, NewTask, TaskEffort, TaskPriority, TaskStatus,
+        TasksFeature,
     };
     use chrono::{Duration, Utc};
 
@@ -301,6 +302,7 @@ mod tests {
             description: None,
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
+            effort: TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,

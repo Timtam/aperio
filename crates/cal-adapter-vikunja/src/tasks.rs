@@ -1149,8 +1149,15 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
     let mut recurrence = recurrence_from_vikunja(entry.repeat_after, entry.repeat_mode);
     let mut resurface_date = None;
     let mut series_id = None;
+    let mut effort = cal_core::TaskEffort::default();
     if let Some(extras) = &extras {
-        cal_core::apply_task_extras(extras, &mut recurrence, &mut resurface_date, &mut series_id);
+        cal_core::apply_task_extras(
+            extras,
+            &mut recurrence,
+            &mut resurface_date,
+            &mut series_id,
+            &mut effort,
+        );
     }
 
     Task {
@@ -1166,6 +1173,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         description: clean_description.filter(|s| !s.is_empty()),
         status,
         priority,
+        effort,
         scheduled_date: scheduled.map(|dt| dt.date_naive()),
         scheduled_time: scheduled.map(|dt| dt.time()).filter(non_midnight),
         deadline_date: deadline.map(|dt| dt.date_naive()),
@@ -1203,9 +1211,10 @@ fn vikunja_body_extras(
     recurrence: Option<&TaskRecurrence>,
     resurface_date: Option<NaiveDate>,
     series_id: Option<&str>,
+    effort: cal_core::TaskEffort,
     op: &str,
 ) -> (Option<String>, i64, i32) {
-    let extras = cal_core::extras_for_task(recurrence, resurface_date, series_id);
+    let extras = cal_core::extras_for_task(recurrence, resurface_date, series_id, effort);
     let description = cal_core::extras::embed(description, &extras).filter(|s| !s.is_empty());
     let native = recurrence.filter(|r| !cal_core::recurrence_needs_extras(r));
     let (repeat_after, repeat_mode) = recurrence_body(native, op);
@@ -1218,6 +1227,7 @@ fn new_task_to_body(new: &NewTask) -> TaskEntry {
         new.recurrence.as_ref(),
         new.resurface_date,
         new.series_id.as_deref(),
+        new.effort,
         "create",
     );
     if !new.reminders.is_empty() {
@@ -1275,6 +1285,7 @@ fn task_to_body(task: &Task) -> TaskEntry {
         task.recurrence.as_ref(),
         task.resurface_date,
         task.series_id.as_deref(),
+        task.effort,
         "update",
     );
     if !task.reminders.is_empty() {
@@ -1747,6 +1758,7 @@ mod tests {
             description: Some("Bakery".into()),
             status: TaskStatus::Open,
             priority: TaskPriority::High,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()),
             scheduled_time: Some(NaiveTime::from_hms_opt(8, 0, 0).unwrap()),
             deadline_date: Some(NaiveDate::from_ymd_opt(2026, 5, 23).unwrap()),
@@ -2207,6 +2219,7 @@ mod tests {
             description: None,
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,
@@ -2532,6 +2545,7 @@ mod tests {
             description: None,
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
+            effort: cal_core::TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,

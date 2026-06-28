@@ -79,6 +79,7 @@ fn task(id: &str) -> Task {
         description: None,
         status: TaskStatus::Open,
         priority: TaskPriority::Medium,
+        effort: cal_core::TaskEffort::Medium,
         scheduled_date: None,
         scheduled_time: None,
         deadline_date: None,

@@ -22,7 +22,7 @@ use base64::Engine;
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
-use crate::{RecurrenceAnchor, RecurrencePlacement, TaskRecurrence};
+use crate::{RecurrenceAnchor, RecurrencePlacement, TaskEffort, TaskRecurrence};
 
 /// Current on-wire format version — the payload line is `aperio:<v>:<b64>`.
 const FORMAT_VERSION: u32 = 1;
@@ -204,12 +204,15 @@ pub fn recurrence_needs_extras(rec: &TaskRecurrence) -> bool {
 /// Build the Aperio-Extras bag for a task: exactly the fields an external
 /// provider can't represent natively. `resurface_date` and `series_id` ride
 /// whenever set; the full `recurrence` rides only when it has a non-native
-/// aspect (so a plain scheduled rule stays in the provider's own field). An
-/// empty bag means "nothing to carry" — the caller writes no block.
+/// aspect (so a plain scheduled rule stays in the provider's own field);
+/// `effort` rides only when it differs from the neutral default (no provider
+/// has an effort field, so it would otherwise be lost on round-trip). An empty
+/// bag means "nothing to carry" — the caller writes no block.
 pub fn extras_for_task(
     recurrence: Option<&TaskRecurrence>,
     resurface_date: Option<NaiveDate>,
     series_id: Option<&str>,
+    effort: TaskEffort,
 ) -> AperioExtras {
     let mut extras = AperioExtras::new();
     if let Some(date) = resurface_date {
@@ -228,6 +231,13 @@ pub fn extras_for_task(
             }
         }
     }
+    // Effort has no native home on any provider — carry it only when it differs
+    // from the neutral default (Medium), so the common case writes no block.
+    if effort != TaskEffort::default() {
+        if let Ok(value) = serde_json::to_value(effort) {
+            extras.insert("effort", value);
+        }
+    }
     extras
 }
 
@@ -240,6 +250,7 @@ pub fn apply_task_extras(
     recurrence: &mut Option<TaskRecurrence>,
     resurface_date: &mut Option<NaiveDate>,
     series_id: &mut Option<String>,
+    effort: &mut TaskEffort,
 ) {
     if let Some(raw) = extras.get("resurface_date").and_then(|v| v.as_str()) {
         if let Ok(date) = raw.parse::<NaiveDate>() {
@@ -252,6 +263,11 @@ pub fn apply_task_extras(
     if let Some(value) = extras.get("recurrence") {
         if let Ok(rec) = serde_json::from_value::<TaskRecurrence>(value.clone()) {
             *recurrence = Some(rec);
+        }
+    }
+    if let Some(value) = extras.get("effort") {
+        if let Ok(e) = serde_json::from_value::<TaskEffort>(value.clone()) {
+            *effort = e;
         }
     }
 }
@@ -372,8 +388,9 @@ mod tests {
             None,
         );
         assert!(!recurrence_needs_extras(&plain));
-        // …so the bag carries nothing from it.
-        let bag = extras_for_task(Some(&plain), None, None);
+        // …so the bag carries nothing from it (and default-Medium effort
+        // writes no key either).
+        let bag = extras_for_task(Some(&plain), None, None, TaskEffort::Medium);
         assert!(bag.is_empty());
     }
 
@@ -389,6 +406,7 @@ mod tests {
             Some(&backlog),
             Some(NaiveDate::from_ymd_opt(2026, 10, 1).unwrap()),
             Some("series-7"),
+            TaskEffort::Medium,
         );
         assert_eq!(
             bag.get("resurface_date").and_then(|v| v.as_str()),
@@ -399,6 +417,14 @@ mod tests {
             Some("series-7")
         );
         assert!(bag.get("recurrence").is_some());
+        // Default-Medium effort writes no key.
+        assert!(bag.get("effort").is_none());
+    }
+
+    #[test]
+    fn non_default_effort_rides_the_bag() {
+        let bag = extras_for_task(None, None, None, TaskEffort::Large);
+        assert_eq!(bag.get("effort").and_then(|v| v.as_str()), Some("large"));
     }
 
     #[test]
@@ -412,6 +438,7 @@ mod tests {
             Some(&backlog),
             Some(NaiveDate::from_ymd_opt(2026, 4, 1).unwrap()),
             Some("series-9"),
+            TaskEffort::Large,
         );
         let stored = embed(Some("Swap shoes"), &bag).unwrap();
 
@@ -421,15 +448,18 @@ mod tests {
         let mut recurrence = None;
         let mut resurface = None;
         let mut series = None;
+        let mut effort = TaskEffort::Medium;
         apply_task_extras(
             &extracted.unwrap(),
             &mut recurrence,
             &mut resurface,
             &mut series,
+            &mut effort,
         );
         assert_eq!(recurrence, Some(backlog));
         assert_eq!(resurface, NaiveDate::from_ymd_opt(2026, 4, 1));
         assert_eq!(series.as_deref(), Some("series-9"));
+        assert_eq!(effort, TaskEffort::Large);
     }
 
     #[test]
@@ -451,14 +481,17 @@ mod tests {
         let mut recurrence = None;
         let mut resurface = None;
         let mut series = Some("keep-me".to_string());
+        let mut effort = TaskEffort::Small;
         apply_task_extras(
             &AperioExtras::new(),
             &mut recurrence,
             &mut resurface,
             &mut series,
+            &mut effort,
         );
         assert!(recurrence.is_none());
         assert!(resurface.is_none());
         assert_eq!(series.as_deref(), Some("keep-me"));
+        assert_eq!(effort, TaskEffort::Small);
     }
 }
