@@ -106,8 +106,10 @@ export function QuickAddTaskDialog({
     openTaskDialog(null, {
       listId: listId || undefined,
       defaultDate: date || undefined,
+      // Carry the in-progress title over so it isn't lost on the hand-off.
+      defaultTitle: title || undefined,
     });
-  }, [onClose, openTaskDialog, listId, date]);
+  }, [onClose, openTaskDialog, listId, date, title]);
 
   const writableLists = taskLists.filter((l) => !l.read_only);
 

@@ -45,6 +45,7 @@ export function DialogHost() {
           task={mode.task}
           defaultListId={mode.listId}
           defaultDate={mode.defaultDate}
+          defaultTitle={mode.defaultTitle}
         />
       );
     case 'quickAdd':

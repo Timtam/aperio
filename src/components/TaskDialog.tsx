@@ -90,6 +90,9 @@ export interface TaskDialogProps {
   defaultListId?: string;
   /** ISO date used to pre-fill scheduled_date when creating. */
   defaultDate?: string;
+  /** Pre-fill the title when creating — carries the in-progress title over
+   *  from the quick-add dialog's "more details" hand-off. */
+  defaultTitle?: string;
 }
 
 
@@ -125,6 +128,7 @@ export function TaskDialog({
   task,
   defaultListId,
   defaultDate,
+  defaultTitle,
 }: TaskDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
@@ -195,8 +199,8 @@ export function TaskDialog({
     }
   }, [subtasks.length, focusedSubtaskIdx]);
   const initialState = useMemo<FormState>(
-    () => buildInitialState(task, defaultListId, defaultDate, taskLists),
-    [task, defaultListId, defaultDate, taskLists],
+    () => buildInitialState(task, defaultListId, defaultDate, defaultTitle, taskLists),
+    [task, defaultListId, defaultDate, defaultTitle, taskLists],
   );
 
   const [form, setForm] = useState<FormState>(initialState);
@@ -1610,6 +1614,7 @@ function buildInitialState(
   task: Task | null,
   defaultListId: string | undefined,
   defaultDate: string | undefined,
+  defaultTitle: string | undefined,
   taskLists: { id: string; read_only: boolean }[],
 ): FormState {
   if (task) {
@@ -1652,7 +1657,7 @@ function buildInitialState(
     taskLists[0]?.id ??
     '';
   return {
-    title: '',
+    title: defaultTitle ?? '',
     listId: fallbackList,
     sectionId: '',
     status: 'open',

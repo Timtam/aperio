@@ -50,6 +50,9 @@ export type DialogMode =
       task: Task | null;
       listId?: string;
       defaultDate?: string;
+      /** Pre-fill the title when creating — used by quick-add → "more
+       *  details" so the in-progress title isn't lost on the hand-off. */
+      defaultTitle?: string;
     }
   | { kind: 'quickAdd' }
   | { kind: 'quickAddTask' }
@@ -95,6 +98,8 @@ export interface OpenEventOptions {
 export interface OpenTaskOptions {
   listId?: string;
   defaultDate?: string;
+  /** Pre-fill the title when creating a new task (quick-add hand-off). */
+  defaultTitle?: string;
 }
 
 export interface OpenContactOptions {
@@ -267,6 +272,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
         task,
         listId: options?.listId,
         defaultDate: options?.defaultDate,
+        defaultTitle: options?.defaultTitle,
       });
     },
     [push],
