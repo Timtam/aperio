@@ -2250,19 +2250,15 @@ button[aria-disabled='true'] {
 }
 
 /* GRID-mode untimed-task BAND. The cell is a flex column holding the timed
-   hour-canvas (`.week-grid__events`) then this task <ul>; `order: -1` lifts
-   the band visually ABOVE the canvas so it sits as a compact lane between the
-   all-day lane (a sibling row above the cells) and the 24h grid — without
-   touching the DOM order, so the chips keep their exact option ids, indices,
-   handlers and Tab nav (only CSS moves them).
-
-   `margin-top: 0` cancels the bottom-pin. The chips compact into a tight
-   horizontal flex-wrap of small bars (like the all-day lane), so the band
-   stays shallow and the timed canvas keeps the rest of the column. Scoped to
-   grid mode via the `--grid` modifier (added in JSX gated on `!listMode`), so
-   list mode is byte-for-byte unchanged. */
+   hour-canvas (`.week-grid__events`) then this task <ul>; the band sits in its
+   natural flow position RIGHT BELOW the 24h canvas (per Toni: the untimed-task
+   band stays under the grid, not above it), just restyled as a compact bar.
+   `margin-top: 0` drops the default bottom-pin so it sits right under the
+   canvas, and the chips compact into a tight horizontal flex-wrap of small bars
+   (like the all-day lane). Reading/Tab order is unchanged: timed events first,
+   then the tasks. Scoped to grid mode via the `--grid` modifier (added in JSX
+   gated on `!listMode`), so list mode is byte-for-byte unchanged. */
 .week-grid__tasks--grid {
-  order: -1;
   margin-top: 0;
   margin-bottom: var(--space-1);
   flex-direction: row;
@@ -2296,15 +2292,15 @@ button[aria-disabled='true'] {
 
 /* GRID-mode untimed-task BAND — the compact bar above the hour-grid (rendered
    right under the all-day band in DayView, GRID mode only). Mirrors
-   `.day-grid__allday`: no top border/separator, a small bottom margin so it
-   sits above the grid, and a horizontal flex-wrap of compact chips instead of
-   the full-width column the LIST-mode `.day-tasks` section uses. The chips are
-   the same `.day-task` buttons + handlers — only the container layout + chip
-   sizing change, so a sighted user finds untimed work at the top of the day. */
+   `.day-grid__allday` but BELOW the grid (per Toni: the task band stays under
+   the grid): a top separator + margin so it reads as a footer band, and a
+   horizontal flex-wrap of compact chips instead of the full-width column the
+   LIST-mode `.day-tasks` section uses. The chips are the same `.day-task`
+   buttons + handlers — only the container layout + chip sizing change. */
 .day-tasks--band {
-  padding: 0;
-  border-top: 0;
-  margin: 0 0 var(--space-2);
+  padding: var(--space-2) 0 0;
+  border-top: 1px solid var(--color-border);
+  margin: var(--space-2) 0 0;
 }
 .day-tasks--band .day-tasks__list {
   /* Horizontal flex-wrap (like the all-day band) instead of the vertical

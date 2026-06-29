@@ -515,31 +515,6 @@ export function DayView() {
         </div>
       )}
 
-      {/* §9.4 untimed tasks — GRID mode places them in a compact band ABOVE
-          the hour-grid (right under the all-day band), styled like
-          .day-grid__allday, so a sighted user doesn't have to scroll the whole
-          24h canvas to find them. The chips are byte-for-byte the same buttons
-          (and handlers) as the LIST-mode section below — they are plain
-          Tab-order buttons, NOT part of the listbox aria-activedescendant nav.
-          LIST mode keeps the section below the list (see further down). */}
-      {!listMode && untimedTasks.length > 0 && (
-        <DayUntimedTasks
-          variant="band"
-          tasks={untimedTasks}
-          dayKey={dayKey}
-          allTasks={tasks}
-          fmt={fmt}
-          t={t}
-          taskListById={taskListById}
-          labelById={labelById}
-          sectionColorById={sectionColorById}
-          visualEffortSizing={visualEffortSizing}
-          onToggle={toggleTaskStatus}
-          onOpen={openTaskDialog}
-          onContextMenu={openTaskMenu}
-        />
-      )}
-
       <div className={'day-grid' + (listMode ? ' day-grid--flow' : '')}>
         {/* Hour ruler — the hour numbers, read off the grid instead of the
             chips. aria-hidden; the time stays in each option's accessible
@@ -834,18 +809,18 @@ export function DayView() {
         </ul>
       </div>
 
-      {/* §9.4 untimed tasks — LIST mode keeps them in the dedicated section
-          BELOW the listbox (unchanged pre-grid placement). GRID mode renders
-          the identical chips in the compact band above the hour-grid instead
-          (see above), so only one of the two surfaces is present per mode. The
-          chips are natural-Tab-order buttons either way (NOT listbox options).
-          Tasks with a concrete deadline_time were already interleaved with
-          events in the listbox above (sorted by time), so only scheduled-only
-          tasks and By-window intermediate days surface here. Click / Enter /
-          Space opens the TaskDialog; status toggles via the marker / Space. */}
-      {listMode && untimedTasks.length > 0 && (
+      {/* §9.4 untimed tasks — always BELOW the grid (per Toni: the task band
+          stays under the grid, not above it). GRID mode styles them as a compact
+          band (`variant="band"`), LIST mode as the pre-grid full-width section.
+          The chips are natural-Tab-order buttons either way (NOT listbox
+          options), so the reading order is events first, then tasks. Tasks with a
+          concrete deadline_time were already interleaved with events in the
+          listbox above (sorted by time), so only scheduled-only tasks and
+          By-window intermediate days surface here. Click / Enter / Space opens
+          the TaskDialog; status toggles via the marker / Space. */}
+      {untimedTasks.length > 0 && (
         <DayUntimedTasks
-          variant="section"
+          variant={listMode ? 'section' : 'band'}
           tasks={untimedTasks}
           dayKey={dayKey}
           allTasks={tasks}
