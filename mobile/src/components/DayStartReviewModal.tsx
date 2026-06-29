@@ -16,19 +16,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   actionableDescendants,
+  buildReminderGroups,
   filterCarriedOver,
-  filterDeadlineArrived,
-  filterDeadlineCountdown,
   filterOverdue,
-  filterUntimedToday,
   priorityMarker,
   prioritySuffix,
+  reminderCount,
   todayIsoKey,
 } from '@aperio/shared';
 import type { Task } from '@aperio/shared';
 
 import { deleteTask as apiDeleteTask, updateTask } from '../api/client';
-import { navigateRoot } from '../navigation/navigationRef';
+import { navigateNested } from '../navigation/navigationRef';
 import { snoozeDayStartReview } from '../state/dayStartSnooze';
 import {
   effectiveForList,
@@ -132,70 +131,83 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
 
   // ── Read-only reminder groups ───────────────────────────────────────────────
   // Gated by the same Settings toggles the checker uses (read off the loaded
-  // behaviour). Informational: the rows open the task editor but never mutate
-  // state from the modal, so they sit outside the resolved/snooze bookkeeping.
-  const reminderUntimed = useMemo(
-    () => (beh.remindUntimedToday ? filterUntimedToday(tasks, meFor) : []),
-    [beh.remindUntimedToday, tasks, meFor],
-  );
-  const reminderDueToday = useMemo(
-    () => (beh.remindDeadlineArrived ? filterDeadlineArrived(tasks, meFor) : []),
-    [beh.remindDeadlineArrived, tasks, meFor],
-  );
-  const reminderCountdown = useMemo(
+  // behaviour). Built via the SHARED `buildReminderGroups` so the rendered rows
+  // are de-duplicated EXACTLY like the checker's count (a task lands in one
+  // group only: due-today > planned-today > countdown). Informational: the rows
+  // open the task editor but never mutate state from the modal, so they sit
+  // outside the resolved/snooze bookkeeping.
+  const reminders = useMemo(
     () =>
-      beh.remindDeadlineCountdown
-        ? filterDeadlineCountdown(tasks, beh.deadlineCountdownDays, meFor)
-        : [],
-    [beh.remindDeadlineCountdown, beh.deadlineCountdownDays, tasks, meFor],
+      buildReminderGroups(
+        tasks,
+        {
+          remindUntimedToday: beh.remindUntimedToday,
+          remindDeadlineArrived: beh.remindDeadlineArrived,
+          remindDeadlineCountdown: beh.remindDeadlineCountdown,
+          deadlineCountdownDays: beh.deadlineCountdownDays,
+        },
+        meFor,
+      ),
+    [
+      tasks,
+      beh.remindUntimedToday,
+      beh.remindDeadlineArrived,
+      beh.remindDeadlineCountdown,
+      beh.deadlineCountdownDays,
+      meFor,
+    ],
   );
-  const hasReminders =
-    reminderUntimed.length + reminderDueToday.length + reminderCountdown.length > 0;
+  const hasReminders = reminderCount(reminders) > 0;
 
   // Render-ready reminder groups: each task set paired with its count-aware
   // summary line and the per-row "why" suffix for the row's accessible label.
-  // Empty groups are filtered out at render time.
-  const reminderGroups = useMemo(
-    () => [
+  // The countdown grammar takes a `{lead}` phrase ("in N days"), so both the
+  // summary and the per-row "why" interpolate it. Empty groups are filtered out
+  // at render time.
+  const reminderGroups = useMemo(() => {
+    const lead = t('dialogs.dayStartReview.reminders.inDays', {
+      count: beh.deadlineCountdownDays,
+    });
+    return [
       {
         key: 'untimed',
-        tasks: reminderUntimed,
+        tasks: reminders.untimed,
         summary: t('dialogs.dayStartReview.reminders.untimedToday', {
-          count: reminderUntimed.length,
+          count: reminders.untimed.length,
         }),
         why: t('dialogs.dayStartReview.reminders.whyUntimed'),
       },
       {
         key: 'dueToday',
-        tasks: reminderDueToday,
+        tasks: reminders.dueToday,
         summary: t('dialogs.dayStartReview.reminders.deadlineArrived', {
-          count: reminderDueToday.length,
+          count: reminders.dueToday.length,
         }),
         why: t('dialogs.dayStartReview.reminders.whyDeadlineToday'),
       },
       {
         key: 'countdown',
-        tasks: reminderCountdown,
+        tasks: reminders.countdown,
         summary: t('dialogs.dayStartReview.reminders.countdown', {
-          count: reminderCountdown.length,
-          days: beh.deadlineCountdownDays,
+          count: reminders.countdown.length,
+          lead,
         }),
-        why: t('dialogs.dayStartReview.reminders.whyCountdown', {
-          days: beh.deadlineCountdownDays,
-        }),
+        why: t('dialogs.dayStartReview.reminders.whyCountdown', { lead }),
       },
-    ],
-    [reminderUntimed, reminderDueToday, reminderCountdown, beh.deadlineCountdownDays, t],
-  );
+    ];
+  }, [reminders, beh.deadlineCountdownDays, t]);
 
   // Open a reminder task in the editor: close the review first (it overlays the
   // navigator as an RN Modal, so the editor would otherwise mount behind it),
   // then navigate via the app-level container ref — this modal renders OUTSIDE
-  // any navigator, so it has no `useNavigation` context of its own.
+  // any navigator, so it has no `useNavigation` context of its own. Target the
+  // Tasks tab's stack EXPLICITLY (it registers TaskEditor): a bare-name navigate
+  // from the root is unhandled when the focused tab's stack has no TaskEditor
+  // (e.g. the Contacts tab), so the row would be a dead button there.
   const openTaskEditor = useCallback(
     (task: Task) => {
       onClose();
-      navigateRoot('TaskEditor', { taskId: task.id, listId: task.list_id });
+      navigateNested('TasksTab', 'TaskEditor', { taskId: task.id, listId: task.list_id });
     },
     [onClose],
   );

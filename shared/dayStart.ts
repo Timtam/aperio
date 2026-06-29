@@ -216,6 +216,60 @@ export function filterDeadlineCountdown(
   });
 }
 
+/** The four Settings → Tasks reminder knobs (synced). */
+export interface ReminderSettings {
+  remindUntimedToday: boolean;
+  remindDeadlineArrived: boolean;
+  remindDeadlineCountdown: boolean;
+  deadlineCountdownDays: number;
+}
+
+/** The three reminder groups, DE-DUPLICATED by task id. */
+export interface ReminderGroups {
+  /** Scheduled today, untimed (and not already due-today). */
+  untimed: Task[];
+  /** Deadline is today. */
+  dueToday: Task[];
+  /** Deadline exactly `deadlineCountdownDays` out (and not already in another group). */
+  countdown: Task[];
+}
+
+/**
+ * Build the three reminder groups for the day-start fire, each gated by its
+ * toggle and DE-DUPLICATED so a task surfaces in exactly ONE group (and is
+ * counted once). Priority: due-today > planned-today > countdown — a task the
+ * deadline-pin just pinned to today (so it satisfies BOTH `filterDeadlineArrived`
+ * and `filterUntimedToday`) reads as "due today", and a task already planned for
+ * today isn't also nagged about its future deadline. Both the checker (count +
+ * notification + announcement) and the dialog (rendered rows) call this, so the
+ * spoken count, the OS notification, and the visible rows always agree.
+ */
+export function buildReminderGroups(
+  tasks: Task[],
+  settings: ReminderSettings,
+  meFor?: (listId: string) => TaskUser | null,
+): ReminderGroups {
+  const dueToday = settings.remindDeadlineArrived
+    ? filterDeadlineArrived(tasks, meFor)
+    : [];
+  const seen = new Set(dueToday.map((t) => t.id));
+  const untimed = (
+    settings.remindUntimedToday ? filterUntimedToday(tasks, meFor) : []
+  ).filter((t) => !seen.has(t.id));
+  untimed.forEach((t) => seen.add(t.id));
+  const countdown = (
+    settings.remindDeadlineCountdown
+      ? filterDeadlineCountdown(tasks, settings.deadlineCountdownDays, meFor)
+      : []
+  ).filter((t) => !seen.has(t.id));
+  return { untimed, dueToday, countdown };
+}
+
+/** Total de-duplicated reminder count across the three groups. */
+export function reminderCount(groups: ReminderGroups): number {
+  return groups.untimed.length + groups.dueToday.length + groups.countdown.length;
+}
+
 /** The Settings → Tasks day-start-trigger pref: `'app-start'` or an `HH:MM`. */
 export type DayStartTrigger = string;
 

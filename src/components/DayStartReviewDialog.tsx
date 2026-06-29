@@ -2,11 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
-import {
-  filterDeadlineArrived,
-  filterDeadlineCountdown,
-  filterUntimedToday,
-} from '@aperio/shared';
+import { buildReminderGroups } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import type { Task } from '../api/types';
@@ -119,27 +115,40 @@ export function DayStartReviewDialog({
   // Read-only reminder groups, gated by the same Settings toggles the
   // checker uses. Informational: the rows open the task editor but
   // never mutate state from the dialog, so they're outside the
-  // resolved/snooze bookkeeping below.
-  const reminderUntimed = useMemo(
-    () => (remindUntimedToday ? filterUntimedToday(tasks, meFor) : []),
-    [remindUntimedToday, tasks, meFor],
-  );
-  const reminderDueToday = useMemo(
-    () => (remindDeadlineArrived ? filterDeadlineArrived(tasks, meFor) : []),
-    [remindDeadlineArrived, tasks, meFor],
-  );
-  const reminderCountdown = useMemo(
+  // resolved/snooze bookkeeping below. The SHARED `buildReminderGroups`
+  // de-duplicates by task id (a deadline-pinned task surfaces in exactly
+  // one group), so the rows here match the checker's spoken count and OS
+  // notification exactly — no task appears in two sections.
+  const groups = useMemo(
     () =>
-      remindDeadlineCountdown
-        ? filterDeadlineCountdown(tasks, deadlineCountdownDays, meFor)
-        : [],
-    [remindDeadlineCountdown, tasks, deadlineCountdownDays, meFor],
+      buildReminderGroups(
+        tasks,
+        {
+          remindUntimedToday,
+          remindDeadlineArrived,
+          remindDeadlineCountdown,
+          deadlineCountdownDays,
+        },
+        meFor,
+      ),
+    [
+      tasks,
+      remindUntimedToday,
+      remindDeadlineArrived,
+      remindDeadlineCountdown,
+      deadlineCountdownDays,
+      meFor,
+    ],
   );
   const hasReminders =
-    reminderUntimed.length +
-      reminderDueToday.length +
-      reminderCountdown.length >
+    groups.untimed.length + groups.dueToday.length + groups.countdown.length >
     0;
+
+  // The day-out lead phrase ("in 3 days") used by both the countdown
+  // summary and the per-row "why" suffix.
+  const countdownLead = t('dialogs.dayStartReview.reminders.inDays', {
+    count: deadlineCountdownDays,
+  });
 
   // Render-ready reminder groups: the summary line (count-aware) + a
   // per-row "why" suffix for each task's button label, paired with the
@@ -148,39 +157,33 @@ export function DayStartReviewDialog({
     () => [
       {
         key: 'untimed',
-        tasks: reminderUntimed,
+        tasks: groups.untimed,
         summary: t('dialogs.dayStartReview.reminders.untimedToday', {
-          count: reminderUntimed.length,
+          count: groups.untimed.length,
         }),
         why: t('dialogs.dayStartReview.reminders.whyUntimed'),
       },
       {
         key: 'dueToday',
-        tasks: reminderDueToday,
+        tasks: groups.dueToday,
         summary: t('dialogs.dayStartReview.reminders.deadlineArrived', {
-          count: reminderDueToday.length,
+          count: groups.dueToday.length,
         }),
         why: t('dialogs.dayStartReview.reminders.whyDeadlineToday'),
       },
       {
         key: 'countdown',
-        tasks: reminderCountdown,
+        tasks: groups.countdown,
         summary: t('dialogs.dayStartReview.reminders.countdown', {
-          count: reminderCountdown.length,
-          days: deadlineCountdownDays,
+          count: groups.countdown.length,
+          lead: countdownLead,
         }),
         why: t('dialogs.dayStartReview.reminders.whyCountdown', {
-          days: deadlineCountdownDays,
+          lead: countdownLead,
         }),
       },
     ],
-    [
-      reminderUntimed,
-      reminderDueToday,
-      reminderCountdown,
-      deadlineCountdownDays,
-      t,
-    ],
+    [groups, countdownLead, t],
   );
 
   const [busy, setBusy] = useState(false);
@@ -657,10 +660,11 @@ export function DayStartReviewDialog({
                 <p className="day-start-review__reminder-summary">
                   {group.summary}
                 </p>
-                <ul
-                  className="missed-tasks__list"
-                  aria-label={group.summary}
-                >
+                {/* No aria-label here — the preceding <p> already names
+                    the group, so labelling the <ul> too would read the
+                    summary twice. */}
+                <ul className="missed-tasks__list">
+
                   {group.tasks.map((task) => (
                     <li key={task.id} className="missed-tasks__row">
                       <button

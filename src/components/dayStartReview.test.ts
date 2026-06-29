@@ -9,12 +9,21 @@ import {
   snoozeDayStartReview,
 } from './dayStartReview';
 import {
+  buildReminderGroups,
   filterDeadlineArrived,
   filterDeadlineCountdown,
   filterDeadlinePinTargets,
   filterUntimedToday,
   hasActionableDescendants,
+  reminderCount,
 } from '@aperio/shared';
+
+const allRemindersOn = {
+  remindUntimedToday: true,
+  remindDeadlineArrived: true,
+  remindDeadlineCountdown: true,
+  deadlineCountdownDays: 3,
+};
 
 const baseTask: Task = {
   id: 't1',
@@ -602,5 +611,58 @@ describe('filterDeadlineCountdown', () => {
     expect(filterDeadlineCountdown(tasks, 0)).toEqual([]);
     expect(filterDeadlineCountdown(tasks, -3)).toEqual([]);
     expect(filterDeadlineCountdown(tasks, Number.NaN)).toEqual([]);
+  });
+});
+
+describe('buildReminderGroups (de-dup, today = 2026-05-20)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 4, 20, 12, 0, 0));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('a task due today AND scheduled today (untimed) surfaces only as due-today', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'both', deadline_date: '2026-05-20', scheduled_date: '2026-05-20' },
+    ];
+    const g = buildReminderGroups(tasks, allRemindersOn);
+    expect(g.dueToday.map((t) => t.id)).toEqual(['both']);
+    expect(g.untimed).toEqual([]);
+    expect(reminderCount(g)).toBe(1); // counted once, not twice
+  });
+
+  it('a task planned today (untimed) with a future countdown deadline surfaces only as planned', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'plan', scheduled_date: '2026-05-20', deadline_date: '2026-05-23' },
+    ];
+    const g = buildReminderGroups(tasks, allRemindersOn);
+    expect(g.untimed.map((t) => t.id)).toEqual(['plan']);
+    expect(g.countdown).toEqual([]);
+    expect(reminderCount(g)).toBe(1);
+  });
+
+  it('keeps three distinct tasks in their three groups', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'u', scheduled_date: '2026-05-20' },
+      { ...baseTask, id: 'd', deadline_date: '2026-05-20' },
+      { ...baseTask, id: 'c', deadline_date: '2026-05-23' },
+    ];
+    const g = buildReminderGroups(tasks, allRemindersOn);
+    expect(g.untimed.map((t) => t.id)).toEqual(['u']);
+    expect(g.dueToday.map((t) => t.id)).toEqual(['d']);
+    expect(g.countdown.map((t) => t.id)).toEqual(['c']);
+    expect(reminderCount(g)).toBe(3);
+  });
+
+  it('respects the per-group toggles', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'u', scheduled_date: '2026-05-20' },
+      { ...baseTask, id: 'd', deadline_date: '2026-05-20' },
+    ];
+    const g = buildReminderGroups(tasks, { ...allRemindersOn, remindUntimedToday: false });
+    expect(g.untimed).toEqual([]);
+    expect(g.dueToday.map((t) => t.id)).toEqual(['d']);
   });
 });

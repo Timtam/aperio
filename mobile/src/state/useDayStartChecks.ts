@@ -3,12 +3,11 @@ import { AccessibilityInfo, AppState } from 'react-native';
 
 import {
   actionableDescendants,
+  buildReminderGroups,
   filterCarriedOver,
-  filterDeadlineArrived,
-  filterDeadlineCountdown,
   filterDeadlinePinTargets,
   filterOverdue,
-  filterUntimedToday,
+  reminderCount,
   shouldFireToday,
   todayIsoKey,
 } from '@aperio/shared';
@@ -143,7 +142,10 @@ async function runDayStartReview(
   const fired = await readFiredDayKey('dayStartReview');
   if (!shouldFireToday(behaviour.dayStartTrigger, fired, todayKey)) return;
   // Snooze respects the user's "remind me later" choice. Do NOT mark fired —
-  // the next eligible tick should run the gate once the snooze expires.
+  // the next eligible tick should run the gate once the snooze expires. NB: this
+  // bail also defers the day's TASK REMINDERS (announcement + notification +
+  // modal) — they're computed below this gate, so a snooze suppresses them too,
+  // and they re-surface together with the review once the snooze expires.
   if (await isDayStartReviewSnoozed()) return;
   if (selectedIds.length === 0) {
     // Nothing in scope; still record the fire so we don't keep re-checking.
@@ -161,41 +163,59 @@ async function runDayStartReview(
   // ── Day-start TASK REMINDERS ────────────────────────────────────────────
   // Three read-only nudges, each gated by its own toggle, sharing this same
   // 'dayStartReview' fire-marker so they surface once a day with the review.
-  // Each non-empty set gets a polite live announcement and contributes to a
-  // single summarising OS notification; the modal also opens when reminders
-  // are the ONLY thing to show (see the `reminderTotal` term in the open
-  // decision below). The predicates already skip settled tasks, project
-  // parents, and other-user tasks (via `meFor`).
-  const untimed = behaviour.remindUntimedToday ? filterUntimedToday(all, meFor) : [];
-  const dueToday = behaviour.remindDeadlineArrived ? filterDeadlineArrived(all, meFor) : [];
-  const countdown = behaviour.remindDeadlineCountdown
-    ? filterDeadlineCountdown(all, behaviour.deadlineCountdownDays, meFor)
-    : [];
-  const reminderTotal = untimed.length + dueToday.length + countdown.length;
+  // Built via the SHARED `buildReminderGroups` so a task lands in exactly ONE
+  // group (due-today > planned-today > countdown) and the spoken count, the OS
+  // notification, and the modal's rendered rows all agree. The predicates skip
+  // settled tasks, project parents, and other-user tasks (via `meFor`).
+  const reminders = buildReminderGroups(
+    all,
+    {
+      remindUntimedToday: behaviour.remindUntimedToday,
+      remindDeadlineArrived: behaviour.remindDeadlineArrived,
+      remindDeadlineCountdown: behaviour.remindDeadlineCountdown,
+      deadlineCountdownDays: behaviour.deadlineCountdownDays,
+    },
+    meFor,
+  );
+  const reminderTotal = reminderCount(reminders);
 
-  if (untimed.length > 0) {
-    AccessibilityInfo.announceForAccessibility(
-      i18n.t('dialogs.dayStartReview.reminders.untimedToday', { count: untimed.length }),
-    );
-  }
-  if (dueToday.length > 0) {
-    AccessibilityInfo.announceForAccessibility(
-      i18n.t('dialogs.dayStartReview.reminders.deadlineArrived', { count: dueToday.length }),
-    );
-  }
-  if (countdown.length > 0) {
-    AccessibilityInfo.announceForAccessibility(
-      i18n.t('dialogs.dayStartReview.reminders.countdown', {
-        count: countdown.length,
-        days: behaviour.deadlineCountdownDays,
+  // Coalesce the per-group lines into ONE polite live announcement: three
+  // back-to-back `announceForAccessibility` calls would each interrupt the
+  // previous, so a screen-reader user would only ever hear the last group.
+  // Joined with ". " they read as a single utterance.
+  const reminderParts: string[] = [];
+  if (reminders.untimed.length > 0) {
+    reminderParts.push(
+      i18n.t('dialogs.dayStartReview.reminders.untimedToday', {
+        count: reminders.untimed.length,
       }),
     );
   }
+  if (reminders.dueToday.length > 0) {
+    reminderParts.push(
+      i18n.t('dialogs.dayStartReview.reminders.deadlineArrived', {
+        count: reminders.dueToday.length,
+      }),
+    );
+  }
+  if (reminders.countdown.length > 0) {
+    reminderParts.push(
+      i18n.t('dialogs.dayStartReview.reminders.countdown', {
+        count: reminders.countdown.length,
+        lead: i18n.t('dialogs.dayStartReview.reminders.inDays', {
+          count: behaviour.deadlineCountdownDays,
+        }),
+      }),
+    );
+  }
+  if (reminderParts.length > 0) {
+    AccessibilityInfo.announceForAccessibility(reminderParts.join('. '));
+  }
   if (reminderTotal > 0) {
     // One combined OS notification for the "you're not looking at Aperio"
-    // reach. The live announcements above already carry the per-group detail
-    // for assistive tech; this is the secondary channel and is suppressed
-    // silently if permission isn't granted.
+    // reach. The single live announcement above already carries the per-group
+    // detail for assistive tech; this is the secondary channel and is
+    // suppressed silently if permission isn't granted.
     void notify(
       i18n.t('dialogs.dayStartReview.reminders.notificationTitle'),
       i18n.t('dialogs.dayStartReview.reminders.notificationBody', { count: reminderTotal }),

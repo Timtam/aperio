@@ -2,11 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
-import {
-  filterDeadlineArrived,
-  filterDeadlineCountdown,
-  filterUntimedToday,
-} from '@aperio/shared';
+import { buildReminderGroups, reminderCount } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import type { Task } from '../api/types';
@@ -108,6 +104,10 @@ export function DayStartReviewChecker() {
     // Snooze respects the user's "Später erinnern" choice. Do NOT
     // mark fired — when the snooze expires, the next tick should
     // run the gate properly.
+    // Coupling note: snoozing the review also defers the day's
+    // reminders — bailing here skips the announce + OS notification
+    // below too, so a snoozed user gets the reminders when the gate
+    // re-runs after the snooze, not a separate nag. Intentional.
     if (isDayStartReviewSnoozed()) return;
     // Wait until the connected-user identity is resolved for every list, so the
     // review never proposes (or silently carries over) a colleague's task — that
@@ -132,45 +132,57 @@ export function DayStartReviewChecker() {
     // ── Day-start TASK REMINDERS ──────────────────────────────────────
     // Three read-only nudges, each gated by its own toggle, sharing the
     // same 'dayStartReview' fire-marker so they surface once a day with
-    // the review. Each non-empty set gets a polite live announcement and
-    // contributes to a single summarising OS notification; the dialog
-    // also opens when reminders are the ONLY thing to show (see the
-    // `reminderTotal` term in the open decisions below). The predicates
+    // the review. The groups are DE-DUPLICATED (a deadline-pinned task is
+    // counted/announced ONCE) by the shared `buildReminderGroups`, the
+    // same helper the dialog renders from — so the spoken count, the OS
+    // notification, and the visible rows always agree. The predicates
     // already skip settled tasks, project parents, and other-user tasks.
-    const untimed = remindUntimedToday ? filterUntimedToday(tasks, meFor) : [];
-    const dueToday = remindDeadlineArrived
-      ? filterDeadlineArrived(tasks, meFor)
-      : [];
-    const countdown = remindDeadlineCountdown
-      ? filterDeadlineCountdown(tasks, deadlineCountdownDays, meFor)
-      : [];
-    const reminderTotal = untimed.length + dueToday.length + countdown.length;
+    const reminderGroups = buildReminderGroups(
+      tasks,
+      {
+        remindUntimedToday,
+        remindDeadlineArrived,
+        remindDeadlineCountdown,
+        deadlineCountdownDays,
+      },
+      meFor,
+    );
+    const reminderTotal = reminderCount(reminderGroups);
 
-    if (untimed.length > 0) {
-      announce(
+    // The live region is a SINGLE polite channel — three sequential
+    // announce() calls would clobber each other, leaving only the last
+    // spoken. Coalesce every non-empty group summary into ONE utterance.
+    const reminderParts: string[] = [];
+    if (reminderGroups.untimed.length > 0) {
+      reminderParts.push(
         t('dialogs.dayStartReview.reminders.untimedToday', {
-          count: untimed.length,
+          count: reminderGroups.untimed.length,
         }),
       );
     }
-    if (dueToday.length > 0) {
-      announce(
+    if (reminderGroups.dueToday.length > 0) {
+      reminderParts.push(
         t('dialogs.dayStartReview.reminders.deadlineArrived', {
-          count: dueToday.length,
+          count: reminderGroups.dueToday.length,
         }),
       );
     }
-    if (countdown.length > 0) {
-      announce(
+    if (reminderGroups.countdown.length > 0) {
+      reminderParts.push(
         t('dialogs.dayStartReview.reminders.countdown', {
-          count: countdown.length,
-          days: deadlineCountdownDays,
+          count: reminderGroups.countdown.length,
+          lead: t('dialogs.dayStartReview.reminders.inDays', {
+            count: deadlineCountdownDays,
+          }),
         }),
       );
+    }
+    if (reminderParts.length > 0) {
+      announce(reminderParts.join('. '), 'polite');
     }
     if (reminderTotal > 0) {
       // One combined OS notification for the "you're not looking at
-      // Aperio" reach. The live announcements above already carry the
+      // Aperio" reach. The live announcement above already carries the
       // per-group detail for assistive tech; this is the secondary
       // channel and is suppressed silently if permission isn't granted.
       void notify(
