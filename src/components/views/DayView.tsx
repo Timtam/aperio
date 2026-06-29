@@ -57,6 +57,7 @@ import {
 } from '../../api/client';
 import type { CalendarEvent } from '../../api/types';
 import {
+  eventBlockFactor,
   layoutDayColumn,
   minutesFromMidnight,
   MINUTES_PER_DAY,
@@ -118,7 +119,14 @@ export function DayView() {
   const range = useMemo(() => visibleRange('day', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
   const { tasks, taskListById } = useTasks();
-  const { visualEffortSizing } = useTaskCascadeEnabled();
+  const { visualEffortSizing, dayViewMode } = useTaskCascadeEnabled();
+  // Compact-list layout vs the proportional hour-grid. In list mode the timed
+  // listbox is normal vertical flow (no positioned 24h canvas), the ruler +
+  // all-day band are not rendered, and each option carries an inline min-height
+  // (events by duration, tasks by effort) instead of a slot. The a11y model —
+  // role=listbox/option, ids, aria-activedescendant, keyboard, labels — is
+  // byte-for-byte identical to grid mode.
+  const listMode = dayViewMode === 'list';
   const currentUserByList = useCurrentUserByList(tasks);
   // Hide tasks assigned to a concrete OTHER user from MY calendar (mine +
   // unassigned stay) — the day-start review's ownership filter (DESIGN §9.7).
@@ -466,7 +474,7 @@ export function DayView() {
       {/* All-day events sit above the hour-grid (they have no hour position).
           Decorative: each event also stays a clipped option in the listbox
           below, so SR/keyboard navigation reaches it on every day it covers. */}
-      {allDayEvents.length > 0 && (
+      {!listMode && allDayEvents.length > 0 && (
         <div className="day-grid__allday" aria-hidden="true">
           {allDayEvents.map((ev) => {
             const color = resolveEventColor(ev, calendarById, labelById);
@@ -490,24 +498,27 @@ export function DayView() {
         </div>
       )}
 
-      <div className="day-grid">
+      <div className={'day-grid' + (listMode ? ' day-grid--flow' : '')}>
         {/* Hour ruler — the hour numbers, read off the grid instead of the
             chips. aria-hidden; the time stays in each option's accessible
             label. The scale is 24h tall, top-aligned with the canvas so the
-            numbers line up with the gridlines. */}
-        <div className="day-grid__ruler" aria-hidden="true">
-          <div className="day-grid__ruler-scale">
-            {Array.from({ length: 24 }, (_, h) => (
-              <span
-                key={h}
-                className="day-grid__ruler-hour"
-                style={{ top: `${(h / 24) * 100}%` }}
-              >
-                {String(h).padStart(2, '0')}
-              </span>
-            ))}
+            numbers line up with the gridlines. Grid mode only — the compact
+            list reads the time off each option's label, not a ruler. */}
+        {!listMode && (
+          <div className="day-grid__ruler" aria-hidden="true">
+            <div className="day-grid__ruler-scale">
+              {Array.from({ length: 24 }, (_, h) => (
+                <span
+                  key={h}
+                  className="day-grid__ruler-hour"
+                  style={{ top: `${(h / 24) * 100}%` }}
+                >
+                  {String(h).padStart(2, '0')}
+                </span>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
         <ul
           ref={listRef}
           role="listbox"
@@ -517,7 +528,7 @@ export function DayView() {
             timedItems.length > 0 ? itemId(focusIndex) : undefined
           }
           onKeyDown={handleKeyDown}
-          className="day-list"
+          className={'day-list' + (listMode ? ' day-list--flow' : '')}
         >
         {timedItems.length === 0 ? (
           <li role="presentation" className="day-list__empty">
@@ -528,8 +539,11 @@ export function DayView() {
             const focused = i === focusIndex;
             // Absolute slot inside the 24h canvas (every timed item has one —
             // see slotByIdx). Positioning is purely visual; the <li> keeps its
-            // option role, id, aria-selected and DOM position unchanged.
-            const slot = slotByIdx.get(i);
+            // option role, id, aria-selected and DOM position unchanged. In
+            // list mode there's no canvas — the option flows normally and gets
+            // an inline min-height instead (events by duration, tasks by
+            // effort), so suppress the slot here.
+            const slot = listMode ? undefined : slotByIdx.get(i);
             if (item.kind === 'task') {
               const task = item.task;
               // Pull the effective time-of-day via the shared helper;
@@ -658,6 +672,15 @@ export function DayView() {
                   total: span.totalDays,
                 })
               : ariaBase;
+            // In LIST mode a timed event gets a duration-scaled min-height via
+            // eventBlockFactor; an all-day event renders as a plain row (no
+            // clip, no min-height). In grid mode this stays unused (the slot
+            // drives geometry).
+            const evSpan =
+              listMode && !ev.all_day ? eventSpanForDay(ev, anchor) : null;
+            const listMinHeight = evSpan
+              ? `${eventBlockFactor(evSpan.endMin - evSpan.startMin) * 2.4}em`
+              : undefined;
             return (
               <li
                 key={ev.id}
@@ -669,18 +692,21 @@ export function DayView() {
                   'day-list__item' +
                   (focused ? ' day-list__item--focused' : '') +
                   (span ? ' day-list__item--multiday' : '') +
-                  // Timed → absolute slot in the canvas. All-day → no slot, so
-                  // clip the <li> (it stays a navigable option; the sighted
-                  // view is the .day-grid__allday band above) instead of letting
-                  // it flow static and collide with the 00:00 chips.
+                  // Timed → absolute slot in the canvas. All-day in GRID mode →
+                  // no slot, so clip the <li> (it stays a navigable option; the
+                  // sighted view is the .day-grid__allday band above) instead of
+                  // letting it flow static and collide with the 00:00 chips. In
+                  // LIST mode there's no band, so the all-day option stays a
+                  // plain visible row (no clip).
                   (slot
                     ? ' day-list__slot'
-                    : ev.all_day
+                    : ev.all_day && !listMode
                       ? ' day-list__item--allday'
                       : '')
                 }
                 style={{
                   ...(slot ? slotStyle(slot) : {}),
+                  ...(listMinHeight ? { minHeight: listMinHeight } : {}),
                   ...(color.hex
                     ? ({ '--event-color': color.hex } as React.CSSProperties)
                     : {}),

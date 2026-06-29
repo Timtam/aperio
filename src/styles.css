@@ -2916,6 +2916,27 @@ button[aria-disabled='true'] {
   );
 }
 
+/* Compact-list layout (calendar.dayViewMode === 'list'). The all-day lane +
+   hour ruler are not rendered in this mode (the JSX gates them), so the head +
+   body drop the leading ruler/corner column and become plain 7-day grids that
+   stay column-aligned. */
+.week-grid__head--flow,
+.week-grid__body--flow {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+/* The per-day events <ul> drops the positioned 24h canvas and becomes a normal
+   vertical flow: reset position/height/gridline-background, stack chips with a
+   small gap. Each chip's own inline min-height (events by duration, tasks by
+   effort) drives its block size. */
+.week-grid__events--flow {
+  position: static;
+  height: auto;
+  background-image: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
 /* A positioned timed chip's <li>. Inline style sets top/height/left/width from
    the layout algorithm; a min-height keeps a very short event legible (it
    overflows its slot downward). The inner chip fills the slot. */
@@ -3415,6 +3436,28 @@ button[aria-disabled='true'] {
     transparent 1px,
     transparent var(--hour-px, 40px)
   );
+}
+
+/* Compact-list layout (calendar.dayViewMode === 'list'). The hour ruler +
+   all-day band are gated off in the JSX, so the day-grid is just the list
+   column; the list drops the positioned 24h canvas and becomes a normal
+   vertical flow. Each option's own inline min-height (events by duration, tasks
+   by effort via the day-task--effort-* classes) drives its block size. */
+.day-grid--flow {
+  /* No fixed inner scroll region — the list grows with its content and the
+     page-level scroll takes over. */
+  overflow-y: visible;
+}
+.day-list--flow {
+  position: static;
+  height: auto;
+  background-image: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  /* Restore a little vertical breathing room the canvas mode removed (the
+     positioned slots set their own padding). */
+  padding: var(--space-2);
 }
 
 .day-list__empty {

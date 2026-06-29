@@ -134,3 +134,30 @@ export function minutesFromMidnight(time: string): number | null {
   if (hh > 23 || mm > 59) return null;
   return hh * 60 + mm;
 }
+
+// ── Compact list view ───────────────────────────────────────────────────────
+// The lighter alternative to the hour-grid: a chronological LIST where each
+// event block's size still reflects its DURATION (a long meeting reads as a
+// bigger block than a short one) — but BOUNDED, so an all-afternoon event
+// doesn't dwarf the rest. This returns a unitless size FACTOR; each platform
+// multiplies it by its own base unit (em on desktop CSS, px in React Native)
+// so the SHAPE of the curve lives in one tested place while the absolute scale
+// stays platform-native. Tasks in the list view are sized by EFFORT instead
+// (they have no duration), via the existing effort-size classes/styles.
+
+/** Extra size per hour of duration, in base units (a 1h event is 1.5× base). */
+const LIST_BLOCK_PER_HOUR = 0.5;
+/** Hard cap so a very long event stays bounded (≈ a 5h+ event). */
+const LIST_BLOCK_MAX_FACTOR = 3.5;
+
+/**
+ * Size factor (≥ 1) for a list-view event block, bounded and proportional to
+ * its duration in minutes. A zero/negative/NaN duration (or a point) returns 1
+ * (the base size). The factor grows linearly with duration and clamps at
+ * LIST_BLOCK_MAX_FACTOR. Multiply by a platform base unit to get a min-height.
+ */
+export function eventBlockFactor(durationMin: number): number {
+  if (!Number.isFinite(durationMin) || durationMin <= 0) return 1;
+  const factor = 1 + (durationMin / 60) * LIST_BLOCK_PER_HOUR;
+  return Math.min(factor, LIST_BLOCK_MAX_FACTOR);
+}

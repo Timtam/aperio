@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  eventBlockFactor,
   layoutDayColumn,
   minutesFromMidnight,
   MINUTES_PER_DAY,
@@ -104,5 +105,32 @@ describe('minutesFromMidnight', () => {
     expect(minutesFromMidnight('24:00')).toBeNull();
     expect(minutesFromMidnight('9')).toBeNull();
     expect(minutesFromMidnight('foo')).toBeNull();
+  });
+});
+
+describe('eventBlockFactor', () => {
+  it('returns the base factor (1) for zero/negative/NaN durations', () => {
+    expect(eventBlockFactor(0)).toBe(1);
+    expect(eventBlockFactor(-30)).toBe(1);
+    expect(eventBlockFactor(Number.NaN)).toBe(1);
+    expect(eventBlockFactor(Number.POSITIVE_INFINITY)).toBe(1);
+  });
+
+  it('grows linearly with duration (0.5 base unit per hour)', () => {
+    expect(eventBlockFactor(60)).toBeCloseTo(1.5);
+    expect(eventBlockFactor(30)).toBeCloseTo(1.25);
+    expect(eventBlockFactor(120)).toBeCloseTo(2);
+    expect(eventBlockFactor(240)).toBeCloseTo(3);
+  });
+
+  it('is monotonic non-decreasing', () => {
+    expect(eventBlockFactor(30)).toBeLessThan(eventBlockFactor(90));
+    expect(eventBlockFactor(90)).toBeLessThan(eventBlockFactor(180));
+  });
+
+  it('clamps at the max factor so a very long event stays bounded', () => {
+    expect(eventBlockFactor(300)).toBeCloseTo(3.5);
+    expect(eventBlockFactor(600)).toBe(3.5);
+    expect(eventBlockFactor(MINUTES_PER_DAY)).toBe(3.5);
   });
 });

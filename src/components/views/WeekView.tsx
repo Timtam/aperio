@@ -68,6 +68,7 @@ import {
   isCommandError,
 } from '../../api/client';
 import {
+  eventBlockFactor,
   layoutDayColumn,
   minutesFromMidnight,
   MINUTES_PER_DAY,
@@ -145,7 +146,14 @@ export function WeekView() {
   );
   const { events, calendarById, loading } = useEvents(range);
   const { tasks, taskListById } = useTasks();
-  const { visualEffortSizing } = useTaskCascadeEnabled();
+  const { visualEffortSizing, dayViewMode } = useTaskCascadeEnabled();
+  // Compact-list layout vs the proportional hour-grid. In list mode the
+  // per-day <ul> is normal vertical flow (no positioned 24h canvas), the
+  // ruler + all-day lane are not rendered, and each chip carries an inline
+  // min-height (events by duration, tasks by effort) instead of a slot. The
+  // a11y model — roles, ids, aria-activedescendant, keyboard, labels — is
+  // byte-for-byte identical to grid mode.
+  const listMode = dayViewMode === 'list';
   const currentUserByList = useCurrentUserByList(tasks);
   // Hide tasks assigned to a concrete OTHER user from MY calendar (mine +
   // unassigned stay) — the day-start review's ownership filter (DESIGN §9.7).
@@ -689,10 +697,18 @@ export function WeekView() {
           onKeyDown={handleKeyDown}
           className="week-grid"
         >
-          <div role="row" className="week-grid__head">
+          <div
+            role="row"
+            className={
+              'week-grid__head' + (listMode ? ' week-grid__head--flow' : '')
+            }
+          >
             {/* Corner above the hour ruler (decorative — keeps the 7 day
-                headers aligned over their columns). */}
-            <div className="week-grid__corner" aria-hidden="true" />
+                headers aligned over their columns). List mode has no ruler, so
+                the corner is dropped and the head is a plain 7-day grid. */}
+            {!listMode && (
+              <div className="week-grid__corner" aria-hidden="true" />
+            )}
             {days.map((day) => (
               <div
                 key={day.toISOString()}
@@ -706,7 +722,7 @@ export function WeekView() {
             ))}
           </div>
 
-          {allDayBars.length > 0 && (
+          {!listMode && allDayBars.length > 0 && (
             <div
               className="week-grid__lane"
               aria-hidden="true"
@@ -781,24 +797,32 @@ export function WeekView() {
             </div>
           )}
 
-          <div role="row" className="week-grid__body">
+          <div
+            role="row"
+            className={
+              'week-grid__body' + (listMode ? ' week-grid__body--flow' : '')
+            }
+          >
             {/* Hour ruler — the hour numbers, read off the grid instead of the
                 chips. aria-hidden; the time is in each chip's accessible label.
                 The scale is 24h tall, top-aligned with each cell's events area
-                so the numbers line up with the gridlines. */}
-            <div className="week-grid__ruler" aria-hidden="true">
-              <div className="week-grid__ruler-scale">
-                {Array.from({ length: 24 }, (_, h) => (
-                  <span
-                    key={h}
-                    className="week-grid__ruler-hour"
-                    style={{ top: `${(h / 24) * 100}%` }}
-                  >
-                    {String(h).padStart(2, '0')}
-                  </span>
-                ))}
+                so the numbers line up with the gridlines. Grid mode only — the
+                compact list reads the time off each chip's label, not a ruler. */}
+            {!listMode && (
+              <div className="week-grid__ruler" aria-hidden="true">
+                <div className="week-grid__ruler-scale">
+                  {Array.from({ length: 24 }, (_, h) => (
+                    <span
+                      key={h}
+                      className="week-grid__ruler-hour"
+                      style={{ top: `${(h / 24) * 100}%` }}
+                    >
+                      {String(h).padStart(2, '0')}
+                    </span>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
             {days.map((day, i) => {
               const dayKey = keyOf(day);
               const merged = dayItemsByDay.get(dayKey);
@@ -925,11 +949,20 @@ export function WeekView() {
                     if (dropped) handleEventDayDrop(dropped, dayKey);
                   }}
                 >
-                  <ul role="list" className="week-grid__events">
+                  <ul
+                    role="list"
+                    className={
+                      'week-grid__events' +
+                      (listMode ? ' week-grid__events--flow' : '')
+                    }
+                  >
                     {timedItems.map((item, itemIdx) => {
                       const isFocusedItem =
                         focused && eventIndex === itemIdx;
-                      const slot = slotByIdx.get(itemIdx);
+                      // In list mode the canvas is normal flow — no absolute
+                      // slot. Each chip gets an inline min-height instead
+                      // (events by duration, tasks by effort).
+                      const slot = listMode ? undefined : slotByIdx.get(itemIdx);
                       if (item.kind === 'task') {
                         const task = item.task;
                         // Pull the effective time-of-day for this row
@@ -969,7 +1002,17 @@ export function WeekView() {
                             role="listitem"
                             className={
                               'week-grid__task-item' +
-                              (slot ? ' week-grid__slot' : '')
+                              (slot ? ' week-grid__slot' : '') +
+                              // Effort sizing applies to the timed task's <li>
+                              // too: in GRID mode the effort class's min-height
+                              // composes with the absolute slot to give a
+                              // large-effort task a taller block at its time; in
+                              // LIST mode it sizes the normal-flow row. Events
+                              // are sized by duration instead, so this is
+                              // task-only.
+                              (effortMod
+                                ? ` week-task--effort-${effortMod}`
+                                : '')
                             }
                             style={slot ? slotStyle(slot) : undefined}
                           >
@@ -1100,13 +1143,30 @@ export function WeekView() {
                       // aria-activedescendant target but is clipped out
                       // of the visual flow so the cell only shows timed
                       // events. The bar's focused state is driven from
-                      // here via `focusedEvId`.
+                      // here via `focusedEvId`. In LIST mode there's no lane,
+                      // so an all-day event renders as a plain row (no clip, no
+                      // min-height); a timed event gets a duration-scaled
+                      // min-height via eventBlockFactor.
+                      const evSpan = ev.all_day ? null : eventSpanForDay(ev, day);
+                      const listMinHeight =
+                        listMode && evSpan
+                          ? `${
+                              eventBlockFactor(evSpan.endMin - evSpan.startMin) *
+                              2.4
+                            }em`
+                          : undefined;
                       return (
                         <li
                           key={ev.id}
                           role="listitem"
                           className={slot ? 'week-grid__slot' : undefined}
-                          style={slot ? slotStyle(slot) : undefined}
+                          style={
+                            slot
+                              ? slotStyle(slot)
+                              : listMinHeight
+                                ? { minHeight: listMinHeight }
+                                : undefined
+                          }
                         >
                           <span
                             id={eventOptionId(i, itemIdx)}
@@ -1114,7 +1174,13 @@ export function WeekView() {
                               'week-event' +
                               (isFocusedItem ? ' week-event--focused' : '') +
                               (span ? ' week-event--multiday' : '') +
-                              (ev.all_day ? ' week-event--in-lane' : '')
+                              // The `--in-lane` clip only applies in grid mode
+                              // (where the all-day lane carries the visible
+                              // bar). In list mode there's no lane, so the
+                              // all-day chip stays a normal visible row.
+                              (ev.all_day && !listMode
+                                ? ' week-event--in-lane'
+                                : '')
                             }
                             aria-label={aria}
                             aria-selected={isFocusedItem}

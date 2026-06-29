@@ -26,6 +26,7 @@ import {
   daysCoveredKeys,
   effortSizeModifier,
   effortSuffix,
+  eventBlockFactor,
   expandAll,
   filterTasksOnDay,
   isDeadlineChip,
@@ -98,9 +99,9 @@ function buildTimeDate(key: string, time: string): Date {
 
 // ── Single-day hour-grid geometry ───────────────────────────────────────────
 // Mirrors the desktop DayView/WeekView grid. Only the single-day caller
-// (EventsScreen, hourGrid=true) renders the timed lane as a 24h-tall positioned
-// canvas; multi-day callers (Week/Month/Agenda) stay the linear list. The
-// overlap math lives in the shared, tested `layoutDayColumn`.
+// (EventsScreen, dayLayout='grid') renders the timed lane as a 24h-tall
+// positioned canvas; multi-day callers (Week/Month/Agenda) stay the linear
+// list. The overlap math lives in the shared, tested `layoutDayColumn`.
 
 /** Canvas pixels per hour → the 24h column is HOUR_PX*24 tall. */
 const HOUR_PX = 48;
@@ -110,6 +111,29 @@ const CANVAS_PX = HOUR_PX * 24;
 const MIN_SLOT_PX = 28;
 /** Hour-ruler column width (carries the 00–23 numbers). */
 const RULER_PX = 44;
+
+// ── Single-day compact-list geometry (dayLayout='list') ──────────────────────
+// The lighter alternative to the hour-grid: a chronological list where a timed
+// EVENT block's min-height still reflects its DURATION (via the shared,
+// platform-agnostic `eventBlockFactor`) so a long meeting reads as a taller
+// block — no absolute slot positioning. Tasks keep their EFFORT sizing instead.
+
+/** Base px the bounded eventBlockFactor [1, 3.5] multiplies into a list-view
+ *  event block min-height (≈ the base `row` height). */
+const LIST_EVENT_BASE_PX = 46;
+
+/** Per-effort minimum chip height for a TIMED TASK in the hour-grid (gated on
+ *  the visualEffortSizing pref). The slot's TOP stays time-positioned; only the
+ *  height is raised to at least this, so a higher-effort task reads as a taller
+ *  block. Medium ≈ MIN_SLOT_PX (the unmodified slot floor). */
+const GRID_TASK_EFFORT_PX = { small: 24, medium: 36, large: 52 } as const;
+
+/** Timed event's clamped duration in minutes on `day` (for the list-view block
+ *  height). Reuses eventSpanForDay so it matches the grid's duration math. */
+function eventDurationMinForDay(start: Date, end: Date, day: Date): number {
+  const span = eventSpanForDay(start, end, day);
+  return span.endMin - span.startMin;
+}
 
 /** Local minutes-from-midnight span an event occupies on `day`, clamped to the
  *  day so a multi-day event clips to [0, 1440]. RN twin of the desktop helper. */
@@ -174,19 +198,26 @@ export interface CalendarDayListProps {
    */
   showDayHeaders?: boolean;
   /**
-   * Render the day's timed items as a proportional 24h hour-grid (placed by
-   * start time, sized by duration) instead of the linear list. Default `false`.
+   * Single-day visual layout for the day's items. `undefined` (the default) =
+   * the plain multi-day linear list — the Week/Month/Agenda callers pass nothing
+   * and render byte-for-byte as before this prop existed.
    *
-   * Single-day ONLY: the single-day caller (EventsScreen) passes `true`. The
-   * multi-day Week/Month/Agenda callers stack days vertically, where a 7×24h /
-   * 30×24h grid would be unusable, so they keep the linear list (`false`). When
-   * `false` the rendering is byte-for-byte the same as before this prop existed.
+   * The single-day caller (EventsScreen) passes the synced `calendar.dayViewMode`
+   * pref:
+   *   - `'grid'` → proportional 24h hour-grid (chips placed by start time, sized
+   *     by duration; tasks raised by effort). The multi-day callers stack days
+   *     vertically where a 7×24h / 30×24h grid would be unusable, so they keep
+   *     the linear list — hence single-day ONLY.
+   *   - `'list'` → a compact chronological list: every timed EVENT block's
+   *     min-height reflects its DURATION (eventBlockFactor), every timed TASK
+   *     keeps its effort sizing. No slot positioning.
    *
-   * Purely visual: every row keeps its `accessible`, role, full
-   * `accessibilityLabel` (incl. the time range) and tap/action handlers; source
-   * order stays chronological. The grid only changes where chips are *drawn*.
+   * Purely visual in all three paths: every row keeps its `accessible`, role,
+   * full `accessibilityLabel` (incl. the time range), tap/action handlers, and
+   * chronological source order (all-day → timed → untimed). Only where chips are
+   * *drawn* / how tall they are changes.
    */
-  hourGrid?: boolean;
+  dayLayout?: 'grid' | 'list';
 }
 
 export function CalendarDayList({
@@ -197,7 +228,7 @@ export function CalendarDayList({
   emptyText,
   dayAnnounceKey,
   showDayHeaders = true,
-  hourGrid = false,
+  dayLayout,
 }: CalendarDayListProps) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
@@ -704,9 +735,13 @@ export function CalendarDayList({
     const hex = resolved.hex;
     // Visual tile-size by effort (sighted users), only when the synced pref is
     // on; medium = neutral base row height. Purely cosmetic — the effort is
-    // always in the row's accessibilityLabel via effortSuffix. Skipped in the
-    // grid: a grid chip is a fixed time-slot (sized by duration), not an effort
-    // tile, so effort sizing doesn't apply there.
+    // always in the row's accessibilityLabel via effortSuffix.
+    // In the LINEAR list (and the compact list-view) this is a row style
+    // (rowEffortSmall/Large). In the hour-GRID a chip is absolutely positioned
+    // by time, so we can't restyle its row height freely; instead we RAISE its
+    // slot min-height per effort (small/medium/large) below — the slot's TOP
+    // (its time position) is untouched, so higher-effort tasks read as taller
+    // blocks without drifting off their time.
     const effortStyle =
       !grid && effortSizing
         ? effortSizeModifier(task.effort) === 'small'
@@ -715,6 +750,11 @@ export function CalendarDayList({
             ? styles.rowEffortLarge
             : null
         : null;
+    // Effort-raised slot height for a TIMED TASK in the grid (gated on the same
+    // pref). The chip's drawn height = max(its duration-derived slot height, the
+    // per-effort minimum); slotStyle already supplies the time-positioned top.
+    const gridTaskEffortStyle =
+      grid && effortSizing ? { minHeight: GRID_TASK_EFFORT_PX[task.effort] } : null;
     // Day-aware visible meta (the row's reason for being on THIS day): its time
     // if timed here, else a "due"/"planned" marker for this day. (Task-level
     // describeDue would show the scheduled day on a deadline-day row.)
@@ -751,7 +791,11 @@ export function CalendarDayList({
           else if (name === 'moveCopy') moveCopyTask(task);
           else openTask(task);
         }}
-        style={grid ? [styles.gridChip, slotStyle(slot)] : [styles.row, effortStyle]}
+        style={
+          grid
+            ? [styles.gridChip, slotStyle(slot), gridTaskEffortStyle]
+            : [styles.row, effortStyle]
+        }
       >
         {/* Sighted tap target to complete/reopen the task; the row otherwise
             opens the task on tap, so the marker needs its own Pressable. SR
@@ -904,6 +948,42 @@ export function CalendarDayList({
     );
   };
 
+  // Single-day COMPACT LIST (dayLayout='list'): the lighter alternative to the
+  // hour-grid. Same reading order (all-day → timed → untimed → create buttons)
+  // and the SAME row renderers (renderEventRow/renderTaskRow without a slot), so
+  // every row's accessibilityRole/Label/actions/tap handlers and source order
+  // are identical to the linear list. The only visual difference: a timed EVENT
+  // is wrapped so its block min-height reflects its DURATION (eventBlockFactor),
+  // and a timed TASK keeps its effort sizing (renderTaskRow's `!grid` path).
+  const renderDayList = (b: DayBucket): ReactNode => (
+    <View key={b.key} style={styles.daySection}>
+      {b.allDay.map((ev) => renderEventRow(ev, b.date, multiDayInfo(ev, b.date)))}
+      {b.timed.map((item) => {
+        if (item.kind === 'task') return renderTaskRow(item.task, b.key);
+        const ev = item.event;
+        const minHeight = Math.round(
+          eventBlockFactor(eventDurationMinForDay(new Date(ev.start), new Date(ev.end), b.date)) *
+            LIST_EVENT_BASE_PX,
+        );
+        // A plain wrapper (out of the a11y tree) that only enforces the
+        // duration-proportional block height; the event row inside keeps its own
+        // role/label/actions unchanged.
+        return (
+          <View
+            key={`le-${ev.id}@${b.key}`}
+            accessible={false}
+            importantForAccessibility="no"
+            style={{ minHeight }}
+          >
+            {renderEventRow(ev, b.date, null)}
+          </View>
+        );
+      })}
+      {b.untimed.map((task) => renderTaskRow(task, b.key))}
+      {renderDayCreateButtons(b)}
+    </View>
+  );
+
   // The error line rides above whatever else renders (the list still shows when
   // a reload after a mutation fails but stale data remains).
   return (
@@ -931,10 +1011,12 @@ export function CalendarDayList({
           keyboardShouldPersistTaps="handled"
         >
           {buckets.map((b) => {
-            // Single-day hour-grid path. Gated on the explicit `hourGrid` prop,
-            // which ONLY the single-day caller (EventsScreen) passes — multi-day
-            // Week/Month/Agenda keep the linear list below unchanged.
-            if (hourGrid) return renderDayGrid(b);
+            // Single-day paths. Gated on the explicit `dayLayout` prop, which
+            // ONLY the single-day caller (EventsScreen) passes — multi-day
+            // Week/Month/Agenda pass nothing and fall through to the linear list
+            // below, unchanged.
+            if (dayLayout === 'grid') return renderDayGrid(b);
+            if (dayLayout === 'list') return renderDayList(b);
             const rows: ReactNode[] = [];
             if (showDayHeaders) {
               rows.push(
@@ -1026,7 +1108,7 @@ const makeStyles = (c: ThemeColors) =>
     itemTitle: { fontSize: 18, fontWeight: '600', color: c.textPrimary },
     itemTitleDone: { textDecorationLine: 'line-through', color: c.textSecondary },
     itemMeta: { fontSize: 14, color: c.textSecondary },
-    // ── Single-day hour-grid (hourGrid) ──────────────────────────────────────
+    // ── Single-day hour-grid (dayLayout='grid') ──────────────────────────────
     // A horizontal [ruler | 24h canvas] row; the canvas is a 24h-tall positioned
     // column. Ruler numbers + chips line up because both are offset from the
     // SAME top by the same per-hour fraction (CANVAS_PX tall).

@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from 'react';
+import { SegmentedControl } from '@expo/ui/community/segmented-control';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -8,6 +9,7 @@ import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { JumpToDateButton } from '../components/JumpToDateButton';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import type { RootStackScreenProps } from '../navigation/types';
+import { readTaskBehaviour, writeDayViewMode } from '../state/taskBehaviour';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Accessible day view — the screen-reader-first equivalent of the desktop
@@ -62,6 +64,24 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
 
   const goToday = useCallback(() => setDay(localMidnight(new Date())), []);
 
+  // The synced single-day layout (`calendar.dayViewMode`, default 'grid'):
+  // proportional hour-grid vs. compact list. Hydrated on mount and re-read on
+  // focus so a Settings change or a peer-device sync reflects without a restart
+  // (the same pattern CalendarDayList uses for the effort-sizing pref). The
+  // toolbar segmented control writes it + flips local state immediately.
+  const [dayViewMode, setDayViewMode] = useState<'grid' | 'list'>('grid');
+  useEffect(() => {
+    const read = () => void readTaskBehaviour().then((b) => setDayViewMode(b.dayViewMode));
+    read();
+    const unsubscribe = navigation.addListener('focus', read);
+    return unsubscribe;
+  }, [navigation]);
+  const dayViewModes: ('grid' | 'list')[] = ['grid', 'list'];
+  const onSelectDayViewMode = useCallback((next: 'grid' | 'list') => {
+    setDayViewMode(next);
+    void writeDayViewMode(next);
+  }, []);
+
   return (
     <View style={styles.screen}>
       <CalendarViewSwitcher
@@ -106,6 +126,23 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
         <JumpToDateButton value={day} onSelect={(date) => setDay(localMidnight(date))} />
       </View>
 
+      {/* Day-layout quick-toggle (Stundenraster / Liste) — a native
+          SegmentedControl (real UISegmentedControl on iOS, Material segmented
+          button row on Android, so VoiceOver/TalkBack get native segmented
+          semantics), mirroring CalendarViewSwitcher. Writes the synced
+          `calendar.dayViewMode` pref + flips local state immediately. Single-day
+          only (this screen IS the single day). */}
+      <View accessibilityLabel={t('toolbar.dayViewMode.label')} style={styles.modeBar}>
+        <SegmentedControl
+          values={[t('toolbar.dayViewMode.grid'), t('toolbar.dayViewMode.list')]}
+          selectedIndex={dayViewMode === 'list' ? 1 : 0}
+          onChange={(e) => {
+            const next = dayViewModes[e.nativeEvent.selectedSegmentIndex];
+            if (next && next !== dayViewMode) onSelectDayViewMode(next);
+          }}
+        />
+      </View>
+
       <View style={styles.actionBar}>
         <Pressable
           accessibilityRole="button"
@@ -126,10 +163,13 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
         emptyText={t('views.day.empty')}
         dayAnnounceKey="views.day.dayAnnounce"
         showDayHeaders={false}
-        // Single-day view → proportional 24h hour-grid (events placed by start,
-        // sized by duration). Visual only; the list semantics are unchanged.
-        // Week/Month/Agenda render CalendarDayList without this prop (linear list).
-        hourGrid
+        // Single-day view → the synced `calendar.dayViewMode`: 'grid' = the
+        // proportional 24h hour-grid (events placed by start, sized by
+        // duration), 'list' = the compact chronological list (event blocks sized
+        // by duration, tasks by effort). Visual only; the list semantics are
+        // unchanged. Week/Month/Agenda render CalendarDayList without this prop
+        // (plain linear list).
+        dayLayout={dayViewMode}
       />
     </View>
   );
@@ -170,6 +210,7 @@ const makeStyles = (c: ThemeColors) =>
       paddingTop: 12,
       alignItems: 'flex-start',
     },
+    modeBar: { paddingHorizontal: 12, paddingTop: 12 },
     actionBar: {
       flexDirection: 'row',
       flexWrap: 'wrap',

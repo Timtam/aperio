@@ -1,8 +1,10 @@
 import { useTranslation } from 'react-i18next';
 
+import { useAnnouncer } from '../a11y/announcerContext';
 import { localDateKey } from '../intl/dateKey';
 import { useDateFormat } from '../intl/dateFormat';
 import { useDialogState } from '../state/dialogStateContext';
+import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
 import { useViewState } from '../state/viewStateContext';
 import { VIEWS, type ViewId } from '../state/viewMath';
 import { CacheRefreshIndicator } from './CacheRefreshIndicator';
@@ -34,8 +36,15 @@ const VIEW_SHORTCUT: Record<ViewId, string> = {
 export function Toolbar() {
   const { t } = useTranslation();
   const fmt = useDateFormat();
+  const announce = useAnnouncer();
   const { view, setView, anchor, jumpToToday, goPrev, goNext } = useViewState();
   const { openQuickAdd, openQuickAddTask, openSearch } = useDialogState();
+  const { dayViewMode, setDayViewMode } = useTaskCascadeEnabled();
+
+  // The grid↔list layout toggle is only meaningful on the day + week
+  // surfaces (the only views that render the hour-grid / list). It hides
+  // entirely elsewhere so it doesn't add noise to month / year / tasks.
+  const showDayViewToggle = view === 'day' || view === 'week';
 
   return (
     <div
@@ -58,6 +67,39 @@ export function Toolbar() {
           </button>
         ))}
       </div>
+
+      {showDayViewToggle && (
+        <div
+          role="group"
+          aria-label={t('toolbar.dayViewMode.label')}
+          className="toolbar__group toolbar__group--day-view"
+        >
+          <button
+            type="button"
+            className="toolbar__view-btn"
+            aria-pressed={dayViewMode === 'grid'}
+            onClick={() => {
+              setDayViewMode('grid');
+              announce(t('toolbar.dayViewMode.toGrid'));
+            }}
+            title={t('toolbar.dayViewMode.toGrid')}
+          >
+            {t('toolbar.dayViewMode.grid')}
+          </button>
+          <button
+            type="button"
+            className="toolbar__view-btn"
+            aria-pressed={dayViewMode === 'list'}
+            onClick={() => {
+              setDayViewMode('list');
+              announce(t('toolbar.dayViewMode.toList'));
+            }}
+            title={t('toolbar.dayViewMode.toList')}
+          >
+            {t('toolbar.dayViewMode.list')}
+          </button>
+        </div>
+      )}
 
       <div
         role="group"

@@ -235,6 +235,13 @@
       "agenda": "Agenda",
       "tasks": "Aufgaben",
       "contacts": "Kontakte"
+    },
+    "dayViewMode": {
+      "label": "Kalender-Layout",
+      "grid": "Stundenraster",
+      "list": "Liste",
+      "toList": "Zur kompakten Liste wechseln",
+      "toGrid": "Zum Stundenraster wechseln"
     }
   },
   "cacheRefresh": {
@@ -910,6 +917,14 @@
         "heading": "Aufwand als Kachelgröße",
         "label": "Aufgaben je nach Aufwand größer/kleiner darstellen",
         "hint": "Wenn aktiviert, werden Aufgabenkacheln je nach eingestelltem Aufwand (klein/mittel/groß) unterschiedlich groß dargestellt, damit auf einen Blick sichtbar ist, wie voll ein Tag ist. Rein visuell — der Aufwand wird unabhängig davon immer im Aufgaben-Label angesagt. Deaktiviert: alle Kacheln gleich groß."
+      },
+      "dayViewMode": {
+        "heading": "Kalender-Tageslayout",
+        "hint": "Wie die Tages- und Wochenansicht des Kalenders Termine anordnet. „Stundenraster\" platziert Termine auf einer 24-Stunden-Zeitachse, nach Dauer dimensioniert. „Kompakte Liste\" stapelt sie als chronologische Liste, jeder Block weiterhin nach Dauer dimensioniert. Aufgaben werden in beiden nach Aufwand dimensioniert. Rein visuell — auch über die Kalender-Symbolleiste umschaltbar.",
+        "options": {
+          "grid": "Stundenraster",
+          "list": "Kompakte Liste"
+        }
       },
       "carryOverDefault": {
         "heading": "Übernahme-Standard",
