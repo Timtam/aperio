@@ -1188,13 +1188,7 @@ export function WeekView() {
                           key={ev.id}
                           role="listitem"
                           className={slot ? 'week-grid__slot' : undefined}
-                          style={
-                            slot
-                              ? slotStyle(slot)
-                              : listMinHeight
-                                ? { minHeight: listMinHeight }
-                                : undefined
-                          }
+                          style={slot ? slotStyle(slot) : undefined}
                         >
                           <span
                             id={eventOptionId(i, itemIdx)}
@@ -1232,9 +1226,20 @@ export function WeekView() {
                               void openEventMenu(ev);
                             }}
                             style={
-                              color.hex
-                                ? ({ '--event-color': color.hex } as React.CSSProperties)
-                                : undefined
+                              {
+                                ...(color.hex
+                                  ? { '--event-color': color.hex }
+                                  : {}),
+                                // List mode: the duration min-height lives on the
+                                // chip itself (not the <li>), so the COLOURED block
+                                // fills the reserved height — otherwise a long
+                                // event reads as a normal-size tile with empty
+                                // space below it. Grid mode leaves listMinHeight
+                                // undefined (the slot drives height via height:100%).
+                                ...(listMinHeight
+                                  ? { minHeight: listMinHeight }
+                                  : {}),
+                              } as React.CSSProperties
                             }
                           >
                             {/* GRID mode: time is read off the hour-ruler, so
