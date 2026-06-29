@@ -3513,17 +3513,23 @@ button[aria-disabled='true'] {
    grid (time | title) inside the bordered container, rows separated by a
    border-bottom (no flex gap). The shared `.day-list__item` above already
    supplies the padding + colour stripe (border-left); this only adds the
-   pre-grid grid + separators + duration floor. Grid mode is untouched (its
-   options carry `.day-list__slot`, which sets its own absolute geometry). */
+   pre-grid grid + separators + the STRICT duration height. Grid mode is
+   untouched (its options carry `.day-list__slot`, which sets its own absolute
+   geometry).
+
+   The row's STRICT duration height (inline `height`, factor × base) makes the
+   height read DURATION at a glance; `overflow: hidden` clips a long wrapping
+   title to that height so a short event can NEVER inflate past a long one. The
+   140px time column keeps the time visible; only the 1fr title clips (the full
+   title stays in the aria-label + the `title` tooltip). align-content:start so a
+   tall row reads from its top edge rather than vertically centring a one-liner. */
 .day-list--flow .day-list__item {
   display: grid;
   grid-template-columns: 140px 1fr;
   gap: var(--space-2);
   border-bottom: 1px solid var(--color-border);
-  /* The duration floor (inline min-height) tops out the natural row height for
-     longer events; align content to the top so a tall row reads from its top
-     edge rather than vertically centring a one-liner. */
   align-content: start;
+  overflow: hidden;
 }
 
 .day-list--flow .day-list__item:last-child {

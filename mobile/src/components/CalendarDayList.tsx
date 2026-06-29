@@ -116,13 +116,22 @@ const RULER_PX = 44;
 
 // ── Single-day compact-list geometry (dayLayout='list') ──────────────────────
 // The lighter alternative to the hour-grid: a chronological list where a timed
-// EVENT block's min-height still reflects its DURATION (via the shared,
-// platform-agnostic `eventBlockFactor`) so a long meeting reads as a taller
-// block — no absolute slot positioning. Tasks keep their EFFORT sizing instead.
+// EVENT block's STRICT height reflects its DURATION (via the shared, platform-
+// agnostic `eventBlockFactor`) so a long meeting reads as a taller block — no
+// absolute slot positioning, and a long title can't inflate a short event (the
+// title clips to the height). Tasks keep their EFFORT sizing instead.
 
-/** Base px the bounded eventBlockFactor [1, 3.5] multiplies into a list-view
- *  event block min-height (≈ the base `row` height). */
-const LIST_EVENT_BASE_PX = 46;
+/** Base px a LIST-mode event block gets at `eventBlockFactor === 1` (a point /
+ *  ≤1h event) — ≈ one base `row` height plus a little fill. The list-mode chip
+ *  uses a STRICT height (not min-height) of `factor × this` with `overflow:
+ *  'hidden'`, so the height reads DURATION at a glance and a long wrapping title
+ *  can never inflate a short event past a long one (the title clips vertically;
+ *  the dot, time/meta and delete affordance lay out horizontally and stay
+ *  visible). The full title is always in the row's accessibilityLabel, and
+ *  tapping the row opens the editor. Bumped 46 → 69 (~1.5×) to match the desktop
+ *  WeekView bump for fuller vertical-space use. A 1h event ≈ 69px, a 4h ≈ 276px
+ *  (4×), a 6h+ caps at ≈414px. */
+const LIST_EVENT_BASE_PX = 69;
 
 /** Per-effort slot-height FLOOR for a TIMED TASK in the hour-grid (gated on the
  *  visualEffortSizing pref). Passed as slotStyle's `floorPx`, so it raises BOTH
@@ -216,8 +225,9 @@ export interface CalendarDayListProps {
    *     vertically where a 7×24h / 30×24h grid would be unusable, so they keep
    *     the linear list — hence single-day ONLY.
    *   - `'list'` → a compact chronological list: every timed EVENT block's
-   *     min-height reflects its DURATION (eventBlockFactor), every timed TASK
-   *     keeps its effort sizing. No slot positioning.
+   *     STRICT height reflects its DURATION (eventBlockFactor; a long title
+   *     clips rather than inflating it), every timed TASK keeps its effort
+   *     sizing. No slot positioning.
    *
    * Purely visual in all three paths: every row keeps its `accessible`, role,
    * full `accessibilityLabel` (incl. the time range), tap/action handlers, and
@@ -636,8 +646,9 @@ export function CalendarDayList({
   // `slot` (grid mode only) absolutely positions the row inside the 24h canvas
   // and switches the visible chip to title-only (the time is read off the ruler;
   // it stays in the accessibilityLabel below, unchanged). `extraStyle` (compact
-  // LIST mode only) carries the duration-proportional min-height so the coloured
-  // event block itself fills that height (no empty wrapper below the row).
+  // LIST mode only) carries the duration-proportional STRICT height (+ overflow:
+  // 'hidden') so the coloured event block fills that height and a long wrapping
+  // title clips instead of inflating a short event past a long one.
   const renderEventRow = (
     ev: CalendarEvent,
     day: Date,
@@ -961,24 +972,30 @@ export function CalendarDayList({
   // and the SAME row renderers (renderEventRow/renderTaskRow without a slot), so
   // every row's accessibilityRole/Label/actions/tap handlers and source order
   // are identical to the linear list. The only visual difference: a timed EVENT
-  // block's own min-height reflects its DURATION (eventBlockFactor) so the
-  // coloured block grows taller for a longer meeting, and a timed TASK keeps its
-  // effort sizing (renderTaskRow's `!grid` path).
+  // block's own STRICT height reflects its DURATION (eventBlockFactor) so the
+  // coloured block grows taller for a longer meeting (a long title clips rather
+  // than inflating it), and a timed TASK keeps its effort sizing (renderTaskRow's
+  // `!grid` path).
   const renderDayList = (b: DayBucket): ReactNode => (
     <View key={b.key} style={styles.daySection}>
       {b.allDay.map((ev) => renderEventRow(ev, b.date, multiDayInfo(ev, b.date)))}
       {b.timed.map((item) => {
         if (item.kind === 'task') return renderTaskRow(item.task, b.key);
         const ev = item.event;
-        const minHeight = Math.round(
+        const height = Math.round(
           eventBlockFactor(eventDurationMinForDay(new Date(ev.start), new Date(ev.end), b.date)) *
             LIST_EVENT_BASE_PX,
         );
-        // The duration-proportional min-height goes onto the event ROW's own
-        // style (no wrapper View), so the coloured block itself fills the height
-        // instead of leaving empty space below it. The row keeps its own
-        // role/label/actions unchanged.
-        return renderEventRow(ev, b.date, null, undefined, { minHeight });
+        // A STRICT duration-driven height (not a min-height floor) on the event
+        // ROW's own style, with overflow:'hidden', so the coloured block both
+        // fills the reserved height AND can never be inflated past its duration
+        // by a long wrapping title — the title clips vertically while the row's
+        // horizontal children (colour dot, time/meta, delete affordance) stay
+        // laid out and tappable. Mirrors the desktop WeekView list chip. The row
+        // keeps its own role/label/actions unchanged; the full title lives in the
+        // accessibilityLabel and tapping the row opens the editor (no clipping
+        // for SR users).
+        return renderEventRow(ev, b.date, null, undefined, { height, overflow: 'hidden' });
       })}
       {b.untimed.map((task) => renderTaskRow(task, b.key))}
       {renderDayCreateButtons(b)}

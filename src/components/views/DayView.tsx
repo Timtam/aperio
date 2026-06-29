@@ -80,13 +80,15 @@ function eventSpanForDay(ev: CalendarEvent, day: Date): TimedSpan {
   };
 }
 
-/** Base block height (em) a LIST-mode event row gets at `eventBlockFactor === 1`
- *  (a point / very short event). Tuned to the pre-grid `.day-list__item` natural
- *  padded row height so a short event in the compact list looks exactly like it
- *  did before the hour-grid rework; longer events grow from here via the shared
- *  `eventBlockFactor` curve (e.g. a 3h event ≈ 2.5× this). The row already has
- *  its natural content height; this only kicks in as a floor for longer events. */
-const DAY_LIST_BLOCK_BASE_EM = 1.6;
+/** Base block height (rem) a LIST-mode event row gets at `eventBlockFactor === 1`
+ *  (a point / ≤1h event) — ≈ one natural row plus a little fill. The list-mode row
+ *  uses a STRICT height (not min-height) of `factor × this`, with the time + title
+ *  on one wrapping flow clipped to fit, so the row height reads DURATION at a
+ *  glance and a long title can never inflate a short event past a long one. A 4h
+ *  event is ~4× a 1h via the shared linear `eventBlockFactor` curve (floor 1, cap
+ *  6). rem (not em) so the small row font doesn't shrink the scale; a touch taller
+ *  than WeekView's 2.25rem because DayView rows are a bit taller. */
+const DAY_LIST_BLOCK_BASE_REM = 2.5;
 
 /** Absolute placement of a timed chip's `<li>` inside the day's 24h-tall
  *  hour-grid (positioning is purely visual; DOM order is unchanged). Identical
@@ -130,8 +132,8 @@ export function DayView() {
   const { visualEffortSizing, dayViewMode } = useTaskCascadeEnabled();
   // Compact-list layout vs the proportional hour-grid. In list mode the timed
   // listbox is normal vertical flow (no positioned 24h canvas), the ruler +
-  // all-day band are not rendered, and each option carries an inline min-height
-  // (events by duration, tasks by effort) instead of a slot. The a11y model —
+  // all-day band are not rendered, and each option is sized inline instead of a
+  // slot (events by a STRICT duration height, tasks by effort). The a11y model —
   // role=listbox/option, ids, aria-activedescendant, keyboard, labels — is
   // byte-for-byte identical to grid mode.
   const listMode = dayViewMode === 'list';
@@ -551,8 +553,8 @@ export function DayView() {
             // Absolute slot inside the 24h canvas (every timed item has one —
             // see slotByIdx). Positioning is purely visual; the <li> keeps its
             // option role, id, aria-selected and DOM position unchanged. In
-            // list mode there's no canvas — the option flows normally and gets
-            // an inline min-height instead (events by duration, tasks by
+            // list mode there's no canvas — the option flows normally and is
+            // sized inline instead (events by a STRICT duration height, tasks by
             // effort), so suppress the slot here.
             const slot = listMode ? undefined : slotByIdx.get(i);
             if (item.kind === 'task') {
@@ -690,17 +692,18 @@ export function DayView() {
                   total: span.totalDays,
                 })
               : ariaBase;
-            // In LIST mode a timed event gets a duration-scaled min-height via
-            // eventBlockFactor; an all-day event renders as a plain row (no
-            // clip, no min-height). In grid mode this stays unused (the slot
-            // drives geometry).
+            // In LIST mode a timed event gets a STRICT duration-scaled height via
+            // eventBlockFactor (so the height reads duration; a long title clips
+            // rather than inflating a short event); an all-day event renders as a
+            // plain row (no clip, no height). In grid mode this stays unused (the
+            // slot drives geometry).
             const evSpan =
               listMode && !ev.all_day ? eventSpanForDay(ev, anchor) : null;
-            const listMinHeight = evSpan
+            const listHeight = evSpan
               ? `${
                   eventBlockFactor(evSpan.endMin - evSpan.startMin) *
-                  DAY_LIST_BLOCK_BASE_EM
-                }em`
+                  DAY_LIST_BLOCK_BASE_REM
+                }rem`
               : undefined;
             return (
               <li
@@ -709,6 +712,10 @@ export function DayView() {
                 role="option"
                 aria-selected={focused}
                 aria-label={aria}
+                // List mode clips the visible title to the duration height — give
+                // sighted users the full title on hover (SR users already get it
+                // from the aria-label above).
+                title={listMode ? ev.title : undefined}
                 className={
                   'day-list__item' +
                   (focused ? ' day-list__item--focused' : '') +
@@ -727,7 +734,13 @@ export function DayView() {
                 }
                 style={{
                   ...(slot ? slotStyle(slot) : {}),
-                  ...(listMinHeight ? { minHeight: listMinHeight } : {}),
+                  // List mode: a STRICT duration-driven height (not min-height),
+                  // so the row both fills the reserved space AND can't be inflated
+                  // past its duration by a long title — the title wraps on one flow
+                  // and is clipped (full text in the aria-label + the title
+                  // tooltip). Grid mode leaves listHeight undefined (the slot drives
+                  // height).
+                  ...(listHeight ? { height: listHeight } : {}),
                   ...(color.hex
                     ? ({ '--event-color': color.hex } as React.CSSProperties)
                     : {}),
