@@ -91,13 +91,14 @@ function eventSpanForDay(ev: CalendarEvent, day: Date): TimedSpan {
 }
 
 /** Base block height (rem) a LIST-mode event chip gets at `eventBlockFactor === 1`
- *  (a point / very short event) — ≈ one compact line. The list-mode chip uses a
+ *  (a point / ≤1h event) — one line of text plus a little fill, tuned for a fuller
+ *  use of the column's vertical space. The list-mode chip uses a
  *  STRICT height (not min-height) of `factor × this`, with the time + title on one
  *  wrapping line clipped to fit, so the chip height reads DURATION at a glance and
  *  a long title can never inflate a short event past a long one. A 3h event ≈ 2.5×
  *  this, a 4h+ event caps at 3.5×. rem (not em) so the small chip font doesn't
  *  shrink the scale. */
-const WEEK_LIST_BLOCK_BASE_REM = 1.5;
+const WEEK_LIST_BLOCK_BASE_REM = 2.25;
 
 /** Absolute placement of a timed chip's `<li>` inside the day column's
  *  24h-tall hour-grid (positioning is purely visual; DOM order is unchanged). */
