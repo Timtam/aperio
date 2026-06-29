@@ -69,43 +69,43 @@ import {
 } from '../../api/client';
 import {
   eventBlockFactor,
+  eventSpanForDay,
   layoutDayColumn,
   minutesFromMidnight,
-  MINUTES_PER_DAY,
   type PositionedSpan,
   type TimedSpan,
 } from '@aperio/shared';
-
-/** Local minutes-from-midnight span an event occupies on `day`, clamped to the
- *  day so a multi-day event clips to [0, 1440]. */
-function eventSpanForDay(ev: CalendarEvent, day: Date): TimedSpan {
-  const base = new Date(day);
-  base.setHours(0, 0, 0, 0);
-  const baseMs = base.getTime();
-  const start = Math.round((new Date(ev.start).getTime() - baseMs) / 60000);
-  const end = Math.round((new Date(ev.end).getTime() - baseMs) / 60000);
-  return {
-    startMin: Math.max(0, Math.min(MINUTES_PER_DAY, start)),
-    endMin: Math.max(0, Math.min(MINUTES_PER_DAY, end)),
-  };
-}
 
 /** Base block height (rem) a LIST-mode event chip gets at `eventBlockFactor === 1`
  *  (a point / ≤1h event) — one line of text plus a little fill, tuned for a fuller
  *  use of the column's vertical space. The list-mode chip uses a
  *  STRICT height (not min-height) of `factor × this`, with the time + title on one
  *  wrapping line clipped to fit, so the chip height reads DURATION at a glance and
- *  a long title can never inflate a short event past a long one. A 3h event ≈ 2.5×
- *  this, a 4h+ event caps at 3.5×. rem (not em) so the small chip font doesn't
- *  shrink the scale. */
+ *  a long title can never inflate a short event past a long one. The shared
+ *  `eventBlockFactor` curve is ~linear in hours (a 3h event ≈ 3×, a 4h ≈ 4×,
+ *  capped at 6×). rem (not em) so the small chip font doesn't shrink the scale. */
 const WEEK_LIST_BLOCK_BASE_REM = 2.25;
 
+/** The slot's CSS `min-height` (1.2em, see `.week-grid__slot`) expressed as a
+ *  fraction of the 24h canvas, so a floored late-night chip can be clamped to
+ *  stay on-canvas. 1.2em ≈ 26px of a ~1440px-ish day canvas → ~0.018; the exact
+ *  value only needs to match the rendered min-height closely enough that a
+ *  zero-duration 23:5x chip doesn't overflow the bottom into the untimed list. */
+const MIN_SLOT_FRACTION = 0.018;
+
 /** Absolute placement of a timed chip's `<li>` inside the day column's
- *  24h-tall hour-grid (positioning is purely visual; DOM order is unchanged). */
+ *  24h-tall hour-grid (positioning is purely visual; DOM order is unchanged).
+ *  The TOP is clamped (not the height) so a chip whose effective height is the
+ *  CSS min-height floor can't extend below the canvas and overlap the untimed
+ *  `.week-grid__tasks` rendered directly under it — mirrors the mobile slot
+ *  clamp. A normal chip (heightFraction ≥ MIN_SLOT_FRACTION ending ≤ 24:00) is
+ *  unaffected; only a floored chip in the last ~30min shifts up a hair. */
 function slotStyle(p: PositionedSpan): React.CSSProperties {
+  const eh = Math.max(p.heightFraction, MIN_SLOT_FRACTION);
+  const top = Math.min(p.topFraction, 1 - eh);
   return {
     position: 'absolute',
-    top: `${p.topFraction * 100}%`,
+    top: `${top * 100}%`,
     height: `${p.heightFraction * 100}%`,
     left: `${(p.columnIndex / p.columnCount) * 100}%`,
     width: `${(1 / p.columnCount) * 100}%`,
@@ -510,6 +510,14 @@ export function WeekView() {
     if (showLoading) announce(t('views.loading'));
   }, [showLoading, announce, t]);
 
+  // The active item is an all-day event whose per-day chip is clipped into the
+  // lane (`--in-lane`) at static y0 (00:00); scrolling THAT into view would yank
+  // the 24h region up to midnight every time the user Tabs onto an all-day
+  // event. So skip the nudge for all-day items — they're already shown in the
+  // always-visible lane bar above the canvas.
+  const focusedItemIsAllDay =
+    focusedItem?.kind === 'event' && focusedItem.event.all_day;
+
   // The timed grid is a 24h-tall internal scroll region now, and
   // aria-activedescendant (unlike a real DOM .focus()) does NOT auto-scroll the
   // active chip into view — so a chip on a scrolled-away hour would be off-screen
@@ -519,11 +527,13 @@ export function WeekView() {
     // List mode is a normal vertical flow (.week-grid__events--flow has no
     // internal scroll region), so the active chip is already in the page scroll
     // — the nudge would needlessly move the page. Only the grid canvas needs it.
-    if (listMode || eventIndex === null) return;
+    // All-day items live in the lane (not on the canvas), so scrolling their
+    // clipped y0 chip would jump the region to midnight — skip them too.
+    if (listMode || eventIndex === null || focusedItemIsAllDay) return;
     document
       .getElementById(eventOptionId(focusIndex, eventIndex))
       ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [focusIndex, eventIndex, eventOptionId, listMode]);
+  }, [focusIndex, eventIndex, eventOptionId, listMode, focusedItemIsAllDay]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -859,7 +869,13 @@ export function WeekView() {
                 timedItems.forEach((item, idx) => {
                   let s: TimedSpan | null = null;
                   if (item.kind === 'event') {
-                    if (!item.event.all_day) s = eventSpanForDay(item.event, day);
+                    if (!item.event.all_day) {
+                      s = eventSpanForDay(
+                        new Date(item.event.start),
+                        new Date(item.event.end),
+                        day,
+                      );
+                    }
                   } else {
                     // A timed task is a zero-duration point; an unparseable time
                     // falls back to midnight so it ALWAYS gets a slot and never
@@ -1178,7 +1194,13 @@ export function WeekView() {
                       // `focusedEvId`. A timed event gets a duration-scaled
                       // min-height in LIST mode via eventBlockFactor; all-day
                       // events get none (they're clipped anyway).
-                      const evSpan = ev.all_day ? null : eventSpanForDay(ev, day);
+                      const evSpan = ev.all_day
+                        ? null
+                        : eventSpanForDay(
+                            new Date(ev.start),
+                            new Date(ev.end),
+                            day,
+                          );
                       const listHeight =
                         listMode && evSpan
                           ? `${

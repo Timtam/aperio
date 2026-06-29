@@ -4202,7 +4202,11 @@ button[aria-disabled='true'] {
 .day-task--effort-small,
 .week-task--effort-small,
 .month-task--effort-small {
-  min-height: 1em;
+  /* >= the grid slot floor (`.week-grid__slot` / `.day-list__slot` are
+     min-height: 1.2em). These effort rules win the cascade on a small-effort
+     timed task's <li>, so a value below 1.2em would LOWER that slot's
+     short-event legibility floor — effort may only raise it, never drop it. */
+  min-height: 1.2em;
   padding-block: 1px;
 }
 .day-task--effort-large,

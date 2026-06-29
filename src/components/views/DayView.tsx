@@ -58,27 +58,12 @@ import {
 import type { CalendarEvent } from '../../api/types';
 import {
   eventBlockFactor,
+  eventSpanForDay,
   layoutDayColumn,
   minutesFromMidnight,
-  MINUTES_PER_DAY,
   type PositionedSpan,
   type TimedSpan,
 } from '@aperio/shared';
-
-/** Local minutes-from-midnight span an event occupies on `day`, clamped to the
- *  day so a multi-day event clips to [0, 1440]. Identical to WeekView's helper
- *  (kept module-local in both so the grid geometry stays self-contained). */
-function eventSpanForDay(ev: CalendarEvent, day: Date): TimedSpan {
-  const base = new Date(day);
-  base.setHours(0, 0, 0, 0);
-  const baseMs = base.getTime();
-  const start = Math.round((new Date(ev.start).getTime() - baseMs) / 60000);
-  const end = Math.round((new Date(ev.end).getTime() - baseMs) / 60000);
-  return {
-    startMin: Math.max(0, Math.min(MINUTES_PER_DAY, start)),
-    endMin: Math.max(0, Math.min(MINUTES_PER_DAY, end)),
-  };
-}
 
 /** Base block height (rem) a LIST-mode event row gets at `eventBlockFactor === 1`
  *  (a point / ≤1h event) — ≈ one natural row plus a little fill. The list-mode row
@@ -90,13 +75,21 @@ function eventSpanForDay(ev: CalendarEvent, day: Date): TimedSpan {
  *  than WeekView's 2.25rem because DayView rows are a bit taller. */
 const DAY_LIST_BLOCK_BASE_REM = 2.5;
 
+/** The slot's CSS `min-height` (1.2em, see `.day-list__slot`) expressed as a
+ *  fraction of the 24h canvas, so a floored late-night option can be clamped to
+ *  stay on-canvas. Matches WeekView's MIN_SLOT_FRACTION. */
+const MIN_SLOT_FRACTION = 0.018;
+
 /** Absolute placement of a timed chip's `<li>` inside the day's 24h-tall
  *  hour-grid (positioning is purely visual; DOM order is unchanged). Identical
- *  to WeekView's helper. */
+ *  to WeekView's helper, including the TOP clamp that keeps a floored min-height
+ *  option (a 23:5x point) from extending below the canvas. */
 function slotStyle(p: PositionedSpan): React.CSSProperties {
+  const eh = Math.max(p.heightFraction, MIN_SLOT_FRACTION);
+  const top = Math.min(p.topFraction, 1 - eh);
   return {
     position: 'absolute',
-    top: `${p.topFraction * 100}%`,
+    top: `${top * 100}%`,
     height: `${p.heightFraction * 100}%`,
     left: `${(p.columnIndex / p.columnCount) * 100}%`,
     width: `${(1 / p.columnCount) * 100}%`,
@@ -218,7 +211,13 @@ export function DayView() {
       if (item.kind === 'event') {
         // All-day events stay out of the timed grid (they have no meaningful
         // hour placement); they still render in DOM order without a slot.
-        if (!item.event.all_day) s = eventSpanForDay(item.event, anchor);
+        if (!item.event.all_day) {
+          s = eventSpanForDay(
+            new Date(item.event.start),
+            new Date(item.event.end),
+            anchor,
+          );
+        }
       } else {
         // A timed task is a zero-duration point; an unparseable time falls back
         // to midnight so it ALWAYS gets a slot and never flows static inside
@@ -698,7 +697,9 @@ export function DayView() {
             // plain row (no clip, no height). In grid mode this stays unused (the
             // slot drives geometry).
             const evSpan =
-              listMode && !ev.all_day ? eventSpanForDay(ev, anchor) : null;
+              listMode && !ev.all_day
+                ? eventSpanForDay(new Date(ev.start), new Date(ev.end), anchor)
+                : null;
             const listHeight = evSpan
               ? `${
                   eventBlockFactor(evSpan.endMin - evSpan.startMin) *

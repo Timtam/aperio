@@ -29,13 +29,13 @@ import {
   effortSizeModifier,
   effortSuffix,
   eventBlockFactor,
+  eventSpanForDay,
   expandAll,
   filterTasksOnDay,
   isDeadlineChip,
   layoutDayColumn,
   localDateKey,
   mergeDayItems,
-  MINUTES_PER_DAY,
   minutesFromMidnight,
   multiDayInfo,
   occurrenceIsoOf,
@@ -113,6 +113,10 @@ const CANVAS_PX = HOUR_PX * 24;
 const MIN_SLOT_PX = 28;
 /** Hour-ruler column width (carries the 00–23 numbers). */
 const RULER_PX = 44;
+/** Top padding (px) left above the auto-scroll target in GRID mode so the first
+ *  event isn't flush to the very top edge — a little breathing room reads
+ *  better. Purely visual; only the single-day grid auto-scroll uses it. */
+const GRID_SCROLL_PAD_PX = 12;
 
 // ── Single-day compact-list geometry (dayLayout='list') ──────────────────────
 // The lighter alternative to the hour-grid: a chronological list where a timed
@@ -142,24 +146,11 @@ const LIST_EVENT_BASE_PX = 69;
 const GRID_TASK_EFFORT_PX = { small: 22, medium: MIN_SLOT_PX, large: 46 } as const;
 
 /** Timed event's clamped duration in minutes on `day` (for the list-view block
- *  height). Reuses eventSpanForDay so it matches the grid's duration math. */
+ *  height). Reuses the shared eventSpanForDay so it matches the grid's duration
+ *  math. */
 function eventDurationMinForDay(start: Date, end: Date, day: Date): number {
   const span = eventSpanForDay(start, end, day);
   return span.endMin - span.startMin;
-}
-
-/** Local minutes-from-midnight span an event occupies on `day`, clamped to the
- *  day so a multi-day event clips to [0, 1440]. RN twin of the desktop helper. */
-function eventSpanForDay(start: Date, end: Date, day: Date): TimedSpan {
-  const base = new Date(day);
-  base.setHours(0, 0, 0, 0);
-  const baseMs = base.getTime();
-  const startMin = Math.round((start.getTime() - baseMs) / 60000);
-  const endMin = Math.round((end.getTime() - baseMs) / 60000);
-  return {
-    startMin: Math.max(0, Math.min(MINUTES_PER_DAY, startMin)),
-    endMin: Math.max(0, Math.min(MINUTES_PER_DAY, endMin)),
-  };
 }
 
 /** Absolute placement of a timed chip inside the 24h canvas (purely visual;
@@ -283,6 +274,19 @@ export function CalendarDayList({
 
   const dayKeys = useMemo(() => days.map(localDateKey), [days]);
 
+  // Re-arm the grid auto-scroll whenever the visible day window changes (the
+  // single-day grid caller swaps `days` on prev/next/jump). Clearing the guard
+  // and the stale measured offsets lets the next layout pass scroll the new day
+  // to its first event; without this, navigating to a new afternoon-only day
+  // would stay parked at the previous day's offset. Grid-only state, but cheap
+  // and harmless for the other callers.
+  const dayWindowKey = dayKeys.join('|');
+  useEffect(() => {
+    scrolledDayKeyRef.current = null;
+    daySectionYRef.current = null;
+    gridRowYRef.current = null;
+  }, [dayWindowKey]);
+
   const calendarsById = useMemo(
     () => new Map(calendars.map((c) => [c.id, c])),
     [calendars],
@@ -342,6 +346,58 @@ export function CalendarDayList({
   // this, a slow earlier resolution could overwrite the newer window's data and
   // leave events mismatched against the day headers (derived from `days`).
   const reqToken = useRef(0);
+
+  // ── Grid auto-scroll (dayLayout='grid' only; sighted/low-vision nicety) ──────
+  // The grid renders a fixed 24h-tall canvas (CANVAS_PX) inside this ScrollView
+  // with no initial offset, so an afternoon-only day would open showing an empty
+  // 00:00–morning band. After layout we scroll ONCE per day so the first timed
+  // slot (or, on today, the current hour) sits near the top. This is purely
+  // visual: it touches no accessibilityLabel/role/action/tap handler, and only
+  // the GRID path calls it — list/linear modes stack from the top already.
+  const scrollRef = useRef<ScrollView>(null);
+  // Measured y of the grid's day section and of its hour-grid row within that
+  // section, captured via onLayout. Both are needed to locate the canvas top in
+  // the scroll content. `null` until measured — if either is unmeasured we do
+  // nothing (stay at the top) rather than scroll to a wrong place.
+  const daySectionYRef = useRef<number | null>(null);
+  const gridRowYRef = useRef<number | null>(null);
+  // Guards one scroll per day so we don't fight the user's manual scroll on
+  // every re-render. Reset (below) whenever the visible day key changes.
+  const scrolledDayKeyRef = useRef<string | null>(null);
+
+  // Try to scroll the grid so `b`'s earliest timed slot (or the current hour on
+  // today) is near the top. No-ops unless: grid mode, both layout offsets are
+  // measured, and we haven't already scrolled for THIS day. Never throws — any
+  // missing measurement just leaves the scroll at the top.
+  const maybeScrollGrid = useCallback(
+    (b: DayBucket, earliestSlotTopPx: number | null) => {
+      if (dayLayout !== 'grid') return;
+      if (scrolledDayKeyRef.current === b.key) return;
+      const sectionY = daySectionYRef.current;
+      const rowY = gridRowYRef.current;
+      if (sectionY == null || rowY == null) return; // unmeasured → stay at top
+      // The canvas top within the scroll content: the day section's y plus the
+      // grid row's y within that section (the all-day band sits above the row).
+      const canvasY = sectionY + rowY;
+      const today = localDateKey(new Date()) === b.key;
+      // Today → current-hour offset; otherwise the earliest timed slot. If the
+      // day has no timed items (earliestSlotTopPx == null) and it isn't today,
+      // leave it at the top — all-day/untimed items live there.
+      const withinCanvas = today
+        ? (new Date().getHours() / 24) * CANVAS_PX
+        : earliestSlotTopPx;
+      if (withinCanvas == null) {
+        // Mark the day handled so a no-timed-items day doesn't re-check forever.
+        scrolledDayKeyRef.current = b.key;
+        return;
+      }
+      const target = Math.max(0, canvasY + withinCanvas - GRID_SCROLL_PAD_PX);
+      scrolledDayKeyRef.current = b.key;
+      scrollRef.current?.scrollTo({ y: target, animated: false });
+    },
+    [dayLayout],
+  );
+
   const load = useCallback(async () => {
     const token = (reqToken.current += 1);
     setLoading(true);
@@ -925,10 +981,35 @@ export function CalendarDayList({
   // preserved chronologically.
   const renderDayGrid = (b: DayBucket): ReactNode => {
     const slots = computeSlots(b);
+    // The earliest timed slot's top in px (the highest chip on the canvas), or
+    // null when the day has no timed items. Drives the auto-scroll target for a
+    // non-today day; `slots` already reflects the overlap layout, and topFraction
+    // is the chip's start position, so min(topFraction)*CANVAS_PX is the top of
+    // the first event/timed-task of the day.
+    const slotTops = Array.from(slots.values(), (p) => p.topFraction * CANVAS_PX);
+    const earliestSlotTopPx = slotTops.length > 0 ? Math.min(...slotTops) : null;
     return (
-      <View key={b.key} style={styles.daySection}>
+      <View
+        key={b.key}
+        style={styles.daySection}
+        // y of this section within the scroll content (the all-day band sits at
+        // its top, the hour-grid row below). Combined with the grid row's y to
+        // locate the canvas top, then we try the one-per-day scroll.
+        onLayout={(e) => {
+          daySectionYRef.current = e.nativeEvent.layout.y;
+          maybeScrollGrid(b, earliestSlotTopPx);
+        }}
+      >
         {b.allDay.map((ev) => renderEventRow(ev, b.date, multiDayInfo(ev, b.date)))}
-        <View style={styles.gridRow}>
+        <View
+          style={styles.gridRow}
+          // y of the hour-grid row within the day section (below the all-day
+          // band). daySectionY + this = the canvas top in the scroll content.
+          onLayout={(e) => {
+            gridRowYRef.current = e.nativeEvent.layout.y;
+            maybeScrollGrid(b, earliestSlotTopPx);
+          }}
+        >
           {/* Hour ruler — the hour numbers (00–23), read off the grid instead of
               the chips. Decorative: the time stays in each row's
               accessibilityLabel, so it's hidden from the screen reader. */}
@@ -1022,6 +1103,7 @@ export function CalendarDayList({
         </Text>
       ) : (
         <ScrollView
+          ref={scrollRef}
           accessibilityRole="list"
           accessibilityLabel={gridLabel}
           style={styles.scroll}

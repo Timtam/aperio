@@ -43,6 +43,23 @@ function clampMinute(min: number): number {
 }
 
 /**
+ * The local minutes-from-midnight span an event occupies on `day`, clamped to
+ * the day so a multi-day event clips to [0, 1440]. `day` is any instant on the
+ * target day; the span is measured from that day's LOCAL midnight. Shared by the
+ * desktop + mobile calendars so the grid/list geometry stays in one place (the
+ * callers pass `new Date(ev.start)` / `new Date(ev.end)`).
+ */
+export function eventSpanForDay(start: Date, end: Date, day: Date): TimedSpan {
+  const base = new Date(day);
+  base.setHours(0, 0, 0, 0);
+  const baseMs = base.getTime();
+  return {
+    startMin: clampMinute(Math.round((start.getTime() - baseMs) / 60000)),
+    endMin: clampMinute(Math.round((end.getTime() - baseMs) / 60000)),
+  };
+}
+
+/**
  * Lay out a single day-column's timed items. Input order is preserved in the
  * OUTPUT (result[i] positions input[i]); the algorithm sorts internally only to
  * compute overlaps. Overlap rule: two spans overlap when one starts strictly
