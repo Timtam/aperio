@@ -271,14 +271,17 @@ export function DayView() {
   // off-screen for sighted / low-vision keyboard users. Scroll it into view
   // whenever the active option (focusIndex) changes. Mirrors WeekView.
   useEffect(() => {
-    if (timedItems.length === 0) return;
+    // List mode is a normal vertical flow (.day-grid--flow has no internal
+    // scroll region), so the active option is already in the page scroll — the
+    // nudge would needlessly move the page. Only the grid's 24h canvas needs it.
+    if (listMode || timedItems.length === 0) return;
     document
       .getElementById(itemId(focusIndex))
       ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     // `dayKey` is a dep so switching to a different day always re-scrolls the
     // active option into view, even when the new day has the same item count
     // and focusIndex is unchanged (otherwise the effect wouldn't re-run).
-  }, [focusIndex, itemId, timedItems.length, dayKey]);
+  }, [focusIndex, itemId, timedItems.length, dayKey, listMode]);
   const listRef = useAutoFocus<HTMLUListElement>(!loading);
 
   const [confirmTarget, setConfirmTarget] = useState<CalendarEvent | null>(
@@ -623,9 +626,16 @@ export function DayView() {
                     void openTaskMenu(task);
                   }}
                 >
-                  {/* Time is read from the hour-grid + ruler, not the chip, so a
-                      short option's one visible line is the title (not clipped).
-                      The time stays in the aria-label above. */}
+                  {/* GRID mode: time is read off the hour-ruler, so the option
+                      is title-only (a short option's one visible line is the
+                      title, not clipped). LIST mode gates the ruler off, so
+                      restore a small visible time-of-day. aria-hidden — the full
+                      time already lives in the aria-label above. */}
+                  {listMode && timeStr && (
+                    <span className="day-list__time" aria-hidden="true">
+                      {timeStr}
+                    </span>
+                  )}
                   <span className="day-list__title">
                     <span
                       className="day-task__marker day-task__marker--clickable"
@@ -730,9 +740,15 @@ export function DayView() {
                   void openEventMenu(ev);
                 }}
               >
-                {/* Time is read from the hour-grid + ruler; the chip's single
-                    line is the title so a short event isn't clipped. The full
-                    start–end range stays in the aria-label above. */}
+                {/* GRID mode: time is read off the hour-ruler, so the option is
+                    title-only. LIST mode gates the ruler off, so restore a small
+                    visible start–end range (or "all day"). aria-hidden — the
+                    full range already lives in the aria-label above. */}
+                {listMode && (
+                  <span className="day-list__time" aria-hidden="true">
+                    {ev.all_day ? t('views.allDay') : `${startStr} – ${endStr}`}
+                  </span>
+                )}
                 <span className="day-list__title">
                   {ev.title}
                   {span && (

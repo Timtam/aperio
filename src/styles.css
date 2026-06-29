@@ -3494,6 +3494,17 @@ button[aria-disabled='true'] {
   font-weight: 500;
 }
 
+/* LIST-mode time stamp (the compact list gates the hour-ruler off, so the
+   start time / start–end range is shown inline on the option instead). Only
+   rendered in list mode (the JSX gates it on listMode); small + muted so the
+   title stays the primary line. The full time is already in the aria-label, so
+   this span is aria-hidden and purely visual. */
+.day-list__time {
+  color: var(--color-fg-muted);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
 /* An all-day event has no hour placement, so its option <li> gets no slot.
    Clip it (visually hidden, still a navigable listbox option) so it can't flow
    static at the top of the positioned canvas and collide with the 00:00 chips.

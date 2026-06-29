@@ -241,7 +241,9 @@
       "grid": "Stundenraster",
       "list": "Liste",
       "toList": "Zur kompakten Liste wechseln",
-      "toGrid": "Zum Stundenraster wechseln"
+      "toGrid": "Zum Stundenraster wechseln",
+      "announceGrid": "Stundenraster-Layout",
+      "announceList": "Kompaktlisten-Layout"
     }
   },
   "cacheRefresh": {

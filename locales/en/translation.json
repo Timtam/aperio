@@ -241,7 +241,9 @@
       "grid": "Hour grid",
       "list": "List",
       "toList": "Switch to compact list",
-      "toGrid": "Switch to hour grid"
+      "toGrid": "Switch to hour grid",
+      "announceGrid": "Hour grid layout",
+      "announceList": "Compact list layout"
     }
   },
   "cacheRefresh": {

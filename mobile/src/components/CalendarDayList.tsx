@@ -9,6 +9,8 @@ import {
   StyleSheet,
   Text,
   View,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 
 import type {
@@ -122,11 +124,13 @@ const RULER_PX = 44;
  *  event block min-height (≈ the base `row` height). */
 const LIST_EVENT_BASE_PX = 46;
 
-/** Per-effort minimum chip height for a TIMED TASK in the hour-grid (gated on
- *  the visualEffortSizing pref). The slot's TOP stays time-positioned; only the
- *  height is raised to at least this, so a higher-effort task reads as a taller
- *  block. Medium ≈ MIN_SLOT_PX (the unmodified slot floor). */
-const GRID_TASK_EFFORT_PX = { small: 24, medium: 36, large: 52 } as const;
+/** Per-effort slot-height FLOOR for a TIMED TASK in the hour-grid (gated on the
+ *  visualEffortSizing pref). Passed as slotStyle's `floorPx`, so it raises BOTH
+ *  the min-height AND the top-clamp — a large task near midnight stays fully
+ *  on-canvas. small < neutral < large; medium == MIN_SLOT_PX, so a medium task
+ *  keeps the unmodified slot floor (NEUTRAL, matching desktop where only the
+ *  small/large effort classes exist). */
+const GRID_TASK_EFFORT_PX = { small: 22, medium: MIN_SLOT_PX, large: 46 } as const;
 
 /** Timed event's clamped duration in minutes on `day` (for the list-view block
  *  height). Reuses eventSpanForDay so it matches the grid's duration math. */
@@ -151,14 +155,17 @@ function eventSpanForDay(start: Date, end: Date, day: Date): TimedSpan {
 
 /** Absolute placement of a timed chip inside the 24h canvas (purely visual;
  *  source order is unchanged). top/height by start+duration, left/width by the
- *  overlap column. A short span keeps a MIN_SLOT_PX min-height so it stays tappable. */
-function slotStyle(p: PositionedSpan) {
-  const height = Math.max(p.heightFraction * CANVAS_PX, MIN_SLOT_PX);
+ *  overlap column. A short span keeps a `floorPx` min-height so it stays tappable;
+ *  a timed task passes its per-effort floor (GRID_TASK_EFFORT_PX) so a higher-
+ *  effort task reads as a taller block. Events use the default MIN_SLOT_PX. */
+function slotStyle(p: PositionedSpan, floorPx = MIN_SLOT_PX) {
+  const height = Math.max(p.heightFraction * CANVAS_PX, floorPx);
   // Clamp the TOP (not the height) so a floored min-height chip near midnight
-  // stays fully on-canvas at its full MIN_SLOT_PX. Clamping the height instead
-  // would squeeze a 23:50 task to ~12px (below the tap target) — here it shifts
-  // up by a few px and keeps its full height, matching the desktop's intent.
-  const top = Math.min(p.topFraction * CANVAS_PX, CANVAS_PX - MIN_SLOT_PX);
+  // stays fully on-canvas at its full `floorPx` height. Clamping the height
+  // instead would squeeze a 23:50 chip below the tap target — here it shifts up
+  // by a few px and keeps its full height, matching the desktop's intent. The
+  // clamp uses the SAME floor, so even a large-effort task at 23:50 fits.
+  const top = Math.min(p.topFraction * CANVAS_PX, CANVAS_PX - floorPx);
   return {
     position: 'absolute' as const,
     top,
@@ -628,12 +635,15 @@ export function CalendarDayList({
 
   // `slot` (grid mode only) absolutely positions the row inside the 24h canvas
   // and switches the visible chip to title-only (the time is read off the ruler;
-  // it stays in the accessibilityLabel below, unchanged).
+  // it stays in the accessibilityLabel below, unchanged). `extraStyle` (compact
+  // LIST mode only) carries the duration-proportional min-height so the coloured
+  // event block itself fills that height (no empty wrapper below the row).
   const renderEventRow = (
     ev: CalendarEvent,
     day: Date,
     span: MultiDayInfo | null,
     slot?: PositionedSpan,
+    extraStyle?: StyleProp<ViewStyle>,
   ) => {
     const rowKey = `e-${ev.id}@${localDateKey(day)}`;
     const hex = resolveEventColor(ev, calendarsById, labelsById).hex;
@@ -656,7 +666,7 @@ export function CalendarDayList({
           accessible
           accessibilityRole="text"
           accessibilityLabel={eventLabel(ev, span)}
-          style={grid ? [styles.gridChip, slotStyle(slot)] : styles.row}
+          style={grid ? [styles.gridChip, slotStyle(slot)] : [styles.row, extraStyle]}
         >
           {dot}
           <View style={styles.rowText}>
@@ -694,7 +704,7 @@ export function CalendarDayList({
           else if (e.nativeEvent.actionName === 'moveCopy') moveCopyEvent(ev);
           else editEvent(ev);
         }}
-        style={grid ? [styles.gridChip, slotStyle(slot)] : styles.row}
+        style={grid ? [styles.gridChip, slotStyle(slot)] : [styles.row, extraStyle]}
       >
         {dot}
         <Pressable accessible={false} onPress={() => editEvent(ev)} style={styles.rowText}>
@@ -739,9 +749,9 @@ export function CalendarDayList({
     // In the LINEAR list (and the compact list-view) this is a row style
     // (rowEffortSmall/Large). In the hour-GRID a chip is absolutely positioned
     // by time, so we can't restyle its row height freely; instead we RAISE its
-    // slot min-height per effort (small/medium/large) below — the slot's TOP
-    // (its time position) is untouched, so higher-effort tasks read as taller
-    // blocks without drifting off their time.
+    // slot FLOOR per effort (small/neutral/large) via slotStyle's `floorPx`
+    // below — the slot's TOP (its time position) is preserved, so higher-effort
+    // tasks read as taller blocks without drifting off their time.
     const effortStyle =
       !grid && effortSizing
         ? effortSizeModifier(task.effort) === 'small'
@@ -750,11 +760,6 @@ export function CalendarDayList({
             ? styles.rowEffortLarge
             : null
         : null;
-    // Effort-raised slot height for a TIMED TASK in the grid (gated on the same
-    // pref). The chip's drawn height = max(its duration-derived slot height, the
-    // per-effort minimum); slotStyle already supplies the time-positioned top.
-    const gridTaskEffortStyle =
-      grid && effortSizing ? { minHeight: GRID_TASK_EFFORT_PX[task.effort] } : null;
     // Day-aware visible meta (the row's reason for being on THIS day): its time
     // if timed here, else a "due"/"planned" marker for this day. (Task-level
     // describeDue would show the scheduled day on a deadline-day row.)
@@ -793,7 +798,10 @@ export function CalendarDayList({
         }}
         style={
           grid
-            ? [styles.gridChip, slotStyle(slot), gridTaskEffortStyle]
+            ? [
+                styles.gridChip,
+                slotStyle(slot, effortSizing ? GRID_TASK_EFFORT_PX[task.effort] : MIN_SLOT_PX),
+              ]
             : [styles.row, effortStyle]
         }
       >
@@ -953,8 +961,9 @@ export function CalendarDayList({
   // and the SAME row renderers (renderEventRow/renderTaskRow without a slot), so
   // every row's accessibilityRole/Label/actions/tap handlers and source order
   // are identical to the linear list. The only visual difference: a timed EVENT
-  // is wrapped so its block min-height reflects its DURATION (eventBlockFactor),
-  // and a timed TASK keeps its effort sizing (renderTaskRow's `!grid` path).
+  // block's own min-height reflects its DURATION (eventBlockFactor) so the
+  // coloured block grows taller for a longer meeting, and a timed TASK keeps its
+  // effort sizing (renderTaskRow's `!grid` path).
   const renderDayList = (b: DayBucket): ReactNode => (
     <View key={b.key} style={styles.daySection}>
       {b.allDay.map((ev) => renderEventRow(ev, b.date, multiDayInfo(ev, b.date)))}
@@ -965,19 +974,11 @@ export function CalendarDayList({
           eventBlockFactor(eventDurationMinForDay(new Date(ev.start), new Date(ev.end), b.date)) *
             LIST_EVENT_BASE_PX,
         );
-        // A plain wrapper (out of the a11y tree) that only enforces the
-        // duration-proportional block height; the event row inside keeps its own
+        // The duration-proportional min-height goes onto the event ROW's own
+        // style (no wrapper View), so the coloured block itself fills the height
+        // instead of leaving empty space below it. The row keeps its own
         // role/label/actions unchanged.
-        return (
-          <View
-            key={`le-${ev.id}@${b.key}`}
-            accessible={false}
-            importantForAccessibility="no"
-            style={{ minHeight }}
-          >
-            {renderEventRow(ev, b.date, null)}
-          </View>
-        );
+        return renderEventRow(ev, b.date, null, undefined, { minHeight });
       })}
       {b.untimed.map((task) => renderTaskRow(task, b.key))}
       {renderDayCreateButtons(b)}

@@ -506,11 +506,14 @@ export function WeekView() {
   // for sighted / low-vision keyboard users. Scroll it into view whenever the
   // active timed chip changes.
   useEffect(() => {
-    if (eventIndex === null) return;
+    // List mode is a normal vertical flow (.week-grid__events--flow has no
+    // internal scroll region), so the active chip is already in the page scroll
+    // — the nudge would needlessly move the page. Only the grid canvas needs it.
+    if (listMode || eventIndex === null) return;
     document
       .getElementById(eventOptionId(focusIndex, eventIndex))
       ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [focusIndex, eventIndex, eventOptionId]);
+  }, [focusIndex, eventIndex, eventOptionId, listMode]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -1024,10 +1027,12 @@ export function WeekView() {
                                 (draggingTaskId === task.id
                                   ? ' week-task--dragging'
                                   : '') +
-                                ` week-task--${task.status.replace('_', '-')}` +
-                                (effortMod
-                                  ? ` week-task--effort-${effortMod}`
-                                  : '')
+                                ` week-task--${task.status.replace('_', '-')}`
+                                // Effort sizing lives ONLY on the load-bearing
+                                // <li> above — `.week-task--effort-*` sets
+                                // min-height AND padding-block, so doubling it
+                                // here pushed the title toward clipping. The span
+                                // fills the <li> via the `height:100%` rule.
                               }
                               // The aria-label carries the status as a
                               // word suffix so SR users hear it on focus
@@ -1077,10 +1082,21 @@ export function WeekView() {
                                 void openTaskMenu(task);
                               }}
                             >
-                              {/* Time is read from the hour-grid + ruler, not
-                                  the chip, so a short chip's one visible line is
-                                  the title (not clipped). The time stays in the
-                                  aria-label. */}
+                              {/* GRID mode: time is read off the hour-ruler, so
+                                  the chip is title-only (a short chip's one
+                                  visible line is the title, not clipped). LIST
+                                  mode gates the ruler off, so restore a small
+                                  visible start time here. aria-hidden — the full
+                                  time already lives in the aria-label, so this
+                                  must not double-announce. */}
+                              {listMode && time && (
+                                <span
+                                  className="week-task__time"
+                                  aria-hidden="true"
+                                >
+                                  {time}
+                                </span>
+                              )}
                               <span className="week-task__body">
                                 <span
                                   className="week-task__check"
@@ -1210,10 +1226,21 @@ export function WeekView() {
                                 : undefined
                             }
                           >
-                            {/* Time is read from the hour-grid + ruler; the
-                                chip's first line is the title so a short event
-                                isn't clipped. The full range stays in the
-                                aria-label. */}
+                            {/* GRID mode: time is read off the hour-ruler, so
+                                the chip is title-only. LIST mode gates the ruler
+                                off, so restore a small visible start time (or
+                                "all day"). aria-hidden — the full start–end range
+                                already lives in the aria-label. */}
+                            {listMode && (
+                              <span
+                                className="week-event__time"
+                                aria-hidden="true"
+                              >
+                                {ev.all_day
+                                  ? t('views.allDay')
+                                  : fmt.format(new Date(ev.start), 'p')}
+                              </span>
+                            )}
                             <span className="week-event__title">{ev.title}</span>
                             {span && (
                               <span className="week-event__span">

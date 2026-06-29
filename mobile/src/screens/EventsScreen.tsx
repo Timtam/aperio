@@ -1,4 +1,3 @@
-import { SegmentedControl } from '@expo/ui/community/segmented-control';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -7,6 +6,7 @@ import { CalendarActions } from '../components/CalendarActions';
 import { CalendarDayList } from '../components/CalendarDayList';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { JumpToDateButton } from '../components/JumpToDateButton';
+import { SegmentedSelect } from '../components/SegmentedSelect';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import type { RootStackScreenProps } from '../navigation/types';
 import { readTaskBehaviour, writeDayViewMode } from '../state/taskBehaviour';
@@ -76,11 +76,17 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
     const unsubscribe = navigation.addListener('focus', read);
     return unsubscribe;
   }, [navigation]);
-  const dayViewModes: ('grid' | 'list')[] = ['grid', 'list'];
   const onSelectDayViewMode = useCallback((next: 'grid' | 'list') => {
     setDayViewMode(next);
     void writeDayViewMode(next);
   }, []);
+  const dayViewModeOptions = useMemo(
+    () => [
+      { value: 'grid' as const, label: t('toolbar.dayViewMode.grid') },
+      { value: 'list' as const, label: t('toolbar.dayViewMode.list') },
+    ],
+    [t],
+  );
 
   return (
     <View style={styles.screen}>
@@ -126,20 +132,19 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
         <JumpToDateButton value={day} onSelect={(date) => setDay(localMidnight(date))} />
       </View>
 
-      {/* Day-layout quick-toggle (Stundenraster / Liste) — a native
-          SegmentedControl (real UISegmentedControl on iOS, Material segmented
-          button row on Android, so VoiceOver/TalkBack get native segmented
-          semantics), mirroring CalendarViewSwitcher. Writes the synced
+      {/* Day-layout quick-toggle (Stundenraster / Liste) — SegmentedSelect:
+          a visible legend Text (sighted users see a labelled toggle) plus the
+          native SegmentedControl (real UISegmentedControl on iOS, Material
+          segmented button row on Android, so VoiceOver/TalkBack get native
+          segmented semantics with the legend announced). Writes the synced
           `calendar.dayViewMode` pref + flips local state immediately. Single-day
           only (this screen IS the single day). */}
-      <View accessibilityLabel={t('toolbar.dayViewMode.label')} style={styles.modeBar}>
-        <SegmentedControl
-          values={[t('toolbar.dayViewMode.grid'), t('toolbar.dayViewMode.list')]}
-          selectedIndex={dayViewMode === 'list' ? 1 : 0}
-          onChange={(e) => {
-            const next = dayViewModes[e.nativeEvent.selectedSegmentIndex];
-            if (next && next !== dayViewMode) onSelectDayViewMode(next);
-          }}
+      <View style={styles.modeBar}>
+        <SegmentedSelect
+          label={t('toolbar.dayViewMode.label')}
+          value={dayViewMode}
+          options={dayViewModeOptions}
+          onChange={onSelectDayViewMode}
         />
       </View>
 

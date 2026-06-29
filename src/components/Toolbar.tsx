@@ -79,8 +79,14 @@ export function Toolbar() {
             className="toolbar__view-btn"
             aria-pressed={dayViewMode === 'grid'}
             onClick={() => {
-              setDayViewMode('grid');
-              announce(t('toolbar.dayViewMode.toGrid'));
+              // No-op re-click of the already-active mode stays silent — the
+              // setter + announce only fire on an actual change. The live
+              // region speaks the RESULT state ("Hour grid layout"), not the
+              // imperative toGrid string (which reads as an instruction).
+              if (dayViewMode !== 'grid') {
+                setDayViewMode('grid');
+                announce(t('toolbar.dayViewMode.announceGrid'));
+              }
             }}
             title={t('toolbar.dayViewMode.toGrid')}
           >
@@ -91,8 +97,12 @@ export function Toolbar() {
             className="toolbar__view-btn"
             aria-pressed={dayViewMode === 'list'}
             onClick={() => {
-              setDayViewMode('list');
-              announce(t('toolbar.dayViewMode.toList'));
+              // See the grid button: silent on a no-op re-click; the live
+              // region speaks the RESULT state ("Compact list layout").
+              if (dayViewMode !== 'list') {
+                setDayViewMode('list');
+                announce(t('toolbar.dayViewMode.announceList'));
+              }
             }}
             title={t('toolbar.dayViewMode.toList')}
           >
