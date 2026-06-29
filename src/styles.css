@@ -3631,6 +3631,21 @@ button[aria-disabled='true'] {
   padding-right: 1px;
   box-sizing: border-box;
   overflow: hidden;
+  /* GRID mode: fill the whole tile with the event/colour-label colour (like the
+     week-grid `.week-event` chips) instead of just the left stripe, so the
+     colour reads at a glance. List mode (no `.day-list__slot`) keeps the stripe.
+     `--event-color` is set inline from resolveEventColor / resolveTaskColor. */
+  background: var(--event-color, var(--color-accent));
+  color: var(--color-accent-fg);
+  border-left: 0;
+  border-radius: var(--radius-sm);
+}
+
+/* Focus on a filled grid tile: an outline (a background tint would hide the
+   colour). Mirrors `.week-event--focused`; inset so it stays within the slot. */
+.day-list__slot.day-list__item--focused {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: -2px;
 }
 
 .day-list__title {
