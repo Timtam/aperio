@@ -17,6 +17,7 @@ import {
 import {
   buildAllDayBars,
   daysCoveredKeys,
+  eventDayTimes,
   multiDayInfo,
 } from '../../intl/multiDay';
 import { useCalendarStore } from '../../state/calendarStoreContext';
@@ -1160,16 +1161,37 @@ export function WeekView() {
                       const ev = item.event;
                       const cal = calendarById.get(ev.calendar_id);
                       const color = resolveEventColor(ev, calendarById, labelById);
+                      const span = multiDayInfo(ev, day);
+                      // A TIMED event that crosses midnight (`span` non-null)
+                      // shows the THIS-day CLAMPED portion, not the absolute
+                      // instants — so the next-day tail reads "00:00 – 01:00"
+                      // (and the start day "23:00 – 24:00") instead of the
+                      // confusing absolute "23:00 – 01:00". Single-day timed
+                      // events keep the absolute start/end. Shared by the visible
+                      // start time below + the aria range so they agree.
+                      const { startStr: dayStartStr, endStr: dayEndStr } =
+                        span && !ev.all_day
+                          ? eventDayTimes(fmt, ev, day)
+                          : {
+                              startStr: fmt.format(new Date(ev.start), 'p'),
+                              endStr: fmt.format(new Date(ev.end), 'p'),
+                            };
                       // The chip shows only the title (time is read from the
                       // hour-grid + ruler); the label speaks the full start–end
                       // range so an SR user hears the DURATION.
                       const timeAria = ev.all_day
                         ? t('views.allDay')
-                        : `${fmt.format(new Date(ev.start), 'p')} – ${fmt.format(
-                            new Date(ev.end),
-                            'p',
-                          )}`;
-                      const span = multiDayInfo(ev, day);
+                        : `${dayStartStr} – ${dayEndStr}`;
+                      // The continuation (tail) chip of a TIMED cross-midnight
+                      // event must NOT be draggable: `moveEventToDay` derives the
+                      // move delta from the absolute START day, so dragging the
+                      // day-N+1 chip would reschedule relative to day N — wrong.
+                      // The start-day chip (dayIndex 1) keeps a well-defined
+                      // anchor and stays draggable. (Blind users use Move/Copy;
+                      // this only fixes the mouse affordance.) All-day chips are
+                      // clipped out of the cell — the lane bar carries their drag.
+                      const isTimedTail =
+                        !ev.all_day && span != null && span.dayIndex > 1;
                       // Color label is purely visual — it's a visible
                       // accent strip on the chip, not extra information
                       // an SR user needs spoken. The calendar / list
@@ -1234,13 +1256,17 @@ export function WeekView() {
                             // give sighted users the full title on hover (SR users
                             // already get it from aria-label).
                             title={listMode ? ev.title : undefined}
-                            draggable
-                            onDragStart={(dev) => {
-                              // Drag onto a sidebar calendar row to move the
-                              // event there (mouse affordance; the keyboard/SR
-                              // path is the Move/Copy dialog).
-                              setEventDrag(dev.dataTransfer, ev);
-                            }}
+                            draggable={!isTimedTail}
+                            onDragStart={
+                              isTimedTail
+                                ? undefined
+                                : (dev) => {
+                                    // Drag onto a sidebar calendar row to move
+                                    // the event there (mouse affordance; the
+                                    // keyboard/SR path is the Move/Copy dialog).
+                                    setEventDrag(dev.dataTransfer, ev);
+                                  }
+                            }
                             onDoubleClick={(dcev) => {
                               // Open the editor, mirroring the task chips
                               // (the keyboard path is Enter on the focused
@@ -1280,9 +1306,7 @@ export function WeekView() {
                                 className="week-event__time"
                                 aria-hidden="true"
                               >
-                                {ev.all_day
-                                  ? t('views.allDay')
-                                  : fmt.format(new Date(ev.start), 'p')}
+                                {ev.all_day ? t('views.allDay') : dayStartStr}
                               </span>
                             )}
                             <span className="week-event__title">{ev.title}</span>
@@ -1409,13 +1433,14 @@ function groupEventsByDay(
   const map = new Map<string, CalendarEvent[]>();
   days.forEach((d) => map.set(keyOf(d), []));
   events.forEach((ev) => {
-    // Multi-day all-day events get bucketed into every visible day they
-    // cover — otherwise the user would see day 1 of a vacation and
-    // nothing on days 2..N (DESIGN tradeoff: visibility beats compactness,
-    // a future iteration may replace the per-day chips with one
-    // continuous bar in a dedicated all-day lane). Timed events stay
-    // anchored to their start day; cross-midnight meetings are out of
-    // scope here.
+    // Bucket each event into every visible day it covers (via
+    // daysCoveredKeys) — otherwise the user would see day 1 of a vacation
+    // and nothing on days 2..N (DESIGN tradeoff: visibility beats
+    // compactness, a future iteration may replace the per-day chips with one
+    // continuous bar in a dedicated all-day lane). This spreads multi-day
+    // ALL-DAY events AND timed events that cross midnight (a 23:00→01:00
+    // meeting lands on both the start day and the next), so the next day
+    // shows its own clamped portion.
     daysCoveredKeys(ev).forEach((k) => {
       const bucket = map.get(k);
       if (bucket) bucket.push(ev);

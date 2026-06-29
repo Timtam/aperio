@@ -11,7 +11,7 @@ import {
   resolveEventColor,
   resolveTaskColor,
 } from '../../intl/eventColor';
-import { eventCoversDay, multiDayInfo } from '../../intl/multiDay';
+import { eventCoversDay, eventDayTimes, multiDayInfo } from '../../intl/multiDay';
 import {
   isExpandedOccurrence,
   occurrenceIsoOf,
@@ -705,9 +705,20 @@ export function DayView() {
             const ev = item.event;
             const cal = calendarById.get(ev.calendar_id);
             const color = resolveEventColor(ev, calendarById, labelById);
-            const startStr = fmt.format(new Date(ev.start), 'p');
-            const endStr = fmt.format(new Date(ev.end), 'p');
             const span = multiDayInfo(ev, anchor);
+            // A TIMED event that crosses midnight (`span` non-null) must show the
+            // THIS-day clamped portion, not the absolute instants: the next-day
+            // tail should read "00:00 – 01:00", not the confusing absolute
+            // "23:00 – 01:00", and the start day "23:00 – 24:00". A single-day
+            // timed event keeps the absolute start/end. (All-day events ignore
+            // these — their visible row reads "all day".)
+            const { startStr, endStr } =
+              span && !ev.all_day
+                ? eventDayTimes(fmt, ev, anchor)
+                : {
+                    startStr: fmt.format(new Date(ev.start), 'p'),
+                    endStr: fmt.format(new Date(ev.end), 'p'),
+                  };
             const ariaBase = t('views.day.eventLabel', {
               title: ev.title,
               start: startStr,

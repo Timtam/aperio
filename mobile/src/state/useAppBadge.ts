@@ -68,8 +68,11 @@ async function countTodayEvents(
   // Set guards against any accidental double-count.
   const ids = new Set<string>();
   for (const ev of expanded) {
-    // On today? (all-day events spread across covered days; timed events anchor
-    // to their start day — same rule the Day view uses.)
+    // On today? eventCoversDay spreads BOTH all-day and timed events across
+    // every covered day — so a meeting that started at 23:00 yesterday and is
+    // still running at 00:30 today counts toward today (its tail covers today)
+    // until it ends, which is intended for a "what's on the plate today" badge.
+    // Same rule the Day view uses.
     if (!eventCoversDay(ev, now)) continue;
     // Timed events that already ended today drop out ("upcoming/running" only);
     // all-day events have no intraday end, so they count all day.

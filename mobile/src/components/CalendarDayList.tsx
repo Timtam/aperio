@@ -332,12 +332,39 @@ export function CalendarDayList({
     [i18n.language],
   );
 
+  // Day's local midnight + `min` minutes, as a Date for `fmtTime`. EDGE: a
+  // clamped end of 1440 (a tail running to the next midnight) has no same-day
+  // Date — formatting midnight + 1440min would roll to "00:00" of day+1 and read
+  // as "00:00", so eventTimeLabel special-cases 1440 → "24:00".
+  const dayMinuteDate = useCallback((day: Date, min: number): Date => {
+    const d = new Date(day);
+    d.setHours(0, 0, 0, 0);
+    d.setMinutes(min);
+    return d;
+  }, []);
+
+  // The per-day time string for a TIMED event on `day`. When the event spans
+  // midnight (multi-day), the time is the portion CLAMPED to `day` — so day N
+  // reads "23:00–24:00" and day N+1 reads "00:00–01:00", matching what's drawn,
+  // instead of the absolute instants (which would mislead a screen reader into
+  // "23:00–01:00" on the tail day). A single-day event (multiDayInfo null) keeps
+  // the absolute start/end. The 1440-minute end is shown as "24:00", not the
+  // "00:00" a midnight Date would format to.
   const eventTimeLabel = useCallback(
-    (ev: CalendarEvent): string => {
+    (ev: CalendarEvent, day?: Date): string => {
       if (ev.all_day) return t('views.allDay');
-      return `${fmtTime(new Date(ev.start))}–${fmtTime(new Date(ev.end))}`;
+      const start = new Date(ev.start);
+      const end = new Date(ev.end);
+      if (day && multiDayInfo(ev, day)) {
+        const sp = eventSpanForDay(start, end, day);
+        const startStr = fmtTime(dayMinuteDate(day, sp.startMin));
+        const endStr =
+          sp.endMin === 1440 ? '24:00' : fmtTime(dayMinuteDate(day, sp.endMin));
+        return `${startStr}–${endStr}`;
+      }
+      return `${fmtTime(start)}–${fmtTime(end)}`;
     },
-    [fmtTime, t],
+    [dayMinuteDate, fmtTime, t],
   );
 
   // A request-epoch guard: the latest load wins. Changing the day window (e.g.
@@ -646,10 +673,13 @@ export function CalendarDayList({
   // ── Accessible labels ──────────────────────────────────────────────────────
 
   const eventLabel = useCallback(
-    (ev: CalendarEvent, span: MultiDayInfo | null): string => {
+    (ev: CalendarEvent, day: Date, span: MultiDayInfo | null): string => {
       let label = t('views.week.eventLabel', {
         title: ev.title,
-        time: eventTimeLabel(ev),
+        // Per-day clamped time on a multi-day (cross-midnight) timed event, so a
+        // screen reader hears the portion that actually falls on THIS day
+        // (eventTimeLabel handles the clamp + the "24:00" tail edge).
+        time: eventTimeLabel(ev, day),
         calendar: calendarsById.get(ev.calendar_id)?.name ?? '—',
       });
       if (span) {
@@ -735,7 +765,7 @@ export function CalendarDayList({
           key={rowKey}
           accessible
           accessibilityRole="text"
-          accessibilityLabel={eventLabel(ev, span)}
+          accessibilityLabel={eventLabel(ev, day, span)}
           style={grid ? [styles.gridChip, slotStyle(slot)] : [styles.row, extraStyle]}
         >
           {dot}
@@ -750,7 +780,7 @@ export function CalendarDayList({
             </Text>
             {!grid && (
               <Text style={styles.itemMeta} importantForAccessibility="no">
-                {eventTimeLabel(ev)}
+                {eventTimeLabel(ev, day)}
               </Text>
             )}
           </View>
@@ -762,7 +792,7 @@ export function CalendarDayList({
         key={rowKey}
         accessible
         accessibilityRole="button"
-        accessibilityLabel={eventLabel(ev, span)}
+        accessibilityLabel={eventLabel(ev, day, span)}
         accessibilityHint={t('mobile.taskHint')}
         accessibilityActions={[
           { name: 'activate', label: t('mobile.editTaskLabel') },
@@ -788,7 +818,7 @@ export function CalendarDayList({
           </Text>
           {!grid && (
             <Text style={styles.itemMeta} importantForAccessibility="no">
-              {eventTimeLabel(ev)}
+              {eventTimeLabel(ev, day)}
             </Text>
           )}
         </Pressable>

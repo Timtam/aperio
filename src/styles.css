@@ -2862,6 +2862,12 @@ button[aria-disabled='true'] {
   --hour-px: 40px;
   /* Width of the leading hour-ruler column (left of the 7 days). */
   --ruler-w: 2.5rem;
+  /* Height of the pinned day-name header (`.week-grid__head`). Used as the
+     scroll-margin-top on the active-chip scrollIntoView target so a near-top
+     chip clears the sticky header instead of tucking behind it (common now the
+     untimed-task band sits at the very top of each cell). Approximate — a touch
+     generous so the chip lands fully clear of the header's bottom border. */
+  --week-head-h: 3.25rem;
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -3082,6 +3088,11 @@ button[aria-disabled='true'] {
   border: 0;
   border-radius: var(--radius-sm);
   font-size: var(--font-size-xs);
+  /* The active chip is scrolled into view via scrollIntoView inside the
+     vertically-scrolling `.week-grid`. Reserve the sticky-header height as
+     scroll-margin so a near-top chip clears the pinned `.week-grid__head`
+     instead of being tucked behind it. */
+  scroll-margin-top: var(--week-head-h, 3.25rem);
 }
 
 .week-event__time {

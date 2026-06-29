@@ -14,12 +14,51 @@ export {
 } from '@aperio/shared';
 export type { MultiDayInfo } from '@aperio/shared';
 
-import { daysCoveredKeys } from '@aperio/shared';
+import { daysCoveredKeys, eventSpanForDay } from '@aperio/shared';
 import type { DayOccurrence as SharedDayOccurrence } from '@aperio/shared';
 
 /** Desktop alias: an agenda day-occurrence always carries a full
  *  `CalendarEvent` (the shared type is generic over the event shape). */
 export type DayOccurrence = SharedDayOccurrence<CalendarEvent>;
+
+/** Minimal shape of the `useDateFormat` formatter this module needs. */
+interface TimeFormatter {
+  format: (date: Date | number, pattern: string) => string;
+}
+
+/**
+ * The start/end time STRINGS to display + speak for one day of a TIMED event.
+ *
+ * For a single-day event this is just the absolute start/end. For a timed event
+ * that crosses midnight (`multiDayInfo` non-null) the caller should pass the
+ * specific `day`, and this returns the per-day CLAMPED portion instead of the
+ * absolute instants — so the next-day tail reads "00:00 – 01:00" rather than the
+ * misleading absolute "23:00 – 01:00". Both views (visible chip text) and the
+ * aria-label share this so the sighted and the spoken time agree.
+ *
+ * EDGE: the start-day portion of a cross-midnight event runs to the day's end,
+ * so its clamped `endMin` is 1440 (the next local midnight). `eventSpanForDay`
+ * clamps to [0, 1440]; minute 1440 formatted as a Date would read "00:00" (the
+ * NEXT day), which is wrong for "ends at the end of THIS day" — so we special-
+ * case it to the literal "24:00".
+ */
+export function eventDayTimes(
+  fmt: TimeFormatter,
+  ev: { start: string; end: string },
+  day: Date,
+  pattern = 'p',
+): { startStr: string; endStr: string } {
+  const sp = eventSpanForDay(new Date(ev.start), new Date(ev.end), day);
+  const base = new Date(day);
+  base.setHours(0, 0, 0, 0);
+  const baseMs = base.getTime();
+  const startStr = fmt.format(new Date(baseMs + sp.startMin * 60000), pattern);
+  const endStr =
+    sp.endMin >= 1440
+      ? '24:00'
+      : fmt.format(new Date(baseMs + sp.endMin * 60000), pattern);
+  return { startStr, endStr };
+}
 
 /**
  * One bar in an all-day lane: an all-day event positioned on a single

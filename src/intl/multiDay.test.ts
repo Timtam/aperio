@@ -5,6 +5,7 @@ import {
   buildAllDayBars,
   daysCoveredKeys,
   eventCoversDay,
+  eventDayTimes,
   multiDayInfo,
 } from './multiDay';
 
@@ -157,6 +158,36 @@ describe('multiDayInfo', () => {
       all_day: false,
     });
     expect(multiDayInfo(timed, new Date(2026, 4, 20))).toBeNull();
+  });
+});
+
+describe('eventDayTimes', () => {
+  // A deterministic 24h `HH:mm` formatter so the per-day clamp assertions are
+  // timezone- and locale-robust (the real `useDateFormat` 'p' is locale-bound).
+  const fmt = {
+    format: (date: Date | number, _pattern: string) => {
+      const d = new Date(date);
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      return `${hh}:${mm}`;
+    },
+  };
+
+  // A timed 23:00 → 01:00 meeting (local-time strings → timezone-robust).
+  const crossMidnight = { start: '2026-05-20T23:00:00', end: '2026-05-21T01:00:00' };
+
+  it('clamps the START day to "…–24:00" (end of day, NOT next 00:00)', () => {
+    expect(eventDayTimes(fmt, crossMidnight, new Date(2026, 4, 20))).toEqual({
+      startStr: '23:00',
+      endStr: '24:00',
+    });
+  });
+
+  it('clamps the TAIL day to "00:00–…" (not the absolute 23:00 start)', () => {
+    expect(eventDayTimes(fmt, crossMidnight, new Date(2026, 4, 21))).toEqual({
+      startStr: '00:00',
+      endStr: '01:00',
+    });
   });
 });
 

@@ -147,6 +147,12 @@ export function expandToDayOccurrences<E extends DaySpanEventLike>(
         });
       });
     } else {
+      // Timed events get ONE agenda row, at their start day — deliberately NOT
+      // spread across midnight here (unlike the day/week/month GRIDS, which show
+      // a 23:00→01:00 meeting on both days via daysCoveredKeys). A flat
+      // chronological agenda reads such a meeting most naturally as a single
+      // "23:00–01:00" entry at its start; a second 00:00 row the next day would
+      // duplicate it. The grid's per-day occupancy is a grid concept.
       const start = new Date(ev.start);
       const k = localDateKey(start);
       if (k < startKey || k > endKey) return;
