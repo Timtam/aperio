@@ -5,7 +5,6 @@ import { useTranslation } from 'react-i18next';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
 import type {
-  CalendarDayViewMode,
   CarryOverDefault,
   CheckoffMode,
   DayStartTrigger,
@@ -54,9 +53,6 @@ const DAY_START_TRIGGER_OPTIONS: readonly DayStartTrigger[] = [
 /** Check-off gesture behaviour choices, rendered as a radio group. */
 const CHECKOFF_MODE_OPTIONS: readonly CheckoffMode[] = ['toggle', 'cycle'];
 
-/** Calendar day/week layout choices, rendered as a radio group. */
-const DAY_VIEW_MODE_OPTIONS: readonly CalendarDayViewMode[] = ['grid', 'list'];
-
 export function TasksPanel() {
   const { t } = useTranslation();
   const {
@@ -68,8 +64,6 @@ export function TasksPanel() {
     setAutoSelfAssign,
     visualEffortSizing,
     setVisualEffortSizing,
-    dayViewMode,
-    setDayViewMode,
     carryOverDefault,
     setCarryOverDefault,
     dayStartTrigger,
@@ -118,9 +112,6 @@ export function TasksPanel() {
   const autoSelfAssignHintId = useId();
   const visualEffortSizingHeadingId = useId();
   const visualEffortSizingHintId = useId();
-  const dayViewModeHeadingId = useId();
-  const dayViewModeHintId = useId();
-  const dayViewModeGroupId = useId();
   const carryOverHeadingId = useId();
   const carryOverHintId = useId();
   const carryOverGroupId = useId();
@@ -270,42 +261,6 @@ export function TasksPanel() {
           />
           <span>{t('dialogs.tasks.visualEffortSizing.label')}</span>
         </label>
-      </section>
-
-      <section
-        aria-labelledby={dayViewModeHeadingId}
-        className="tasks-settings__section"
-      >
-        <h3 id={dayViewModeHeadingId} className="color-labels__heading">
-          {t('dialogs.tasks.dayViewMode.heading')}
-        </h3>
-        <p id={dayViewModeHintId} className="tasks-settings__hint">
-          {t('dialogs.tasks.dayViewMode.hint')}
-        </p>
-        {/* Two options with a clear visual trade-off (hour-grid vs compact
-            list); a radiogroup keeps them side-by-side with arrow-key nav,
-            mirroring the carry-over default below. The toolbar exposes the
-            same toggle as a quick-switch; both write the synced pref. */}
-        <div
-          role="radiogroup"
-          id={dayViewModeGroupId}
-          aria-labelledby={dayViewModeHeadingId}
-          aria-describedby={dayViewModeHintId}
-          className="tasks-settings__radiogroup"
-        >
-          {DAY_VIEW_MODE_OPTIONS.map((option) => (
-            <label key={option} className="tasks-settings__radio">
-              <input
-                type="radio"
-                name={dayViewModeGroupId}
-                value={option}
-                checked={dayViewMode === option}
-                onChange={() => setDayViewMode(option)}
-              />
-              <span>{t(`dialogs.tasks.dayViewMode.options.${option}`)}</span>
-            </label>
-          ))}
-        </div>
       </section>
 
       <section

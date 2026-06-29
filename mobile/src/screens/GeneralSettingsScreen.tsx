@@ -16,6 +16,7 @@ import { readWeekStart, writeWeekStart, type WeekStart } from '../settings/weekS
 import { useAppBadgePref } from '../state/appBadge';
 import { useBackgroundSyncPref } from '../state/backgroundSync';
 import { useHapticsPref } from '../state/haptics';
+import { readTaskBehaviour, writeDayViewMode } from '../state/taskBehaviour';
 import { useSoundPref } from '../state/useSoundPref';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -31,6 +32,10 @@ export default function GeneralSettingsScreen() {
   const styles = useThemedStyles(makeStyles);
   const [language, setLanguage] = useState<LanguageChoice>('system');
   const [weekStart, setWeekStart] = useState<WeekStart>(1);
+  // Calendar day/week layout (synced `calendar.dayViewMode`) — a view preference
+  // like week-start, so it lives here (the mobile twin of the desktop Calendars
+  // panel's setting), not under Tasks. Also switchable from the calendar toolbar.
+  const [dayViewMode, setDayViewMode] = useState<'grid' | 'list'>('grid');
   // The global default reminder sound (§14.4 root). System/Silent only on mobile
   // — Custom needs an asset store the host lacks; a custom value synced from
   // desktop still round-trips and is shown read-only by SoundSelect.
@@ -49,6 +54,7 @@ export default function GeneralSettingsScreen() {
     useCallback(() => {
       void readLanguageChoice().then(setLanguage);
       void readWeekStart().then(setWeekStart);
+      void readTaskBehaviour().then((b) => setDayViewMode(b.dayViewMode));
     }, []),
   );
 
@@ -61,6 +67,11 @@ export default function GeneralSettingsScreen() {
   const onWeekStartChange = useCallback((next: WeekStart) => {
     setWeekStart(next);
     void writeWeekStart(next);
+  }, []);
+
+  const onDayViewModeChange = useCallback((next: 'grid' | 'list') => {
+    setDayViewMode(next);
+    void writeDayViewMode(next);
   }, []);
 
   // Localized full weekday names for the picker. 7 Jan 2024 is a Sunday (index
@@ -103,6 +114,28 @@ export default function GeneralSettingsScreen() {
         />
         <Text style={styles.hint} accessibilityRole="text">
           {t('dialogs.settings.general.weekStartHint')}
+        </Text>
+      </View>
+
+      <View style={styles.section}>
+        <RadioGroup<'grid' | 'list'>
+          label={t('dialogs.settings.calendars.dayViewMode.heading')}
+          labelAsHeading
+          value={dayViewMode}
+          options={[
+            {
+              value: 'grid',
+              label: t('dialogs.settings.calendars.dayViewMode.options.grid'),
+            },
+            {
+              value: 'list',
+              label: t('dialogs.settings.calendars.dayViewMode.options.list'),
+            },
+          ]}
+          onChange={onDayViewModeChange}
+        />
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.settings.calendars.dayViewMode.hint')}
         </Text>
       </View>
 

@@ -3,9 +3,14 @@ import { FocusableNote } from '../a11y/FocusableNote';
 import { useTranslation } from 'react-i18next';
 
 import { useCalendarStore } from '../state/calendarStoreContext';
+import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
+import type { CalendarDayViewMode } from '../state/TaskCascadeProvider';
 import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
 import { RemindersEditor } from './RemindersEditor';
 import { SoundPrefField } from './SoundPrefField';
+
+/** Calendar day/week layout choices, rendered as a radio group. */
+const DAY_VIEW_MODE_OPTIONS: readonly CalendarDayViewMode[] = ['grid', 'list'];
 
 /**
  * Calendars settings panel — per-calendar default reminders + sounds.
@@ -42,6 +47,9 @@ import { SoundPrefField } from './SoundPrefField';
 export function CalendarsPanel() {
   const { t } = useTranslation();
   const { calendars, accounts } = useCalendarStore();
+  // Calendar day/week layout is a synced view preference (also toggled from the
+  // calendar toolbar); both write the same `calendar.dayViewMode` pref.
+  const { dayViewMode, setDayViewMode } = useTaskCascadeEnabled();
 
   const calendarIds = useMemo(() => calendars.map((c) => c.id), [calendars]);
   const { getDefaultsFor, setDefaultsFor, hydrating } =
@@ -96,6 +104,10 @@ export function CalendarsPanel() {
   const idPrefix = useId();
   const optionId = (id: string) => `${idPrefix}-opt-${id}`;
   const detailHeadingId = `${idPrefix}-detail-h`;
+
+  const dayViewModeHeadingId = useId();
+  const dayViewModeHintId = useId();
+  const dayViewModeGroupId = useId();
 
   // Keep the active option visible: with aria-activedescendant the browser
   // doesn't move DOM focus, so it won't auto-scroll the selection into view
@@ -164,6 +176,48 @@ export function CalendarsPanel() {
       <FocusableNote className="form__hint">
         {t('dialogs.settings.calendars.hint')}
       </FocusableNote>
+
+      {/* Calendar day/week layout — a top-level view preference, so it sits at
+          the top of the panel above the per-calendar defaults. Two options with
+          a clear visual trade-off (hour-grid vs compact list); a radiogroup
+          keeps them side-by-side with arrow-key nav. The toolbar exposes the
+          same toggle as a quick-switch; both write the synced pref. */}
+      <section
+        className="calendars-panel__group"
+        aria-label={t('dialogs.settings.calendars.dayViewMode.heading')}
+      >
+        <h3
+          id={dayViewModeHeadingId}
+          className="calendars-panel__account"
+        >
+          {t('dialogs.settings.calendars.dayViewMode.heading')}
+        </h3>
+        <p id={dayViewModeHintId} className="form__hint">
+          {t('dialogs.settings.calendars.dayViewMode.hint')}
+        </p>
+        <div
+          role="radiogroup"
+          id={dayViewModeGroupId}
+          aria-labelledby={dayViewModeHeadingId}
+          aria-describedby={dayViewModeHintId}
+          className="tasks-settings__radiogroup"
+        >
+          {DAY_VIEW_MODE_OPTIONS.map((option) => (
+            <label key={option} className="tasks-settings__radio">
+              <input
+                type="radio"
+                name={dayViewModeGroupId}
+                value={option}
+                checked={dayViewMode === option}
+                onChange={() => setDayViewMode(option)}
+              />
+              <span>
+                {t(`dialogs.settings.calendars.dayViewMode.options.${option}`)}
+              </span>
+            </label>
+          ))}
+        </div>
+      </section>
 
       {/* §14.4 global notification-sound default. Sits above the
           per-calendar selector because it's the fallback every calendar /

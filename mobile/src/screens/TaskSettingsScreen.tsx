@@ -13,7 +13,6 @@ import {
   writeCascadeEnabled,
   writeCheckoffMode,
   writeDayStartTrigger,
-  writeDayViewMode,
   writeVisualEffortSizing,
   type CarryOverDefault,
   type CheckoffMode,
@@ -74,7 +73,6 @@ export default function TaskSettingsScreen() {
   const [autoDate, setAutoDate] = useState(true);
   const [autoSelfAssign, setAutoSelfAssign] = useState(true);
   const [visualEffortSizing, setVisualEffortSizing] = useState(true);
-  const [dayViewMode, setDayViewMode] = useState<'grid' | 'list'>('grid');
   const [carryOver, setCarryOver] = useState<CarryOverDefault>('ask');
   const [dayStart, setDayStart] = useState<DayStartTrigger>('00:00');
 
@@ -88,7 +86,6 @@ export default function TaskSettingsScreen() {
         setAutoDate(b.autoDate);
         setAutoSelfAssign(b.autoSelfAssign);
         setVisualEffortSizing(b.visualEffortSizing);
-        setDayViewMode(b.dayViewMode);
         setCarryOver(b.carryOverDefault);
         setDayStart(b.dayStartTrigger);
       });
@@ -98,11 +95,6 @@ export default function TaskSettingsScreen() {
   const onCheckoffChange = useCallback((next: CheckoffMode) => {
     setCheckoffMode(next);
     void writeCheckoffMode(next);
-  }, []);
-
-  const onDayViewModeChange = useCallback((next: 'grid' | 'list') => {
-    setDayViewMode(next);
-    void writeDayViewMode(next);
   }, []);
 
   const onCarryOverChange = useCallback((next: CarryOverDefault) => {
@@ -225,21 +217,6 @@ export default function TaskSettingsScreen() {
         </Text>
       </View>
 
-      <View style={styles.section}>
-        <RadioGroup<'grid' | 'list'>
-          label={t('dialogs.tasks.dayViewMode.heading')}
-          labelAsHeading
-          value={dayViewMode}
-          options={[
-            { value: 'grid', label: t('dialogs.tasks.dayViewMode.options.grid') },
-            { value: 'list', label: t('dialogs.tasks.dayViewMode.options.list') },
-          ]}
-          onChange={onDayViewModeChange}
-        />
-        <Text style={styles.hint} accessibilityRole="text">
-          {t('dialogs.tasks.dayViewMode.hint')}
-        </Text>
-      </View>
 
       <View style={styles.section}>
         <RadioGroup<CarryOverDefault>

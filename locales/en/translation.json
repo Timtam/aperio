@@ -496,6 +496,14 @@
         "minimizeToTrayHint": "The minimize button hides Aperio in the tray. Click the tray icon to bring the window back."
       },
       "calendars": {
+        "dayViewMode": {
+          "heading": "Calendar day layout",
+          "hint": "How the calendar's day and week views lay out events. \"Hour grid\" places events on a 24-hour timeline, sized by duration. \"Compact list\" stacks them as a chronological list, each block still sized by duration. Tasks size by effort in both. Purely visual — also switchable from the calendar toolbar.",
+          "options": {
+            "grid": "Hour grid",
+            "list": "Compact list"
+          }
+        },
         "hint": "Default reminders that apply to events without their own reminder. Useful for iCloud calendars: iOS “Default Alert Times” aren't written into the event itself, so without a default here the alarm doesn't show in Aperio.",
         "empty": "No calendars yet — add an account first.",
         "accountHeading": "{{account}}",
@@ -922,14 +930,6 @@
         "heading": "Effort as tile size",
         "label": "Show tasks larger/smaller by effort",
         "hint": "When enabled, task tiles render at different sizes depending on the task's effort (small/medium/large), so you can see at a glance how full a day is. Purely visual — the effort is always announced in the task's label regardless. Disable to render every tile the same size."
-      },
-      "dayViewMode": {
-        "heading": "Calendar day layout",
-        "hint": "How the calendar's day and week views lay out events. \"Hour grid\" places events on a 24-hour timeline, sized by duration. \"Compact list\" stacks them as a chronological list, each block still sized by duration. Tasks size by effort in both. Purely visual — also switchable from the calendar toolbar.",
-        "options": {
-          "grid": "Hour grid",
-          "list": "Compact list"
-        }
       },
       "carryOverDefault": {
         "heading": "Carry-over default",
