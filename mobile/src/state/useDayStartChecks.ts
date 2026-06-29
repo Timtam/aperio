@@ -4,8 +4,11 @@ import { AccessibilityInfo, AppState } from 'react-native';
 import {
   actionableDescendants,
   filterCarriedOver,
+  filterDeadlineArrived,
+  filterDeadlineCountdown,
   filterDeadlinePinTargets,
   filterOverdue,
+  filterUntimedToday,
   shouldFireToday,
   todayIsoKey,
 } from '@aperio/shared';
@@ -13,6 +16,7 @@ import type { Task, TaskUser } from '@aperio/shared';
 import i18n from '../../i18n';
 
 import { getTasks, listTaskLists, updateTask } from '../api/client';
+import { notify } from './notify';
 import { currentUserForList } from './currentUser';
 import { readFiredDayKey, writeFiredDayKey } from './dayStartFired';
 import { isDayStartReviewSnoozed } from './dayStartSnooze';
@@ -153,6 +157,52 @@ async function runDayStartReview(
   await writeFiredDayKey('dayStartReview', todayKey);
 
   const meFor = await meForTasks(all);
+
+  // ── Day-start TASK REMINDERS ────────────────────────────────────────────
+  // Three read-only nudges, each gated by its own toggle, sharing this same
+  // 'dayStartReview' fire-marker so they surface once a day with the review.
+  // Each non-empty set gets a polite live announcement and contributes to a
+  // single summarising OS notification; the modal also opens when reminders
+  // are the ONLY thing to show (see the `reminderTotal` term in the open
+  // decision below). The predicates already skip settled tasks, project
+  // parents, and other-user tasks (via `meFor`).
+  const untimed = behaviour.remindUntimedToday ? filterUntimedToday(all, meFor) : [];
+  const dueToday = behaviour.remindDeadlineArrived ? filterDeadlineArrived(all, meFor) : [];
+  const countdown = behaviour.remindDeadlineCountdown
+    ? filterDeadlineCountdown(all, behaviour.deadlineCountdownDays, meFor)
+    : [];
+  const reminderTotal = untimed.length + dueToday.length + countdown.length;
+
+  if (untimed.length > 0) {
+    AccessibilityInfo.announceForAccessibility(
+      i18n.t('dialogs.dayStartReview.reminders.untimedToday', { count: untimed.length }),
+    );
+  }
+  if (dueToday.length > 0) {
+    AccessibilityInfo.announceForAccessibility(
+      i18n.t('dialogs.dayStartReview.reminders.deadlineArrived', { count: dueToday.length }),
+    );
+  }
+  if (countdown.length > 0) {
+    AccessibilityInfo.announceForAccessibility(
+      i18n.t('dialogs.dayStartReview.reminders.countdown', {
+        count: countdown.length,
+        days: behaviour.deadlineCountdownDays,
+      }),
+    );
+  }
+  if (reminderTotal > 0) {
+    // One combined OS notification for the "you're not looking at Aperio"
+    // reach. The live announcements above already carry the per-group detail
+    // for assistive tech; this is the secondary channel and is suppressed
+    // silently if permission isn't granted.
+    void notify(
+      i18n.t('dialogs.dayStartReview.reminders.notificationTitle'),
+      i18n.t('dialogs.dayStartReview.reminders.notificationBody', { count: reminderTotal }),
+      'day-start reminders notification',
+    );
+  }
+
   const overdue = filterOverdue(all, meFor);
   const slipped = filterCarriedOver(all, {
     cascadeEnabledFor: (listId) => effectiveForList(behaviour, listId).cascade,
@@ -179,12 +229,13 @@ async function runDayStartReview(
   }
   if (todayRows.length + backlogRows.length > 0) invalidateData();
 
-  // Open the modal iff there's still a decision to make. Bump the data version
-  // first so the modal's own `useTasks` re-reads from the bridge rather than a
-  // possibly-stale warm cache — the checker read the bridge directly (a
-  // separate fan-out), so this keeps the modal authoritative over what it acts
-  // on and makes its loading-guard meaningful.
-  if (overdue.length + askRows.length > 0) {
+  // Open the modal iff there's still a decision to make OR a reminder to show
+  // (the reminders section is informational but still a reason to surface the
+  // modal). Bump the data version first so the modal's own `useTasks` re-reads
+  // from the bridge rather than a possibly-stale warm cache — the checker read
+  // the bridge directly (a separate fan-out), so this keeps the modal
+  // authoritative over what it acts on and makes its loading-guard meaningful.
+  if (overdue.length + askRows.length + reminderTotal > 0) {
     invalidateData();
     openReview();
   }
