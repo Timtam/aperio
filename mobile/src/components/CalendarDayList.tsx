@@ -482,7 +482,10 @@ export function CalendarDayList({
         (ev) => ev.all_day && daysCoveredKeys(ev).includes(key),
       );
       const timedEvents = visibleEvents.filter(
-        (ev) => !ev.all_day && localDateKey(new Date(ev.start)) === key,
+        // daysCoveredKeys spreads a timed event across midnight too, so a
+        // 23:00→01:00 meeting buckets onto both days (mergeDayItems +
+        // eventSpanForDay clamp each day's portion).
+        (ev) => !ev.all_day && daysCoveredKeys(ev).includes(key),
       );
       const dayTasks = filterTasksOnDay(tasks, key, showCompletedForList, meFor);
       const { timed, untimed } = mergeDayItems(
@@ -1037,7 +1040,7 @@ export function CalendarDayList({
             ))}
             {b.timed.map((item, idx) =>
               item.kind === 'event'
-                ? renderEventRow(item.event, b.date, null, slots.get(idx))
+                ? renderEventRow(item.event, b.date, multiDayInfo(item.event, b.date), slots.get(idx))
                 : renderTaskRow(item.task, b.key, slots.get(idx)),
             )}
           </View>
@@ -1076,7 +1079,7 @@ export function CalendarDayList({
         // keeps its own role/label/actions unchanged; the full title lives in the
         // accessibilityLabel and tapping the row opens the editor (no clipping
         // for SR users).
-        return renderEventRow(ev, b.date, null, undefined, { height, overflow: 'hidden' });
+        return renderEventRow(ev, b.date, multiDayInfo(ev, b.date), undefined, { height, overflow: 'hidden' });
       })}
       {b.untimed.map((task) => renderTaskRow(task, b.key))}
       {renderDayCreateButtons(b)}
@@ -1139,7 +1142,7 @@ export function CalendarDayList({
             for (const item of b.timed) {
               rows.push(
                 item.kind === 'event'
-                  ? renderEventRow(item.event, b.date, null)
+                  ? renderEventRow(item.event, b.date, multiDayInfo(item.event, b.date))
                   : renderTaskRow(item.task, b.key),
               );
             }

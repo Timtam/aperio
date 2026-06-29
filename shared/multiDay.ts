@@ -10,9 +10,12 @@ import { localDateKey } from './dateKey';
  * from the calendar. These helpers let each view treat the event as present on
  * every day it covers.
  *
- * Scope: only **all-day** events are spread. Timed events that happen to cross
- * midnight (an 11 p.m. → 1 a.m. meeting) stay anchored to their start day —
- * that's how Outlook / Google handle it too.
+ * Scope: all-day events are spread across [start, end). TIMED events that cross
+ * midnight (an 11 p.m. → 1 a.m. meeting) are also spread onto each day they
+ * actually occupy, so the post-midnight tail shows on the next day too; the
+ * per-day `eventSpanForDay` clamp then renders each day's portion (day N:
+ * 23:00–24:00, day N+1: 00:00–01:00). An event ending exactly at midnight does
+ * NOT leak into the next day (end-exclusive).
  *
  * Timezone handling: all-day events are anchored at the user's LOCAL midnight,
  * expressed as a UTC instant — the convention the CalDAV adapter's
@@ -40,29 +43,39 @@ export interface DaySpanEventLike {
  *
  * - All-day, span > 0: walks [start, end) and emits one key per day.
  * - All-day, span 0 (DTEND missing or == DTSTART): emits the start day.
- * - Timed: emits only the start day's key.
+ * - Timed, same day: emits the start day's key.
+ * - Timed crossing midnight: emits each day whose local midnight falls strictly
+ *   before the (exclusive) end instant (so an 11pm→1am meeting emits both days).
  */
 export function daysCoveredKeys(ev: DaySpanEventLike): string[] {
-  if (!ev.all_day) {
-    return [localDateKey(new Date(ev.start))];
-  }
   const start = new Date(ev.start);
   const end = new Date(ev.end);
   // Anchor at local midnight before walking so a DST transition in the middle
-  // of the range doesn't yield a fractional day.
+  // of the range doesn't yield a fractional day. setDate(+1) is DST-safe — it
+  // moves by a calendar day, not 24 fixed hours.
   const startMid = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-  const endMid = new Date(end.getFullYear(), end.getMonth(), end.getDate());
-  const endKey = localDateKey(endMid);
-  // Always include the start day; then step one calendar day at a time and
-  // include each day strictly before the (exclusive) end day. setDate(+1) is
-  // DST-safe — it moves by a calendar day, not 24 fixed hours.
   const keys = [localDateKey(startMid)];
   const cursor = new Date(startMid);
+  if (ev.all_day) {
+    // DTEND is an EXCLUSIVE date: include each day strictly before the end day.
+    const endMid = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+    const endKey = localDateKey(endMid);
+    for (;;) {
+      cursor.setDate(cursor.getDate() + 1);
+      const k = localDateKey(cursor);
+      if (k >= endKey) break;
+      keys.push(k);
+    }
+    return keys;
+  }
+  // Timed: include each later day whose local midnight is strictly before the
+  // (exclusive) end instant. The guard keeps a bad/zero/short span (incl. a
+  // NaN end) on the start day only — and prevents an unbounded walk.
+  if (!(end.getTime() > startMid.getTime())) return keys;
   for (;;) {
     cursor.setDate(cursor.getDate() + 1);
-    const k = localDateKey(cursor);
-    if (k >= endKey) break;
-    keys.push(k);
+    if (cursor.getTime() >= end.getTime()) break;
+    keys.push(localDateKey(cursor));
   }
   return keys;
 }
@@ -76,10 +89,11 @@ export interface MultiDayInfo {
 
 /**
  * Return position info for a multi-day event on a given day, or `null` if the
- * event spans only one day (so views can skip the "(3/14)" suffix).
+ * event spans only one day (so views can skip the "(3/14)" suffix). Works for
+ * all-day spans AND timed events that cross midnight (a 23:00→01:00 meeting is
+ * "1/2" on its start day and "2/2" the next).
  */
 export function multiDayInfo(ev: DaySpanEventLike, day: Date): MultiDayInfo | null {
-  if (!ev.all_day) return null;
   const keys = daysCoveredKeys(ev);
   if (keys.length <= 1) return null;
   const idx = keys.indexOf(localDateKey(day));
