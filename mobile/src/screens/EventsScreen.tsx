@@ -126,6 +126,10 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
         emptyText={t('views.day.empty')}
         dayAnnounceKey="views.day.dayAnnounce"
         showDayHeaders={false}
+        // Single-day view → proportional 24h hour-grid (events placed by start,
+        // sized by duration). Visual only; the list semantics are unchanged.
+        // Week/Month/Agenda render CalendarDayList without this prop (linear list).
+        hourGrid
       />
     </View>
   );

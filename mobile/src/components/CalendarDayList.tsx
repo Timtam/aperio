@@ -15,9 +15,11 @@ import type {
   ColorLabel,
   DayGridItem,
   MultiDayInfo,
+  PositionedSpan,
   Section,
   Task,
   TaskList,
+  TimedSpan,
 } from '@aperio/shared';
 import {
   assigneeSuffix,
@@ -27,8 +29,11 @@ import {
   expandAll,
   filterTasksOnDay,
   isDeadlineChip,
+  layoutDayColumn,
   localDateKey,
   mergeDayItems,
+  MINUTES_PER_DAY,
+  minutesFromMidnight,
   multiDayInfo,
   occurrenceIsoOf,
   prioritySuffix,
@@ -91,6 +96,51 @@ function buildTimeDate(key: string, time: string): Date {
   return new Date(y, mo - 1, d, hh ?? 0, mm ?? 0, ss ?? 0);
 }
 
+// ── Single-day hour-grid geometry ───────────────────────────────────────────
+// Mirrors the desktop DayView/WeekView grid. Only the single-day caller
+// (EventsScreen, hourGrid=true) renders the timed lane as a 24h-tall positioned
+// canvas; multi-day callers (Week/Month/Agenda) stay the linear list. The
+// overlap math lives in the shared, tested `layoutDayColumn`.
+
+/** Canvas pixels per hour → the 24h column is HOUR_PX*24 tall. */
+const HOUR_PX = 48;
+/** Full timed-canvas height in px (24h). */
+const CANVAS_PX = HOUR_PX * 24;
+/** Minimum rendered chip height so a short/zero-duration item stays legible. */
+const MIN_SLOT_PX = 28;
+/** Hour-ruler column width (carries the 00–23 numbers). */
+const RULER_PX = 44;
+
+/** Local minutes-from-midnight span an event occupies on `day`, clamped to the
+ *  day so a multi-day event clips to [0, 1440]. RN twin of the desktop helper. */
+function eventSpanForDay(start: Date, end: Date, day: Date): TimedSpan {
+  const base = new Date(day);
+  base.setHours(0, 0, 0, 0);
+  const baseMs = base.getTime();
+  const startMin = Math.round((start.getTime() - baseMs) / 60000);
+  const endMin = Math.round((end.getTime() - baseMs) / 60000);
+  return {
+    startMin: Math.max(0, Math.min(MINUTES_PER_DAY, startMin)),
+    endMin: Math.max(0, Math.min(MINUTES_PER_DAY, endMin)),
+  };
+}
+
+/** Absolute placement of a timed chip inside the 24h canvas (purely visual;
+ *  source order is unchanged). top/height by start+duration, left/width by the
+ *  overlap column. A short span keeps a MIN_SLOT_PX min-height so it stays tappable. */
+function slotStyle(p: PositionedSpan) {
+  const top = p.topFraction * CANVAS_PX;
+  const height = Math.max(p.heightFraction * CANVAS_PX, MIN_SLOT_PX);
+  return {
+    position: 'absolute' as const,
+    top,
+    // Clamp so a min-height chip near the bottom doesn't overflow the canvas.
+    height: Math.min(height, CANVAS_PX - top),
+    left: `${(p.columnIndex / p.columnCount) * 100}%` as const,
+    width: `${(1 / p.columnCount) * 100}%` as const,
+  };
+}
+
 interface DayBucket {
   key: string;
   date: Date;
@@ -120,6 +170,20 @@ export interface CalendarDayListProps {
    * heading for a screen-reader user.
    */
   showDayHeaders?: boolean;
+  /**
+   * Render the day's timed items as a proportional 24h hour-grid (placed by
+   * start time, sized by duration) instead of the linear list. Default `false`.
+   *
+   * Single-day ONLY: the single-day caller (EventsScreen) passes `true`. The
+   * multi-day Week/Month/Agenda callers stack days vertically, where a 7×24h /
+   * 30×24h grid would be unusable, so they keep the linear list (`false`). When
+   * `false` the rendering is byte-for-byte the same as before this prop existed.
+   *
+   * Purely visual: every row keeps its `accessible`, role, full
+   * `accessibilityLabel` (incl. the time range) and tap/action handlers; source
+   * order stays chronological. The grid only changes where chips are *drawn*.
+   */
+  hourGrid?: boolean;
 }
 
 export function CalendarDayList({
@@ -130,6 +194,7 @@ export function CalendarDayList({
   emptyText,
   dayAnnounceKey,
   showDayHeaders = true,
+  hourGrid = false,
 }: CalendarDayListProps) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
@@ -527,9 +592,18 @@ export function CalendarDayList({
     [fmtDateOnly, fmtTime, t, tasks, tr],
   );
 
-  const renderEventRow = (ev: CalendarEvent, day: Date, span: MultiDayInfo | null) => {
+  // `slot` (grid mode only) absolutely positions the row inside the 24h canvas
+  // and switches the visible chip to title-only (the time is read off the ruler;
+  // it stays in the accessibilityLabel below, unchanged).
+  const renderEventRow = (
+    ev: CalendarEvent,
+    day: Date,
+    span: MultiDayInfo | null,
+    slot?: PositionedSpan,
+  ) => {
     const rowKey = `e-${ev.id}@${localDateKey(day)}`;
     const hex = resolveEventColor(ev, calendarsById, labelsById).hex;
+    const grid = slot != null;
     const dot =
       hex != null ? (
         <View
@@ -548,17 +622,23 @@ export function CalendarDayList({
           accessible
           accessibilityRole="text"
           accessibilityLabel={eventLabel(ev, span)}
-          style={styles.row}
+          style={grid ? [styles.gridChip, slotStyle(slot)] : styles.row}
         >
           {dot}
           <View style={styles.rowText}>
-            <Text style={styles.itemTitle} importantForAccessibility="no">
+            <Text
+              style={styles.itemTitle}
+              importantForAccessibility="no"
+              numberOfLines={grid ? 1 : undefined}
+            >
               {ev.title}
               {badge}
             </Text>
-            <Text style={styles.itemMeta} importantForAccessibility="no">
-              {eventTimeLabel(ev)}
-            </Text>
+            {!grid && (
+              <Text style={styles.itemMeta} importantForAccessibility="no">
+                {eventTimeLabel(ev)}
+              </Text>
+            )}
           </View>
         </View>
       );
@@ -580,44 +660,58 @@ export function CalendarDayList({
           else if (e.nativeEvent.actionName === 'moveCopy') moveCopyEvent(ev);
           else editEvent(ev);
         }}
-        style={styles.row}
+        style={grid ? [styles.gridChip, slotStyle(slot)] : styles.row}
       >
         {dot}
         <Pressable accessible={false} onPress={() => editEvent(ev)} style={styles.rowText}>
-          <Text style={styles.itemTitle} importantForAccessibility="no">
+          <Text
+            style={styles.itemTitle}
+            importantForAccessibility="no"
+            numberOfLines={grid ? 1 : undefined}
+          >
             {ev.title}
             {badge}
           </Text>
-          <Text style={styles.itemMeta} importantForAccessibility="no">
-            {eventTimeLabel(ev)}
-          </Text>
+          {!grid && (
+            <Text style={styles.itemMeta} importantForAccessibility="no">
+              {eventTimeLabel(ev)}
+            </Text>
+          )}
         </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`${t('dialogs.event.delete')}: ${ev.title}`}
-          onPress={() => removeEvent(ev)}
-          style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
-        >
-          <Text style={styles.deleteButtonText}>{t('dialogs.event.delete')}</Text>
-        </Pressable>
+        {/* In the compact grid chip the inline delete button would crowd out
+            the title; SR users keep the row's "delete" custom action. */}
+        {!grid && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${t('dialogs.event.delete')}: ${ev.title}`}
+            onPress={() => removeEvent(ev)}
+            style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.deleteButtonText}>{t('dialogs.event.delete')}</Text>
+          </Pressable>
+        )}
       </View>
     );
   };
 
-  const renderTaskRow = (task: Task, key: string) => {
+  const renderTaskRow = (task: Task, key: string, slot?: PositionedSpan) => {
     const done = task.status === 'completed';
+    const grid = slot != null;
     const resolved = resolveTaskColor(task, listsById, labelsById, sectionColorById);
     const hex = resolved.hex;
     // Visual tile-size by effort (sighted users), only when the synced pref is
     // on; medium = neutral base row height. Purely cosmetic — the effort is
-    // always in the row's accessibilityLabel via effortSuffix.
-    const effortStyle = effortSizing
-      ? effortSizeModifier(task.effort) === 'small'
-        ? styles.rowEffortSmall
-        : effortSizeModifier(task.effort) === 'large'
-          ? styles.rowEffortLarge
-          : null
-      : null;
+    // always in the row's accessibilityLabel via effortSuffix. Skipped in the
+    // grid: a grid chip is a fixed time-slot (sized by duration), not an effort
+    // tile, so effort sizing doesn't apply there.
+    const effortStyle =
+      !grid && effortSizing
+        ? effortSizeModifier(task.effort) === 'small'
+          ? styles.rowEffortSmall
+          : effortSizeModifier(task.effort) === 'large'
+            ? styles.rowEffortLarge
+            : null
+        : null;
     // Day-aware visible meta (the row's reason for being on THIS day): its time
     // if timed here, else a "due"/"planned" marker for this day. (Task-level
     // describeDue would show the scheduled day on a deadline-day row.)
@@ -654,7 +748,7 @@ export function CalendarDayList({
           else if (name === 'moveCopy') moveCopyTask(task);
           else openTask(task);
         }}
-        style={[styles.row, effortStyle]}
+        style={grid ? [styles.gridChip, slotStyle(slot)] : [styles.row, effortStyle]}
       >
         {/* Sighted tap target to complete/reopen the task; the row otherwise
             opens the task on tap, so the marker needs its own Pressable. SR
@@ -682,14 +776,125 @@ export function CalendarDayList({
           <Text
             style={[styles.itemTitle, done && styles.itemTitleDone]}
             importantForAccessibility="no"
+            numberOfLines={grid ? 1 : undefined}
           >
             {task.parent_id ? '↳ ' : ''}
             {task.title}
           </Text>
-          <Text style={styles.itemMeta} importantForAccessibility="no">
-            {meta}
-          </Text>
+          {!grid && (
+            <Text style={styles.itemMeta} importantForAccessibility="no">
+              {meta}
+            </Text>
+          )}
         </Pressable>
+      </View>
+    );
+  };
+
+  // Hour-grid placement for one day's timed items (single-day only). Each timed
+  // item gets an absolute slot keyed by its index in `b.timed`; source order is
+  // untouched. Every timed task ALWAYS gets a slot (unparseable time → midnight)
+  // so nothing flows static and corrupts the positioned canvas. Mirrors the
+  // desktop DayView's `slotByIdx`.
+  const computeSlots = (b: DayBucket): Map<number, PositionedSpan> => {
+    const map = new Map<number, PositionedSpan>();
+    const spans: TimedSpan[] = [];
+    const slotIdxs: number[] = [];
+    b.timed.forEach((item, idx) => {
+      let s: TimedSpan | null = null;
+      if (item.kind === 'event') {
+        // All-day events never reach b.timed (they're in b.allDay), but guard
+        // anyway — an all-day chip has no meaningful hour placement.
+        if (!item.event.all_day) {
+          s = eventSpanForDay(new Date(item.event.start), new Date(item.event.end), b.date);
+        }
+      } else {
+        // A timed task is a zero-duration point; an unparseable time falls back
+        // to midnight so it ALWAYS gets a slot.
+        const m = minutesFromMidnight(taskTimeOnDay(item.task, b.key) ?? '');
+        s = { startMin: m ?? 0, endMin: m ?? 0 };
+      }
+      if (s) {
+        spans.push(s);
+        slotIdxs.push(idx);
+      }
+    });
+    const positions = layoutDayColumn(spans);
+    slotIdxs.forEach((idx, k) => map.set(idx, positions[k]));
+    return map;
+  };
+
+  // The day's +event / +task create buttons — shared by the list and grid
+  // layouts (in the grid they sit below the canvas, still reachable).
+  const renderDayCreateButtons = (b: DayBucket): ReactNode => (
+    <>
+      {firstWritableCalendarId != null && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${t('toolbar.newEvent')}, ${fmtFullDate(b.date)}`}
+          onPress={() => addEventOnDay(b.key)}
+          style={({ pressed }) => [styles.newEventButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.newEventText}>{t('toolbar.newEvent')}</Text>
+        </Pressable>
+      )}
+      {firstWritableTaskListId != null && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${t('toolbar.newTask')}, ${fmtFullDate(b.date)}`}
+          onPress={() => addTaskOnDay(b.key)}
+          style={({ pressed }) => [styles.newEventButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.newEventText}>{t('toolbar.newTask')}</Text>
+        </Pressable>
+      )}
+    </>
+  );
+
+  // Single-day hour-grid: all-day events + untimed tasks in a compact section
+  // ABOVE the 24h canvas (so they're never buried), then the canvas itself — a
+  // leading hour-ruler (00–23, decorative) beside the positioned day column.
+  // Source order stays chronological; the grid is visual only.
+  const renderDayGrid = (b: DayBucket): ReactNode => {
+    const slots = computeSlots(b);
+    return (
+      <View key={b.key} style={styles.daySection}>
+        {b.allDay.map((ev) => renderEventRow(ev, b.date, multiDayInfo(ev, b.date)))}
+        {b.untimed.map((task) => renderTaskRow(task, b.key))}
+        <View style={styles.gridRow}>
+          {/* Hour ruler — the hour numbers (00–23), read off the grid instead of
+              the chips. Decorative: the time stays in each row's
+              accessibilityLabel, so it's hidden from the screen reader. */}
+          <View
+            style={styles.ruler}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
+            {Array.from({ length: 24 }, (_, h) => (
+              <Text key={h} style={[styles.rulerHour, { top: (h / 24) * CANVAS_PX }]}>
+                {String(h).padStart(2, '0')}
+              </Text>
+            ))}
+          </View>
+          {/* The positioned 24h day column. Each timed chip is absolutely placed
+              by start+duration; faint hour gridlines read the column as a grid. */}
+          <View style={styles.canvas}>
+            {Array.from({ length: 24 }, (_, h) => (
+              <View
+                key={h}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+                style={[styles.gridLine, { top: (h / 24) * CANVAS_PX }]}
+              />
+            ))}
+            {b.timed.map((item, idx) =>
+              item.kind === 'event'
+                ? renderEventRow(item.event, b.date, null, slots.get(idx))
+                : renderTaskRow(item.task, b.key, slots.get(idx)),
+            )}
+          </View>
+        </View>
+        {renderDayCreateButtons(b)}
       </View>
     );
   };
@@ -721,6 +926,10 @@ export function CalendarDayList({
           keyboardShouldPersistTaps="handled"
         >
           {buckets.map((b) => {
+            // Single-day hour-grid path. Gated on the explicit `hourGrid` prop,
+            // which ONLY the single-day caller (EventsScreen) passes — multi-day
+            // Week/Month/Agenda keep the linear list below unchanged.
+            if (hourGrid) return renderDayGrid(b);
             const rows: ReactNode[] = [];
             if (showDayHeaders) {
               rows.push(
@@ -753,36 +962,7 @@ export function CalendarDayList({
             return (
               <View key={b.key} style={styles.daySection}>
                 {rows}
-                {firstWritableCalendarId != null && (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`${t('toolbar.newEvent')}, ${fmtFullDate(b.date)}`}
-                    onPress={() => addEventOnDay(b.key)}
-                    style={({ pressed }) => [
-                      styles.newEventButton,
-                      pressed && styles.pressed,
-                    ]}
-                  >
-                    <Text style={styles.newEventText}>
-                      {t('toolbar.newEvent')}
-                    </Text>
-                  </Pressable>
-                )}
-                {firstWritableTaskListId != null && (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`${t('toolbar.newTask')}, ${fmtFullDate(b.date)}`}
-                    onPress={() => addTaskOnDay(b.key)}
-                    style={({ pressed }) => [
-                      styles.newEventButton,
-                      pressed && styles.pressed,
-                    ]}
-                  >
-                    <Text style={styles.newEventText}>
-                      {t('toolbar.newTask')}
-                    </Text>
-                  </Pressable>
-                )}
+                {renderDayCreateButtons(b)}
               </View>
             );
           })}
@@ -841,6 +1021,44 @@ const makeStyles = (c: ThemeColors) =>
     itemTitle: { fontSize: 18, fontWeight: '600', color: c.textPrimary },
     itemTitleDone: { textDecorationLine: 'line-through', color: c.textSecondary },
     itemMeta: { fontSize: 14, color: c.textSecondary },
+    // ── Single-day hour-grid (hourGrid) ──────────────────────────────────────
+    // A horizontal [ruler | 24h canvas] row; the canvas is a 24h-tall positioned
+    // column. Ruler numbers + chips line up because both are offset from the
+    // SAME top by the same per-hour fraction (CANVAS_PX tall).
+    gridRow: { flexDirection: 'row', alignItems: 'flex-start' },
+    ruler: { width: RULER_PX, height: CANVAS_PX, position: 'relative' },
+    rulerHour: {
+      position: 'absolute',
+      right: 6,
+      fontSize: 12,
+      color: c.textSecondary,
+      // Nudge up so the number sits centred on its gridline.
+      marginTop: -7,
+    },
+    canvas: { flex: 1, height: CANVAS_PX, position: 'relative' },
+    gridLine: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      height: 1,
+      backgroundColor: c.border,
+      opacity: 0.5,
+    },
+    // A timed chip inside the canvas: absolutely positioned (slotStyle supplies
+    // top/height/left/width), compact, title-only. overflow:hidden clips a long
+    // title to the slot height so it never spills over neighbours.
+    gridChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingVertical: 4,
+      paddingHorizontal: 8,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+      overflow: 'hidden',
+    },
     deleteButton: {
       paddingVertical: 10,
       paddingHorizontal: 14,
