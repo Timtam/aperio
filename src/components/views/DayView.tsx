@@ -218,6 +218,18 @@ export function DayView() {
     return map;
   }, [timedItems, anchor, dayKey]);
 
+  // All-day events have no hour placement, so they get no slot — their <li>
+  // stays a (visually-hidden) option in the listbox for SR/keyboard, while the
+  // sighted representation is this band above the grid. Mirrors WeekView's
+  // clipped `--in-lane` option + visible all-day lane.
+  const allDayEvents = useMemo(
+    () =>
+      timedItems.flatMap((it) =>
+        it.kind === 'event' && it.event.all_day ? [it.event] : [],
+      ),
+    [timedItems],
+  );
+
   const [focusIndex, setFocusIndex] = useState(0);
 
   // If the day changes (or events arrive) and the previous focus index
@@ -255,7 +267,10 @@ export function DayView() {
     document
       .getElementById(itemId(focusIndex))
       ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [focusIndex, itemId, timedItems.length]);
+    // `dayKey` is a dep so switching to a different day always re-scrolls the
+    // active option into view, even when the new day has the same item count
+    // and focusIndex is unchanged (otherwise the effect wouldn't re-run).
+  }, [focusIndex, itemId, timedItems.length, dayKey]);
   const listRef = useAutoFocus<HTMLUListElement>(!loading);
 
   const [confirmTarget, setConfirmTarget] = useState<CalendarEvent | null>(
@@ -448,6 +463,33 @@ export function DayView() {
           the time reads off the grid; the canvas + ruler scroll together as one
           internal region. Purely visual — the listbox keeps its role, IDs,
           aria-activedescendant and keyboard handlers unchanged. */}
+      {/* All-day events sit above the hour-grid (they have no hour position).
+          Decorative: each event also stays a clipped option in the listbox
+          below, so SR/keyboard navigation reaches it on every day it covers. */}
+      {allDayEvents.length > 0 && (
+        <div className="day-grid__allday" aria-hidden="true">
+          {allDayEvents.map((ev) => {
+            const color = resolveEventColor(ev, calendarById, labelById);
+            return (
+              <button
+                key={`allday-${ev.id}`}
+                type="button"
+                tabIndex={-1}
+                className="day-grid__allday-bar"
+                style={
+                  color.hex
+                    ? ({ '--event-color': color.hex } as React.CSSProperties)
+                    : undefined
+                }
+                onClick={() => openEventDialog(ev)}
+              >
+                <span className="day-grid__allday-title">{ev.title}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <div className="day-grid">
         {/* Hour ruler — the hour numbers, read off the grid instead of the
             chips. aria-hidden; the time stays in each option's accessible
@@ -627,7 +669,15 @@ export function DayView() {
                   'day-list__item' +
                   (focused ? ' day-list__item--focused' : '') +
                   (span ? ' day-list__item--multiday' : '') +
-                  (slot ? ' day-list__slot' : '')
+                  // Timed → absolute slot in the canvas. All-day → no slot, so
+                  // clip the <li> (it stays a navigable option; the sighted
+                  // view is the .day-grid__allday band above) instead of letting
+                  // it flow static and collide with the 00:00 chips.
+                  (slot
+                    ? ' day-list__slot'
+                    : ev.all_day
+                      ? ' day-list__item--allday'
+                      : '')
                 }
                 style={{
                   ...(slot ? slotStyle(slot) : {}),

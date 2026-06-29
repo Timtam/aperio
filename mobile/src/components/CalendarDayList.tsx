@@ -129,13 +129,16 @@ function eventSpanForDay(start: Date, end: Date, day: Date): TimedSpan {
  *  source order is unchanged). top/height by start+duration, left/width by the
  *  overlap column. A short span keeps a MIN_SLOT_PX min-height so it stays tappable. */
 function slotStyle(p: PositionedSpan) {
-  const top = p.topFraction * CANVAS_PX;
   const height = Math.max(p.heightFraction * CANVAS_PX, MIN_SLOT_PX);
+  // Clamp the TOP (not the height) so a floored min-height chip near midnight
+  // stays fully on-canvas at its full MIN_SLOT_PX. Clamping the height instead
+  // would squeeze a 23:50 task to ~12px (below the tap target) — here it shifts
+  // up by a few px and keeps its full height, matching the desktop's intent.
+  const top = Math.min(p.topFraction * CANVAS_PX, CANVAS_PX - MIN_SLOT_PX);
   return {
     position: 'absolute' as const,
     top,
-    // Clamp so a min-height chip near the bottom doesn't overflow the canvas.
-    height: Math.min(height, CANVAS_PX - top),
+    height,
     left: `${(p.columnIndex / p.columnCount) * 100}%` as const,
     width: `${(1 / p.columnCount) * 100}%` as const,
   };
@@ -851,16 +854,17 @@ export function CalendarDayList({
     </>
   );
 
-  // Single-day hour-grid: all-day events + untimed tasks in a compact section
-  // ABOVE the 24h canvas (so they're never buried), then the canvas itself — a
-  // leading hour-ruler (00–23, decorative) beside the positioned day column.
-  // Source order stays chronological; the grid is visual only.
+  // Single-day hour-grid: all-day events in a compact band ABOVE the 24h canvas,
+  // then the canvas itself (a leading hour-ruler 00–23 beside the positioned day
+  // column), then the untimed tasks below. This keeps the screen-reader reading
+  // order all-day → timed → untimed, matching the desktop DayView and the linear
+  // list path. The grid is visual only; within the canvas timed order is
+  // preserved chronologically.
   const renderDayGrid = (b: DayBucket): ReactNode => {
     const slots = computeSlots(b);
     return (
       <View key={b.key} style={styles.daySection}>
         {b.allDay.map((ev) => renderEventRow(ev, b.date, multiDayInfo(ev, b.date)))}
-        {b.untimed.map((task) => renderTaskRow(task, b.key))}
         <View style={styles.gridRow}>
           {/* Hour ruler — the hour numbers (00–23), read off the grid instead of
               the chips. Decorative: the time stays in each row's
@@ -894,6 +898,7 @@ export function CalendarDayList({
             )}
           </View>
         </View>
+        {b.untimed.map((task) => renderTaskRow(task, b.key))}
         {renderDayCreateButtons(b)}
       </View>
     );

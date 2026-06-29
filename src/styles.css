@@ -3376,7 +3376,11 @@ button[aria-disabled='true'] {
    with the canvas so the numbers line up with the gridlines. */
 .day-grid__ruler {
   flex: 0 0 var(--ruler-w, 2.5rem);
-  padding: var(--space-2) 0;
+  /* No vertical padding: the ruler-scale must share the SAME top origin as the
+     sibling .day-list canvas (which has padding:0), or the 00–23 numbers sit a
+     constant ~8px below the gridlines + chip tops they label. The numbers get
+     their own horizontal inset via .day-grid__ruler-hour's `right`. */
+  padding: 0;
   border-right: 1px solid var(--color-border);
   font-size: var(--font-size-xs);
   color: var(--color-fg-muted);
@@ -3445,6 +3449,50 @@ button[aria-disabled='true'] {
 
 .day-list__title {
   font-weight: 500;
+}
+
+/* An all-day event has no hour placement, so its option <li> gets no slot.
+   Clip it (visually hidden, still a navigable listbox option) so it can't flow
+   static at the top of the positioned canvas and collide with the 00:00 chips.
+   The sighted representation is the .day-grid__allday band above. Same
+   "visually hidden, still focusable" pattern as WeekView's `--in-lane`. */
+.day-list__item--allday {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+/* Visible all-day band above the hour-grid (sighted users; the a11y lives in
+   the clipped options inside the listbox). Decorative — aria-hidden. */
+.day-grid__allday {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+.day-grid__allday-bar {
+  display: flex;
+  align-items: center;
+  max-width: 100%;
+  background: var(--event-color, var(--color-accent));
+  color: var(--color-accent-fg);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  padding: 2px var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.day-grid__allday-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Year view ──────────────────────────────────────────────────────────── */
