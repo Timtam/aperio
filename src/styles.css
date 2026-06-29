@@ -3354,8 +3354,10 @@ button[aria-disabled='true'] {
    (and the view header above stays visible). Purely visual: the listbox keeps
    its role/IDs/aria/keyboard semantics, DOM order unchanged. */
 .day-grid {
-  /* Pixels per hour in the timed grid — the whole canvas is 24× this. */
-  --hour-px: 40px;
+  /* Pixels per hour. Roomier than the week grid (60 vs 40): the day view is a
+     single scrollable column, so it can afford taller hours — a 30-minute event
+     gets ~30px, enough for the title without clipping. */
+  --hour-px: 60px;
   /* Width of the leading hour-ruler column. */
   --ruler-w: 2.5rem;
   display: flex;
@@ -3431,6 +3433,11 @@ button[aria-disabled='true'] {
    overflows its slot downward). The inner content fills the slot and clips. */
 .day-list__slot {
   min-height: 1.2em;
+  /* Override .day-list__item's vertical padding (var(--space-2)) — on a short
+     slot that padding (with box-sizing: border-box) squeezed the title into a
+     few px and clipped the glyphs mid-line. A 2px block padding keeps the title
+     top-aligned and legible, matching how the week grid reads. */
+  padding-block: 2px;
   padding-right: 1px;
   box-sizing: border-box;
   overflow: hidden;
