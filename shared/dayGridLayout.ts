@@ -145,19 +145,24 @@ export function minutesFromMidnight(time: string): number | null {
 // stays platform-native. Tasks in the list view are sized by EFFORT instead
 // (they have no duration), via the existing effort-size classes/styles.
 
-/** Extra size per hour of duration, in base units (a 1h event is 1.5× base). */
-const LIST_BLOCK_PER_HOUR = 0.5;
-/** Hard cap so a very long event stays bounded (≈ a 5h+ event). */
-const LIST_BLOCK_MAX_FACTOR = 3.5;
+/** Floor factor: events at/under 1 hour share the one-line minimum so a short
+ *  event stays legible (and the block height never drops below one line). */
+const LIST_BLOCK_MIN_FACTOR = 1;
+/** Hard cap so a very long event stays bounded (≈ a 6h+ block). */
+const LIST_BLOCK_MAX_FACTOR = 6;
 
 /**
- * Size factor (≥ 1) for a list-view event block, bounded and proportional to
- * its duration in minutes. A zero/negative/NaN duration (or a point) returns 1
- * (the base size). The factor grows linearly with duration and clamps at
- * LIST_BLOCK_MAX_FACTOR. Multiply by a platform base unit to get a min-height.
+ * Size factor for a list-view event block — roughly the duration in HOURS, so
+ * the rendered height reads the duration RATIO at a glance (a 4h event is ≈ 4×
+ * a 1h event). Floored at LIST_BLOCK_MIN_FACTOR (events ≤ 1h share the one-line
+ * minimum for legibility) and capped at LIST_BLOCK_MAX_FACTOR. A zero/negative/
+ * NaN duration (or a point) returns the floor. Multiply by a per-surface
+ * one-line base unit to get the (STRICT) block height.
  */
 export function eventBlockFactor(durationMin: number): number {
-  if (!Number.isFinite(durationMin) || durationMin <= 0) return 1;
-  const factor = 1 + (durationMin / 60) * LIST_BLOCK_PER_HOUR;
-  return Math.min(factor, LIST_BLOCK_MAX_FACTOR);
+  if (!Number.isFinite(durationMin) || durationMin <= 0) {
+    return LIST_BLOCK_MIN_FACTOR;
+  }
+  const hours = durationMin / 60;
+  return Math.min(Math.max(hours, LIST_BLOCK_MIN_FACTOR), LIST_BLOCK_MAX_FACTOR);
 }

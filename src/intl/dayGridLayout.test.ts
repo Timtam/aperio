@@ -109,28 +109,30 @@ describe('minutesFromMidnight', () => {
 });
 
 describe('eventBlockFactor', () => {
-  it('returns the base factor (1) for zero/negative/NaN durations', () => {
+  it('returns the floor factor (1) for zero/negative/NaN and sub-hour durations', () => {
     expect(eventBlockFactor(0)).toBe(1);
     expect(eventBlockFactor(-30)).toBe(1);
     expect(eventBlockFactor(Number.NaN)).toBe(1);
     expect(eventBlockFactor(Number.POSITIVE_INFINITY)).toBe(1);
+    expect(eventBlockFactor(30)).toBe(1); // sub-hour floored to one line
   });
 
-  it('grows linearly with duration (0.5 base unit per hour)', () => {
-    expect(eventBlockFactor(60)).toBeCloseTo(1.5);
-    expect(eventBlockFactor(30)).toBeCloseTo(1.25);
+  it('is ~linear in hours above the floor (a 4h event is 4x a 1h event)', () => {
+    expect(eventBlockFactor(60)).toBeCloseTo(1);
+    expect(eventBlockFactor(90)).toBeCloseTo(1.5);
     expect(eventBlockFactor(120)).toBeCloseTo(2);
-    expect(eventBlockFactor(240)).toBeCloseTo(3);
+    expect(eventBlockFactor(240)).toBeCloseTo(4);
   });
 
   it('is monotonic non-decreasing', () => {
-    expect(eventBlockFactor(30)).toBeLessThan(eventBlockFactor(90));
-    expect(eventBlockFactor(90)).toBeLessThan(eventBlockFactor(180));
+    expect(eventBlockFactor(30)).toBeLessThanOrEqual(eventBlockFactor(60));
+    expect(eventBlockFactor(60)).toBeLessThan(eventBlockFactor(120));
+    expect(eventBlockFactor(120)).toBeLessThan(eventBlockFactor(180));
   });
 
-  it('clamps at the max factor so a very long event stays bounded', () => {
-    expect(eventBlockFactor(300)).toBeCloseTo(3.5);
-    expect(eventBlockFactor(600)).toBe(3.5);
-    expect(eventBlockFactor(MINUTES_PER_DAY)).toBe(3.5);
+  it('caps a very long event so the block stays bounded', () => {
+    expect(eventBlockFactor(360)).toBeCloseTo(6);
+    expect(eventBlockFactor(600)).toBe(6);
+    expect(eventBlockFactor(MINUTES_PER_DAY)).toBe(6);
   });
 });
