@@ -1071,6 +1071,21 @@
         "autoBacklogToast_other": "{{count}} tasks sent to backlog.",
         "undoAnnounce_one": "Undid carry-over for 1 task.",
         "undoAnnounce_other": "Undid carry-over for {{count}} tasks."
+      },
+      "reminders": {
+        "heading": "Reminders",
+        "untimedToday_one": "1 task planned for today",
+        "untimedToday_other": "{{count}} tasks planned for today",
+        "deadlineArrived_one": "1 task is due today",
+        "deadlineArrived_other": "{{count}} tasks are due today",
+        "countdown_one": "1 task is due in {{days}} days",
+        "countdown_other": "{{count}} tasks are due in {{days}} days",
+        "whyUntimed": "Planned for today",
+        "whyDeadlineToday": "Deadline today",
+        "whyCountdown": "Deadline in {{days}} days",
+        "notificationTitle": "Day-start reminders",
+        "notificationBody_one": "{{count}} task needs your attention today.",
+        "notificationBody_other": "{{count}} tasks need your attention today."
       }
     },
     "deadlinePin": {

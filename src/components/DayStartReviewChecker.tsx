@@ -2,6 +2,12 @@ import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
+import {
+  filterDeadlineArrived,
+  filterDeadlineCountdown,
+  filterUntimedToday,
+} from '@aperio/shared';
+
 import { useAnnouncer } from '../a11y/announcerContext';
 import type { Task } from '../api/types';
 import {
@@ -13,6 +19,7 @@ import {
 import { todayIsoKey } from '../intl/taskDay';
 import { useCurrentUserByList } from '../state/currentUser';
 import { useDialogState } from '../state/dialogStateContext';
+import { notify } from '../state/notify';
 import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
 import type {
   CarryOverDefault,
@@ -69,8 +76,15 @@ export function DayStartReviewChecker() {
   } = useDialogState();
   const announce = useAnnouncer();
   const { t } = useTranslation();
-  const { effectiveForList, dayStartTrigger, hydrating } =
-    useTaskCascadeEnabled();
+  const {
+    effectiveForList,
+    dayStartTrigger,
+    hydrating,
+    remindUntimedToday,
+    remindDeadlineArrived,
+    remindDeadlineCountdown,
+    deadlineCountdownDays,
+  } = useTaskCascadeEnabled();
   const { showToast } = useToast();
   const todayKey = useCurrentDayKey();
   // Persistent fire marker — hydrated from localStorage on mount so a
@@ -114,6 +128,59 @@ export function DayStartReviewChecker() {
     // is the answer there.
     firedRef.current = todayKey;
     writeFiredDayKey('dayStartReview', todayKey);
+
+    // ── Day-start TASK REMINDERS ──────────────────────────────────────
+    // Three read-only nudges, each gated by its own toggle, sharing the
+    // same 'dayStartReview' fire-marker so they surface once a day with
+    // the review. Each non-empty set gets a polite live announcement and
+    // contributes to a single summarising OS notification; the dialog
+    // also opens when reminders are the ONLY thing to show (see the
+    // `reminderTotal` term in the open decisions below). The predicates
+    // already skip settled tasks, project parents, and other-user tasks.
+    const untimed = remindUntimedToday ? filterUntimedToday(tasks, meFor) : [];
+    const dueToday = remindDeadlineArrived
+      ? filterDeadlineArrived(tasks, meFor)
+      : [];
+    const countdown = remindDeadlineCountdown
+      ? filterDeadlineCountdown(tasks, deadlineCountdownDays, meFor)
+      : [];
+    const reminderTotal = untimed.length + dueToday.length + countdown.length;
+
+    if (untimed.length > 0) {
+      announce(
+        t('dialogs.dayStartReview.reminders.untimedToday', {
+          count: untimed.length,
+        }),
+      );
+    }
+    if (dueToday.length > 0) {
+      announce(
+        t('dialogs.dayStartReview.reminders.deadlineArrived', {
+          count: dueToday.length,
+        }),
+      );
+    }
+    if (countdown.length > 0) {
+      announce(
+        t('dialogs.dayStartReview.reminders.countdown', {
+          count: countdown.length,
+          days: deadlineCountdownDays,
+        }),
+      );
+    }
+    if (reminderTotal > 0) {
+      // One combined OS notification for the "you're not looking at
+      // Aperio" reach. The live announcements above already carry the
+      // per-group detail for assistive tech; this is the secondary
+      // channel and is suppressed silently if permission isn't granted.
+      void notify(
+        t('dialogs.dayStartReview.reminders.notificationTitle'),
+        t('dialogs.dayStartReview.reminders.notificationBody', {
+          count: reminderTotal,
+        }),
+        'day-start reminders notification',
+      );
+    }
 
     // Group slipped tasks by list and split by each list's carry-over
     // default. Tasks in lists set to 'ask' end up in the dialog; tasks
@@ -163,16 +230,19 @@ export function DayStartReviewChecker() {
           });
         }
         // Dialog opens iff there's still something to talk about —
-        // either an overdue row or a slipped row whose list voted
-        // 'ask'.
-        if (overdue.length + askRows.length > 0) openDayStartReview();
+        // an overdue row, a slipped row whose list voted 'ask', or any
+        // reminder (the reminders section is informational but still a
+        // reason to surface the dialog).
+        if (overdue.length + askRows.length + reminderTotal > 0) {
+          openDayStartReview();
+        }
       })();
       return;
     }
 
-    // No silent work: pure ask-mode. Open the dialog if there's
-    // anything in either section, otherwise stay quiet.
-    if (overdue.length + askRows.length === 0) return;
+    // No silent work: pure ask-mode. Open the dialog if there's anything
+    // in either section OR any reminder to show, otherwise stay quiet.
+    if (overdue.length + askRows.length + reminderTotal === 0) return;
     openDayStartReview();
   }, [
     loading,
@@ -181,6 +251,10 @@ export function DayStartReviewChecker() {
     currentUserByList,
     effectiveForList,
     dayStartTrigger,
+    remindUntimedToday,
+    remindDeadlineArrived,
+    remindDeadlineCountdown,
+    deadlineCountdownDays,
     todayKey,
     dialogMode.kind,
     openDayStartReview,

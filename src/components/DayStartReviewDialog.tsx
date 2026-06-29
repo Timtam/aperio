@@ -2,6 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
+import {
+  filterDeadlineArrived,
+  filterDeadlineCountdown,
+  filterUntimedToday,
+} from '@aperio/shared';
+
 import { useAnnouncer } from '../a11y/announcerContext';
 import type { Task } from '../api/types';
 import { todayIsoKey } from '../intl/taskDay';
@@ -69,13 +75,19 @@ export function DayStartReviewDialog({
   const { t, i18n } = useTranslation();
   const announce = useAnnouncer();
   const { tasks } = useTasks();
-  const { invalidateData } = useDialogState();
+  const { invalidateData, openTaskDialog } = useDialogState();
   // Per-list cascade resolution: each row obeys its OWN list's
   // status-coupling preference. The filter below treats a slipped
   // subtask as hidden iff its own list has cascade on AND it has a
   // slipped ancestor in that same list; the per-row action
   // handlers walk descendants the same way.
-  const { effectiveForList } = useTaskCascadeEnabled();
+  const {
+    effectiveForList,
+    remindUntimedToday,
+    remindDeadlineArrived,
+    remindDeadlineCountdown,
+    deadlineCountdownDays,
+  } = useTaskCascadeEnabled();
   const cascadeEnabledFor = useCallback(
     (listId: string) => effectiveForList(listId).cascade,
     [effectiveForList],
@@ -102,6 +114,73 @@ export function DayStartReviewDialog({
   const slipped = useMemo(
     () => filterCarriedOver(tasks, { cascadeEnabledFor, meFor }),
     [tasks, cascadeEnabledFor, meFor],
+  );
+
+  // Read-only reminder groups, gated by the same Settings toggles the
+  // checker uses. Informational: the rows open the task editor but
+  // never mutate state from the dialog, so they're outside the
+  // resolved/snooze bookkeeping below.
+  const reminderUntimed = useMemo(
+    () => (remindUntimedToday ? filterUntimedToday(tasks, meFor) : []),
+    [remindUntimedToday, tasks, meFor],
+  );
+  const reminderDueToday = useMemo(
+    () => (remindDeadlineArrived ? filterDeadlineArrived(tasks, meFor) : []),
+    [remindDeadlineArrived, tasks, meFor],
+  );
+  const reminderCountdown = useMemo(
+    () =>
+      remindDeadlineCountdown
+        ? filterDeadlineCountdown(tasks, deadlineCountdownDays, meFor)
+        : [],
+    [remindDeadlineCountdown, tasks, deadlineCountdownDays, meFor],
+  );
+  const hasReminders =
+    reminderUntimed.length +
+      reminderDueToday.length +
+      reminderCountdown.length >
+    0;
+
+  // Render-ready reminder groups: the summary line (count-aware) + a
+  // per-row "why" suffix for each task's button label, paired with the
+  // matching task set. Empty groups are filtered out at render time.
+  const reminderGroups = useMemo(
+    () => [
+      {
+        key: 'untimed',
+        tasks: reminderUntimed,
+        summary: t('dialogs.dayStartReview.reminders.untimedToday', {
+          count: reminderUntimed.length,
+        }),
+        why: t('dialogs.dayStartReview.reminders.whyUntimed'),
+      },
+      {
+        key: 'dueToday',
+        tasks: reminderDueToday,
+        summary: t('dialogs.dayStartReview.reminders.deadlineArrived', {
+          count: reminderDueToday.length,
+        }),
+        why: t('dialogs.dayStartReview.reminders.whyDeadlineToday'),
+      },
+      {
+        key: 'countdown',
+        tasks: reminderCountdown,
+        summary: t('dialogs.dayStartReview.reminders.countdown', {
+          count: reminderCountdown.length,
+          days: deadlineCountdownDays,
+        }),
+        why: t('dialogs.dayStartReview.reminders.whyCountdown', {
+          days: deadlineCountdownDays,
+        }),
+      },
+    ],
+    [
+      reminderUntimed,
+      reminderDueToday,
+      reminderCountdown,
+      deadlineCountdownDays,
+      t,
+    ],
   );
 
   const [busy, setBusy] = useState(false);
@@ -465,7 +544,9 @@ export function DayStartReviewDialog({
   // Defensive empty-state: caller opened us with nothing to show
   // (race between the checker and a refetch). Close quietly without
   // snoozing — there's no reason to suppress a real future trigger.
-  if (totalRemaining === 0 && resolvedIds.size === 0) {
+  // Reminders are a valid reason to stay open even with no actionable
+  // rows, so a reminders-only review isn't dismissed here.
+  if (totalRemaining === 0 && resolvedIds.size === 0 && !hasReminders) {
     onClose();
     return null;
   }
@@ -562,6 +643,40 @@ export function DayStartReviewDialog({
               {t('dialogs.dayStartReview.deadlines.bulk.allDone')}
             </button>
           </div>
+        </section>
+      )}
+
+      {hasReminders && (
+        <section className="day-start-review__section day-start-review__section--reminders">
+          <h3 className="day-start-review__heading">
+            {t('dialogs.dayStartReview.reminders.heading')}
+          </h3>
+          {reminderGroups.map((group) =>
+            group.tasks.length === 0 ? null : (
+              <div key={group.key} className="day-start-review__reminder-group">
+                <p className="day-start-review__reminder-summary">
+                  {group.summary}
+                </p>
+                <ul
+                  className="missed-tasks__list"
+                  aria-label={group.summary}
+                >
+                  {group.tasks.map((task) => (
+                    <li key={task.id} className="missed-tasks__row">
+                      <button
+                        type="button"
+                        className="day-start-review__reminder-task"
+                        onClick={() => openTaskDialog(task)}
+                        aria-label={`${task.title}, ${group.why}`}
+                      >
+                        <span aria-hidden="true">{task.title}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ),
+          )}
         </section>
       )}
 

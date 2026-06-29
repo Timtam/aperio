@@ -1068,6 +1068,21 @@
         "autoBacklogToast_other": "{{count}} Aufgaben ins Backlog verschoben.",
         "undoAnnounce_one": "Übernahme für 1 Aufgabe rückgängig gemacht.",
         "undoAnnounce_other": "Übernahme für {{count}} Aufgaben rückgängig gemacht."
+      },
+      "reminders": {
+        "heading": "Erinnerungen",
+        "untimedToday_one": "1 Aufgabe für heute geplant",
+        "untimedToday_other": "{{count}} Aufgaben für heute geplant",
+        "deadlineArrived_one": "1 Aufgabe ist heute fällig",
+        "deadlineArrived_other": "{{count}} Aufgaben sind heute fällig",
+        "countdown_one": "1 Aufgabe ist in {{days}} Tagen fällig",
+        "countdown_other": "{{count}} Aufgaben sind in {{days}} Tagen fällig",
+        "whyUntimed": "Für heute geplant",
+        "whyDeadlineToday": "Deadline heute",
+        "whyCountdown": "Deadline in {{days}} Tagen",
+        "notificationTitle": "Tageswechsel-Erinnerungen",
+        "notificationBody_one": "{{count}} Aufgabe braucht heute deine Aufmerksamkeit.",
+        "notificationBody_other": "{{count}} Aufgaben brauchen heute deine Aufmerksamkeit."
       }
     },
     "deadlinePin": {

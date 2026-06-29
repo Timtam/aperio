@@ -2,11 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { listen } from '@tauri-apps/api/event';
-import {
-  isPermissionGranted,
-  requestPermission,
-  sendNotification,
-} from '@tauri-apps/plugin-notification';
 
 import {
   getSyncConflictsCount,
@@ -17,34 +12,7 @@ import {
   type SyncRoundReport,
 } from '../api/client';
 import { useDialogState } from './dialogStateContext';
-
-/**
- * Fire an OS-level notification announcing new sync conflicts
- * (DESIGN.md §19.9). Requests notification permission lazily on
- * the first call — the user sees the OS prompt at most once per
- * install; subsequent calls short-circuit via the already-granted
- * check. Failures are best-effort: we still emit the in-app
- * `aria-live` + status-bar tone via the existing paths, so a
- * suppressed notification doesn't hide the conflict.
- */
-async function notifyConflicts(
-  count: number,
-  title: string,
-  body: string,
-): Promise<void> {
-  try {
-    let granted = await isPermissionGranted();
-    if (!granted) {
-      const result = await requestPermission();
-      granted = result === 'granted';
-    }
-    if (!granted) return;
-    sendNotification({ title, body });
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.warn(`notify ${count} sync conflicts failed`, err);
-  }
-}
+import { notify } from './notify';
 
 /**
  * Frontend bridge to the cross-device sync backend (DESIGN.md §19,
@@ -157,7 +125,11 @@ export function useSync() {
               : t('syncStatus.notifyConflictBody_other', {
                   count: report.conflicts,
                 });
-          void notifyConflicts(report.conflicts, title, body);
+          void notify(
+            title,
+            body,
+            `notify ${report.conflicts} sync conflicts`,
+          );
         }
       }
       if (error) {
