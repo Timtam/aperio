@@ -1,5 +1,5 @@
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
@@ -13,6 +13,10 @@ import {
   writeCascadeEnabled,
   writeCheckoffMode,
   writeDayStartTrigger,
+  writeDeadlineCountdownDays,
+  writeRemindDeadlineArrived,
+  writeRemindDeadlineCountdown,
+  writeRemindUntimedToday,
   writeVisualEffortSizing,
   type CarryOverDefault,
   type CheckoffMode,
@@ -27,6 +31,10 @@ import {
 // Screen-reader-first: the radio group is one focus stop per option; each switch
 // row is a single switch node (role + checked + label on the Pressable, the
 // visual Switch hidden + non-interactive), with its hint as the next element.
+
+/** Sensible "X days before a deadline" presets (the pref clamps to 1..30). A
+ *  RadioGroup of numbers is the SR-faithful single-select on RN (no <select>). */
+const DEADLINE_COUNTDOWN_DAYS_OPTIONS: readonly number[] = [1, 2, 3, 5, 7, 14];
 
 /** One accessible switch row: the Pressable owns role/checked/label/tap; the
  *  inner Switch is the visual indicator only (hidden from SR, tap routed to the
@@ -73,6 +81,10 @@ export default function TaskSettingsScreen() {
   const [autoDate, setAutoDate] = useState(true);
   const [autoSelfAssign, setAutoSelfAssign] = useState(true);
   const [visualEffortSizing, setVisualEffortSizing] = useState(true);
+  const [remindUntimedToday, setRemindUntimedToday] = useState(true);
+  const [remindDeadlineArrived, setRemindDeadlineArrived] = useState(true);
+  const [remindDeadlineCountdown, setRemindDeadlineCountdown] = useState(true);
+  const [deadlineCountdownDays, setDeadlineCountdownDays] = useState(3);
   const [carryOver, setCarryOver] = useState<CarryOverDefault>('ask');
   const [dayStart, setDayStart] = useState<DayStartTrigger>('00:00');
 
@@ -86,6 +98,10 @@ export default function TaskSettingsScreen() {
         setAutoDate(b.autoDate);
         setAutoSelfAssign(b.autoSelfAssign);
         setVisualEffortSizing(b.visualEffortSizing);
+        setRemindUntimedToday(b.remindUntimedToday);
+        setRemindDeadlineArrived(b.remindDeadlineArrived);
+        setRemindDeadlineCountdown(b.remindDeadlineCountdown);
+        setDeadlineCountdownDays(b.deadlineCountdownDays);
         setCarryOver(b.carryOverDefault);
         setDayStart(b.dayStartTrigger);
       });
@@ -138,6 +154,50 @@ export default function TaskSettingsScreen() {
       return next;
     });
   }, []);
+
+  const onRemindUntimedTodayToggle = useCallback(() => {
+    setRemindUntimedToday((prev) => {
+      const next = !prev;
+      void writeRemindUntimedToday(next);
+      return next;
+    });
+  }, []);
+
+  const onRemindDeadlineArrivedToggle = useCallback(() => {
+    setRemindDeadlineArrived((prev) => {
+      const next = !prev;
+      void writeRemindDeadlineArrived(next);
+      return next;
+    });
+  }, []);
+
+  const onRemindDeadlineCountdownToggle = useCallback(() => {
+    setRemindDeadlineCountdown((prev) => {
+      const next = !prev;
+      void writeRemindDeadlineCountdown(next);
+      return next;
+    });
+  }, []);
+
+  const onCountdownDaysChange = useCallback((next: number) => {
+    setDeadlineCountdownDays(next);
+    void writeDeadlineCountdownDays(next);
+  }, []);
+
+  // Always keep the current (possibly synced-from-another-device) value
+  // selectable even if it's not a preset; splice it in, keep sorted.
+  const countdownDayOptions = useMemo(() => {
+    const set = new Set<number>(DEADLINE_COUNTDOWN_DAYS_OPTIONS);
+    set.add(deadlineCountdownDays);
+    return [...set]
+      .sort((a, b) => a - b)
+      .map((days) => ({
+        value: days,
+        label: t('dialogs.tasks.reminders.countdownDays.option', {
+          count: days,
+        }),
+      }));
+  }, [deadlineCountdownDays, t]);
 
   return (
     <ScrollView
@@ -217,6 +277,55 @@ export default function TaskSettingsScreen() {
         </Text>
       </View>
 
+      {/* Day-start reminders. Three independent switches + the shared
+          "X days before" lead time. Prefs only — the reminder LOGIC that
+          consumes them lands in a later step. */}
+      <View style={styles.section}>
+        <Text style={styles.heading} accessibilityRole="header">
+          {t('dialogs.tasks.reminders.heading')}
+        </Text>
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.tasks.reminders.hint')}
+        </Text>
+
+        <SwitchRow
+          label={t('dialogs.tasks.reminders.untimedToday.label')}
+          value={remindUntimedToday}
+          onToggle={onRemindUntimedTodayToggle}
+        />
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.tasks.reminders.untimedToday.hint')}
+        </Text>
+
+        <SwitchRow
+          label={t('dialogs.tasks.reminders.deadlineArrived.label')}
+          value={remindDeadlineArrived}
+          onToggle={onRemindDeadlineArrivedToggle}
+        />
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.tasks.reminders.deadlineArrived.hint')}
+        </Text>
+
+        <SwitchRow
+          label={t('dialogs.tasks.reminders.deadlineCountdown.label')}
+          value={remindDeadlineCountdown}
+          onToggle={onRemindDeadlineCountdownToggle}
+        />
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.tasks.reminders.deadlineCountdown.hint')}
+        </Text>
+
+        <RadioGroup<number>
+          label={t('dialogs.tasks.reminders.countdownDays.label')}
+          labelAsHeading
+          value={deadlineCountdownDays}
+          options={countdownDayOptions}
+          onChange={onCountdownDaysChange}
+        />
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.tasks.reminders.countdownDays.hint')}
+        </Text>
+      </View>
 
       <View style={styles.section}>
         <RadioGroup<CarryOverDefault>

@@ -949,6 +949,28 @@
           "appStart": "Nur beim App-Start"
         }
       },
+      "reminders": {
+        "heading": "Tagesstart-Erinnerungen",
+        "hint": "Woran dich die Tagesstart-Durchsicht erinnert. Jede Erinnerung lässt sich einzeln abschalten.",
+        "untimedToday": {
+          "label": "An heutige Aufgaben ohne Uhrzeit erinnern",
+          "hint": "Wenn aktiviert, listet die Tagesstart-Durchsicht die für heute geplanten Aufgaben ohne feste Uhrzeit auf — genau die, die man leicht vergisst. Deaktiviert: keine Erinnerung an Aufgaben ohne Uhrzeit."
+        },
+        "deadlineArrived": {
+          "label": "Erinnern, wenn eine Frist erreicht ist",
+          "hint": "Wenn aktiviert, wirst du an dem Tag erinnert, an dem die Frist einer Aufgabe fällig wird. Deaktiviert: keine Erinnerung am Fristtag."
+        },
+        "deadlineCountdown": {
+          "label": "Vor einer Frist erinnern",
+          "hint": "Wenn aktiviert, wirst du eine festgelegte Anzahl Tage vor der Frist einer Aufgabe erinnert, damit sie dich nicht überrascht. Die Vorlaufzeit stellst du unten ein."
+        },
+        "countdownDays": {
+          "label": "Tage vor der Frist",
+          "hint": "Wie viele Tage vor einer Frist die frühe Erinnerung ausgelöst wird. Zwischen 1 und 30 Tagen.",
+          "option": "{{count}} Tag vorher",
+          "option_other": "{{count}} Tage vorher"
+        }
+      },
       "perList": {
         "heading": "Pro Aufgabenliste",
         "hint": "Überschreibe die drei globalen Standards oben für einzelne Aufgabenlisten. Felder auf „Globaler Standard\" erben den Wert; eine konkrete Auswahl lässt diese Liste anders reagieren als die übrigen.",

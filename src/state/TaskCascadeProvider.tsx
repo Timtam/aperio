@@ -50,6 +50,15 @@ const CHECKOFF_MODE_KEY = 'tasks.checkoffMode';
 const AUTO_SELF_ASSIGN_KEY = 'tasks.autoSelfAssign';
 const VISUAL_EFFORT_SIZING_KEY = 'tasks.visualEffortSizing';
 const CALENDAR_DAY_VIEW_MODE_KEY = 'calendar.dayViewMode';
+// Day-start reminder knobs (synced). Three on/off booleans (default ON,
+// only a literal stored 'false' disables) + a numeric "X days before"
+// value stored as a string like dayStartTrigger (parsed + clamped 1..30
+// on hydrate, fallback 3 on garbage). The reminder LOGIC that consumes
+// these lands in a later step; this provider only owns the prefs.
+const REMIND_UNTIMED_TODAY_KEY = 'tasks.remindUntimedToday';
+const REMIND_DEADLINE_ARRIVED_KEY = 'tasks.remindDeadlineArrived';
+const REMIND_DEADLINE_COUNTDOWN_KEY = 'tasks.remindDeadlineCountdown';
+const DEADLINE_COUNTDOWN_DAYS_KEY = 'tasks.deadlineCountdownDays';
 /**
  * Single JSON pref holding the per-list override map. Keyed by
  * task-list id, value is a `ListOverrides` record carrying any
@@ -64,6 +73,27 @@ const CALENDAR_DAY_VIEW_MODE_KEY = 'calendar.dayViewMode';
  */
 const LIST_OVERRIDES_KEY = 'tasks.listOverrides';
 const WRITE_DEBOUNCE_MS = 150;
+
+/** Default "X days before a deadline" reminder lead time. */
+const DEADLINE_COUNTDOWN_DAYS_DEFAULT = 3;
+const DEADLINE_COUNTDOWN_DAYS_MIN = 1;
+const DEADLINE_COUNTDOWN_DAYS_MAX = 30;
+
+/**
+ * Parse the stored "X days before" string and clamp it to 1..30.
+ * Anything non-numeric / out of an integer range falls back to the
+ * default of 3 — same defensive posture as the `dayStartTrigger`
+ * string pref.
+ */
+function parseCountdownDays(stored: string | null): number {
+  if (stored === null) return DEADLINE_COUNTDOWN_DAYS_DEFAULT;
+  const n = Number.parseInt(stored, 10);
+  if (!Number.isFinite(n)) return DEADLINE_COUNTDOWN_DAYS_DEFAULT;
+  return Math.min(
+    DEADLINE_COUNTDOWN_DAYS_MAX,
+    Math.max(DEADLINE_COUNTDOWN_DAYS_MIN, n),
+  );
+}
 
 export type CarryOverDefault = 'ask' | 'today' | 'backlog';
 
@@ -190,6 +220,22 @@ export interface TaskCascadeContextValue {
   visualEffortSizing: boolean;
   /** Set the visual-effort-sizing preference. Debounced-persisted (synced). */
   setVisualEffortSizing: (value: boolean) => void;
+  /** Remind of today's untimed (date-only) scheduled tasks. Default on. */
+  remindUntimedToday: boolean;
+  /** Set the untimed-today reminder preference. Debounced-persisted (synced). */
+  setRemindUntimedToday: (value: boolean) => void;
+  /** Remind when a task's deadline day has arrived. Default on. */
+  remindDeadlineArrived: boolean;
+  /** Set the deadline-arrived reminder preference. Debounced-persisted (synced). */
+  setRemindDeadlineArrived: (value: boolean) => void;
+  /** Remind X days before a deadline (the X is `deadlineCountdownDays`). Default on. */
+  remindDeadlineCountdown: boolean;
+  /** Set the deadline-countdown reminder preference. Debounced-persisted (synced). */
+  setRemindDeadlineCountdown: (value: boolean) => void;
+  /** Global "X days before a deadline" lead time (1..30). Default 3. */
+  deadlineCountdownDays: number;
+  /** Set the countdown lead time. Clamped 1..30. Debounced-persisted (synced). */
+  setDeadlineCountdownDays: (value: number) => void;
   /** How the calendar day + week views lay out events ('grid' | 'list').
    *  Purely visual; the a11y model is identical in both modes. */
   dayViewMode: CalendarDayViewMode;
@@ -233,6 +279,16 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
   const [autoSelfAssign, setAutoSelfAssignState] = useState(true);
   // Visual effort-sizing defaults ON; only a literal stored 'false' disables.
   const [visualEffortSizing, setVisualEffortSizingState] = useState(true);
+  // Day-start reminder knobs. The three booleans default ON (only a
+  // literal stored 'false' disables); the countdown lead time defaults
+  // to 3 days (parsed + clamped 1..30 on hydrate).
+  const [remindUntimedToday, setRemindUntimedTodayState] = useState(true);
+  const [remindDeadlineArrived, setRemindDeadlineArrivedState] = useState(true);
+  const [remindDeadlineCountdown, setRemindDeadlineCountdownState] =
+    useState(true);
+  const [deadlineCountdownDays, setDeadlineCountdownDaysState] = useState(
+    DEADLINE_COUNTDOWN_DAYS_DEFAULT,
+  );
   // Calendar day/week layout defaults to the hour-grid; only a literal stored
   // 'list' switches to the compact list (anything else falls back to grid).
   const [dayViewMode, setDayViewModeState] =
@@ -261,6 +317,10 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       getUserPref(CHECKOFF_MODE_KEY).catch(() => null),
       getUserPref(AUTO_SELF_ASSIGN_KEY).catch(() => null),
       getUserPref(VISUAL_EFFORT_SIZING_KEY).catch(() => null),
+      getUserPref(REMIND_UNTIMED_TODAY_KEY).catch(() => null),
+      getUserPref(REMIND_DEADLINE_ARRIVED_KEY).catch(() => null),
+      getUserPref(REMIND_DEADLINE_COUNTDOWN_KEY).catch(() => null),
+      getUserPref(DEADLINE_COUNTDOWN_DAYS_KEY).catch(() => null),
       getUserPref(CALENDAR_DAY_VIEW_MODE_KEY).catch(() => null),
       getUserPref(LIST_OVERRIDES_KEY).catch(() => null),
     ])
@@ -273,6 +333,10 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
           checkoffRaw,
           autoSelfAssignRaw,
           visualEffortSizingRaw,
+          remindUntimedTodayRaw,
+          remindDeadlineArrivedRaw,
+          remindDeadlineCountdownRaw,
+          deadlineCountdownDaysRaw,
           dayViewModeRaw,
           listOverridesRaw,
         ]) => {
@@ -284,6 +348,18 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
           if (autoSelfAssignRaw === 'false') setAutoSelfAssignState(false);
           if (visualEffortSizingRaw === 'false')
             setVisualEffortSizingState(false);
+          // Day-start reminder booleans default ON; only a literal
+          // 'false' disables them (same convention as the others).
+          if (remindUntimedTodayRaw === 'false')
+            setRemindUntimedTodayState(false);
+          if (remindDeadlineArrivedRaw === 'false')
+            setRemindDeadlineArrivedState(false);
+          if (remindDeadlineCountdownRaw === 'false')
+            setRemindDeadlineCountdownState(false);
+          // Countdown lead time: parse + clamp 1..30, fall back to 3.
+          setDeadlineCountdownDaysState(
+            parseCountdownDays(deadlineCountdownDaysRaw),
+          );
           // Calendar day-view mode: only a literal stored 'list' switches
           // away from the grid default; anything else keeps 'grid'.
           if (dayViewModeRaw === 'list') setDayViewModeState('list');
@@ -424,6 +500,87 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
     };
   }, [visualEffortSizing, hydrating]);
 
+  const remindUntimedTodayTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (hydrating) return;
+    if (remindUntimedTodayTimer.current !== null) {
+      window.clearTimeout(remindUntimedTodayTimer.current);
+    }
+    remindUntimedTodayTimer.current = window.setTimeout(() => {
+      void setUserPref(
+        REMIND_UNTIMED_TODAY_KEY,
+        remindUntimedToday ? 'true' : 'false',
+      );
+    }, WRITE_DEBOUNCE_MS);
+    return () => {
+      if (remindUntimedTodayTimer.current !== null) {
+        window.clearTimeout(remindUntimedTodayTimer.current);
+        remindUntimedTodayTimer.current = null;
+      }
+    };
+  }, [remindUntimedToday, hydrating]);
+
+  const remindDeadlineArrivedTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (hydrating) return;
+    if (remindDeadlineArrivedTimer.current !== null) {
+      window.clearTimeout(remindDeadlineArrivedTimer.current);
+    }
+    remindDeadlineArrivedTimer.current = window.setTimeout(() => {
+      void setUserPref(
+        REMIND_DEADLINE_ARRIVED_KEY,
+        remindDeadlineArrived ? 'true' : 'false',
+      );
+    }, WRITE_DEBOUNCE_MS);
+    return () => {
+      if (remindDeadlineArrivedTimer.current !== null) {
+        window.clearTimeout(remindDeadlineArrivedTimer.current);
+        remindDeadlineArrivedTimer.current = null;
+      }
+    };
+  }, [remindDeadlineArrived, hydrating]);
+
+  const remindDeadlineCountdownTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (hydrating) return;
+    if (remindDeadlineCountdownTimer.current !== null) {
+      window.clearTimeout(remindDeadlineCountdownTimer.current);
+    }
+    remindDeadlineCountdownTimer.current = window.setTimeout(() => {
+      void setUserPref(
+        REMIND_DEADLINE_COUNTDOWN_KEY,
+        remindDeadlineCountdown ? 'true' : 'false',
+      );
+    }, WRITE_DEBOUNCE_MS);
+    return () => {
+      if (remindDeadlineCountdownTimer.current !== null) {
+        window.clearTimeout(remindDeadlineCountdownTimer.current);
+        remindDeadlineCountdownTimer.current = null;
+      }
+    };
+  }, [remindDeadlineCountdown, hydrating]);
+
+  const deadlineCountdownDaysTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (hydrating) return;
+    if (deadlineCountdownDaysTimer.current !== null) {
+      window.clearTimeout(deadlineCountdownDaysTimer.current);
+    }
+    deadlineCountdownDaysTimer.current = window.setTimeout(() => {
+      // Persist the clamped value as a string (mirrors dayStartTrigger).
+      void setUserPref(
+        DEADLINE_COUNTDOWN_DAYS_KEY,
+        String(deadlineCountdownDays),
+      );
+    }, WRITE_DEBOUNCE_MS);
+    return () => {
+      if (deadlineCountdownDaysTimer.current !== null) {
+        window.clearTimeout(deadlineCountdownDaysTimer.current);
+        deadlineCountdownDaysTimer.current = null;
+      }
+    };
+  }, [deadlineCountdownDays, hydrating]);
+
   const dayViewModeTimer = useRef<number | null>(null);
   useEffect(() => {
     if (hydrating) return;
@@ -524,6 +681,29 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
   const setVisualEffortSizing = useCallback((value: boolean) => {
     setVisualEffortSizingState(value);
   }, []);
+  const setRemindUntimedToday = useCallback((value: boolean) => {
+    setRemindUntimedTodayState(value);
+  }, []);
+  const setRemindDeadlineArrived = useCallback((value: boolean) => {
+    setRemindDeadlineArrivedState(value);
+  }, []);
+  const setRemindDeadlineCountdown = useCallback((value: boolean) => {
+    setRemindDeadlineCountdownState(value);
+  }, []);
+  const setDeadlineCountdownDays = useCallback((value: number) => {
+    // Clamp on the way in too, so a stray UI value can never persist
+    // out of range (defence in depth alongside the hydration clamp).
+    const clamped = Math.min(
+      DEADLINE_COUNTDOWN_DAYS_MAX,
+      Math.max(
+        DEADLINE_COUNTDOWN_DAYS_MIN,
+        Number.isFinite(value)
+          ? Math.round(value)
+          : DEADLINE_COUNTDOWN_DAYS_DEFAULT,
+      ),
+    );
+    setDeadlineCountdownDaysState(clamped);
+  }, []);
   const setDayViewMode = useCallback((value: CalendarDayViewMode) => {
     setDayViewModeState(value);
   }, []);
@@ -588,6 +768,14 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       setAutoSelfAssign,
       visualEffortSizing,
       setVisualEffortSizing,
+      remindUntimedToday,
+      setRemindUntimedToday,
+      remindDeadlineArrived,
+      setRemindDeadlineArrived,
+      remindDeadlineCountdown,
+      setRemindDeadlineCountdown,
+      deadlineCountdownDays,
+      setDeadlineCountdownDays,
       dayViewMode,
       setDayViewMode,
       carryOverDefault,
@@ -610,6 +798,14 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       setAutoSelfAssign,
       visualEffortSizing,
       setVisualEffortSizing,
+      remindUntimedToday,
+      setRemindUntimedToday,
+      remindDeadlineArrived,
+      setRemindDeadlineArrived,
+      remindDeadlineCountdown,
+      setRemindDeadlineCountdown,
+      deadlineCountdownDays,
+      setDeadlineCountdownDays,
       dayViewMode,
       setDayViewMode,
       carryOverDefault,

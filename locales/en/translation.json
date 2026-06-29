@@ -952,6 +952,28 @@
           "appStart": "App start only"
         }
       },
+      "reminders": {
+        "heading": "Day-start reminders",
+        "hint": "What the day-start review reminds you about. Each reminder can be turned off independently.",
+        "untimedToday": {
+          "label": "Remind me of today's untimed tasks",
+          "hint": "When enabled, the day-start review lists tasks scheduled for today that have no specific time — the ones easy to forget. Disable to skip the untimed-tasks reminder."
+        },
+        "deadlineArrived": {
+          "label": "Remind me when a deadline has arrived",
+          "hint": "When enabled, you're reminded on the day a task's deadline falls due. Disable to skip the deadline-day reminder."
+        },
+        "deadlineCountdown": {
+          "label": "Remind me before a deadline",
+          "hint": "When enabled, you're reminded a set number of days ahead of a task's deadline, so it doesn't sneak up on you. Set the lead time below."
+        },
+        "countdownDays": {
+          "label": "Days before the deadline",
+          "hint": "How many days ahead of a deadline the early reminder fires. Between 1 and 30 days.",
+          "option": "{{count}} day before",
+          "option_other": "{{count}} days before"
+        }
+      },
       "perList": {
         "heading": "Per task list",
         "hint": "Override the three defaults above for individual task lists. Leave a field on \"Global default\" to inherit; pick a specific value to make this list behave differently from the rest.",

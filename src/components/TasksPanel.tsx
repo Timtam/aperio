@@ -53,6 +53,14 @@ const DAY_START_TRIGGER_OPTIONS: readonly DayStartTrigger[] = [
 /** Check-off gesture behaviour choices, rendered as a radio group. */
 const CHECKOFF_MODE_OPTIONS: readonly CheckoffMode[] = ['toggle', 'cycle'];
 
+/**
+ * Sensible "X days before a deadline" presets for the countdown lead
+ * time. The pref clamps to 1..30, so these stay inside that range; a
+ * `<select>` keeps the short list compact and one focus stop for SR
+ * users (vs. a free-typed number spinner).
+ */
+const DEADLINE_COUNTDOWN_DAYS_OPTIONS: readonly number[] = [1, 2, 3, 5, 7, 14];
+
 export function TasksPanel() {
   const { t } = useTranslation();
   const {
@@ -64,6 +72,14 @@ export function TasksPanel() {
     setAutoSelfAssign,
     visualEffortSizing,
     setVisualEffortSizing,
+    remindUntimedToday,
+    setRemindUntimedToday,
+    remindDeadlineArrived,
+    setRemindDeadlineArrived,
+    remindDeadlineCountdown,
+    setRemindDeadlineCountdown,
+    deadlineCountdownDays,
+    setDeadlineCountdownDays,
     carryOverDefault,
     setCarryOverDefault,
     dayStartTrigger,
@@ -101,6 +117,15 @@ export function TasksPanel() {
     }));
   }, [taskLists, accountNameById, t]);
 
+  // Make sure the current (possibly synced-from-another-device) value
+  // is always selectable even if it's not one of the presets — splice
+  // it in and keep the list sorted so the <select> never shows blank.
+  const countdownDayChoices = useMemo(() => {
+    const set = new Set<number>(DEADLINE_COUNTDOWN_DAYS_OPTIONS);
+    set.add(deadlineCountdownDays);
+    return [...set].sort((a, b) => a - b);
+  }, [deadlineCountdownDays]);
+
   const checkoffHeadingId = useId();
   const checkoffHintId = useId();
   const checkoffGroupId = useId();
@@ -118,6 +143,12 @@ export function TasksPanel() {
   const triggerHeadingId = useId();
   const triggerHintId = useId();
   const triggerSelectId = useId();
+  const remindersHeadingId = useId();
+  const remindUntimedHintId = useId();
+  const remindDeadlineArrivedHintId = useId();
+  const remindCountdownHintId = useId();
+  const countdownDaysHintId = useId();
+  const countdownDaysSelectId = useId();
   const perListHeadingId = useId();
   const perListHintId = useId();
 
@@ -345,6 +376,92 @@ export function TasksPanel() {
                 </option>
               );
             })}
+          </select>
+        </label>
+      </section>
+
+      {/* Day-start reminders. Three independent on/off toggles + the
+          shared "X days before" lead time. These only configure the
+          prefs — the reminder LOGIC that consumes them lands in a later
+          step. Grouped here with the other day-start behaviours. */}
+      <section
+        aria-labelledby={remindersHeadingId}
+        className="tasks-settings__section"
+      >
+        <h3 id={remindersHeadingId} className="color-labels__heading">
+          {t('dialogs.tasks.reminders.heading')}
+        </h3>
+        <p className="tasks-settings__hint">
+          {t('dialogs.tasks.reminders.hint')}
+        </p>
+
+        <p id={remindUntimedHintId} className="tasks-settings__hint">
+          {t('dialogs.tasks.reminders.untimedToday.hint')}
+        </p>
+        <label className="tasks-settings__toggle">
+          <input
+            type="checkbox"
+            checked={remindUntimedToday}
+            aria-describedby={remindUntimedHintId}
+            onChange={(e) => setRemindUntimedToday(e.target.checked)}
+          />
+          <span>{t('dialogs.tasks.reminders.untimedToday.label')}</span>
+        </label>
+
+        <p id={remindDeadlineArrivedHintId} className="tasks-settings__hint">
+          {t('dialogs.tasks.reminders.deadlineArrived.hint')}
+        </p>
+        <label className="tasks-settings__toggle">
+          <input
+            type="checkbox"
+            checked={remindDeadlineArrived}
+            aria-describedby={remindDeadlineArrivedHintId}
+            onChange={(e) => setRemindDeadlineArrived(e.target.checked)}
+          />
+          <span>{t('dialogs.tasks.reminders.deadlineArrived.label')}</span>
+        </label>
+
+        <p id={remindCountdownHintId} className="tasks-settings__hint">
+          {t('dialogs.tasks.reminders.deadlineCountdown.hint')}
+        </p>
+        <label className="tasks-settings__toggle">
+          <input
+            type="checkbox"
+            checked={remindDeadlineCountdown}
+            aria-describedby={remindCountdownHintId}
+            onChange={(e) => setRemindDeadlineCountdown(e.target.checked)}
+          />
+          <span>{t('dialogs.tasks.reminders.deadlineCountdown.label')}</span>
+        </label>
+
+        {/* The "X days before" lead time. Shown regardless so the value
+            can be set ahead of (or independently from) the countdown
+            toggle. A short <select> is one focus stop for SR users. */}
+        <p id={countdownDaysHintId} className="tasks-settings__hint">
+          {t('dialogs.tasks.reminders.countdownDays.hint')}
+        </p>
+        <label
+          htmlFor={countdownDaysSelectId}
+          className="tasks-settings__select-label"
+        >
+          <span className="form__label">
+            {t('dialogs.tasks.reminders.countdownDays.label')}
+          </span>
+          <select
+            id={countdownDaysSelectId}
+            value={String(deadlineCountdownDays)}
+            aria-describedby={countdownDaysHintId}
+            onChange={(e) =>
+              setDeadlineCountdownDays(Number.parseInt(e.target.value, 10))
+            }
+          >
+            {countdownDayChoices.map((days) => (
+              <option key={days} value={days}>
+                {t('dialogs.tasks.reminders.countdownDays.option', {
+                  count: days,
+                })}
+              </option>
+            ))}
           </select>
         </label>
       </section>
