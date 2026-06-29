@@ -2939,6 +2939,23 @@ button[aria-disabled='true'] {
   gap: 2px;
 }
 
+/* List-mode chip: a STRICT duration-driven height (set inline) makes the height
+   read duration at a glance. Lay the time + title on ONE wrapping text flow and
+   clip the overflow, so a long title fills the available height but can NEVER
+   inflate a short event past a long one. (Grid mode keeps the flex-column,
+   title-only chip — the ruler carries the time there.) */
+.week-grid__events--flow .week-event {
+  display: block;
+  overflow: hidden;
+}
+.week-grid__events--flow .week-event__time {
+  display: inline;
+  padding-right: 0.4em;
+}
+.week-grid__events--flow .week-event__title {
+  display: inline;
+}
+
 /* A positioned timed chip's <li>. Inline style sets top/height/left/width from
    the layout algorithm; a min-height keeps a very short event legible (it
    overflows its slot downward). The inner chip fills the slot. */

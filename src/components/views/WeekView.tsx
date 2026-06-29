@@ -90,12 +90,14 @@ function eventSpanForDay(ev: CalendarEvent, day: Date): TimedSpan {
   };
 }
 
-/** Base block height (em) a LIST-mode event chip gets at `eventBlockFactor === 1`
- *  (a point / very short event). Tuned to the pre-grid one-line chip height so a
- *  short event in the compact list looks exactly like it did before the hour-grid
- *  rework; longer events grow from here via the shared `eventBlockFactor` curve
- *  (e.g. a 3h event ≈ 2.5× this). */
-const WEEK_LIST_BLOCK_BASE_EM = 1.4;
+/** Base block height (rem) a LIST-mode event chip gets at `eventBlockFactor === 1`
+ *  (a point / very short event) — ≈ one compact line. The list-mode chip uses a
+ *  STRICT height (not min-height) of `factor × this`, with the time + title on one
+ *  wrapping line clipped to fit, so the chip height reads DURATION at a glance and
+ *  a long title can never inflate a short event past a long one. A 3h event ≈ 2.5×
+ *  this, a 4h+ event caps at 3.5×. rem (not em) so the small chip font doesn't
+ *  shrink the scale. */
+const WEEK_LIST_BLOCK_BASE_REM = 1.5;
 
 /** Absolute placement of a timed chip's `<li>` inside the day column's
  *  24h-tall hour-grid (positioning is purely visual; DOM order is unchanged). */
@@ -1176,12 +1178,12 @@ export function WeekView() {
                       // min-height in LIST mode via eventBlockFactor; all-day
                       // events get none (they're clipped anyway).
                       const evSpan = ev.all_day ? null : eventSpanForDay(ev, day);
-                      const listMinHeight =
+                      const listHeight =
                         listMode && evSpan
                           ? `${
                               eventBlockFactor(evSpan.endMin - evSpan.startMin) *
-                              WEEK_LIST_BLOCK_BASE_EM
-                            }em`
+                              WEEK_LIST_BLOCK_BASE_REM
+                            }rem`
                           : undefined;
                       return (
                         <li
@@ -1205,6 +1207,10 @@ export function WeekView() {
                             }
                             aria-label={aria}
                             aria-selected={isFocusedItem}
+                            // List mode clips the title to the duration height —
+                            // give sighted users the full title on hover (SR users
+                            // already get it from aria-label).
+                            title={listMode ? ev.title : undefined}
                             draggable
                             onDragStart={(dev) => {
                               // Drag onto a sidebar calendar row to move the
@@ -1230,15 +1236,14 @@ export function WeekView() {
                                 ...(color.hex
                                   ? { '--event-color': color.hex }
                                   : {}),
-                                // List mode: the duration min-height lives on the
-                                // chip itself (not the <li>), so the COLOURED block
-                                // fills the reserved height — otherwise a long
-                                // event reads as a normal-size tile with empty
-                                // space below it. Grid mode leaves listMinHeight
-                                // undefined (the slot drives height via height:100%).
-                                ...(listMinHeight
-                                  ? { minHeight: listMinHeight }
-                                  : {}),
+                                // List mode: a STRICT duration-driven height on the
+                                // chip itself, so the COLOURED block both fills the
+                                // space AND can't be inflated past its duration by a
+                                // long title — the title wraps on one flow and is
+                                // clipped (full text in the aria-label + the title
+                                // tooltip). Grid mode leaves listHeight undefined
+                                // (the slot drives height via height:100%).
+                                ...(listHeight ? { height: listHeight } : {}),
                               } as React.CSSProperties
                             }
                           >
