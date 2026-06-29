@@ -9,7 +9,10 @@ import {
   snoozeDayStartReview,
 } from './dayStartReview';
 import {
+  filterDeadlineArrived,
+  filterDeadlineCountdown,
   filterDeadlinePinTargets,
+  filterUntimedToday,
   hasActionableDescendants,
 } from '@aperio/shared';
 
@@ -514,5 +517,90 @@ describe('snoozeDayStartReview / isDayStartReviewSnoozed', () => {
     const until = Date.now() + 60 * 60 * 1000;
     localStorage.setItem('aperio.carryOver.snoozeUntil', String(until));
     expect(isDayStartReviewSnoozed()).toBe(true);
+  });
+});
+
+// ── Day-start TASK REMINDERS (today = 2026-05-20) ───────────────────────────
+describe('filterUntimedToday', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 4, 20, 12, 0, 0));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('picks open tasks scheduled today with NO time-of-day', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'untimed', scheduled_date: '2026-05-20' },
+      { ...baseTask, id: 'timed', scheduled_date: '2026-05-20', scheduled_time: '09:00' },
+      { ...baseTask, id: 'yesterday', scheduled_date: '2026-05-19' },
+      { ...baseTask, id: 'tomorrow', scheduled_date: '2026-05-21' },
+      { ...baseTask, id: 'done', scheduled_date: '2026-05-20', status: 'completed' },
+    ];
+    expect(filterUntimedToday(tasks).map((t) => t.id)).toEqual(['untimed']);
+  });
+
+  it('suppresses a project parent with an open subtask', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'parent', scheduled_date: '2026-05-20' },
+      { ...baseTask, id: 'child', parent_id: 'parent', status: 'open' },
+    ];
+    expect(filterUntimedToday(tasks).map((t) => t.id)).toEqual([]);
+  });
+});
+
+describe('filterDeadlineArrived', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 4, 20, 12, 0, 0));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('picks open tasks whose deadline is today (even if already scheduled today)', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'due', deadline_date: '2026-05-20' },
+      { ...baseTask, id: 'due-pinned', deadline_date: '2026-05-20', scheduled_date: '2026-05-20' },
+      { ...baseTask, id: 'yesterday', deadline_date: '2026-05-19' },
+      { ...baseTask, id: 'tomorrow', deadline_date: '2026-05-21' },
+      { ...baseTask, id: 'done', deadline_date: '2026-05-20', status: 'cancelled' },
+    ];
+    expect(filterDeadlineArrived(tasks).map((t) => t.id).sort()).toEqual(['due', 'due-pinned']);
+    // Unlike the pin selector, the already-pinned one is still surfaced.
+    expect(filterDeadlinePinTargets(tasks).map((t) => t.id)).toEqual(['due']);
+  });
+});
+
+describe('filterDeadlineCountdown', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 4, 20, 12, 0, 0));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('picks tasks whose deadline is exactly X days out (X=3 → 2026-05-23)', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'in3', deadline_date: '2026-05-23' },
+      { ...baseTask, id: 'in2', deadline_date: '2026-05-22' },
+      { ...baseTask, id: 'today', deadline_date: '2026-05-20' },
+      { ...baseTask, id: 'in3-done', deadline_date: '2026-05-23', status: 'completed' },
+    ];
+    expect(filterDeadlineCountdown(tasks, 3).map((t) => t.id)).toEqual(['in3']);
+  });
+
+  it('crosses a month boundary correctly (today 05-20 + 13 = 06-02)', () => {
+    const tasks: Task[] = [{ ...baseTask, id: 'x', deadline_date: '2026-06-02' }];
+    expect(filterDeadlineCountdown(tasks, 13).map((t) => t.id)).toEqual(['x']);
+  });
+
+  it('selects nothing for daysUntil <= 0 or non-finite', () => {
+    const tasks: Task[] = [{ ...baseTask, id: 'today', deadline_date: '2026-05-20' }];
+    expect(filterDeadlineCountdown(tasks, 0)).toEqual([]);
+    expect(filterDeadlineCountdown(tasks, -3)).toEqual([]);
+    expect(filterDeadlineCountdown(tasks, Number.NaN)).toEqual([]);
   });
 });

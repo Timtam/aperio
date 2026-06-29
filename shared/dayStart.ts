@@ -1,3 +1,4 @@
+import { localDateKey } from './dateKey';
 import { isMineOrUnassigned } from './taskAssignment';
 import { todayIsoKey } from './taskDay';
 import type { Task, TaskUser } from './types';
@@ -137,6 +138,80 @@ export function filterDeadlinePinTargets(
     // Never pin a project parent to today — its subtasks carry the day plan.
     if (hasActionableDescendants(task.id, tasks)) return false;
     // Don't silently pin a task owned by a concrete OTHER user to my today.
+    return meFor ? isMineOrUnassigned(task.assignees, meFor(task.list_id)) : true;
+  });
+}
+
+// ── Day-start TASK REMINDERS ────────────────────────────────────────────────
+// Three reminders surfaced at the day-start trigger (alongside carry-over /
+// deadline-pin), each gated by its own Settings toggle. Same structural rules as
+// the other selectors: skip settled tasks, suppress "project" parents (their
+// open subtasks are the real units), and never remind about a task owned by a
+// concrete OTHER user. PURE — `todayIsoKey()` reads the local wall-clock.
+
+/** `todayIsoKey()` shifted by `days` whole local calendar days (handles month/
+ *  year rollover via the Date constructor's overflow). */
+function isoKeyPlusDays(days: number): string {
+  const [y, m, d] = todayIsoKey().split('-').map(Number);
+  return localDateKey(new Date(y, m - 1, d + days));
+}
+
+/**
+ * Tasks scheduled for TODAY with NO time-of-day (`scheduled_time` null) and
+ * still actionable — the "you planned these for today" nudge. A task with a
+ * concrete scheduled_time already shows on the calendar's timeline, so it's not
+ * part of this untimed reminder.
+ */
+export function filterUntimedToday(
+  tasks: Task[],
+  meFor?: (listId: string) => TaskUser | null,
+): Task[] {
+  const today = todayIsoKey();
+  return tasks.filter((task) => {
+    if (task.scheduled_date !== today) return false;
+    if (task.scheduled_time != null) return false;
+    if (task.status === 'completed' || task.status === 'cancelled') return false;
+    if (hasActionableDescendants(task.id, tasks)) return false;
+    return meFor ? isMineOrUnassigned(task.assignees, meFor(task.list_id)) : true;
+  });
+}
+
+/**
+ * Tasks whose `deadline_date` is TODAY and still actionable — "the deadline is
+ * here". Unlike `filterDeadlinePinTargets` this does NOT exclude tasks already
+ * scheduled to today: the reminder fires regardless of whether the silent
+ * deadline-pin also moves it (the pin runs separately, after).
+ */
+export function filterDeadlineArrived(
+  tasks: Task[],
+  meFor?: (listId: string) => TaskUser | null,
+): Task[] {
+  const today = todayIsoKey();
+  return tasks.filter((task) => {
+    if (task.deadline_date !== today) return false;
+    if (task.status === 'completed' || task.status === 'cancelled') return false;
+    if (hasActionableDescendants(task.id, tasks)) return false;
+    return meFor ? isMineOrUnassigned(task.assignees, meFor(task.list_id)) : true;
+  });
+}
+
+/**
+ * Tasks whose `deadline_date` is exactly `daysUntil` whole days from today (the
+ * countdown nudge, e.g. "due in 3 days") and still actionable. `daysUntil` is
+ * the global default; Phase B will let a task override it. `daysUntil <= 0` (or
+ * non-finite) selects nothing — the deadline DAY itself is `filterDeadlineArrived`.
+ */
+export function filterDeadlineCountdown(
+  tasks: Task[],
+  daysUntil: number,
+  meFor?: (listId: string) => TaskUser | null,
+): Task[] {
+  if (!Number.isFinite(daysUntil) || daysUntil <= 0) return [];
+  const targetKey = isoKeyPlusDays(daysUntil);
+  return tasks.filter((task) => {
+    if (task.deadline_date !== targetKey) return false;
+    if (task.status === 'completed' || task.status === 'cancelled') return false;
+    if (hasActionableDescendants(task.id, tasks)) return false;
     return meFor ? isMineOrUnassigned(task.assignees, meFor(task.list_id)) : true;
   });
 }
