@@ -2934,7 +2934,9 @@ button[aria-disabled='true'] {
   background-image: none;
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  /* Pre-grid chip spacing — a tight 2px between chips (the hour-grid rework's
+     var(--space-1) = 4px read as too much air between events). */
+  gap: 2px;
 }
 
 /* A positioned timed chip's <li>. Inline style sets top/height/left/width from
@@ -3080,6 +3082,14 @@ button[aria-disabled='true'] {
   padding: 2px;
   background: var(--color-bg-elevated);
   border-bottom: 1px solid var(--color-border);
+}
+
+/* Compact-list layout: the hour ruler is gated off, so the all-day lane drops
+   its leading ruler column and becomes a plain 7-day grid (pre-grid layout),
+   staying aligned with the .week-grid__body--flow cells below. The bars use the
+   no-ruler gridColumn offset in this mode (see WeekView). */
+.week-grid__lane--flow {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 
 .week-allday-bar,
@@ -3447,17 +3457,24 @@ button[aria-disabled='true'] {
   /* No fixed inner scroll region — the list grows with its content and the
      page-level scroll takes over. */
   overflow-y: visible;
+  /* The pre-grid bordered/rounded container lives on .day-list--flow in this
+     mode, so drop .day-grid's own border/radius to avoid a double frame. */
+  border: 0;
+  border-radius: 0;
 }
 .day-list--flow {
   position: static;
   height: auto;
   background-image: none;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  /* Restore a little vertical breathing room the canvas mode removed (the
-     positioned slots set their own padding). */
-  padding: var(--space-2);
+  /* Pre-grid look: a single bordered, rounded container whose rows are
+     separated by per-row border-bottoms (NOT flex gap) — flex gap + padding
+     read as too much air between events. The hour-grid canvas (.day-list) is
+     borderless because .day-grid wraps it; in list mode .day-grid--flow drops
+     its own border, so the container border lives here instead. */
+  display: block;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
 }
 
 .day-list__empty {
@@ -3473,6 +3490,27 @@ button[aria-disabled='true'] {
 
 .day-list__item--focused {
   background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+/* LIST-mode row: reproduce the pre-grid `.day-list__item` look — a two-column
+   grid (time | title) inside the bordered container, rows separated by a
+   border-bottom (no flex gap). The shared `.day-list__item` above already
+   supplies the padding + colour stripe (border-left); this only adds the
+   pre-grid grid + separators + duration floor. Grid mode is untouched (its
+   options carry `.day-list__slot`, which sets its own absolute geometry). */
+.day-list--flow .day-list__item {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  /* The duration floor (inline min-height) tops out the natural row height for
+     longer events; align content to the top so a tall row reads from its top
+     edge rather than vertically centring a one-liner. */
+  align-content: start;
+}
+
+.day-list--flow .day-list__item:last-child {
+  border-bottom: 0;
 }
 
 /* A positioned timed option's <li>. Inline style sets top/height/left/width

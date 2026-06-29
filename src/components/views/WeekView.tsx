@@ -90,6 +90,13 @@ function eventSpanForDay(ev: CalendarEvent, day: Date): TimedSpan {
   };
 }
 
+/** Base block height (em) a LIST-mode event chip gets at `eventBlockFactor === 1`
+ *  (a point / very short event). Tuned to the pre-grid one-line chip height so a
+ *  short event in the compact list looks exactly like it did before the hour-grid
+ *  rework; longer events grow from here via the shared `eventBlockFactor` curve
+ *  (e.g. a 3h event ≈ 2.5× this). */
+const WEEK_LIST_BLOCK_BASE_EM = 1.4;
+
 /** Absolute placement of a timed chip's `<li>` inside the day column's
  *  24h-tall hour-grid (positioning is purely visual; DOM order is unchanged). */
 function slotStyle(p: PositionedSpan): React.CSSProperties {
@@ -725,9 +732,11 @@ export function WeekView() {
             ))}
           </div>
 
-          {!listMode && allDayBars.length > 0 && (
+          {allDayBars.length > 0 && (
             <div
-              className="week-grid__lane"
+              className={
+                'week-grid__lane' + (listMode ? ' week-grid__lane--flow' : '')
+              }
               aria-hidden="true"
               style={
                 { '--lane-rows': laneRows } as React.CSSProperties
@@ -742,8 +751,12 @@ export function WeekView() {
                 const isBarFocused = focusedEvId === bar.event.id;
                 const span = multiDayInfo(bar.event, new Date(bar.event.start));
                 const style: React.CSSProperties & Record<string, string> = {
-                  // +1 for the leading hour-ruler column (day N → grid col N+1).
-                  gridColumn: `${bar.startCol + 1} / ${bar.endCol + 2}`,
+                  // GRID mode has a leading hour-ruler column, so day N → grid
+                  // col N+1. LIST mode drops the ruler (pre-grid layout), so the
+                  // 7 day columns start at 1 — day N → grid col N.
+                  gridColumn: listMode
+                    ? `${bar.startCol} / ${bar.endCol + 1}`
+                    : `${bar.startCol + 1} / ${bar.endCol + 2}`,
                   gridRow: String(bar.lane + 1),
                 };
                 if (color.hex) style['--event-color'] = color.hex;
@@ -1154,21 +1167,20 @@ export function WeekView() {
                             total: span.totalDays,
                           })
                         : ariaBase;
-                      // All-day events are visualised by the lane above;
-                      // their per-day chip stays in the listbox as the
-                      // aria-activedescendant target but is clipped out
-                      // of the visual flow so the cell only shows timed
-                      // events. The bar's focused state is driven from
-                      // here via `focusedEvId`. In LIST mode there's no lane,
-                      // so an all-day event renders as a plain row (no clip, no
-                      // min-height); a timed event gets a duration-scaled
-                      // min-height via eventBlockFactor.
+                      // All-day events are visualised by the lane above in BOTH
+                      // modes; their per-day chip stays in the listbox as the
+                      // aria-activedescendant target but is clipped out of the
+                      // visual flow (`--in-lane`) so the cell only shows timed
+                      // events. The bar's focused state is driven from here via
+                      // `focusedEvId`. A timed event gets a duration-scaled
+                      // min-height in LIST mode via eventBlockFactor; all-day
+                      // events get none (they're clipped anyway).
                       const evSpan = ev.all_day ? null : eventSpanForDay(ev, day);
                       const listMinHeight =
                         listMode && evSpan
                           ? `${
                               eventBlockFactor(evSpan.endMin - evSpan.startMin) *
-                              2.4
+                              WEEK_LIST_BLOCK_BASE_EM
                             }em`
                           : undefined;
                       return (
@@ -1190,13 +1202,12 @@ export function WeekView() {
                               'week-event' +
                               (isFocusedItem ? ' week-event--focused' : '') +
                               (span ? ' week-event--multiday' : '') +
-                              // The `--in-lane` clip only applies in grid mode
-                              // (where the all-day lane carries the visible
-                              // bar). In list mode there's no lane, so the
-                              // all-day chip stays a normal visible row.
-                              (ev.all_day && !listMode
-                                ? ' week-event--in-lane'
-                                : '')
+                              // The `--in-lane` clip applies in BOTH modes: the
+                              // all-day lane carries the visible bar in grid AND
+                              // list mode (pre-grid behaviour), so an all-day
+                              // event is never a plain row in the week list — it
+                              // lives only in the lane above.
+                              (ev.all_day ? ' week-event--in-lane' : '')
                             }
                             aria-label={aria}
                             aria-selected={isFocusedItem}

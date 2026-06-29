@@ -80,6 +80,14 @@ function eventSpanForDay(ev: CalendarEvent, day: Date): TimedSpan {
   };
 }
 
+/** Base block height (em) a LIST-mode event row gets at `eventBlockFactor === 1`
+ *  (a point / very short event). Tuned to the pre-grid `.day-list__item` natural
+ *  padded row height so a short event in the compact list looks exactly like it
+ *  did before the hour-grid rework; longer events grow from here via the shared
+ *  `eventBlockFactor` curve (e.g. a 3h event ≈ 2.5× this). The row already has
+ *  its natural content height; this only kicks in as a floor for longer events. */
+const DAY_LIST_BLOCK_BASE_EM = 1.6;
+
 /** Absolute placement of a timed chip's `<li>` inside the day's 24h-tall
  *  hour-grid (positioning is purely visual; DOM order is unchanged). Identical
  *  to WeekView's helper. */
@@ -689,7 +697,10 @@ export function DayView() {
             const evSpan =
               listMode && !ev.all_day ? eventSpanForDay(ev, anchor) : null;
             const listMinHeight = evSpan
-              ? `${eventBlockFactor(evSpan.endMin - evSpan.startMin) * 2.4}em`
+              ? `${
+                  eventBlockFactor(evSpan.endMin - evSpan.startMin) *
+                  DAY_LIST_BLOCK_BASE_EM
+                }em`
               : undefined;
             return (
               <li
