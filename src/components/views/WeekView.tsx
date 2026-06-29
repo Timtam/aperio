@@ -1312,6 +1312,7 @@ export function WeekView() {
                     dayKey={dayKey}
                     allTasks={tasks}
                     cellIndex={i}
+                    listMode={listMode}
                     optionIdBase={timedItems.length}
                     focusedIndex={focused ? eventIndex : null}
                     eventOptionId={eventOptionId}
@@ -1443,6 +1444,7 @@ function WeekDayTasks({
   dayKey,
   allTasks,
   cellIndex,
+  listMode,
   optionIdBase,
   focusedIndex,
   eventOptionId,
@@ -1464,6 +1466,13 @@ function WeekDayTasks({
   allTasks: Task[];
   /** This day's index in the week, for the activedescendant option id. */
   cellIndex: number;
+  /** GRID vs compact-LIST layout. Drives ONLY a visual modifier class on the
+   *  task <ul>: in grid mode the untimed band is lifted to the TOP of the cell
+   *  (CSS `order: -1`) and compacted into a tight flex-wrap, sitting between
+   *  the all-day lane and the hour canvas. In list mode it stays the pre-grid
+   *  bottom-pinned column. The chips' DOM order, option ids, indices, handlers
+   *  and a11y are IDENTICAL either way — only CSS position + size change. */
+  listMode: boolean;
   /** Bucket index of the first untimed task: the count of timed items in
    *  this cell, so untimed chips continue the grid nav after the lane. */
   optionIdBase: number;
@@ -1498,7 +1507,14 @@ function WeekDayTasks({
   if (tasks.length === 0) return null;
   return (
     <ul
-      className="week-grid__tasks"
+      className={
+        'week-grid__tasks' +
+        // GRID-mode only: lift the untimed band to the TOP of the cell
+        // (CSS `order: -1`) and compact it. List mode keeps the pre-grid
+        // bottom-pinned column, so no modifier there. Purely visual — the
+        // DOM order / option ids / Tab nav are unchanged in both modes.
+        (listMode ? '' : ' week-grid__tasks--grid')
+      }
       aria-label={t('views.week.tasksOnDay', { count: tasks.length })}
     >
       {tasks.map((task, idx) => {

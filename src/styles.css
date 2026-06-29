@@ -2241,9 +2241,43 @@ button[aria-disabled='true'] {
    column that fills the body row), so the free space lands between the
    time-ordered chips and the "no fixed time" tasks — making the two
    groups easy to tell apart. Collapses to a normal gap when the cell is
-   already full. Week view only; the DayView list keeps its top flow. */
+   already full. Week view only; the DayView list keeps its top flow.
+
+   This bottom-pin is the LIST-mode (pre-grid) behaviour. GRID mode overrides
+   it below to lift the band to the TOP of the cell instead. */
 .week-grid__tasks {
   margin-top: auto;
+}
+
+/* GRID-mode untimed-task BAND. The cell is a flex column holding the timed
+   hour-canvas (`.week-grid__events`) then this task <ul>; `order: -1` lifts
+   the band visually ABOVE the canvas so it sits as a compact lane between the
+   all-day lane (a sibling row above the cells) and the 24h grid — without
+   touching the DOM order, so the chips keep their exact option ids, indices,
+   handlers and Tab nav (only CSS moves them).
+
+   `margin-top: 0` cancels the bottom-pin. The chips compact into a tight
+   horizontal flex-wrap of small bars (like the all-day lane), so the band
+   stays shallow and the timed canvas keeps the rest of the column. Scoped to
+   grid mode via the `--grid` modifier (added in JSX gated on `!listMode`), so
+   list mode is byte-for-byte unchanged. */
+.week-grid__tasks--grid {
+  order: -1;
+  margin-top: 0;
+  margin-bottom: var(--space-1);
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding-top: 0;
+}
+/* Compact chip in the grid-mode band: shrink-to-content (override the
+   full-width column chip) so several fit per row, capped so a long title
+   truncates rather than forcing one-chip-per-row. */
+.week-grid__tasks--grid .week-grid__task-item {
+  max-width: 100%;
+}
+.week-grid__tasks--grid .week-task {
+  width: auto;
 }
 
 .day-tasks {
@@ -2258,6 +2292,47 @@ button[aria-disabled='true'] {
   letter-spacing: 0.04em;
   color: var(--color-fg-muted);
   margin: 0 0 var(--space-2);
+}
+
+/* GRID-mode untimed-task BAND — the compact bar above the hour-grid (rendered
+   right under the all-day band in DayView, GRID mode only). Mirrors
+   `.day-grid__allday`: no top border/separator, a small bottom margin so it
+   sits above the grid, and a horizontal flex-wrap of compact chips instead of
+   the full-width column the LIST-mode `.day-tasks` section uses. The chips are
+   the same `.day-task` buttons + handlers — only the container layout + chip
+   sizing change, so a sighted user finds untimed work at the top of the day. */
+.day-tasks--band {
+  padding: 0;
+  border-top: 0;
+  margin: 0 0 var(--space-2);
+}
+.day-tasks--band .day-tasks__list {
+  /* Horizontal flex-wrap (like the all-day band) instead of the vertical
+     column the bottom section uses. Tight gap so the band stays shallow. */
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: 0;
+}
+.day-tasks--band .day-tasks__item {
+  /* Each chip sizes to its content (so several fit per row) rather than
+     filling the row width. Cap the width so a long title truncates instead
+     of pushing the band into one-chip-per-row. */
+  max-width: 100%;
+  min-width: 0;
+}
+.day-tasks--band .day-task {
+  /* Compact chip: shrink-to-content (override the column's width:100%) and a
+     tighter font so the band reads as a lane of small bars, like the all-day
+     band's `.day-grid__allday-bar`. */
+  width: auto;
+  font-size: var(--font-size-xs);
+}
+.day-tasks--band .day-task__title {
+  /* Keep the title on one truncating line so chips stay bar-shaped. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .week-task,

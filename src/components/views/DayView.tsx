@@ -55,7 +55,12 @@ import {
   deleteEventById,
   isCommandError,
 } from '../../api/client';
-import type { CalendarEvent } from '../../api/types';
+import type {
+  CalendarEvent,
+  ColorLabel,
+  Task,
+  TaskList,
+} from '../../api/types';
 import {
   eventBlockFactor,
   eventSpanForDay,
@@ -510,6 +515,31 @@ export function DayView() {
         </div>
       )}
 
+      {/* §9.4 untimed tasks — GRID mode places them in a compact band ABOVE
+          the hour-grid (right under the all-day band), styled like
+          .day-grid__allday, so a sighted user doesn't have to scroll the whole
+          24h canvas to find them. The chips are byte-for-byte the same buttons
+          (and handlers) as the LIST-mode section below — they are plain
+          Tab-order buttons, NOT part of the listbox aria-activedescendant nav.
+          LIST mode keeps the section below the list (see further down). */}
+      {!listMode && untimedTasks.length > 0 && (
+        <DayUntimedTasks
+          variant="band"
+          tasks={untimedTasks}
+          dayKey={dayKey}
+          allTasks={tasks}
+          fmt={fmt}
+          t={t}
+          taskListById={taskListById}
+          labelById={labelById}
+          sectionColorById={sectionColorById}
+          visualEffortSizing={visualEffortSizing}
+          onToggle={toggleTaskStatus}
+          onOpen={openTaskDialog}
+          onContextMenu={openTaskMenu}
+        />
+      )}
+
       <div className={'day-grid' + (listMode ? ' day-grid--flow' : '')}>
         {/* Hour ruler — the hour numbers, read off the grid instead of the
             chips. aria-hidden; the time stays in each option's accessible
@@ -793,154 +823,31 @@ export function DayView() {
         </ul>
       </div>
 
-      {/* §9.4: untimed tasks on this day, rendered as natural-Tab-
-          order buttons below the listbox. Tasks with a concrete
-          deadline_time were already interleaved with events in the
-          listbox above (sorted by time), so only scheduled-only
-          tasks and By-window intermediate days surface here. Click
-          / Enter / Space opens the TaskDialog; status toggles live
-          in TaskView (the dedicated keyboard surface). */}
-      {untimedTasks.length > 0 && (
-        <section
-          className="day-tasks"
-          aria-label={t('views.day.tasksHeading')}
-        >
-          <h3 className="day-tasks__heading">
-            {t('views.day.tasksHeading')}
-          </h3>
-          <ul className="day-tasks__list">
-            {untimedTasks.map((task) => {
-              // "Due here" when the task is on this day because of its
-              // deadline (not its scheduled day) — that chip is the
-              // deadline marker ("fällig bis …"). A task scheduled today
-              // stays a plain work chip even with a later deadline.
-              const isBy = isDeadlineChip(task, dayKey);
-              // The scheduled chip now also announces its deadline (the
-              // deadline-day duplicate is suppressed in filterTasksOnDay), so
-              // use the "fällig bis …" label whenever the task carries a
-              // deadline — not only on a pure deadline marker.
-              const hasDeadline = task.deadline_date != null;
-              const labelKey = hasDeadline
-                ? 'views.week.taskChipBy'
-                : 'views.week.taskChip';
-              // Visible deadline badge on the SCHEDULED chip (a deadline-only
-              // marker, `isBy`, already sits on its own day so it needs none).
-              const deadlineBadge =
-                !isBy && task.deadline_date
-                  ? fmt.format(new Date(`${task.deadline_date}T00:00:00`), 'P')
-                  : '';
-              const color = resolveTaskColor(
-                task,
-                taskListById,
-                labelById,
-                sectionColorById,
-              );
-              const state = t(statusI18nKey(task.status));
-              const priorityGlyph = priorityMarker(task.priority);
-              const effortMod = visualEffortSizing
-                ? effortSizeModifier(task.effort)
-                : '';
-              return (
-                <li key={task.id} className="day-tasks__item">
-                  <button
-                    type="button"
-                    className={
-                      'day-task' +
-                      ` day-task--${task.status.replace('_', '-')}` +
-                      (isBy ? ' day-task--by' : '') +
-                      (effortMod ? ` day-task--effort-${effortMod}` : '')
-                    }
-                    // Default <button> would fire onClick on both
-                    // Space and Enter. We need different actions:
-                    // Space toggles done (matches the visual ☐/☑),
-                    // Enter opens the editor. Intercept here.
-                    onKeyDown={(ev) => {
-                      if (ev.key === ' ' || ev.key === 'Spacebar') {
-                        ev.preventDefault();
-                        void toggleTaskStatus(task);
-                      } else if (ev.key === 'Enter') {
-                        ev.preventDefault();
-                        openTaskDialog(task);
-                      } else if (
-                        ev.key === 'ContextMenu' ||
-                        (ev.shiftKey && ev.key === 'F10')
-                      ) {
-                        ev.preventDefault();
-                        const rect = (
-                          ev.currentTarget as HTMLElement
-                        ).getBoundingClientRect();
-                        void openTaskMenu(task, {
-                          x: rect.left,
-                          y: rect.bottom,
-                        });
-                      }
-                    }}
-                    onDoubleClick={(e) => {
-                      e.stopPropagation();
-                      openTaskDialog(task);
-                    }}
-                    onContextMenu={(ev) => {
-                      ev.preventDefault();
-                      ev.stopPropagation();
-                      void openTaskMenu(task);
-                    }}
-                    style={
-                      color.hex
-                        ? ({
-                            '--event-color': color.hex,
-                          } as React.CSSProperties)
-                        : undefined
-                    }
-                    aria-label={
-                      t(labelKey, {
-                        title: task.title,
-                        deadline: task.deadline_date
-                          ? fmt.format(
-                              new Date(`${task.deadline_date}T00:00:00`),
-                              'PPP',
-                            )
-                          : '',
-                        state,
-                        priority: prioritySuffix(t, task.priority),
-                        progress: subtaskProgressSuffix(t, task.id, tasks),
-                        assignee: assigneeSuffix(t, task.assignees),
-                      }) +
-                      subtaskParentSuffix(t, task, tasks) +
-                      effortSuffix(t, task.effort)
-                    }
-                  >
-                    <span
-                      className="day-task__marker day-task__marker--clickable"
-                      aria-hidden="true"
-                      onClick={(ev) => {
-                        ev.stopPropagation();
-                        void toggleTaskStatus(task);
-                      }}
-                    >
-                      {statusMarker(task.status)}
-                    </span>
-                    <span className="day-task__title">
-                      {task.parent_id ? '↳ ' : ''}
-                      {task.title}
-                    </span>
-                    {priorityGlyph && (
-                      <span className="day-task__priority" aria-hidden="true">
-                        {priorityGlyph}
-                      </span>
-                    )}
-                    {deadlineBadge && (
-                      <span className="day-task__deadline" aria-hidden="true">
-                        {t('views.week.taskChipDeadlineBadge', {
-                          deadline: deadlineBadge,
-                        })}
-                      </span>
-                    )}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
+      {/* §9.4 untimed tasks — LIST mode keeps them in the dedicated section
+          BELOW the listbox (unchanged pre-grid placement). GRID mode renders
+          the identical chips in the compact band above the hour-grid instead
+          (see above), so only one of the two surfaces is present per mode. The
+          chips are natural-Tab-order buttons either way (NOT listbox options).
+          Tasks with a concrete deadline_time were already interleaved with
+          events in the listbox above (sorted by time), so only scheduled-only
+          tasks and By-window intermediate days surface here. Click / Enter /
+          Space opens the TaskDialog; status toggles via the marker / Space. */}
+      {listMode && untimedTasks.length > 0 && (
+        <DayUntimedTasks
+          variant="section"
+          tasks={untimedTasks}
+          dayKey={dayKey}
+          allTasks={tasks}
+          fmt={fmt}
+          t={t}
+          taskListById={taskListById}
+          labelById={labelById}
+          sectionColorById={sectionColorById}
+          visualEffortSizing={visualEffortSizing}
+          onToggle={toggleTaskStatus}
+          onOpen={openTaskDialog}
+          onContextMenu={openTaskMenu}
+        />
       )}
 
       <ConfirmDialog
@@ -966,6 +873,218 @@ export function DayView() {
           if (scopeTarget) void performDelete(scopeTarget, 'series');
         }}
       />
+    </section>
+  );
+}
+
+/**
+ * §9.4 untimed-task chips for the day surface. Rendered in one of two
+ * places depending on `dayViewMode`:
+ *
+ *  - `variant="band"` (GRID mode): a compact horizontal flex-wrap bar
+ *    ABOVE the hour-grid, styled like the all-day band — so a sighted
+ *    user finds the untimed work at the top instead of scrolling past
+ *    the whole 24h canvas.
+ *  - `variant="section"` (LIST mode): the original dedicated section
+ *    BELOW the list (unchanged pre-grid placement).
+ *
+ * The chips themselves are byte-for-byte identical between the two
+ * variants — same `<button className="day-task">`, same a11y label
+ * (incl. the effort suffix), same keyboard / mouse / drag / context
+ * handlers. They are plain Tab-order buttons in BOTH cases (NOT part
+ * of the listbox aria-activedescendant nav). Only the wrapping
+ * container + its CSS differ. Factored here so the markup isn't
+ * duplicated across the two render sites in DayView.
+ */
+function DayUntimedTasks({
+  variant,
+  tasks,
+  dayKey,
+  allTasks,
+  fmt,
+  t,
+  taskListById,
+  labelById,
+  sectionColorById,
+  visualEffortSizing,
+  onToggle,
+  onOpen,
+  onContextMenu,
+}: {
+  variant: 'band' | 'section';
+  tasks: Task[];
+  dayKey: string;
+  allTasks: Task[];
+  fmt: ReturnType<typeof useDateFormat>;
+  t: ReturnType<typeof useTranslation>['t'];
+  taskListById: Map<string, TaskList>;
+  labelById: Map<string, ColorLabel>;
+  sectionColorById: Map<string, string>;
+  visualEffortSizing: boolean;
+  onToggle: (task: Task) => void | Promise<void>;
+  onOpen: (task: Task) => void;
+  onContextMenu: (
+    task: Task,
+    position?: { x: number; y: number },
+  ) => void | Promise<void>;
+}) {
+  return (
+    <section
+      className={
+        'day-tasks' + (variant === 'band' ? ' day-tasks--band' : '')
+      }
+      aria-label={t('views.day.tasksHeading')}
+    >
+      <h3 className="day-tasks__heading">{t('views.day.tasksHeading')}</h3>
+      <ul className="day-tasks__list">
+        {tasks.map((task) => {
+          // "Due here" when the task is on this day because of its
+          // deadline (not its scheduled day) — that chip is the
+          // deadline marker ("fällig bis …"). A task scheduled today
+          // stays a plain work chip even with a later deadline.
+          const isBy = isDeadlineChip(task, dayKey);
+          // The scheduled chip now also announces its deadline (the
+          // deadline-day duplicate is suppressed in filterTasksOnDay), so
+          // use the "fällig bis …" label whenever the task carries a
+          // deadline — not only on a pure deadline marker.
+          const hasDeadline = task.deadline_date != null;
+          const labelKey = hasDeadline
+            ? 'views.week.taskChipBy'
+            : 'views.week.taskChip';
+          // Visible deadline badge on the SCHEDULED chip (a deadline-only
+          // marker, `isBy`, already sits on its own day so it needs none).
+          const deadlineBadge =
+            !isBy && task.deadline_date
+              ? fmt.format(new Date(`${task.deadline_date}T00:00:00`), 'P')
+              : '';
+          const color = resolveTaskColor(
+            task,
+            taskListById,
+            labelById,
+            sectionColorById,
+          );
+          const state = t(statusI18nKey(task.status));
+          const priorityGlyph = priorityMarker(task.priority);
+          const effortMod = visualEffortSizing
+            ? effortSizeModifier(task.effort)
+            : '';
+          return (
+            <li key={task.id} className="day-tasks__item">
+              <button
+                type="button"
+                className={
+                  'day-task' +
+                  ` day-task--${task.status.replace('_', '-')}` +
+                  (isBy ? ' day-task--by' : '') +
+                  (effortMod ? ` day-task--effort-${effortMod}` : '')
+                }
+                // Default <button> would fire onClick on both
+                // Space and Enter. We need different actions:
+                // Space toggles done (matches the visual ☐/☑),
+                // Enter opens the editor. Intercept here.
+                onKeyDown={(ev) => {
+                  if (ev.key === ' ' || ev.key === 'Spacebar') {
+                    ev.preventDefault();
+                    void onToggle(task);
+                  } else if (ev.key === 'Enter') {
+                    ev.preventDefault();
+                    onOpen(task);
+                  } else if (
+                    ev.key === 'ContextMenu' ||
+                    (ev.shiftKey && ev.key === 'F10')
+                  ) {
+                    ev.preventDefault();
+                    const rect = (
+                      ev.currentTarget as HTMLElement
+                    ).getBoundingClientRect();
+                    void onContextMenu(task, {
+                      x: rect.left,
+                      y: rect.bottom,
+                    });
+                  }
+                }}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  onOpen(task);
+                }}
+                onContextMenu={(ev) => {
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  void onContextMenu(task);
+                }}
+                // Drag-to-reschedule is a band-only affordance: the
+                // pre-grid LIST section never carried it, so keep that
+                // surface byte-for-byte (no drag) and only the compact
+                // grid-mode band gets the draggable chip, matching how
+                // the grid's other task chips drag.
+                draggable={variant === 'band'}
+                onDragStart={
+                  variant === 'band'
+                    ? (dev) => {
+                        setTaskDrag(
+                          dev.dataTransfer,
+                          task,
+                          allTasks.filter((c) => c.parent_id === task.id),
+                        );
+                      }
+                    : undefined
+                }
+                style={
+                  color.hex
+                    ? ({
+                        '--event-color': color.hex,
+                      } as React.CSSProperties)
+                    : undefined
+                }
+                aria-label={
+                  t(labelKey, {
+                    title: task.title,
+                    deadline: task.deadline_date
+                      ? fmt.format(
+                          new Date(`${task.deadline_date}T00:00:00`),
+                          'PPP',
+                        )
+                      : '',
+                    state,
+                    priority: prioritySuffix(t, task.priority),
+                    progress: subtaskProgressSuffix(t, task.id, allTasks),
+                    assignee: assigneeSuffix(t, task.assignees),
+                  }) +
+                  subtaskParentSuffix(t, task, allTasks) +
+                  effortSuffix(t, task.effort)
+                }
+              >
+                <span
+                  className="day-task__marker day-task__marker--clickable"
+                  aria-hidden="true"
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    void onToggle(task);
+                  }}
+                >
+                  {statusMarker(task.status)}
+                </span>
+                <span className="day-task__title">
+                  {task.parent_id ? '↳ ' : ''}
+                  {task.title}
+                </span>
+                {priorityGlyph && (
+                  <span className="day-task__priority" aria-hidden="true">
+                    {priorityGlyph}
+                  </span>
+                )}
+                {deadlineBadge && (
+                  <span className="day-task__deadline" aria-hidden="true">
+                    {t('views.week.taskChipDeadlineBadge', {
+                      deadline: deadlineBadge,
+                    })}
+                  </span>
+                )}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     </section>
   );
 }

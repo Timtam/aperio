@@ -976,12 +976,17 @@ export function CalendarDayList({
     </>
   );
 
-  // Single-day hour-grid: all-day events in a compact band ABOVE the 24h canvas,
-  // then the canvas itself (a leading hour-ruler 00–23 beside the positioned day
-  // column), then the untimed tasks below. This keeps the screen-reader reading
-  // order all-day → timed → untimed, matching the desktop DayView and the linear
-  // list path. The grid is visual only; within the canvas timed order is
-  // preserved chronologically.
+  // Single-day hour-grid: all-day events first, then a compact band of UNTIMED
+  // tasks, then the 24h canvas (a leading hour-ruler 00–23 beside the positioned
+  // day column). The untimed band sits ABOVE the canvas so a screen-reader / a
+  // sighted user meets the day's tasks-without-a-time up front, instead of after
+  // scrolling past a full 24h-tall canvas where they were buried. The reading /
+  // source order becomes all-day → untimed-tasks → timed(canvas) → create
+  // buttons, matching the top-down visual (a top band of tasks, then the
+  // timeline). Each untimed row uses the SAME renderTaskRow (no slot), so its
+  // accessibilityRole/Label/actions/effort sizing + tap handlers are unchanged —
+  // only its position in the tree moved. The grid is visual only; within the
+  // canvas timed order is preserved chronologically.
   const renderDayGrid = (b: DayBucket): ReactNode => {
     const slots = computeSlots(b);
     // The earliest timed slot's top in px (the highest chip on the canvas), or
@@ -1004,6 +1009,18 @@ export function CalendarDayList({
         }}
       >
         {b.allDay.map((ev) => renderEventRow(ev, b.date, multiDayInfo(ev, b.date)))}
+        {/* Compact band of untimed tasks, ABOVE the canvas. A short heading then
+            the same renderTaskRow rows (no slot → unchanged a11y + effort sizing
+            + tap handlers); only the band's container is a little tighter than
+            the canvas area, and each row stays fully tappable. */}
+        {b.untimed.length > 0 && (
+          <View style={styles.taskBand}>
+            <Text accessibilityRole="header" style={styles.taskBandHeading}>
+              {t('views.day.tasksHeading')}
+            </Text>
+            {b.untimed.map((task) => renderTaskRow(task, b.key))}
+          </View>
+        )}
         <View
           style={styles.gridRow}
           // y of the hour-grid row within the day section (below the all-day
@@ -1045,7 +1062,6 @@ export function CalendarDayList({
             )}
           </View>
         </View>
-        {b.untimed.map((task) => renderTaskRow(task, b.key))}
         {renderDayCreateButtons(b)}
       </View>
     );
@@ -1211,6 +1227,18 @@ const makeStyles = (c: ThemeColors) =>
     itemTitle: { fontSize: 18, fontWeight: '600', color: c.textPrimary },
     itemTitleDone: { textDecorationLine: 'line-through', color: c.textSecondary },
     itemMeta: { fontSize: 14, color: c.textSecondary },
+    // ── Single-day untimed-task band (dayLayout='grid') ──────────────────────
+    // A compact band of the day's untimed tasks, sitting ABOVE the 24h canvas
+    // (between the all-day rows and the hour-grid). A little tighter than the
+    // canvas area (smaller gap) so it reads as a top band, while each task row
+    // inside keeps its own full padding / tap target (renderTaskRow's `row`).
+    taskBand: { gap: 4 },
+    taskBandHeading: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: c.textLabel,
+      marginBottom: 2,
+    },
     // ── Single-day hour-grid (dayLayout='grid') ──────────────────────────────
     // A horizontal [ruler | 24h canvas] row; the canvas is a 24h-tall positioned
     // column. Ruler numbers + chips line up because both are offset from the
