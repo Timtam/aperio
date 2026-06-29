@@ -56,6 +56,41 @@ import {
   isCommandError,
 } from '../../api/client';
 import type { CalendarEvent } from '../../api/types';
+import {
+  layoutDayColumn,
+  minutesFromMidnight,
+  MINUTES_PER_DAY,
+  type PositionedSpan,
+  type TimedSpan,
+} from '@aperio/shared';
+
+/** Local minutes-from-midnight span an event occupies on `day`, clamped to the
+ *  day so a multi-day event clips to [0, 1440]. Identical to WeekView's helper
+ *  (kept module-local in both so the grid geometry stays self-contained). */
+function eventSpanForDay(ev: CalendarEvent, day: Date): TimedSpan {
+  const base = new Date(day);
+  base.setHours(0, 0, 0, 0);
+  const baseMs = base.getTime();
+  const start = Math.round((new Date(ev.start).getTime() - baseMs) / 60000);
+  const end = Math.round((new Date(ev.end).getTime() - baseMs) / 60000);
+  return {
+    startMin: Math.max(0, Math.min(MINUTES_PER_DAY, start)),
+    endMin: Math.max(0, Math.min(MINUTES_PER_DAY, end)),
+  };
+}
+
+/** Absolute placement of a timed chip's `<li>` inside the day's 24h-tall
+ *  hour-grid (positioning is purely visual; DOM order is unchanged). Identical
+ *  to WeekView's helper. */
+function slotStyle(p: PositionedSpan): React.CSSProperties {
+  return {
+    position: 'absolute',
+    top: `${p.topFraction * 100}%`,
+    height: `${p.heightFraction * 100}%`,
+    left: `${(p.columnIndex / p.columnCount) * 100}%`,
+    width: `${(1 / p.columnCount) * 100}%`,
+  };
+}
 
 /**
  * Day view — flat listbox of the focused day's events.
@@ -151,6 +186,38 @@ export function DayView() {
     return { timedItems: timed, untimedTasks: untimed };
   }, [dayEvents, dayTasks, dayKey]);
 
+  // Hour-grid placement: each timed item gets an absolute slot (top/height by
+  // start + duration, side-by-side on overlap) inside the 24h canvas. Keyed by
+  // the item's index so the chip map applies it; DOM order (and therefore
+  // SR/keyboard nav) is untouched. Mirrors WeekView's per-column logic for the
+  // single day column.
+  const slotByIdx = useMemo(() => {
+    const map = new Map<number, PositionedSpan>();
+    const spans: TimedSpan[] = [];
+    const slotIdxs: number[] = [];
+    timedItems.forEach((item, idx) => {
+      let s: TimedSpan | null = null;
+      if (item.kind === 'event') {
+        // All-day events stay out of the timed grid (they have no meaningful
+        // hour placement); they still render in DOM order without a slot.
+        if (!item.event.all_day) s = eventSpanForDay(item.event, anchor);
+      } else {
+        // A timed task is a zero-duration point; an unparseable time falls back
+        // to midnight so it ALWAYS gets a slot and never flows static inside
+        // the positioned canvas (which would corrupt the grid).
+        const m = minutesFromMidnight(taskTimeOnDay(item.task, dayKey) ?? '');
+        s = { startMin: m ?? 0, endMin: m ?? 0 };
+      }
+      if (s) {
+        spans.push(s);
+        slotIdxs.push(idx);
+      }
+    });
+    const positions = layoutDayColumn(spans);
+    slotIdxs.forEach((idx, k) => map.set(idx, positions[k]));
+    return map;
+  }, [timedItems, anchor, dayKey]);
+
   const [focusIndex, setFocusIndex] = useState(0);
 
   // If the day changes (or events arrive) and the previous focus index
@@ -177,6 +244,18 @@ export function DayView() {
     (i: number) => `${idPrefix}-item-${i}`,
     [idPrefix],
   );
+
+  // The timed list is now a 24h-tall internal scroll region, and
+  // aria-activedescendant (unlike a real DOM .focus()) does NOT auto-scroll the
+  // active option into view — so an option on a scrolled-away hour would be
+  // off-screen for sighted / low-vision keyboard users. Scroll it into view
+  // whenever the active option (focusIndex) changes. Mirrors WeekView.
+  useEffect(() => {
+    if (timedItems.length === 0) return;
+    document
+      .getElementById(itemId(focusIndex))
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [focusIndex, itemId, timedItems.length]);
   const listRef = useAutoFocus<HTMLUListElement>(!loading);
 
   const [confirmTarget, setConfirmTarget] = useState<CalendarEvent | null>(
@@ -364,17 +443,40 @@ export function DayView() {
         </p>
       )}
 
-      <ul
-        ref={listRef}
-        role="listbox"
-        tabIndex={0}
-        aria-label={t('views.day.eventList')}
-        aria-activedescendant={
-          timedItems.length > 0 ? itemId(focusIndex) : undefined
-        }
-        onKeyDown={handleKeyDown}
-        className="day-list"
-      >
+      {/* The timed list is a 24h-tall positioned hour-canvas (see .day-list in
+          styles.css). A leading hour-ruler carries the hour numbers (00–23) so
+          the time reads off the grid; the canvas + ruler scroll together as one
+          internal region. Purely visual — the listbox keeps its role, IDs,
+          aria-activedescendant and keyboard handlers unchanged. */}
+      <div className="day-grid">
+        {/* Hour ruler — the hour numbers, read off the grid instead of the
+            chips. aria-hidden; the time stays in each option's accessible
+            label. The scale is 24h tall, top-aligned with the canvas so the
+            numbers line up with the gridlines. */}
+        <div className="day-grid__ruler" aria-hidden="true">
+          <div className="day-grid__ruler-scale">
+            {Array.from({ length: 24 }, (_, h) => (
+              <span
+                key={h}
+                className="day-grid__ruler-hour"
+                style={{ top: `${(h / 24) * 100}%` }}
+              >
+                {String(h).padStart(2, '0')}
+              </span>
+            ))}
+          </div>
+        </div>
+        <ul
+          ref={listRef}
+          role="listbox"
+          tabIndex={0}
+          aria-label={t('views.day.eventList')}
+          aria-activedescendant={
+            timedItems.length > 0 ? itemId(focusIndex) : undefined
+          }
+          onKeyDown={handleKeyDown}
+          className="day-list"
+        >
         {timedItems.length === 0 ? (
           <li role="presentation" className="day-list__empty">
             {t('views.day.empty')}
@@ -382,6 +484,10 @@ export function DayView() {
         ) : (
           timedItems.map((item, i) => {
             const focused = i === focusIndex;
+            // Absolute slot inside the 24h canvas (every timed item has one —
+            // see slotByIdx). Positioning is purely visual; the <li> keeps its
+            // option role, id, aria-selected and DOM position unchanged.
+            const slot = slotByIdx.get(i);
             if (item.kind === 'task') {
               const task = item.task;
               // Pull the effective time-of-day via the shared helper;
@@ -432,15 +538,15 @@ export function DayView() {
                     // (not a `day-list__item--*` one) so both DayView task
                     // surfaces — this agenda row + the grid chip — resize
                     // identically by effort.
-                    (effortMod ? ` day-task--effort-${effortMod}` : '')
+                    (effortMod ? ` day-task--effort-${effortMod}` : '') +
+                    (slot ? ' day-list__slot' : '')
                   }
-                  style={
-                    color.hex
-                      ? ({
-                          '--event-color': color.hex,
-                        } as React.CSSProperties)
-                      : undefined
-                  }
+                  style={{
+                    ...(slot ? slotStyle(slot) : {}),
+                    ...(color.hex
+                      ? ({ '--event-color': color.hex } as React.CSSProperties)
+                      : {}),
+                  }}
                   draggable
                   onDragStart={(dev) => {
                     setTaskDrag(
@@ -461,7 +567,9 @@ export function DayView() {
                     void openTaskMenu(task);
                   }}
                 >
-                  <span className="day-list__time">{timeStr}</span>
+                  {/* Time is read from the hour-grid + ruler, not the chip, so a
+                      short option's one visible line is the title (not clipped).
+                      The time stays in the aria-label above. */}
                   <span className="day-list__title">
                     <span
                       className="day-task__marker day-task__marker--clickable"
@@ -518,13 +626,15 @@ export function DayView() {
                 className={
                   'day-list__item' +
                   (focused ? ' day-list__item--focused' : '') +
-                  (span ? ' day-list__item--multiday' : '')
+                  (span ? ' day-list__item--multiday' : '') +
+                  (slot ? ' day-list__slot' : '')
                 }
-                style={
-                  color.hex
+                style={{
+                  ...(slot ? slotStyle(slot) : {}),
+                  ...(color.hex
                     ? ({ '--event-color': color.hex } as React.CSSProperties)
-                    : undefined
-                }
+                    : {}),
+                }}
                 draggable
                 onDragStart={(dev) => {
                   setEventDrag(dev.dataTransfer, ev);
@@ -544,9 +654,9 @@ export function DayView() {
                   void openEventMenu(ev);
                 }}
               >
-                <span className="day-list__time">
-                  {ev.all_day ? t('views.allDay') : `${startStr} – ${endStr}`}
-                </span>
+                {/* Time is read from the hour-grid + ruler; the chip's single
+                    line is the title so a short event isn't clipped. The full
+                    start–end range stays in the aria-label above. */}
                 <span className="day-list__title">
                   {ev.title}
                   {span && (
@@ -563,7 +673,8 @@ export function DayView() {
             );
           })
         )}
-      </ul>
+        </ul>
+      </div>
 
       {/* §9.4: untimed tasks on this day, rendered as natural-Tab-
           order buttons below the listbox. Tasks with a concrete

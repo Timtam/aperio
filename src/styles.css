@@ -3346,13 +3346,69 @@ button[aria-disabled='true'] {
 
 /* ── Day view (flat listbox) ────────────────────────────────────────────── */
 
-.day-list {
-  list-style: none;
+/* The DayView timed surface is now a proportional hour-grid for the single
+   focused day — the DayView mirror of WeekView's per-column canvas. A leading
+   hour-ruler carries the hour numbers; the listbox to its right is a 24h-tall
+   positioned canvas where timed options are placed by start + duration. The
+   ruler + canvas share one internal scroll region so they scroll in lockstep
+   (and the view header above stays visible). Purely visual: the listbox keeps
+   its role/IDs/aria/keyboard semantics, DOM order unchanged. */
+.day-grid {
+  /* Pixels per hour in the timed grid — the whole canvas is 24× this. */
+  --hour-px: 40px;
+  /* Width of the leading hour-ruler column. */
+  --ruler-w: 2.5rem;
+  display: flex;
   margin: var(--space-3) 0 0;
-  padding: 0;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  overflow: hidden;
+  /* The 24h canvas is tall, so it scrolls vertically; x is clipped so a stray
+     inset shadow can't surface a spurious horizontal scrollbar. */
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* Hour ruler — the leading column carrying the hour numbers, so the time reads
+   off the grid (the options now show only the title). aria-hidden; the time
+   stays in each option's accessible label. The scale is 24h tall, top-aligned
+   with the canvas so the numbers line up with the gridlines. */
+.day-grid__ruler {
+  flex: 0 0 var(--ruler-w, 2.5rem);
+  padding: var(--space-2) 0;
+  border-right: 1px solid var(--color-border);
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-muted);
+}
+.day-grid__ruler-scale {
+  position: relative;
+  height: calc(24 * var(--hour-px, 40px));
+}
+.day-grid__ruler-hour {
+  position: absolute;
+  right: var(--space-2);
+  transform: translateY(-0.5em);
+  font-variant-numeric: tabular-nums;
+}
+
+.day-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  /* Proportional hour-grid: a 24h-tall positioned canvas. Timed options are
+     absolutely placed (top/height by start + duration, side-by-side on
+     overlap). Faint hour gridlines via a repeating background so it reads as a
+     time grid. Fills the width the ruler leaves. */
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  height: calc(24 * var(--hour-px, 40px));
+  background-image: repeating-linear-gradient(
+    to bottom,
+    var(--color-border) 0,
+    var(--color-border) 1px,
+    transparent 1px,
+    transparent var(--hour-px, 40px)
+  );
 }
 
 .day-list__empty {
@@ -3362,25 +3418,22 @@ button[aria-disabled='true'] {
 }
 
 .day-list__item {
-  display: grid;
-  grid-template-columns: 140px 1fr;
-  gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   border-left: 4px solid var(--event-color, var(--color-accent));
-  border-bottom: 1px solid var(--color-border);
-}
-
-.day-list__item:last-child {
-  border-bottom: 0;
 }
 
 .day-list__item--focused {
   background: color-mix(in srgb, var(--color-accent) 10%, transparent);
 }
 
-.day-list__time {
-  color: var(--color-fg-muted);
-  font-size: var(--font-size-sm);
+/* A positioned timed option's <li>. Inline style sets top/height/left/width
+   from the layout algorithm; a min-height keeps a very short option legible (it
+   overflows its slot downward). The inner content fills the slot and clips. */
+.day-list__slot {
+  min-height: 1.2em;
+  padding-right: 1px;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .day-list__title {
