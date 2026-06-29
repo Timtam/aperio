@@ -2785,6 +2785,8 @@ button[aria-disabled='true'] {
 .week-grid {
   /* Pixels per hour in the timed grid — the whole day column is 24× this. */
   --hour-px: 40px;
+  /* Width of the leading hour-ruler column (left of the 7 days). */
+  --ruler-w: 2.5rem;
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -2808,10 +2810,11 @@ button[aria-disabled='true'] {
 .week-grid__head,
 .week-grid__body {
   display: grid;
-  /* minmax(0, …) lets a column shrink below its content's min-content, so a
-     long task title truncates instead of widening that day column (which
-     would desync the body columns from the fixed header row). */
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  /* A leading hour-ruler column, then the 7 days. minmax(0, …) lets a day
+     column shrink below its content's min-content, so a long task title
+     truncates instead of widening that day column (which would desync the body
+     columns from the fixed header row). */
+  grid-template-columns: var(--ruler-w, 2.5rem) repeat(7, minmax(0, 1fr));
 }
 
 .week-grid__head {
@@ -2927,6 +2930,32 @@ button[aria-disabled='true'] {
   overflow: hidden;
 }
 
+/* Hour ruler — the leading column carrying the hour numbers, so the time is
+   read off the grid (the chips now show only the title). aria-hidden; the time
+   stays in each chip's accessible label. The corner sits above it in the head.
+   The ruler shares the cell's padding so `.week-grid__ruler-scale` (24h tall)
+   top-aligns with each cell's `.week-grid__events`, lining the hour numbers up
+   with the gridlines. */
+.week-grid__corner {
+  border-right: 1px solid var(--color-border);
+}
+.week-grid__ruler {
+  padding: var(--space-2);
+  border-right: 1px solid var(--color-border);
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-muted);
+}
+.week-grid__ruler-scale {
+  position: relative;
+  height: calc(24 * var(--hour-px, 40px));
+}
+.week-grid__ruler-hour {
+  position: absolute;
+  right: 0;
+  transform: translateY(-0.5em);
+  font-variant-numeric: tabular-nums;
+}
+
 .week-event {
   display: flex;
   flex-direction: column;
@@ -3022,9 +3051,9 @@ button[aria-disabled='true'] {
  */
 .week-grid__lane {
   display: grid;
-  /* minmax(0, …) to match the head/body grid so the all-day lane columns
-     stay aligned with the day cells below even with long event titles. */
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  /* Leading ruler column then 7 days, matching the head/body grid so the
+     all-day lane columns stay aligned with the day cells below. */
+  grid-template-columns: var(--ruler-w, 2.5rem) repeat(7, minmax(0, 1fr));
   grid-template-rows: repeat(var(--lane-rows, 1), minmax(20px, auto));
   gap: 2px;
   padding: 2px;

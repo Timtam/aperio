@@ -690,6 +690,9 @@ export function WeekView() {
           className="week-grid"
         >
           <div role="row" className="week-grid__head">
+            {/* Corner above the hour ruler (decorative — keeps the 7 day
+                headers aligned over their columns). */}
+            <div className="week-grid__corner" aria-hidden="true" />
             {days.map((day) => (
               <div
                 key={day.toISOString()}
@@ -720,7 +723,8 @@ export function WeekView() {
                 const isBarFocused = focusedEvId === bar.event.id;
                 const span = multiDayInfo(bar.event, new Date(bar.event.start));
                 const style: React.CSSProperties & Record<string, string> = {
-                  gridColumn: `${bar.startCol} / ${bar.endCol + 1}`,
+                  // +1 for the leading hour-ruler column (day N → grid col N+1).
+                  gridColumn: `${bar.startCol + 1} / ${bar.endCol + 2}`,
                   gridRow: String(bar.lane + 1),
                 };
                 if (color.hex) style['--event-color'] = color.hex;
@@ -778,6 +782,23 @@ export function WeekView() {
           )}
 
           <div role="row" className="week-grid__body">
+            {/* Hour ruler — the hour numbers, read off the grid instead of the
+                chips. aria-hidden; the time is in each chip's accessible label.
+                The scale is 24h tall, top-aligned with each cell's events area
+                so the numbers line up with the gridlines. */}
+            <div className="week-grid__ruler" aria-hidden="true">
+              <div className="week-grid__ruler-scale">
+                {Array.from({ length: 24 }, (_, h) => (
+                  <span
+                    key={h}
+                    className="week-grid__ruler-hour"
+                    style={{ top: `${(h / 24) * 100}%` }}
+                  >
+                    {String(h).padStart(2, '0')}
+                  </span>
+                ))}
+              </div>
+            </div>
             {days.map((day, i) => {
               const dayKey = keyOf(day);
               const merged = dayItemsByDay.get(dayKey);
@@ -1013,7 +1034,10 @@ export function WeekView() {
                                 void openTaskMenu(task);
                               }}
                             >
-                              <span className="week-task__time">{time}</span>
+                              {/* Time is read from the hour-grid + ruler, not
+                                  the chip, so a short chip's one visible line is
+                                  the title (not clipped). The time stays in the
+                                  aria-label. */}
                               <span className="week-task__body">
                                 <span
                                   className="week-task__check"
@@ -1045,13 +1069,9 @@ export function WeekView() {
                       const ev = item.event;
                       const cal = calendarById.get(ev.calendar_id);
                       const color = resolveEventColor(ev, calendarById, labelById);
-                      const time = ev.all_day
-                        ? t('views.allDay')
-                        : fmt.format(new Date(ev.start), 'p');
-                      // The chip shows the start; the label speaks the full
-                      // start–end range so an SR user hears the DURATION (it
-                      // was start-only before — duration is the point of the
-                      // hour-grid).
+                      // The chip shows only the title (time is read from the
+                      // hour-grid + ruler); the label speaks the full start–end
+                      // range so an SR user hears the DURATION.
                       const timeAria = ev.all_day
                         ? t('views.allDay')
                         : `${fmt.format(new Date(ev.start), 'p')} – ${fmt.format(
@@ -1124,7 +1144,10 @@ export function WeekView() {
                                 : undefined
                             }
                           >
-                            <span className="week-event__time">{time}</span>
+                            {/* Time is read from the hour-grid + ruler; the
+                                chip's first line is the title so a short event
+                                isn't clipped. The full range stays in the
+                                aria-label. */}
                             <span className="week-event__title">{ev.title}</span>
                             {span && (
                               <span className="week-event__span">
