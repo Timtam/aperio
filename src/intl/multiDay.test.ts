@@ -5,6 +5,7 @@ import {
   buildAllDayBars,
   daysCoveredKeys,
   eventCoversDay,
+  eventDayTimes,
   multiDayInfo,
 } from './multiDay';
 
@@ -64,14 +65,42 @@ describe('daysCoveredKeys', () => {
     expect(daysCoveredKeys(ev)).toEqual(['2026-05-20']);
   });
 
-  it('ignores end for non-all-day events (no spread on cross-midnight)', () => {
+  // Timed events use LOCAL-time strings (no Z) so the cross-midnight assertions
+  // are timezone-robust — daysCoveredKeys reads the local calendar day.
+  it('spreads a timed event across midnight onto both days', () => {
     const ev = mkEvent({
-      start: '2026-05-20T22:00:00Z',
-      end: '2026-05-21T02:00:00Z',
+      start: '2026-05-20T22:00:00',
+      end: '2026-05-21T02:00:00',
       all_day: false,
     });
-    // Only the start day, regardless of crossing midnight in UTC.
-    expect(daysCoveredKeys(ev)).toHaveLength(1);
+    expect(daysCoveredKeys(ev)).toEqual(['2026-05-20', '2026-05-21']);
+  });
+
+  it('keeps a same-day timed event on one day', () => {
+    const ev = mkEvent({
+      start: '2026-05-20T09:00:00',
+      end: '2026-05-20T10:00:00',
+      all_day: false,
+    });
+    expect(daysCoveredKeys(ev)).toEqual(['2026-05-20']);
+  });
+
+  it('does not leak a timed event ending exactly at midnight into the next day', () => {
+    const ev = mkEvent({
+      start: '2026-05-20T22:00:00',
+      end: '2026-05-21T00:00:00',
+      all_day: false,
+    });
+    expect(daysCoveredKeys(ev)).toEqual(['2026-05-20']);
+  });
+
+  it('keeps a bad/NaN-end timed event on the start day only', () => {
+    const ev = mkEvent({
+      start: '2026-05-20T22:00:00',
+      end: 'not-a-date',
+      all_day: false,
+    });
+    expect(daysCoveredKeys(ev)).toEqual(['2026-05-20']);
   });
 });
 
@@ -106,14 +135,59 @@ describe('multiDayInfo', () => {
     expect(multiDayInfo(ev, new Date(2026, 4, 19))).toBeNull();
   });
 
-  it('returns null for non-all-day events even if they cross midnight', () => {
+  it('returns 1/2 and 2/2 for a timed event that crosses midnight', () => {
     const timed = mkEvent({
-      start: '2026-05-20T22:00:00Z',
-      end: '2026-05-21T02:00:00Z',
+      start: '2026-05-20T22:00:00',
+      end: '2026-05-21T02:00:00',
+      all_day: false,
+    });
+    expect(multiDayInfo(timed, new Date(2026, 4, 20))).toEqual({
+      dayIndex: 1,
+      totalDays: 2,
+    });
+    expect(multiDayInfo(timed, new Date(2026, 4, 21))).toEqual({
+      dayIndex: 2,
+      totalDays: 2,
+    });
+  });
+
+  it('returns null for a same-day timed event', () => {
+    const timed = mkEvent({
+      start: '2026-05-20T09:00:00',
+      end: '2026-05-20T10:00:00',
       all_day: false,
     });
     expect(multiDayInfo(timed, new Date(2026, 4, 20))).toBeNull();
-    expect(multiDayInfo(timed, new Date(2026, 4, 21))).toBeNull();
+  });
+});
+
+describe('eventDayTimes', () => {
+  // A deterministic 24h `HH:mm` formatter so the per-day clamp assertions are
+  // timezone- and locale-robust (the real `useDateFormat` 'p' is locale-bound).
+  const fmt = {
+    format: (date: Date | number, _pattern: string) => {
+      const d = new Date(date);
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      return `${hh}:${mm}`;
+    },
+  };
+
+  // A timed 23:00 → 01:00 meeting (local-time strings → timezone-robust).
+  const crossMidnight = { start: '2026-05-20T23:00:00', end: '2026-05-21T01:00:00' };
+
+  it('clamps the START day to "…–24:00" (end of day, NOT next 00:00)', () => {
+    expect(eventDayTimes(fmt, crossMidnight, new Date(2026, 4, 20))).toEqual({
+      startStr: '23:00',
+      endStr: '24:00',
+    });
+  });
+
+  it('clamps the TAIL day to "00:00–…" (not the absolute 23:00 start)', () => {
+    expect(eventDayTimes(fmt, crossMidnight, new Date(2026, 4, 21))).toEqual({
+      startStr: '00:00',
+      endStr: '01:00',
+    });
   });
 });
 

@@ -2241,9 +2241,39 @@ button[aria-disabled='true'] {
    column that fills the body row), so the free space lands between the
    time-ordered chips and the "no fixed time" tasks — making the two
    groups easy to tell apart. Collapses to a normal gap when the cell is
-   already full. Week view only; the DayView list keeps its top flow. */
+   already full. Week view only; the DayView list keeps its top flow.
+
+   This bottom-pin is the LIST-mode (pre-grid) behaviour. GRID mode overrides
+   it below to lift the band to the TOP of the cell instead. */
 .week-grid__tasks {
   margin-top: auto;
+}
+
+/* GRID-mode untimed-task BAND. The cell is a flex column holding the timed
+   hour-canvas (`.week-grid__events`) then this task <ul>; the band sits in its
+   natural flow position RIGHT BELOW the 24h canvas (per Toni: the untimed-task
+   band stays under the grid, not above it), just restyled as a compact bar.
+   `margin-top: 0` drops the default bottom-pin so it sits right under the
+   canvas, and the chips compact into a tight horizontal flex-wrap of small bars
+   (like the all-day lane). Reading/Tab order is unchanged: timed events first,
+   then the tasks. Scoped to grid mode via the `--grid` modifier (added in JSX
+   gated on `!listMode`), so list mode is byte-for-byte unchanged. */
+.week-grid__tasks--grid {
+  margin-top: 0;
+  margin-bottom: var(--space-1);
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding-top: 0;
+}
+/* Compact chip in the grid-mode band: shrink-to-content (override the
+   full-width column chip) so several fit per row, capped so a long title
+   truncates rather than forcing one-chip-per-row. */
+.week-grid__tasks--grid .week-grid__task-item {
+  max-width: 100%;
+}
+.week-grid__tasks--grid .week-task {
+  width: auto;
 }
 
 .day-tasks {
@@ -2258,6 +2288,47 @@ button[aria-disabled='true'] {
   letter-spacing: 0.04em;
   color: var(--color-fg-muted);
   margin: 0 0 var(--space-2);
+}
+
+/* GRID-mode untimed-task BAND — the compact bar above the hour-grid (rendered
+   right under the all-day band in DayView, GRID mode only). Mirrors
+   `.day-grid__allday` but BELOW the grid (per Toni: the task band stays under
+   the grid): a top separator + margin so it reads as a footer band, and a
+   horizontal flex-wrap of compact chips instead of the full-width column the
+   LIST-mode `.day-tasks` section uses. The chips are the same `.day-task`
+   buttons + handlers — only the container layout + chip sizing change. */
+.day-tasks--band {
+  padding: var(--space-2) 0 0;
+  border-top: 1px solid var(--color-border);
+  margin: var(--space-2) 0 0;
+}
+.day-tasks--band .day-tasks__list {
+  /* Horizontal flex-wrap (like the all-day band) instead of the vertical
+     column the bottom section uses. Tight gap so the band stays shallow. */
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: 0;
+}
+.day-tasks--band .day-tasks__item {
+  /* Each chip sizes to its content (so several fit per row) rather than
+     filling the row width. Cap the width so a long title truncates instead
+     of pushing the band into one-chip-per-row. */
+  max-width: 100%;
+  min-width: 0;
+}
+.day-tasks--band .day-task {
+  /* Compact chip: shrink-to-content (override the column's width:100%) and a
+     tighter font so the band reads as a lane of small bars, like the all-day
+     band's `.day-grid__allday-bar`. */
+  width: auto;
+  font-size: var(--font-size-xs);
+}
+.day-tasks--band .day-task__title {
+  /* Keep the title on one truncating line so chips stay bar-shaped. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .week-task,
@@ -2783,22 +2854,44 @@ button[aria-disabled='true'] {
 /* ── Week view ──────────────────────────────────────────────────────────── */
 
 .week-grid {
+  /* Pixels per hour in the timed grid — the whole day column is 24× this. */
+  --hour-px: 40px;
+  /* Width of the leading hour-ruler column (left of the 7 days). */
+  --ruler-w: 2.5rem;
+  /* Height of the pinned day-name header (`.week-grid__head`). Used as the
+     scroll-margin-top on the active-chip scrollIntoView target so a near-top
+     chip clears the sticky header instead of tucking behind it (common now the
+     untimed-task band sits at the very top of each cell). Approximate — a touch
+     generous so the chip lands fully clear of the header's bottom border. */
+  --week-head-h: 3.25rem;
   display: flex;
   flex-direction: column;
   flex: 1;
   min-width: 0;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  overflow: hidden;
+  /* The 24h timed grid is tall, so the grid scrolls vertically; the day-name
+     header stays pinned (sticky) so columns stay identifiable while scrolling.
+     Keep x clipped (a non-visible y axis would otherwise compute x to auto and
+     a stray inset shadow could surface a spurious horizontal scrollbar). */
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.week-grid__head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 
 .week-grid__head,
 .week-grid__body {
   display: grid;
-  /* minmax(0, …) lets a column shrink below its content's min-content, so a
-     long task title truncates instead of widening that day column (which
-     would desync the body columns from the fixed header row). */
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  /* A leading hour-ruler column, then the 7 days. minmax(0, …) lets a day
+     column shrink below its content's min-content, so a long task title
+     truncates instead of widening that day column (which would desync the body
+     columns from the fixed header row). */
+  grid-template-columns: var(--ruler-w, 2.5rem) repeat(7, minmax(0, 1fr));
 }
 
 .week-grid__head {
@@ -2884,9 +2977,100 @@ button[aria-disabled='true'] {
   list-style: none;
   margin: 0;
   padding: 0;
+  /* Proportional hour-grid: a 24h-tall positioned canvas. Timed chips are
+     absolutely placed (top/height by start + duration, side-by-side on
+     overlap); all-day chips stay clipped via `display: contents` on their
+     <li>. Faint hour gridlines via a repeating background so it reads as a
+     time grid. */
+  position: relative;
+  height: calc(24 * var(--hour-px, 40px));
+  background-image: repeating-linear-gradient(
+    to bottom,
+    var(--color-border) 0,
+    var(--color-border) 1px,
+    transparent 1px,
+    transparent var(--hour-px, 40px)
+  );
+}
+
+/* Compact-list layout (calendar.dayViewMode === 'list'). The all-day lane +
+   hour ruler are not rendered in this mode (the JSX gates them), so the head +
+   body drop the leading ruler/corner column and become plain 7-day grids that
+   stay column-aligned. */
+.week-grid__head--flow,
+.week-grid__body--flow {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+/* The per-day events <ul> drops the positioned 24h canvas and becomes a normal
+   vertical flow: reset position/height/gridline-background, stack chips with a
+   small gap. Each chip's own inline min-height (events by duration, tasks by
+   effort) drives its block size. */
+.week-grid__events--flow {
+  position: static;
+  height: auto;
+  background-image: none;
   display: flex;
   flex-direction: column;
+  /* Pre-grid chip spacing — a tight 2px between chips (the hour-grid rework's
+     var(--space-1) = 4px read as too much air between events). */
   gap: 2px;
+}
+
+/* List-mode chip: a STRICT duration-driven height (set inline) makes the height
+   read duration at a glance. Lay the time + title on ONE wrapping text flow and
+   clip the overflow, so a long title fills the available height but can NEVER
+   inflate a short event past a long one. (Grid mode keeps the flex-column,
+   title-only chip — the ruler carries the time there.) */
+.week-grid__events--flow .week-event {
+  display: block;
+  overflow: hidden;
+}
+.week-grid__events--flow .week-event__time {
+  display: inline;
+  padding-right: 0.4em;
+}
+.week-grid__events--flow .week-event__title {
+  display: inline;
+}
+
+/* A positioned timed chip's <li>. Inline style sets top/height/left/width from
+   the layout algorithm; a min-height keeps a very short event legible (it
+   overflows its slot downward). The inner chip fills the slot. */
+.week-grid__slot {
+  min-height: 1.2em;
+  padding-right: 1px;
+  box-sizing: border-box;
+}
+.week-grid__slot > .week-event,
+.week-grid__slot > .week-task {
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Hour ruler — the leading column carrying the hour numbers, so the time is
+   read off the grid (the chips now show only the title). aria-hidden; the time
+   stays in each chip's accessible label. The corner sits above it in the head.
+   The ruler shares the cell's padding so `.week-grid__ruler-scale` (24h tall)
+   top-aligns with each cell's `.week-grid__events`, lining the hour numbers up
+   with the gridlines. */
+.week-grid__corner {
+  border-right: 1px solid var(--color-border);
+}
+.week-grid__ruler {
+  padding: var(--space-2);
+  border-right: 1px solid var(--color-border);
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-muted);
+}
+.week-grid__ruler-scale {
+  position: relative;
+  height: calc(24 * var(--hour-px, 40px));
+}
+.week-grid__ruler-hour {
+  position: absolute;
+  right: 0;
+  transform: translateY(-0.5em);
+  font-variant-numeric: tabular-nums;
 }
 
 .week-event {
@@ -2900,6 +3084,11 @@ button[aria-disabled='true'] {
   border: 0;
   border-radius: var(--radius-sm);
   font-size: var(--font-size-xs);
+  /* The active chip is scrolled into view via scrollIntoView inside the
+     vertically-scrolling `.week-grid`. Reserve the sticky-header height as
+     scroll-margin so a near-top chip clears the pinned `.week-grid__head`
+     instead of being tucked behind it. */
+  scroll-margin-top: var(--week-head-h, 3.25rem);
 }
 
 .week-event__time {
@@ -2984,14 +3173,22 @@ button[aria-disabled='true'] {
  */
 .week-grid__lane {
   display: grid;
-  /* minmax(0, …) to match the head/body grid so the all-day lane columns
-     stay aligned with the day cells below even with long event titles. */
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  /* Leading ruler column then 7 days, matching the head/body grid so the
+     all-day lane columns stay aligned with the day cells below. */
+  grid-template-columns: var(--ruler-w, 2.5rem) repeat(7, minmax(0, 1fr));
   grid-template-rows: repeat(var(--lane-rows, 1), minmax(20px, auto));
   gap: 2px;
   padding: 2px;
   background: var(--color-bg-elevated);
   border-bottom: 1px solid var(--color-border);
+}
+
+/* Compact-list layout: the hour ruler is gated off, so the all-day lane drops
+   its leading ruler column and becomes a plain 7-day grid (pre-grid layout),
+   staying aligned with the .week-grid__body--flow cells below. The bars use the
+   no-ruler gridColumn offset in this mode (see WeekView). */
+.week-grid__lane--flow {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 
 .week-allday-bar,
@@ -3279,10 +3476,101 @@ button[aria-disabled='true'] {
 
 /* ── Day view (flat listbox) ────────────────────────────────────────────── */
 
+/* The DayView timed surface is now a proportional hour-grid for the single
+   focused day — the DayView mirror of WeekView's per-column canvas. A leading
+   hour-ruler carries the hour numbers; the listbox to its right is a 24h-tall
+   positioned canvas where timed options are placed by start + duration. The
+   ruler + canvas share one internal scroll region so they scroll in lockstep
+   (and the view header above stays visible). Purely visual: the listbox keeps
+   its role/IDs/aria/keyboard semantics, DOM order unchanged. */
+.day-grid {
+  /* Pixels per hour. Roomier than the week grid (60 vs 40): the day view is a
+     single scrollable column, so it can afford taller hours — a 30-minute event
+     gets ~30px, enough for the title without clipping. */
+  --hour-px: 60px;
+  /* Width of the leading hour-ruler column. */
+  --ruler-w: 2.5rem;
+  display: flex;
+  margin: var(--space-3) 0 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  /* The 24h canvas is tall, so it scrolls vertically; x is clipped so a stray
+     inset shadow can't surface a spurious horizontal scrollbar. */
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* Hour ruler — the leading column carrying the hour numbers, so the time reads
+   off the grid (the options now show only the title). aria-hidden; the time
+   stays in each option's accessible label. The scale is 24h tall, top-aligned
+   with the canvas so the numbers line up with the gridlines. */
+.day-grid__ruler {
+  flex: 0 0 var(--ruler-w, 2.5rem);
+  /* No vertical padding: the ruler-scale must share the SAME top origin as the
+     sibling .day-list canvas (which has padding:0), or the 00–23 numbers sit a
+     constant ~8px below the gridlines + chip tops they label. The numbers get
+     their own horizontal inset via .day-grid__ruler-hour's `right`. */
+  padding: 0;
+  border-right: 1px solid var(--color-border);
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-muted);
+}
+.day-grid__ruler-scale {
+  position: relative;
+  height: calc(24 * var(--hour-px, 40px));
+}
+.day-grid__ruler-hour {
+  position: absolute;
+  right: var(--space-2);
+  transform: translateY(-0.5em);
+  font-variant-numeric: tabular-nums;
+}
+
 .day-list {
   list-style: none;
-  margin: var(--space-3) 0 0;
+  margin: 0;
   padding: 0;
+  /* Proportional hour-grid: a 24h-tall positioned canvas. Timed options are
+     absolutely placed (top/height by start + duration, side-by-side on
+     overlap). Faint hour gridlines via a repeating background so it reads as a
+     time grid. Fills the width the ruler leaves. */
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  height: calc(24 * var(--hour-px, 40px));
+  background-image: repeating-linear-gradient(
+    to bottom,
+    var(--color-border) 0,
+    var(--color-border) 1px,
+    transparent 1px,
+    transparent var(--hour-px, 40px)
+  );
+}
+
+/* Compact-list layout (calendar.dayViewMode === 'list'). The hour ruler +
+   all-day band are gated off in the JSX, so the day-grid is just the list
+   column; the list drops the positioned 24h canvas and becomes a normal
+   vertical flow. Each option's own inline min-height (events by duration, tasks
+   by effort via the day-task--effort-* classes) drives its block size. */
+.day-grid--flow {
+  /* No fixed inner scroll region — the list grows with its content and the
+     page-level scroll takes over. */
+  overflow-y: visible;
+  /* The pre-grid bordered/rounded container lives on .day-list--flow in this
+     mode, so drop .day-grid's own border/radius to avoid a double frame. */
+  border: 0;
+  border-radius: 0;
+}
+.day-list--flow {
+  position: static;
+  height: auto;
+  background-image: none;
+  /* Pre-grid look: a single bordered, rounded container whose rows are
+     separated by per-row border-bottoms (NOT flex gap) — flex gap + padding
+     read as too much air between events. The hour-grid canvas (.day-list) is
+     borderless because .day-grid wraps it; in list mode .day-grid--flow drops
+     its own border, so the container border lives here instead. */
+  display: block;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   overflow: hidden;
@@ -3295,29 +3583,128 @@ button[aria-disabled='true'] {
 }
 
 .day-list__item {
-  display: grid;
-  grid-template-columns: 140px 1fr;
-  gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   border-left: 4px solid var(--event-color, var(--color-accent));
-  border-bottom: 1px solid var(--color-border);
-}
-
-.day-list__item:last-child {
-  border-bottom: 0;
 }
 
 .day-list__item--focused {
   background: color-mix(in srgb, var(--color-accent) 10%, transparent);
 }
 
-.day-list__time {
-  color: var(--color-fg-muted);
-  font-size: var(--font-size-sm);
+/* LIST-mode row: reproduce the pre-grid `.day-list__item` look — a two-column
+   grid (time | title) inside the bordered container, rows separated by a
+   border-bottom (no flex gap). The shared `.day-list__item` above already
+   supplies the padding + colour stripe (border-left); this only adds the
+   pre-grid grid + separators + the STRICT duration height. Grid mode is
+   untouched (its options carry `.day-list__slot`, which sets its own absolute
+   geometry).
+
+   The row's STRICT duration height (inline `height`, factor × base) makes the
+   height read DURATION at a glance; `overflow: hidden` clips a long wrapping
+   title to that height so a short event can NEVER inflate past a long one. The
+   140px time column keeps the time visible; only the 1fr title clips (the full
+   title stays in the aria-label + the `title` tooltip). align-content:start so a
+   tall row reads from its top edge rather than vertically centring a one-liner. */
+.day-list--flow .day-list__item {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  align-content: start;
+  overflow: hidden;
+}
+
+.day-list--flow .day-list__item:last-child {
+  border-bottom: 0;
+}
+
+/* A positioned timed option's <li>. Inline style sets top/height/left/width
+   from the layout algorithm; a min-height keeps a very short option legible (it
+   overflows its slot downward). The inner content fills the slot and clips. */
+.day-list__slot {
+  min-height: 1.2em;
+  /* Override .day-list__item's vertical padding (var(--space-2)) — on a short
+     slot that padding (with box-sizing: border-box) squeezed the title into a
+     few px and clipped the glyphs mid-line. A 2px block padding keeps the title
+     top-aligned and legible, matching how the week grid reads. */
+  padding-block: 2px;
+  padding-right: 1px;
+  box-sizing: border-box;
+  overflow: hidden;
+  /* GRID mode: fill the whole tile with the event/colour-label colour (like the
+     week-grid `.week-event` chips) instead of just the left stripe, so the
+     colour reads at a glance. List mode (no `.day-list__slot`) keeps the stripe.
+     `--event-color` is set inline from resolveEventColor / resolveTaskColor. */
+  background: var(--event-color, var(--color-accent));
+  color: var(--color-accent-fg);
+  border-left: 0;
+  border-radius: var(--radius-sm);
+}
+
+/* Focus on a filled grid tile: an outline (a background tint would hide the
+   colour). Mirrors `.week-event--focused`; inset so it stays within the slot. */
+.day-list__slot.day-list__item--focused {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: -2px;
 }
 
 .day-list__title {
   font-weight: 500;
+}
+
+/* LIST-mode time stamp (the compact list gates the hour-ruler off, so the
+   start time / start–end range is shown inline on the option instead). Only
+   rendered in list mode (the JSX gates it on listMode); small + muted so the
+   title stays the primary line. The full time is already in the aria-label, so
+   this span is aria-hidden and purely visual. */
+.day-list__time {
+  color: var(--color-fg-muted);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* An all-day event has no hour placement, so its option <li> gets no slot.
+   Clip it (visually hidden, still a navigable listbox option) so it can't flow
+   static at the top of the positioned canvas and collide with the 00:00 chips.
+   The sighted representation is the .day-grid__allday band above. Same
+   "visually hidden, still focusable" pattern as WeekView's `--in-lane`. */
+.day-list__item--allday {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+/* Visible all-day band above the hour-grid (sighted users; the a11y lives in
+   the clipped options inside the listbox). Decorative — aria-hidden. */
+.day-grid__allday {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+.day-grid__allday-bar {
+  display: flex;
+  align-items: center;
+  max-width: 100%;
+  background: var(--event-color, var(--color-accent));
+  color: var(--color-accent-fg);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  padding: 2px var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.day-grid__allday-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Year view ──────────────────────────────────────────────────────────── */
@@ -3912,7 +4299,11 @@ button[aria-disabled='true'] {
 .day-task--effort-small,
 .week-task--effort-small,
 .month-task--effort-small {
-  min-height: 1em;
+  /* >= the grid slot floor (`.week-grid__slot` / `.day-list__slot` are
+     min-height: 1.2em). These effort rules win the cascade on a small-effort
+     timed task's <li>, so a value below 1.2em would LOWER that slot's
+     short-event legibility floor — effort may only raise it, never drop it. */
+  min-height: 1.2em;
   padding-block: 1px;
 }
 .day-task--effort-large,

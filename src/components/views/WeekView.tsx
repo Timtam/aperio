@@ -17,6 +17,7 @@ import {
 import {
   buildAllDayBars,
   daysCoveredKeys,
+  eventDayTimes,
   multiDayInfo,
 } from '../../intl/multiDay';
 import { useCalendarStore } from '../../state/calendarStoreContext';
@@ -67,6 +68,50 @@ import {
   deleteEventById,
   isCommandError,
 } from '../../api/client';
+import {
+  eventBlockFactor,
+  eventSpanForDay,
+  layoutDayColumn,
+  minutesFromMidnight,
+  type PositionedSpan,
+  type TimedSpan,
+} from '@aperio/shared';
+
+/** Base block height (rem) a LIST-mode event chip gets at `eventBlockFactor === 1`
+ *  (a point / ≤1h event) — one line of text plus a little fill, tuned for a fuller
+ *  use of the column's vertical space. The list-mode chip uses a
+ *  STRICT height (not min-height) of `factor × this`, with the time + title on one
+ *  wrapping line clipped to fit, so the chip height reads DURATION at a glance and
+ *  a long title can never inflate a short event past a long one. The shared
+ *  `eventBlockFactor` curve is ~linear in hours (a 3h event ≈ 3×, a 4h ≈ 4×,
+ *  capped at 6×). rem (not em) so the small chip font doesn't shrink the scale. */
+const WEEK_LIST_BLOCK_BASE_REM = 2.25;
+
+/** The slot's CSS `min-height` (1.2em, see `.week-grid__slot`) expressed as a
+ *  fraction of the 24h canvas, so a floored late-night chip can be clamped to
+ *  stay on-canvas. 1.2em ≈ 26px of a ~1440px-ish day canvas → ~0.018; the exact
+ *  value only needs to match the rendered min-height closely enough that a
+ *  zero-duration 23:5x chip doesn't overflow the bottom into the untimed list. */
+const MIN_SLOT_FRACTION = 0.018;
+
+/** Absolute placement of a timed chip's `<li>` inside the day column's
+ *  24h-tall hour-grid (positioning is purely visual; DOM order is unchanged).
+ *  The TOP is clamped (not the height) so a chip whose effective height is the
+ *  CSS min-height floor can't extend below the canvas and overlap the untimed
+ *  `.week-grid__tasks` rendered directly under it — mirrors the mobile slot
+ *  clamp. A normal chip (heightFraction ≥ MIN_SLOT_FRACTION ending ≤ 24:00) is
+ *  unaffected; only a floored chip in the last ~30min shifts up a hair. */
+function slotStyle(p: PositionedSpan): React.CSSProperties {
+  const eh = Math.max(p.heightFraction, MIN_SLOT_FRACTION);
+  const top = Math.min(p.topFraction, 1 - eh);
+  return {
+    position: 'absolute',
+    top: `${top * 100}%`,
+    height: `${p.heightFraction * 100}%`,
+    left: `${(p.columnIndex / p.columnCount) * 100}%`,
+    width: `${(1 / p.columnCount) * 100}%`,
+  };
+}
 
 /**
  * Week view — the workhorse calendar surface.
@@ -112,7 +157,14 @@ export function WeekView() {
   );
   const { events, calendarById, loading } = useEvents(range);
   const { tasks, taskListById } = useTasks();
-  const { visualEffortSizing } = useTaskCascadeEnabled();
+  const { visualEffortSizing, dayViewMode } = useTaskCascadeEnabled();
+  // Compact-list layout vs the proportional hour-grid. In list mode the
+  // per-day <ul> is normal vertical flow (no positioned 24h canvas), the
+  // ruler + all-day lane are not rendered, and each chip carries an inline
+  // min-height (events by duration, tasks by effort) instead of a slot. The
+  // a11y model — roles, ids, aria-activedescendant, keyboard, labels — is
+  // byte-for-byte identical to grid mode.
+  const listMode = dayViewMode === 'list';
   const currentUserByList = useCurrentUserByList(tasks);
   // Hide tasks assigned to a concrete OTHER user from MY calendar (mine +
   // unassigned stay) — the day-start review's ownership filter (DESIGN §9.7).
@@ -459,6 +511,31 @@ export function WeekView() {
     if (showLoading) announce(t('views.loading'));
   }, [showLoading, announce, t]);
 
+  // The active item is an all-day event whose per-day chip is clipped into the
+  // lane (`--in-lane`) at static y0 (00:00); scrolling THAT into view would yank
+  // the 24h region up to midnight every time the user Tabs onto an all-day
+  // event. So skip the nudge for all-day items — they're already shown in the
+  // always-visible lane bar above the canvas.
+  const focusedItemIsAllDay =
+    focusedItem?.kind === 'event' && focusedItem.event.all_day;
+
+  // The timed grid is a 24h-tall internal scroll region now, and
+  // aria-activedescendant (unlike a real DOM .focus()) does NOT auto-scroll the
+  // active chip into view — so a chip on a scrolled-away hour would be off-screen
+  // for sighted / low-vision keyboard users. Scroll it into view whenever the
+  // active timed chip changes.
+  useEffect(() => {
+    // List mode is a normal vertical flow (.week-grid__events--flow has no
+    // internal scroll region), so the active chip is already in the page scroll
+    // — the nudge would needlessly move the page. Only the grid canvas needs it.
+    // All-day items live in the lane (not on the canvas), so scrolling their
+    // clipped y0 chip would jump the region to midnight — skip them too.
+    if (listMode || eventIndex === null || focusedItemIsAllDay) return;
+    document
+      .getElementById(eventOptionId(focusIndex, eventIndex))
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [focusIndex, eventIndex, eventOptionId, listMode, focusedItemIsAllDay]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       // Tab / Shift+Tab walk through *all* events of the visible week
@@ -644,7 +721,18 @@ export function WeekView() {
           onKeyDown={handleKeyDown}
           className="week-grid"
         >
-          <div role="row" className="week-grid__head">
+          <div
+            role="row"
+            className={
+              'week-grid__head' + (listMode ? ' week-grid__head--flow' : '')
+            }
+          >
+            {/* Corner above the hour ruler (decorative — keeps the 7 day
+                headers aligned over their columns). List mode has no ruler, so
+                the corner is dropped and the head is a plain 7-day grid. */}
+            {!listMode && (
+              <div className="week-grid__corner" aria-hidden="true" />
+            )}
             {days.map((day) => (
               <div
                 key={day.toISOString()}
@@ -660,7 +748,9 @@ export function WeekView() {
 
           {allDayBars.length > 0 && (
             <div
-              className="week-grid__lane"
+              className={
+                'week-grid__lane' + (listMode ? ' week-grid__lane--flow' : '')
+              }
               aria-hidden="true"
               style={
                 { '--lane-rows': laneRows } as React.CSSProperties
@@ -675,7 +765,12 @@ export function WeekView() {
                 const isBarFocused = focusedEvId === bar.event.id;
                 const span = multiDayInfo(bar.event, new Date(bar.event.start));
                 const style: React.CSSProperties & Record<string, string> = {
-                  gridColumn: `${bar.startCol} / ${bar.endCol + 1}`,
+                  // GRID mode has a leading hour-ruler column, so day N → grid
+                  // col N+1. LIST mode drops the ruler (pre-grid layout), so the
+                  // 7 day columns start at 1 — day N → grid col N.
+                  gridColumn: listMode
+                    ? `${bar.startCol} / ${bar.endCol + 1}`
+                    : `${bar.startCol + 1} / ${bar.endCol + 2}`,
                   gridRow: String(bar.lane + 1),
                 };
                 if (color.hex) style['--event-color'] = color.hex;
@@ -732,12 +827,75 @@ export function WeekView() {
             </div>
           )}
 
-          <div role="row" className="week-grid__body">
+          <div
+            role="row"
+            className={
+              'week-grid__body' + (listMode ? ' week-grid__body--flow' : '')
+            }
+          >
+            {/* Hour ruler — the hour numbers, read off the grid instead of the
+                chips. aria-hidden; the time is in each chip's accessible label.
+                The scale is 24h tall, top-aligned with each cell's events area
+                so the numbers line up with the gridlines. Grid mode only — the
+                compact list reads the time off each chip's label, not a ruler. */}
+            {!listMode && (
+              <div className="week-grid__ruler" aria-hidden="true">
+                <div className="week-grid__ruler-scale">
+                  {Array.from({ length: 24 }, (_, h) => (
+                    <span
+                      key={h}
+                      className="week-grid__ruler-hour"
+                      style={{ top: `${(h / 24) * 100}%` }}
+                    >
+                      {String(h).padStart(2, '0')}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
             {days.map((day, i) => {
               const dayKey = keyOf(day);
               const merged = dayItemsByDay.get(dayKey);
               const timedItems = merged?.timed ?? [];
               const untimedTasks = merged?.untimed ?? [];
+              // Hour-grid placement: each non-all-day timed item gets an
+              // absolute slot (top/height by start+duration, side-by-side on
+              // overlap). All-day chips stay clipped in the lane (no slot).
+              // Keyed by the item's index so the chip map applies it; DOM order
+              // (and therefore SR/keyboard nav) is untouched.
+              const slotByIdx = new Map<number, PositionedSpan>();
+              {
+                const spans: TimedSpan[] = [];
+                const slotIdxs: number[] = [];
+                timedItems.forEach((item, idx) => {
+                  let s: TimedSpan | null = null;
+                  if (item.kind === 'event') {
+                    if (!item.event.all_day) {
+                      s = eventSpanForDay(
+                        new Date(item.event.start),
+                        new Date(item.event.end),
+                        day,
+                      );
+                    }
+                  } else {
+                    // A timed task is a zero-duration point; an unparseable time
+                    // falls back to midnight so it ALWAYS gets a slot and never
+                    // flows static inside the positioned canvas (which would
+                    // corrupt the grid). All-day events are the only no-slot
+                    // items (they stay clipped in the lane).
+                    const m = minutesFromMidnight(
+                      taskTimeOnDay(item.task, dayKey) ?? '',
+                    );
+                    s = { startMin: m ?? 0, endMin: m ?? 0 };
+                  }
+                  if (s) {
+                    spans.push(s);
+                    slotIdxs.push(idx);
+                  }
+                });
+                const positions = layoutDayColumn(spans);
+                slotIdxs.forEach((idx, k) => slotByIdx.set(idx, positions[k]));
+              }
               // The timedItems array is the same one the Tab-navigation
               // buckets see, so `itemIdx` below matches the hook's
               // `eventIndex`. That keeps `aria-activedescendant`,
@@ -827,10 +985,20 @@ export function WeekView() {
                     if (dropped) handleEventDayDrop(dropped, dayKey);
                   }}
                 >
-                  <ul role="list" className="week-grid__events">
+                  <ul
+                    role="list"
+                    className={
+                      'week-grid__events' +
+                      (listMode ? ' week-grid__events--flow' : '')
+                    }
+                  >
                     {timedItems.map((item, itemIdx) => {
                       const isFocusedItem =
                         focused && eventIndex === itemIdx;
+                      // In list mode the canvas is normal flow — no absolute
+                      // slot. Each chip gets an inline min-height instead
+                      // (events by duration, tasks by effort).
+                      const slot = listMode ? undefined : slotByIdx.get(itemIdx);
                       if (item.kind === 'task') {
                         const task = item.task;
                         // Pull the effective time-of-day for this row
@@ -868,7 +1036,21 @@ export function WeekView() {
                           <li
                             key={`task-${task.id}`}
                             role="listitem"
-                            className="week-grid__task-item"
+                            className={
+                              'week-grid__task-item' +
+                              (slot ? ' week-grid__slot' : '') +
+                              // Effort sizing applies to the timed task's <li>
+                              // too: in GRID mode the effort class's min-height
+                              // composes with the absolute slot to give a
+                              // large-effort task a taller block at its time; in
+                              // LIST mode it sizes the normal-flow row. Events
+                              // are sized by duration instead, so this is
+                              // task-only.
+                              (effortMod
+                                ? ` week-task--effort-${effortMod}`
+                                : '')
+                            }
+                            style={slot ? slotStyle(slot) : undefined}
                           >
                             <span
                               id={eventOptionId(i, itemIdx)}
@@ -878,10 +1060,12 @@ export function WeekView() {
                                 (draggingTaskId === task.id
                                   ? ' week-task--dragging'
                                   : '') +
-                                ` week-task--${task.status.replace('_', '-')}` +
-                                (effortMod
-                                  ? ` week-task--effort-${effortMod}`
-                                  : '')
+                                ` week-task--${task.status.replace('_', '-')}`
+                                // Effort sizing lives ONLY on the load-bearing
+                                // <li> above — `.week-task--effort-*` sets
+                                // min-height AND padding-block, so doubling it
+                                // here pushed the title toward clipping. The span
+                                // fills the <li> via the `height:100%` rule.
                               }
                               // The aria-label carries the status as a
                               // word suffix so SR users hear it on focus
@@ -931,7 +1115,21 @@ export function WeekView() {
                                 void openTaskMenu(task);
                               }}
                             >
-                              <span className="week-task__time">{time}</span>
+                              {/* GRID mode: time is read off the hour-ruler, so
+                                  the chip is title-only (a short chip's one
+                                  visible line is the title, not clipped). LIST
+                                  mode gates the ruler off, so restore a small
+                                  visible start time here. aria-hidden — the full
+                                  time already lives in the aria-label, so this
+                                  must not double-announce. */}
+                              {listMode && time && (
+                                <span
+                                  className="week-task__time"
+                                  aria-hidden="true"
+                                >
+                                  {time}
+                                </span>
+                              )}
                               <span className="week-task__body">
                                 <span
                                   className="week-task__check"
@@ -963,17 +1161,44 @@ export function WeekView() {
                       const ev = item.event;
                       const cal = calendarById.get(ev.calendar_id);
                       const color = resolveEventColor(ev, calendarById, labelById);
-                      const time = ev.all_day
-                        ? t('views.allDay')
-                        : `${fmt.format(new Date(ev.start), 'p')}`;
                       const span = multiDayInfo(ev, day);
+                      // A TIMED event that crosses midnight (`span` non-null)
+                      // shows the THIS-day CLAMPED portion, not the absolute
+                      // instants — so the next-day tail reads "00:00 – 01:00"
+                      // (and the start day "23:00 – 24:00") instead of the
+                      // confusing absolute "23:00 – 01:00". Single-day timed
+                      // events keep the absolute start/end. Shared by the visible
+                      // start time below + the aria range so they agree.
+                      const { startStr: dayStartStr, endStr: dayEndStr } =
+                        span && !ev.all_day
+                          ? eventDayTimes(fmt, ev, day)
+                          : {
+                              startStr: fmt.format(new Date(ev.start), 'p'),
+                              endStr: fmt.format(new Date(ev.end), 'p'),
+                            };
+                      // The chip shows only the title (time is read from the
+                      // hour-grid + ruler); the label speaks the full start–end
+                      // range so an SR user hears the DURATION.
+                      const timeAria = ev.all_day
+                        ? t('views.allDay')
+                        : `${dayStartStr} – ${dayEndStr}`;
+                      // The continuation (tail) chip of a TIMED cross-midnight
+                      // event must NOT be draggable: `moveEventToDay` derives the
+                      // move delta from the absolute START day, so dragging the
+                      // day-N+1 chip would reschedule relative to day N — wrong.
+                      // The start-day chip (dayIndex 1) keeps a well-defined
+                      // anchor and stays draggable. (Blind users use Move/Copy;
+                      // this only fixes the mouse affordance.) All-day chips are
+                      // clipped out of the cell — the lane bar carries their drag.
+                      const isTimedTail =
+                        !ev.all_day && span != null && span.dayIndex > 1;
                       // Color label is purely visual — it's a visible
                       // accent strip on the chip, not extra information
                       // an SR user needs spoken. The calendar / list
                       // affiliation stays in the label.
                       const ariaBase = t('views.week.eventLabel', {
                         title: ev.title,
-                        time,
+                        time: timeAria,
                         calendar: cal?.name ?? '—',
                       });
                       const aria = span
@@ -983,31 +1208,65 @@ export function WeekView() {
                             total: span.totalDays,
                           })
                         : ariaBase;
-                      // All-day events are visualised by the lane above;
-                      // their per-day chip stays in the listbox as the
-                      // aria-activedescendant target but is clipped out
-                      // of the visual flow so the cell only shows timed
-                      // events. The bar's focused state is driven from
-                      // here via `focusedEvId`.
+                      // All-day events are visualised by the lane above in BOTH
+                      // modes; their per-day chip stays in the listbox as the
+                      // aria-activedescendant target but is clipped out of the
+                      // visual flow (`--in-lane`) so the cell only shows timed
+                      // events. The bar's focused state is driven from here via
+                      // `focusedEvId`. A timed event gets a duration-scaled
+                      // min-height in LIST mode via eventBlockFactor; all-day
+                      // events get none (they're clipped anyway).
+                      const evSpan = ev.all_day
+                        ? null
+                        : eventSpanForDay(
+                            new Date(ev.start),
+                            new Date(ev.end),
+                            day,
+                          );
+                      const listHeight =
+                        listMode && evSpan
+                          ? `${
+                              eventBlockFactor(evSpan.endMin - evSpan.startMin) *
+                              WEEK_LIST_BLOCK_BASE_REM
+                            }rem`
+                          : undefined;
                       return (
-                        <li key={ev.id} role="listitem">
+                        <li
+                          key={ev.id}
+                          role="listitem"
+                          className={slot ? 'week-grid__slot' : undefined}
+                          style={slot ? slotStyle(slot) : undefined}
+                        >
                           <span
                             id={eventOptionId(i, itemIdx)}
                             className={
                               'week-event' +
                               (isFocusedItem ? ' week-event--focused' : '') +
                               (span ? ' week-event--multiday' : '') +
+                              // The `--in-lane` clip applies in BOTH modes: the
+                              // all-day lane carries the visible bar in grid AND
+                              // list mode (pre-grid behaviour), so an all-day
+                              // event is never a plain row in the week list — it
+                              // lives only in the lane above.
                               (ev.all_day ? ' week-event--in-lane' : '')
                             }
                             aria-label={aria}
                             aria-selected={isFocusedItem}
-                            draggable
-                            onDragStart={(dev) => {
-                              // Drag onto a sidebar calendar row to move the
-                              // event there (mouse affordance; the keyboard/SR
-                              // path is the Move/Copy dialog).
-                              setEventDrag(dev.dataTransfer, ev);
-                            }}
+                            // List mode clips the title to the duration height —
+                            // give sighted users the full title on hover (SR users
+                            // already get it from aria-label).
+                            title={listMode ? ev.title : undefined}
+                            draggable={!isTimedTail}
+                            onDragStart={
+                              isTimedTail
+                                ? undefined
+                                : (dev) => {
+                                    // Drag onto a sidebar calendar row to move
+                                    // the event there (mouse affordance; the
+                                    // keyboard/SR path is the Move/Copy dialog).
+                                    setEventDrag(dev.dataTransfer, ev);
+                                  }
+                            }
                             onDoubleClick={(dcev) => {
                               // Open the editor, mirroring the task chips
                               // (the keyboard path is Enter on the focused
@@ -1022,12 +1281,34 @@ export function WeekView() {
                               void openEventMenu(ev);
                             }}
                             style={
-                              color.hex
-                                ? ({ '--event-color': color.hex } as React.CSSProperties)
-                                : undefined
+                              {
+                                ...(color.hex
+                                  ? { '--event-color': color.hex }
+                                  : {}),
+                                // List mode: a STRICT duration-driven height on the
+                                // chip itself, so the COLOURED block both fills the
+                                // space AND can't be inflated past its duration by a
+                                // long title — the title wraps on one flow and is
+                                // clipped (full text in the aria-label + the title
+                                // tooltip). Grid mode leaves listHeight undefined
+                                // (the slot drives height via height:100%).
+                                ...(listHeight ? { height: listHeight } : {}),
+                              } as React.CSSProperties
                             }
                           >
-                            <span className="week-event__time">{time}</span>
+                            {/* GRID mode: time is read off the hour-ruler, so
+                                the chip is title-only. LIST mode gates the ruler
+                                off, so restore a small visible start time (or
+                                "all day"). aria-hidden — the full start–end range
+                                already lives in the aria-label. */}
+                            {listMode && (
+                              <span
+                                className="week-event__time"
+                                aria-hidden="true"
+                              >
+                                {ev.all_day ? t('views.allDay') : dayStartStr}
+                              </span>
+                            )}
                             <span className="week-event__title">{ev.title}</span>
                             {span && (
                               <span className="week-event__span">
@@ -1055,6 +1336,7 @@ export function WeekView() {
                     dayKey={dayKey}
                     allTasks={tasks}
                     cellIndex={i}
+                    listMode={listMode}
                     optionIdBase={timedItems.length}
                     focusedIndex={focused ? eventIndex : null}
                     eventOptionId={eventOptionId}
@@ -1151,13 +1433,14 @@ function groupEventsByDay(
   const map = new Map<string, CalendarEvent[]>();
   days.forEach((d) => map.set(keyOf(d), []));
   events.forEach((ev) => {
-    // Multi-day all-day events get bucketed into every visible day they
-    // cover — otherwise the user would see day 1 of a vacation and
-    // nothing on days 2..N (DESIGN tradeoff: visibility beats compactness,
-    // a future iteration may replace the per-day chips with one
-    // continuous bar in a dedicated all-day lane). Timed events stay
-    // anchored to their start day; cross-midnight meetings are out of
-    // scope here.
+    // Bucket each event into every visible day it covers (via
+    // daysCoveredKeys) — otherwise the user would see day 1 of a vacation
+    // and nothing on days 2..N (DESIGN tradeoff: visibility beats
+    // compactness, a future iteration may replace the per-day chips with one
+    // continuous bar in a dedicated all-day lane). This spreads multi-day
+    // ALL-DAY events AND timed events that cross midnight (a 23:00→01:00
+    // meeting lands on both the start day and the next), so the next day
+    // shows its own clamped portion.
     daysCoveredKeys(ev).forEach((k) => {
       const bucket = map.get(k);
       if (bucket) bucket.push(ev);
@@ -1186,6 +1469,7 @@ function WeekDayTasks({
   dayKey,
   allTasks,
   cellIndex,
+  listMode,
   optionIdBase,
   focusedIndex,
   eventOptionId,
@@ -1207,6 +1491,13 @@ function WeekDayTasks({
   allTasks: Task[];
   /** This day's index in the week, for the activedescendant option id. */
   cellIndex: number;
+  /** GRID vs compact-LIST layout. Drives ONLY a visual modifier class on the
+   *  task <ul>: in grid mode the untimed band is lifted to the TOP of the cell
+   *  (CSS `order: -1`) and compacted into a tight flex-wrap, sitting between
+   *  the all-day lane and the hour canvas. In list mode it stays the pre-grid
+   *  bottom-pinned column. The chips' DOM order, option ids, indices, handlers
+   *  and a11y are IDENTICAL either way — only CSS position + size change. */
+  listMode: boolean;
   /** Bucket index of the first untimed task: the count of timed items in
    *  this cell, so untimed chips continue the grid nav after the lane. */
   optionIdBase: number;
@@ -1241,7 +1532,14 @@ function WeekDayTasks({
   if (tasks.length === 0) return null;
   return (
     <ul
-      className="week-grid__tasks"
+      className={
+        'week-grid__tasks' +
+        // GRID-mode only: lift the untimed band to the TOP of the cell
+        // (CSS `order: -1`) and compact it. List mode keeps the pre-grid
+        // bottom-pinned column, so no modifier there. Purely visual — the
+        // DOM order / option ids / Tab nav are unchanged in both modes.
+        (listMode ? '' : ' week-grid__tasks--grid')
+      }
       aria-label={t('views.week.tasksOnDay', { count: tasks.length })}
     >
       {tasks.map((task, idx) => {

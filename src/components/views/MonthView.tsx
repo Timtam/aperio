@@ -36,6 +36,7 @@ import {
 import {
   buildAllDayBars,
   daysCoveredKeys,
+  eventDayTimes,
   multiDayInfo,
 } from '../../intl/multiDay';
 import { filterTasksOnDay, isDeadlineChip } from '../../intl/taskDay';
@@ -883,10 +884,27 @@ export function MonthView() {
                           labelById,
                         );
                         const cal = calendarById.get(ev.calendar_id);
+                        const span = multiDayInfo(ev, day);
+                        // MonthView shows only the START time. For a TIMED event
+                        // that crosses midnight (`span` non-null) show this day's
+                        // CLAMPED start — so the next-day tail cell reads "00:00",
+                        // not the misleading absolute "23:00". Single-day timed
+                        // events keep the absolute start. All-day → "all day".
                         const time = ev.all_day
                           ? t('views.allDay')
-                          : fmt.format(new Date(ev.start), 'p');
-                        const span = multiDayInfo(ev, day);
+                          : span
+                            ? eventDayTimes(fmt, ev, day).startStr
+                            : fmt.format(new Date(ev.start), 'p');
+                        // The continuation (tail) chip of a TIMED cross-midnight
+                        // event must NOT be draggable: `moveEventToDay` derives
+                        // the move delta from the absolute START day, so dragging
+                        // the day-N+1 chip would reschedule relative to day N —
+                        // wrong. The start-day chip (dayIndex 1) keeps a
+                        // well-defined anchor and stays draggable. (Blind users
+                        // use Move/Copy; this only fixes the mouse affordance.)
+                        // All-day multi-day chips keep dragging unchanged.
+                        const isTimedTail =
+                          !ev.all_day && span != null && span.dayIndex > 1;
                         const ariaBase = t('views.week.eventLabel', {
                           title: ev.title,
                           time,
@@ -914,15 +932,19 @@ export function MonthView() {
                             }
                             aria-label={aria}
                             aria-selected={isFocusedItem}
-                            draggable
-                            onDragStart={(dev) => {
-                              // Drag onto another day cell to move the
-                              // event there, or onto a sidebar calendar
-                              // row to move it to that calendar (mouse
-                              // affordance; keyboard/SR paths are the
-                              // editor + Move/Copy dialog).
-                              setEventDrag(dev.dataTransfer, ev);
-                            }}
+                            draggable={!isTimedTail}
+                            onDragStart={
+                              isTimedTail
+                                ? undefined
+                                : (dev) => {
+                                    // Drag onto another day cell to move the
+                                    // event there, or onto a sidebar calendar
+                                    // row to move it to that calendar (mouse
+                                    // affordance; keyboard/SR paths are the
+                                    // editor + Move/Copy dialog).
+                                    setEventDrag(dev.dataTransfer, ev);
+                                  }
+                            }
                             onDoubleClick={(dcev) => {
                               // Open the editor, mirroring the task chips
                               // (the keyboard path is Enter on the focused
@@ -1047,8 +1069,10 @@ function keyOf(d: Date): string {
 function groupEventsByDay(events: CalendarEvent[]): Map<string, CalendarEvent[]> {
   const map = new Map<string, CalendarEvent[]>();
   events.forEach((ev) => {
-    // Multi-day all-day events appear in every cell they cover — see
-    // WeekView.groupEventsByDay for the rationale.
+    // Multi-day all-day events AND timed events that cross midnight appear in
+    // every cell they cover (via daysCoveredKeys) — a 23:00→01:00 meeting lands
+    // on both its start cell and the next. See WeekView.groupEventsByDay for the
+    // rationale.
     daysCoveredKeys(ev).forEach((k) => {
       const bucket = map.get(k);
       if (bucket) bucket.push(ev);

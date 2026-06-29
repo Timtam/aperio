@@ -4,10 +4,12 @@ import { getUserPref, setUserPref } from '../api/prefs';
 
 // The task-behaviour knobs (Settings → Tasks), SYNCED across the user's devices
 // via the `tasks.*` user-prefs (§19.2.1 always-sync keys) — the mobile twin of
-// the desktop TaskCascadeProvider. SEVEN globals (check-off mode, status
-// coupling, auto-date, auto-self-assign, visual effort sizing, carry-over
-// default, day-start trigger) + a per-list
-// override map (`tasks.listOverrides`). The check-off path reads the EFFECTIVE
+// the desktop TaskCascadeProvider. Eight globals (check-off mode, status
+// coupling, auto-date, auto-self-assign, visual effort sizing, calendar
+// day-view mode, carry-over default, day-start trigger) + a per-list
+// override map (`tasks.listOverrides`). (The day-view mode rides the
+// `calendar.dayViewMode` key, shared 1:1 with the desktop toolbar toggle.)
+// The check-off path reads the EFFECTIVE
 // (per-list-resolved) cascade/auto-date, so a per-list override set on ANY
 // device applies here. carryOverDefault + dayStartTrigger drive the day-start
 // review / deadline-pin checkers. Best-effort: a read failure falls back to the
@@ -42,6 +44,8 @@ export interface TaskBehaviour {
   autoSelfAssign: boolean;
   /** Render task tiles at different sizes by effort (small/medium/large). Default on. */
   visualEffortSizing: boolean;
+  /** Single-day calendar layout: proportional hour-grid or compact list. Default grid. */
+  dayViewMode: 'grid' | 'list';
   /** What a check-off does: flip open↔completed, or cycle through in_progress. */
   checkoffMode: CheckoffMode;
   /** Day-start action for tasks whose scheduled day passed + still open. */
@@ -56,6 +60,9 @@ const CASCADE_KEY = 'tasks.cascadeStatusCoupling';
 const AUTO_DATE_KEY = 'tasks.autoDateOnStart';
 const AUTO_SELF_ASSIGN_KEY = 'tasks.autoSelfAssign';
 const VISUAL_EFFORT_SIZING_KEY = 'tasks.visualEffortSizing';
+// Cross-device synced single-day calendar layout. SAME key string as the
+// desktop toolbar's day-view-mode pref so the two sync 1:1 (must match exactly).
+const CALENDAR_DAY_VIEW_MODE_KEY = 'calendar.dayViewMode';
 const CHECKOFF_KEY = 'tasks.checkoffMode';
 const CARRY_OVER_KEY = 'tasks.carryOverDefault';
 const DAY_START_TRIGGER_KEY = 'tasks.dayStartTrigger';
@@ -67,6 +74,7 @@ export const TASK_BEHAVIOUR_DEFAULTS: TaskBehaviour = {
   autoDate: true,
   autoSelfAssign: true,
   visualEffortSizing: true,
+  dayViewMode: 'grid',
   checkoffMode: 'toggle',
   carryOverDefault: 'ask',
   dayStartTrigger: '00:00',
@@ -128,7 +136,7 @@ function parseListOverrides(stored: string | null): Record<string, ListOverrides
   }
 }
 
-/** Read all seven synced knobs + the per-list override map, or the desktop
+/** Read all synced knobs + the per-list override map, or the desktop
  *  defaults when unset/unreadable. */
 export async function readTaskBehaviour(): Promise<TaskBehaviour> {
   try {
@@ -137,6 +145,7 @@ export async function readTaskBehaviour(): Promise<TaskBehaviour> {
       autoDate,
       selfAssign,
       effortSizing,
+      dayViewMode,
       checkoff,
       carryOver,
       trigger,
@@ -146,6 +155,7 @@ export async function readTaskBehaviour(): Promise<TaskBehaviour> {
       getUserPref(AUTO_DATE_KEY),
       getUserPref(AUTO_SELF_ASSIGN_KEY),
       getUserPref(VISUAL_EFFORT_SIZING_KEY),
+      getUserPref(CALENDAR_DAY_VIEW_MODE_KEY),
       getUserPref(CHECKOFF_KEY),
       getUserPref(CARRY_OVER_KEY),
       getUserPref(DAY_START_TRIGGER_KEY),
@@ -156,6 +166,7 @@ export async function readTaskBehaviour(): Promise<TaskBehaviour> {
       autoDate: parseBool(autoDate),
       autoSelfAssign: parseBool(selfAssign),
       visualEffortSizing: parseBool(effortSizing),
+      dayViewMode: dayViewMode === 'list' ? 'list' : 'grid',
       checkoffMode: parseCheckoff(checkoff),
       carryOverDefault: isCarryOverDefault(carryOver) ? carryOver : 'ask',
       dayStartTrigger: isDayStartTrigger(trigger) ? trigger : '00:00',
@@ -182,6 +193,8 @@ export const writeAutoSelfAssign = (v: boolean): Promise<void> =>
   writeBest(AUTO_SELF_ASSIGN_KEY, v ? 'true' : 'false');
 export const writeVisualEffortSizing = (v: boolean): Promise<void> =>
   writeBest(VISUAL_EFFORT_SIZING_KEY, v ? 'true' : 'false');
+export const writeDayViewMode = (m: 'grid' | 'list'): Promise<void> =>
+  writeBest(CALENDAR_DAY_VIEW_MODE_KEY, m);
 export const writeCheckoffMode = (m: CheckoffMode): Promise<void> =>
   writeBest(CHECKOFF_KEY, m);
 export const writeCarryOverDefault = (v: CarryOverDefault): Promise<void> =>

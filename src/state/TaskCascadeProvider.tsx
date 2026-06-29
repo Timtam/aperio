@@ -49,6 +49,7 @@ const DAY_START_TRIGGER_KEY = 'tasks.dayStartTrigger';
 const CHECKOFF_MODE_KEY = 'tasks.checkoffMode';
 const AUTO_SELF_ASSIGN_KEY = 'tasks.autoSelfAssign';
 const VISUAL_EFFORT_SIZING_KEY = 'tasks.visualEffortSizing';
+const CALENDAR_DAY_VIEW_MODE_KEY = 'calendar.dayViewMode';
 /**
  * Single JSON pref holding the per-list override map. Keyed by
  * task-list id, value is a `ListOverrides` record carrying any
@@ -65,6 +66,21 @@ const LIST_OVERRIDES_KEY = 'tasks.listOverrides';
 const WRITE_DEBOUNCE_MS = 150;
 
 export type CarryOverDefault = 'ask' | 'today' | 'backlog';
+
+/**
+ * How the calendar's day + week views lay out events:
+ *   - `'grid'` (default): the proportional 24h hour-grid — events
+ *     absolute-positioned by start time, sized by duration.
+ *   - `'list'`: a compact chronological list — events stack in normal
+ *     flow, each block still sized by its duration (via
+ *     `eventBlockFactor`), tasks sized by effort.
+ *
+ * Purely visual: the screen-reader model (roles, ids,
+ * aria-activedescendant, keyboard, labels) is byte-for-byte identical
+ * in both modes. Synced like `visualEffortSizing` so the choice
+ * follows the user across devices.
+ */
+export type CalendarDayViewMode = 'grid' | 'list';
 
 /**
  * When the three day-start checkers (CarryOver, MissedTasks,
@@ -174,6 +190,11 @@ export interface TaskCascadeContextValue {
   visualEffortSizing: boolean;
   /** Set the visual-effort-sizing preference. Debounced-persisted (synced). */
   setVisualEffortSizing: (value: boolean) => void;
+  /** How the calendar day + week views lay out events ('grid' | 'list').
+   *  Purely visual; the a11y model is identical in both modes. */
+  dayViewMode: CalendarDayViewMode;
+  /** Set the calendar day-view-mode preference. Debounced-persisted (synced). */
+  setDayViewMode: (value: CalendarDayViewMode) => void;
   /** Carry-over default action used by `CarryOverChecker`. */
   carryOverDefault: CarryOverDefault;
   /** Set the carry-over default. Debounced-persisted. */
@@ -212,6 +233,10 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
   const [autoSelfAssign, setAutoSelfAssignState] = useState(true);
   // Visual effort-sizing defaults ON; only a literal stored 'false' disables.
   const [visualEffortSizing, setVisualEffortSizingState] = useState(true);
+  // Calendar day/week layout defaults to the hour-grid; only a literal stored
+  // 'list' switches to the compact list (anything else falls back to grid).
+  const [dayViewMode, setDayViewModeState] =
+    useState<CalendarDayViewMode>('grid');
   const [carryOverDefault, setCarryOverDefaultState] =
     useState<CarryOverDefault>('ask');
   // Default '00:00' means "as soon as the local date rolls over",
@@ -236,6 +261,7 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       getUserPref(CHECKOFF_MODE_KEY).catch(() => null),
       getUserPref(AUTO_SELF_ASSIGN_KEY).catch(() => null),
       getUserPref(VISUAL_EFFORT_SIZING_KEY).catch(() => null),
+      getUserPref(CALENDAR_DAY_VIEW_MODE_KEY).catch(() => null),
       getUserPref(LIST_OVERRIDES_KEY).catch(() => null),
     ])
       .then(
@@ -247,6 +273,7 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
           checkoffRaw,
           autoSelfAssignRaw,
           visualEffortSizingRaw,
+          dayViewModeRaw,
           listOverridesRaw,
         ]) => {
           if (cancelled) return;
@@ -257,6 +284,9 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
           if (autoSelfAssignRaw === 'false') setAutoSelfAssignState(false);
           if (visualEffortSizingRaw === 'false')
             setVisualEffortSizingState(false);
+          // Calendar day-view mode: only a literal stored 'list' switches
+          // away from the grid default; anything else keeps 'grid'.
+          if (dayViewModeRaw === 'list') setDayViewModeState('list');
           // Carry-over default is a tri-state enum; reject anything
           // that doesn't match the allowed values and keep the default.
           if (isCarryOverDefault(carryOverRaw)) {
@@ -394,6 +424,23 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
     };
   }, [visualEffortSizing, hydrating]);
 
+  const dayViewModeTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (hydrating) return;
+    if (dayViewModeTimer.current !== null) {
+      window.clearTimeout(dayViewModeTimer.current);
+    }
+    dayViewModeTimer.current = window.setTimeout(() => {
+      void setUserPref(CALENDAR_DAY_VIEW_MODE_KEY, dayViewMode);
+    }, WRITE_DEBOUNCE_MS);
+    return () => {
+      if (dayViewModeTimer.current !== null) {
+        window.clearTimeout(dayViewModeTimer.current);
+        dayViewModeTimer.current = null;
+      }
+    };
+  }, [dayViewMode, hydrating]);
+
   const carryOverTimer = useRef<number | null>(null);
   useEffect(() => {
     if (hydrating) return;
@@ -477,6 +524,9 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
   const setVisualEffortSizing = useCallback((value: boolean) => {
     setVisualEffortSizingState(value);
   }, []);
+  const setDayViewMode = useCallback((value: CalendarDayViewMode) => {
+    setDayViewModeState(value);
+  }, []);
   const setCarryOverDefault = useCallback((value: CarryOverDefault) => {
     setCarryOverDefaultState(value);
   }, []);
@@ -538,6 +588,8 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       setAutoSelfAssign,
       visualEffortSizing,
       setVisualEffortSizing,
+      dayViewMode,
+      setDayViewMode,
       carryOverDefault,
       setCarryOverDefault,
       dayStartTrigger,
@@ -558,6 +610,8 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       setAutoSelfAssign,
       visualEffortSizing,
       setVisualEffortSizing,
+      dayViewMode,
+      setDayViewMode,
       carryOverDefault,
       setCarryOverDefault,
       dayStartTrigger,

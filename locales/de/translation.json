@@ -235,6 +235,15 @@
       "agenda": "Agenda",
       "tasks": "Aufgaben",
       "contacts": "Kontakte"
+    },
+    "dayViewMode": {
+      "label": "Kalender-Layout",
+      "grid": "Stundenraster",
+      "list": "Liste",
+      "toList": "Zur kompakten Liste wechseln",
+      "toGrid": "Zum Stundenraster wechseln",
+      "announceGrid": "Stundenraster-Layout",
+      "announceList": "Kompaktlisten-Layout"
     }
   },
   "cacheRefresh": {
@@ -484,6 +493,14 @@
         "minimizeToTrayHint": "Der Minimieren-Knopf blendet Aperio in den Infobereich aus. Ein Klick auf das Symbol holt das Fenster zurück."
       },
       "calendars": {
+        "dayViewMode": {
+          "heading": "Kalender-Tageslayout",
+          "hint": "Wie die Tages- und Wochenansicht des Kalenders Termine anordnet. „Stundenraster\" platziert Termine auf einer 24-Stunden-Zeitachse, nach Dauer dimensioniert. „Kompakte Liste\" stapelt sie als chronologische Liste, jeder Block weiterhin nach Dauer dimensioniert. Aufgaben werden in beiden nach Aufwand dimensioniert. Rein visuell — auch über die Kalender-Symbolleiste umschaltbar.",
+          "options": {
+            "grid": "Stundenraster",
+            "list": "Kompakte Liste"
+          }
+        },
         "hint": "Standard-Hinweise, die auf Termine ohne eigenen Hinweis angewendet werden. Hilfreich für iCloud-Kalender: iOS-„Standardhinweise“ werden nicht in den Termin geschrieben, ohne hier konfigurierten Standard erscheint der Hinweis in Aperio nicht.",
         "empty": "Noch keine Kalender — füge zuerst ein Konto hinzu.",
         "accountHeading": "{{account}}",

@@ -11,7 +11,7 @@ import {
   resolveEventColor,
   resolveTaskColor,
 } from '../../intl/eventColor';
-import { eventCoversDay, multiDayInfo } from '../../intl/multiDay';
+import { eventCoversDay, eventDayTimes, multiDayInfo } from '../../intl/multiDay';
 import {
   isExpandedOccurrence,
   occurrenceIsoOf,
@@ -55,7 +55,51 @@ import {
   deleteEventById,
   isCommandError,
 } from '../../api/client';
-import type { CalendarEvent } from '../../api/types';
+import type {
+  CalendarEvent,
+  ColorLabel,
+  Task,
+  TaskList,
+} from '../../api/types';
+import {
+  eventBlockFactor,
+  eventSpanForDay,
+  layoutDayColumn,
+  minutesFromMidnight,
+  type PositionedSpan,
+  type TimedSpan,
+} from '@aperio/shared';
+
+/** Base block height (rem) a LIST-mode event row gets at `eventBlockFactor === 1`
+ *  (a point / ≤1h event) — ≈ one natural row plus a little fill. The list-mode row
+ *  uses a STRICT height (not min-height) of `factor × this`, with the time + title
+ *  on one wrapping flow clipped to fit, so the row height reads DURATION at a
+ *  glance and a long title can never inflate a short event past a long one. A 4h
+ *  event is ~4× a 1h via the shared linear `eventBlockFactor` curve (floor 1, cap
+ *  6). rem (not em) so the small row font doesn't shrink the scale; a touch taller
+ *  than WeekView's 2.25rem because DayView rows are a bit taller. */
+const DAY_LIST_BLOCK_BASE_REM = 2.5;
+
+/** The slot's CSS `min-height` (1.2em, see `.day-list__slot`) expressed as a
+ *  fraction of the 24h canvas, so a floored late-night option can be clamped to
+ *  stay on-canvas. Matches WeekView's MIN_SLOT_FRACTION. */
+const MIN_SLOT_FRACTION = 0.018;
+
+/** Absolute placement of a timed chip's `<li>` inside the day's 24h-tall
+ *  hour-grid (positioning is purely visual; DOM order is unchanged). Identical
+ *  to WeekView's helper, including the TOP clamp that keeps a floored min-height
+ *  option (a 23:5x point) from extending below the canvas. */
+function slotStyle(p: PositionedSpan): React.CSSProperties {
+  const eh = Math.max(p.heightFraction, MIN_SLOT_FRACTION);
+  const top = Math.min(p.topFraction, 1 - eh);
+  return {
+    position: 'absolute',
+    top: `${top * 100}%`,
+    height: `${p.heightFraction * 100}%`,
+    left: `${(p.columnIndex / p.columnCount) * 100}%`,
+    width: `${(1 / p.columnCount) * 100}%`,
+  };
+}
 
 /**
  * Day view — flat listbox of the focused day's events.
@@ -83,7 +127,14 @@ export function DayView() {
   const range = useMemo(() => visibleRange('day', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
   const { tasks, taskListById } = useTasks();
-  const { visualEffortSizing } = useTaskCascadeEnabled();
+  const { visualEffortSizing, dayViewMode } = useTaskCascadeEnabled();
+  // Compact-list layout vs the proportional hour-grid. In list mode the timed
+  // listbox is normal vertical flow (no positioned 24h canvas), the ruler +
+  // all-day band are not rendered, and each option is sized inline instead of a
+  // slot (events by a STRICT duration height, tasks by effort). The a11y model —
+  // role=listbox/option, ids, aria-activedescendant, keyboard, labels — is
+  // byte-for-byte identical to grid mode.
+  const listMode = dayViewMode === 'list';
   const currentUserByList = useCurrentUserByList(tasks);
   // Hide tasks assigned to a concrete OTHER user from MY calendar (mine +
   // unassigned stay) — the day-start review's ownership filter (DESIGN §9.7).
@@ -151,6 +202,56 @@ export function DayView() {
     return { timedItems: timed, untimedTasks: untimed };
   }, [dayEvents, dayTasks, dayKey]);
 
+  // Hour-grid placement: each timed item gets an absolute slot (top/height by
+  // start + duration, side-by-side on overlap) inside the 24h canvas. Keyed by
+  // the item's index so the chip map applies it; DOM order (and therefore
+  // SR/keyboard nav) is untouched. Mirrors WeekView's per-column logic for the
+  // single day column.
+  const slotByIdx = useMemo(() => {
+    const map = new Map<number, PositionedSpan>();
+    const spans: TimedSpan[] = [];
+    const slotIdxs: number[] = [];
+    timedItems.forEach((item, idx) => {
+      let s: TimedSpan | null = null;
+      if (item.kind === 'event') {
+        // All-day events stay out of the timed grid (they have no meaningful
+        // hour placement); they still render in DOM order without a slot.
+        if (!item.event.all_day) {
+          s = eventSpanForDay(
+            new Date(item.event.start),
+            new Date(item.event.end),
+            anchor,
+          );
+        }
+      } else {
+        // A timed task is a zero-duration point; an unparseable time falls back
+        // to midnight so it ALWAYS gets a slot and never flows static inside
+        // the positioned canvas (which would corrupt the grid).
+        const m = minutesFromMidnight(taskTimeOnDay(item.task, dayKey) ?? '');
+        s = { startMin: m ?? 0, endMin: m ?? 0 };
+      }
+      if (s) {
+        spans.push(s);
+        slotIdxs.push(idx);
+      }
+    });
+    const positions = layoutDayColumn(spans);
+    slotIdxs.forEach((idx, k) => map.set(idx, positions[k]));
+    return map;
+  }, [timedItems, anchor, dayKey]);
+
+  // All-day events have no hour placement, so they get no slot — their <li>
+  // stays a (visually-hidden) option in the listbox for SR/keyboard, while the
+  // sighted representation is this band above the grid. Mirrors WeekView's
+  // clipped `--in-lane` option + visible all-day lane.
+  const allDayEvents = useMemo(
+    () =>
+      timedItems.flatMap((it) =>
+        it.kind === 'event' && it.event.all_day ? [it.event] : [],
+      ),
+    [timedItems],
+  );
+
   const [focusIndex, setFocusIndex] = useState(0);
 
   // If the day changes (or events arrive) and the previous focus index
@@ -177,6 +278,24 @@ export function DayView() {
     (i: number) => `${idPrefix}-item-${i}`,
     [idPrefix],
   );
+
+  // The timed list is now a 24h-tall internal scroll region, and
+  // aria-activedescendant (unlike a real DOM .focus()) does NOT auto-scroll the
+  // active option into view — so an option on a scrolled-away hour would be
+  // off-screen for sighted / low-vision keyboard users. Scroll it into view
+  // whenever the active option (focusIndex) changes. Mirrors WeekView.
+  useEffect(() => {
+    // List mode is a normal vertical flow (.day-grid--flow has no internal
+    // scroll region), so the active option is already in the page scroll — the
+    // nudge would needlessly move the page. Only the grid's 24h canvas needs it.
+    if (listMode || timedItems.length === 0) return;
+    document
+      .getElementById(itemId(focusIndex))
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    // `dayKey` is a dep so switching to a different day always re-scrolls the
+    // active option into view, even when the new day has the same item count
+    // and focusIndex is unchanged (otherwise the effect wouldn't re-run).
+  }, [focusIndex, itemId, timedItems.length, dayKey, listMode]);
   const listRef = useAutoFocus<HTMLUListElement>(!loading);
 
   const [confirmTarget, setConfirmTarget] = useState<CalendarEvent | null>(
@@ -364,17 +483,70 @@ export function DayView() {
         </p>
       )}
 
-      <ul
-        ref={listRef}
-        role="listbox"
-        tabIndex={0}
-        aria-label={t('views.day.eventList')}
-        aria-activedescendant={
-          timedItems.length > 0 ? itemId(focusIndex) : undefined
-        }
-        onKeyDown={handleKeyDown}
-        className="day-list"
-      >
+      {/* The timed list is a 24h-tall positioned hour-canvas (see .day-list in
+          styles.css). A leading hour-ruler carries the hour numbers (00–23) so
+          the time reads off the grid; the canvas + ruler scroll together as one
+          internal region. Purely visual — the listbox keeps its role, IDs,
+          aria-activedescendant and keyboard handlers unchanged. */}
+      {/* All-day events sit above the hour-grid (they have no hour position).
+          Decorative: each event also stays a clipped option in the listbox
+          below, so SR/keyboard navigation reaches it on every day it covers. */}
+      {!listMode && allDayEvents.length > 0 && (
+        <div className="day-grid__allday" aria-hidden="true">
+          {allDayEvents.map((ev) => {
+            const color = resolveEventColor(ev, calendarById, labelById);
+            return (
+              <button
+                key={`allday-${ev.id}`}
+                type="button"
+                tabIndex={-1}
+                className="day-grid__allday-bar"
+                style={
+                  color.hex
+                    ? ({ '--event-color': color.hex } as React.CSSProperties)
+                    : undefined
+                }
+                onClick={() => openEventDialog(ev)}
+              >
+                <span className="day-grid__allday-title">{ev.title}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <div className={'day-grid' + (listMode ? ' day-grid--flow' : '')}>
+        {/* Hour ruler — the hour numbers, read off the grid instead of the
+            chips. aria-hidden; the time stays in each option's accessible
+            label. The scale is 24h tall, top-aligned with the canvas so the
+            numbers line up with the gridlines. Grid mode only — the compact
+            list reads the time off each option's label, not a ruler. */}
+        {!listMode && (
+          <div className="day-grid__ruler" aria-hidden="true">
+            <div className="day-grid__ruler-scale">
+              {Array.from({ length: 24 }, (_, h) => (
+                <span
+                  key={h}
+                  className="day-grid__ruler-hour"
+                  style={{ top: `${(h / 24) * 100}%` }}
+                >
+                  {String(h).padStart(2, '0')}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        <ul
+          ref={listRef}
+          role="listbox"
+          tabIndex={0}
+          aria-label={t('views.day.eventList')}
+          aria-activedescendant={
+            timedItems.length > 0 ? itemId(focusIndex) : undefined
+          }
+          onKeyDown={handleKeyDown}
+          className={'day-list' + (listMode ? ' day-list--flow' : '')}
+        >
         {timedItems.length === 0 ? (
           <li role="presentation" className="day-list__empty">
             {t('views.day.empty')}
@@ -382,6 +554,13 @@ export function DayView() {
         ) : (
           timedItems.map((item, i) => {
             const focused = i === focusIndex;
+            // Absolute slot inside the 24h canvas (every timed item has one —
+            // see slotByIdx). Positioning is purely visual; the <li> keeps its
+            // option role, id, aria-selected and DOM position unchanged. In
+            // list mode there's no canvas — the option flows normally and is
+            // sized inline instead (events by a STRICT duration height, tasks by
+            // effort), so suppress the slot here.
+            const slot = listMode ? undefined : slotByIdx.get(i);
             if (item.kind === 'task') {
               const task = item.task;
               // Pull the effective time-of-day via the shared helper;
@@ -432,15 +611,15 @@ export function DayView() {
                     // (not a `day-list__item--*` one) so both DayView task
                     // surfaces — this agenda row + the grid chip — resize
                     // identically by effort.
-                    (effortMod ? ` day-task--effort-${effortMod}` : '')
+                    (effortMod ? ` day-task--effort-${effortMod}` : '') +
+                    (slot ? ' day-list__slot' : '')
                   }
-                  style={
-                    color.hex
-                      ? ({
-                          '--event-color': color.hex,
-                        } as React.CSSProperties)
-                      : undefined
-                  }
+                  style={{
+                    ...(slot ? slotStyle(slot) : {}),
+                    ...(color.hex
+                      ? ({ '--event-color': color.hex } as React.CSSProperties)
+                      : {}),
+                  }}
                   draggable
                   onDragStart={(dev) => {
                     setTaskDrag(
@@ -461,7 +640,16 @@ export function DayView() {
                     void openTaskMenu(task);
                   }}
                 >
-                  <span className="day-list__time">{timeStr}</span>
+                  {/* GRID mode: time is read off the hour-ruler, so the option
+                      is title-only (a short option's one visible line is the
+                      title, not clipped). LIST mode gates the ruler off, so
+                      restore a small visible time-of-day. aria-hidden — the full
+                      time already lives in the aria-label above. */}
+                  {listMode && timeStr && (
+                    <span className="day-list__time" aria-hidden="true">
+                      {timeStr}
+                    </span>
+                  )}
                   <span className="day-list__title">
                     <span
                       className="day-task__marker day-task__marker--clickable"
@@ -492,9 +680,20 @@ export function DayView() {
             const ev = item.event;
             const cal = calendarById.get(ev.calendar_id);
             const color = resolveEventColor(ev, calendarById, labelById);
-            const startStr = fmt.format(new Date(ev.start), 'p');
-            const endStr = fmt.format(new Date(ev.end), 'p');
             const span = multiDayInfo(ev, anchor);
+            // A TIMED event that crosses midnight (`span` non-null) must show the
+            // THIS-day clamped portion, not the absolute instants: the next-day
+            // tail should read "00:00 – 01:00", not the confusing absolute
+            // "23:00 – 01:00", and the start day "23:00 – 24:00". A single-day
+            // timed event keeps the absolute start/end. (All-day events ignore
+            // these — their visible row reads "all day".)
+            const { startStr, endStr } =
+              span && !ev.all_day
+                ? eventDayTimes(fmt, ev, anchor)
+                : {
+                    startStr: fmt.format(new Date(ev.start), 'p'),
+                    endStr: fmt.format(new Date(ev.end), 'p'),
+                  };
             const ariaBase = t('views.day.eventLabel', {
               title: ev.title,
               start: startStr,
@@ -508,6 +707,21 @@ export function DayView() {
                   total: span.totalDays,
                 })
               : ariaBase;
+            // In LIST mode a timed event gets a STRICT duration-scaled height via
+            // eventBlockFactor (so the height reads duration; a long title clips
+            // rather than inflating a short event); an all-day event renders as a
+            // plain row (no clip, no height). In grid mode this stays unused (the
+            // slot drives geometry).
+            const evSpan =
+              listMode && !ev.all_day
+                ? eventSpanForDay(new Date(ev.start), new Date(ev.end), anchor)
+                : null;
+            const listHeight = evSpan
+              ? `${
+                  eventBlockFactor(evSpan.endMin - evSpan.startMin) *
+                  DAY_LIST_BLOCK_BASE_REM
+                }rem`
+              : undefined;
             return (
               <li
                 key={ev.id}
@@ -515,16 +729,39 @@ export function DayView() {
                 role="option"
                 aria-selected={focused}
                 aria-label={aria}
+                // List mode clips the visible title to the duration height — give
+                // sighted users the full title on hover (SR users already get it
+                // from the aria-label above).
+                title={listMode ? ev.title : undefined}
                 className={
                   'day-list__item' +
                   (focused ? ' day-list__item--focused' : '') +
-                  (span ? ' day-list__item--multiday' : '')
+                  (span ? ' day-list__item--multiday' : '') +
+                  // Timed → absolute slot in the canvas. All-day in GRID mode →
+                  // no slot, so clip the <li> (it stays a navigable option; the
+                  // sighted view is the .day-grid__allday band above) instead of
+                  // letting it flow static and collide with the 00:00 chips. In
+                  // LIST mode there's no band, so the all-day option stays a
+                  // plain visible row (no clip).
+                  (slot
+                    ? ' day-list__slot'
+                    : ev.all_day && !listMode
+                      ? ' day-list__item--allday'
+                      : '')
                 }
-                style={
-                  color.hex
+                style={{
+                  ...(slot ? slotStyle(slot) : {}),
+                  // List mode: a STRICT duration-driven height (not min-height),
+                  // so the row both fills the reserved space AND can't be inflated
+                  // past its duration by a long title — the title wraps on one flow
+                  // and is clipped (full text in the aria-label + the title
+                  // tooltip). Grid mode leaves listHeight undefined (the slot drives
+                  // height).
+                  ...(listHeight ? { height: listHeight } : {}),
+                  ...(color.hex
                     ? ({ '--event-color': color.hex } as React.CSSProperties)
-                    : undefined
-                }
+                    : {}),
+                }}
                 draggable
                 onDragStart={(dev) => {
                   setEventDrag(dev.dataTransfer, ev);
@@ -544,9 +781,15 @@ export function DayView() {
                   void openEventMenu(ev);
                 }}
               >
-                <span className="day-list__time">
-                  {ev.all_day ? t('views.allDay') : `${startStr} – ${endStr}`}
-                </span>
+                {/* GRID mode: time is read off the hour-ruler, so the option is
+                    title-only. LIST mode gates the ruler off, so restore a small
+                    visible start–end range (or "all day"). aria-hidden — the
+                    full range already lives in the aria-label above. */}
+                {listMode && (
+                  <span className="day-list__time" aria-hidden="true">
+                    {ev.all_day ? t('views.allDay') : `${startStr} – ${endStr}`}
+                  </span>
+                )}
                 <span className="day-list__title">
                   {ev.title}
                   {span && (
@@ -563,156 +806,34 @@ export function DayView() {
             );
           })
         )}
-      </ul>
+        </ul>
+      </div>
 
-      {/* §9.4: untimed tasks on this day, rendered as natural-Tab-
-          order buttons below the listbox. Tasks with a concrete
-          deadline_time were already interleaved with events in the
-          listbox above (sorted by time), so only scheduled-only
-          tasks and By-window intermediate days surface here. Click
-          / Enter / Space opens the TaskDialog; status toggles live
-          in TaskView (the dedicated keyboard surface). */}
+      {/* §9.4 untimed tasks — always BELOW the grid (per Toni: the task band
+          stays under the grid, not above it). GRID mode styles them as a compact
+          band (`variant="band"`), LIST mode as the pre-grid full-width section.
+          The chips are natural-Tab-order buttons either way (NOT listbox
+          options), so the reading order is events first, then tasks. Tasks with a
+          concrete deadline_time were already interleaved with events in the
+          listbox above (sorted by time), so only scheduled-only tasks and
+          By-window intermediate days surface here. Click / Enter / Space opens
+          the TaskDialog; status toggles via the marker / Space. */}
       {untimedTasks.length > 0 && (
-        <section
-          className="day-tasks"
-          aria-label={t('views.day.tasksHeading')}
-        >
-          <h3 className="day-tasks__heading">
-            {t('views.day.tasksHeading')}
-          </h3>
-          <ul className="day-tasks__list">
-            {untimedTasks.map((task) => {
-              // "Due here" when the task is on this day because of its
-              // deadline (not its scheduled day) — that chip is the
-              // deadline marker ("fällig bis …"). A task scheduled today
-              // stays a plain work chip even with a later deadline.
-              const isBy = isDeadlineChip(task, dayKey);
-              // The scheduled chip now also announces its deadline (the
-              // deadline-day duplicate is suppressed in filterTasksOnDay), so
-              // use the "fällig bis …" label whenever the task carries a
-              // deadline — not only on a pure deadline marker.
-              const hasDeadline = task.deadline_date != null;
-              const labelKey = hasDeadline
-                ? 'views.week.taskChipBy'
-                : 'views.week.taskChip';
-              // Visible deadline badge on the SCHEDULED chip (a deadline-only
-              // marker, `isBy`, already sits on its own day so it needs none).
-              const deadlineBadge =
-                !isBy && task.deadline_date
-                  ? fmt.format(new Date(`${task.deadline_date}T00:00:00`), 'P')
-                  : '';
-              const color = resolveTaskColor(
-                task,
-                taskListById,
-                labelById,
-                sectionColorById,
-              );
-              const state = t(statusI18nKey(task.status));
-              const priorityGlyph = priorityMarker(task.priority);
-              const effortMod = visualEffortSizing
-                ? effortSizeModifier(task.effort)
-                : '';
-              return (
-                <li key={task.id} className="day-tasks__item">
-                  <button
-                    type="button"
-                    className={
-                      'day-task' +
-                      ` day-task--${task.status.replace('_', '-')}` +
-                      (isBy ? ' day-task--by' : '') +
-                      (effortMod ? ` day-task--effort-${effortMod}` : '')
-                    }
-                    // Default <button> would fire onClick on both
-                    // Space and Enter. We need different actions:
-                    // Space toggles done (matches the visual ☐/☑),
-                    // Enter opens the editor. Intercept here.
-                    onKeyDown={(ev) => {
-                      if (ev.key === ' ' || ev.key === 'Spacebar') {
-                        ev.preventDefault();
-                        void toggleTaskStatus(task);
-                      } else if (ev.key === 'Enter') {
-                        ev.preventDefault();
-                        openTaskDialog(task);
-                      } else if (
-                        ev.key === 'ContextMenu' ||
-                        (ev.shiftKey && ev.key === 'F10')
-                      ) {
-                        ev.preventDefault();
-                        const rect = (
-                          ev.currentTarget as HTMLElement
-                        ).getBoundingClientRect();
-                        void openTaskMenu(task, {
-                          x: rect.left,
-                          y: rect.bottom,
-                        });
-                      }
-                    }}
-                    onDoubleClick={(e) => {
-                      e.stopPropagation();
-                      openTaskDialog(task);
-                    }}
-                    onContextMenu={(ev) => {
-                      ev.preventDefault();
-                      ev.stopPropagation();
-                      void openTaskMenu(task);
-                    }}
-                    style={
-                      color.hex
-                        ? ({
-                            '--event-color': color.hex,
-                          } as React.CSSProperties)
-                        : undefined
-                    }
-                    aria-label={
-                      t(labelKey, {
-                        title: task.title,
-                        deadline: task.deadline_date
-                          ? fmt.format(
-                              new Date(`${task.deadline_date}T00:00:00`),
-                              'PPP',
-                            )
-                          : '',
-                        state,
-                        priority: prioritySuffix(t, task.priority),
-                        progress: subtaskProgressSuffix(t, task.id, tasks),
-                        assignee: assigneeSuffix(t, task.assignees),
-                      }) +
-                      subtaskParentSuffix(t, task, tasks) +
-                      effortSuffix(t, task.effort)
-                    }
-                  >
-                    <span
-                      className="day-task__marker day-task__marker--clickable"
-                      aria-hidden="true"
-                      onClick={(ev) => {
-                        ev.stopPropagation();
-                        void toggleTaskStatus(task);
-                      }}
-                    >
-                      {statusMarker(task.status)}
-                    </span>
-                    <span className="day-task__title">
-                      {task.parent_id ? '↳ ' : ''}
-                      {task.title}
-                    </span>
-                    {priorityGlyph && (
-                      <span className="day-task__priority" aria-hidden="true">
-                        {priorityGlyph}
-                      </span>
-                    )}
-                    {deadlineBadge && (
-                      <span className="day-task__deadline" aria-hidden="true">
-                        {t('views.week.taskChipDeadlineBadge', {
-                          deadline: deadlineBadge,
-                        })}
-                      </span>
-                    )}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
+        <DayUntimedTasks
+          variant={listMode ? 'section' : 'band'}
+          tasks={untimedTasks}
+          dayKey={dayKey}
+          allTasks={tasks}
+          fmt={fmt}
+          t={t}
+          taskListById={taskListById}
+          labelById={labelById}
+          sectionColorById={sectionColorById}
+          visualEffortSizing={visualEffortSizing}
+          onToggle={toggleTaskStatus}
+          onOpen={openTaskDialog}
+          onContextMenu={openTaskMenu}
+        />
       )}
 
       <ConfirmDialog
@@ -738,6 +859,218 @@ export function DayView() {
           if (scopeTarget) void performDelete(scopeTarget, 'series');
         }}
       />
+    </section>
+  );
+}
+
+/**
+ * §9.4 untimed-task chips for the day surface. Rendered in one of two
+ * places depending on `dayViewMode`:
+ *
+ *  - `variant="band"` (GRID mode): a compact horizontal flex-wrap bar
+ *    ABOVE the hour-grid, styled like the all-day band — so a sighted
+ *    user finds the untimed work at the top instead of scrolling past
+ *    the whole 24h canvas.
+ *  - `variant="section"` (LIST mode): the original dedicated section
+ *    BELOW the list (unchanged pre-grid placement).
+ *
+ * The chips themselves are byte-for-byte identical between the two
+ * variants — same `<button className="day-task">`, same a11y label
+ * (incl. the effort suffix), same keyboard / mouse / drag / context
+ * handlers. They are plain Tab-order buttons in BOTH cases (NOT part
+ * of the listbox aria-activedescendant nav). Only the wrapping
+ * container + its CSS differ. Factored here so the markup isn't
+ * duplicated across the two render sites in DayView.
+ */
+function DayUntimedTasks({
+  variant,
+  tasks,
+  dayKey,
+  allTasks,
+  fmt,
+  t,
+  taskListById,
+  labelById,
+  sectionColorById,
+  visualEffortSizing,
+  onToggle,
+  onOpen,
+  onContextMenu,
+}: {
+  variant: 'band' | 'section';
+  tasks: Task[];
+  dayKey: string;
+  allTasks: Task[];
+  fmt: ReturnType<typeof useDateFormat>;
+  t: ReturnType<typeof useTranslation>['t'];
+  taskListById: Map<string, TaskList>;
+  labelById: Map<string, ColorLabel>;
+  sectionColorById: Map<string, string>;
+  visualEffortSizing: boolean;
+  onToggle: (task: Task) => void | Promise<void>;
+  onOpen: (task: Task) => void;
+  onContextMenu: (
+    task: Task,
+    position?: { x: number; y: number },
+  ) => void | Promise<void>;
+}) {
+  return (
+    <section
+      className={
+        'day-tasks' + (variant === 'band' ? ' day-tasks--band' : '')
+      }
+      aria-label={t('views.day.tasksHeading')}
+    >
+      <h3 className="day-tasks__heading">{t('views.day.tasksHeading')}</h3>
+      <ul className="day-tasks__list">
+        {tasks.map((task) => {
+          // "Due here" when the task is on this day because of its
+          // deadline (not its scheduled day) — that chip is the
+          // deadline marker ("fällig bis …"). A task scheduled today
+          // stays a plain work chip even with a later deadline.
+          const isBy = isDeadlineChip(task, dayKey);
+          // The scheduled chip now also announces its deadline (the
+          // deadline-day duplicate is suppressed in filterTasksOnDay), so
+          // use the "fällig bis …" label whenever the task carries a
+          // deadline — not only on a pure deadline marker.
+          const hasDeadline = task.deadline_date != null;
+          const labelKey = hasDeadline
+            ? 'views.week.taskChipBy'
+            : 'views.week.taskChip';
+          // Visible deadline badge on the SCHEDULED chip (a deadline-only
+          // marker, `isBy`, already sits on its own day so it needs none).
+          const deadlineBadge =
+            !isBy && task.deadline_date
+              ? fmt.format(new Date(`${task.deadline_date}T00:00:00`), 'P')
+              : '';
+          const color = resolveTaskColor(
+            task,
+            taskListById,
+            labelById,
+            sectionColorById,
+          );
+          const state = t(statusI18nKey(task.status));
+          const priorityGlyph = priorityMarker(task.priority);
+          const effortMod = visualEffortSizing
+            ? effortSizeModifier(task.effort)
+            : '';
+          return (
+            <li key={task.id} className="day-tasks__item">
+              <button
+                type="button"
+                className={
+                  'day-task' +
+                  ` day-task--${task.status.replace('_', '-')}` +
+                  (isBy ? ' day-task--by' : '') +
+                  (effortMod ? ` day-task--effort-${effortMod}` : '')
+                }
+                // Default <button> would fire onClick on both
+                // Space and Enter. We need different actions:
+                // Space toggles done (matches the visual ☐/☑),
+                // Enter opens the editor. Intercept here.
+                onKeyDown={(ev) => {
+                  if (ev.key === ' ' || ev.key === 'Spacebar') {
+                    ev.preventDefault();
+                    void onToggle(task);
+                  } else if (ev.key === 'Enter') {
+                    ev.preventDefault();
+                    onOpen(task);
+                  } else if (
+                    ev.key === 'ContextMenu' ||
+                    (ev.shiftKey && ev.key === 'F10')
+                  ) {
+                    ev.preventDefault();
+                    const rect = (
+                      ev.currentTarget as HTMLElement
+                    ).getBoundingClientRect();
+                    void onContextMenu(task, {
+                      x: rect.left,
+                      y: rect.bottom,
+                    });
+                  }
+                }}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  onOpen(task);
+                }}
+                onContextMenu={(ev) => {
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  void onContextMenu(task);
+                }}
+                // Drag-to-reschedule is a band-only affordance: the
+                // pre-grid LIST section never carried it, so keep that
+                // surface byte-for-byte (no drag) and only the compact
+                // grid-mode band gets the draggable chip, matching how
+                // the grid's other task chips drag.
+                draggable={variant === 'band'}
+                onDragStart={
+                  variant === 'band'
+                    ? (dev) => {
+                        setTaskDrag(
+                          dev.dataTransfer,
+                          task,
+                          allTasks.filter((c) => c.parent_id === task.id),
+                        );
+                      }
+                    : undefined
+                }
+                style={
+                  color.hex
+                    ? ({
+                        '--event-color': color.hex,
+                      } as React.CSSProperties)
+                    : undefined
+                }
+                aria-label={
+                  t(labelKey, {
+                    title: task.title,
+                    deadline: task.deadline_date
+                      ? fmt.format(
+                          new Date(`${task.deadline_date}T00:00:00`),
+                          'PPP',
+                        )
+                      : '',
+                    state,
+                    priority: prioritySuffix(t, task.priority),
+                    progress: subtaskProgressSuffix(t, task.id, allTasks),
+                    assignee: assigneeSuffix(t, task.assignees),
+                  }) +
+                  subtaskParentSuffix(t, task, allTasks) +
+                  effortSuffix(t, task.effort)
+                }
+              >
+                <span
+                  className="day-task__marker day-task__marker--clickable"
+                  aria-hidden="true"
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    void onToggle(task);
+                  }}
+                >
+                  {statusMarker(task.status)}
+                </span>
+                <span className="day-task__title">
+                  {task.parent_id ? '↳ ' : ''}
+                  {task.title}
+                </span>
+                {priorityGlyph && (
+                  <span className="day-task__priority" aria-hidden="true">
+                    {priorityGlyph}
+                  </span>
+                )}
+                {deadlineBadge && (
+                  <span className="day-task__deadline" aria-hidden="true">
+                    {t('views.week.taskChipDeadlineBadge', {
+                      deadline: deadlineBadge,
+                    })}
+                  </span>
+                )}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     </section>
   );
 }
