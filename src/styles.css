@@ -3551,7 +3551,7 @@ button[aria-disabled='true'] {
 }
 .day-grid__ruler-scale {
   position: relative;
-  height: calc(24 * var(--hour-px, 2.5rem));
+  height: calc(var(--day-hours, 24) * var(--hour-px, 2.5rem));
 }
 .day-grid__ruler-hour {
   position: absolute;
@@ -3571,7 +3571,7 @@ button[aria-disabled='true'] {
   flex: 1;
   min-width: 0;
   position: relative;
-  height: calc(24 * var(--hour-px, 2.5rem));
+  height: calc(var(--day-hours, 24) * var(--hour-px, 2.5rem));
   background-image: repeating-linear-gradient(
     to bottom,
     var(--color-border) 0,
@@ -3579,6 +3579,20 @@ button[aria-disabled='true'] {
     transparent 1px,
     transparent var(--hour-px, 2.5rem)
   );
+  /* When the window starts on a half-hour, shift the hourly gridline pattern by
+     that fraction of an hour so the lines still land on whole hours (matching
+     the ruler ticks). 0 for a whole-hour start. */
+  background-position-y: calc(var(--day-grid-line-frac, 0) * var(--hour-px, 2.5rem));
+}
+
+/* A timed item that falls ENTIRELY outside the visible day window — parked as a
+   thin chip at the top (before) / bottom (after) edge of the canvas. Dashed +
+   slightly transparent so it reads as "outside the shown hours"; the real time
+   stays in the option's accessible label. */
+.day-list__item--outside {
+  opacity: 0.85;
+  border-style: dashed;
+  z-index: 5;
 }
 
 /* Compact-list layout (calendar.dayViewMode === 'list'). The hour ruler +
