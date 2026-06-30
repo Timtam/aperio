@@ -329,6 +329,7 @@ async function moveOrCopyTask(
     scheduled_time: task.scheduled_time,
     deadline_date: task.deadline_date,
     deadline_time: task.deadline_time,
+    deadline_reminder_days: task.deadline_reminder_days,
     recurrence: task.recurrence,
     parent_id: null,
     // Copy lands in another list whose sections differ — start ungrouped.
@@ -351,6 +352,7 @@ async function moveOrCopyTask(
       scheduled_time: child.scheduled_time,
       deadline_date: child.deadline_date,
       deadline_time: child.deadline_time,
+      deadline_reminder_days: child.deadline_reminder_days,
       recurrence: child.recurrence,
       parent_id: newParent.id,
       section_id: null,

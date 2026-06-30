@@ -827,17 +827,8 @@ button[aria-disabled='true'] {
   padding: var(--space-1) 0;
 }
 
-/* Per-list override rows (#124). One subsection per account, each
- * with a vertical list of "list name + three tri-state selects"
- * rows. Selects sit on one line on a wide screen and wrap on a
- * narrow one — `flex-wrap` does the work. */
-.tasks-settings__list-group {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding-top: var(--space-2);
-}
-
+/* A bare vertical list reset (no bullets/margins), shared by the Contacts
+ * panel and other settings lists. */
 .tasks-settings__list {
   list-style: none;
   margin: 0;
@@ -847,19 +838,10 @@ button[aria-disabled='true'] {
   gap: var(--space-2);
 }
 
-.tasks-settings__list-row {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-}
-
-.tasks-settings__list-name {
-  font-weight: 500;
-}
-
+/* The per-list override detail pane (#124): three tri-state selects that sit
+ * on one line on a wide screen and wrap on a narrow one — `flex-wrap` does the
+ * work. (The per-list master/detail itself reuses the `calendars-panel__*`
+ * selector styles.) */
 .tasks-settings__list-controls {
   display: flex;
   flex-wrap: wrap;

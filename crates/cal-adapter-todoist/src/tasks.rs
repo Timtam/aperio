@@ -767,6 +767,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
     let mut resurface_date = None;
     let mut series_id = None;
     let mut effort = cal_core::TaskEffort::default();
+    let mut deadline_reminder_days = None;
     if let Some(extras) = &extras {
         cal_core::apply_task_extras(
             extras,
@@ -774,6 +775,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
             &mut resurface_date,
             &mut series_id,
             &mut effort,
+            &mut deadline_reminder_days,
         );
     }
 
@@ -793,6 +795,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         // date+no-time and accept that any locally-set
         // `deadline_time` is lost on the next round-trip.
         deadline_time: None,
+        deadline_reminder_days,
         recurrence,
         parent_id: entry.parent_id.filter(|s| !s.is_empty()),
         section_id: entry.section_id.filter(|s| !s.is_empty()),
@@ -821,8 +824,15 @@ fn todoist_description(
     resurface_date: Option<NaiveDate>,
     series_id: Option<&str>,
     effort: cal_core::TaskEffort,
+    deadline_reminder_days: Option<i64>,
 ) -> Option<String> {
-    let extras = cal_core::extras_for_task(recurrence, resurface_date, series_id, effort);
+    let extras = cal_core::extras_for_task(
+        recurrence,
+        resurface_date,
+        series_id,
+        effort,
+        deadline_reminder_days,
+    );
     cal_core::extras::embed(description, &extras).filter(|s| !s.is_empty())
 }
 
@@ -849,6 +859,7 @@ fn new_task_to_create_body(list_id: &str, new: &NewTask) -> CreateTaskBody {
             new.resurface_date,
             new.series_id.as_deref(),
             new.effort,
+            new.deadline_reminder_days,
         ),
         priority: Some(aperio_priority_to_todoist(new.priority)),
         assignee_id: first_assignee_id(&new.assignees),
@@ -875,6 +886,7 @@ fn task_to_update_body(task: &Task) -> UpdateTaskBody {
             task.resurface_date,
             task.series_id.as_deref(),
             task.effort,
+            task.deadline_reminder_days,
         ),
         priority: Some(aperio_priority_to_todoist(task.priority)),
         assignee_id: first_assignee_id(&task.assignees),
@@ -1277,6 +1289,7 @@ mod tests {
             status: TaskStatus::Open,
             priority: TaskPriority::High,
             effort: cal_core::TaskEffort::Medium,
+            deadline_reminder_days: None,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()),
             scheduled_time: None,
             deadline_date: Some(NaiveDate::from_ymd_opt(2026, 5, 23).unwrap()),
@@ -1511,6 +1524,7 @@ mod tests {
             status: TaskStatus::Completed,
             priority: TaskPriority::Medium,
             effort: cal_core::TaskEffort::Medium,
+            deadline_reminder_days: None,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,
@@ -1569,6 +1583,7 @@ mod tests {
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
             effort: cal_core::TaskEffort::Medium,
+            deadline_reminder_days: None,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,
@@ -1629,6 +1644,7 @@ mod tests {
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
             effort: cal_core::TaskEffort::Medium,
+            deadline_reminder_days: None,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,
@@ -1679,6 +1695,7 @@ mod tests {
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
             effort: cal_core::TaskEffort::Medium,
+            deadline_reminder_days: None,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,
@@ -1949,6 +1966,7 @@ mod tests {
             status: TaskStatus::Open,
             priority: TaskPriority::Low,
             effort: cal_core::TaskEffort::Medium,
+            deadline_reminder_days: None,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,

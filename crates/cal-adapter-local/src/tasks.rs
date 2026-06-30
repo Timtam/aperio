@@ -238,9 +238,10 @@ impl LocalAdapter {
                 "INSERT INTO tasks (
                     id, list_id, parent_id, section_id, title, description, status, priority,
                     effort, scheduled_date, scheduled_time, deadline_date, deadline_time,
+                    deadline_reminder_days,
                     recurrence, resurface_date, series_id, color_label_id, reminders, sound,
                     created_at, updated_at, completed_at, etag
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
                 params![
                     id,
                     list_id,
@@ -255,6 +256,7 @@ impl LocalAdapter {
                     task.scheduled_time.as_ref().map(fmt_time),
                     task.deadline_date.as_ref().map(fmt_date),
                     task.deadline_time.as_ref().map(fmt_time),
+                    task.deadline_reminder_days,
                     recurrence_json,
                     task.resurface_date.as_ref().map(fmt_date),
                     task.series_id,
@@ -280,6 +282,7 @@ impl LocalAdapter {
             scheduled_time: task.scheduled_time,
             deadline_date: task.deadline_date,
             deadline_time: task.deadline_time,
+            deadline_reminder_days: task.deadline_reminder_days,
             recurrence: task.recurrence,
             resurface_date: task.resurface_date,
             series_id: task.series_id,
@@ -356,7 +359,7 @@ impl LocalAdapter {
                 "UPDATE tasks
                     SET list_id = ?, parent_id = ?, section_id = ?, title = ?, description = ?,
                         status = ?, priority = ?, effort = ?, scheduled_date = ?, scheduled_time = ?,
-                        deadline_date = ?, deadline_time = ?,
+                        deadline_date = ?, deadline_time = ?, deadline_reminder_days = ?,
                         recurrence = ?, resurface_date = ?, series_id = ?, color_label_id = ?,
                         reminders = ?, sound = ?,
                         updated_at = ?, completed_at = ?, etag = ?
@@ -374,6 +377,7 @@ impl LocalAdapter {
                     task.scheduled_time.as_ref().map(fmt_time),
                     task.deadline_date.as_ref().map(fmt_date),
                     task.deadline_time.as_ref().map(fmt_time),
+                    task.deadline_reminder_days,
                     recurrence_json,
                     task.resurface_date.as_ref().map(fmt_date),
                     task.series_id,
@@ -569,7 +573,7 @@ impl LocalAdapter {
                         priority, scheduled_date, scheduled_time, deadline_date,
                         deadline_time, recurrence, color_label_id, reminders, sound,
                         created_at, updated_at, completed_at, etag, section_id,
-                        resurface_date, series_id, effort
+                        resurface_date, series_id, effort, deadline_reminder_days
                    FROM tasks WHERE id = ?",
             )
             .map_err(map_sql_err)?;
@@ -765,7 +769,7 @@ const TASK_SELECT: &str = "SELECT id, list_id, parent_id, title, description, st
             priority, scheduled_date, scheduled_time, deadline_date,
             deadline_time, recurrence, color_label_id, reminders, sound,
             created_at, updated_at, completed_at, etag, section_id,
-            resurface_date, series_id, effort
+            resurface_date, series_id, effort, deadline_reminder_days
        FROM tasks
       WHERE list_id = ?
       ORDER BY COALESCE(scheduled_date, deadline_date, ''), created_at";
@@ -925,6 +929,7 @@ pub(crate) fn row_to_task(row: &rusqlite::Row<'_>) -> cal_core::Result<Task> {
     };
     let series_id = opt_text(row, 21)?;
     let effort = parse_task_effort(&req_text(row, 22)?)?;
+    let deadline_reminder_days: Option<i64> = row.get(23).map_err(map_sql_err)?;
 
     Ok(Task {
         assignees: Vec::new(),
@@ -939,6 +944,7 @@ pub(crate) fn row_to_task(row: &rusqlite::Row<'_>) -> cal_core::Result<Task> {
         scheduled_time,
         deadline_date,
         deadline_time,
+        deadline_reminder_days,
         recurrence,
         resurface_date,
         series_id,
@@ -982,6 +988,7 @@ mod tests {
             scheduled_time: None,
             deadline_date: None,
             deadline_time: None,
+            deadline_reminder_days: None,
             recurrence: None,
             resurface_date: None,
             series_id: None,
@@ -1057,6 +1064,34 @@ mod tests {
             tasks[0].deadline_date,
             Some(NaiveDate::from_ymd_opt(2026, 7, 31).unwrap())
         );
+    }
+
+    #[tokio::test]
+    async fn deadline_reminder_days_roundtrips() {
+        // `deadline_reminder_days` is read positionally (row index 23 in
+        // `row_to_task`) after a hand-edited multi-column SELECT, so a swapped
+        // index would silently mis-map it. Set distinct neighbours (a Large
+        // effort at index 22, a known series id at 21) so a slip onto either
+        // would surface as a wrong value here. The chosen 7 is also a preset,
+        // but the point is the column round-trips intact.
+        let (a, list) = adapter_with_list();
+        let mut nt = mk_task("Renew passport");
+        nt.deadline_date = Some(NaiveDate::from_ymd_opt(2026, 8, 1).unwrap());
+        nt.deadline_reminder_days = Some(7);
+        nt.effort = TaskEffort::Large;
+        nt.series_id = Some("series-passport".into());
+        let created = a.create_task(&list.id, nt).await.unwrap();
+
+        // Read back via the by-id path…
+        let by_id = a.get_task_by_id(&created.id).unwrap().unwrap();
+        assert_eq!(by_id.deadline_reminder_days, Some(7));
+        assert_eq!(by_id.effort, TaskEffort::Large);
+        assert_eq!(by_id.series_id.as_deref(), Some("series-passport"));
+
+        // …and via the list path (a different SELECT, same `row_to_task`).
+        let listed = a.get_tasks(&list.id).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].deadline_reminder_days, Some(7));
     }
 
     #[tokio::test]

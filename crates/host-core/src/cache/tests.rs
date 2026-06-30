@@ -80,6 +80,7 @@ fn task(id: &str) -> Task {
         status: TaskStatus::Open,
         priority: TaskPriority::Medium,
         effort: cal_core::TaskEffort::Medium,
+        deadline_reminder_days: None,
         scheduled_date: None,
         scheduled_time: None,
         deadline_date: None,

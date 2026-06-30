@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
+import { buildReminderGroups, reminderCount } from '@aperio/shared';
+
 import { useAnnouncer } from '../a11y/announcerContext';
 import type { Task } from '../api/types';
 import {
@@ -13,6 +15,7 @@ import {
 import { todayIsoKey } from '../intl/taskDay';
 import { useCurrentUserByList } from '../state/currentUser';
 import { useDialogState } from '../state/dialogStateContext';
+import { notify } from '../state/notify';
 import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
 import type {
   CarryOverDefault,
@@ -69,8 +72,15 @@ export function DayStartReviewChecker() {
   } = useDialogState();
   const announce = useAnnouncer();
   const { t } = useTranslation();
-  const { effectiveForList, dayStartTrigger, hydrating } =
-    useTaskCascadeEnabled();
+  const {
+    effectiveForList,
+    dayStartTrigger,
+    hydrating,
+    remindUntimedToday,
+    remindDeadlineArrived,
+    remindDeadlineCountdown,
+    deadlineCountdownDays,
+  } = useTaskCascadeEnabled();
   const { showToast } = useToast();
   const todayKey = useCurrentDayKey();
   // Persistent fire marker — hydrated from localStorage on mount so a
@@ -94,6 +104,10 @@ export function DayStartReviewChecker() {
     // Snooze respects the user's "Später erinnern" choice. Do NOT
     // mark fired — when the snooze expires, the next tick should
     // run the gate properly.
+    // Coupling note: snoozing the review also defers the day's
+    // reminders — bailing here skips the announce + OS notification
+    // below too, so a snoozed user gets the reminders when the gate
+    // re-runs after the snooze, not a separate nag. Intentional.
     if (isDayStartReviewSnoozed()) return;
     // Wait until the connected-user identity is resolved for every list, so the
     // review never proposes (or silently carries over) a colleague's task — that
@@ -114,6 +128,70 @@ export function DayStartReviewChecker() {
     // is the answer there.
     firedRef.current = todayKey;
     writeFiredDayKey('dayStartReview', todayKey);
+
+    // ── Day-start TASK REMINDERS ──────────────────────────────────────
+    // Three read-only nudges, each gated by its own toggle, sharing the
+    // same 'dayStartReview' fire-marker so they surface once a day with
+    // the review. The groups are DE-DUPLICATED (a deadline-pinned task is
+    // counted/announced ONCE) by the shared `buildReminderGroups`, the
+    // same helper the dialog renders from — so the spoken count, the OS
+    // notification, and the visible rows always agree. The predicates
+    // already skip settled tasks, project parents, and other-user tasks.
+    const reminderGroups = buildReminderGroups(
+      tasks,
+      {
+        remindUntimedToday,
+        remindDeadlineArrived,
+        remindDeadlineCountdown,
+        deadlineCountdownDays,
+      },
+      meFor,
+    );
+    const reminderTotal = reminderCount(reminderGroups);
+
+    // The live region is a SINGLE polite channel — three sequential
+    // announce() calls would clobber each other, leaving only the last
+    // spoken. Coalesce every non-empty group summary into ONE utterance.
+    const reminderParts: string[] = [];
+    if (reminderGroups.untimed.length > 0) {
+      reminderParts.push(
+        t('dialogs.dayStartReview.reminders.untimedToday', {
+          count: reminderGroups.untimed.length,
+        }),
+      );
+    }
+    if (reminderGroups.dueToday.length > 0) {
+      reminderParts.push(
+        t('dialogs.dayStartReview.reminders.deadlineArrived', {
+          count: reminderGroups.dueToday.length,
+        }),
+      );
+    }
+    if (reminderGroups.countdown.length > 0) {
+      // Summary only — the per-task remaining days (1..window) differ, so the
+      // spoken roll-up stays generic ("N tasks with an upcoming deadline").
+      reminderParts.push(
+        t('dialogs.dayStartReview.reminders.countdown', {
+          count: reminderGroups.countdown.length,
+        }),
+      );
+    }
+    if (reminderParts.length > 0) {
+      announce(reminderParts.join('. '), 'polite');
+    }
+    if (reminderTotal > 0) {
+      // One combined OS notification for the "you're not looking at
+      // Aperio" reach. The live announcement above already carries the
+      // per-group detail for assistive tech; this is the secondary
+      // channel and is suppressed silently if permission isn't granted.
+      void notify(
+        t('dialogs.dayStartReview.reminders.notificationTitle'),
+        t('dialogs.dayStartReview.reminders.notificationBody', {
+          count: reminderTotal,
+        }),
+        'day-start reminders notification',
+      );
+    }
 
     // Group slipped tasks by list and split by each list's carry-over
     // default. Tasks in lists set to 'ask' end up in the dialog; tasks
@@ -163,16 +241,19 @@ export function DayStartReviewChecker() {
           });
         }
         // Dialog opens iff there's still something to talk about —
-        // either an overdue row or a slipped row whose list voted
-        // 'ask'.
-        if (overdue.length + askRows.length > 0) openDayStartReview();
+        // an overdue row, a slipped row whose list voted 'ask', or any
+        // reminder (the reminders section is informational but still a
+        // reason to surface the dialog).
+        if (overdue.length + askRows.length + reminderTotal > 0) {
+          openDayStartReview();
+        }
       })();
       return;
     }
 
-    // No silent work: pure ask-mode. Open the dialog if there's
-    // anything in either section, otherwise stay quiet.
-    if (overdue.length + askRows.length === 0) return;
+    // No silent work: pure ask-mode. Open the dialog if there's anything
+    // in either section OR any reminder to show, otherwise stay quiet.
+    if (overdue.length + askRows.length + reminderTotal === 0) return;
     openDayStartReview();
   }, [
     loading,
@@ -181,6 +262,10 @@ export function DayStartReviewChecker() {
     currentUserByList,
     effectiveForList,
     dayStartTrigger,
+    remindUntimedToday,
+    remindDeadlineArrived,
+    remindDeadlineCountdown,
+    deadlineCountdownDays,
     todayKey,
     dialogMode.kind,
     openDayStartReview,

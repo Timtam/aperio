@@ -3,9 +3,11 @@ import { AccessibilityInfo, AppState } from 'react-native';
 
 import {
   actionableDescendants,
+  buildReminderGroups,
   filterCarriedOver,
   filterDeadlinePinTargets,
   filterOverdue,
+  reminderCount,
   shouldFireToday,
   todayIsoKey,
 } from '@aperio/shared';
@@ -13,6 +15,7 @@ import type { Task, TaskUser } from '@aperio/shared';
 import i18n from '../../i18n';
 
 import { getTasks, listTaskLists, updateTask } from '../api/client';
+import { notify } from './notify';
 import { currentUserForList } from './currentUser';
 import { readFiredDayKey, writeFiredDayKey } from './dayStartFired';
 import { isDayStartReviewSnoozed } from './dayStartSnooze';
@@ -139,7 +142,10 @@ async function runDayStartReview(
   const fired = await readFiredDayKey('dayStartReview');
   if (!shouldFireToday(behaviour.dayStartTrigger, fired, todayKey)) return;
   // Snooze respects the user's "remind me later" choice. Do NOT mark fired —
-  // the next eligible tick should run the gate once the snooze expires.
+  // the next eligible tick should run the gate once the snooze expires. NB: this
+  // bail also defers the day's TASK REMINDERS (announcement + notification +
+  // modal) — they're computed below this gate, so a snooze suppresses them too,
+  // and they re-surface together with the review once the snooze expires.
   if (await isDayStartReviewSnoozed()) return;
   if (selectedIds.length === 0) {
     // Nothing in scope; still record the fire so we don't keep re-checking.
@@ -153,6 +159,69 @@ async function runDayStartReview(
   await writeFiredDayKey('dayStartReview', todayKey);
 
   const meFor = await meForTasks(all);
+
+  // ── Day-start TASK REMINDERS ────────────────────────────────────────────
+  // Three read-only nudges, each gated by its own toggle, sharing this same
+  // 'dayStartReview' fire-marker so they surface once a day with the review.
+  // Built via the SHARED `buildReminderGroups` so a task lands in exactly ONE
+  // group (due-today > planned-today > countdown) and the spoken count, the OS
+  // notification, and the modal's rendered rows all agree. The predicates skip
+  // settled tasks, project parents, and other-user tasks (via `meFor`).
+  const reminders = buildReminderGroups(
+    all,
+    {
+      remindUntimedToday: behaviour.remindUntimedToday,
+      remindDeadlineArrived: behaviour.remindDeadlineArrived,
+      remindDeadlineCountdown: behaviour.remindDeadlineCountdown,
+      deadlineCountdownDays: behaviour.deadlineCountdownDays,
+    },
+    meFor,
+  );
+  const reminderTotal = reminderCount(reminders);
+
+  // Coalesce the per-group lines into ONE polite live announcement: three
+  // back-to-back `announceForAccessibility` calls would each interrupt the
+  // previous, so a screen-reader user would only ever hear the last group.
+  // Joined with ". " they read as a single utterance.
+  const reminderParts: string[] = [];
+  if (reminders.untimed.length > 0) {
+    reminderParts.push(
+      i18n.t('dialogs.dayStartReview.reminders.untimedToday', {
+        count: reminders.untimed.length,
+      }),
+    );
+  }
+  if (reminders.dueToday.length > 0) {
+    reminderParts.push(
+      i18n.t('dialogs.dayStartReview.reminders.deadlineArrived', {
+        count: reminders.dueToday.length,
+      }),
+    );
+  }
+  if (reminders.countdown.length > 0) {
+    // Summary only — the per-task remaining days (1..window) differ, so the
+    // spoken roll-up stays generic ("N tasks with an upcoming deadline").
+    reminderParts.push(
+      i18n.t('dialogs.dayStartReview.reminders.countdown', {
+        count: reminders.countdown.length,
+      }),
+    );
+  }
+  if (reminderParts.length > 0) {
+    AccessibilityInfo.announceForAccessibility(reminderParts.join('. '));
+  }
+  if (reminderTotal > 0) {
+    // One combined OS notification for the "you're not looking at Aperio"
+    // reach. The single live announcement above already carries the per-group
+    // detail for assistive tech; this is the secondary channel and is
+    // suppressed silently if permission isn't granted.
+    void notify(
+      i18n.t('dialogs.dayStartReview.reminders.notificationTitle'),
+      i18n.t('dialogs.dayStartReview.reminders.notificationBody', { count: reminderTotal }),
+      'day-start reminders notification',
+    );
+  }
+
   const overdue = filterOverdue(all, meFor);
   const slipped = filterCarriedOver(all, {
     cascadeEnabledFor: (listId) => effectiveForList(behaviour, listId).cascade,
@@ -179,12 +248,13 @@ async function runDayStartReview(
   }
   if (todayRows.length + backlogRows.length > 0) invalidateData();
 
-  // Open the modal iff there's still a decision to make. Bump the data version
-  // first so the modal's own `useTasks` re-reads from the bridge rather than a
-  // possibly-stale warm cache — the checker read the bridge directly (a
-  // separate fan-out), so this keeps the modal authoritative over what it acts
-  // on and makes its loading-guard meaningful.
-  if (overdue.length + askRows.length > 0) {
+  // Open the modal iff there's still a decision to make OR a reminder to show
+  // (the reminders section is informational but still a reason to surface the
+  // modal). Bump the data version first so the modal's own `useTasks` re-reads
+  // from the bridge rather than a possibly-stale warm cache — the checker read
+  // the bridge directly (a separate fan-out), so this keeps the modal
+  // authoritative over what it acts on and makes its loading-guard meaningful.
+  if (overdue.length + askRows.length + reminderTotal > 0) {
     invalidateData();
     openReview();
   }

@@ -3635,6 +3635,7 @@ impl Host {
                 scheduled_time: task.scheduled_time,
                 deadline_date: task.deadline_date,
                 deadline_time: task.deadline_time,
+                deadline_reminder_days: task.deadline_reminder_days,
                 recurrence: task.recurrence.clone(),
                 resurface_date: task.resurface_date,
                 series_id: task.series_id.clone(),

@@ -141,6 +141,156 @@ export function filterDeadlinePinTargets(
   });
 }
 
+// ── Day-start TASK REMINDERS ────────────────────────────────────────────────
+// Three reminders surfaced at the day-start trigger (alongside carry-over /
+// deadline-pin), each gated by its own Settings toggle. Same structural rules as
+// the other selectors: skip settled tasks, suppress "project" parents (their
+// open subtasks are the real units), and never remind about a task owned by a
+// concrete OTHER user. PURE — `todayIsoKey()` reads the local wall-clock.
+
+/** Whole local calendar days from today until `task.deadline_date`: 0 = today,
+ *  negative = past, null = no deadline. Drives the countdown WINDOW check + the
+ *  per-task "in N days" label. Rounds so a 23/25h DST day doesn't drift. */
+export function daysUntilDeadline(task: Task): number | null {
+  if (!task.deadline_date) return null;
+  const [ty, tm, td] = todayIsoKey().split('-').map(Number);
+  const [dy, dm, dd] = task.deadline_date.split('-').map(Number);
+  const todayMs = new Date(ty, tm - 1, td).getTime();
+  const deadlineMs = new Date(dy, dm - 1, dd).getTime();
+  return Math.round((deadlineMs - todayMs) / 86_400_000);
+}
+
+/**
+ * Tasks scheduled for TODAY with NO time-of-day (`scheduled_time` null) and
+ * still actionable — the "you planned these for today" nudge. A task with a
+ * concrete scheduled_time already shows on the calendar's timeline, so it's not
+ * part of this untimed reminder.
+ */
+export function filterUntimedToday(
+  tasks: Task[],
+  meFor?: (listId: string) => TaskUser | null,
+): Task[] {
+  const today = todayIsoKey();
+  return tasks.filter((task) => {
+    if (task.scheduled_date !== today) return false;
+    if (task.scheduled_time != null) return false;
+    if (task.status === 'completed' || task.status === 'cancelled') return false;
+    if (hasActionableDescendants(task.id, tasks)) return false;
+    return meFor ? isMineOrUnassigned(task.assignees, meFor(task.list_id)) : true;
+  });
+}
+
+/**
+ * Tasks whose `deadline_date` is TODAY and still actionable — "the deadline is
+ * here". Unlike `filterDeadlinePinTargets` this does NOT exclude tasks already
+ * scheduled to today: the reminder fires regardless of whether the silent
+ * deadline-pin also moves it (the pin runs separately, after).
+ */
+export function filterDeadlineArrived(
+  tasks: Task[],
+  meFor?: (listId: string) => TaskUser | null,
+): Task[] {
+  const today = todayIsoKey();
+  return tasks.filter((task) => {
+    if (task.deadline_date !== today) return false;
+    if (task.status === 'completed' || task.status === 'cancelled') return false;
+    if (hasActionableDescendants(task.id, tasks)) return false;
+    return meFor ? isMineOrUnassigned(task.assignees, meFor(task.list_id)) : true;
+  });
+}
+
+/**
+ * Tasks whose deadline is APPROACHING — within the countdown WINDOW: the deadline
+ * is between 1 and the window-many days away (inclusive), still actionable. So a
+ * window of 3 nudges CUMULATIVELY — 3 days before, 2 days before, AND 1 day
+ * before (each day the deadline draws closer, the task stays in the set until the
+ * deadline day itself, which is `filterDeadlineArrived`, not this).
+ *
+ * `daysUntil` is the GLOBAL default window (`tasks.deadlineCountdownDays`). A task
+ * overrides it via `deadline_reminder_days` (honoured only when finite `>= 1`; a
+ * `null`/non-finite/`< 1` override falls back to the global). The per-task
+ * remaining days for the label is `daysUntilDeadline(task)`.
+ */
+export function filterDeadlineCountdown(
+  tasks: Task[],
+  daysUntil: number,
+  meFor?: (listId: string) => TaskUser | null,
+): Task[] {
+  const globalValid = Number.isFinite(daysUntil) && daysUntil >= 1;
+  return tasks.filter((task) => {
+    // Per-task override wins only when it's a finite window >= 1; else the global.
+    const override = task.deadline_reminder_days;
+    const window =
+      override != null && Number.isFinite(override) && override >= 1
+        ? override
+        : globalValid
+          ? daysUntil
+          : null;
+    if (window == null) return false;
+    if (task.status === 'completed' || task.status === 'cancelled') return false;
+    const days = daysUntilDeadline(task);
+    // 1..window: skip the deadline day (0 → filterDeadlineArrived) and anything
+    // already past or beyond the window.
+    if (days == null || days < 1 || days > window) return false;
+    if (hasActionableDescendants(task.id, tasks)) return false;
+    return meFor ? isMineOrUnassigned(task.assignees, meFor(task.list_id)) : true;
+  });
+}
+
+/** The four Settings → Tasks reminder knobs (synced). */
+export interface ReminderSettings {
+  remindUntimedToday: boolean;
+  remindDeadlineArrived: boolean;
+  remindDeadlineCountdown: boolean;
+  deadlineCountdownDays: number;
+}
+
+/** The three reminder groups, DE-DUPLICATED by task id. */
+export interface ReminderGroups {
+  /** Scheduled today, untimed (and not already due-today). */
+  untimed: Task[];
+  /** Deadline is today. */
+  dueToday: Task[];
+  /** Deadline exactly `deadlineCountdownDays` out (and not already in another group). */
+  countdown: Task[];
+}
+
+/**
+ * Build the three reminder groups for the day-start fire, each gated by its
+ * toggle and DE-DUPLICATED so a task surfaces in exactly ONE group (and is
+ * counted once). Priority: due-today > planned-today > countdown — a task the
+ * deadline-pin just pinned to today (so it satisfies BOTH `filterDeadlineArrived`
+ * and `filterUntimedToday`) reads as "due today", and a task already planned for
+ * today isn't also nagged about its future deadline. Both the checker (count +
+ * notification + announcement) and the dialog (rendered rows) call this, so the
+ * spoken count, the OS notification, and the visible rows always agree.
+ */
+export function buildReminderGroups(
+  tasks: Task[],
+  settings: ReminderSettings,
+  meFor?: (listId: string) => TaskUser | null,
+): ReminderGroups {
+  const dueToday = settings.remindDeadlineArrived
+    ? filterDeadlineArrived(tasks, meFor)
+    : [];
+  const seen = new Set(dueToday.map((t) => t.id));
+  const untimed = (
+    settings.remindUntimedToday ? filterUntimedToday(tasks, meFor) : []
+  ).filter((t) => !seen.has(t.id));
+  untimed.forEach((t) => seen.add(t.id));
+  const countdown = (
+    settings.remindDeadlineCountdown
+      ? filterDeadlineCountdown(tasks, settings.deadlineCountdownDays, meFor)
+      : []
+  ).filter((t) => !seen.has(t.id));
+  return { untimed, dueToday, countdown };
+}
+
+/** Total de-duplicated reminder count across the three groups. */
+export function reminderCount(groups: ReminderGroups): number {
+  return groups.untimed.length + groups.dueToday.length + groups.countdown.length;
+}
+
 /** The Settings → Tasks day-start-trigger pref: `'app-start'` or an `HH:MM`. */
 export type DayStartTrigger = string;
 

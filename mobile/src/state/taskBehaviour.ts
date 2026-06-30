@@ -44,6 +44,14 @@ export interface TaskBehaviour {
   autoSelfAssign: boolean;
   /** Render task tiles at different sizes by effort (small/medium/large). Default on. */
   visualEffortSizing: boolean;
+  /** Remind of today's untimed (date-only) scheduled tasks. Default on. */
+  remindUntimedToday: boolean;
+  /** Remind when a task's deadline day has arrived. Default on. */
+  remindDeadlineArrived: boolean;
+  /** Remind X days before a deadline (the X is `deadlineCountdownDays`). Default on. */
+  remindDeadlineCountdown: boolean;
+  /** Global "X days before a deadline" lead time (clamped 1..30). Default 3. */
+  deadlineCountdownDays: number;
   /** Single-day calendar layout: proportional hour-grid or compact list. Default grid. */
   dayViewMode: 'grid' | 'list';
   /** What a check-off does: flip open↔completed, or cycle through in_progress. */
@@ -60,6 +68,14 @@ const CASCADE_KEY = 'tasks.cascadeStatusCoupling';
 const AUTO_DATE_KEY = 'tasks.autoDateOnStart';
 const AUTO_SELF_ASSIGN_KEY = 'tasks.autoSelfAssign';
 const VISUAL_EFFORT_SIZING_KEY = 'tasks.visualEffortSizing';
+// Day-start reminder knobs (synced). Three on/off booleans (default ON) + a
+// numeric "X days before" lead time stored as a string like dayStartTrigger
+// (parsed + clamped 1..30 on hydrate). The reminder LOGIC that consumes these
+// lands in a later step; this module only owns the prefs.
+const REMIND_UNTIMED_TODAY_KEY = 'tasks.remindUntimedToday';
+const REMIND_DEADLINE_ARRIVED_KEY = 'tasks.remindDeadlineArrived';
+const REMIND_DEADLINE_COUNTDOWN_KEY = 'tasks.remindDeadlineCountdown';
+const DEADLINE_COUNTDOWN_DAYS_KEY = 'tasks.deadlineCountdownDays';
 // Cross-device synced single-day calendar layout. SAME key string as the
 // desktop toolbar's day-view-mode pref so the two sync 1:1 (must match exactly).
 const CALENDAR_DAY_VIEW_MODE_KEY = 'calendar.dayViewMode';
@@ -74,6 +90,10 @@ export const TASK_BEHAVIOUR_DEFAULTS: TaskBehaviour = {
   autoDate: true,
   autoSelfAssign: true,
   visualEffortSizing: true,
+  remindUntimedToday: true,
+  remindDeadlineArrived: true,
+  remindDeadlineCountdown: true,
+  deadlineCountdownDays: 3,
   dayViewMode: 'grid',
   checkoffMode: 'toggle',
   carryOverDefault: 'ask',
@@ -105,6 +125,24 @@ function parseBool(stored: string | null): boolean {
 
 function parseCheckoff(stored: string | null): CheckoffMode {
   return stored === 'cycle' ? 'cycle' : 'toggle';
+}
+
+/** Default "X days before a deadline" lead time + the clamp bounds. */
+export const DEADLINE_COUNTDOWN_DAYS_DEFAULT = 3;
+export const DEADLINE_COUNTDOWN_DAYS_MIN = 1;
+export const DEADLINE_COUNTDOWN_DAYS_MAX = 30;
+
+/** Parse the stored "X days before" string and clamp it to 1..30; anything
+ *  non-numeric / out of range falls back to the default of 3 (mirrors the
+ *  desktop TaskCascadeProvider hydration). */
+export function parseCountdownDays(stored: string | null): number {
+  if (stored === null) return DEADLINE_COUNTDOWN_DAYS_DEFAULT;
+  const n = Number.parseInt(stored, 10);
+  if (!Number.isFinite(n)) return DEADLINE_COUNTDOWN_DAYS_DEFAULT;
+  return Math.min(
+    DEADLINE_COUNTDOWN_DAYS_MAX,
+    Math.max(DEADLINE_COUNTDOWN_DAYS_MIN, n),
+  );
 }
 
 /** Parse + sanitise the listOverrides JSON per-list-per-field so one corrupt
@@ -145,6 +183,10 @@ export async function readTaskBehaviour(): Promise<TaskBehaviour> {
       autoDate,
       selfAssign,
       effortSizing,
+      remindUntimed,
+      remindDeadlineArrived,
+      remindDeadlineCountdown,
+      countdownDays,
       dayViewMode,
       checkoff,
       carryOver,
@@ -155,6 +197,10 @@ export async function readTaskBehaviour(): Promise<TaskBehaviour> {
       getUserPref(AUTO_DATE_KEY),
       getUserPref(AUTO_SELF_ASSIGN_KEY),
       getUserPref(VISUAL_EFFORT_SIZING_KEY),
+      getUserPref(REMIND_UNTIMED_TODAY_KEY),
+      getUserPref(REMIND_DEADLINE_ARRIVED_KEY),
+      getUserPref(REMIND_DEADLINE_COUNTDOWN_KEY),
+      getUserPref(DEADLINE_COUNTDOWN_DAYS_KEY),
       getUserPref(CALENDAR_DAY_VIEW_MODE_KEY),
       getUserPref(CHECKOFF_KEY),
       getUserPref(CARRY_OVER_KEY),
@@ -166,6 +212,10 @@ export async function readTaskBehaviour(): Promise<TaskBehaviour> {
       autoDate: parseBool(autoDate),
       autoSelfAssign: parseBool(selfAssign),
       visualEffortSizing: parseBool(effortSizing),
+      remindUntimedToday: parseBool(remindUntimed),
+      remindDeadlineArrived: parseBool(remindDeadlineArrived),
+      remindDeadlineCountdown: parseBool(remindDeadlineCountdown),
+      deadlineCountdownDays: parseCountdownDays(countdownDays),
       dayViewMode: dayViewMode === 'list' ? 'list' : 'grid',
       checkoffMode: parseCheckoff(checkoff),
       carryOverDefault: isCarryOverDefault(carryOver) ? carryOver : 'ask',
@@ -193,6 +243,23 @@ export const writeAutoSelfAssign = (v: boolean): Promise<void> =>
   writeBest(AUTO_SELF_ASSIGN_KEY, v ? 'true' : 'false');
 export const writeVisualEffortSizing = (v: boolean): Promise<void> =>
   writeBest(VISUAL_EFFORT_SIZING_KEY, v ? 'true' : 'false');
+export const writeRemindUntimedToday = (v: boolean): Promise<void> =>
+  writeBest(REMIND_UNTIMED_TODAY_KEY, v ? 'true' : 'false');
+export const writeRemindDeadlineArrived = (v: boolean): Promise<void> =>
+  writeBest(REMIND_DEADLINE_ARRIVED_KEY, v ? 'true' : 'false');
+export const writeRemindDeadlineCountdown = (v: boolean): Promise<void> =>
+  writeBest(REMIND_DEADLINE_COUNTDOWN_KEY, v ? 'true' : 'false');
+/** Persist the countdown lead time (clamped 1..30) as a string. */
+export const writeDeadlineCountdownDays = (v: number): Promise<void> => {
+  const clamped = Math.min(
+    DEADLINE_COUNTDOWN_DAYS_MAX,
+    Math.max(
+      DEADLINE_COUNTDOWN_DAYS_MIN,
+      Number.isFinite(v) ? Math.round(v) : DEADLINE_COUNTDOWN_DAYS_DEFAULT,
+    ),
+  );
+  return writeBest(DEADLINE_COUNTDOWN_DAYS_KEY, String(clamped));
+};
 export const writeDayViewMode = (m: 'grid' | 'list'): Promise<void> =>
   writeBest(CALENDAR_DAY_VIEW_MODE_KEY, m);
 export const writeCheckoffMode = (m: CheckoffMode): Promise<void> =>

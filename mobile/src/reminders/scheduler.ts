@@ -24,7 +24,7 @@ const HORIZON_MINUTES = 7 * 24 * 60;
  *  dropped silently past it). The soonest N are kept; a later reschedule (next
  *  foreground/mutation) rolls the window forward. */
 const MAX_SCHEDULED = 60;
-const CHANNEL_ID = 'reminders';
+export const CHANNEL_ID = 'reminders';
 /** Silent variant — a "Silent" reminder (§14.4) lands here: visible in the
  *  shade, no sound. Android couples sound to the channel (immutable per-channel),
  *  so a no-sound reminder needs its own LOW-importance channel rather than a
@@ -50,7 +50,10 @@ Notifications.setNotificationHandler({
 });
 
 let channelEnsured = false;
-async function ensureAndroidChannel(): Promise<void> {
+/** Create the Android notification channels (create-once; no-op on iOS or after
+ *  the first call). Exported so the day-start notifier delivers on the same
+ *  default channel without duplicating the dance. */
+export async function ensureAndroidChannel(): Promise<void> {
   if (Platform.OS !== 'android' || channelEnsured) return;
   // Android 8+ requires a channel; its name is what the user sees in system
   // settings to customise sound/importance per-app.
@@ -98,7 +101,10 @@ async function resolveDelivery(
   return { channelId: CHANNEL_ID, sound: 'default' };
 }
 
-async function ensurePermission(): Promise<boolean> {
+/** Ensure OS notification permission, prompting once if we still can. Shared
+ *  with the day-start reminder notifier (state/notify.ts) so both delivery
+ *  paths go through one permission flow — the user is asked at most once. */
+export async function ensurePermission(): Promise<boolean> {
   const current = await Notifications.getPermissionsAsync();
   if (current.granted) return true;
   if (!current.canAskAgain) return false;

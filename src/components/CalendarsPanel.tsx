@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useId, useMemo } from 'react';
 import { FocusableNote } from '../a11y/FocusableNote';
 import { useTranslation } from 'react-i18next';
 
@@ -7,10 +7,14 @@ import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
 import type { CalendarDayViewMode } from '../state/TaskCascadeProvider';
 import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
 import { RemindersEditor } from './RemindersEditor';
+import { SettingsSelectorDetail } from './SettingsSelectorDetail';
 import { SoundPrefField } from './SoundPrefField';
 
 /** Calendar day/week layout choices, rendered as a radio group. */
 const DAY_VIEW_MODE_OPTIONS: readonly CalendarDayViewMode[] = ['grid', 'list'];
+
+/** Stable id accessor for the selector (module scope so its identity holds). */
+const calendarItemId = (c: { id: string }) => c.id;
 
 /**
  * Calendars settings panel — per-calendar default reminders + sounds.
@@ -23,23 +27,16 @@ const DAY_VIEW_MODE_OPTIONS: readonly CalendarDayViewMode[] = ['grid', 'list'];
  * mismatch (iPhone alarm rings, Aperio shows nothing). The per-calendar
  * default closes the gap on the Aperio side. Local calendars work too.
  *
- * Accessibility — master/detail (DESIGN.md §6.5 keyboard-first idiom):
- * an earlier version rendered every calendar's full reminders editor +
- * sound picker inline, which produced ~8–12 focusable controls PER calendar
- * (dozens of accounts × calendars → 70–100+ tab stops) and, worse, never
- * told a screen-reader user WHICH calendar a focused control belonged to —
- * the calendar name was a bare `<span>`, the account an `<h3>`, neither
- * associated with the controls, so NVDA users needed object navigation.
- *
- * Now the panel is a single `role="listbox"` of calendars (one tab stop,
- * arrow-key navigable, grouped visually by account) where each option's
- * accessible name carries "{account} › {calendar}, {summary}" so the
- * source is always announced; plus a detail region that shows the editor
- * for ONLY the selected calendar, headed "Erinnerungen – {account} ›
- * {calendar}". Selection follows focus, so arrowing the list live-swaps the
- * detail; tabbing once lands in the selected calendar's editor and nothing
- * else. Tab count drops from ~per-calendar×N to "1 (list) + the one
- * calendar being edited".
+ * Accessibility — master/detail (DESIGN.md §6.5 keyboard-first idiom),
+ * factored into the shared `SettingsSelectorDetail`: an earlier version
+ * rendered every calendar's full reminders editor + sound picker inline,
+ * which produced ~8–12 focusable controls PER calendar (dozens of accounts ×
+ * calendars → 70–100+ tab stops) and, worse, never told a screen-reader user
+ * WHICH calendar a focused control belonged to. Now the panel is a single
+ * `role="listbox"` of calendars (one tab stop, arrow-key navigable, grouped
+ * visually by account) where each option's accessible name carries
+ * "{account} › {calendar}, {summary}", plus a detail region that shows the
+ * editor for ONLY the selected calendar.
  *
  * The panel reads the calendar catalog from `CalendarStore`; the hook fans
  * out one `getUserPref` per calendar on mount and writes are debounced.
@@ -63,7 +60,7 @@ export function CalendarsPanel() {
     return map;
   }, [accounts]);
 
-  const groups = useMemo(() => {
+  const selectorGroups = useMemo(() => {
     const byAccount = new Map<string, typeof calendars>();
     calendars.forEach((c) => {
       const list = byAccount.get(c.account_id) ?? [];
@@ -71,104 +68,29 @@ export function CalendarsPanel() {
       byAccount.set(c.account_id, list);
     });
     return [...byAccount.entries()].map(([accountId, cals]) => ({
-      accountId,
-      accountName:
+      id: accountId,
+      label:
         accountNameById.get(accountId) ??
         (accountId === 'local'
           ? t('dialogs.settings.calendars.localAccount')
           : accountId),
-      calendars: cals,
+      items: cals,
     }));
   }, [calendars, accountNameById, t]);
-
-  // Flat id order for arrow-key navigation across the account groups.
-  const orderedIds = useMemo(
-    () => groups.flatMap((g) => g.calendars.map((c) => c.id)),
-    [groups],
-  );
-
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-
-  // Keep a valid selection: default to the first calendar and recover if
-  // the selected one disappears (account removed mid-session, etc.).
-  useEffect(() => {
-    if (orderedIds.length === 0) {
-      if (selectedId !== null) setSelectedId(null);
-      return;
-    }
-    if (selectedId === null || !orderedIds.includes(selectedId)) {
-      setSelectedId(orderedIds[0]);
-    }
-  }, [orderedIds, selectedId]);
-
-  const idPrefix = useId();
-  const optionId = (id: string) => `${idPrefix}-opt-${id}`;
-  const detailHeadingId = `${idPrefix}-detail-h`;
 
   const dayViewModeHeadingId = useId();
   const dayViewModeHintId = useId();
   const dayViewModeGroupId = useId();
 
-  // Keep the active option visible: with aria-activedescendant the browser
-  // doesn't move DOM focus, so it won't auto-scroll the selection into view
-  // inside the (capped-height, scrollable) listbox. `block: 'nearest'`
-  // minimises movement. Optional-chained so it's a no-op where
-  // scrollIntoView isn't implemented (jsdom).
-  useEffect(() => {
-    if (!selectedId) return;
-    const el = document.getElementById(`${idPrefix}-opt-${selectedId}`);
-    el?.scrollIntoView?.({ block: 'nearest' });
-  }, [selectedId, idPrefix]);
-
-  // Account name + calendar for the currently selected option (detail head).
-  const selected = useMemo(() => {
-    for (const g of groups) {
-      const cal = g.calendars.find((c) => c.id === selectedId);
-      if (cal) return { cal, accountName: g.accountName };
-    }
-    return null;
-  }, [groups, selectedId]);
-
   // Spoken summary of a calendar's default-reminder count — folded into the
-  // option's accessible name so the screen reader announces the state
-  // without the user having to read the detail pane. Singular/plural picked
-  // in code to stay independent of the i18next plural-suffix convention.
+  // option's accessible name so the screen reader announces the state without
+  // the user having to read the detail pane. Singular/plural picked in code to
+  // stay independent of the i18next plural-suffix convention.
   const summaryFor = (id: string): string => {
     const n = getDefaultsFor(id).length;
     if (n === 0) return t('dialogs.settings.calendars.reminderSummaryNone');
     if (n === 1) return t('dialogs.settings.calendars.reminderSummaryOne');
     return t('dialogs.settings.calendars.reminderSummaryOther', { count: n });
-  };
-
-  const selectAt = (index: number) => {
-    if (orderedIds.length === 0) return;
-    const clamped = Math.min(orderedIds.length - 1, Math.max(0, index));
-    setSelectedId(orderedIds[clamped]);
-  };
-
-  const handleKey = (e: React.KeyboardEvent<HTMLUListElement>) => {
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
-    const cur = selectedId ? orderedIds.indexOf(selectedId) : -1;
-    switch (e.key) {
-      case 'ArrowDown':
-        e.preventDefault();
-        selectAt(cur + 1);
-        return;
-      case 'ArrowUp':
-        e.preventDefault();
-        selectAt(cur - 1);
-        return;
-      case 'Home':
-        e.preventDefault();
-        selectAt(0);
-        return;
-      case 'End':
-        e.preventDefault();
-        selectAt(orderedIds.length - 1);
-        return;
-      default:
-        return;
-    }
   };
 
   return (
@@ -186,10 +108,7 @@ export function CalendarsPanel() {
         className="calendars-panel__group"
         aria-label={t('dialogs.settings.calendars.dayViewMode.heading')}
       >
-        <h3
-          id={dayViewModeHeadingId}
-          className="calendars-panel__account"
-        >
+        <h3 id={dayViewModeHeadingId} className="calendars-panel__account">
           {t('dialogs.settings.calendars.dayViewMode.heading')}
         </h3>
         <p id={dayViewModeHintId} className="form__hint">
@@ -229,9 +148,7 @@ export function CalendarsPanel() {
         <h3 className="calendars-panel__account">
           {t('dialogs.settings.notifications.heading')}
         </h3>
-        <p className="form__hint">
-          {t('dialogs.settings.notifications.hint')}
-        </p>
+        <p className="form__hint">{t('dialogs.settings.notifications.hint')}</p>
         <SoundPrefField
           prefKey="sound.global"
           allowInherit={false}
@@ -252,120 +169,43 @@ export function CalendarsPanel() {
       )}
 
       {!hydrating && calendars.length > 0 && (
-        <div className="calendars-panel__master-detail">
-          {/* Master: one keyboard-navigable list of calendars. The visual
-              account sub-headers are presentational (each option's own
-              accessible name already carries the account), so arrow keys
-              walk the options uninterrupted. */}
-          <ul
-            role="listbox"
-            tabIndex={0}
-            aria-label={t('dialogs.settings.calendars.selectorLabel')}
-            aria-activedescendant={
-              selectedId ? optionId(selectedId) : undefined
-            }
-            onKeyDown={handleKey}
-            className="calendars-panel__selector"
-          >
-            {groups.map((group) => (
-              <li
-                key={group.accountId}
-                role="presentation"
-                className="calendars-panel__selector-group"
-              >
-                <span
-                  className="calendars-panel__account"
-                  aria-hidden="true"
-                >
-                  {group.accountName}
-                </span>
-                <ul
-                  role="presentation"
-                  className="calendars-panel__selector-sublist"
-                >
-                  {group.calendars.map((cal) => {
-                    const isSel = cal.id === selectedId;
-                    return (
-                      <li
-                        key={cal.id}
-                        id={optionId(cal.id)}
-                        role="option"
-                        aria-selected={isSel}
-                        aria-label={t(
-                          'dialogs.settings.calendars.optionLabel',
-                          {
-                            account: group.accountName,
-                            calendar: cal.name,
-                            summary: summaryFor(cal.id),
-                          },
-                        )}
-                        className={
-                          'calendars-panel__option' +
-                          (isSel ? ' calendars-panel__option--selected' : '')
-                        }
-                        onClick={() => setSelectedId(cal.id)}
-                      >
-                        <span
-                          className="calendars-panel__swatch"
-                          aria-hidden="true"
-                          style={
-                            cal.color?.hex
-                              ? { background: cal.color.hex }
-                              : undefined
-                          }
-                        />
-                        <span className="calendars-panel__name">
-                          {cal.name}
-                        </span>
-                        <span
-                          className="calendars-panel__option-summary"
-                          aria-hidden="true"
-                        >
-                          {getDefaultsFor(cal.id).length || ''}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </li>
-            ))}
-          </ul>
-
-          {/* Detail: editor for the selected calendar only. The region is
-              named after the calendar so focus entering it (Tab from the
-              list) announces "Erinnerungen – {account} › {calendar}". */}
-          {selected && (
-            <section
-              className="calendars-panel__detail"
-              aria-labelledby={detailHeadingId}
-            >
-              <h3
-                id={detailHeadingId}
-                className="calendars-panel__detail-heading"
-              >
-                {t('dialogs.settings.calendars.detailHeading', {
-                  account: selected.accountName,
-                  calendar: selected.cal.name,
-                })}
-              </h3>
-              {/* `key` resets the editor's internal state when the selected
-                  calendar changes, so the controls always reflect the new
-                  calendar rather than carrying over the previous one's. */}
+        <SettingsSelectorDetail
+          groups={selectorGroups}
+          getItemId={calendarItemId}
+          getItemName={(c) => c.name}
+          getItemSummary={(c) => summaryFor(c.id)}
+          getItemBadge={(c) => getDefaultsFor(c.id).length || ''}
+          getItemSwatchHex={(c) => c.color?.hex}
+          withSwatch
+          selectorLabel={t('dialogs.settings.calendars.selectorLabel')}
+          optionLabel={({ account, name, summary }) =>
+            t('dialogs.settings.calendars.optionLabel', {
+              account,
+              calendar: name,
+              summary,
+            })
+          }
+          detailHeading={({ account, name }) =>
+            t('dialogs.settings.calendars.detailHeading', {
+              account,
+              calendar: name,
+            })
+          }
+          renderDetail={(cal) => (
+            // The selector re-keys this subtree per selection, so the editor
+            // already resets to the newly-selected calendar's values.
+            <>
               <RemindersEditor
-                key={selected.cal.id}
-                value={getDefaultsFor(selected.cal.id)}
-                onChange={(next) => setDefaultsFor(selected.cal.id, next)}
+                value={getDefaultsFor(cal.id)}
+                onChange={(next) => setDefaultsFor(cal.id, next)}
                 mode="event"
               />
               {/* §14.4 per-calendar default sound — inherits the global
                   default unless overridden. */}
-              <SoundPrefField
-                key={`sound-${selected.cal.id}`}
-                prefKey={`sound.calendar.${selected.cal.id}`}
-              />
-            </section>
+              <SoundPrefField prefKey={`sound.calendar.${cal.id}`} />
+            </>
           )}
-        </div>
+        />
       )}
     </div>
   );

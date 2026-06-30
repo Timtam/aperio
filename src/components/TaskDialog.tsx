@@ -76,6 +76,14 @@ import {
   type TaskRecurrenceValue,
 } from './taskRecurrence';
 
+/** Day presets offered for the per-task "remind me N days before the deadline"
+ *  override. `null` (no override) is the implicit default and uses the global
+ *  `tasks.deadlineCountdownDays`. */
+const DEADLINE_REMINDER_PRESETS = [1, 2, 3, 5, 7, 14] as const;
+/** Sentinel value for the "Default (global)" `<option>`; maps to/from `null`.
+ *  Zero is safe — "0 days before" is never a real preset. */
+const DEADLINE_REMINDER_DEFAULT = 0;
+
 /**
  * Task create / edit dialog (DESIGN.md section 9.9).
  *
@@ -117,6 +125,10 @@ interface FormState {
   scheduledTime: string;
   deadlineDate: string;
   deadlineTime: string;
+  /** Per-task override for how many days before the deadline the early
+   *  reminder fires. `null` ⇒ use the global `tasks.deadlineCountdownDays`.
+   *  Only meaningful while a deadline date is set. */
+  deadlineReminderDays: number | null;
   description: string;
   colorLabel: string | null;
   recurrence: TaskRecurrenceValue;
@@ -277,6 +289,18 @@ export function TaskDialog({
     () => sectionsByList[form.listId] ?? [],
     [sectionsByList, form.listId],
   );
+  // The day presets for the per-task early-reminder override, plus the
+  // current value spliced in (sorted) when it's a non-null override that
+  // isn't one of the presets — e.g. a `10` synced from another device. Keeps
+  // the <select> from silently showing the wrong option for a value the user
+  // never picked here but that does round-trip on save.
+  const deadlineReminderChoices = useMemo(() => {
+    const set = new Set<number>(DEADLINE_REMINDER_PRESETS);
+    if (form.deadlineReminderDays != null) {
+      set.add(form.deadlineReminderDays);
+    }
+    return [...set].sort((a, b) => a - b);
+  }, [form.deadlineReminderDays]);
   // Sections are user-managed (create / rename / delete) on local lists
   // and on providers that declare `manageable_sections` (Todoist,
   // Vikunja). Providers without it expose sections read-only — we just
@@ -460,7 +484,14 @@ export function TaskDialog({
     announce(t('dialogs.task.fields.scheduled.cleared'));
   }, [announce, t]);
   const clearDeadline = useCallback(() => {
-    setForm((prev) => ({ ...prev, deadlineDate: '', deadlineTime: '' }));
+    // Drop the per-task reminder override alongside the date+time — the
+    // override is meaningless without a deadline (mirrors deadlineTime).
+    setForm((prev) => ({
+      ...prev,
+      deadlineDate: '',
+      deadlineTime: '',
+      deadlineReminderDays: null,
+    }));
     deadlineDateRef.current?.focus();
     announce(t('dialogs.task.fields.deadline.cleared'));
   }, [announce, t]);
@@ -486,6 +517,8 @@ export function TaskDialog({
         scheduled_time: null,
         deadline_date: null,
         deadline_time: null,
+        // A fresh subtask uses the global countdown (no override).
+        deadline_reminder_days: null,
         recurrence: null,
         parent_id: task.id,
         // Keep the subtask in its parent's section so it groups with it.
@@ -816,6 +849,11 @@ export function TaskDialog({
             scheduled_time,
             deadline_date,
             deadline_time,
+            // Per-task reminder override only rides along with a real deadline;
+            // a deadline-less task always falls back to the global countdown.
+            deadline_reminder_days: deadline_date
+              ? form.deadlineReminderDays
+              : null,
             recurrence: recurrenceToBackend(form.recurrence),
             description: form.description.trim() || null,
             color_label: form.colorLabel,
@@ -891,6 +929,11 @@ export function TaskDialog({
             scheduled_time,
             deadline_date,
             deadline_time,
+            // Per-task reminder override only rides along with a real deadline;
+            // a deadline-less task always falls back to the global countdown.
+            deadline_reminder_days: deadline_date
+              ? form.deadlineReminderDays
+              : null,
             recurrence: recurrenceToBackend(form.recurrence),
             parent_id: null,
             section_id: form.sectionId || null,
@@ -915,6 +958,7 @@ export function TaskDialog({
                 scheduled_time: null,
                 deadline_date: null,
                 deadline_time: null,
+                deadline_reminder_days: null,
                 recurrence: null,
                 parent_id: created.id,
                 section_id: form.sectionId || null,
@@ -1341,6 +1385,39 @@ export function TaskDialog({
             </label>
           </div>
           {form.deadlineDate && (
+            <label className="form__field">
+              <span className="form__label">
+                {t('dialogs.task.fields.deadlineReminder.label')}
+              </span>
+              <select
+                value={form.deadlineReminderDays ?? DEADLINE_REMINDER_DEFAULT}
+                onChange={(e) => {
+                  const raw = Number(e.target.value);
+                  update(
+                    'deadlineReminderDays',
+                    raw === DEADLINE_REMINDER_DEFAULT ? null : raw,
+                  );
+                }}
+              >
+                <option value={DEADLINE_REMINDER_DEFAULT}>
+                  {t('dialogs.task.fields.deadlineReminder.default')}
+                </option>
+                {deadlineReminderChoices.map((days) => (
+                  <option key={days} value={days}>
+                    {t('dialogs.task.fields.deadlineReminder.option', {
+                      count: days,
+                    })}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {form.deadlineDate && (
+            <p className="form__hint">
+              {t('dialogs.task.fields.deadlineReminder.hint')}
+            </p>
+          )}
+          {form.deadlineDate && (
             <button
               type="button"
               className="form__inline-clear"
@@ -1659,6 +1736,7 @@ function buildInitialState(
       scheduledTime: task.scheduled_time?.slice(0, 5) ?? '',
       deadlineDate: task.deadline_date ?? '',
       deadlineTime: task.deadline_time?.slice(0, 5) ?? '',
+      deadlineReminderDays: task.deadline_reminder_days,
       description: task.description ?? '',
       colorLabel: task.color_label ?? null,
       recurrence: recurrenceFromBackend(task.recurrence),
@@ -1695,6 +1773,7 @@ function buildInitialState(
     scheduledTime: '',
     deadlineDate: '',
     deadlineTime: '',
+    deadlineReminderDays: null,
     description: '',
     colorLabel: null,
     recurrence: { ...TASK_RECURRENCE_DEFAULT },

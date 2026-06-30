@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
+import { buildReminderGroups, daysUntilDeadline } from '@aperio/shared';
+
 import { useAnnouncer } from '../a11y/announcerContext';
 import type { Task } from '../api/types';
 import { todayIsoKey } from '../intl/taskDay';
@@ -69,13 +71,19 @@ export function DayStartReviewDialog({
   const { t, i18n } = useTranslation();
   const announce = useAnnouncer();
   const { tasks } = useTasks();
-  const { invalidateData } = useDialogState();
+  const { invalidateData, openTaskDialog } = useDialogState();
   // Per-list cascade resolution: each row obeys its OWN list's
   // status-coupling preference. The filter below treats a slipped
   // subtask as hidden iff its own list has cascade on AND it has a
   // slipped ancestor in that same list; the per-row action
   // handlers walk descendants the same way.
-  const { effectiveForList } = useTaskCascadeEnabled();
+  const {
+    effectiveForList,
+    remindUntimedToday,
+    remindDeadlineArrived,
+    remindDeadlineCountdown,
+    deadlineCountdownDays,
+  } = useTaskCascadeEnabled();
   const cascadeEnabledFor = useCallback(
     (listId: string) => effectiveForList(listId).cascade,
     [effectiveForList],
@@ -102,6 +110,78 @@ export function DayStartReviewDialog({
   const slipped = useMemo(
     () => filterCarriedOver(tasks, { cascadeEnabledFor, meFor }),
     [tasks, cascadeEnabledFor, meFor],
+  );
+
+  // Read-only reminder groups, gated by the same Settings toggles the
+  // checker uses. Informational: the rows open the task editor but
+  // never mutate state from the dialog, so they're outside the
+  // resolved/snooze bookkeeping below. The SHARED `buildReminderGroups`
+  // de-duplicates by task id (a deadline-pinned task surfaces in exactly
+  // one group), so the rows here match the checker's spoken count and OS
+  // notification exactly — no task appears in two sections.
+  const groups = useMemo(
+    () =>
+      buildReminderGroups(
+        tasks,
+        {
+          remindUntimedToday,
+          remindDeadlineArrived,
+          remindDeadlineCountdown,
+          deadlineCountdownDays,
+        },
+        meFor,
+      ),
+    [
+      tasks,
+      remindUntimedToday,
+      remindDeadlineArrived,
+      remindDeadlineCountdown,
+      deadlineCountdownDays,
+      meFor,
+    ],
+  );
+  const hasReminders =
+    groups.untimed.length + groups.dueToday.length + groups.countdown.length >
+    0;
+
+  // Render-ready reminder groups: the summary line (count-aware) + a
+  // per-row "why" suffix for each task's button label, paired with the
+  // matching task set. Empty groups are filtered out at render time. The
+  // countdown "why" is PER TASK — the set spans the whole 1..window range,
+  // so each task announces its OWN remaining days — hence `why` is a function.
+  const reminderGroups = useMemo(
+    () => [
+      {
+        key: 'untimed',
+        tasks: groups.untimed,
+        summary: t('dialogs.dayStartReview.reminders.untimedToday', {
+          count: groups.untimed.length,
+        }),
+        why: () => t('dialogs.dayStartReview.reminders.whyUntimed'),
+      },
+      {
+        key: 'dueToday',
+        tasks: groups.dueToday,
+        summary: t('dialogs.dayStartReview.reminders.deadlineArrived', {
+          count: groups.dueToday.length,
+        }),
+        why: () => t('dialogs.dayStartReview.reminders.whyDeadlineToday'),
+      },
+      {
+        key: 'countdown',
+        tasks: groups.countdown,
+        summary: t('dialogs.dayStartReview.reminders.countdown', {
+          count: groups.countdown.length,
+        }),
+        why: (task: Task) =>
+          t('dialogs.dayStartReview.reminders.whyCountdown', {
+            lead: t('dialogs.dayStartReview.reminders.inDays', {
+              count: daysUntilDeadline(task) ?? deadlineCountdownDays,
+            }),
+          }),
+      },
+    ],
+    [groups, deadlineCountdownDays, t],
   );
 
   const [busy, setBusy] = useState(false);
@@ -465,7 +545,9 @@ export function DayStartReviewDialog({
   // Defensive empty-state: caller opened us with nothing to show
   // (race between the checker and a refetch). Close quietly without
   // snoozing — there's no reason to suppress a real future trigger.
-  if (totalRemaining === 0 && resolvedIds.size === 0) {
+  // Reminders are a valid reason to stay open even with no actionable
+  // rows, so a reminders-only review isn't dismissed here.
+  if (totalRemaining === 0 && resolvedIds.size === 0 && !hasReminders) {
     onClose();
     return null;
   }
@@ -562,6 +644,41 @@ export function DayStartReviewDialog({
               {t('dialogs.dayStartReview.deadlines.bulk.allDone')}
             </button>
           </div>
+        </section>
+      )}
+
+      {hasReminders && (
+        <section className="day-start-review__section day-start-review__section--reminders">
+          <h3 className="day-start-review__heading">
+            {t('dialogs.dayStartReview.reminders.heading')}
+          </h3>
+          {reminderGroups.map((group) =>
+            group.tasks.length === 0 ? null : (
+              <div key={group.key} className="day-start-review__reminder-group">
+                <p className="day-start-review__reminder-summary">
+                  {group.summary}
+                </p>
+                {/* No aria-label here — the preceding <p> already names
+                    the group, so labelling the <ul> too would read the
+                    summary twice. */}
+                <ul className="missed-tasks__list">
+
+                  {group.tasks.map((task) => (
+                    <li key={task.id} className="missed-tasks__row">
+                      <button
+                        type="button"
+                        className="day-start-review__reminder-task"
+                        onClick={() => openTaskDialog(task)}
+                        aria-label={`${task.title}, ${group.why(task)}`}
+                      >
+                        <span aria-hidden="true">{task.title}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ),
+          )}
         </section>
       )}
 

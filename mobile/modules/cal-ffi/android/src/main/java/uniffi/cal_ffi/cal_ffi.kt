@@ -8835,6 +8835,12 @@ data class NewTaskDto (
     , 
     var `deadlineTime`: kotlin.String?
     , 
+    /**
+     * Per-task override for the day-start deadline countdown; see
+     * [`TaskDto::deadline_reminder_days`]. `None` ⇒ use the global default.
+     */
+    var `deadlineReminderDays`: kotlin.Long?
+    , 
     var `recurrence`: TaskRecurrence?
     , 
     var `parentId`: kotlin.String?
@@ -8871,6 +8877,7 @@ public object FfiConverterTypeNewTaskDto: FfiConverterRustBuffer<NewTaskDto> {
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalLong.read(buf),
             FfiConverterOptionalTypeTaskRecurrence.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
@@ -8890,6 +8897,7 @@ public object FfiConverterTypeNewTaskDto: FfiConverterRustBuffer<NewTaskDto> {
             FfiConverterOptionalString.allocationSize(value.`scheduledTime`) +
             FfiConverterOptionalString.allocationSize(value.`deadlineDate`) +
             FfiConverterOptionalString.allocationSize(value.`deadlineTime`) +
+            FfiConverterOptionalLong.allocationSize(value.`deadlineReminderDays`) +
             FfiConverterOptionalTypeTaskRecurrence.allocationSize(value.`recurrence`) +
             FfiConverterOptionalString.allocationSize(value.`parentId`) +
             FfiConverterOptionalString.allocationSize(value.`sectionId`) +
@@ -8908,6 +8916,7 @@ public object FfiConverterTypeNewTaskDto: FfiConverterRustBuffer<NewTaskDto> {
             FfiConverterOptionalString.write(value.`scheduledTime`, buf)
             FfiConverterOptionalString.write(value.`deadlineDate`, buf)
             FfiConverterOptionalString.write(value.`deadlineTime`, buf)
+            FfiConverterOptionalLong.write(value.`deadlineReminderDays`, buf)
             FfiConverterOptionalTypeTaskRecurrence.write(value.`recurrence`, buf)
             FfiConverterOptionalString.write(value.`parentId`, buf)
             FfiConverterOptionalString.write(value.`sectionId`, buf)
@@ -9100,6 +9109,12 @@ data class TaskDto (
      */
     var `deadlineTime`: kotlin.String?
     , 
+    /**
+     * Per-task override for the day-start deadline countdown: remind this
+     * many days before `deadline_date`. `None` ⇒ use the global default.
+     */
+    var `deadlineReminderDays`: kotlin.Long?
+    , 
     var `recurrence`: TaskRecurrence?
     , 
     /**
@@ -9172,6 +9187,7 @@ public object FfiConverterTypeTaskDto: FfiConverterRustBuffer<TaskDto> {
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalLong.read(buf),
             FfiConverterOptionalTypeTaskRecurrence.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
@@ -9199,6 +9215,7 @@ public object FfiConverterTypeTaskDto: FfiConverterRustBuffer<TaskDto> {
             FfiConverterOptionalString.allocationSize(value.`scheduledTime`) +
             FfiConverterOptionalString.allocationSize(value.`deadlineDate`) +
             FfiConverterOptionalString.allocationSize(value.`deadlineTime`) +
+            FfiConverterOptionalLong.allocationSize(value.`deadlineReminderDays`) +
             FfiConverterOptionalTypeTaskRecurrence.allocationSize(value.`recurrence`) +
             FfiConverterOptionalString.allocationSize(value.`resurfaceDate`) +
             FfiConverterOptionalString.allocationSize(value.`seriesId`) +
@@ -9225,6 +9242,7 @@ public object FfiConverterTypeTaskDto: FfiConverterRustBuffer<TaskDto> {
             FfiConverterOptionalString.write(value.`scheduledTime`, buf)
             FfiConverterOptionalString.write(value.`deadlineDate`, buf)
             FfiConverterOptionalString.write(value.`deadlineTime`, buf)
+            FfiConverterOptionalLong.write(value.`deadlineReminderDays`, buf)
             FfiConverterOptionalTypeTaskRecurrence.write(value.`recurrence`, buf)
             FfiConverterOptionalString.write(value.`resurfaceDate`, buf)
             FfiConverterOptionalString.write(value.`seriesId`, buf)
@@ -10621,6 +10639,38 @@ public object FfiConverterOptionalUInt: FfiConverterRustBuffer<kotlin.UInt?> {
         } else {
             buf.put(1)
             FfiConverterUInt.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalLong: FfiConverterRustBuffer<kotlin.Long?> {
+    override fun read(buf: ByteBuffer): kotlin.Long? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterLong.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.Long?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterLong.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.Long?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterLong.write(value, buf)
         }
     }
 }

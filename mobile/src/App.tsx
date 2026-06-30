@@ -18,6 +18,7 @@ import { SyncStatusButton } from './components/SyncStatusButton';
 import { useCacheUpdates } from './state/cacheObserver';
 import { SyncStatusContext } from './state/syncStatusContext';
 import { ThemeProvider, useTheme, navigationThemeFor } from './theme';
+import { navigationRef } from './navigation/navigationRef';
 import type { RootStackParamList, RootTabParamList } from './navigation/types';
 import { useReminderTriggers } from './reminders/scheduler';
 import { useAppBadge } from './state/useAppBadge';
@@ -485,6 +486,7 @@ function AppContent() {
           dark / high-contrast backgrounds. */}
       <StatusBar style={theme.mode === 'light' ? 'dark' : 'light'} />
       <NavigationContainer
+        ref={navigationRef}
         theme={navigationThemeFor(theme)}
         initialState={initialNavState}
         onStateChange={(state) => {

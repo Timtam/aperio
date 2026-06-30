@@ -173,6 +173,12 @@ export interface Task {
    *  via `scheduled_date`. */
   deadline_date: string | null;
   deadline_time: string | null;
+  /** Aperio-only per-task override for the day-start deadline countdown:
+   *  remind this many days before `deadline_date`, overriding the global
+   *  `tasks.deadlineCountdownDays` for this task. `null` ⇒ use the global
+   *  default. Host-only: it rides the AperioExtras bag on external providers
+   *  (no provider has a native field for it). */
+  deadline_reminder_days: number | null;
   recurrence: unknown;
   /** DESIGN §9.12: a backlog task surfaces in the active backlog only on/after
    *  this date (the recurrence "resurface" trigger). `null` ⇒ visible now;

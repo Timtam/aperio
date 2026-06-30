@@ -761,6 +761,7 @@ async fn reconcile_task_extension(
         task.resurface_date,
         task.series_id.as_deref(),
         task.effort,
+        task.deadline_reminder_days,
     ) {
         Some(ext) => {
             ignore_not_found(state.delete_request(&ext_path).await)?;

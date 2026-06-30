@@ -15,6 +15,7 @@ const baseTask: Task = {
   scheduled_time: null,
   deadline_date: null,
   deadline_time: null,
+  deadline_reminder_days: null,
   recurrence: null,
   resurface_date: null,
   series_id: null,

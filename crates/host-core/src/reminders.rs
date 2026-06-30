@@ -1073,6 +1073,7 @@ mod tests {
             status: TaskStatus::Open,
             priority: cal_core::TaskPriority::Medium,
             effort: cal_core::TaskEffort::Medium,
+            deadline_reminder_days: None,
             scheduled_date,
             scheduled_time,
             deadline_date,

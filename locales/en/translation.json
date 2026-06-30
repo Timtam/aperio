@@ -506,7 +506,6 @@
         },
         "hint": "Default reminders that apply to events without their own reminder. Useful for iCloud calendars: iOS “Default Alert Times” aren't written into the event itself, so without a default here the alarm doesn't show in Aperio.",
         "empty": "No calendars yet — add an account first.",
-        "accountHeading": "{{account}}",
         "localAccount": "Local",
         "selectorLabel": "Choose calendar",
         "optionLabel": "{{account}} › {{calendar}}, {{summary}}",
@@ -952,6 +951,28 @@
           "appStart": "App start only"
         }
       },
+      "reminders": {
+        "heading": "Day-start reminders",
+        "hint": "What the day-start review reminds you about. Each reminder can be turned off independently.",
+        "untimedToday": {
+          "label": "Remind me of today's untimed tasks",
+          "hint": "When enabled, the day-start review lists tasks scheduled for today that have no specific time — the ones easy to forget. Disable to skip the untimed-tasks reminder."
+        },
+        "deadlineArrived": {
+          "label": "Remind me when a deadline has arrived",
+          "hint": "When enabled, you're reminded on the day a task's deadline falls due. Disable to skip the deadline-day reminder."
+        },
+        "deadlineCountdown": {
+          "label": "Remind me before a deadline",
+          "hint": "When enabled, you're reminded a set number of days ahead of a task's deadline, so it doesn't sneak up on you. Set the lead time below."
+        },
+        "countdownDays": {
+          "label": "Days before the deadline",
+          "hint": "How many days ahead of a deadline the early reminder fires. Between 1 and 30 days.",
+          "option": "{{count}} day before",
+          "option_other": "{{count}} days before"
+        }
+      },
       "perList": {
         "heading": "Per task list",
         "hint": "Override the three defaults above for individual task lists. Leave a field on \"Global default\" to inherit; pick a specific value to make this list behave differently from the rest.",
@@ -961,7 +982,13 @@
         "carryOver": "Carry-over",
         "inherit": "Global default",
         "on": "On",
-        "off": "Off"
+        "off": "Off",
+        "selectorLabel": "Choose task list",
+        "optionLabel": "{{account}} › {{list}}, {{summary}}",
+        "detailHeading": "Overrides – {{account}} › {{list}}",
+        "summaryNone": "inherits all defaults",
+        "summaryOne": "1 override",
+        "summaryOther": "{{count}} overrides"
       }
     },
     "confirm": {
@@ -1049,6 +1076,23 @@
         "autoBacklogToast_other": "{{count}} tasks sent to backlog.",
         "undoAnnounce_one": "Undid carry-over for 1 task.",
         "undoAnnounce_other": "Undid carry-over for {{count}} tasks."
+      },
+      "reminders": {
+        "heading": "Reminders",
+        "untimedToday_one": "1 task planned for today",
+        "untimedToday_other": "{{count}} tasks planned for today",
+        "deadlineArrived_one": "1 task is due today",
+        "deadlineArrived_other": "{{count}} tasks are due today",
+        "countdown_one": "1 task with an upcoming deadline",
+        "countdown_other": "{{count}} tasks with an upcoming deadline",
+        "inDays_one": "in 1 day",
+        "inDays_other": "in {{count}} days",
+        "whyUntimed": "Planned for today",
+        "whyDeadlineToday": "Deadline today",
+        "whyCountdown": "Deadline {{lead}}",
+        "notificationTitle": "Day-start reminders",
+        "notificationBody_one": "{{count}} task needs your attention today.",
+        "notificationBody_other": "{{count}} tasks need your attention today."
       }
     },
     "deadlinePin": {
@@ -1307,6 +1351,13 @@
           "addDate": "Add deadline day",
           "addTime": "Add time",
           "clearTime": "Clear time"
+        },
+        "deadlineReminder": {
+          "label": "Early reminder",
+          "hint": "How many days before this deadline the early reminder fires. Overrides the global default just for this task.",
+          "default": "Default (global)",
+          "option_one": "{{count}} day before",
+          "option_other": "{{count}} days before"
         },
         "description": "Description",
         "colorLabel": "Color label"

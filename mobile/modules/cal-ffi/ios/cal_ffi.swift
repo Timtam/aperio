@@ -5616,6 +5616,11 @@ public struct NewTaskDto: Equatable, Hashable {
     public var scheduledTime: String?
     public var deadlineDate: String?
     public var deadlineTime: String?
+    /**
+     * Per-task override for the day-start deadline countdown; see
+     * [`TaskDto::deadline_reminder_days`]. `None` ⇒ use the global default.
+     */
+    public var deadlineReminderDays: Int64?
     public var recurrence: TaskRecurrence?
     public var parentId: String?
     public var sectionId: String?
@@ -5625,7 +5630,11 @@ public struct NewTaskDto: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(title: String, description: String?, status: TaskStatus, priority: TaskPriority, effort: TaskEffort, scheduledDate: String?, scheduledTime: String?, deadlineDate: String?, deadlineTime: String?, recurrence: TaskRecurrence?, parentId: String?, sectionId: String?, colorLabel: String?, reminders: [Reminder], sound: SoundConfig?) {
+    public init(title: String, description: String?, status: TaskStatus, priority: TaskPriority, effort: TaskEffort, scheduledDate: String?, scheduledTime: String?, deadlineDate: String?, deadlineTime: String?, 
+        /**
+         * Per-task override for the day-start deadline countdown; see
+         * [`TaskDto::deadline_reminder_days`]. `None` ⇒ use the global default.
+         */deadlineReminderDays: Int64?, recurrence: TaskRecurrence?, parentId: String?, sectionId: String?, colorLabel: String?, reminders: [Reminder], sound: SoundConfig?) {
         self.title = title
         self.description = description
         self.status = status
@@ -5635,6 +5644,7 @@ public struct NewTaskDto: Equatable, Hashable {
         self.scheduledTime = scheduledTime
         self.deadlineDate = deadlineDate
         self.deadlineTime = deadlineTime
+        self.deadlineReminderDays = deadlineReminderDays
         self.recurrence = recurrence
         self.parentId = parentId
         self.sectionId = sectionId
@@ -5668,6 +5678,7 @@ public struct FfiConverterTypeNewTaskDto: FfiConverterRustBuffer {
                 scheduledTime: FfiConverterOptionString.read(from: &buf), 
                 deadlineDate: FfiConverterOptionString.read(from: &buf), 
                 deadlineTime: FfiConverterOptionString.read(from: &buf), 
+                deadlineReminderDays: FfiConverterOptionInt64.read(from: &buf), 
                 recurrence: FfiConverterOptionTypeTaskRecurrence.read(from: &buf), 
                 parentId: FfiConverterOptionString.read(from: &buf), 
                 sectionId: FfiConverterOptionString.read(from: &buf), 
@@ -5687,6 +5698,7 @@ public struct FfiConverterTypeNewTaskDto: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.scheduledTime, into: &buf)
         FfiConverterOptionString.write(value.deadlineDate, into: &buf)
         FfiConverterOptionString.write(value.deadlineTime, into: &buf)
+        FfiConverterOptionInt64.write(value.deadlineReminderDays, into: &buf)
         FfiConverterOptionTypeTaskRecurrence.write(value.recurrence, into: &buf)
         FfiConverterOptionString.write(value.parentId, into: &buf)
         FfiConverterOptionString.write(value.sectionId, into: &buf)
@@ -5942,6 +5954,11 @@ public struct TaskDto: Equatable, Hashable {
      * `HH:MM:SS`. Requires `deadline_date`.
      */
     public var deadlineTime: String?
+    /**
+     * Per-task override for the day-start deadline countdown: remind this
+     * many days before `deadline_date`. `None` ⇒ use the global default.
+     */
+    public var deadlineReminderDays: Int64?
     public var recurrence: TaskRecurrence?
     /**
      * `YYYY-MM-DD`. Backlog resurface trigger (DESIGN §9.12), derived by the
@@ -5991,7 +6008,11 @@ public struct TaskDto: Equatable, Hashable {
          */deadlineDate: String?, 
         /**
          * `HH:MM:SS`. Requires `deadline_date`.
-         */deadlineTime: String?, recurrence: TaskRecurrence?, 
+         */deadlineTime: String?, 
+        /**
+         * Per-task override for the day-start deadline countdown: remind this
+         * many days before `deadline_date`. `None` ⇒ use the global default.
+         */deadlineReminderDays: Int64?, recurrence: TaskRecurrence?, 
         /**
          * `YYYY-MM-DD`. Backlog resurface trigger (DESIGN §9.12), derived by the
          * recurrence engine when a backlog instance is spawned. Round-trips
@@ -6025,6 +6046,7 @@ public struct TaskDto: Equatable, Hashable {
         self.scheduledTime = scheduledTime
         self.deadlineDate = deadlineDate
         self.deadlineTime = deadlineTime
+        self.deadlineReminderDays = deadlineReminderDays
         self.recurrence = recurrence
         self.resurfaceDate = resurfaceDate
         self.seriesId = seriesId
@@ -6066,6 +6088,7 @@ public struct FfiConverterTypeTaskDto: FfiConverterRustBuffer {
                 scheduledTime: FfiConverterOptionString.read(from: &buf), 
                 deadlineDate: FfiConverterOptionString.read(from: &buf), 
                 deadlineTime: FfiConverterOptionString.read(from: &buf), 
+                deadlineReminderDays: FfiConverterOptionInt64.read(from: &buf), 
                 recurrence: FfiConverterOptionTypeTaskRecurrence.read(from: &buf), 
                 resurfaceDate: FfiConverterOptionString.read(from: &buf), 
                 seriesId: FfiConverterOptionString.read(from: &buf), 
@@ -6093,6 +6116,7 @@ public struct FfiConverterTypeTaskDto: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.scheduledTime, into: &buf)
         FfiConverterOptionString.write(value.deadlineDate, into: &buf)
         FfiConverterOptionString.write(value.deadlineTime, into: &buf)
+        FfiConverterOptionInt64.write(value.deadlineReminderDays, into: &buf)
         FfiConverterOptionTypeTaskRecurrence.write(value.recurrence, into: &buf)
         FfiConverterOptionString.write(value.resurfaceDate, into: &buf)
         FfiConverterOptionString.write(value.seriesId, into: &buf)
@@ -7674,6 +7698,30 @@ fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterUInt32.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionInt64: FfiConverterRustBuffer {
+    typealias SwiftType = Int64?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterInt64.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterInt64.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }

@@ -85,6 +85,8 @@ export function QuickAddTaskDialog({
           scheduled_time: null,
           deadline_date: null,
           deadline_time: null,
+          // No per-task countdown override on quick-add → use the global.
+          deadline_reminder_days: null,
           recurrence: null,
           parent_id: null,
           section_id: null,

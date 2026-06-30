@@ -503,7 +503,6 @@
         },
         "hint": "Standard-Hinweise, die auf Termine ohne eigenen Hinweis angewendet werden. Hilfreich für iCloud-Kalender: iOS-„Standardhinweise“ werden nicht in den Termin geschrieben, ohne hier konfigurierten Standard erscheint der Hinweis in Aperio nicht.",
         "empty": "Noch keine Kalender — füge zuerst ein Konto hinzu.",
-        "accountHeading": "{{account}}",
         "localAccount": "Lokal",
         "selectorLabel": "Kalender auswählen",
         "optionLabel": "{{account}} › {{calendar}}, {{summary}}",
@@ -949,6 +948,28 @@
           "appStart": "Nur beim App-Start"
         }
       },
+      "reminders": {
+        "heading": "Tagesstart-Erinnerungen",
+        "hint": "Woran dich die Tagesstart-Durchsicht erinnert. Jede Erinnerung lässt sich einzeln abschalten.",
+        "untimedToday": {
+          "label": "An heutige Aufgaben ohne Uhrzeit erinnern",
+          "hint": "Wenn aktiviert, listet die Tagesstart-Durchsicht die für heute geplanten Aufgaben ohne feste Uhrzeit auf — genau die, die man leicht vergisst. Deaktiviert: keine Erinnerung an Aufgaben ohne Uhrzeit."
+        },
+        "deadlineArrived": {
+          "label": "Erinnern, wenn eine Frist erreicht ist",
+          "hint": "Wenn aktiviert, wirst du an dem Tag erinnert, an dem die Frist einer Aufgabe fällig wird. Deaktiviert: keine Erinnerung am Fristtag."
+        },
+        "deadlineCountdown": {
+          "label": "Vor einer Frist erinnern",
+          "hint": "Wenn aktiviert, wirst du eine festgelegte Anzahl Tage vor der Frist einer Aufgabe erinnert, damit sie dich nicht überrascht. Die Vorlaufzeit stellst du unten ein."
+        },
+        "countdownDays": {
+          "label": "Tage vor der Frist",
+          "hint": "Wie viele Tage vor einer Frist die frühe Erinnerung ausgelöst wird. Zwischen 1 und 30 Tagen.",
+          "option": "{{count}} Tag vorher",
+          "option_other": "{{count}} Tage vorher"
+        }
+      },
       "perList": {
         "heading": "Pro Aufgabenliste",
         "hint": "Überschreibe die drei globalen Standards oben für einzelne Aufgabenlisten. Felder auf „Globaler Standard\" erben den Wert; eine konkrete Auswahl lässt diese Liste anders reagieren als die übrigen.",
@@ -958,7 +979,13 @@
         "carryOver": "Übernahme",
         "inherit": "Globaler Standard",
         "on": "An",
-        "off": "Aus"
+        "off": "Aus",
+        "selectorLabel": "Aufgabenliste auswählen",
+        "optionLabel": "{{account}} › {{list}}, {{summary}}",
+        "detailHeading": "Überschreibungen – {{account}} › {{list}}",
+        "summaryNone": "erbt alle Standardwerte",
+        "summaryOne": "1 Überschreibung",
+        "summaryOther": "{{count}} Überschreibungen"
       }
     },
     "confirm": {
@@ -1046,6 +1073,23 @@
         "autoBacklogToast_other": "{{count}} Aufgaben ins Backlog verschoben.",
         "undoAnnounce_one": "Übernahme für 1 Aufgabe rückgängig gemacht.",
         "undoAnnounce_other": "Übernahme für {{count}} Aufgaben rückgängig gemacht."
+      },
+      "reminders": {
+        "heading": "Erinnerungen",
+        "untimedToday_one": "1 Aufgabe für heute geplant",
+        "untimedToday_other": "{{count}} Aufgaben für heute geplant",
+        "deadlineArrived_one": "1 Aufgabe ist heute fällig",
+        "deadlineArrived_other": "{{count}} Aufgaben sind heute fällig",
+        "countdown_one": "1 Aufgabe mit baldiger Deadline",
+        "countdown_other": "{{count}} Aufgaben mit baldiger Deadline",
+        "inDays_one": "in 1 Tag",
+        "inDays_other": "in {{count}} Tagen",
+        "whyUntimed": "Für heute geplant",
+        "whyDeadlineToday": "Deadline heute",
+        "whyCountdown": "Deadline {{lead}}",
+        "notificationTitle": "Tageswechsel-Erinnerungen",
+        "notificationBody_one": "{{count}} Aufgabe braucht heute deine Aufmerksamkeit.",
+        "notificationBody_other": "{{count}} Aufgaben brauchen heute deine Aufmerksamkeit."
       }
     },
     "deadlinePin": {
@@ -1307,6 +1351,13 @@
           "addDate": "Frist-Tag hinzufügen",
           "addTime": "Uhrzeit hinzufügen",
           "clearTime": "Uhrzeit entfernen"
+        },
+        "deadlineReminder": {
+          "label": "Frühe Erinnerung",
+          "hint": "Wie viele Tage vor dieser Frist die frühe Erinnerung ausgelöst wird. Überschreibt den globalen Standard nur für diese Aufgabe.",
+          "default": "Standard (global)",
+          "option_one": "{{count}} Tag vorher",
+          "option_other": "{{count}} Tage vorher"
         },
         "description": "Beschreibung",
         "colorLabel": "Farb-Label"

@@ -16,15 +16,19 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   actionableDescendants,
+  buildReminderGroups,
+  daysUntilDeadline,
   filterCarriedOver,
   filterOverdue,
   priorityMarker,
   prioritySuffix,
+  reminderCount,
   todayIsoKey,
 } from '@aperio/shared';
 import type { Task } from '@aperio/shared';
 
 import { deleteTask as apiDeleteTask, updateTask } from '../api/client';
+import { navigateNested } from '../navigation/navigationRef';
 import { snoozeDayStartReview } from '../state/dayStartSnooze';
 import {
   effectiveForList,
@@ -126,6 +130,91 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
     [tasks, cascadeFor, meFor],
   );
 
+  // ── Read-only reminder groups ───────────────────────────────────────────────
+  // Gated by the same Settings toggles the checker uses (read off the loaded
+  // behaviour). Built via the SHARED `buildReminderGroups` so the rendered rows
+  // are de-duplicated EXACTLY like the checker's count (a task lands in one
+  // group only: due-today > planned-today > countdown). Informational: the rows
+  // open the task editor but never mutate state from the modal, so they sit
+  // outside the resolved/snooze bookkeeping.
+  const reminders = useMemo(
+    () =>
+      buildReminderGroups(
+        tasks,
+        {
+          remindUntimedToday: beh.remindUntimedToday,
+          remindDeadlineArrived: beh.remindDeadlineArrived,
+          remindDeadlineCountdown: beh.remindDeadlineCountdown,
+          deadlineCountdownDays: beh.deadlineCountdownDays,
+        },
+        meFor,
+      ),
+    [
+      tasks,
+      beh.remindUntimedToday,
+      beh.remindDeadlineArrived,
+      beh.remindDeadlineCountdown,
+      beh.deadlineCountdownDays,
+      meFor,
+    ],
+  );
+  const hasReminders = reminderCount(reminders) > 0;
+
+  // Render-ready reminder groups: each task set paired with its count-aware
+  // summary line and the per-row "why" suffix for the row's accessible label.
+  // The countdown "why" is PER TASK — the set spans the whole 1..window range,
+  // so each task announces its OWN remaining days — hence `why` is a function.
+  // Empty groups are filtered out at render time.
+  const reminderGroups = useMemo(
+    () => [
+      {
+        key: 'untimed',
+        tasks: reminders.untimed,
+        summary: t('dialogs.dayStartReview.reminders.untimedToday', {
+          count: reminders.untimed.length,
+        }),
+        why: () => t('dialogs.dayStartReview.reminders.whyUntimed'),
+      },
+      {
+        key: 'dueToday',
+        tasks: reminders.dueToday,
+        summary: t('dialogs.dayStartReview.reminders.deadlineArrived', {
+          count: reminders.dueToday.length,
+        }),
+        why: () => t('dialogs.dayStartReview.reminders.whyDeadlineToday'),
+      },
+      {
+        key: 'countdown',
+        tasks: reminders.countdown,
+        summary: t('dialogs.dayStartReview.reminders.countdown', {
+          count: reminders.countdown.length,
+        }),
+        why: (task: Task) =>
+          t('dialogs.dayStartReview.reminders.whyCountdown', {
+            lead: t('dialogs.dayStartReview.reminders.inDays', {
+              count: daysUntilDeadline(task) ?? beh.deadlineCountdownDays,
+            }),
+          }),
+      },
+    ],
+    [reminders, beh.deadlineCountdownDays, t],
+  );
+
+  // Open a reminder task in the editor: close the review first (it overlays the
+  // navigator as an RN Modal, so the editor would otherwise mount behind it),
+  // then navigate via the app-level container ref — this modal renders OUTSIDE
+  // any navigator, so it has no `useNavigation` context of its own. Target the
+  // Tasks tab's stack EXPLICITLY (it registers TaskEditor): a bare-name navigate
+  // from the root is unhandled when the focused tab's stack has no TaskEditor
+  // (e.g. the Contacts tab), so the row would be a dead button there.
+  const openTaskEditor = useCallback(
+    (task: Task) => {
+      onClose();
+      navigateNested('TasksTab', 'TaskEditor', { taskId: task.id, listId: task.list_id });
+    },
+    [onClose],
+  );
+
   const remainingOverdue = useMemo(
     () => overdue.filter((task) => !resolvedIds.has(task.id)),
     [overdue, resolvedIds],
@@ -178,15 +267,30 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   // defensive empty-on-open (checker + modal raced) closes WITHOUT snoozing —
   // there's no reason to suppress a real future trigger. Both wait for the
   // initial fetch + behaviour load so a transient empty state can't close us.
+  // A reminders-ONLY review (no actionable rows opened, nothing resolved yet)
+  // stays open: reminders are a valid reason to surface the dialog, so it isn't
+  // auto-dismissed here. Once the user has resolved a row, the "all handled"
+  // close still fires — the read-only reminders never block that.
   useEffect(() => {
     if (!visible || behaviour == null || loading) return;
     if (totalRemaining > 0) return;
+    if (resolvedIds.size === 0 && hasReminders) return;
     if (resolvedIds.size > 0) {
       announce(t('dialogs.dayStartReview.allHandled'));
       void snoozeDayStartReview(4);
     }
     onClose();
-  }, [visible, behaviour, loading, totalRemaining, resolvedIds.size, announce, t, onClose]);
+  }, [
+    visible,
+    behaviour,
+    loading,
+    totalRemaining,
+    resolvedIds.size,
+    hasReminders,
+    announce,
+    t,
+    onClose,
+  ]);
 
   // ── Deadline-section actions ────────────────────────────────────────────────
 
@@ -541,6 +645,37 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
             contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 24 }]}
             keyboardShouldPersistTaps="handled"
           >
+            {hasReminders && (
+              <View style={styles.section}>
+                <Text accessibilityRole="header" style={styles.sectionHeading}>
+                  {t('dialogs.dayStartReview.reminders.heading')}
+                </Text>
+                {reminderGroups.map((group) =>
+                  group.tasks.length === 0 ? null : (
+                    <View key={group.key} style={styles.reminderGroup}>
+                      <Text style={styles.reminderSummary}>{group.summary}</Text>
+                      {group.tasks.map((task) => (
+                        <Pressable
+                          key={task.id}
+                          accessibilityRole="button"
+                          accessibilityLabel={`${task.title}, ${group.why(task)}`}
+                          onPress={() => openTaskEditor(task)}
+                          style={({ pressed }) => [
+                            styles.reminderRow,
+                            pressed && styles.actionPressed,
+                          ]}
+                        >
+                          <Text style={styles.reminderTaskTitle} importantForAccessibility="no">
+                            {task.title}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  ),
+                )}
+              </View>
+            )}
+
             {remainingOverdue.length > 0 && (
               <View style={styles.section}>
                 <Text accessibilityRole="header" style={styles.sectionHeading}>
@@ -694,6 +829,22 @@ const makeStyles = (c: ThemeColors) =>
     list: { gap: 20, paddingTop: 8 },
     section: { gap: 10 },
     sectionHeading: { fontSize: 18, fontWeight: '700', color: c.textPrimary },
+    // Read-only reminders: a count summary per group, then each task as a tap
+    // target that opens its editor. Lighter chrome than the actionable rows —
+    // these inform, they don't carry per-row buttons.
+    reminderGroup: { gap: 6 },
+    reminderSummary: { fontSize: 15, fontWeight: '600', color: c.textSecondary },
+    reminderRow: {
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+      minHeight: 44,
+      justifyContent: 'center',
+    },
+    reminderTaskTitle: { fontSize: 16, fontWeight: '600', color: c.link },
     row: {
       gap: 8,
       padding: 14,
