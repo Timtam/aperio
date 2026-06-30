@@ -70,6 +70,30 @@ use crate::{
 /// from their `etag`" dialog would be noise.
 const METADATA_FIELDS: &[&str] = &["updated_at", "created_at", "etag"];
 
+/// Round-trip a `recurrence` field value through its typed model so two
+/// semantically-identical recurrences that serialize differently compare equal.
+/// The §9.12 `#[serde(default)]` axes (anchor/placement/fixed_dates) are always
+/// emitted by the current model but omitted by older payloads; without this,
+/// "default present" vs "absent" raises a spurious conflict. Returns the value
+/// unchanged if it can't be parsed as the expected type (so a genuinely
+/// malformed/foreign value still compares by its raw form).
+fn canonicalize_recurrence(kind: ConflictKind, value: &Value) -> Value {
+    let canon = match kind {
+        ConflictKind::Task => {
+            serde_json::from_value::<Option<cal_core::TaskRecurrence>>(value.clone())
+                .ok()
+                .and_then(|r| serde_json::to_value(r).ok())
+        }
+        ConflictKind::Event => {
+            serde_json::from_value::<Option<cal_core::EventRecurrence>>(value.clone())
+                .ok()
+                .and_then(|r| serde_json::to_value(r).ok())
+        }
+        _ => None,
+    };
+    canon.unwrap_or_else(|| value.clone())
+}
+
 /// Per-call summary the applier hands back so callers (the sync
 /// scheduler, settings dialog "Reapply log" actions, tests) can
 /// surface what happened without grovelling through tracing
@@ -715,6 +739,19 @@ impl EventLogApplier {
             if local_field == *patch_val {
                 continue; // already aligned, no-op
             }
+            // The `recurrence` field carries `#[serde(default)]` axes
+            // (anchor/placement/fixed_dates, §9.12) that the CURRENT model always
+            // serializes but older payloads omit. A raw-JSON compare then reads
+            // "key present at its default" vs "key absent" as a difference and
+            // raises a SPURIOUS conflict for a recurrence that is in fact
+            // identical. Compare the typed values so a serialization difference
+            // alone can't conflict.
+            if field == "recurrence"
+                && canonicalize_recurrence(kind, &local_field)
+                    == canonicalize_recurrence(kind, patch_val)
+            {
+                continue;
+            }
             // Metadata fields (`updated_at`, `created_at`, `etag`) are
             // bookkeeping — silently take the remote so the merged
             // row is consistent. They're never user-surfaced as
@@ -954,4 +991,67 @@ fn store_to_sync(err: StoreError) -> SyncError {
 /// claiming a particular root cause.
 fn core_to_sync(err: cal_core::Error) -> SyncError {
     SyncError::Internal(err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn recurrence_serialization_drift_is_not_a_conflict() {
+        // The exact shapes from a real cross-device conflict: the remote payload
+        // was written by an older build that predates the §9.12 axes, so it omits
+        // `anchor`/`placement`/`fixed_dates`; the local row, re-serialized through
+        // the current model, always emits them at their defaults. The two are the
+        // SAME daily recurrence.
+        let legacy_remote = json!({
+            "day_of_month": null,
+            "day_of_week": null,
+            "end": { "type": "never" },
+            "frequency": "daily",
+            "interval": 1
+        });
+        let current_local = json!({
+            "anchor": "from_date",
+            "day_of_month": null,
+            "day_of_week": null,
+            "end": { "type": "never" },
+            "fixed_dates": null,
+            "frequency": "daily",
+            "interval": 1,
+            "placement": "schedule"
+        });
+
+        // Raw JSON differs only by the default-valued keys the older build omitted.
+        assert_ne!(legacy_remote, current_local);
+
+        // Canonicalized through the typed model they are identical, so merge_fields
+        // treats them as aligned and records NO conflict (the bug was a spurious
+        // recurrence conflict surfacing in the sync-conflicts dialog).
+        assert_eq!(
+            canonicalize_recurrence(ConflictKind::Task, &legacy_remote),
+            canonicalize_recurrence(ConflictKind::Task, &current_local),
+        );
+    }
+
+    #[test]
+    fn genuinely_different_recurrence_still_differs_after_canonicalize() {
+        // A real difference (daily vs weekly) must survive canonicalization so a
+        // true recurrence conflict is still detected.
+        let daily = json!({ "end": { "type": "never" }, "frequency": "daily", "interval": 1 });
+        let weekly = json!({ "end": { "type": "never" }, "frequency": "weekly", "interval": 1 });
+        assert_ne!(
+            canonicalize_recurrence(ConflictKind::Task, &daily),
+            canonicalize_recurrence(ConflictKind::Task, &weekly),
+        );
+    }
+
+    #[test]
+    fn non_recurrence_kinds_pass_values_through_unchanged() {
+        // For kinds without a recurrence type the helper is a no-op, so it can't
+        // accidentally normalize an unrelated field.
+        let v = json!({ "frequency": "daily" });
+        assert_eq!(canonicalize_recurrence(ConflictKind::Calendar, &v), v);
+    }
 }
