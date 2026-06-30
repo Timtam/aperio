@@ -3479,6 +3479,14 @@ button[aria-disabled='true'] {
   margin: var(--space-3) 0 0;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  /* Bound the grid to the space left in the day-view column and let it SHRINK
+     below the 24h canvas (min-height:0), so `overflow-y: auto` actually scrolls
+     the canvas INSIDE the grid instead of the grid growing to its full height.
+     Without this the tall canvas pushed the whole view — and at a larger UI
+     font-size it grew enough to collide with the untimed-task band below it. The
+     band now stays a visible footer and the hours scroll within the grid. */
+  flex: 1 1 0;
+  min-height: 0;
   /* The 24h canvas is tall, so it scrolls vertically; x is clipped so a stray
      inset shadow can't surface a spurious horizontal scrollbar. */
   overflow-x: hidden;
@@ -3538,8 +3546,14 @@ button[aria-disabled='true'] {
    vertical flow. Each option's own inline min-height (events by duration, tasks
    by effort via the day-task--effort-* classes) drives its block size. */
 .day-grid--flow {
-  /* No fixed inner scroll region — the list grows with its content and the
-     page-level scroll takes over. */
+  /* No fixed inner scroll region — the list keeps its full (content) height and
+     the day-view column's own scroll takes over. `flex: 0 0 auto` is load-
+     bearing: it forbids the flex column from COMPRESSING this item below its
+     content, which (with overflow:visible) would spill the rows over the
+     untimed-task section below — the overlap that showed up at a larger UI
+     font-size. At its natural height the bounded `.view` scrolls the whole thing
+     instead. */
+  flex: 0 0 auto;
   overflow-y: visible;
   /* The pre-grid bordered/rounded container lives on .day-list--flow in this
      mode, so drop .day-grid's own border/radius to avoid a double frame. */
