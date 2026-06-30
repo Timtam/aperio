@@ -980,7 +980,13 @@
         "carryOver": "Übernahme",
         "inherit": "Globaler Standard",
         "on": "An",
-        "off": "Aus"
+        "off": "Aus",
+        "selectorLabel": "Aufgabenliste auswählen",
+        "optionLabel": "{{account}} › {{list}}, {{summary}}",
+        "detailHeading": "Überschreibungen – {{account}} › {{list}}",
+        "summaryNone": "erbt alle Standardwerte",
+        "summaryOne": "1 Überschreibung",
+        "summaryOther": "{{count}} Überschreibungen"
       }
     },
     "confirm": {

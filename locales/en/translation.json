@@ -983,7 +983,13 @@
         "carryOver": "Carry-over",
         "inherit": "Global default",
         "on": "On",
-        "off": "Off"
+        "off": "Off",
+        "selectorLabel": "Choose task list",
+        "optionLabel": "{{account}} › {{list}}, {{summary}}",
+        "detailHeading": "Overrides – {{account}} › {{list}}",
+        "summaryNone": "inherits all defaults",
+        "summaryOne": "1 override",
+        "summaryOther": "{{count}} overrides"
       }
     },
     "confirm": {
