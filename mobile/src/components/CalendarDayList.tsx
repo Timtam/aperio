@@ -37,6 +37,7 @@ import {
   layoutDayColumn,
   localDateKey,
   mergeDayItems,
+  MINUTES_PER_DAY,
   minutesFromMidnight,
   multiDayInfo,
   occurrenceIsoOf,
@@ -110,16 +111,19 @@ function buildTimeDate(key: string, time: string): Date {
 // it does NOT grow when the OS font scale (iOS Dynamic Type / Android font size)
 // enlarges the chip labels, which would clip them. Scale the grid geometry by
 // the OS font scale so the whole canvas (and every absolutely-positioned chip,
-// which derives from CANVAS_PX) grows proportionally with the text, keeping the
-// single-line labels readable. This is the mobile twin of the desktop
-// `--hour-px`→rem fix. Read once at module load (a font-scale change while the
-// app runs is picked up on the next launch — RN reloads on most such changes).
+// which derives from HOUR_PX × the visible hours) grows proportionally with the
+// text, keeping the single-line labels readable. This is the mobile twin of the
+// desktop `--hour-px`→rem fix. Read once at module load (a font-scale change
+// while the app runs is picked up on the next launch — RN reloads on most such
+// changes).
 const FONT_SCALE = PixelRatio.getFontScale();
 
-/** Canvas pixels per hour → the 24h column is HOUR_PX*24 tall. */
+/** Canvas pixels per hour → the canvas is HOUR_PX × (visible hours) tall. With
+ *  the default full-day window the column is HOUR_PX*24; a narrower visible
+ *  window (the synced `calendar.dayStartMin`/`dayEndMin` pref) shortens it
+ *  proportionally so the grid spans only [dayStartMin, dayEndMin]. The mobile
+ *  twin of the desktop `--hour-px` × `--day-hours` height. */
 const HOUR_PX = Math.round(48 * FONT_SCALE);
-/** Full timed-canvas height in px (24h). */
-const CANVAS_PX = HOUR_PX * 24;
 /** Minimum rendered chip height so a short/zero-duration item stays legible. */
 const MIN_SLOT_PX = Math.round(28 * FONT_SCALE);
 /** Hour-ruler column width (carries the 00–23 numbers). */
@@ -168,19 +172,22 @@ function eventDurationMinForDay(start: Date, end: Date, day: Date): number {
   return span.endMin - span.startMin;
 }
 
-/** Absolute placement of a timed chip inside the 24h canvas (purely visual;
- *  source order is unchanged). top/height by start+duration, left/width by the
- *  overlap column. A short span keeps a `floorPx` min-height so it stays tappable;
- *  a timed task passes its per-effort floor (GRID_TASK_EFFORT_PX) so a higher-
- *  effort task reads as a taller block. Events use the default MIN_SLOT_PX. */
-function slotStyle(p: PositionedSpan, floorPx = MIN_SLOT_PX) {
-  const height = Math.max(p.heightFraction * CANVAS_PX, floorPx);
-  // Clamp the TOP (not the height) so a floored min-height chip near midnight
-  // stays fully on-canvas at its full `floorPx` height. Clamping the height
-  // instead would squeeze a 23:50 chip below the tap target — here it shifts up
-  // by a few px and keeps its full height, matching the desktop's intent. The
-  // clamp uses the SAME floor, so even a large-effort task at 23:50 fits.
-  const top = Math.min(p.topFraction * CANVAS_PX, CANVAS_PX - floorPx);
+/** Absolute placement of a timed chip inside the (windowed) canvas (purely
+ *  visual; source order is unchanged). top/height by start+duration, left/width
+ *  by the overlap column. The fractions are WINDOW-RELATIVE (the shared
+ *  `layoutDayColumn` already classified the item 'in' and clamped it to the
+ *  visible window), so they're multiplied by `canvasPx` — the WINDOWED canvas
+ *  height, not a fixed 24h — to land at the right pixel. A short span keeps a
+ *  `floorPx` min-height so it stays tappable; a timed task passes its per-effort
+ *  floor (GRID_TASK_EFFORT_PX) so a higher-effort task reads as a taller block.
+ *  Events use the default MIN_SLOT_PX. */
+function slotStyle(p: PositionedSpan, canvasPx: number, floorPx = MIN_SLOT_PX) {
+  const height = Math.max(p.heightFraction * canvasPx, floorPx);
+  // Clamp the TOP (not the height) so a chip near the window's late edge keeps
+  // its full height and stays on-canvas — it shifts up a few px rather than
+  // being squeezed below the tap target. Clamp by the chip's own (floored)
+  // height, matching the desktop reference, so even a large-effort task fits.
+  const top = Math.min(p.topFraction * canvasPx, canvasPx - height);
   return {
     position: 'absolute' as const,
     top,
@@ -270,9 +277,22 @@ export function CalendarDayList({
   // and re-read on focus so a Settings toggle / peer sync reflects without a
   // restart. Purely visual — the SR effort suffix is always appended below.
   const [effortSizing, setEffortSizing] = useState(true);
+  // The synced visible day-window of the hour-grid (`calendar.dayStartMin` /
+  // `dayEndMin`, minutes from midnight; default 0/1440 = the full day). The
+  // single-day grid spans only [dayStartMin, dayEndMin]: the canvas height +
+  // ruler shrink to the window and timed items are positioned window-relative
+  // (see computeSlots / layoutDayColumn). Read alongside the effort pref so one
+  // focus-refresh covers both; default 0/1440 reproduces today's full-day grid
+  // exactly. Window applies to the GRID only — the compact list ignores it.
+  const [dayStartMin, setDayStartMin] = useState(0);
+  const [dayEndMin, setDayEndMin] = useState(MINUTES_PER_DAY);
   useEffect(() => {
     const read = () =>
-      void readTaskBehaviour().then((b) => setEffortSizing(b.visualEffortSizing));
+      void readTaskBehaviour().then((b) => {
+        setEffortSizing(b.visualEffortSizing);
+        setDayStartMin(b.dayStartMin);
+        setDayEndMin(b.dayEndMin);
+      });
     read();
     const unsubscribe = navigation.addListener('focus', read);
     return unsubscribe;
@@ -290,12 +310,13 @@ export function CalendarDayList({
   const dayKeys = useMemo(() => days.map(localDateKey), [days]);
 
   // Re-arm the grid auto-scroll whenever the visible day window changes (the
-  // single-day grid caller swaps `days` on prev/next/jump). Clearing the guard
-  // and the stale measured offsets lets the next layout pass scroll the new day
-  // to its first event; without this, navigating to a new afternoon-only day
+  // single-day grid caller swaps `days` on prev/next/jump) OR the visible-hours
+  // pref changes (a narrower window moves where "now" / the first event sits in
+  // the canvas). Clearing the guard and the stale measured offsets lets the next
+  // layout pass re-scroll; without this, navigating to a new afternoon-only day
   // would stay parked at the previous day's offset. Grid-only state, but cheap
   // and harmless for the other callers.
-  const dayWindowKey = dayKeys.join('|');
+  const dayWindowKey = `${dayKeys.join('|')}@${dayStartMin}-${dayEndMin}`;
   useEffect(() => {
     scrolledDayKeyRef.current = null;
     daySectionYRef.current = null;
@@ -382,6 +403,31 @@ export function CalendarDayList({
     [dayMinuteDate, fmtTime, t],
   );
 
+  // ── Windowed hour-grid geometry (dayLayout='grid' only) ──────────────────────
+  // Derived from the synced [dayStartMin, dayEndMin] window. Mirrors the desktop
+  // DayView: windowMin = the visible span (≥ 1), dayHours = its hours, and the
+  // canvas height = dayHours × HOUR_PX so the column shrinks to the window. The
+  // shared layoutDayColumn returns WINDOW-RELATIVE fractions for in-window items,
+  // so multiplying by `canvasPx` (not a fixed 24h) lands each chip correctly.
+  // Default 0/1440 → windowMin 1440, dayHours 24, canvasPx HOUR_PX*24 — the exact
+  // pre-window full-day canvas.
+  const dayWindow = useMemo(
+    () => ({ startMin: dayStartMin, endMin: dayEndMin }),
+    [dayStartMin, dayEndMin],
+  );
+  const windowMin = Math.max(1, dayEndMin - dayStartMin);
+  const dayHours = windowMin / 60;
+  const canvasPx = dayHours * HOUR_PX;
+  // Whole-hour ruler ticks inside the window (e.g. 7…22 for a 7–23 window),
+  // positioned by (h*60 - dayStartMin)/windowMin — mirrors desktop's rulerHours.
+  const rulerHours = useMemo(() => {
+    const out: number[] = [];
+    for (let h = Math.ceil(dayStartMin / 60); h * 60 < dayEndMin; h += 1) {
+      out.push(h);
+    }
+    return out;
+  }, [dayStartMin, dayEndMin]);
+
   // A request-epoch guard: the latest load wins. Changing the day window (e.g.
   // the week-start pref resolving async, or a prev/next step) recomputes `range`
   // and re-fires load while an earlier fetch may still be in flight; without
@@ -390,10 +436,11 @@ export function CalendarDayList({
   const reqToken = useRef(0);
 
   // ── Grid auto-scroll (dayLayout='grid' only; sighted/low-vision nicety) ──────
-  // The grid renders a fixed 24h-tall canvas (CANVAS_PX) inside this ScrollView
-  // with no initial offset, so an afternoon-only day would open showing an empty
-  // 00:00–morning band. After layout we scroll ONCE per day so the first timed
-  // slot (or, on today, the current hour) sits near the top. This is purely
+  // The grid renders a windowed-height canvas (dayHours × HOUR_PX) inside this
+  // ScrollView with no initial offset, so an afternoon-only day (full window)
+  // would open showing an empty early-morning band. After layout we scroll ONCE
+  // per day so the first in-window timed slot (or, on today, the current hour)
+  // sits near the top. This is purely
   // visual: it touches no accessibilityLabel/role/action/tap handler, and only
   // the GRID path calls it — list/linear modes stack from the top already.
   const scrollRef = useRef<ScrollView>(null);
@@ -422,12 +469,14 @@ export function CalendarDayList({
       // grid row's y within that section (the all-day band sits above the row).
       const canvasY = sectionY + rowY;
       const today = localDateKey(new Date()) === b.key;
-      // Today → current-hour offset; otherwise the earliest timed slot. If the
-      // day has no timed items (earliestSlotTopPx == null) and it isn't today,
-      // leave it at the top — all-day/untimed items live there.
-      const withinCanvas = today
-        ? (new Date().getHours() / 24) * CANVAS_PX
-        : earliestSlotTopPx;
+      // Today → current-hour offset, window-relative + clamped into the canvas
+      // (the now-line could be outside a narrow window); otherwise the earliest
+      // in-window timed slot. If the day has no in-window timed items
+      // (earliestSlotTopPx == null) and it isn't today, leave it at the top —
+      // all-day / outside-band / untimed items live there.
+      const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+      const nowFrac = Math.min(1, Math.max(0, (nowMin - dayStartMin) / windowMin));
+      const withinCanvas = today ? nowFrac * canvasPx : earliestSlotTopPx;
       if (withinCanvas == null) {
         // Mark the day handled so a no-timed-items day doesn't re-check forever.
         scrolledDayKeyRef.current = b.key;
@@ -437,7 +486,7 @@ export function CalendarDayList({
       scrolledDayKeyRef.current = b.key;
       scrollRef.current?.scrollTo({ y: target, animated: false });
     },
-    [dayLayout],
+    [dayLayout, dayStartMin, windowMin, canvasPx],
   );
 
   const load = useCallback(async () => {
@@ -781,7 +830,7 @@ export function CalendarDayList({
           accessible
           accessibilityRole="text"
           accessibilityLabel={eventLabel(ev, day, span)}
-          style={grid ? [styles.gridChip, slotStyle(slot)] : [styles.row, extraStyle]}
+          style={grid ? [styles.gridChip, slotStyle(slot, canvasPx)] : [styles.row, extraStyle]}
         >
           {dot}
           <View style={styles.rowText}>
@@ -819,7 +868,7 @@ export function CalendarDayList({
           else if (e.nativeEvent.actionName === 'moveCopy') moveCopyEvent(ev);
           else editEvent(ev);
         }}
-        style={grid ? [styles.gridChip, slotStyle(slot)] : [styles.row, extraStyle]}
+        style={grid ? [styles.gridChip, slotStyle(slot, canvasPx)] : [styles.row, extraStyle]}
       >
         {dot}
         <Pressable accessible={false} onPress={() => editEvent(ev)} style={styles.rowText}>
@@ -915,7 +964,11 @@ export function CalendarDayList({
           grid
             ? [
                 styles.gridChip,
-                slotStyle(slot, effortSizing ? GRID_TASK_EFFORT_PX[task.effort] : MIN_SLOT_PX),
+                slotStyle(
+                  slot,
+                  canvasPx,
+                  effortSizing ? GRID_TASK_EFFORT_PX[task.effort] : MIN_SLOT_PX,
+                ),
               ]
             : [styles.row, effortStyle]
         }
@@ -989,7 +1042,7 @@ export function CalendarDayList({
         slotIdxs.push(idx);
       }
     });
-    const positions = layoutDayColumn(spans);
+    const positions = layoutDayColumn(spans, dayWindow);
     slotIdxs.forEach((idx, k) => map.set(idx, positions[k]));
     return map;
   };
@@ -1021,22 +1074,57 @@ export function CalendarDayList({
     </>
   );
 
-  // Single-day hour-grid: all-day events, then the 24h canvas (a leading
-  // hour-ruler 00–23 beside the positioned day column), then a compact band of
-  // UNTIMED tasks BELOW the canvas (per Toni: the task band stays under the grid,
-  // not above). Reading/source order: all-day → timed(canvas) → untimed → create
-  // buttons (events first, then tasks). Each untimed row uses the SAME
-  // renderTaskRow (no slot), so its accessibilityRole/Label/actions/effort sizing
-  // + tap handlers are unchanged. The grid is visual only; within the canvas
-  // timed order is preserved chronologically.
+  // One timed item rendered as a plain (un-slotted) row for an "outside the
+  // visible hours" band — reuses renderEventRow/renderTaskRow WITHOUT a slot, so
+  // the row keeps its full accessibilityLabel (with its REAL time — a cross-
+  // midnight event shows its clamped this-day time via eventTimeLabel), all its
+  // custom actions and its tap-to-open handler. Unlike the desktop (which clips a
+  // listbox option and shows an aria-hidden bar), an RN band row is itself the
+  // accessible element, so the screen reader reaches every outside item here.
+  const renderOutsideRow = (
+    item: DayGridItem<CalendarEvent, Task>,
+    day: Date,
+    key: string,
+  ): ReactNode =>
+    item.kind === 'event'
+      ? renderEventRow(item.event, day, multiDayInfo(item.event, day))
+      : renderTaskRow(item.task, key);
+
+  // Single-day hour-grid: all-day events, then (when the window hides them) a
+  // compact BEFORE band of items earlier than the window start, then the windowed
+  // canvas (a leading hour-ruler beside the positioned day column), then an AFTER
+  // band of items past the window end, then a compact band of UNTIMED tasks BELOW
+  // the canvas (per Toni: the task band stays under the grid). Reading/source
+  // order: all-day → before → timed(canvas) → after → untimed → create buttons
+  // (events first, then tasks) — and `b.timed` is already chronological, so the
+  // before/in/after split preserves time order across the three groups. Each band
+  // row uses the SAME renderEventRow/renderTaskRow (no slot), so its
+  // accessibilityRole/Label/actions/effort sizing + tap handlers are unchanged.
+  // The grid is visual only; within the canvas timed order is preserved.
   const renderDayGrid = (b: DayBucket): ReactNode => {
     const slots = computeSlots(b);
-    // The earliest timed slot's top in px (the highest chip on the canvas), or
-    // null when the day has no timed items. Drives the auto-scroll target for a
-    // non-today day; `slots` already reflects the overlap layout, and topFraction
-    // is the chip's start position, so min(topFraction)*CANVAS_PX is the top of
-    // the first event/timed-task of the day.
-    const slotTops = Array.from(slots.values(), (p) => p.topFraction * CANVAS_PX);
+    // Partition the day's timed items by where the shared layout placed them
+    // relative to the visible window. In-window items keep their canvas slot;
+    // before/after items fall into the outside bands above/below the grid. Items
+    // with no slot (defensive) are treated as in-window so nothing is dropped.
+    const before: { item: DayGridItem<CalendarEvent, Task> }[] = [];
+    const inWindow: { item: DayGridItem<CalendarEvent, Task>; idx: number }[] = [];
+    const after: { item: DayGridItem<CalendarEvent, Task> }[] = [];
+    b.timed.forEach((item, idx) => {
+      const placement = slots.get(idx)?.placement ?? 'in';
+      if (placement === 'before') before.push({ item });
+      else if (placement === 'after') after.push({ item });
+      else inWindow.push({ item, idx });
+    });
+    // The earliest IN-WINDOW slot's top in px (the highest chip on the canvas), or
+    // null when no timed item lands in the window. Drives the auto-scroll target
+    // for a non-today day; topFraction is window-relative, so × canvasPx is the
+    // chip's top in the (windowed) canvas. Outside items are excluded (their
+    // fractions are 0 and they live in the bands, not on the canvas).
+    const slotTops = inWindow
+      .map(({ idx }) => slots.get(idx))
+      .filter((p): p is PositionedSpan => p != null && p.placement === 'in')
+      .map((p) => p.topFraction * canvasPx);
     const earliestSlotTopPx = slotTops.length > 0 ? Math.min(...slotTops) : null;
     return (
       <View
@@ -1051,47 +1139,75 @@ export function CalendarDayList({
         }}
       >
         {b.allDay.map((ev) => renderEventRow(ev, b.date, multiDayInfo(ev, b.date)))}
+        {/* Items earlier than the window start — a compact band above the grid.
+            Real accessible rows (the time is in each label), so the screen reader
+            still reaches an out-of-window event/task. */}
+        {before.length > 0 && (
+          <View style={styles.outsideBand}>
+            <Text accessibilityRole="header" style={styles.outsideBandHeading}>
+              {t('views.day.outsideBefore', { time: fmtTime(dayMinuteDate(b.date, dayStartMin)) })}
+            </Text>
+            {before.map(({ item }) => renderOutsideRow(item, b.date, b.key))}
+          </View>
+        )}
         <View
           style={styles.gridRow}
-          // y of the hour-grid row within the day section (below the all-day
-          // band). daySectionY + this = the canvas top in the scroll content.
+          // y of the hour-grid row within the day section (below the all-day band
+          // + before-band). daySectionY + this = the canvas top in the scroll
+          // content.
           onLayout={(e) => {
             gridRowYRef.current = e.nativeEvent.layout.y;
             maybeScrollGrid(b, earliestSlotTopPx);
           }}
         >
-          {/* Hour ruler — the hour numbers (00–23), read off the grid instead of
-              the chips. Decorative: the time stays in each row's
-              accessibilityLabel, so it's hidden from the screen reader. */}
+          {/* Hour ruler — the whole-hour numbers INSIDE the window, read off the
+              grid instead of the chips. Decorative: the time stays in each row's
+              accessibilityLabel, so it's hidden from the screen reader. Each tick
+              is positioned by (h*60 - dayStartMin)/windowMin, matching desktop. */}
           <View
-            style={styles.ruler}
+            style={[styles.ruler, { height: canvasPx }]}
             accessibilityElementsHidden
             importantForAccessibility="no-hide-descendants"
           >
-            {Array.from({ length: 24 }, (_, h) => (
-              <Text key={h} style={[styles.rulerHour, { top: (h / 24) * CANVAS_PX }]}>
+            {rulerHours.map((h) => (
+              <Text
+                key={h}
+                style={[styles.rulerHour, { top: ((h * 60 - dayStartMin) / windowMin) * canvasPx }]}
+              >
                 {String(h).padStart(2, '0')}
               </Text>
             ))}
           </View>
-          {/* The positioned 24h day column. Each timed chip is absolutely placed
-              by start+duration; faint hour gridlines read the column as a grid. */}
-          <View style={styles.canvas}>
-            {Array.from({ length: 24 }, (_, h) => (
+          {/* The positioned day column, sized to the visible window. Each timed
+              chip is absolutely placed by its window-relative start+duration;
+              faint gridlines on the whole hours read the column as a grid. */}
+          <View style={[styles.canvas, { height: canvasPx }]}>
+            {rulerHours.map((h) => (
               <View
                 key={h}
                 accessibilityElementsHidden
                 importantForAccessibility="no-hide-descendants"
-                style={[styles.gridLine, { top: (h / 24) * CANVAS_PX }]}
+                style={[styles.gridLine, { top: ((h * 60 - dayStartMin) / windowMin) * canvasPx }]}
               />
             ))}
-            {b.timed.map((item, idx) =>
+            {inWindow.map(({ item, idx }) =>
               item.kind === 'event'
                 ? renderEventRow(item.event, b.date, multiDayInfo(item.event, b.date), slots.get(idx))
                 : renderTaskRow(item.task, b.key, slots.get(idx)),
             )}
           </View>
         </View>
+        {/* Items past the window end — the mirror band below the grid. */}
+        {after.length > 0 && (
+          <View style={styles.outsideBand}>
+            <Text accessibilityRole="header" style={styles.outsideBandHeading}>
+              {t('views.day.outsideAfter', {
+                time: dayEndMin >= MINUTES_PER_DAY ? '24:00' : fmtTime(dayMinuteDate(b.date, dayEndMin)),
+              })}
+            </Text>
+            {after.map(({ item }) => renderOutsideRow(item, b.date, b.key))}
+          </View>
+        )}
         {/* Compact band of untimed tasks, BELOW the canvas (per Toni: the task
             band stays under the grid, not above it). A short heading then the
             same renderTaskRow rows (no slot → unchanged a11y + effort sizing +
@@ -1282,12 +1398,26 @@ const makeStyles = (c: ThemeColors) =>
       color: c.textLabel,
       marginBottom: 2,
     },
+    // ── Single-day "outside the visible hours" bands (dayLayout='grid') ───────
+    // The compact band of events/tasks that fall before the window start (above
+    // the grid) or after the window end (below it). Same row renderers as the
+    // canvas, so each band row is a full accessible row (the time is in its
+    // label) — the screen reader still reaches every out-of-window item.
+    outsideBand: { gap: 4 },
+    outsideBandHeading: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: c.textLabel,
+      marginBottom: 2,
+    },
     // ── Single-day hour-grid (dayLayout='grid') ──────────────────────────────
-    // A horizontal [ruler | 24h canvas] row; the canvas is a 24h-tall positioned
-    // column. Ruler numbers + chips line up because both are offset from the
-    // SAME top by the same per-hour fraction (CANVAS_PX tall).
+    // A horizontal [ruler | canvas] row; the canvas is a windowed-height
+    // positioned column (its height is set inline per-render = dayHours × HOUR_PX,
+    // shrinking to the visible [dayStartMin, dayEndMin] window). Ruler numbers +
+    // chips line up because both are offset from the SAME top by the same
+    // window-relative fraction × that height.
     gridRow: { flexDirection: 'row', alignItems: 'flex-start' },
-    ruler: { width: RULER_PX, height: CANVAS_PX, position: 'relative' },
+    ruler: { width: RULER_PX, position: 'relative' },
     rulerHour: {
       position: 'absolute',
       right: 6,
@@ -1296,7 +1426,7 @@ const makeStyles = (c: ThemeColors) =>
       // Nudge up so the number sits centred on its gridline.
       marginTop: -7,
     },
-    canvas: { flex: 1, height: CANVAS_PX, position: 'relative' },
+    canvas: { flex: 1, position: 'relative' },
     gridLine: {
       position: 'absolute',
       left: 0,
