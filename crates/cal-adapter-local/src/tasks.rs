@@ -1067,6 +1067,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn deadline_reminder_days_roundtrips() {
+        // `deadline_reminder_days` is read positionally (row index 23 in
+        // `row_to_task`) after a hand-edited multi-column SELECT, so a swapped
+        // index would silently mis-map it. Set distinct neighbours (a Large
+        // effort at index 22, a known series id at 21) so a slip onto either
+        // would surface as a wrong value here. The chosen 7 is also a preset,
+        // but the point is the column round-trips intact.
+        let (a, list) = adapter_with_list();
+        let mut nt = mk_task("Renew passport");
+        nt.deadline_date = Some(NaiveDate::from_ymd_opt(2026, 8, 1).unwrap());
+        nt.deadline_reminder_days = Some(7);
+        nt.effort = TaskEffort::Large;
+        nt.series_id = Some("series-passport".into());
+        let created = a.create_task(&list.id, nt).await.unwrap();
+
+        // Read back via the by-id path…
+        let by_id = a.get_task_by_id(&created.id).unwrap().unwrap();
+        assert_eq!(by_id.deadline_reminder_days, Some(7));
+        assert_eq!(by_id.effort, TaskEffort::Large);
+        assert_eq!(by_id.series_id.as_deref(), Some("series-passport"));
+
+        // …and via the list path (a different SELECT, same `row_to_task`).
+        let listed = a.get_tasks(&list.id).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].deadline_reminder_days, Some(7));
+    }
+
+    #[tokio::test]
     async fn scheduled_time_roundtrips() {
         // Times pair with their date; the DB CHECK constraint blocks
         // a time without a date, and round-tripping both ways is the

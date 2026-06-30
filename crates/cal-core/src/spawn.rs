@@ -191,7 +191,7 @@ fn instance_skeleton(
         scheduled_time: scheduled_date.and(template.scheduled_time),
         deadline_date,
         deadline_time: deadline_date.and(template.deadline_time),
-        deadline_reminder_days: template.deadline_reminder_days,
+        deadline_reminder_days: deadline_date.and(template.deadline_reminder_days),
         recurrence: Some(rule.clone()),
         resurface_date,
         // The next instance stays in the same series for idempotent spawning.

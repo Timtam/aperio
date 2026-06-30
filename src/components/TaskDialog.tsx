@@ -289,6 +289,18 @@ export function TaskDialog({
     () => sectionsByList[form.listId] ?? [],
     [sectionsByList, form.listId],
   );
+  // The day presets for the per-task early-reminder override, plus the
+  // current value spliced in (sorted) when it's a non-null override that
+  // isn't one of the presets — e.g. a `10` synced from another device. Keeps
+  // the <select> from silently showing the wrong option for a value the user
+  // never picked here but that does round-trip on save.
+  const deadlineReminderChoices = useMemo(() => {
+    const set = new Set<number>(DEADLINE_REMINDER_PRESETS);
+    if (form.deadlineReminderDays != null) {
+      set.add(form.deadlineReminderDays);
+    }
+    return [...set].sort((a, b) => a - b);
+  }, [form.deadlineReminderDays]);
   // Sections are user-managed (create / rename / delete) on local lists
   // and on providers that declare `manageable_sections` (Todoist,
   // Vikunja). Providers without it expose sections read-only — we just
@@ -1390,7 +1402,7 @@ export function TaskDialog({
                 <option value={DEADLINE_REMINDER_DEFAULT}>
                   {t('dialogs.task.fields.deadlineReminder.default')}
                 </option>
-                {DEADLINE_REMINDER_PRESETS.map((days) => (
+                {deadlineReminderChoices.map((days) => (
                   <option key={days} value={days}>
                     {t('dialogs.task.fields.deadlineReminder.option', {
                       count: days,

@@ -511,21 +511,29 @@ export default function TaskEditorModal({
   // "Default (global)" plus the day presets. Modelled as a RadioGroup (not a
   // segmented control) — seven options is too many for a segment row, and each
   // radio is its own focus stop for a screen-reader user.
-  const deadlineReminderOptions = useMemo(
-    () => [
+  const deadlineReminderOptions = useMemo(() => {
+    // The day presets, plus the current value spliced in (sorted) when it's a
+    // non-null override that isn't a preset — e.g. a `10` synced from another
+    // device. Without this the RadioGroup announces NOTHING selected for such a
+    // value, even though it saves back intact.
+    const set = new Set<number>(DEADLINE_REMINDER_PRESETS);
+    if (form.deadlineReminderDays != null) {
+      set.add(form.deadlineReminderDays);
+    }
+    const days = [...set].sort((a, b) => a - b);
+    return [
       {
         value: DEADLINE_REMINDER_DEFAULT,
         label: t('dialogs.task.fields.deadlineReminder.default'),
       },
-      ...DEADLINE_REMINDER_PRESETS.map((days) => ({
-        value: days,
+      ...days.map((d) => ({
+        value: d,
         label: t('dialogs.task.fields.deadlineReminder.option', {
-          count: days,
+          count: d,
         }),
       })),
-    ],
-    [t],
-  );
+    ];
+  }, [t, form.deadlineReminderDays]);
 
   // A subtask must stay in its parent's list (the bridge has no list-move hint)
   // — both when editing an existing subtask and when creating a new one.

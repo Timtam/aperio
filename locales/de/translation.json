@@ -1351,7 +1351,7 @@
           "label": "Frühe Erinnerung",
           "hint": "Wie viele Tage vor dieser Frist die frühe Erinnerung ausgelöst wird. Überschreibt den globalen Standard nur für diese Aufgabe.",
           "default": "Standard (global)",
-          "option": "{{count}} Tag vorher",
+          "option_one": "{{count}} Tag vorher",
           "option_other": "{{count}} Tage vorher"
         },
         "description": "Beschreibung",

@@ -1351,7 +1351,7 @@
           "label": "Early reminder",
           "hint": "How many days before this deadline the early reminder fires. Overrides the global default just for this task.",
           "default": "Default (global)",
-          "option": "{{count}} day before",
+          "option_one": "{{count}} day before",
           "option_other": "{{count}} days before"
         },
         "description": "Description",
