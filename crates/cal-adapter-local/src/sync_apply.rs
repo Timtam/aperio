@@ -184,10 +184,11 @@ impl LocalAdapter {
             "INSERT INTO tasks (
                 id, list_id, parent_id, section_id, title, description, status, priority,
                 effort, scheduled_date, scheduled_time, deadline_date, deadline_time,
+                deadline_reminder_days,
                 recurrence, color_label_id, reminders, sound,
                 created_at, updated_at, completed_at, etag,
                 resurface_date, series_id
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                  list_id        = excluded.list_id,
                  parent_id      = excluded.parent_id,
@@ -201,6 +202,7 @@ impl LocalAdapter {
                  scheduled_time = excluded.scheduled_time,
                  deadline_date  = excluded.deadline_date,
                  deadline_time  = excluded.deadline_time,
+                 deadline_reminder_days = excluded.deadline_reminder_days,
                  recurrence     = excluded.recurrence,
                  color_label_id = excluded.color_label_id,
                  reminders      = excluded.reminders,
@@ -224,6 +226,7 @@ impl LocalAdapter {
                 task.scheduled_time.as_ref().map(fmt_time),
                 task.deadline_date.as_ref().map(fmt_date),
                 task.deadline_time.as_ref().map(fmt_time),
+                task.deadline_reminder_days,
                 recurrence_json,
                 task.color_label.as_ref().map(|c| c.as_str()),
                 reminders_json,

@@ -206,13 +206,16 @@ pub fn recurrence_needs_extras(rec: &TaskRecurrence) -> bool {
 /// whenever set; the full `recurrence` rides only when it has a non-native
 /// aspect (so a plain scheduled rule stays in the provider's own field);
 /// `effort` rides only when it differs from the neutral default (no provider
-/// has an effort field, so it would otherwise be lost on round-trip). An empty
-/// bag means "nothing to carry" — the caller writes no block.
+/// has an effort field, so it would otherwise be lost on round-trip);
+/// `deadline_reminder_days` (the per-task day-start countdown override) rides
+/// only when `Some`. An empty bag means "nothing to carry" — the caller writes
+/// no block.
 pub fn extras_for_task(
     recurrence: Option<&TaskRecurrence>,
     resurface_date: Option<NaiveDate>,
     series_id: Option<&str>,
     effort: TaskEffort,
+    deadline_reminder_days: Option<i64>,
 ) -> AperioExtras {
     let mut extras = AperioExtras::new();
     if let Some(date) = resurface_date {
@@ -238,6 +241,11 @@ pub fn extras_for_task(
             extras.insert("effort", value);
         }
     }
+    // The per-task deadline-countdown override has no native home on any
+    // provider — carry it only when set, so the common case writes no block.
+    if let Some(days) = deadline_reminder_days {
+        extras.insert("deadline_reminder_days", serde_json::Value::from(days));
+    }
     extras
 }
 
@@ -251,6 +259,7 @@ pub fn apply_task_extras(
     resurface_date: &mut Option<NaiveDate>,
     series_id: &mut Option<String>,
     effort: &mut TaskEffort,
+    deadline_reminder_days: &mut Option<i64>,
 ) {
     if let Some(raw) = extras.get("resurface_date").and_then(|v| v.as_str()) {
         if let Ok(date) = raw.parse::<NaiveDate>() {
@@ -269,6 +278,12 @@ pub fn apply_task_extras(
         if let Ok(e) = serde_json::from_value::<TaskEffort>(value.clone()) {
             *effort = e;
         }
+    }
+    if let Some(days) = extras
+        .get("deadline_reminder_days")
+        .and_then(|v| v.as_i64())
+    {
+        *deadline_reminder_days = Some(days);
     }
 }
 
@@ -390,7 +405,7 @@ mod tests {
         assert!(!recurrence_needs_extras(&plain));
         // …so the bag carries nothing from it (and default-Medium effort
         // writes no key either).
-        let bag = extras_for_task(Some(&plain), None, None, TaskEffort::Medium);
+        let bag = extras_for_task(Some(&plain), None, None, TaskEffort::Medium, None);
         assert!(bag.is_empty());
     }
 
@@ -407,6 +422,7 @@ mod tests {
             Some(NaiveDate::from_ymd_opt(2026, 10, 1).unwrap()),
             Some("series-7"),
             TaskEffort::Medium,
+            None,
         );
         assert_eq!(
             bag.get("resurface_date").and_then(|v| v.as_str()),
@@ -419,12 +435,27 @@ mod tests {
         assert!(bag.get("recurrence").is_some());
         // Default-Medium effort writes no key.
         assert!(bag.get("effort").is_none());
+        // No per-task deadline override ⇒ no key either.
+        assert!(bag.get("deadline_reminder_days").is_none());
     }
 
     #[test]
     fn non_default_effort_rides_the_bag() {
-        let bag = extras_for_task(None, None, None, TaskEffort::Large);
+        let bag = extras_for_task(None, None, None, TaskEffort::Large, None);
         assert_eq!(bag.get("effort").and_then(|v| v.as_str()), Some("large"));
+    }
+
+    #[test]
+    fn deadline_reminder_days_override_rides_the_bag() {
+        // Carried only when Some.
+        let bag = extras_for_task(None, None, None, TaskEffort::Medium, Some(7));
+        assert_eq!(
+            bag.get("deadline_reminder_days").and_then(|v| v.as_i64()),
+            Some(7),
+        );
+        // None ⇒ no key.
+        let bag = extras_for_task(None, None, None, TaskEffort::Medium, None);
+        assert!(bag.get("deadline_reminder_days").is_none());
     }
 
     #[test]
@@ -439,6 +470,7 @@ mod tests {
             Some(NaiveDate::from_ymd_opt(2026, 4, 1).unwrap()),
             Some("series-9"),
             TaskEffort::Large,
+            Some(5),
         );
         let stored = embed(Some("Swap shoes"), &bag).unwrap();
 
@@ -449,17 +481,20 @@ mod tests {
         let mut resurface = None;
         let mut series = None;
         let mut effort = TaskEffort::Medium;
+        let mut deadline_reminder_days = None;
         apply_task_extras(
             &extracted.unwrap(),
             &mut recurrence,
             &mut resurface,
             &mut series,
             &mut effort,
+            &mut deadline_reminder_days,
         );
         assert_eq!(recurrence, Some(backlog));
         assert_eq!(resurface, NaiveDate::from_ymd_opt(2026, 4, 1));
         assert_eq!(series.as_deref(), Some("series-9"));
         assert_eq!(effort, TaskEffort::Large);
+        assert_eq!(deadline_reminder_days, Some(5));
     }
 
     #[test]
@@ -482,16 +517,19 @@ mod tests {
         let mut resurface = None;
         let mut series = Some("keep-me".to_string());
         let mut effort = TaskEffort::Small;
+        let mut deadline_reminder_days = Some(9);
         apply_task_extras(
             &AperioExtras::new(),
             &mut recurrence,
             &mut resurface,
             &mut series,
             &mut effort,
+            &mut deadline_reminder_days,
         );
         assert!(recurrence.is_none());
         assert!(resurface.is_none());
         assert_eq!(series.as_deref(), Some("keep-me"));
         assert_eq!(effort, TaskEffort::Small);
+        assert_eq!(deadline_reminder_days, Some(9));
     }
 }

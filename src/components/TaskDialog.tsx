@@ -486,6 +486,8 @@ export function TaskDialog({
         scheduled_time: null,
         deadline_date: null,
         deadline_time: null,
+        // A fresh subtask uses the global countdown (no override).
+        deadline_reminder_days: null,
         recurrence: null,
         parent_id: task.id,
         // Keep the subtask in its parent's section so it groups with it.
@@ -891,6 +893,9 @@ export function TaskDialog({
             scheduled_time,
             deadline_date,
             deadline_time,
+            // Per-task countdown override editor lands next; default to the
+            // global until then.
+            deadline_reminder_days: null,
             recurrence: recurrenceToBackend(form.recurrence),
             parent_id: null,
             section_id: form.sectionId || null,
@@ -915,6 +920,7 @@ export function TaskDialog({
                 scheduled_time: null,
                 deadline_date: null,
                 deadline_time: null,
+                deadline_reminder_days: null,
                 recurrence: null,
                 parent_id: created.id,
                 section_id: form.sectionId || null,

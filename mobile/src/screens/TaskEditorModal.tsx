@@ -553,6 +553,9 @@ export default function TaskEditorModal({
           scheduled_time: sched.time,
           deadline_date: dead.date,
           deadline_time: dead.time,
+          // Per-task countdown override editor lands next; default to the
+          // global until then.
+          deadline_reminder_days: null,
           recurrence: canRecur ? toBackend(form.recurrence) : null,
           parent_id: parentId ?? null,
           section_id: canSection ? form.sectionId || null : null,
@@ -579,6 +582,7 @@ export default function TaskEditorModal({
               scheduled_time: null,
               deadline_date: null,
               deadline_time: null,
+              deadline_reminder_days: null,
               recurrence: null,
               parent_id: created.id,
               section_id: created.section_id,

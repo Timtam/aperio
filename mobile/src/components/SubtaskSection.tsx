@@ -129,6 +129,8 @@ export function SubtaskSection({
         scheduled_time: null,
         deadline_date: null,
         deadline_time: null,
+        // A fresh subtask uses the global countdown (no override).
+        deadline_reminder_days: null,
         recurrence: null,
         parent_id: parentTask.id,
         // Keep the subtask in its parent's section so it groups with it.

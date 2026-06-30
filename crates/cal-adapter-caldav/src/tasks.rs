@@ -353,6 +353,7 @@ pub async fn create_task(
         scheduled_time: new.scheduled_time,
         deadline_date: new.deadline_date,
         deadline_time: new.deadline_time,
+        deadline_reminder_days: new.deadline_reminder_days,
         recurrence: new.recurrence,
         parent_id: new.parent_id,
         section_id: None,
@@ -486,6 +487,7 @@ fn build_vtodo_from_task(task: &Task) -> String {
         scheduled_time: task.scheduled_time,
         deadline_date: task.deadline_date,
         deadline_time: task.deadline_time,
+        deadline_reminder_days: task.deadline_reminder_days,
         recurrence: task.recurrence.clone(),
         parent_id: task.parent_id.clone(),
         section_id: None,
@@ -581,6 +583,7 @@ fn apply_common(todo: &mut Todo, uid: &str, task: &NewTask, completed_at: Option
         task.resurface_date,
         task.series_id.as_deref(),
         task.effort,
+        task.deadline_reminder_days,
     );
     if let Some(payload) = encode_payload(&extras) {
         todo.add_property("X-APERIO-EXTRAS", payload);
@@ -646,6 +649,7 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
     let mut resurface_date = None;
     let mut series_id = None;
     let mut effort = cal_core::TaskEffort::default();
+    let mut deadline_reminder_days = None;
     if let Some(extras) = todo
         .property_value("X-APERIO-EXTRAS")
         .and_then(decode_payload)
@@ -656,6 +660,7 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
             &mut resurface_date,
             &mut series_id,
             &mut effort,
+            &mut deadline_reminder_days,
         );
     }
 
@@ -672,6 +677,7 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
         scheduled_time,
         deadline_date,
         deadline_time,
+        deadline_reminder_days,
         recurrence,
         parent_id: None,
         section_id: None,
@@ -856,6 +862,7 @@ mod tests {
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
             effort: cal_core::TaskEffort::Medium,
+            deadline_reminder_days: None,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 20).unwrap()),
             scheduled_time: None,
             deadline_date: None,
@@ -970,6 +977,7 @@ END:VCALENDAR</c:calendar-data>
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
             effort: cal_core::TaskEffort::Medium,
+            deadline_reminder_days: None,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 21).unwrap()),
             scheduled_time: None,
             deadline_date: Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()),
@@ -1006,6 +1014,7 @@ END:VCALENDAR</c:calendar-data>
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
             effort: cal_core::TaskEffort::Medium,
+            deadline_reminder_days: None,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()),
@@ -1050,6 +1059,7 @@ END:VCALENDAR</c:calendar-data>
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
             effort: cal_core::TaskEffort::Medium,
+            deadline_reminder_days: None,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 21).unwrap()),
             scheduled_time: None,
             deadline_date: None,

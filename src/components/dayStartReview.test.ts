@@ -37,6 +37,7 @@ const baseTask: Task = {
   scheduled_time: null,
   deadline_date: null,
   deadline_time: null,
+  deadline_reminder_days: null,
   recurrence: null,
   resurface_date: null,
   series_id: null,
@@ -611,6 +612,53 @@ describe('filterDeadlineCountdown', () => {
     expect(filterDeadlineCountdown(tasks, 0)).toEqual([]);
     expect(filterDeadlineCountdown(tasks, -3)).toEqual([]);
     expect(filterDeadlineCountdown(tasks, Number.NaN)).toEqual([]);
+  });
+
+  it('honours a per-task override (=7) at today+7 even when the global is 3', () => {
+    const tasks: Task[] = [
+      // Override 7 → due 2026-05-27 matches; the global-3 day (05-23) doesn't.
+      {
+        ...baseTask,
+        id: 'override7',
+        deadline_date: '2026-05-27',
+        deadline_reminder_days: 7,
+      },
+      // Same override, but its deadline sits on the global-3 day → no match.
+      {
+        ...baseTask,
+        id: 'override7-wrongday',
+        deadline_date: '2026-05-23',
+        deadline_reminder_days: 7,
+      },
+      // No override → still uses the global default of 3 (05-23).
+      { ...baseTask, id: 'global', deadline_date: '2026-05-23' },
+    ];
+    expect(filterDeadlineCountdown(tasks, 3).map((t) => t.id)).toEqual([
+      'override7',
+      'global',
+    ]);
+  });
+
+  it('falls back to the global default when the override is null or < 1', () => {
+    const tasks: Task[] = [
+      // null override → global 3 (05-23).
+      { ...baseTask, id: 'null', deadline_date: '2026-05-23', deadline_reminder_days: null },
+      // < 1 override → ignored, global 3 (05-23).
+      { ...baseTask, id: 'zero', deadline_date: '2026-05-23', deadline_reminder_days: 0 },
+    ];
+    expect(filterDeadlineCountdown(tasks, 3).map((t) => t.id).sort()).toEqual([
+      'null',
+      'zero',
+    ]);
+  });
+
+  it('honours an override even when the global default is invalid (<= 0)', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'override5', deadline_date: '2026-05-25', deadline_reminder_days: 5 },
+      // No override + invalid global → nothing.
+      { ...baseTask, id: 'noov', deadline_date: '2026-05-25' },
+    ];
+    expect(filterDeadlineCountdown(tasks, 0).map((t) => t.id)).toEqual(['override5']);
   });
 });
 

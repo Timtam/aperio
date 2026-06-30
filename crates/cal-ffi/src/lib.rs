@@ -627,6 +627,9 @@ pub struct TaskDto {
     pub deadline_date: Option<String>,
     /// `HH:MM:SS`. Requires `deadline_date`.
     pub deadline_time: Option<String>,
+    /// Per-task override for the day-start deadline countdown: remind this
+    /// many days before `deadline_date`. `None` ⇒ use the global default.
+    pub deadline_reminder_days: Option<i64>,
     pub recurrence: Option<TaskRecurrence>,
     /// `YYYY-MM-DD`. Backlog resurface trigger (DESIGN §9.12), derived by the
     /// recurrence engine when a backlog instance is spawned. Round-trips
@@ -665,6 +668,7 @@ impl From<cal_core::Task> for TaskDto {
             scheduled_time: t.scheduled_time.map(time_to_string),
             deadline_date: t.deadline_date.map(date_to_string),
             deadline_time: t.deadline_time.map(time_to_string),
+            deadline_reminder_days: t.deadline_reminder_days,
             recurrence: t.recurrence.map(TaskRecurrence::from),
             resurface_date: t.resurface_date.map(date_to_string),
             series_id: t.series_id,
@@ -697,6 +701,7 @@ impl TryFrom<TaskDto> for cal_core::Task {
             scheduled_time: opt_time_field("scheduled_time", t.scheduled_time)?,
             deadline_date: opt_date_field("deadline_date", t.deadline_date)?,
             deadline_time: opt_time_field("deadline_time", t.deadline_time)?,
+            deadline_reminder_days: t.deadline_reminder_days,
             recurrence: t
                 .recurrence
                 .map(cal_core::TaskRecurrence::try_from)
@@ -739,6 +744,9 @@ pub struct NewTaskDto {
     pub scheduled_time: Option<String>,
     pub deadline_date: Option<String>,
     pub deadline_time: Option<String>,
+    /// Per-task override for the day-start deadline countdown; see
+    /// [`TaskDto::deadline_reminder_days`]. `None` ⇒ use the global default.
+    pub deadline_reminder_days: Option<i64>,
     pub recurrence: Option<TaskRecurrence>,
     pub parent_id: Option<String>,
     pub section_id: Option<String>,
@@ -761,6 +769,7 @@ impl TryFrom<NewTaskDto> for cal_core::NewTask {
             scheduled_time: opt_time_field("scheduled_time", t.scheduled_time)?,
             deadline_date: opt_date_field("deadline_date", t.deadline_date)?,
             deadline_time: opt_time_field("deadline_time", t.deadline_time)?,
+            deadline_reminder_days: t.deadline_reminder_days,
             recurrence: t
                 .recurrence
                 .map(cal_core::TaskRecurrence::try_from)
@@ -1296,6 +1305,7 @@ mod tests {
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
             effort: TaskEffort::Medium,
+            deadline_reminder_days: None,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,

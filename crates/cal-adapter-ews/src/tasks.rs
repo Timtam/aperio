@@ -840,6 +840,7 @@ pub fn to_task(item: ParsedTask, list_id: &str) -> EwsResult<Task> {
     let mut resurface_date = None;
     let mut series_id = None;
     let mut effort = cal_core::TaskEffort::default();
+    let mut deadline_reminder_days = None;
     if let Some(extras) = item.extras_payload.as_deref().and_then(decode_payload) {
         apply_task_extras(
             &extras,
@@ -847,6 +848,7 @@ pub fn to_task(item: ParsedTask, list_id: &str) -> EwsResult<Task> {
             &mut resurface_date,
             &mut series_id,
             &mut effort,
+            &mut deadline_reminder_days,
         );
     }
 
@@ -863,6 +865,7 @@ pub fn to_task(item: ParsedTask, list_id: &str) -> EwsResult<Task> {
         scheduled_time,
         deadline_date,
         deadline_time,
+        deadline_reminder_days,
         recurrence,
         parent_id: None,
         section_id: None,
@@ -925,6 +928,7 @@ pub fn new_task_to_task_item_xml(task: &NewTask) -> String {
         task.resurface_date,
         task.series_id.as_deref(),
         task.effort,
+        task.deadline_reminder_days,
     ) {
         out.push_str("          ");
         out.push_str(&prop);
@@ -988,8 +992,15 @@ fn aperio_extras_property_xml(
     resurface_date: Option<NaiveDate>,
     series_id: Option<&str>,
     effort: cal_core::TaskEffort,
+    deadline_reminder_days: Option<i64>,
 ) -> Option<String> {
-    let extras = extras_for_task(recurrence, resurface_date, series_id, effort);
+    let extras = extras_for_task(
+        recurrence,
+        resurface_date,
+        series_id,
+        effort,
+        deadline_reminder_days,
+    );
     let payload = encode_payload(&extras)?;
     Some(format!(
         "<t:ExtendedProperty>{}<t:Value>{}</t:Value></t:ExtendedProperty>",
@@ -1076,6 +1087,7 @@ pub fn task_to_update_field_xml(task: &Task) -> (String, String) {
         task.resurface_date,
         task.series_id.as_deref(),
         task.effort,
+        task.deadline_reminder_days,
     ) {
         Some(prop) => {
             let field_uri = aperio_extras_field_uri();
@@ -1253,6 +1265,7 @@ fn build_task_from_new(
         scheduled_time: new.scheduled_time,
         deadline_date: new.deadline_date,
         deadline_time: new.deadline_time,
+        deadline_reminder_days: new.deadline_reminder_days,
         recurrence: new.recurrence.clone(),
         parent_id: new.parent_id.clone(),
         section_id: None,
@@ -1443,6 +1456,7 @@ mod tests {
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
             effort: cal_core::TaskEffort::Medium,
+            deadline_reminder_days: None,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 21).unwrap()),
             scheduled_time: None,
             deadline_date: None,
@@ -1504,6 +1518,7 @@ mod tests {
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
             effort: cal_core::TaskEffort::Medium,
+            deadline_reminder_days: None,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,
@@ -1702,6 +1717,7 @@ mod tests {
             status: TaskStatus::Open,
             priority: TaskPriority::High,
             effort: cal_core::TaskEffort::Medium,
+            deadline_reminder_days: None,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 20).unwrap()),
             scheduled_time: None,
             deadline_date: Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()),
@@ -1750,6 +1766,7 @@ mod tests {
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
             effort: cal_core::TaskEffort::Medium,
+            deadline_reminder_days: None,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,
@@ -1902,6 +1919,7 @@ mod tests {
             status: TaskStatus::Completed,
             priority: TaskPriority::Medium,
             effort: cal_core::TaskEffort::Medium,
+            deadline_reminder_days: None,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,

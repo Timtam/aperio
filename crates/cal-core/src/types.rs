@@ -336,6 +336,16 @@ pub struct Task {
     pub scheduled_time: Option<NaiveTime>,
     pub deadline_date: Option<NaiveDate>,
     pub deadline_time: Option<NaiveTime>,
+    /// Aperio-only per-task override for the day-start deadline countdown:
+    /// "remind me this many days before *this* task's `deadline_date`",
+    /// overriding the global `tasks.deadlineCountdownDays` for this task.
+    /// `None` ⇒ use the global default. No external provider has a native
+    /// home for it, so on an external list it rides the AperioExtras bag
+    /// (`extras.rs`); on a local list it's an ordinary column.
+    /// `#[serde(default)]` so task JSON synced before this field existed
+    /// still deserializes (→ `None`).
+    #[serde(default)]
+    pub deadline_reminder_days: Option<i64>,
 
     pub recurrence: Option<TaskRecurrence>,
     /// DESIGN §9.12: a backlog task surfaces in the active backlog only
@@ -383,6 +393,10 @@ pub struct NewTask {
     pub scheduled_time: Option<NaiveTime>,
     pub deadline_date: Option<NaiveDate>,
     pub deadline_time: Option<NaiveTime>,
+    /// See `Task::deadline_reminder_days`. `#[serde(default)]` → `None` when
+    /// absent.
+    #[serde(default)]
+    pub deadline_reminder_days: Option<i64>,
     pub recurrence: Option<TaskRecurrence>,
     /// See `Task::resurface_date` (DESIGN §9.12).
     #[serde(default)]

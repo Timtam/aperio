@@ -46,6 +46,7 @@ export interface CreateTaskRequest {
   scheduled_time: string | null;
   deadline_date: string | null;
   deadline_time: string | null;
+  deadline_reminder_days: Task['deadline_reminder_days'];
   recurrence: unknown;
   parent_id: string | null;
   section_id: string | null;
@@ -128,6 +129,7 @@ export const createTask = async (request: CreateTaskRequest): Promise<Task> => {
     scheduled_time: request.scheduled_time,
     deadline_date: request.deadline_date,
     deadline_time: request.deadline_time,
+    deadline_reminder_days: request.deadline_reminder_days,
     recurrence: request.recurrence ?? null,
     resurface_date: null,
     series_id: null,
@@ -161,6 +163,7 @@ export const duplicateTask = async (task: Task): Promise<Task> =>
     scheduled_time: task.scheduled_time,
     deadline_date: task.deadline_date,
     deadline_time: task.deadline_time,
+    deadline_reminder_days: task.deadline_reminder_days,
     recurrence: task.recurrence,
     parent_id: null,
     section_id: task.section_id,

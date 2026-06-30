@@ -318,6 +318,7 @@ export interface CreateTaskRequest {
   scheduled_time: string | null;
   deadline_date: string | null;
   deadline_time: string | null;
+  deadline_reminder_days: Task['deadline_reminder_days'];
   recurrence: unknown;
   parent_id: string | null;
   section_id: string | null;

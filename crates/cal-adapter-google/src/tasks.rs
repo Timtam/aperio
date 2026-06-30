@@ -290,6 +290,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
     let mut resurface_date = None;
     let mut series_id = None;
     let mut effort = cal_core::TaskEffort::default();
+    let mut deadline_reminder_days = None;
     if let Some(extras) = &extras {
         cal_core::apply_task_extras(
             extras,
@@ -297,6 +298,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
             &mut resurface_date,
             &mut series_id,
             &mut effort,
+            &mut deadline_reminder_days,
         );
     }
 
@@ -323,6 +325,9 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         scheduled_time: None,
         deadline_date: None,
         deadline_time: None,
+        // Like effort, the per-task deadline-countdown override survives the
+        // round-trip via the extras block, so carry the value read from the bag.
+        deadline_reminder_days,
         recurrence,
         parent_id: entry.parent,
         section_id: None,
@@ -351,8 +356,15 @@ fn google_notes(
     resurface_date: Option<NaiveDate>,
     series_id: Option<&str>,
     effort: cal_core::TaskEffort,
+    deadline_reminder_days: Option<i64>,
 ) -> Option<String> {
-    let extras = cal_core::extras_for_task(recurrence, resurface_date, series_id, effort);
+    let extras = cal_core::extras_for_task(
+        recurrence,
+        resurface_date,
+        series_id,
+        effort,
+        deadline_reminder_days,
+    );
     cal_core::extras::embed(notes, &extras).filter(|s| !s.is_empty())
 }
 
@@ -390,6 +402,7 @@ fn new_task_to_body(new: &NewTask) -> TaskEntry {
             new.resurface_date,
             new.series_id.as_deref(),
             new.effort,
+            new.deadline_reminder_days,
         ),
         status: Some(task_status_to_google(new.status).to_string()),
         due,
@@ -429,6 +442,7 @@ fn task_to_body(task: &Task) -> TaskEntry {
             task.resurface_date,
             task.series_id.as_deref(),
             task.effort,
+            task.deadline_reminder_days,
         ),
         status: Some(task_status_to_google(task.status).to_string()),
         due,
@@ -622,6 +636,7 @@ mod tests {
             status: TaskStatus::Open,
             priority: TaskPriority::High,
             effort: cal_core::TaskEffort::Medium,
+            deadline_reminder_days: None,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()),
             scheduled_time: None,
             deadline_date: None,

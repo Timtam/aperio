@@ -1150,6 +1150,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
     let mut resurface_date = None;
     let mut series_id = None;
     let mut effort = cal_core::TaskEffort::default();
+    let mut deadline_reminder_days = None;
     if let Some(extras) = &extras {
         cal_core::apply_task_extras(
             extras,
@@ -1157,6 +1158,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
             &mut resurface_date,
             &mut series_id,
             &mut effort,
+            &mut deadline_reminder_days,
         );
     }
 
@@ -1178,6 +1180,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         scheduled_time: scheduled.map(|dt| dt.time()).filter(non_midnight),
         deadline_date: deadline.map(|dt| dt.date_naive()),
         deadline_time: deadline.map(|dt| dt.time()).filter(non_midnight),
+        deadline_reminder_days,
         // parent_id + reminders are intentionally dropped on read;
         // documented in the module preamble. Recurrence round-trips the
         // shapes Vikunja can store (daily/weekly periods + monthly) plus the
@@ -1212,9 +1215,16 @@ fn vikunja_body_extras(
     resurface_date: Option<NaiveDate>,
     series_id: Option<&str>,
     effort: cal_core::TaskEffort,
+    deadline_reminder_days: Option<i64>,
     op: &str,
 ) -> (Option<String>, i64, i32) {
-    let extras = cal_core::extras_for_task(recurrence, resurface_date, series_id, effort);
+    let extras = cal_core::extras_for_task(
+        recurrence,
+        resurface_date,
+        series_id,
+        effort,
+        deadline_reminder_days,
+    );
     let description = cal_core::extras::embed(description, &extras).filter(|s| !s.is_empty());
     let native = recurrence.filter(|r| !cal_core::recurrence_needs_extras(r));
     let (repeat_after, repeat_mode) = recurrence_body(native, op);
@@ -1228,6 +1238,7 @@ fn new_task_to_body(new: &NewTask) -> TaskEntry {
         new.resurface_date,
         new.series_id.as_deref(),
         new.effort,
+        new.deadline_reminder_days,
         "create",
     );
     if !new.reminders.is_empty() {
@@ -1286,6 +1297,7 @@ fn task_to_body(task: &Task) -> TaskEntry {
         task.resurface_date,
         task.series_id.as_deref(),
         task.effort,
+        task.deadline_reminder_days,
         "update",
     );
     if !task.reminders.is_empty() {
@@ -1759,6 +1771,7 @@ mod tests {
             status: TaskStatus::Open,
             priority: TaskPriority::High,
             effort: cal_core::TaskEffort::Medium,
+            deadline_reminder_days: None,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()),
             scheduled_time: Some(NaiveTime::from_hms_opt(8, 0, 0).unwrap()),
             deadline_date: Some(NaiveDate::from_ymd_opt(2026, 5, 23).unwrap()),
@@ -2220,6 +2233,7 @@ mod tests {
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
             effort: cal_core::TaskEffort::Medium,
+            deadline_reminder_days: None,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,
@@ -2546,6 +2560,7 @@ mod tests {
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
             effort: cal_core::TaskEffort::Medium,
+            deadline_reminder_days: None,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,

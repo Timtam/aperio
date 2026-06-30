@@ -332,6 +332,8 @@ fn map_reminder(d: DeviceReminder) -> Result<Task> {
         scheduled_time,
         deadline_date: None,
         deadline_time: None,
+        // Device calendars have no per-task deadline-countdown override.
+        deadline_reminder_days: None,
         recurrence: None,
         resurface_date: None,
         series_id: None,
@@ -758,6 +760,7 @@ mod tests {
             status,
             priority,
             effort: Default::default(),
+            deadline_reminder_days: None,
             scheduled_date: None,
             scheduled_time: None,
             deadline_date: None,

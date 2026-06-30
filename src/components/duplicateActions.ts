@@ -37,6 +37,7 @@ export async function duplicateTask(task: Task): Promise<void> {
     scheduled_time: task.scheduled_time,
     deadline_date: task.deadline_date,
     deadline_time: task.deadline_time,
+    deadline_reminder_days: task.deadline_reminder_days,
     recurrence: task.recurrence,
     parent_id: null,
     // Duplicate stays in the same list, so keep its section grouping.

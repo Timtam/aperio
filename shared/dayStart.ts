@@ -196,20 +196,34 @@ export function filterDeadlineArrived(
 }
 
 /**
- * Tasks whose `deadline_date` is exactly `daysUntil` whole days from today (the
- * countdown nudge, e.g. "due in 3 days") and still actionable. `daysUntil` is
- * the global default; Phase B will let a task override it. `daysUntil <= 0` (or
- * non-finite) selects nothing — the deadline DAY itself is `filterDeadlineArrived`.
+ * Tasks whose `deadline_date` is exactly the countdown lead-time away (the
+ * countdown nudge, e.g. "due in 3 days") and still actionable.
+ *
+ * `daysUntil` is the GLOBAL default lead-time (`tasks.deadlineCountdownDays`).
+ * Each task may override it via `deadline_reminder_days`: its target day is
+ * `today + (deadline_reminder_days ?? daysUntil)`. The override is honoured only
+ * when it's a finite value `>= 1`; a `null`, non-finite, or `< 1` override falls
+ * back to the global default. If the resolved lead-time is `<= 0` (or non-finite)
+ * for a task, it's skipped — the deadline DAY itself is `filterDeadlineArrived`.
  */
 export function filterDeadlineCountdown(
   tasks: Task[],
   daysUntil: number,
   meFor?: (listId: string) => TaskUser | null,
 ): Task[] {
-  if (!Number.isFinite(daysUntil) || daysUntil <= 0) return [];
-  const targetKey = isoKeyPlusDays(daysUntil);
+  const globalValid = Number.isFinite(daysUntil) && daysUntil >= 1;
   return tasks.filter((task) => {
-    if (task.deadline_date !== targetKey) return false;
+    // Per-task override wins only when it's a finite lead-time >= 1; otherwise
+    // fall back to the global default.
+    const override = task.deadline_reminder_days;
+    const lead =
+      override != null && Number.isFinite(override) && override >= 1
+        ? override
+        : globalValid
+          ? daysUntil
+          : null;
+    if (lead == null) return false;
+    if (task.deadline_date !== isoKeyPlusDays(lead)) return false;
     if (task.status === 'completed' || task.status === 'cancelled') return false;
     if (hasActionableDescendants(task.id, tasks)) return false;
     return meFor ? isMineOrUnassigned(task.assignees, meFor(task.list_id)) : true;

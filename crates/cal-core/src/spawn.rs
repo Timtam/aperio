@@ -57,6 +57,7 @@ pub fn completion_record_for(completed: &Task) -> NewTask {
         scheduled_time: completed.scheduled_time,
         deadline_date: completed.deadline_date,
         deadline_time: completed.deadline_time,
+        deadline_reminder_days: completed.deadline_reminder_days,
         recurrence: None,
         resurface_date: None,
         series_id: None,
@@ -168,9 +169,10 @@ fn next_backlog_instance(
 }
 
 /// Shared constructor for a spawned instance: inherits the template's
-/// content (title, description, priority, effort, section, color, reminders,
-/// sound, recurrence rule and `series_id`), resets completion state, and takes
-/// the caller's date placement. Times survive only alongside their date.
+/// content (title, description, priority, effort, deadline-reminder override,
+/// section, color, reminders, sound, recurrence rule and `series_id`), resets
+/// completion state, and takes the caller's date placement. Times survive only
+/// alongside their date.
 fn instance_skeleton(
     template: &Task,
     rule: &TaskRecurrence,
@@ -189,6 +191,7 @@ fn instance_skeleton(
         scheduled_time: scheduled_date.and(template.scheduled_time),
         deadline_date,
         deadline_time: deadline_date.and(template.deadline_time),
+        deadline_reminder_days: template.deadline_reminder_days,
         recurrence: Some(rule.clone()),
         resurface_date,
         // The next instance stays in the same series for idempotent spawning.
@@ -311,6 +314,7 @@ mod tests {
             scheduled_time: None,
             deadline_date: None,
             deadline_time: None,
+            deadline_reminder_days: None,
             recurrence: Some(recurrence),
             resurface_date: None,
             series_id: Some("series-1".into()),
