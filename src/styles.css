@@ -4136,13 +4136,20 @@ button[aria-disabled='true'] {
   margin-top: 0;
 }
 
-/* Section sub-headers (Vikunja bucket / Todoist section): lighter +
-   uppercase so they read as a child grouping under their list, not a peer. */
-.task-list__group-row--section {
+/* Section sub-headers (Vikunja bucket / Todoist section): the sub-header look
+   (lighter, smaller, uppercase, tracked) so they read as a child grouping under
+   their list, not a peer.
+
+   It MUST sit on the LABEL, not the whole group-row: a section's child task rows
+   are nested INSIDE the group-row, and font-size/text-transform/letter-spacing
+   all inherit — on the row they made every task under a section render smaller
+   AND all-caps in the list, while the editor (a separate input) stayed normal.
+   Scoping to the label keeps the sub-header styling off the tasks. */
+.task-list__group-row--section > .task-list__group-label {
   font-weight: 500;
+  font-size: var(--font-size-xs, 0.75rem);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  font-size: var(--font-size-xs, 0.75rem);
 }
 
 /* A colored section header: left accent in the section's color (the same
