@@ -503,36 +503,26 @@ export function MonthView() {
 
   const today = useMemo(() => new Date(), []);
   const rowCount = cells.length / 7;
+  // Size every week-row to the BUSIEST day so all cells stay a uniform calendar
+  // grid AND no events clip; the grid scrolls when that exceeds the window. The
+  // count drives a rem-based row min-height in CSS, so it tracks the UI
+  // font-size without a DOM measurement.
+  const maxItems = useMemo(
+    () => buckets.reduce((m, b) => Math.max(m, b.items.length), 0),
+    [buckets],
+  );
+  // Uniform row height — overhead + the busiest day's item count, in rem so it
+  // scales with the UI font-size. Set INLINE on every row so they're all
+  // identical (and so it can't be lost to var inheritance / calc resolution).
+  const rowMinHeight = `${(2 + maxItems * 1.4).toFixed(2)}rem`;
   const gridRef = useAutoFocus<HTMLDivElement>(!loading);
 
-  // How many event chips fit in a day cell depends on the cell height,
-  // which depends on the window height (the grid fills the available
-  // space). Measure a row after layout and recompute on resize so a taller
-  // window shows more events instead of empty space — and a shorter one
-  // collapses gracefully to a "+N" hint. Overflow events stay in the DOM
-  // either way (see the render note); this only changes how many are
-  // visible.
-  const [visiblePerCell, setVisiblePerCell] = useState(3);
-  useEffect(() => {
-    const grid = gridRef.current;
-    if (!grid || typeof ResizeObserver === 'undefined') return;
-    const recompute = () => {
-      const row = grid.querySelector('.month-grid__row');
-      const rowH = row?.getBoundingClientRect().height ?? 0;
-      if (rowH <= 0) return;
-      // Rough cell budget for the xs font: date line + cell padding, then
-      // one chip per event. Being off by a chip is harmless — the cell
-      // clips overflow, and an extra event just becomes "+N more".
-      const CELL_OVERHEAD = 28;
-      const CHIP = 21;
-      const fit = Math.max(1, Math.floor((rowH - CELL_OVERHEAD) / CHIP));
-      setVisiblePerCell((prev) => (prev === fit ? prev : fit));
-    };
-    recompute();
-    const ro = new ResizeObserver(recompute);
-    ro.observe(grid);
-    return () => ro.disconnect();
-  }, [gridRef, rowCount]);
+  // The month grid scrolls (see `.month-grid` in styles.css): each week row
+  // grows to fit its busiest day, so EVERY event is shown rather than capped to
+  // a measured cell height (the old px-based budget didn't track the UI
+  // font-size and clipped events with no way to scroll to them). No per-cell
+  // limit — the render's "+N more" path stays but never triggers.
+  const visiblePerCell = Number.POSITIVE_INFINITY;
 
   return (
     <section className="view view--month" aria-label={t('views.month.title')}>
@@ -667,7 +657,11 @@ export function MonthView() {
                     })}
                   </div>
                 )}
-                <div role="row" className="month-grid__row">
+                <div
+                  role="row"
+                  className="month-grid__row"
+                  style={{ minHeight: rowMinHeight }}
+                >
                 <div role="rowheader" className="month-grid__kw">
                   {fmt.isoWeek(addDays(rowStart, 3))}
                 </div>

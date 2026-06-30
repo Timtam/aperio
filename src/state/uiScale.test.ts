@@ -26,7 +26,7 @@ describe('readUiScale', () => {
     localStorage.setItem('aperio.ui.fontScale', '5');
     expect(readUiScale()).toBe(2); // MAX_SCALE
     localStorage.setItem('aperio.ui.fontScale', '0.1');
-    expect(readUiScale()).toBe(0.85); // MIN_SCALE
+    expect(readUiScale()).toBe(0.7); // UI_MIN_SCALE
   });
 
   it('falls back to the default for a non-numeric value', () => {

@@ -17,17 +17,16 @@ import { useState } from 'react';
 const STORAGE_KEY = 'aperio.ui.fontScale';
 const BASE_FONT_PX = 16;
 
-/** Selectable scale multipliers (90%–150%). */
-export const UI_SCALE_OPTIONS = [0.9, 1, 1.1, 1.25, 1.5] as const;
 export const DEFAULT_UI_SCALE = 1;
 
-// Bounds for a hand-edited / future value; the presets stay well inside.
-const MIN_SCALE = 0.85;
-const MAX_SCALE = 2;
+/** Font-size slider bounds + granularity: 70%–200% in 5% steps. */
+export const UI_MIN_SCALE = 0.7;
+export const UI_MAX_SCALE = 2;
+export const UI_SCALE_STEP = 0.05;
 
 function clampScale(n: number): number {
   if (!Number.isFinite(n)) return DEFAULT_UI_SCALE;
-  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, n));
+  return Math.min(UI_MAX_SCALE, Math.max(UI_MIN_SCALE, n));
 }
 
 /** The persisted scale, or the default. Synchronous — safe before first paint. */
