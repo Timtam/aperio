@@ -900,7 +900,11 @@
       "actionSaveBothUnsupported": "„Beide speichern\" steht in dieser Version noch nicht zur Verfügung.",
       "actionAriaContext": "{{kind}}, Feld {{field}}",
       "listLabel": "Offene Sync-Konflikte",
-      "resolved": "Konflikt gelöst."
+      "resolved": "Konflikt gelöst.",
+      "copy": "Konflikte in die Zwischenablage kopieren",
+      "copyHeader": "Aperio-Sync-Konflikte ({{count}})",
+      "copied": "Konflikte in die Zwischenablage kopiert.",
+      "copyFailed": "Kopieren in die Zwischenablage fehlgeschlagen."
     },
     "tasks": {
       "checkoffMode": {

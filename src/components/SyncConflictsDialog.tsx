@@ -108,7 +108,7 @@ export function SyncConflictsDialog({
       });
       try {
         await resolveSyncConflict(conflict.id, choice);
-        announce(t('syncConflicts.resolved'));
+        announce(t('dialogs.syncConflicts.resolved'));
       } catch (err: unknown) {
         // eslint-disable-next-line no-console
         console.warn('resolve_sync_conflict failed', err);
@@ -121,7 +121,7 @@ export function SyncConflictsDialog({
           'code' in err &&
           (err as { code?: string }).code === 'unsupported'
         ) {
-          announce(t('syncConflicts.actionSaveBothUnsupported'), 'assertive');
+          announce(t('dialogs.syncConflicts.actionSaveBothUnsupported'), 'assertive');
         }
         // Put the row back so the user can try again.
         refresh();
@@ -132,16 +132,31 @@ export function SyncConflictsDialog({
     [announce, refresh, t],
   );
 
+  // Copy every conflict as readable text so a screen-reader user can report a
+  // sync problem without OCR'ing the dialog. Values use the same decode as the
+  // rows (scalars unquoted, objects as JSON) so a serialization difference — the
+  // kind of thing that causes a spurious conflict — stays visible in the dump.
+  const onCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(conflictsToText(conflicts, t, fmt));
+      announce(t('dialogs.syncConflicts.copied'));
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('copy sync conflicts failed', err);
+      announce(t('dialogs.syncConflicts.copyFailed'), 'assertive');
+    }
+  }, [conflicts, t, fmt, announce]);
+
   const intro =
     conflicts.length === 1
-      ? t('syncConflicts.intro_one')
-      : t('syncConflicts.intro_other', { count: conflicts.length });
+      ? t('dialogs.syncConflicts.intro_one')
+      : t('dialogs.syncConflicts.intro_other', { count: conflicts.length });
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={t('syncConflicts.title')}
+      title={t('dialogs.syncConflicts.title')}
       className="sync-conflicts-dialog"
     >
       {/* Modal's body lives in `role="application"` for the
@@ -151,8 +166,17 @@ export function SyncConflictsDialog({
           element's accessible name so the screen reader reads
           the actual content instead of "Anmerkung". */}
       <FocusableNote className="sync-conflicts__intro">
-        {conflicts.length === 0 ? t('syncConflicts.empty') : intro}
+        {conflicts.length === 0 ? t('dialogs.syncConflicts.empty') : intro}
       </FocusableNote>
+      {conflicts.length > 0 && (
+        <button
+          type="button"
+          className="sync-conflicts__copy"
+          onClick={() => void onCopy()}
+        >
+          {t('dialogs.syncConflicts.copy')}
+        </button>
+      )}
       {conflicts.length > 0 && (
         // The list itself is a tab-stop landing target — after
         // the user resolves a row, we re-park focus on the
@@ -162,7 +186,7 @@ export function SyncConflictsDialog({
           ref={listRef}
           tabIndex={-1}
           className="sync-conflicts__list"
-          aria-label={t('syncConflicts.listLabel')}
+          aria-label={t('dialogs.syncConflicts.listLabel')}
         >
           {conflicts.map((c) => (
             <ConflictRow
@@ -195,7 +219,7 @@ function ConflictRow({
   busy,
   onResolve,
 }: ConflictRowProps) {
-  const kindLabel = t(`syncConflicts.rowKind.${conflict.row_kind}`);
+  const kindLabel = t(`dialogs.syncConflicts.rowKind.${conflict.row_kind}`);
   const remoteTime = (() => {
     try {
       return fmt.format(new Date(conflict.remote_timestamp), 'PPPp');
@@ -211,7 +235,7 @@ function ConflictRow({
   // the field + kind into each button's accessible name lets SR
   // users know which conflict they're acting on without
   // back-arrowing to the row heading.
-  const ariaContext = t('syncConflicts.actionAriaContext', {
+  const ariaContext = t('dialogs.syncConflicts.actionAriaContext', {
     kind: kindLabel,
     field: conflict.field,
   });
@@ -233,11 +257,11 @@ function ConflictRow({
       >
         <strong>{kindLabel}</strong>
         <span className="sync-conflict-row__field">
-          {t('syncConflicts.fieldLabel')}: {conflict.field}
+          {t('dialogs.syncConflicts.fieldLabel')}: {conflict.field}
         </span>
       </div>
       <p className="sync-conflict-row__source">
-        {t('syncConflicts.remoteSourceLabel', {
+        {t('dialogs.syncConflicts.remoteSourceLabel', {
           time: remoteTime,
           device: conflict.remote_device_id,
         })}
@@ -245,13 +269,13 @@ function ConflictRow({
       <div className="sync-conflict-row__values">
         <div>
           <span className="sync-conflict-row__valueLabel">
-            {t('syncConflicts.localValueLabel')}
+            {t('dialogs.syncConflicts.localValueLabel')}
           </span>
           <code>{decodeForDisplay(conflict.local_value)}</code>
         </div>
         <div>
           <span className="sync-conflict-row__valueLabel">
-            {t('syncConflicts.remoteValueLabel')}
+            {t('dialogs.syncConflicts.remoteValueLabel')}
           </span>
           <code>{decodeForDisplay(conflict.remote_value)}</code>
         </div>
@@ -260,37 +284,72 @@ function ConflictRow({
         <button
           type="button"
           disabled={busy}
-          aria-label={`${t('syncConflicts.actionKeepLocal')} — ${ariaContext}`}
+          aria-label={`${t('dialogs.syncConflicts.actionKeepLocal')} — ${ariaContext}`}
           onClick={() => onResolve(conflict, 'keep_local')}
         >
-          {t('syncConflicts.actionKeepLocal')}
+          {t('dialogs.syncConflicts.actionKeepLocal')}
         </button>
         <button
           type="button"
           disabled={busy}
-          aria-label={`${t('syncConflicts.actionTakeRemote')} — ${ariaContext}`}
+          aria-label={`${t('dialogs.syncConflicts.actionTakeRemote')} — ${ariaContext}`}
           onClick={() => onResolve(conflict, 'take_remote')}
         >
-          {t('syncConflicts.actionTakeRemote')}
+          {t('dialogs.syncConflicts.actionTakeRemote')}
         </button>
         <button
           type="button"
           disabled={busy}
-          aria-label={`${t('syncConflicts.actionSaveBoth')} — ${ariaContext}`}
+          aria-label={`${t('dialogs.syncConflicts.actionSaveBoth')} — ${ariaContext}`}
           // Use aria-describedby (not title) for the "not yet
           // implemented" hint so SR users on platforms that
           // ignore title still get the message.
           aria-describedby={saveBothHintId}
           onClick={() => onResolve(conflict, 'save_both')}
         >
-          {t('syncConflicts.actionSaveBoth')}
+          {t('dialogs.syncConflicts.actionSaveBoth')}
         </button>
         <span id={saveBothHintId} className="sr-only">
-          {t('syncConflicts.actionSaveBothUnsupported')}
+          {t('dialogs.syncConflicts.actionSaveBothUnsupported')}
         </span>
       </div>
     </li>
   );
+}
+
+/** Serialize every conflict to a readable, paste-able block — for reporting a
+ *  sync problem from the dialog (a screen-reader user can't easily transcribe
+ *  it otherwise). Uses the same value decode as the rows so a serialization
+ *  difference between the two sides stays visible. */
+function conflictsToText(
+  conflicts: SyncConflict[],
+  t: ReturnType<typeof useTranslation>['t'],
+  fmt: ReturnType<typeof useDateFormat>,
+): string {
+  const lines: string[] = [
+    t('dialogs.syncConflicts.copyHeader', { count: conflicts.length }),
+    '',
+  ];
+  conflicts.forEach((c, i) => {
+    let remoteTime: string;
+    try {
+      remoteTime = fmt.format(new Date(c.remote_timestamp), 'PPPp');
+    } catch {
+      remoteTime = c.remote_timestamp;
+    }
+    lines.push(
+      `[${i + 1}] ${t(`dialogs.syncConflicts.rowKind.${c.row_kind}`)} — ` +
+        `${t('dialogs.syncConflicts.fieldLabel')}: ${c.field} (${c.row_id})`,
+      `    ${t('dialogs.syncConflicts.localValueLabel')}: ${decodeForDisplay(c.local_value)}`,
+      `    ${t('dialogs.syncConflicts.remoteValueLabel')}: ${decodeForDisplay(c.remote_value)}`,
+      `    ${t('dialogs.syncConflicts.remoteSourceLabel', {
+        time: remoteTime,
+        device: c.remote_device_id,
+      })}`,
+      '',
+    );
+  });
+  return lines.join('\n').trimEnd() + '\n';
 }
 
 /** Decode the JSON-encoded backend value into something readable.
