@@ -2913,7 +2913,15 @@ button[aria-disabled='true'] {
 }
 
 .week-grid__body {
-  flex: 1;
+  /* Grow to fill the week-grid, but NEVER shrink below the cells' content
+     (flex-shrink 0): a compressed body capped the day cells — and their
+     `border-right` column separators — above the scrolled content, so the lines
+     stopped partway down the list at a larger UI font-size. `align-content:
+     stretch` makes the single auto row fill the body so the cells (and their
+     separators) span the full height even when the content is shorter than the
+     viewport. */
+  flex: 1 0 auto;
+  align-content: stretch;
   min-height: 200px;
 }
 
