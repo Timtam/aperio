@@ -158,6 +158,17 @@ textarea,
   cursor: text;
 }
 
+/* Native form controls don't inherit `font` by default, so they ignore the
+   rem-based UI font-size (Settings → Appearance) and stay at the browser
+   default. Make them inherit so the whole interface scales together — including
+   <select> controls AND their dropdown option list (the options inherit the
+   select's now-scaled font). `button` inherits separately below. */
+input,
+select,
+textarea {
+  font: inherit;
+}
+
 a,
 button {
   cursor: pointer;
@@ -2248,37 +2259,25 @@ button[aria-disabled='true'] {
    groups easy to tell apart. Collapses to a normal gap when the cell is
    already full. Week view only; the DayView list keeps its top flow.
 
-   This bottom-pin is the LIST-mode (pre-grid) behaviour. GRID mode overrides
-   it below to lift the band to the TOP of the cell instead. */
+   Applies in BOTH list and grid mode; grid mode (`.week-grid__tasks--grid`
+   below) keeps this bottom-pin and only adds a footer separator. */
 .week-grid__tasks {
   margin-top: auto;
 }
 
-/* GRID-mode untimed-task BAND. The cell is a flex column holding the timed
-   hour-canvas (`.week-grid__events`) then this task <ul>; the band sits in its
-   natural flow position RIGHT BELOW the 24h canvas (per Toni: the untimed-task
-   band stays under the grid, not above it), just restyled as a compact bar.
-   `margin-top: 0` drops the default bottom-pin so it sits right under the
-   canvas, and the chips compact into a tight horizontal flex-wrap of small bars
-   (like the all-day lane). Reading/Tab order is unchanged: timed events first,
-   then the tasks. Scoped to grid mode via the `--grid` modifier (added in JSX
-   gated on `!listMode`), so list mode is byte-for-byte unchanged. */
+/* GRID-mode untimed-task list. The base rule already lays this <ul> out as a
+   FULL-WIDTH flex column pinned to the BOTTOM of the cell (`margin-top: auto`),
+   below the timed hour-canvas (per Toni: the untimed-task list stays under the
+   grid, spanning the column). Grid mode only adds a hairline footer separator so
+   it reads as distinct from the canvas above. (It was previously a compact
+   horizontal chip bar to save room in the tall 24h grid; with the configurable
+   visible-day window the canvas is shorter, so the full-width list fits — and is
+   what Toni wants.) Reading/Tab order is unchanged: timed events first, then the
+   tasks. Scoped via the `--grid` modifier (gated on `!listMode` in JSX), so list
+   mode is byte-for-byte unchanged. */
 .week-grid__tasks--grid {
-  margin-top: 0;
   margin-bottom: var(--space-1);
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 2px;
-  padding-top: 0;
-}
-/* Compact chip in the grid-mode band: shrink-to-content (override the
-   full-width column chip) so several fit per row, capped so a long title
-   truncates rather than forcing one-chip-per-row. */
-.week-grid__tasks--grid .week-grid__task-item {
-  max-width: 100%;
-}
-.week-grid__tasks--grid .week-task {
-  width: auto;
+  border-top: 1px solid var(--color-border);
 }
 
 .day-tasks {
@@ -2992,11 +2991,13 @@ button[aria-disabled='true'] {
   list-style: none;
   margin: 0;
   padding: 0;
-  /* Proportional hour-grid: a 24h-tall positioned canvas. Timed chips are
-     absolutely placed (top/height by start + duration, side-by-side on
-     overlap); all-day chips stay clipped via `display: contents` on their
-     <li>. Faint hour gridlines via a repeating background so it reads as a
-     time grid. */
+  /* Proportional hour-grid: a positioned canvas spanning the visible day window.
+     Timed chips are absolutely placed (top/height by start + duration,
+     side-by-side on overlap); all-day chips stay clipped via `display: contents`
+     on their <li>. Faint hour gridlines via a repeating background so it reads as
+     a time grid. Height + gridline offset (for a half-hour window start) are set
+     inline in WeekView to the visible window (a React custom prop in calc()
+     silently fails here); this is the full-day fallback. */
   position: relative;
   height: calc(24 * var(--hour-px, 2.5rem));
   background-image: repeating-linear-gradient(
@@ -3048,6 +3049,60 @@ button[aria-disabled='true'] {
   display: inline;
 }
 
+/* Visible "outside the shown hours" band — events/tasks before the window start
+   (above the cell's canvas) / after the window end (below it). Decorative,
+   aria-hidden; the a11y lives in the clipped chips inside the cell's listbox.
+   A leading label ("Before 07:00" / "After 23:00") tells sighted users what
+   they're looking at; a hairline toward the canvas marks the visual cut. Scoped
+   per cell (unlike DayView's full-width band), so no ruler inset is needed — the
+   cell already sits under its day column. Grid mode only (gated in JSX). */
+.week-grid__outside {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-muted);
+}
+.week-grid__outside--before {
+  margin-bottom: var(--space-1);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px dashed var(--color-border);
+}
+.week-grid__outside--after {
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
+  border-top: 1px dashed var(--color-border);
+}
+.week-grid__outside-label {
+  font-weight: 500;
+  white-space: nowrap;
+  width: 100%;
+}
+.week-grid__outside-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  background: var(--event-color, var(--color-accent));
+  color: var(--color-accent-fg);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  padding: 2px var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.week-grid__outside-time {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+.week-grid__outside-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* A positioned timed chip's <li>. Inline style sets top/height/left/width from
    the layout algorithm; a min-height keeps a very short event legible (it
    overflows its slot downward). The inner chip fills the slot. */
@@ -3079,6 +3134,8 @@ button[aria-disabled='true'] {
 }
 .week-grid__ruler-scale {
   position: relative;
+  /* Height is set inline (WeekView) to the visible window; this is the full-day
+     fallback. */
   height: calc(24 * var(--hour-px, 2.5rem));
 }
 .week-grid__ruler-hour {
@@ -3551,6 +3608,8 @@ button[aria-disabled='true'] {
 }
 .day-grid__ruler-scale {
   position: relative;
+  /* Height is set inline (DayView) to the visible window; this is the full-day
+     fallback. */
   height: calc(24 * var(--hour-px, 2.5rem));
 }
 .day-grid__ruler-hour {
@@ -3571,6 +3630,8 @@ button[aria-disabled='true'] {
   flex: 1;
   min-width: 0;
   position: relative;
+  /* Height + gridline offset (for a half-hour window start) are set inline in
+     DayView to the visible window; this is the full-day fallback. */
   height: calc(24 * var(--hour-px, 2.5rem));
   background-image: repeating-linear-gradient(
     to bottom,
@@ -3579,6 +3640,76 @@ button[aria-disabled='true'] {
     transparent 1px,
     transparent var(--hour-px, 2.5rem)
   );
+}
+
+/* A timed item ENTIRELY outside the visible day window. Like an all-day option,
+   its <li> is clipped (visually hidden, still a navigable listbox option that
+   reads the real time off its label) — the sighted representation is the
+   .day-grid__outside band above/below the grid. */
+.day-list__item--outside {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+/* Visible "outside the shown hours" band — events/tasks before the window start
+   (above the grid) / after the window end (below it). Decorative, aria-hidden;
+   the a11y lives in the clipped options inside the listbox. A leading label
+   ("Before 07:00" / "After 23:00") tells sighted users what they're looking at;
+   a hairline toward the grid marks the visual cut. */
+.day-grid__outside {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  /* Inset by the ruler width so the bars line up with the grid COLUMNS below
+     (a "Before 07:00" chip sits over the 07:00 column), not over the ruler. */
+  padding-left: var(--ruler-w, 2.5rem);
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-muted);
+}
+.day-grid__outside--before {
+  margin-bottom: var(--space-1);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px dashed var(--color-border);
+}
+.day-grid__outside--after {
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
+  border-top: 1px dashed var(--color-border);
+}
+.day-grid__outside-label {
+  font-weight: 500;
+  white-space: nowrap;
+}
+.day-grid__outside-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  background: var(--event-color, var(--color-accent));
+  color: var(--color-accent-fg);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  padding: 2px var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.day-grid__outside-time {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+.day-grid__outside-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Compact-list layout (calendar.dayViewMode === 'list'). The hour ruler +
@@ -3727,6 +3858,9 @@ button[aria-disabled='true'] {
   flex-wrap: wrap;
   gap: var(--space-1);
   margin-bottom: var(--space-2);
+  /* Align with the grid columns below (past the ruler), matching the outside
+     band, instead of starting over the hour-ruler. */
+  padding-left: var(--ruler-w, 2.5rem);
 }
 .day-grid__allday-bar {
   display: flex;

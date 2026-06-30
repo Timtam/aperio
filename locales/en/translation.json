@@ -508,6 +508,14 @@
             "list": "Compact list"
           }
         },
+        "dayWindow": {
+          "heading": "Visible hours",
+          "hint": "The hour grid shows only this window of the day. Events outside it appear in a small band at the top or bottom. If the start is at or after the end, the full day is shown.",
+          "startLabel": "Day starts at",
+          "endLabel": "Day ends at",
+          "startAdjusted": "Start time adjusted to {{time}}",
+          "endAdjusted": "End time adjusted to {{time}}"
+        },
         "hint": "Default reminders that apply to events without their own reminder. Useful for iCloud calendars: iOS “Default Alert Times” aren't written into the event itself, so without a default here the alarm doesn't show in Aperio.",
         "empty": "No calendars yet — add an account first.",
         "localAccount": "Local",
@@ -1819,6 +1827,8 @@
       "taskLabel": "Task: {{title}}, {{time}}, {{state}}{{priority}}{{progress}}{{assignee}}",
       "tasksHeading": "Tasks",
       "gridLabel": "Day's items",
+      "outsideBefore": "Before {{time}}",
+      "outsideAfter": "After {{time}}",
       "dayAnnounce_one": "{{day}}, 1 item",
       "dayAnnounce_other": "{{day}}, {{count}} items"
     },

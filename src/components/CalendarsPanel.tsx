@@ -1,5 +1,6 @@
 import { useId, useMemo } from 'react';
 import { FocusableNote } from '../a11y/FocusableNote';
+import { useAnnouncer } from '../a11y/announcerContext';
 import { useTranslation } from 'react-i18next';
 
 import { useCalendarStore } from '../state/calendarStoreContext';
@@ -12,6 +13,28 @@ import { SoundPrefField } from './SoundPrefField';
 
 /** Calendar day/week layout choices, rendered as a radio group. */
 const DAY_VIEW_MODE_OPTIONS: readonly CalendarDayViewMode[] = ['grid', 'list'];
+
+/** Format a minutes-from-midnight value as a zero-padded "HH:MM" wall clock.
+ *  1440 reads as "24:00" (the end-of-day sentinel). */
+function formatHhMm(minutes: number): string {
+  const hh = Math.floor(minutes / 60);
+  const mm = minutes % 60;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+/** Half-hour START options: 00:00 … 23:30 (minutes 0, 30, … 1410). The window
+ *  start can't be the end-of-day sentinel, so 24:00 is excluded. */
+const DAY_START_OPTIONS: readonly number[] = Array.from(
+  { length: 48 },
+  (_, i) => i * 30,
+);
+
+/** Half-hour END options: 00:30 … 24:00 (minutes 30, 60, … 1440). The window
+ *  end can't be midnight, so 00:00 is excluded; 1440 is the "24:00" sentinel. */
+const DAY_END_OPTIONS: readonly number[] = Array.from(
+  { length: 48 },
+  (_, i) => (i + 1) * 30,
+);
 
 /** Stable id accessor for the selector (module scope so its identity holds). */
 const calendarItemId = (c: { id: string }) => c.id;
@@ -43,10 +66,12 @@ const calendarItemId = (c: { id: string }) => c.id;
  */
 export function CalendarsPanel() {
   const { t } = useTranslation();
+  const announce = useAnnouncer();
   const { calendars, accounts } = useCalendarStore();
   // Calendar day/week layout is a synced view preference (also toggled from the
   // calendar toolbar); both write the same `calendar.dayViewMode` pref.
-  const { dayViewMode, setDayViewMode } = useTaskCascadeEnabled();
+  const { dayViewMode, setDayViewMode, dayStartMin, dayEndMin, setDayWindow } =
+    useTaskCascadeEnabled();
 
   const calendarIds = useMemo(() => calendars.map((c) => c.id), [calendars]);
   const { getDefaultsFor, setDefaultsFor, hydrating } =
@@ -81,6 +106,8 @@ export function CalendarsPanel() {
   const dayViewModeHeadingId = useId();
   const dayViewModeHintId = useId();
   const dayViewModeGroupId = useId();
+  const dayWindowHeadingId = useId();
+  const dayWindowHintId = useId();
 
   // Spoken summary of a calendar's default-reminder count — folded into the
   // option's accessible name so the screen reader announces the state without
@@ -91,6 +118,38 @@ export function CalendarsPanel() {
     if (n === 0) return t('dialogs.settings.calendars.reminderSummaryNone');
     if (n === 1) return t('dialogs.settings.calendars.reminderSummaryOne');
     return t('dialogs.settings.calendars.reminderSummaryOther', { count: n });
+  };
+
+  // Picking start>=end (or end<=start) would otherwise snap BOTH selects to the
+  // full day, silently discarding the value the user just set. Instead honour
+  // the changed control and auto-nudge the OTHER edge to keep a valid window,
+  // announcing the adjustment (the focused select re-reads itself, but the
+  // auto-moved one would change unnoticed for a screen-reader user).
+  const onChangeStart = (next: number) => {
+    if (next >= dayEndMin) {
+      const end = Math.min(1440, next + 30);
+      announce(
+        t('dialogs.settings.calendars.dayWindow.endAdjusted', {
+          time: formatHhMm(end),
+        }),
+      );
+      setDayWindow(next, end);
+    } else {
+      setDayWindow(next, dayEndMin);
+    }
+  };
+  const onChangeEnd = (next: number) => {
+    if (next <= dayStartMin) {
+      const start = Math.max(0, next - 30);
+      announce(
+        t('dialogs.settings.calendars.dayWindow.startAdjusted', {
+          time: formatHhMm(start),
+        }),
+      );
+      setDayWindow(start, next);
+    } else {
+      setDayWindow(dayStartMin, next);
+    }
   };
 
   return (
@@ -136,6 +195,55 @@ export function CalendarsPanel() {
             </label>
           ))}
         </div>
+      </section>
+
+      {/* Visible day window — the START + END of the calendar hour-grid. Two
+          native <select>s of half-hour times (NOT a slider) so the primary
+          (blind) user can operate it with a screen reader + keyboard. Each
+          change validates the pair via setDayWindow (snap to half-hour, clamp,
+          full-day fallback when start >= end). Synced like dayViewMode. */}
+      <section
+        className="calendars-panel__group"
+        aria-label={t('dialogs.settings.calendars.dayWindow.heading')}
+      >
+        <h3 id={dayWindowHeadingId} className="calendars-panel__account">
+          {t('dialogs.settings.calendars.dayWindow.heading')}
+        </h3>
+        <p id={dayWindowHintId} className="form__hint">
+          {t('dialogs.settings.calendars.dayWindow.hint')}
+        </p>
+        <label className="form__field">
+          <span className="form__label">
+            {t('dialogs.settings.calendars.dayWindow.startLabel')}
+          </span>
+          <select
+            value={dayStartMin}
+            aria-describedby={dayWindowHintId}
+            onChange={(e) => onChangeStart(Number(e.target.value))}
+          >
+            {DAY_START_OPTIONS.map((min) => (
+              <option key={min} value={min}>
+                {formatHhMm(min)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="form__field">
+          <span className="form__label">
+            {t('dialogs.settings.calendars.dayWindow.endLabel')}
+          </span>
+          <select
+            value={dayEndMin}
+            aria-describedby={dayWindowHintId}
+            onChange={(e) => onChangeEnd(Number(e.target.value))}
+          >
+            {DAY_END_OPTIONS.map((min) => (
+              <option key={min} value={min}>
+                {formatHhMm(min)}
+              </option>
+            ))}
+          </select>
+        </label>
       </section>
 
       {/* §14.4 global notification-sound default. Sits above the

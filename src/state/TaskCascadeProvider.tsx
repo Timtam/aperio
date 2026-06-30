@@ -7,6 +7,8 @@ import {
   type ReactNode,
 } from 'react';
 
+import { FULL_DAY_WINDOW, MINUTES_PER_DAY } from '@aperio/shared';
+
 import { getUserPref, setUserPref } from '../api/client';
 import { TaskCascadeContext } from './taskCascadeContext';
 
@@ -50,6 +52,14 @@ const CHECKOFF_MODE_KEY = 'tasks.checkoffMode';
 const AUTO_SELF_ASSIGN_KEY = 'tasks.autoSelfAssign';
 const VISUAL_EFFORT_SIZING_KEY = 'tasks.visualEffortSizing';
 const CALENDAR_DAY_VIEW_MODE_KEY = 'calendar.dayViewMode';
+// Visible day-window of the calendar hour-grid (synced). Two integer minute
+// values from midnight stored as strings (e.g. "420" = 07:00). Parsed +
+// validated on hydrate AND in the setter: clamped to [0, 1440], rounded to the
+// nearest 30 (half-hour granularity); a start >= end pair falls back to the
+// full day. The grid renderers consume `dayStartMin`/`dayEndMin`; this provider
+// only owns the prefs.
+const CALENDAR_DAY_START_MIN_KEY = 'calendar.dayStartMin';
+const CALENDAR_DAY_END_MIN_KEY = 'calendar.dayEndMin';
 // Day-start reminder knobs (synced). Three on/off booleans (default ON,
 // only a literal stored 'false' disables) + a numeric "X days before"
 // value stored as a string like dayStartTrigger (parsed + clamped 1..30
@@ -93,6 +103,53 @@ function parseCountdownDays(stored: string | null): number {
     DEADLINE_COUNTDOWN_DAYS_MAX,
     Math.max(DEADLINE_COUNTDOWN_DAYS_MIN, n),
   );
+}
+
+/**
+ * Snap a raw minute value to the visible-day-window grid: integer, clamped to
+ * `[0, 1440]`, rounded to the nearest 30 (half-hour granularity). A non-finite
+ * input falls back to `fallback` (already snapped).
+ */
+function snapWindowMinute(value: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  const rounded = Math.round(value / 30) * 30;
+  return Math.min(MINUTES_PER_DAY, Math.max(0, rounded));
+}
+
+/**
+ * Validate a `(start, end)` day-window pair. Each end is snapped to the
+ * half-hour grid in `[0, 1440]`; if `start >= end` after snapping, the whole
+ * pair falls back to the FULL day window (the historical behaviour). Used by
+ * BOTH the hydration parse and the `setDayWindow` setter so an invalid value
+ * can never reach state or storage.
+ */
+function validateDayWindow(
+  startRaw: number,
+  endRaw: number,
+): { startMin: number; endMin: number } {
+  const startMin = snapWindowMinute(startRaw, FULL_DAY_WINDOW.startMin);
+  const endMin = snapWindowMinute(endRaw, FULL_DAY_WINDOW.endMin);
+  if (startMin >= endMin) {
+    return { startMin: FULL_DAY_WINDOW.startMin, endMin: FULL_DAY_WINDOW.endMin };
+  }
+  return { startMin, endMin };
+}
+
+/**
+ * Parse the two stored minute strings into a validated day-window. A
+ * missing/garbage value parses to NaN, which `validateDayWindow` snaps to the
+ * full-day default for that edge; an out-of-order pair falls back to the full
+ * day.
+ */
+function parseDayWindow(
+  startStored: string | null,
+  endStored: string | null,
+): { startMin: number; endMin: number } {
+  const startNum =
+    startStored === null ? FULL_DAY_WINDOW.startMin : Number.parseInt(startStored, 10);
+  const endNum =
+    endStored === null ? FULL_DAY_WINDOW.endMin : Number.parseInt(endStored, 10);
+  return validateDayWindow(startNum, endNum);
 }
 
 export type CarryOverDefault = 'ask' | 'today' | 'backlog';
@@ -241,6 +298,16 @@ export interface TaskCascadeContextValue {
   dayViewMode: CalendarDayViewMode;
   /** Set the calendar day-view-mode preference. Debounced-persisted (synced). */
   setDayViewMode: (value: CalendarDayViewMode) => void;
+  /** Visible-window START of the calendar hour-grid, minutes from midnight
+   *  (half-hour grid, [0, 1440]). Default 0 (midnight). */
+  dayStartMin: number;
+  /** Visible-window END of the calendar hour-grid, minutes from midnight
+   *  (half-hour grid, [0, 1440]). Default 1440 (end of day). */
+  dayEndMin: number;
+  /** Set the visible day window. The pair is validated (snapped to the
+   *  half-hour grid, clamped, full-day fallback when start >= end) before it
+   *  reaches state; both keys are debounced-persisted (synced). */
+  setDayWindow: (startMin: number, endMin: number) => void;
   /** Carry-over default action used by `CarryOverChecker`. */
   carryOverDefault: CarryOverDefault;
   /** Set the carry-over default. Debounced-persisted. */
@@ -293,6 +360,14 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
   // 'list' switches to the compact list (anything else falls back to grid).
   const [dayViewMode, setDayViewModeState] =
     useState<CalendarDayViewMode>('grid');
+  // Visible day window of the hour-grid. Defaults to the full day (the
+  // historical behaviour); hydration + the setter snap to the half-hour grid.
+  const [dayStartMin, setDayStartMinState] = useState<number>(
+    FULL_DAY_WINDOW.startMin,
+  );
+  const [dayEndMin, setDayEndMinState] = useState<number>(
+    FULL_DAY_WINDOW.endMin,
+  );
   const [carryOverDefault, setCarryOverDefaultState] =
     useState<CarryOverDefault>('ask');
   // Default '00:00' means "as soon as the local date rolls over",
@@ -322,6 +397,8 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       getUserPref(REMIND_DEADLINE_COUNTDOWN_KEY).catch(() => null),
       getUserPref(DEADLINE_COUNTDOWN_DAYS_KEY).catch(() => null),
       getUserPref(CALENDAR_DAY_VIEW_MODE_KEY).catch(() => null),
+      getUserPref(CALENDAR_DAY_START_MIN_KEY).catch(() => null),
+      getUserPref(CALENDAR_DAY_END_MIN_KEY).catch(() => null),
       getUserPref(LIST_OVERRIDES_KEY).catch(() => null),
     ])
       .then(
@@ -338,6 +415,8 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
           remindDeadlineCountdownRaw,
           deadlineCountdownDaysRaw,
           dayViewModeRaw,
+          dayStartMinRaw,
+          dayEndMinRaw,
           listOverridesRaw,
         ]) => {
           if (cancelled) return;
@@ -363,6 +442,15 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
           // Calendar day-view mode: only a literal stored 'list' switches
           // away from the grid default; anything else keeps 'grid'.
           if (dayViewModeRaw === 'list') setDayViewModeState('list');
+          // Visible day window: parse + validate the two minute strings as a
+          // pair (snap to the half-hour grid, clamp; full-day fallback when
+          // start >= end). Always set both so a one-sided stored value still
+          // lands on a consistent window.
+          {
+            const win = parseDayWindow(dayStartMinRaw, dayEndMinRaw);
+            setDayStartMinState(win.startMin);
+            setDayEndMinState(win.endMin);
+          }
           // Carry-over default is a tri-state enum; reject anything
           // that doesn't match the allowed values and keep the default.
           if (isCarryOverDefault(carryOverRaw)) {
@@ -598,6 +686,43 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
     };
   }, [dayViewMode, hydrating]);
 
+  // Visible day window — one debounced timer per key (mirrors dayViewMode).
+  // State already holds validated, snapped minute values (the setter + the
+  // hydrate parse guarantee it), so we just stringify the integer.
+  const dayStartMinTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (hydrating) return;
+    if (dayStartMinTimer.current !== null) {
+      window.clearTimeout(dayStartMinTimer.current);
+    }
+    dayStartMinTimer.current = window.setTimeout(() => {
+      void setUserPref(CALENDAR_DAY_START_MIN_KEY, String(dayStartMin));
+    }, WRITE_DEBOUNCE_MS);
+    return () => {
+      if (dayStartMinTimer.current !== null) {
+        window.clearTimeout(dayStartMinTimer.current);
+        dayStartMinTimer.current = null;
+      }
+    };
+  }, [dayStartMin, hydrating]);
+
+  const dayEndMinTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (hydrating) return;
+    if (dayEndMinTimer.current !== null) {
+      window.clearTimeout(dayEndMinTimer.current);
+    }
+    dayEndMinTimer.current = window.setTimeout(() => {
+      void setUserPref(CALENDAR_DAY_END_MIN_KEY, String(dayEndMin));
+    }, WRITE_DEBOUNCE_MS);
+    return () => {
+      if (dayEndMinTimer.current !== null) {
+        window.clearTimeout(dayEndMinTimer.current);
+        dayEndMinTimer.current = null;
+      }
+    };
+  }, [dayEndMin, hydrating]);
+
   const carryOverTimer = useRef<number | null>(null);
   useEffect(() => {
     if (hydrating) return;
@@ -707,6 +832,14 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
   const setDayViewMode = useCallback((value: CalendarDayViewMode) => {
     setDayViewModeState(value);
   }, []);
+  const setDayWindow = useCallback((startMin: number, endMin: number) => {
+    // Validate the pair on the way in (snap to half-hour, clamp, full-day
+    // fallback when start >= end) so an invalid value can never reach state or
+    // the debounced persistence — defence in depth alongside the hydrate parse.
+    const win = validateDayWindow(startMin, endMin);
+    setDayStartMinState(win.startMin);
+    setDayEndMinState(win.endMin);
+  }, []);
   const setCarryOverDefault = useCallback((value: CarryOverDefault) => {
     setCarryOverDefaultState(value);
   }, []);
@@ -778,6 +911,9 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       setDeadlineCountdownDays,
       dayViewMode,
       setDayViewMode,
+      dayStartMin,
+      dayEndMin,
+      setDayWindow,
       carryOverDefault,
       setCarryOverDefault,
       dayStartTrigger,
@@ -808,6 +944,9 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       setDeadlineCountdownDays,
       dayViewMode,
       setDayViewMode,
+      dayStartMin,
+      dayEndMin,
+      setDayWindow,
       carryOverDefault,
       setCarryOverDefault,
       dayStartTrigger,

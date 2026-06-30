@@ -33,6 +33,22 @@ Kapitel lernst du sie kennen und wechselst zwischen ihnen.
   „Heute" in der Symbolleiste).
 - **Kalenderwochen** werden in den Wochen- und Monatsansichten angezeigt.
 
+## Sichtbare Stunden im Stundenraster
+
+Standardmäßig zeigt das Stundenraster (Tages- und Wochenansicht) den ganzen Tag
+von 0 bis 24 Uhr. Unter **Einstellungen → Kalender → „Sichtbare Stunden"** legst
+du Anfang und Ende fest – z. B. 7:00 bis 23:00 –, in **Halbstunden-Schritten**.
+Das Raster zeigt dann nur dieses Fenster, sodass deine üblichen Stunden mehr
+Platz bekommen.
+
+Termine oder Aufgaben **außerhalb** des Fensters gehen nicht verloren: Sie
+erscheinen in einem kompakten **Band** über (vor Fensterbeginn) bzw. unter (nach
+Fensterende) dem Raster und bleiben mit **Tastatur und Screenreader** in
+Zeitreihenfolge erreichbar – mit ihrer echten Uhrzeit im Namen.
+
+Die Einstellung wird **geräteübergreifend synchronisiert**. Sie betrifft nur das
+Stundenraster; die kompakte Listenansicht zeigt weiterhin alle Einträge.
+
 ## Seitenleiste ein- und ausklappen
 
 Die **Seitenleiste** (Konten, Kalender und Aufgabenlisten) lässt sich über die

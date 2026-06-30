@@ -65,6 +65,7 @@ import {
   eventBlockFactor,
   eventSpanForDay,
   layoutDayColumn,
+  MINUTES_PER_DAY,
   minutesFromMidnight,
   type PositionedSpan,
   type TimedSpan,
@@ -80,17 +81,24 @@ import {
  *  than WeekView's 2.25rem because DayView rows are a bit taller. */
 const DAY_LIST_BLOCK_BASE_REM = 2.5;
 
-/** The slot's CSS `min-height` (1.2em, see `.day-list__slot`) expressed as a
- *  fraction of the 24h canvas, so a floored late-night option can be clamped to
- *  stay on-canvas. Matches WeekView's MIN_SLOT_FRACTION. */
+/** The slot's CSS `min-height` (1.2em, see `.day-list__slot`) as a fraction of
+ *  the FULL-DAY canvas, so a floored late-night option can be clamped to stay
+ *  on-canvas. With a narrower visible window the canvas is shorter, so the same
+ *  absolute min-height is a LARGER fraction — callers scale this up via
+ *  `slotStyle`'s `minFraction` arg (see the window-aware value in DayView).
+ *  Matches WeekView's MIN_SLOT_FRACTION. */
 const MIN_SLOT_FRACTION = 0.018;
 
-/** Absolute placement of a timed chip's `<li>` inside the day's 24h-tall
- *  hour-grid (positioning is purely visual; DOM order is unchanged). Identical
- *  to WeekView's helper, including the TOP clamp that keeps a floored min-height
- *  option (a 23:5x point) from extending below the canvas. */
-function slotStyle(p: PositionedSpan): React.CSSProperties {
-  const eh = Math.max(p.heightFraction, MIN_SLOT_FRACTION);
+/** Absolute placement of a timed chip's `<li>` inside the visible-window
+ *  hour-grid (positioning is purely visual; DOM order is unchanged). `minFraction`
+ *  is the floored option's min-height as a fraction of the CURRENT canvas (the
+ *  window, which may be < 24h) — used by the TOP clamp that keeps a floored
+ *  min-height option (a window-edge point) from extending below the canvas. */
+function slotStyle(
+  p: PositionedSpan,
+  minFraction = MIN_SLOT_FRACTION,
+): React.CSSProperties {
+  const eh = Math.max(p.heightFraction, minFraction);
   const top = Math.min(p.topFraction, 1 - eh);
   return {
     position: 'absolute',
@@ -99,6 +107,60 @@ function slotStyle(p: PositionedSpan): React.CSSProperties {
     left: `${(p.columnIndex / p.columnCount) * 100}%`,
     width: `${(1 / p.columnCount) * 100}%`,
   };
+}
+
+/** One chip in the "outside the visible hours" band (before/after the window).
+ *  Holds just what the decorative band needs; the real a11y is the clipped
+ *  listbox option this duplicates. */
+interface OutsideBandEntry {
+  key: string;
+  title: string;
+  /** Localised start time, e.g. "06:00" — so the band reads "06:00 Title". */
+  time: string;
+  colorHex?: string;
+  onOpen: () => void;
+}
+
+/** Decorative band of the events/tasks that fall outside the visible day window
+ *  — rendered above (before) / below (after) the hour-grid, mirroring the
+ *  all-day band. `aria-hidden`: each entry is also a clipped, navigable listbox
+ *  option (that's where the a11y lives), so the bars are `tabIndex={-1}` and
+ *  exist only for sighted users. Returns null when empty. */
+function OutsideBand({
+  entries,
+  edge,
+  label,
+}: {
+  entries: OutsideBandEntry[];
+  edge: 'before' | 'after';
+  label: string;
+}) {
+  if (entries.length === 0) return null;
+  return (
+    <div
+      className={`day-grid__outside day-grid__outside--${edge}`}
+      aria-hidden="true"
+    >
+      <span className="day-grid__outside-label">{label}</span>
+      {entries.map((e) => (
+        <button
+          key={e.key}
+          type="button"
+          tabIndex={-1}
+          className="day-grid__outside-bar"
+          style={
+            e.colorHex
+              ? ({ '--event-color': e.colorHex } as React.CSSProperties)
+              : undefined
+          }
+          onClick={e.onOpen}
+        >
+          {e.time && <span className="day-grid__outside-time">{e.time}</span>}
+          <span className="day-grid__outside-title">{e.title}</span>
+        </button>
+      ))}
+    </div>
+  );
 }
 
 /**
@@ -127,7 +189,8 @@ export function DayView() {
   const range = useMemo(() => visibleRange('day', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
   const { tasks, taskListById } = useTasks();
-  const { visualEffortSizing, dayViewMode } = useTaskCascadeEnabled();
+  const { visualEffortSizing, dayViewMode, dayStartMin, dayEndMin } =
+    useTaskCascadeEnabled();
   // Compact-list layout vs the proportional hour-grid. In list mode the timed
   // listbox is normal vertical flow (no positioned 24h canvas), the ruler +
   // all-day band are not rendered, and each option is sized inline instead of a
@@ -135,6 +198,43 @@ export function DayView() {
   // role=listbox/option, ids, aria-activedescendant, keyboard, labels — is
   // byte-for-byte identical to grid mode.
   const listMode = dayViewMode === 'list';
+  // Visible day window (synced pref). The hour-grid spans [dayStartMin, dayEndMin]
+  // instead of a fixed 0–24, so the canvas height + ruler shrink to the window
+  // and timed items are positioned relative to it (see slotByIdx / layoutDayColumn).
+  // Default 0/1440 reproduces the full day exactly. `--day-hours` drives the CSS
+  // height; `--day-grid-line-frac` shifts the hourly gridline pattern so the lines
+  // land on whole hours even when the window starts on a half-hour.
+  const windowMin = Math.max(1, dayEndMin - dayStartMin);
+  const dayHours = windowMin / 60;
+  const gridLineFrac = ((60 - (dayStartMin % 60)) % 60) / 60;
+  // Bake the windowed canvas height straight into an inline style (the number
+  // interpolated into the string) rather than driving it through a React-inline
+  // CSS custom property: a custom prop consumed inside calc() proved unreliable
+  // here (same reason MonthView sets its row min-height inline, not via a var).
+  // `--hour-px` itself is CSS-defined, so it resolves fine.
+  const gridHeight = `calc(${dayHours} * var(--hour-px, 3.75rem))`;
+  const gridLineOffset = `calc(${gridLineFrac} * var(--hour-px, 3.75rem))`;
+  // The slot min-height (MIN_SLOT_FRACTION of the FULL day) as a fraction of the
+  // current (possibly narrower) window, so a floored point keeps its on-canvas
+  // clamp at any window size. Capped so a very narrow window stays sane.
+  const slotMinFraction = Math.min(
+    0.5,
+    (MIN_SLOT_FRACTION * MINUTES_PER_DAY) / windowMin,
+  );
+  // Whole-hour ruler ticks inside the window, INCLUDING the window-end hour so
+  // the chosen end is labelled (e.g. 7…23 for a 7–23 window) — but never 24:00,
+  // the degenerate full-day end (so the default stays 0…23 as before).
+  const rulerHours = useMemo(() => {
+    const out: number[] = [];
+    for (
+      let h = Math.ceil(dayStartMin / 60);
+      h * 60 <= dayEndMin && h * 60 < MINUTES_PER_DAY;
+      h += 1
+    ) {
+      out.push(h);
+    }
+    return out;
+  }, [dayStartMin, dayEndMin]);
   const currentUserByList = useCurrentUserByList(tasks);
   // Hide tasks assigned to a concrete OTHER user from MY calendar (mine +
   // unassigned stay) — the day-start review's ownership filter (DESIGN §9.7).
@@ -235,10 +335,80 @@ export function DayView() {
         slotIdxs.push(idx);
       }
     });
-    const positions = layoutDayColumn(spans);
+    const positions = layoutDayColumn(spans, {
+      startMin: dayStartMin,
+      endMin: dayEndMin,
+    });
     slotIdxs.forEach((idx, k) => map.set(idx, positions[k]));
     return map;
-  }, [timedItems, anchor, dayKey]);
+  }, [timedItems, anchor, dayKey, dayStartMin, dayEndMin]);
+
+  // Items ENTIRELY outside the visible window (placement 'before' / 'after')
+  // aren't placed on the canvas: their listbox option is clipped (visually
+  // hidden but still navigable, reading the real time off its label — exactly
+  // like an all-day option), and the SIGHTED representation is a compact band
+  // above (before) / below (after) the grid. Mirrors the .day-grid__allday
+  // pattern. Built in time order; events AND timed tasks both land here.
+  const outsideBands = useMemo(() => {
+    const before: OutsideBandEntry[] = [];
+    const after: OutsideBandEntry[] = [];
+    timedItems.forEach((item, idx) => {
+      const slot = slotByIdx.get(idx);
+      if (!slot || slot.placement === 'in') return;
+      let entry: OutsideBandEntry;
+      if (item.kind === 'event') {
+        const ev = item.event;
+        // Cross-midnight event: its tail on day 2 runs 00:00–…, so show the
+        // clamped THIS-DAY start (like the grid chip + aria-label do), not the
+        // misleading absolute start.
+        const startStr = multiDayInfo(ev, anchor)
+          ? eventDayTimes(fmt, ev, anchor).startStr
+          : fmt.format(new Date(ev.start), 'p');
+        entry = {
+          key: `ev-${ev.id}`,
+          title: ev.title,
+          time: startStr,
+          colorHex: resolveEventColor(ev, calendarById, labelById).hex ?? undefined,
+          onOpen: () => openEventDialog(ev),
+        };
+      } else {
+        const task = item.task;
+        const t0 = taskTimeOnDay(task, dayKey);
+        entry = {
+          key: `task-${task.id}`,
+          title: task.title,
+          time: t0 ? fmt.format(new Date(`${dayKey}T${t0}`), 'p') : '',
+          colorHex:
+            resolveTaskColor(task, taskListById, labelById, sectionColorById)
+              .hex ?? undefined,
+          onOpen: () => openTaskDialog(task),
+        };
+      }
+      (slot.placement === 'before' ? before : after).push(entry);
+    });
+    return { before, after };
+  }, [
+    timedItems,
+    slotByIdx,
+    anchor,
+    calendarById,
+    labelById,
+    taskListById,
+    sectionColorById,
+    dayKey,
+    fmt,
+    openEventDialog,
+    openTaskDialog,
+  ]);
+
+  // Window-boundary time as a localised "HH:MM" for the outside-band labels.
+  // 1440 is the end-of-day sentinel (no real Date), so spell it literally.
+  const clockAt = (min: number): string => {
+    if (min >= MINUTES_PER_DAY) return '24:00';
+    const hh = String(Math.floor(min / 60)).padStart(2, '0');
+    const mm = String(min % 60).padStart(2, '0');
+    return fmt.format(new Date(`${dayKey}T${hh}:${mm}:00`), 'p');
+  };
 
   // All-day events have no hour placement, so they get no slot — their <li>
   // stays a (visually-hidden) option in the listbox for SR/keyboard, while the
@@ -287,15 +457,23 @@ export function DayView() {
   useEffect(() => {
     // List mode is a normal vertical flow (.day-grid--flow has no internal
     // scroll region), so the active option is already in the page scroll — the
-    // nudge would needlessly move the page. Only the grid's 24h canvas needs it.
-    if (listMode || timedItems.length === 0) return;
+    // nudge would needlessly move the page. Only the grid's canvas needs it. An
+    // all-day or outside-window option is clipped at static y0 (no positioned
+    // slot), so scrolling THAT into view would yank the canvas to the top — skip
+    // it (it's shown in its band); nudge only in-window options.
+    if (
+      listMode ||
+      timedItems.length === 0 ||
+      slotByIdx.get(focusIndex)?.placement !== 'in'
+    )
+      return;
     document
       .getElementById(itemId(focusIndex))
       ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     // `dayKey` is a dep so switching to a different day always re-scrolls the
     // active option into view, even when the new day has the same item count
     // and focusIndex is unchanged (otherwise the effect wouldn't re-run).
-  }, [focusIndex, itemId, timedItems.length, dayKey, listMode]);
+  }, [focusIndex, itemId, timedItems.length, dayKey, listMode, slotByIdx]);
   const listRef = useAutoFocus<HTMLUListElement>(!loading);
 
   const [confirmTarget, setConfirmTarget] = useState<CalendarEvent | null>(
@@ -515,20 +693,36 @@ export function DayView() {
         </div>
       )}
 
+      {/* Events/tasks before the window start — a compact band above the grid
+          (sighted view; the a11y is the clipped options in the listbox). */}
+      {!listMode && (
+        <OutsideBand
+          entries={outsideBands.before}
+          edge="before"
+          label={t('views.day.outsideBefore', { time: clockAt(dayStartMin) })}
+        />
+      )}
+
       <div className={'day-grid' + (listMode ? ' day-grid--flow' : '')}>
         {/* Hour ruler — the hour numbers, read off the grid instead of the
             chips. aria-hidden; the time stays in each option's accessible
-            label. The scale is 24h tall, top-aligned with the canvas so the
-            numbers line up with the gridlines. Grid mode only — the compact
-            list reads the time off each option's label, not a ruler. */}
+            label. Top-aligned with the canvas so the numbers line up with the
+            gridlines; both scale to the visible window via the inline height.
+            Grid mode only — the compact list reads the time off each option's
+            label, not a ruler. */}
         {!listMode && (
           <div className="day-grid__ruler" aria-hidden="true">
-            <div className="day-grid__ruler-scale">
-              {Array.from({ length: 24 }, (_, h) => (
+            <div
+              className="day-grid__ruler-scale"
+              style={{ height: gridHeight }}
+            >
+              {rulerHours.map((h) => (
                 <span
                   key={h}
                   className="day-grid__ruler-hour"
-                  style={{ top: `${(h / 24) * 100}%` }}
+                  style={{
+                    top: `${((h * 60 - dayStartMin) / windowMin) * 100}%`,
+                  }}
                 >
                   {String(h).padStart(2, '0')}
                 </span>
@@ -541,6 +735,14 @@ export function DayView() {
           role="listbox"
           tabIndex={0}
           aria-label={t('views.day.eventList')}
+          // Grid mode: the canvas height + gridline offset scale to the visible
+          // window (inline, so a React custom prop in calc() can't silently fail).
+          // List mode: no positioned canvas — let .day-list--flow drive height.
+          style={
+            listMode
+              ? undefined
+              : { height: gridHeight, backgroundPositionY: gridLineOffset }
+          }
           aria-activedescendant={
             timedItems.length > 0 ? itemId(focusIndex) : undefined
           }
@@ -561,6 +763,10 @@ export function DayView() {
             // sized inline instead (events by a STRICT duration height, tasks by
             // effort), so suppress the slot here.
             const slot = listMode ? undefined : slotByIdx.get(i);
+            // In-window → positioned canvas slot. Outside the window → the
+            // option is clipped (the band above/below is the sighted view).
+            const slotIn = slot?.placement === 'in';
+            const slotOut = slot != null && slot.placement !== 'in';
             if (item.kind === 'task') {
               const task = item.task;
               // Pull the effective time-of-day via the shared helper;
@@ -612,10 +818,11 @@ export function DayView() {
                     // surfaces — this agenda row + the grid chip — resize
                     // identically by effort.
                     (effortMod ? ` day-task--effort-${effortMod}` : '') +
-                    (slot ? ' day-list__slot' : '')
+                    (slotIn ? ' day-list__slot' : '') +
+                    (slotOut ? ' day-list__item--outside' : '')
                   }
                   style={{
-                    ...(slot ? slotStyle(slot) : {}),
+                    ...(slotIn && slot ? slotStyle(slot, slotMinFraction) : {}),
                     ...(color.hex
                       ? ({ '--event-color': color.hex } as React.CSSProperties)
                       : {}),
@@ -743,14 +950,16 @@ export function DayView() {
                   // letting it flow static and collide with the 00:00 chips. In
                   // LIST mode there's no band, so the all-day option stays a
                   // plain visible row (no clip).
-                  (slot
+                  (slotIn
                     ? ' day-list__slot'
-                    : ev.all_day && !listMode
-                      ? ' day-list__item--allday'
+                    : (slotOut || (ev.all_day && !listMode))
+                      ? slotOut
+                        ? ' day-list__item--outside'
+                        : ' day-list__item--allday'
                       : '')
                 }
                 style={{
-                  ...(slot ? slotStyle(slot) : {}),
+                  ...(slotIn && slot ? slotStyle(slot, slotMinFraction) : {}),
                   // List mode: a STRICT duration-driven height (not min-height),
                   // so the row both fills the reserved space AND can't be inflated
                   // past its duration by a long title — the title wraps on one flow
@@ -808,6 +1017,16 @@ export function DayView() {
         )}
         </ul>
       </div>
+
+      {/* Events/tasks after the window end — a compact band below the grid
+          (mirror of the before-band above). */}
+      {!listMode && (
+        <OutsideBand
+          entries={outsideBands.after}
+          edge="after"
+          label={t('views.day.outsideAfter', { time: clockAt(dayEndMin) })}
+        />
+      )}
 
       {/* §9.4 untimed tasks — always BELOW the grid (per Toni: the task band
           stays under the grid, not above it). GRID mode styles them as a compact
