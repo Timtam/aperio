@@ -451,15 +451,23 @@ export function DayView() {
   useEffect(() => {
     // List mode is a normal vertical flow (.day-grid--flow has no internal
     // scroll region), so the active option is already in the page scroll — the
-    // nudge would needlessly move the page. Only the grid's 24h canvas needs it.
-    if (listMode || timedItems.length === 0) return;
+    // nudge would needlessly move the page. Only the grid's canvas needs it. An
+    // all-day or outside-window option is clipped at static y0 (no positioned
+    // slot), so scrolling THAT into view would yank the canvas to the top — skip
+    // it (it's shown in its band); nudge only in-window options.
+    if (
+      listMode ||
+      timedItems.length === 0 ||
+      slotByIdx.get(focusIndex)?.placement !== 'in'
+    )
+      return;
     document
       .getElementById(itemId(focusIndex))
       ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     // `dayKey` is a dep so switching to a different day always re-scrolls the
     // active option into view, even when the new day has the same item count
     // and focusIndex is unchanged (otherwise the effect wouldn't re-run).
-  }, [focusIndex, itemId, timedItems.length, dayKey, listMode]);
+  }, [focusIndex, itemId, timedItems.length, dayKey, listMode, slotByIdx]);
   const listRef = useAutoFocus<HTMLUListElement>(!loading);
 
   const [confirmTarget, setConfirmTarget] = useState<CalendarEvent | null>(

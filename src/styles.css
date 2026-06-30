@@ -2259,8 +2259,8 @@ button[aria-disabled='true'] {
    groups easy to tell apart. Collapses to a normal gap when the cell is
    already full. Week view only; the DayView list keeps its top flow.
 
-   This bottom-pin is the LIST-mode (pre-grid) behaviour. GRID mode overrides
-   it below to lift the band to the TOP of the cell instead. */
+   This bottom-pin is the LIST-mode (pre-grid) behaviour. GRID mode overrides it
+   below (`margin-top: 0`) so the band flows right BELOW the canvas instead. */
 .week-grid__tasks {
   margin-top: auto;
 }
@@ -3003,11 +3003,13 @@ button[aria-disabled='true'] {
   list-style: none;
   margin: 0;
   padding: 0;
-  /* Proportional hour-grid: a 24h-tall positioned canvas. Timed chips are
-     absolutely placed (top/height by start + duration, side-by-side on
-     overlap); all-day chips stay clipped via `display: contents` on their
-     <li>. Faint hour gridlines via a repeating background so it reads as a
-     time grid. */
+  /* Proportional hour-grid: a positioned canvas spanning the visible day window.
+     Timed chips are absolutely placed (top/height by start + duration,
+     side-by-side on overlap); all-day chips stay clipped via `display: contents`
+     on their <li>. Faint hour gridlines via a repeating background so it reads as
+     a time grid. Height + gridline offset (for a half-hour window start) are set
+     inline in WeekView to the visible window (a React custom prop in calc()
+     silently fails here); this is the full-day fallback. */
   position: relative;
   height: calc(24 * var(--hour-px, 2.5rem));
   background-image: repeating-linear-gradient(
@@ -3059,6 +3061,60 @@ button[aria-disabled='true'] {
   display: inline;
 }
 
+/* Visible "outside the shown hours" band — events/tasks before the window start
+   (above the cell's canvas) / after the window end (below it). Decorative,
+   aria-hidden; the a11y lives in the clipped chips inside the cell's listbox.
+   A leading label ("Before 07:00" / "After 23:00") tells sighted users what
+   they're looking at; a hairline toward the canvas marks the visual cut. Scoped
+   per cell (unlike DayView's full-width band), so no ruler inset is needed — the
+   cell already sits under its day column. Grid mode only (gated in JSX). */
+.week-grid__outside {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-muted);
+}
+.week-grid__outside--before {
+  margin-bottom: var(--space-1);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px dashed var(--color-border);
+}
+.week-grid__outside--after {
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
+  border-top: 1px dashed var(--color-border);
+}
+.week-grid__outside-label {
+  font-weight: 500;
+  white-space: nowrap;
+  width: 100%;
+}
+.week-grid__outside-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  background: var(--event-color, var(--color-accent));
+  color: var(--color-accent-fg);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  padding: 2px var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.week-grid__outside-time {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+.week-grid__outside-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* A positioned timed chip's <li>. Inline style sets top/height/left/width from
    the layout algorithm; a min-height keeps a very short event legible (it
    overflows its slot downward). The inner chip fills the slot. */
@@ -3090,6 +3146,8 @@ button[aria-disabled='true'] {
 }
 .week-grid__ruler-scale {
   position: relative;
+  /* Height is set inline (WeekView) to the visible window; this is the full-day
+     fallback. */
   height: calc(24 * var(--hour-px, 2.5rem));
 }
 .week-grid__ruler-hour {
