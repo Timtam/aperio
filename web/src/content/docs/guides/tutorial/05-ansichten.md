@@ -33,6 +33,21 @@ to know them and switch between them.
   toolbar).
 - **Week numbers** are shown in the week and month views.
 
+## Visible hours in the hour grid
+
+By default the hour grid (day and week views) shows the whole day from 0 to 24.
+Under **Settings → Calendars → "Visible hours"** you set a start and end — e.g.
+7:00 to 23:00 — in **half-hour steps**. The grid then shows only that window, so
+your usual hours get more room.
+
+Events or tasks **outside** the window aren't lost: they appear in a compact
+**band** above (before the window start) / below (after the window end) the
+grid, and stay reachable with **keyboard and screen reader** in time order —
+with their real time in the name.
+
+The setting is **synced across your devices**. It affects only the hour grid;
+the compact list view still shows every entry.
+
 ## Collapsing the sidebar
 
 The **sidebar** (accounts, calendars and task lists) can be collapsed and
