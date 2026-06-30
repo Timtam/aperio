@@ -1,4 +1,4 @@
-import type { TaskList, TaskStatus } from '@aperio/shared';
+import { FULL_DAY_WINDOW, MINUTES_PER_DAY, type TaskList, type TaskStatus } from '@aperio/shared';
 
 import { getUserPref, setUserPref } from '../api/prefs';
 
@@ -54,6 +54,12 @@ export interface TaskBehaviour {
   deadlineCountdownDays: number;
   /** Single-day calendar layout: proportional hour-grid or compact list. Default grid. */
   dayViewMode: 'grid' | 'list';
+  /** Visible-window START of the calendar hour-grid, minutes from midnight
+   *  (half-hour grid, [0, 1440]). Default 0 (midnight). */
+  dayStartMin: number;
+  /** Visible-window END of the calendar hour-grid, minutes from midnight
+   *  (half-hour grid, [0, 1440]). Default 1440 (end of day). */
+  dayEndMin: number;
   /** What a check-off does: flip open↔completed, or cycle through in_progress. */
   checkoffMode: CheckoffMode;
   /** Day-start action for tasks whose scheduled day passed + still open. */
@@ -79,6 +85,11 @@ const DEADLINE_COUNTDOWN_DAYS_KEY = 'tasks.deadlineCountdownDays';
 // Cross-device synced single-day calendar layout. SAME key string as the
 // desktop toolbar's day-view-mode pref so the two sync 1:1 (must match exactly).
 const CALENDAR_DAY_VIEW_MODE_KEY = 'calendar.dayViewMode';
+// Cross-device synced visible day-window of the calendar hour-grid. Two integer
+// minute values from midnight stored as strings (e.g. "420" = 07:00). SAME key
+// strings as the desktop TaskCascadeProvider so the two sync 1:1.
+const CALENDAR_DAY_START_MIN_KEY = 'calendar.dayStartMin';
+const CALENDAR_DAY_END_MIN_KEY = 'calendar.dayEndMin';
 const CHECKOFF_KEY = 'tasks.checkoffMode';
 const CARRY_OVER_KEY = 'tasks.carryOverDefault';
 const DAY_START_TRIGGER_KEY = 'tasks.dayStartTrigger';
@@ -95,6 +106,8 @@ export const TASK_BEHAVIOUR_DEFAULTS: TaskBehaviour = {
   remindDeadlineCountdown: true,
   deadlineCountdownDays: 3,
   dayViewMode: 'grid',
+  dayStartMin: FULL_DAY_WINDOW.startMin,
+  dayEndMin: FULL_DAY_WINDOW.endMin,
   checkoffMode: 'toggle',
   carryOverDefault: 'ask',
   dayStartTrigger: '00:00',
@@ -145,6 +158,45 @@ export function parseCountdownDays(stored: string | null): number {
   );
 }
 
+/** Snap a raw minute value to the visible-day-window grid: integer, clamped to
+ *  [0, 1440], rounded to the nearest 30 (half-hour granularity). A non-finite
+ *  input falls back to `fallback` (already snapped). */
+function snapWindowMinute(value: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  const rounded = Math.round(value / 30) * 30;
+  return Math.min(MINUTES_PER_DAY, Math.max(0, rounded));
+}
+
+/** Validate a `(start, end)` day-window pair: each end snapped to the half-hour
+ *  grid in [0, 1440]; a `start >= end` pair falls back to the FULL day window.
+ *  Used by both the read parse and `writeDayWindow` (mirrors the desktop
+ *  TaskCascadeProvider). */
+export function validateDayWindow(
+  startRaw: number,
+  endRaw: number,
+): { startMin: number; endMin: number } {
+  const startMin = snapWindowMinute(startRaw, FULL_DAY_WINDOW.startMin);
+  const endMin = snapWindowMinute(endRaw, FULL_DAY_WINDOW.endMin);
+  if (startMin >= endMin) {
+    return { startMin: FULL_DAY_WINDOW.startMin, endMin: FULL_DAY_WINDOW.endMin };
+  }
+  return { startMin, endMin };
+}
+
+/** Parse the two stored minute strings into a validated day-window; a
+ *  missing/garbage edge parses to NaN → snapped to the full-day default, and an
+ *  out-of-order pair falls back to the full day. */
+function parseDayWindow(
+  startStored: string | null,
+  endStored: string | null,
+): { startMin: number; endMin: number } {
+  const startNum =
+    startStored === null ? FULL_DAY_WINDOW.startMin : Number.parseInt(startStored, 10);
+  const endNum =
+    endStored === null ? FULL_DAY_WINDOW.endMin : Number.parseInt(endStored, 10);
+  return validateDayWindow(startNum, endNum);
+}
+
 /** Parse + sanitise the listOverrides JSON per-list-per-field so one corrupt
  *  entry doesn't poison the others (mirrors the desktop hydration). */
 function parseListOverrides(stored: string | null): Record<string, ListOverrides> {
@@ -188,6 +240,8 @@ export async function readTaskBehaviour(): Promise<TaskBehaviour> {
       remindDeadlineCountdown,
       countdownDays,
       dayViewMode,
+      dayStartMin,
+      dayEndMin,
       checkoff,
       carryOver,
       trigger,
@@ -202,11 +256,14 @@ export async function readTaskBehaviour(): Promise<TaskBehaviour> {
       getUserPref(REMIND_DEADLINE_COUNTDOWN_KEY),
       getUserPref(DEADLINE_COUNTDOWN_DAYS_KEY),
       getUserPref(CALENDAR_DAY_VIEW_MODE_KEY),
+      getUserPref(CALENDAR_DAY_START_MIN_KEY),
+      getUserPref(CALENDAR_DAY_END_MIN_KEY),
       getUserPref(CHECKOFF_KEY),
       getUserPref(CARRY_OVER_KEY),
       getUserPref(DAY_START_TRIGGER_KEY),
       getUserPref(LIST_OVERRIDES_KEY),
     ]);
+    const dayWindow = parseDayWindow(dayStartMin, dayEndMin);
     return {
       cascadeEnabled: parseBool(cascade),
       autoDate: parseBool(autoDate),
@@ -217,6 +274,8 @@ export async function readTaskBehaviour(): Promise<TaskBehaviour> {
       remindDeadlineCountdown: parseBool(remindDeadlineCountdown),
       deadlineCountdownDays: parseCountdownDays(countdownDays),
       dayViewMode: dayViewMode === 'list' ? 'list' : 'grid',
+      dayStartMin: dayWindow.startMin,
+      dayEndMin: dayWindow.endMin,
       checkoffMode: parseCheckoff(checkoff),
       carryOverDefault: isCarryOverDefault(carryOver) ? carryOver : 'ask',
       dayStartTrigger: isDayStartTrigger(trigger) ? trigger : '00:00',
@@ -262,6 +321,19 @@ export const writeDeadlineCountdownDays = (v: number): Promise<void> => {
 };
 export const writeDayViewMode = (m: 'grid' | 'list'): Promise<void> =>
   writeBest(CALENDAR_DAY_VIEW_MODE_KEY, m);
+/** Persist the visible day window. The pair is validated (snapped to the
+ *  half-hour grid, clamped; full-day fallback when start >= end) so an invalid
+ *  value can never reach storage; both keys are written. */
+export const writeDayWindow = async (
+  startMin: number,
+  endMin: number,
+): Promise<void> => {
+  const win = validateDayWindow(startMin, endMin);
+  await Promise.all([
+    writeBest(CALENDAR_DAY_START_MIN_KEY, String(win.startMin)),
+    writeBest(CALENDAR_DAY_END_MIN_KEY, String(win.endMin)),
+  ]);
+};
 export const writeCheckoffMode = (m: CheckoffMode): Promise<void> =>
   writeBest(CHECKOFF_KEY, m);
 export const writeCarryOverDefault = (v: CarryOverDefault): Promise<void> =>
