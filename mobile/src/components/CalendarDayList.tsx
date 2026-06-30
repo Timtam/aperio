@@ -418,11 +418,17 @@ export function CalendarDayList({
   const windowMin = Math.max(1, dayEndMin - dayStartMin);
   const dayHours = windowMin / 60;
   const canvasPx = dayHours * HOUR_PX;
-  // Whole-hour ruler ticks inside the window (e.g. 7…22 for a 7–23 window),
-  // positioned by (h*60 - dayStartMin)/windowMin — mirrors desktop's rulerHours.
+  // Whole-hour ruler ticks inside the window, INCLUDING the window-end hour so
+  // the chosen end is labelled (e.g. 7…23 for a 7–23 window) — but never 24:00,
+  // the degenerate full-day end. Positioned by (h*60 - dayStartMin)/windowMin —
+  // mirrors desktop's rulerHours.
   const rulerHours = useMemo(() => {
     const out: number[] = [];
-    for (let h = Math.ceil(dayStartMin / 60); h * 60 < dayEndMin; h += 1) {
+    for (
+      let h = Math.ceil(dayStartMin / 60);
+      h * 60 <= dayEndMin && h * 60 < MINUTES_PER_DAY;
+      h += 1
+    ) {
       out.push(h);
     }
     return out;

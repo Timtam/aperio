@@ -221,10 +221,16 @@ export function DayView() {
     0.5,
     (MIN_SLOT_FRACTION * MINUTES_PER_DAY) / windowMin,
   );
-  // Whole-hour ruler ticks inside the window (e.g. 7…22 for a 7–23 window).
+  // Whole-hour ruler ticks inside the window, INCLUDING the window-end hour so
+  // the chosen end is labelled (e.g. 7…23 for a 7–23 window) — but never 24:00,
+  // the degenerate full-day end (so the default stays 0…23 as before).
   const rulerHours = useMemo(() => {
     const out: number[] = [];
-    for (let h = Math.ceil(dayStartMin / 60); h * 60 < dayEndMin; h += 1) {
+    for (
+      let h = Math.ceil(dayStartMin / 60);
+      h * 60 <= dayEndMin && h * 60 < MINUTES_PER_DAY;
+      h += 1
+    ) {
       out.push(h);
     }
     return out;
