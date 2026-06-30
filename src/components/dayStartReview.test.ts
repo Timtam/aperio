@@ -10,6 +10,7 @@ import {
 } from './dayStartReview';
 import {
   buildReminderGroups,
+  daysUntilDeadline,
   filterDeadlineArrived,
   filterDeadlineCountdown,
   filterDeadlinePinTargets,
@@ -592,59 +593,59 @@ describe('filterDeadlineCountdown', () => {
     vi.useRealTimers();
   });
 
-  it('picks tasks whose deadline is exactly X days out (X=3 → 2026-05-23)', () => {
+  it('is CUMULATIVE — window 3 matches deadlines 3, 2 AND 1 days out (not 4, not today)', () => {
     const tasks: Task[] = [
+      { ...baseTask, id: 'in4', deadline_date: '2026-05-24' }, // 4 days > window
       { ...baseTask, id: 'in3', deadline_date: '2026-05-23' },
       { ...baseTask, id: 'in2', deadline_date: '2026-05-22' },
-      { ...baseTask, id: 'today', deadline_date: '2026-05-20' },
-      { ...baseTask, id: 'in3-done', deadline_date: '2026-05-23', status: 'completed' },
+      { ...baseTask, id: 'in1', deadline_date: '2026-05-21' },
+      { ...baseTask, id: 'today', deadline_date: '2026-05-20' }, // 0 days → filterDeadlineArrived
+      { ...baseTask, id: 'past', deadline_date: '2026-05-19' },
+      { ...baseTask, id: 'in2-done', deadline_date: '2026-05-22', status: 'completed' },
     ];
-    expect(filterDeadlineCountdown(tasks, 3).map((t) => t.id)).toEqual(['in3']);
+    expect(filterDeadlineCountdown(tasks, 3).map((t) => t.id)).toEqual([
+      'in3',
+      'in2',
+      'in1',
+    ]);
   });
 
-  it('crosses a month boundary correctly (today 05-20 + 13 = 06-02)', () => {
-    const tasks: Task[] = [{ ...baseTask, id: 'x', deadline_date: '2026-06-02' }];
-    expect(filterDeadlineCountdown(tasks, 13).map((t) => t.id)).toEqual(['x']);
+  it('crosses a month boundary correctly (window 13 covers 06-02 = 13 days out)', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'in13', deadline_date: '2026-06-02' }, // 13 days → in window
+      { ...baseTask, id: 'in14', deadline_date: '2026-06-03' }, // 14 days → out
+    ];
+    expect(filterDeadlineCountdown(tasks, 13).map((t) => t.id)).toEqual(['in13']);
   });
 
-  it('selects nothing for daysUntil <= 0 or non-finite', () => {
-    const tasks: Task[] = [{ ...baseTask, id: 'today', deadline_date: '2026-05-20' }];
+  it('selects nothing for window <= 0 or non-finite', () => {
+    const tasks: Task[] = [{ ...baseTask, id: 'in2', deadline_date: '2026-05-22' }];
     expect(filterDeadlineCountdown(tasks, 0)).toEqual([]);
     expect(filterDeadlineCountdown(tasks, -3)).toEqual([]);
     expect(filterDeadlineCountdown(tasks, Number.NaN)).toEqual([]);
   });
 
-  it('honours a per-task override (=7) at today+7 even when the global is 3', () => {
+  it('a per-task override WIDENS the window (5 days out matches at override 7 but not global 3)', () => {
     const tasks: Task[] = [
-      // Override 7 → due 2026-05-27 matches; the global-3 day (05-23) doesn't.
+      // Override 7 → 5 days out is within 1..7.
       {
         ...baseTask,
         id: 'override7',
-        deadline_date: '2026-05-27',
+        deadline_date: '2026-05-25',
         deadline_reminder_days: 7,
       },
-      // Same override, but its deadline sits on the global-3 day → no match.
-      {
-        ...baseTask,
-        id: 'override7-wrongday',
-        deadline_date: '2026-05-23',
-        deadline_reminder_days: 7,
-      },
-      // No override → still uses the global default of 3 (05-23).
-      { ...baseTask, id: 'global', deadline_date: '2026-05-23' },
+      // No override → global window 3; 5 days out is beyond it.
+      { ...baseTask, id: 'global', deadline_date: '2026-05-25' },
     ];
-    expect(filterDeadlineCountdown(tasks, 3).map((t) => t.id)).toEqual([
-      'override7',
-      'global',
-    ]);
+    expect(filterDeadlineCountdown(tasks, 3).map((t) => t.id)).toEqual(['override7']);
   });
 
-  it('falls back to the global default when the override is null or < 1', () => {
+  it('falls back to the global window when the override is null or < 1', () => {
     const tasks: Task[] = [
-      // null override → global 3 (05-23).
-      { ...baseTask, id: 'null', deadline_date: '2026-05-23', deadline_reminder_days: null },
-      // < 1 override → ignored, global 3 (05-23).
-      { ...baseTask, id: 'zero', deadline_date: '2026-05-23', deadline_reminder_days: 0 },
+      // null override → global 3; 2 days out is in window.
+      { ...baseTask, id: 'null', deadline_date: '2026-05-22', deadline_reminder_days: null },
+      // < 1 override → ignored, global 3; 2 days out is in window.
+      { ...baseTask, id: 'zero', deadline_date: '2026-05-22', deadline_reminder_days: 0 },
     ];
     expect(filterDeadlineCountdown(tasks, 3).map((t) => t.id).sort()).toEqual([
       'null',
@@ -652,11 +653,12 @@ describe('filterDeadlineCountdown', () => {
     ]);
   });
 
-  it('honours an override even when the global default is invalid (<= 0)', () => {
+  it('honours an override window even when the global default is invalid (<= 0)', () => {
     const tasks: Task[] = [
-      { ...baseTask, id: 'override5', deadline_date: '2026-05-25', deadline_reminder_days: 5 },
+      // Override 5 → 4 days out is in 1..5, even with the global disabled.
+      { ...baseTask, id: 'override5', deadline_date: '2026-05-24', deadline_reminder_days: 5 },
       // No override + invalid global → nothing.
-      { ...baseTask, id: 'noov', deadline_date: '2026-05-25' },
+      { ...baseTask, id: 'noov', deadline_date: '2026-05-24' },
     ];
     expect(filterDeadlineCountdown(tasks, 0).map((t) => t.id)).toEqual(['override5']);
   });
@@ -712,5 +714,24 @@ describe('buildReminderGroups (de-dup, today = 2026-05-20)', () => {
     const g = buildReminderGroups(tasks, { ...allRemindersOn, remindUntimedToday: false });
     expect(g.untimed).toEqual([]);
     expect(g.dueToday.map((t) => t.id)).toEqual(['d']);
+  });
+});
+
+describe('daysUntilDeadline (today = 2026-05-20)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 4, 20, 12, 0, 0));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('counts whole local days to the deadline (0 today, negative past, null none)', () => {
+    expect(daysUntilDeadline({ ...baseTask, deadline_date: '2026-05-23' })).toBe(3);
+    expect(daysUntilDeadline({ ...baseTask, deadline_date: '2026-05-21' })).toBe(1);
+    expect(daysUntilDeadline({ ...baseTask, deadline_date: '2026-05-20' })).toBe(0);
+    expect(daysUntilDeadline({ ...baseTask, deadline_date: '2026-05-19' })).toBe(-1);
+    expect(daysUntilDeadline({ ...baseTask, deadline_date: '2026-06-02' })).toBe(13);
+    expect(daysUntilDeadline({ ...baseTask, deadline_date: null })).toBeNull();
   });
 });

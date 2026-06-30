@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   actionableDescendants,
   buildReminderGroups,
+  daysUntilDeadline,
   filterCarriedOver,
   filterOverdue,
   priorityMarker,
@@ -161,21 +162,18 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
 
   // Render-ready reminder groups: each task set paired with its count-aware
   // summary line and the per-row "why" suffix for the row's accessible label.
-  // The countdown grammar takes a `{lead}` phrase ("in N days"), so both the
-  // summary and the per-row "why" interpolate it. Empty groups are filtered out
-  // at render time.
-  const reminderGroups = useMemo(() => {
-    const lead = t('dialogs.dayStartReview.reminders.inDays', {
-      count: beh.deadlineCountdownDays,
-    });
-    return [
+  // The countdown "why" is PER TASK — the set spans the whole 1..window range,
+  // so each task announces its OWN remaining days — hence `why` is a function.
+  // Empty groups are filtered out at render time.
+  const reminderGroups = useMemo(
+    () => [
       {
         key: 'untimed',
         tasks: reminders.untimed,
         summary: t('dialogs.dayStartReview.reminders.untimedToday', {
           count: reminders.untimed.length,
         }),
-        why: t('dialogs.dayStartReview.reminders.whyUntimed'),
+        why: () => t('dialogs.dayStartReview.reminders.whyUntimed'),
       },
       {
         key: 'dueToday',
@@ -183,19 +181,24 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
         summary: t('dialogs.dayStartReview.reminders.deadlineArrived', {
           count: reminders.dueToday.length,
         }),
-        why: t('dialogs.dayStartReview.reminders.whyDeadlineToday'),
+        why: () => t('dialogs.dayStartReview.reminders.whyDeadlineToday'),
       },
       {
         key: 'countdown',
         tasks: reminders.countdown,
         summary: t('dialogs.dayStartReview.reminders.countdown', {
           count: reminders.countdown.length,
-          lead,
         }),
-        why: t('dialogs.dayStartReview.reminders.whyCountdown', { lead }),
+        why: (task: Task) =>
+          t('dialogs.dayStartReview.reminders.whyCountdown', {
+            lead: t('dialogs.dayStartReview.reminders.inDays', {
+              count: daysUntilDeadline(task) ?? beh.deadlineCountdownDays,
+            }),
+          }),
       },
-    ];
-  }, [reminders, beh.deadlineCountdownDays, t]);
+    ],
+    [reminders, beh.deadlineCountdownDays, t],
+  );
 
   // Open a reminder task in the editor: close the review first (it overlays the
   // navigator as an RN Modal, so the editor would otherwise mount behind it),
@@ -655,7 +658,7 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
                         <Pressable
                           key={task.id}
                           accessibilityRole="button"
-                          accessibilityLabel={`${task.title}, ${group.why}`}
+                          accessibilityLabel={`${task.title}, ${group.why(task)}`}
                           onPress={() => openTaskEditor(task)}
                           style={({ pressed }) => [
                             styles.reminderRow,

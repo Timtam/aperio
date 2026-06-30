@@ -1,4 +1,3 @@
-import { localDateKey } from './dateKey';
 import { isMineOrUnassigned } from './taskAssignment';
 import { todayIsoKey } from './taskDay';
 import type { Task, TaskUser } from './types';
@@ -149,11 +148,16 @@ export function filterDeadlinePinTargets(
 // open subtasks are the real units), and never remind about a task owned by a
 // concrete OTHER user. PURE — `todayIsoKey()` reads the local wall-clock.
 
-/** `todayIsoKey()` shifted by `days` whole local calendar days (handles month/
- *  year rollover via the Date constructor's overflow). */
-function isoKeyPlusDays(days: number): string {
-  const [y, m, d] = todayIsoKey().split('-').map(Number);
-  return localDateKey(new Date(y, m - 1, d + days));
+/** Whole local calendar days from today until `task.deadline_date`: 0 = today,
+ *  negative = past, null = no deadline. Drives the countdown WINDOW check + the
+ *  per-task "in N days" label. Rounds so a 23/25h DST day doesn't drift. */
+export function daysUntilDeadline(task: Task): number | null {
+  if (!task.deadline_date) return null;
+  const [ty, tm, td] = todayIsoKey().split('-').map(Number);
+  const [dy, dm, dd] = task.deadline_date.split('-').map(Number);
+  const todayMs = new Date(ty, tm - 1, td).getTime();
+  const deadlineMs = new Date(dy, dm - 1, dd).getTime();
+  return Math.round((deadlineMs - todayMs) / 86_400_000);
 }
 
 /**
@@ -196,15 +200,16 @@ export function filterDeadlineArrived(
 }
 
 /**
- * Tasks whose `deadline_date` is exactly the countdown lead-time away (the
- * countdown nudge, e.g. "due in 3 days") and still actionable.
+ * Tasks whose deadline is APPROACHING — within the countdown WINDOW: the deadline
+ * is between 1 and the window-many days away (inclusive), still actionable. So a
+ * window of 3 nudges CUMULATIVELY — 3 days before, 2 days before, AND 1 day
+ * before (each day the deadline draws closer, the task stays in the set until the
+ * deadline day itself, which is `filterDeadlineArrived`, not this).
  *
- * `daysUntil` is the GLOBAL default lead-time (`tasks.deadlineCountdownDays`).
- * Each task may override it via `deadline_reminder_days`: its target day is
- * `today + (deadline_reminder_days ?? daysUntil)`. The override is honoured only
- * when it's a finite value `>= 1`; a `null`, non-finite, or `< 1` override falls
- * back to the global default. If the resolved lead-time is `<= 0` (or non-finite)
- * for a task, it's skipped — the deadline DAY itself is `filterDeadlineArrived`.
+ * `daysUntil` is the GLOBAL default window (`tasks.deadlineCountdownDays`). A task
+ * overrides it via `deadline_reminder_days` (honoured only when finite `>= 1`; a
+ * `null`/non-finite/`< 1` override falls back to the global). The per-task
+ * remaining days for the label is `daysUntilDeadline(task)`.
  */
 export function filterDeadlineCountdown(
   tasks: Task[],
@@ -213,18 +218,20 @@ export function filterDeadlineCountdown(
 ): Task[] {
   const globalValid = Number.isFinite(daysUntil) && daysUntil >= 1;
   return tasks.filter((task) => {
-    // Per-task override wins only when it's a finite lead-time >= 1; otherwise
-    // fall back to the global default.
+    // Per-task override wins only when it's a finite window >= 1; else the global.
     const override = task.deadline_reminder_days;
-    const lead =
+    const window =
       override != null && Number.isFinite(override) && override >= 1
         ? override
         : globalValid
           ? daysUntil
           : null;
-    if (lead == null) return false;
-    if (task.deadline_date !== isoKeyPlusDays(lead)) return false;
+    if (window == null) return false;
     if (task.status === 'completed' || task.status === 'cancelled') return false;
+    const days = daysUntilDeadline(task);
+    // 1..window: skip the deadline day (0 → filterDeadlineArrived) and anything
+    // already past or beyond the window.
+    if (days == null || days < 1 || days > window) return false;
     if (hasActionableDescendants(task.id, tasks)) return false;
     return meFor ? isMineOrUnassigned(task.assignees, meFor(task.list_id)) : true;
   });

@@ -199,12 +199,11 @@ async function runDayStartReview(
     );
   }
   if (reminders.countdown.length > 0) {
+    // Summary only — the per-task remaining days (1..window) differ, so the
+    // spoken roll-up stays generic ("N tasks with an upcoming deadline").
     reminderParts.push(
       i18n.t('dialogs.dayStartReview.reminders.countdown', {
         count: reminders.countdown.length,
-        lead: i18n.t('dialogs.dayStartReview.reminders.inDays', {
-          count: behaviour.deadlineCountdownDays,
-        }),
       }),
     );
   }

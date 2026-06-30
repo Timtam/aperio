@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
-import { buildReminderGroups } from '@aperio/shared';
+import { buildReminderGroups, daysUntilDeadline } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import type { Task } from '../api/types';
@@ -144,15 +144,11 @@ export function DayStartReviewDialog({
     groups.untimed.length + groups.dueToday.length + groups.countdown.length >
     0;
 
-  // The day-out lead phrase ("in 3 days") used by both the countdown
-  // summary and the per-row "why" suffix.
-  const countdownLead = t('dialogs.dayStartReview.reminders.inDays', {
-    count: deadlineCountdownDays,
-  });
-
   // Render-ready reminder groups: the summary line (count-aware) + a
   // per-row "why" suffix for each task's button label, paired with the
-  // matching task set. Empty groups are filtered out at render time.
+  // matching task set. Empty groups are filtered out at render time. The
+  // countdown "why" is PER TASK — the set spans the whole 1..window range,
+  // so each task announces its OWN remaining days — hence `why` is a function.
   const reminderGroups = useMemo(
     () => [
       {
@@ -161,7 +157,7 @@ export function DayStartReviewDialog({
         summary: t('dialogs.dayStartReview.reminders.untimedToday', {
           count: groups.untimed.length,
         }),
-        why: t('dialogs.dayStartReview.reminders.whyUntimed'),
+        why: () => t('dialogs.dayStartReview.reminders.whyUntimed'),
       },
       {
         key: 'dueToday',
@@ -169,21 +165,23 @@ export function DayStartReviewDialog({
         summary: t('dialogs.dayStartReview.reminders.deadlineArrived', {
           count: groups.dueToday.length,
         }),
-        why: t('dialogs.dayStartReview.reminders.whyDeadlineToday'),
+        why: () => t('dialogs.dayStartReview.reminders.whyDeadlineToday'),
       },
       {
         key: 'countdown',
         tasks: groups.countdown,
         summary: t('dialogs.dayStartReview.reminders.countdown', {
           count: groups.countdown.length,
-          lead: countdownLead,
         }),
-        why: t('dialogs.dayStartReview.reminders.whyCountdown', {
-          lead: countdownLead,
-        }),
+        why: (task: Task) =>
+          t('dialogs.dayStartReview.reminders.whyCountdown', {
+            lead: t('dialogs.dayStartReview.reminders.inDays', {
+              count: daysUntilDeadline(task) ?? deadlineCountdownDays,
+            }),
+          }),
       },
     ],
-    [groups, countdownLead, t],
+    [groups, deadlineCountdownDays, t],
   );
 
   const [busy, setBusy] = useState(false);
@@ -671,7 +669,7 @@ export function DayStartReviewDialog({
                         type="button"
                         className="day-start-review__reminder-task"
                         onClick={() => openTaskDialog(task)}
-                        aria-label={`${task.title}, ${group.why}`}
+                        aria-label={`${task.title}, ${group.why(task)}`}
                       >
                         <span aria-hidden="true">{task.title}</span>
                       </button>
