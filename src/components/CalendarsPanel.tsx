@@ -13,6 +13,9 @@ import { SoundPrefField } from './SoundPrefField';
 /** Calendar day/week layout choices, rendered as a radio group. */
 const DAY_VIEW_MODE_OPTIONS: readonly CalendarDayViewMode[] = ['grid', 'list'];
 
+/** Stable id accessor for the selector (module scope so its identity holds). */
+const calendarItemId = (c: { id: string }) => c.id;
+
 /**
  * Calendars settings panel — per-calendar default reminders + sounds.
  *
@@ -168,7 +171,7 @@ export function CalendarsPanel() {
       {!hydrating && calendars.length > 0 && (
         <SettingsSelectorDetail
           groups={selectorGroups}
-          getItemId={(c) => c.id}
+          getItemId={calendarItemId}
           getItemName={(c) => c.name}
           getItemSummary={(c) => summaryFor(c.id)}
           getItemBadge={(c) => getDefaultsFor(c.id).length || ''}
@@ -189,22 +192,17 @@ export function CalendarsPanel() {
             })
           }
           renderDetail={(cal) => (
+            // The selector re-keys this subtree per selection, so the editor
+            // already resets to the newly-selected calendar's values.
             <>
-              {/* `key` resets the editor's internal state when the selected
-                  calendar changes, so the controls always reflect the new
-                  calendar rather than carrying over the previous one's. */}
               <RemindersEditor
-                key={cal.id}
                 value={getDefaultsFor(cal.id)}
                 onChange={(next) => setDefaultsFor(cal.id, next)}
                 mode="event"
               />
               {/* §14.4 per-calendar default sound — inherits the global
                   default unless overridden. */}
-              <SoundPrefField
-                key={`sound-${cal.id}`}
-                prefKey={`sound.calendar.${cal.id}`}
-              />
+              <SoundPrefField prefKey={`sound.calendar.${cal.id}`} />
             </>
           )}
         />

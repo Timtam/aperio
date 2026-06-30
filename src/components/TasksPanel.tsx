@@ -54,6 +54,9 @@ const DAY_START_TRIGGER_OPTIONS: readonly DayStartTrigger[] = [
 /** Check-off gesture behaviour choices, rendered as a radio group. */
 const CHECKOFF_MODE_OPTIONS: readonly CheckoffMode[] = ['toggle', 'cycle'];
 
+/** Stable id accessor for the per-list selector (module scope so its identity holds). */
+const taskListItemId = (l: { id: string }) => l.id;
+
 /**
  * Sensible "X days before a deadline" presets for the countdown lead
  * time. The pref clamps to 1..30, so these stay inside that range; a
@@ -503,7 +506,7 @@ export function TasksPanel() {
           // selected list, instead of stacking every list's controls inline.
           <SettingsSelectorDetail
             groups={listSelectorGroups}
-            getItemId={(l) => l.id}
+            getItemId={taskListItemId}
             getItemName={(l) => l.name}
             getItemSummary={(l) => listSummary(l.id)}
             getItemBadge={(l) =>
@@ -620,12 +623,9 @@ export function TasksPanel() {
                     </select>
                   </label>
                   {/* §14.4 per-list default notification sound — inherits the
-                      global default unless set. Re-keyed on the selected list
-                      so the picker reflects the current list. */}
-                  <SoundPrefField
-                    key={`sound-${list.id}`}
-                    prefKey={`sound.tasklist.${list.id}`}
-                  />
+                      global default unless set. The selector re-keys this
+                      detail per selection, so it reflects the current list. */}
+                  <SoundPrefField prefKey={`sound.tasklist.${list.id}`} />
                 </div>
               );
             }}

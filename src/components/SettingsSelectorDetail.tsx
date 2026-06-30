@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from 'react';
+import { Fragment, useEffect, useId, useMemo, useState } from 'react';
 
 /** A visually sub-headed group of selectable items (e.g. one account). */
 export interface SettingsSelectorGroup<T> {
@@ -32,7 +32,11 @@ export interface SettingsSelectorDetailProps<T> {
   optionLabel: (args: { account: string; name: string; summary: string }) => string;
   /** Build the detail region heading from group label + item name. */
   detailHeading: (args: { account: string; name: string }) => string;
-  /** Render the detail editor for the selected item. */
+  /**
+   * Render the detail editor for the selected item. The returned content is
+   * keyed by the selected item's id, so it remounts (resetting any internal
+   * state) whenever the selection changes — callers need not key it themselves.
+   */
   renderDetail: (item: T, group: SettingsSelectorGroup<T>) => React.ReactNode;
 }
 
@@ -149,7 +153,12 @@ export function SettingsSelectorDetail<T>({
         role="listbox"
         tabIndex={0}
         aria-label={selectorLabel}
-        aria-activedescendant={selectedId ? optionId(selectedId) : undefined}
+        // Derive the active id from what actually renders (`selected`) rather
+        // than raw `selectedId`, so the attribute can never dangle at an option
+        // that was removed this render (recovery runs in the next commit).
+        aria-activedescendant={
+          selected ? optionId(getItemId(selected.item)) : undefined
+        }
         onKeyDown={handleKey}
         className="calendars-panel__selector"
       >
@@ -225,7 +234,11 @@ export function SettingsSelectorDetail<T>({
               name: getItemName(selected.item),
             })}
           </h3>
-          {renderDetail(selected.item, selected.group)}
+          {/* Keyed by the selection so the editor remounts (and its internal
+              state resets) when the selected entity changes. */}
+          <Fragment key={getItemId(selected.item)}>
+            {renderDetail(selected.item, selected.group)}
+          </Fragment>
         </section>
       )}
     </div>
