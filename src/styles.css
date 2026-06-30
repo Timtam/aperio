@@ -2259,37 +2259,25 @@ button[aria-disabled='true'] {
    groups easy to tell apart. Collapses to a normal gap when the cell is
    already full. Week view only; the DayView list keeps its top flow.
 
-   This bottom-pin is the LIST-mode (pre-grid) behaviour. GRID mode overrides it
-   below (`margin-top: 0`) so the band flows right BELOW the canvas instead. */
+   Applies in BOTH list and grid mode; grid mode (`.week-grid__tasks--grid`
+   below) keeps this bottom-pin and only adds a footer separator. */
 .week-grid__tasks {
   margin-top: auto;
 }
 
-/* GRID-mode untimed-task BAND. The cell is a flex column holding the timed
-   hour-canvas (`.week-grid__events`) then this task <ul>; the band sits in its
-   natural flow position RIGHT BELOW the 24h canvas (per Toni: the untimed-task
-   band stays under the grid, not above it), just restyled as a compact bar.
-   `margin-top: 0` drops the default bottom-pin so it sits right under the
-   canvas, and the chips compact into a tight horizontal flex-wrap of small bars
-   (like the all-day lane). Reading/Tab order is unchanged: timed events first,
-   then the tasks. Scoped to grid mode via the `--grid` modifier (added in JSX
-   gated on `!listMode`), so list mode is byte-for-byte unchanged. */
+/* GRID-mode untimed-task list. The base rule already lays this <ul> out as a
+   FULL-WIDTH flex column pinned to the BOTTOM of the cell (`margin-top: auto`),
+   below the timed hour-canvas (per Toni: the untimed-task list stays under the
+   grid, spanning the column). Grid mode only adds a hairline footer separator so
+   it reads as distinct from the canvas above. (It was previously a compact
+   horizontal chip bar to save room in the tall 24h grid; with the configurable
+   visible-day window the canvas is shorter, so the full-width list fits — and is
+   what Toni wants.) Reading/Tab order is unchanged: timed events first, then the
+   tasks. Scoped via the `--grid` modifier (gated on `!listMode` in JSX), so list
+   mode is byte-for-byte unchanged. */
 .week-grid__tasks--grid {
-  margin-top: 0;
   margin-bottom: var(--space-1);
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 2px;
-  padding-top: 0;
-}
-/* Compact chip in the grid-mode band: shrink-to-content (override the
-   full-width column chip) so several fit per row, capped so a long title
-   truncates rather than forcing one-chip-per-row. */
-.week-grid__tasks--grid .week-grid__task-item {
-  max-width: 100%;
-}
-.week-grid__tasks--grid .week-task {
-  width: auto;
+  border-top: 1px solid var(--color-border);
 }
 
 .day-tasks {

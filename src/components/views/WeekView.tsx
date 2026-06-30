@@ -1791,12 +1791,12 @@ function WeekDayTasks({
   /** This day's index in the week, for the activedescendant option id. */
   cellIndex: number;
   /** GRID vs compact-LIST layout. Drives ONLY a visual modifier class on the
-   *  task <ul>: in grid mode the untimed band is compacted into a tight flex-wrap
-   *  that flows right BELOW the hour canvas (its `margin-top` bottom-pin is
-   *  dropped, per Toni's "the task band stays under the grid"). In list mode it
-   *  stays the pre-grid bottom-pinned column. The chips' DOM order, option ids,
-   *  indices, handlers and a11y are IDENTICAL either way — only CSS position +
-   *  size change. */
+   *  task <ul>: in grid mode the untimed tasks are a full-width list pinned to
+   *  the BOTTOM of the cell, below the hour canvas (per Toni's "the task band
+   *  stays under the grid", spanning the column), with a footer separator. In
+   *  list mode it stays the pre-grid bottom-pinned column. The chips' DOM order,
+   *  option ids, indices, handlers and a11y are IDENTICAL either way — only the
+   *  CSS layout changes. */
   listMode: boolean;
   /** Bucket index of the first untimed task: the count of timed items in
    *  this cell, so untimed chips continue the grid nav after the lane. */
@@ -1834,10 +1834,10 @@ function WeekDayTasks({
     <ul
       className={
         'week-grid__tasks' +
-        // GRID-mode only: compact the untimed band into a tight flex-wrap that
-        // flows right below the canvas (drops its `margin-top` pin). List mode
-        // keeps the pre-grid bottom-pinned column, so no modifier there. Purely
-        // visual — the DOM order / option ids / Tab nav are unchanged in both.
+        // GRID-mode only: a footer separator so the bottom-pinned full-width
+        // task list reads as distinct from the canvas above. List mode keeps the
+        // pre-grid column, so no modifier there. Purely visual — the DOM order /
+        // option ids / Tab nav are unchanged in both.
         (listMode ? '' : ' week-grid__tasks--grid')
       }
       aria-label={t('views.week.tasksOnDay', { count: tasks.length })}
