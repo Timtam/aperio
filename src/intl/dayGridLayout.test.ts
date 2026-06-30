@@ -94,6 +94,78 @@ describe('layoutDayColumn', () => {
   });
 });
 
+describe('layoutDayColumn — visible window', () => {
+  const W7to23 = { startMin: at(7), endMin: at(23) }; // 420..1380, span 960 min
+  const winMin = at(23) - at(7);
+
+  it('defaults to the full day (placement "in", full-day fractions)', () => {
+    const [p] = layoutDayColumn([span(at(9), at(10))]);
+    expect(p.placement).toBe('in');
+    expect(p.topFraction).toBeCloseTo(at(9) / MINUTES_PER_DAY);
+  });
+
+  it('positions an in-window event relative to the window', () => {
+    const [p] = layoutDayColumn([span(at(9), at(10, 30))], W7to23);
+    expect(p.placement).toBe('in');
+    expect(p.topFraction).toBeCloseTo((at(9) - at(7)) / winMin);
+    expect(p.heightFraction).toBeCloseTo(90 / winMin);
+  });
+
+  it('clamps a partly-before event to the window top (keeps its in-window slice)', () => {
+    // 6:00–9:00, window 7–23 → shows 7:00–9:00.
+    const [p] = layoutDayColumn([span(at(6), at(9))], W7to23);
+    expect(p.placement).toBe('in');
+    expect(p.topFraction).toBeCloseTo(0);
+    expect(p.heightFraction).toBeCloseTo((at(9) - at(7)) / winMin);
+  });
+
+  it('clamps a partly-after event to the window bottom', () => {
+    // 22:00–24:00, window 7–23 → shows 22:00–23:00 at the bottom.
+    const [p] = layoutDayColumn([span(at(22), MINUTES_PER_DAY)], W7to23);
+    expect(p.placement).toBe('in');
+    expect(p.topFraction).toBeCloseTo((at(22) - at(7)) / winMin);
+    expect(p.heightFraction).toBeCloseTo((at(23) - at(22)) / winMin);
+  });
+
+  it('flags entirely-outside events "before" / "after"', () => {
+    const out = layoutDayColumn(
+      [span(at(2), at(3)), span(at(23, 30), at(23, 45))],
+      W7to23,
+    );
+    expect(out[0].placement).toBe('before');
+    expect(out[1].placement).toBe('after');
+  });
+
+  it('an event ending exactly at the window start is "before"; a point AT the start is "in"', () => {
+    const out = layoutDayColumn([span(at(6), at(7)), span(at(7), at(7))], W7to23);
+    expect(out[0].placement).toBe('before');
+    expect(out[1].placement).toBe('in');
+    expect(out[1].topFraction).toBeCloseTo(0);
+  });
+
+  it('a point at the (exclusive) window end is "after"', () => {
+    const [p] = layoutDayColumn([span(at(23), at(23))], W7to23);
+    expect(p.placement).toBe('after');
+  });
+
+  it('computes overlap within the clamped window', () => {
+    const out = layoutDayColumn(
+      [span(at(9), at(10, 30)), span(at(10), at(11))],
+      W7to23,
+    );
+    expect(out.map((p) => p.columnCount)).toEqual([2, 2]);
+    expect(out.every((p) => p.placement === 'in')).toBe(true);
+  });
+
+  it('keeps input order with mixed in/before/after items', () => {
+    const out = layoutDayColumn(
+      [span(at(9), at(10)), span(at(2), at(3)), span(at(23, 30), at(23, 45))],
+      W7to23,
+    );
+    expect(out.map((p) => p.placement)).toEqual(['in', 'before', 'after']);
+  });
+});
+
 describe('minutesFromMidnight', () => {
   it('parses HH:MM and HH:MM:SS', () => {
     expect(minutesFromMidnight('09:30')).toBe(570);

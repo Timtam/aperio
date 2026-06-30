@@ -22,17 +22,40 @@ export interface TimedSpan {
   endMin: number;
 }
 
+/** Where a timed item sits relative to the visible window. `'in'` items are
+ *  positioned by the fractions below; `'before'`/`'after'` items fall ENTIRELY
+ *  outside the window — the renderer collects them into the top/bottom "outside
+ *  hours" band and ignores their fractions (which are 0). Items keep their
+ *  source/DOM order either way, so screen-reader + keyboard nav reach every item
+ *  regardless of the window. */
+export type SpanPlacement = 'in' | 'before' | 'after';
+
 export interface PositionedSpan {
-  /** Top edge as a fraction [0, 1) of the full-day height. */
+  /** Position relative to the visible window. */
+  placement: SpanPlacement;
+  /** Top edge as a fraction [0, 1] of the VISIBLE-WINDOW height (0 for an
+   *  outside item). */
   topFraction: number;
-  /** Height as a fraction (0, 1] of the full-day height. May be ~0 for a
-   *  zero-duration point — the renderer applies a px minimum. */
+  /** Height as a fraction (0, 1] of the visible-window height; clamped to the
+   *  window so a partly-outside event shows only its in-window slice. May be ~0
+   *  for a zero-duration point — the renderer applies a px minimum. */
   heightFraction: number;
   /** This item's column within its overlap cluster (0-based). */
   columnIndex: number;
   /** Total columns in this item's overlap cluster (≥ 1); width = 1/columnCount. */
   columnCount: number;
 }
+
+/** The visible time window of the grid, in minutes from local midnight. The
+ *  default `FULL_DAY_WINDOW` spans the whole day (the historical behaviour). */
+export interface DayWindow {
+  /** Window start, minutes from midnight (0 = midnight). */
+  startMin: number;
+  /** Window end, minutes from midnight (1440 = end of day). Exclusive bottom edge. */
+  endMin: number;
+}
+
+export const FULL_DAY_WINDOW: DayWindow = { startMin: 0, endMin: MINUTES_PER_DAY };
 
 /** Clamp a raw minute value into a valid in-day position. */
 function clampMinute(min: number): number {
@@ -69,19 +92,58 @@ export function eventSpanForDay(start: Date, end: Date, day: Date): TimedSpan {
  * at the same minute share two columns but a task at the boundary of an event
  * stays clear.
  */
-export function layoutDayColumn(spans: TimedSpan[]): PositionedSpan[] {
+export function layoutDayColumn(
+  spans: TimedSpan[],
+  window: DayWindow = FULL_DAY_WINDOW,
+): PositionedSpan[] {
   const n = spans.length;
+  const result: PositionedSpan[] = new Array(n);
+
+  const winStart = clampMinute(window.startMin);
+  // Keep a strictly-positive window so the fraction denominator is never 0.
+  const winEnd = Math.max(winStart + 1, clampMinute(window.endMin));
+  const winMin = winEnd - winStart;
+
+  const outside = (placement: SpanPlacement): PositionedSpan => ({
+    placement,
+    topFraction: 0,
+    heightFraction: 0,
+    columnIndex: 0,
+    columnCount: 1,
+  });
+
   // A zero-duration point gets an infinitesimal EFFECTIVE end (< 1 minute, the
   // smallest real gap) used ONLY for overlap math, so two coincident points
   // split into side-by-side columns while a point at an event's edge — or two
   // back-to-back events — still read as non-overlapping. The real `endMin`
   // (which may equal startMin) still drives the rendered height.
   const EPSILON = 1e-3;
-  const items = spans.map((s, i) => {
+
+  // Classify each item against the window. Items entirely before/after it are
+  // banded by the renderer (placement flag, fractions ignored) and don't
+  // compete for columns; in-window items are CLAMPED to the window for both the
+  // overlap pass and their rendered fractions. Each in-window item carries its
+  // ORIGINAL index so the output stays aligned with the input order.
+  const items: { i: number; startMin: number; endMin: number; effEnd: number }[] = [];
+  spans.forEach((s, i) => {
     const startMin = clampMinute(s.startMin);
     const endMin = Math.max(startMin, clampMinute(s.endMin));
-    const effEnd = endMin === startMin ? startMin + EPSILON : endMin;
-    return { i, startMin, endMin, effEnd };
+    const isPoint = endMin === startMin;
+    // Before: ends at/before the window start (a point strictly before it). A
+    // point exactly at winStart stays IN (at the top edge).
+    if (isPoint ? startMin < winStart : endMin <= winStart) {
+      result[i] = outside('before');
+      return;
+    }
+    // After: starts at/after the (exclusive) window end.
+    if (startMin >= winEnd) {
+      result[i] = outside('after');
+      return;
+    }
+    const visStart = Math.max(startMin, winStart);
+    const visEnd = Math.min(endMin, winEnd);
+    const effEnd = visEnd === visStart ? visStart + EPSILON : visEnd;
+    items.push({ i, startMin: visStart, endMin: visEnd, effEnd });
   });
 
   // Sort by start, then by effective end (longer first on a tie) for a stable
@@ -90,23 +152,21 @@ export function layoutDayColumn(spans: TimedSpan[]): PositionedSpan[] {
     .slice()
     .sort((a, b) => a.startMin - b.startMin || b.effEnd - a.effEnd);
 
-  const result: PositionedSpan[] = new Array(n);
-
   // Walk the sorted items, accumulating a "cluster" of transitively-overlapping
   // items. A cluster closes when the next item starts at/after the max effective
   // end seen so far — then every item in it shares the same columnCount.
-  let cluster: { i: number; col: number }[] = [];
+  let cluster: { item: (typeof items)[number]; col: number }[] = [];
   let clusterMaxEnd = -1;
 
   const flush = () => {
     if (cluster.length === 0) return;
-    const cols = cluster.reduce((m, it) => Math.max(m, it.col + 1), 0);
-    for (const it of cluster) {
-      const item = items[it.i];
-      result[item.i] = {
-        topFraction: item.startMin / MINUTES_PER_DAY,
-        heightFraction: (item.endMin - item.startMin) / MINUTES_PER_DAY,
-        columnIndex: it.col,
+    const cols = cluster.reduce((m, c) => Math.max(m, c.col + 1), 0);
+    for (const c of cluster) {
+      result[c.item.i] = {
+        placement: 'in',
+        topFraction: (c.item.startMin - winStart) / winMin,
+        heightFraction: (c.item.endMin - c.item.startMin) / winMin,
+        columnIndex: c.col,
         columnCount: cols,
       };
     }
@@ -131,7 +191,7 @@ export function layoutDayColumn(spans: TimedSpan[]): PositionedSpan[] {
       col = colEnds.length;
     }
     colEnds[col] = cur.effEnd;
-    cluster.push({ i: cur.i, col });
+    cluster.push({ item: cur, col });
     clusterMaxEnd = Math.max(clusterMaxEnd, cur.effEnd);
   }
   flush();
