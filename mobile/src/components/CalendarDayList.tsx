@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
   Alert,
+  PixelRatio,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -105,14 +106,24 @@ function buildTimeDate(key: string, time: string): Date {
 // positioned canvas; multi-day callers (Week/Month/Agenda) stay the linear
 // list. The overlap math lives in the shared, tested `layoutDayColumn`.
 
+// The hour-grid is laid out in absolute pixels, so — unlike free-flowing text —
+// it does NOT grow when the OS font scale (iOS Dynamic Type / Android font size)
+// enlarges the chip labels, which would clip them. Scale the grid geometry by
+// the OS font scale so the whole canvas (and every absolutely-positioned chip,
+// which derives from CANVAS_PX) grows proportionally with the text, keeping the
+// single-line labels readable. This is the mobile twin of the desktop
+// `--hour-px`→rem fix. Read once at module load (a font-scale change while the
+// app runs is picked up on the next launch — RN reloads on most such changes).
+const FONT_SCALE = PixelRatio.getFontScale();
+
 /** Canvas pixels per hour → the 24h column is HOUR_PX*24 tall. */
-const HOUR_PX = 48;
+const HOUR_PX = Math.round(48 * FONT_SCALE);
 /** Full timed-canvas height in px (24h). */
 const CANVAS_PX = HOUR_PX * 24;
 /** Minimum rendered chip height so a short/zero-duration item stays legible. */
-const MIN_SLOT_PX = 28;
+const MIN_SLOT_PX = Math.round(28 * FONT_SCALE);
 /** Hour-ruler column width (carries the 00–23 numbers). */
-const RULER_PX = 44;
+const RULER_PX = Math.round(44 * FONT_SCALE);
 /** Top padding (px) left above the auto-scroll target in GRID mode so the first
  *  event isn't flush to the very top edge — a little breathing room reads
  *  better. Purely visual; only the single-day grid auto-scroll uses it. */
@@ -135,7 +146,7 @@ const GRID_SCROLL_PAD_PX = 12;
  *  tapping the row opens the editor. Bumped 46 → 69 (~1.5×) to match the desktop
  *  WeekView bump for fuller vertical-space use. A 1h event ≈ 69px, a 4h ≈ 276px
  *  (4×), a 6h+ caps at ≈414px. */
-const LIST_EVENT_BASE_PX = 69;
+const LIST_EVENT_BASE_PX = Math.round(69 * FONT_SCALE);
 
 /** Per-effort slot-height FLOOR for a TIMED TASK in the hour-grid (gated on the
  *  visualEffortSizing pref). Passed as slotStyle's `floorPx`, so it raises BOTH
@@ -143,7 +154,11 @@ const LIST_EVENT_BASE_PX = 69;
  *  on-canvas. small < neutral < large; medium == MIN_SLOT_PX, so a medium task
  *  keeps the unmodified slot floor (NEUTRAL, matching desktop where only the
  *  small/large effort classes exist). */
-const GRID_TASK_EFFORT_PX = { small: 22, medium: MIN_SLOT_PX, large: 46 } as const;
+const GRID_TASK_EFFORT_PX = {
+  small: Math.round(22 * FONT_SCALE),
+  medium: MIN_SLOT_PX,
+  large: Math.round(46 * FONT_SCALE),
+} as const;
 
 /** Timed event's clamped duration in minutes on `day` (for the list-view block
  *  height). Reuses the shared eventSpanForDay so it matches the grid's duration

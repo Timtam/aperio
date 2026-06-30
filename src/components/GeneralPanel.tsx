@@ -10,6 +10,12 @@ import {
   setLanguagePref,
   type LanguagePref,
 } from '../intl/language';
+import {
+  UI_MAX_SCALE,
+  UI_MIN_SCALE,
+  UI_SCALE_STEP,
+  useUiScale,
+} from '../state/uiScale';
 import { type WeekStart } from '../state/viewMath';
 import { useViewState } from '../state/viewStateContext';
 
@@ -29,7 +35,14 @@ const MINIMIZE_TO_TRAY = 'window.minimizeToTray';
 export function GeneralPanel() {
   const { t, i18n } = useTranslation();
   const { weekStartsOn, setWeekStartsOn } = useViewState();
+  const [uiScale, setUiScale] = useUiScale();
   const [language, setLanguage] = useState<LanguagePref>('system');
+
+  // Current scale as a percent label — the slider's spoken value
+  // (aria-valuetext) and the visible read-out next to it.
+  const fontSizeLabel = t('dialogs.settings.general.fontSizeOption', {
+    pct: Math.round(uiScale * 100),
+  });
 
   // Localized weekday names for the week-start picker. 7 Jan 2024 is a
   // Sunday (date-fns weekStartsOn 0), so option index d maps to that weekday.
@@ -151,6 +164,42 @@ export function GeneralPanel() {
         </label>
         <p className="form__hint">
           {t('dialogs.settings.general.weekStartHint')}
+        </p>
+      </section>
+
+      <section
+        className="general-panel__section"
+        aria-label={t('dialogs.settings.general.appearanceHeading')}
+      >
+        <h3 className="calendars-panel__account">
+          {t('dialogs.settings.general.appearanceHeading')}
+        </h3>
+        <label className="form__field">
+          <span className="form__label">
+            {t('dialogs.settings.general.fontSizeLabel')}
+          </span>
+          <span className="general-panel__scale-row">
+            <input
+              type="range"
+              className="general-panel__scale-slider"
+              min={UI_MIN_SCALE}
+              max={UI_MAX_SCALE}
+              step={UI_SCALE_STEP}
+              value={uiScale}
+              // Announce "120 %" instead of the raw 1.2; updates as the user
+              // arrows the slider (±5%).
+              aria-valuetext={fontSizeLabel}
+              onChange={(e) => setUiScale(Number.parseFloat(e.target.value))}
+            />
+            {/* Visible read-out for sighted users; the slider already speaks
+                the value via aria-valuetext, so hide this from the SR. */}
+            <span className="general-panel__scale-value" aria-hidden="true">
+              {fontSizeLabel}
+            </span>
+          </span>
+        </label>
+        <p className="form__hint">
+          {t('dialogs.settings.general.fontSizeHint')}
         </p>
       </section>
 
