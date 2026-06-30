@@ -207,6 +207,13 @@ export function DayView() {
   const windowMin = Math.max(1, dayEndMin - dayStartMin);
   const dayHours = windowMin / 60;
   const gridLineFrac = ((60 - (dayStartMin % 60)) % 60) / 60;
+  // Bake the windowed canvas height straight into an inline style (the number
+  // interpolated into the string) rather than driving it through a React-inline
+  // CSS custom property: a custom prop consumed inside calc() proved unreliable
+  // here (same reason MonthView sets its row min-height inline, not via a var).
+  // `--hour-px` itself is CSS-defined, so it resolves fine.
+  const gridHeight = `calc(${dayHours} * var(--hour-px, 3.75rem))`;
+  const gridLineOffset = `calc(${gridLineFrac} * var(--hour-px, 3.75rem))`;
   // The slot min-height (MIN_SLOT_FRACTION of the FULL day) as a fraction of the
   // current (possibly narrower) window, so a floored point keeps its on-canvas
   // clamp at any window size. Capped so a very narrow window stays sane.
@@ -682,23 +689,19 @@ export function DayView() {
         />
       )}
 
-      <div
-        className={'day-grid' + (listMode ? ' day-grid--flow' : '')}
-        style={
-          {
-            '--day-hours': dayHours,
-            '--day-grid-line-frac': gridLineFrac,
-          } as React.CSSProperties
-        }
-      >
+      <div className={'day-grid' + (listMode ? ' day-grid--flow' : '')}>
         {/* Hour ruler — the hour numbers, read off the grid instead of the
             chips. aria-hidden; the time stays in each option's accessible
-            label. The scale is 24h tall, top-aligned with the canvas so the
-            numbers line up with the gridlines. Grid mode only — the compact
-            list reads the time off each option's label, not a ruler. */}
+            label. Top-aligned with the canvas so the numbers line up with the
+            gridlines; both scale to the visible window via the inline height.
+            Grid mode only — the compact list reads the time off each option's
+            label, not a ruler. */}
         {!listMode && (
           <div className="day-grid__ruler" aria-hidden="true">
-            <div className="day-grid__ruler-scale">
+            <div
+              className="day-grid__ruler-scale"
+              style={{ height: gridHeight }}
+            >
               {rulerHours.map((h) => (
                 <span
                   key={h}
@@ -718,6 +721,14 @@ export function DayView() {
           role="listbox"
           tabIndex={0}
           aria-label={t('views.day.eventList')}
+          // Grid mode: the canvas height + gridline offset scale to the visible
+          // window (inline, so a React custom prop in calc() can't silently fail).
+          // List mode: no positioned canvas — let .day-list--flow drive height.
+          style={
+            listMode
+              ? undefined
+              : { height: gridHeight, backgroundPositionY: gridLineOffset }
+          }
           aria-activedescendant={
             timedItems.length > 0 ? itemId(focusIndex) : undefined
           }
