@@ -1825,6 +1825,8 @@
       "eventLabel": "Termin: {{title}}, {{start}} bis {{end}}, Kalender: {{calendar}}",
       "taskLabel": "Aufgabe: {{title}}, {{time}}, {{state}}{{priority}}{{progress}}{{assignee}}",
       "gridLabel": "Einträge des Tages",
+      "outsideBefore": "Vor {{time}}",
+      "outsideAfter": "Nach {{time}}",
       "dayAnnounce_one": "{{day}}, 1 Eintrag",
       "dayAnnounce_other": "{{day}}, {{count}} Einträge"
     },

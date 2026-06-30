@@ -1825,6 +1825,8 @@
       "taskLabel": "Task: {{title}}, {{time}}, {{state}}{{priority}}{{progress}}{{assignee}}",
       "tasksHeading": "Tasks",
       "gridLabel": "Day's items",
+      "outsideBefore": "Before {{time}}",
+      "outsideAfter": "After {{time}}",
       "dayAnnounce_one": "{{day}}, 1 item",
       "dayAnnounce_other": "{{day}}, {{count}} items"
     },

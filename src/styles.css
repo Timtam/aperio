@@ -3585,14 +3585,71 @@ button[aria-disabled='true'] {
   background-position-y: calc(var(--day-grid-line-frac, 0) * var(--hour-px, 2.5rem));
 }
 
-/* A timed item that falls ENTIRELY outside the visible day window — parked as a
-   thin chip at the top (before) / bottom (after) edge of the canvas. Dashed +
-   slightly transparent so it reads as "outside the shown hours"; the real time
-   stays in the option's accessible label. */
+/* A timed item ENTIRELY outside the visible day window. Like an all-day option,
+   its <li> is clipped (visually hidden, still a navigable listbox option that
+   reads the real time off its label) — the sighted representation is the
+   .day-grid__outside band above/below the grid. */
 .day-list__item--outside {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+/* Visible "outside the shown hours" band — events/tasks before the window start
+   (above the grid) / after the window end (below it). Decorative, aria-hidden;
+   the a11y lives in the clipped options inside the listbox. A leading label
+   ("Before 07:00" / "After 23:00") tells sighted users what they're looking at;
+   a hairline toward the grid marks the visual cut. */
+.day-grid__outside {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-muted);
+}
+.day-grid__outside--before {
+  margin-bottom: var(--space-1);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px dashed var(--color-border);
+}
+.day-grid__outside--after {
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
+  border-top: 1px dashed var(--color-border);
+}
+.day-grid__outside-label {
+  font-weight: 500;
+  white-space: nowrap;
+}
+.day-grid__outside-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  background: var(--event-color, var(--color-accent));
+  color: var(--color-accent-fg);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  padding: 2px var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.day-grid__outside-time {
+  font-variant-numeric: tabular-nums;
   opacity: 0.85;
-  border-style: dashed;
-  z-index: 5;
+}
+.day-grid__outside-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Compact-list layout (calendar.dayViewMode === 'list'). The hour ruler +
