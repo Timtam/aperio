@@ -158,6 +158,17 @@ textarea,
   cursor: text;
 }
 
+/* Native form controls don't inherit `font` by default, so they ignore the
+   rem-based UI font-size (Settings → Appearance) and stay at the browser
+   default. Make them inherit so the whole interface scales together — including
+   <select> controls AND their dropdown option list (the options inherit the
+   select's now-scaled font). `button` inherits separately below. */
+input,
+select,
+textarea {
+  font: inherit;
+}
+
 a,
 button {
   cursor: pointer;
@@ -3551,7 +3562,9 @@ button[aria-disabled='true'] {
 }
 .day-grid__ruler-scale {
   position: relative;
-  height: calc(var(--day-hours, 24) * var(--hour-px, 2.5rem));
+  /* Height is set inline (DayView) to the visible window; this is the full-day
+     fallback. */
+  height: calc(24 * var(--hour-px, 2.5rem));
 }
 .day-grid__ruler-hour {
   position: absolute;
@@ -3571,7 +3584,9 @@ button[aria-disabled='true'] {
   flex: 1;
   min-width: 0;
   position: relative;
-  height: calc(var(--day-hours, 24) * var(--hour-px, 2.5rem));
+  /* Height + gridline offset (for a half-hour window start) are set inline in
+     DayView to the visible window; this is the full-day fallback. */
+  height: calc(24 * var(--hour-px, 2.5rem));
   background-image: repeating-linear-gradient(
     to bottom,
     var(--color-border) 0,
@@ -3579,10 +3594,6 @@ button[aria-disabled='true'] {
     transparent 1px,
     transparent var(--hour-px, 2.5rem)
   );
-  /* When the window starts on a half-hour, shift the hourly gridline pattern by
-     that fraction of an hour so the lines still land on whole hours (matching
-     the ruler ticks). 0 for a whole-hour start. */
-  background-position-y: calc(var(--day-grid-line-frac, 0) * var(--hour-px, 2.5rem));
 }
 
 /* A timed item ENTIRELY outside the visible day window. Like an all-day option,
