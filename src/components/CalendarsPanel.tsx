@@ -1,5 +1,6 @@
 import { useId, useMemo } from 'react';
 import { FocusableNote } from '../a11y/FocusableNote';
+import { useAnnouncer } from '../a11y/announcerContext';
 import { useTranslation } from 'react-i18next';
 
 import { useCalendarStore } from '../state/calendarStoreContext';
@@ -65,6 +66,7 @@ const calendarItemId = (c: { id: string }) => c.id;
  */
 export function CalendarsPanel() {
   const { t } = useTranslation();
+  const announce = useAnnouncer();
   const { calendars, accounts } = useCalendarStore();
   // Calendar day/week layout is a synced view preference (also toggled from the
   // calendar toolbar); both write the same `calendar.dayViewMode` pref.
@@ -116,6 +118,38 @@ export function CalendarsPanel() {
     if (n === 0) return t('dialogs.settings.calendars.reminderSummaryNone');
     if (n === 1) return t('dialogs.settings.calendars.reminderSummaryOne');
     return t('dialogs.settings.calendars.reminderSummaryOther', { count: n });
+  };
+
+  // Picking start>=end (or end<=start) would otherwise snap BOTH selects to the
+  // full day, silently discarding the value the user just set. Instead honour
+  // the changed control and auto-nudge the OTHER edge to keep a valid window,
+  // announcing the adjustment (the focused select re-reads itself, but the
+  // auto-moved one would change unnoticed for a screen-reader user).
+  const onChangeStart = (next: number) => {
+    if (next >= dayEndMin) {
+      const end = Math.min(1440, next + 30);
+      announce(
+        t('dialogs.settings.calendars.dayWindow.endAdjusted', {
+          time: formatHhMm(end),
+        }),
+      );
+      setDayWindow(next, end);
+    } else {
+      setDayWindow(next, dayEndMin);
+    }
+  };
+  const onChangeEnd = (next: number) => {
+    if (next <= dayStartMin) {
+      const start = Math.max(0, next - 30);
+      announce(
+        t('dialogs.settings.calendars.dayWindow.startAdjusted', {
+          time: formatHhMm(start),
+        }),
+      );
+      setDayWindow(start, next);
+    } else {
+      setDayWindow(dayStartMin, next);
+    }
   };
 
   return (
@@ -185,7 +219,7 @@ export function CalendarsPanel() {
           <select
             value={dayStartMin}
             aria-describedby={dayWindowHintId}
-            onChange={(e) => setDayWindow(Number(e.target.value), dayEndMin)}
+            onChange={(e) => onChangeStart(Number(e.target.value))}
           >
             {DAY_START_OPTIONS.map((min) => (
               <option key={min} value={min}>
@@ -201,7 +235,7 @@ export function CalendarsPanel() {
           <select
             value={dayEndMin}
             aria-describedby={dayWindowHintId}
-            onChange={(e) => setDayWindow(dayStartMin, Number(e.target.value))}
+            onChange={(e) => onChangeEnd(Number(e.target.value))}
           >
             {DAY_END_OPTIONS.map((min) => (
               <option key={min} value={min}>

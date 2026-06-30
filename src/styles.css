@@ -3611,6 +3611,9 @@ button[aria-disabled='true'] {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-1);
+  /* Inset by the ruler width so the bars line up with the grid COLUMNS below
+     (a "Before 07:00" chip sits over the 07:00 column), not over the ruler. */
+  padding-left: var(--ruler-w, 2.5rem);
   font-size: var(--font-size-xs);
   color: var(--color-fg-muted);
 }
@@ -3798,6 +3801,9 @@ button[aria-disabled='true'] {
   flex-wrap: wrap;
   gap: var(--space-1);
   margin-bottom: var(--space-2);
+  /* Align with the grid columns below (past the ruler), matching the outside
+     band, instead of starting over the hour-ruler. */
+  padding-left: var(--ruler-w, 2.5rem);
 }
 .day-grid__allday-bar {
   display: flex;

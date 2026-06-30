@@ -81,17 +81,24 @@ import {
  *  than WeekView's 2.25rem because DayView rows are a bit taller. */
 const DAY_LIST_BLOCK_BASE_REM = 2.5;
 
-/** The slot's CSS `min-height` (1.2em, see `.day-list__slot`) expressed as a
- *  fraction of the 24h canvas, so a floored late-night option can be clamped to
- *  stay on-canvas. Matches WeekView's MIN_SLOT_FRACTION. */
+/** The slot's CSS `min-height` (1.2em, see `.day-list__slot`) as a fraction of
+ *  the FULL-DAY canvas, so a floored late-night option can be clamped to stay
+ *  on-canvas. With a narrower visible window the canvas is shorter, so the same
+ *  absolute min-height is a LARGER fraction — callers scale this up via
+ *  `slotStyle`'s `minFraction` arg (see the window-aware value in DayView).
+ *  Matches WeekView's MIN_SLOT_FRACTION. */
 const MIN_SLOT_FRACTION = 0.018;
 
-/** Absolute placement of a timed chip's `<li>` inside the day's 24h-tall
- *  hour-grid (positioning is purely visual; DOM order is unchanged). Identical
- *  to WeekView's helper, including the TOP clamp that keeps a floored min-height
- *  option (a 23:5x point) from extending below the canvas. */
-function slotStyle(p: PositionedSpan): React.CSSProperties {
-  const eh = Math.max(p.heightFraction, MIN_SLOT_FRACTION);
+/** Absolute placement of a timed chip's `<li>` inside the visible-window
+ *  hour-grid (positioning is purely visual; DOM order is unchanged). `minFraction`
+ *  is the floored option's min-height as a fraction of the CURRENT canvas (the
+ *  window, which may be < 24h) — used by the TOP clamp that keeps a floored
+ *  min-height option (a window-edge point) from extending below the canvas. */
+function slotStyle(
+  p: PositionedSpan,
+  minFraction = MIN_SLOT_FRACTION,
+): React.CSSProperties {
+  const eh = Math.max(p.heightFraction, minFraction);
   const top = Math.min(p.topFraction, 1 - eh);
   return {
     position: 'absolute',
@@ -200,6 +207,13 @@ export function DayView() {
   const windowMin = Math.max(1, dayEndMin - dayStartMin);
   const dayHours = windowMin / 60;
   const gridLineFrac = ((60 - (dayStartMin % 60)) % 60) / 60;
+  // The slot min-height (MIN_SLOT_FRACTION of the FULL day) as a fraction of the
+  // current (possibly narrower) window, so a floored point keeps its on-canvas
+  // clamp at any window size. Capped so a very narrow window stays sane.
+  const slotMinFraction = Math.min(
+    0.5,
+    (MIN_SLOT_FRACTION * MINUTES_PER_DAY) / windowMin,
+  );
   // Whole-hour ruler ticks inside the window (e.g. 7…22 for a 7–23 window).
   const rulerHours = useMemo(() => {
     const out: number[] = [];
@@ -331,10 +345,16 @@ export function DayView() {
       let entry: OutsideBandEntry;
       if (item.kind === 'event') {
         const ev = item.event;
+        // Cross-midnight event: its tail on day 2 runs 00:00–…, so show the
+        // clamped THIS-DAY start (like the grid chip + aria-label do), not the
+        // misleading absolute start.
+        const startStr = multiDayInfo(ev, anchor)
+          ? eventDayTimes(fmt, ev, anchor).startStr
+          : fmt.format(new Date(ev.start), 'p');
         entry = {
           key: `ev-${ev.id}`,
           title: ev.title,
-          time: fmt.format(new Date(ev.start), 'p'),
+          time: startStr,
           colorHex: resolveEventColor(ev, calendarById, labelById).hex ?? undefined,
           onOpen: () => openEventDialog(ev),
         };
@@ -357,6 +377,7 @@ export function DayView() {
   }, [
     timedItems,
     slotByIdx,
+    anchor,
     calendarById,
     labelById,
     taskListById,
@@ -776,7 +797,7 @@ export function DayView() {
                     (slotOut ? ' day-list__item--outside' : '')
                   }
                   style={{
-                    ...(slotIn && slot ? slotStyle(slot) : {}),
+                    ...(slotIn && slot ? slotStyle(slot, slotMinFraction) : {}),
                     ...(color.hex
                       ? ({ '--event-color': color.hex } as React.CSSProperties)
                       : {}),
@@ -913,7 +934,7 @@ export function DayView() {
                       : '')
                 }
                 style={{
-                  ...(slotIn && slot ? slotStyle(slot) : {}),
+                  ...(slotIn && slot ? slotStyle(slot, slotMinFraction) : {}),
                   // List mode: a STRICT duration-driven height (not min-height),
                   // so the row both fills the reserved space AND can't be inflated
                   // past its duration by a long title — the title wraps on one flow

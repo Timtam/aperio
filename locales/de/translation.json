@@ -509,7 +509,9 @@
           "heading": "Sichtbare Stunden",
           "hint": "Das Stundenraster zeigt nur diesen Ausschnitt des Tages. Termine außerhalb erscheinen in einem Band oben oder unten. Liegt der Beginn am oder nach dem Ende, wird der ganze Tag angezeigt.",
           "startLabel": "Tag beginnt um",
-          "endLabel": "Tag endet um"
+          "endLabel": "Tag endet um",
+          "startAdjusted": "Startzeit auf {{time}} angepasst",
+          "endAdjusted": "Endzeit auf {{time}} angepasst"
         },
         "hint": "Standard-Hinweise, die auf Termine ohne eigenen Hinweis angewendet werden. Hilfreich für iCloud-Kalender: iOS-„Standardhinweise“ werden nicht in den Termin geschrieben, ohne hier konfigurierten Standard erscheint der Hinweis in Aperio nicht.",
         "empty": "Noch keine Kalender — füge zuerst ein Konto hinzu.",
