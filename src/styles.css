@@ -2836,8 +2836,10 @@ button[aria-disabled='true'] {
 /* ── Week view ──────────────────────────────────────────────────────────── */
 
 .week-grid {
-  /* Pixels per hour in the timed grid — the whole day column is 24× this. */
-  --hour-px: 40px;
+  /* Height per hour in the timed grid — the whole day column is 24× this. rem
+     so the grid scales with the UI font-size; events are positioned in % of the
+     column, so they follow automatically. 2.5rem = 40px at the 16px base. */
+  --hour-px: 2.5rem;
   /* Width of the leading hour-ruler column (left of the 7 days). */
   --ruler-w: 2.5rem;
   /* Height of the pinned day-name header (`.week-grid__head`). Used as the
@@ -2965,13 +2967,13 @@ button[aria-disabled='true'] {
      <li>. Faint hour gridlines via a repeating background so it reads as a
      time grid. */
   position: relative;
-  height: calc(24 * var(--hour-px, 40px));
+  height: calc(24 * var(--hour-px, 2.5rem));
   background-image: repeating-linear-gradient(
     to bottom,
     var(--color-border) 0,
     var(--color-border) 1px,
     transparent 1px,
-    transparent var(--hour-px, 40px)
+    transparent var(--hour-px, 2.5rem)
   );
 }
 
@@ -3046,7 +3048,7 @@ button[aria-disabled='true'] {
 }
 .week-grid__ruler-scale {
   position: relative;
-  height: calc(24 * var(--hour-px, 40px));
+  height: calc(24 * var(--hour-px, 2.5rem));
 }
 .week-grid__ruler-hour {
   position: absolute;
@@ -3466,10 +3468,11 @@ button[aria-disabled='true'] {
    (and the view header above stays visible). Purely visual: the listbox keeps
    its role/IDs/aria/keyboard semantics, DOM order unchanged. */
 .day-grid {
-  /* Pixels per hour. Roomier than the week grid (60 vs 40): the day view is a
+  /* Height per hour. Roomier than the week grid (60 vs 40): the day view is a
      single scrollable column, so it can afford taller hours — a 30-minute event
-     gets ~30px, enough for the title without clipping. */
-  --hour-px: 60px;
+     gets ~30px, enough for the title without clipping. rem so it scales with the
+     UI font-size (events are %-positioned). 3.75rem = 60px at the 16px base. */
+  --hour-px: 3.75rem;
   /* Width of the leading hour-ruler column. */
   --ruler-w: 2.5rem;
   display: flex;
@@ -3499,7 +3502,7 @@ button[aria-disabled='true'] {
 }
 .day-grid__ruler-scale {
   position: relative;
-  height: calc(24 * var(--hour-px, 40px));
+  height: calc(24 * var(--hour-px, 2.5rem));
 }
 .day-grid__ruler-hour {
   position: absolute;
@@ -3519,13 +3522,13 @@ button[aria-disabled='true'] {
   flex: 1;
   min-width: 0;
   position: relative;
-  height: calc(24 * var(--hour-px, 40px));
+  height: calc(24 * var(--hour-px, 2.5rem));
   background-image: repeating-linear-gradient(
     to bottom,
     var(--color-border) 0,
     var(--color-border) 1px,
     transparent 1px,
-    transparent var(--hour-px, 40px)
+    transparent var(--hour-px, 2.5rem)
   );
 }
 

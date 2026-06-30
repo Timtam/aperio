@@ -10,6 +10,7 @@ import {
   setLanguagePref,
   type LanguagePref,
 } from '../intl/language';
+import { UI_SCALE_OPTIONS, useUiScale } from '../state/uiScale';
 import { type WeekStart } from '../state/viewMath';
 import { useViewState } from '../state/viewStateContext';
 
@@ -29,7 +30,17 @@ const MINIMIZE_TO_TRAY = 'window.minimizeToTray';
 export function GeneralPanel() {
   const { t, i18n } = useTranslation();
   const { weekStartsOn, setWeekStartsOn } = useViewState();
+  const [uiScale, setUiScale] = useUiScale();
   const [language, setLanguage] = useState<LanguagePref>('system');
+
+  // Keep the current scale selectable even if it's a non-preset value (a
+  // hand-edited localStorage or a future preset list) so the <select> never
+  // shows blank — splice it in, sorted.
+  const scaleChoices = useMemo(() => {
+    const set = new Set<number>(UI_SCALE_OPTIONS);
+    set.add(uiScale);
+    return [...set].sort((a, b) => a - b);
+  }, [uiScale]);
 
   // Localized weekday names for the week-start picker. 7 Jan 2024 is a
   // Sunday (date-fns weekStartsOn 0), so option index d maps to that weekday.
@@ -151,6 +162,35 @@ export function GeneralPanel() {
         </label>
         <p className="form__hint">
           {t('dialogs.settings.general.weekStartHint')}
+        </p>
+      </section>
+
+      <section
+        className="general-panel__section"
+        aria-label={t('dialogs.settings.general.appearanceHeading')}
+      >
+        <h3 className="calendars-panel__account">
+          {t('dialogs.settings.general.appearanceHeading')}
+        </h3>
+        <label className="form__field">
+          <span className="form__label">
+            {t('dialogs.settings.general.fontSizeLabel')}
+          </span>
+          <select
+            value={String(uiScale)}
+            onChange={(e) => setUiScale(Number.parseFloat(e.target.value))}
+          >
+            {scaleChoices.map((s) => (
+              <option key={s} value={s}>
+                {t('dialogs.settings.general.fontSizeOption', {
+                  pct: Math.round(s * 100),
+                })}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="form__hint">
+          {t('dialogs.settings.general.fontSizeHint')}
         </p>
       </section>
 
