@@ -91,6 +91,10 @@ interface FormState {
   scheduledTime: string;
   deadlineDate: string;
   deadlineTime: string;
+  /** Per-task override for how many days before the deadline the early
+   *  reminder fires. `null` ⇒ use the global `tasks.deadlineCountdownDays`.
+   *  Only meaningful while a deadline date is set. */
+  deadlineReminderDays: number | null;
   description: string;
   recurrence: TaskRecurrenceValue;
   reminders: Reminder[];
@@ -115,6 +119,7 @@ function buildInitialState(
       scheduledTime: '',
       deadlineDate: '',
       deadlineTime: '',
+      deadlineReminderDays: null,
       description: '',
       recurrence: { ...TASK_RECURRENCE_DEFAULT },
       reminders: [],
@@ -133,6 +138,7 @@ function buildInitialState(
     scheduledTime: loaded.scheduled_time ? loaded.scheduled_time.slice(0, 5) : '',
     deadlineDate: loaded.deadline_date ?? '',
     deadlineTime: loaded.deadline_time ? loaded.deadline_time.slice(0, 5) : '',
+    deadlineReminderDays: loaded.deadline_reminder_days,
     description: loaded.description ?? '',
     recurrence: fromBackend(loaded.recurrence),
     reminders: loaded.reminders ?? [],
@@ -143,6 +149,14 @@ function buildInitialState(
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^\d{2}:\d{2}$/;
+
+/** Day presets offered for the per-task "remind me N days before the deadline"
+ *  override. `null` (no override) is the implicit default and uses the global
+ *  `tasks.deadlineCountdownDays`. */
+const DEADLINE_REMINDER_PRESETS = [1, 2, 3, 5, 7, 14] as const;
+/** Sentinel value for the "Default (global)" radio option; maps to/from `null`.
+ *  Zero is safe — "0 days before" is never a real preset. */
+const DEADLINE_REMINDER_DEFAULT = 0;
 
 /** A day/time pair → stored shape: no date ⇒ both null (the DB CHECK forbids a
  *  time without a date); a `HH:MM` time is stored as `HH:MM:00`. */
@@ -383,7 +397,9 @@ export default function TaskEditorModal({
       setForm((f) =>
         which === 'scheduled'
           ? { ...f, scheduledDate: '', scheduledTime: '' }
-          : { ...f, deadlineDate: '', deadlineTime: '' },
+          : // Drop the per-task reminder override alongside the deadline — it
+            // is meaningless without a deadline (mirrors deadlineTime).
+            { ...f, deadlineDate: '', deadlineTime: '', deadlineReminderDays: null },
       );
       AccessibilityInfo.announceForAccessibility(
         t(`dialogs.task.fields.${which}.cleared`),
@@ -492,6 +508,24 @@ export default function TaskEditorModal({
     ],
     [t],
   );
+  // "Default (global)" plus the day presets. Modelled as a RadioGroup (not a
+  // segmented control) — seven options is too many for a segment row, and each
+  // radio is its own focus stop for a screen-reader user.
+  const deadlineReminderOptions = useMemo(
+    () => [
+      {
+        value: DEADLINE_REMINDER_DEFAULT,
+        label: t('dialogs.task.fields.deadlineReminder.default'),
+      },
+      ...DEADLINE_REMINDER_PRESETS.map((days) => ({
+        value: days,
+        label: t('dialogs.task.fields.deadlineReminder.option', {
+          count: days,
+        }),
+      })),
+    ],
+    [t],
+  );
 
   // A subtask must stay in its parent's list (the bridge has no list-move hint)
   // — both when editing an existing subtask and when creating a new one.
@@ -553,9 +587,9 @@ export default function TaskEditorModal({
           scheduled_time: sched.time,
           deadline_date: dead.date,
           deadline_time: dead.time,
-          // Per-task countdown override editor lands next; default to the
-          // global until then.
-          deadline_reminder_days: null,
+          // Per-task reminder override only rides along with a real deadline;
+          // a deadline-less task always falls back to the global countdown.
+          deadline_reminder_days: dead.date ? form.deadlineReminderDays : null,
           recurrence: canRecur ? toBackend(form.recurrence) : null,
           parent_id: parentId ?? null,
           section_id: canSection ? form.sectionId || null : null,
@@ -658,6 +692,9 @@ export default function TaskEditorModal({
             scheduled_time: sched.time,
             deadline_date: dead.date,
             deadline_time: dead.time,
+            // Per-task reminder override only rides along with a real deadline;
+            // a deadline-less task always falls back to the global countdown.
+            deadline_reminder_days: dead.date ? form.deadlineReminderDays : null,
             recurrence: canRecur ? toBackend(form.recurrence) : null,
             reminders: form.reminders,
             assignees: rootAssignees,
@@ -855,6 +892,28 @@ export default function TaskEditorModal({
         editable={!loading}
         locale={i18n.language}
       />
+
+      {/* The per-task reminder override only matters when a deadline is set; it
+          falls back to the global countdown otherwise, so it stays hidden. */}
+      {form.deadlineDate !== '' && (
+        <View style={styles.field}>
+          <RadioGroup<number>
+            label={t('dialogs.task.fields.deadlineReminder.label')}
+            value={form.deadlineReminderDays ?? DEADLINE_REMINDER_DEFAULT}
+            options={deadlineReminderOptions}
+            onChange={(v) =>
+              update(
+                'deadlineReminderDays',
+                v === DEADLINE_REMINDER_DEFAULT ? null : v,
+              )
+            }
+            disabled={loading}
+          />
+          <Text style={styles.hint} accessibilityRole="text">
+            {t('dialogs.task.fields.deadlineReminder.hint')}
+          </Text>
+        </View>
+      )}
 
       <View style={styles.field}>
         <Text style={styles.legend}>{t('dialogs.task.fields.description')}</Text>
