@@ -40,6 +40,7 @@ import { useTabBarInset } from '../hooks/useTabBarInset';
 import { describeDue } from '../intl/describeDue';
 import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
 import { useCacheReload } from '../state/cacheObserver';
+import { hapticLoadBegin, hapticLoadEnd } from '../state/haptics';
 import { useCurrentUserByList } from '../state/currentUser';
 import { useTaskStore } from '../state/taskStoreContext';
 import { surfaceTaskNow } from '../state/moveActions';
@@ -84,6 +85,25 @@ export default function TasksScreen({
   // / synced tasks appear without an app restart. Other screens reload via their
   // own useCacheReload; the Tasks screen drives reloads through dataVersion.
   useCacheReload('tasks', invalidateData);
+
+  // Keep the current list on screen while a reload revalidates: blank ONLY the
+  // very first load (nothing to show yet). useTasks retains the previous `tasks`
+  // until the refetch resolves, so a mutation (delete / complete / edit) or a
+  // background tasks-refresh updates in place instead of flashing the loading
+  // spinner — matching the calendar views. Set once a load has completed.
+  const hasLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!loading) hasLoadedRef.current = true;
+  }, [loading]);
+
+  // Tactile cue while a load runs, via the shared debounced coordinator: a light
+  // tap once it's slow enough to notice, a success buzz when it finishes (fast
+  // warm loads stay silent; no double-buzz when a background refresh overlaps).
+  useEffect(() => {
+    if (!loading) return undefined;
+    hapticLoadBegin();
+    return () => hapticLoadEnd();
+  }, [loading]);
 
   // The shared helpers + buildEntries take a plain (key, vars) => string; adapt
   // i18next's t (whose overload union isn't directly assignable).
@@ -727,7 +747,7 @@ export default function TasksScreen({
         })}
       </View>
 
-      {loading ? (
+      {loading && !hasLoadedRef.current ? (
         <View
           style={styles.center}
           accessible
