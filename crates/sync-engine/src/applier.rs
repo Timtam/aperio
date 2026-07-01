@@ -94,6 +94,29 @@ fn canonicalize_recurrence(kind: ConflictKind, value: &Value) -> Value {
     canon.unwrap_or_else(|| value.clone())
 }
 
+/// Whether a STORED conflict is still a genuine field difference under the
+/// CURRENT comparison rules. The live merge path (below) already skips metadata
+/// fields and canonicalizes `recurrence` before raising a conflict — but it only
+/// guards NEW envelopes, so a conflict RECORDED by an older build (before those
+/// rules existed) lingers in `sync_conflicts` forever even after the user
+/// updates. This is the retroactive counterpart: `false` means the stored
+/// conflict is spurious under today's rules and can be auto-resolved. Mirrors the
+/// exact predicates the merge loop uses, so the two never disagree.
+pub fn conflict_still_genuine(
+    kind: ConflictKind,
+    field: &str,
+    local: &Value,
+    remote: &Value,
+) -> bool {
+    if METADATA_FIELDS.contains(&field) {
+        return false;
+    }
+    if field == "recurrence" {
+        return canonicalize_recurrence(kind, local) != canonicalize_recurrence(kind, remote);
+    }
+    local != remote
+}
+
 /// Per-call summary the applier hands back so callers (the sync
 /// scheduler, settings dialog "Reapply log" actions, tests) can
 /// surface what happened without grovelling through tracing
@@ -1045,6 +1068,46 @@ mod tests {
             canonicalize_recurrence(ConflictKind::Task, &daily),
             canonicalize_recurrence(ConflictKind::Task, &weekly),
         );
+    }
+
+    #[test]
+    fn conflict_still_genuine_prunes_spurious_keeps_real() {
+        // Recurrence serialization drift (the §9.12 default axes present vs
+        // absent) is NOT a genuine conflict — so a stale record like this can be
+        // pruned retroactively.
+        let with_axes = json!({
+            "anchor": "from_date", "end": { "type": "never" }, "fixed_dates": null,
+            "frequency": "daily", "interval": 1, "placement": "schedule"
+        });
+        let without = json!({ "end": { "type": "never" }, "frequency": "daily", "interval": 1 });
+        assert!(!conflict_still_genuine(
+            ConflictKind::Task,
+            "recurrence",
+            &with_axes,
+            &without
+        ));
+        // A real recurrence difference (daily vs weekly) stays genuine.
+        let weekly = json!({ "end": { "type": "never" }, "frequency": "weekly", "interval": 1 });
+        assert!(conflict_still_genuine(
+            ConflictKind::Task,
+            "recurrence",
+            &without,
+            &weekly
+        ));
+        // Metadata fields are never genuine conflicts.
+        assert!(!conflict_still_genuine(
+            ConflictKind::Task,
+            "updated_at",
+            &json!("2026-06-01T00:00:00Z"),
+            &json!("2026-06-02T00:00:00Z"),
+        ));
+        // A normal field with different values IS genuine (kept for the user).
+        assert!(conflict_still_genuine(
+            ConflictKind::Task,
+            "status",
+            &json!("completed"),
+            &json!("open"),
+        ));
     }
 
     #[test]

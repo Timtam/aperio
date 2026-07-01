@@ -176,6 +176,35 @@ impl<'a> ConflictsRepo<'a> {
         Ok(out)
     }
 
+    /// Auto-resolve stored conflicts that a newer build no longer considers
+    /// genuine — a `recurrence` serialization-drift conflict recorded before
+    /// `canonicalize_recurrence` existed, or a metadata field. The applier's
+    /// live check only guards NEW envelopes, so without this a pre-fix spurious
+    /// conflict lingers in the dialog forever after the user updates. Idempotent
+    /// (once pruned there's nothing left to re-check). Clears with `KeepLocal` —
+    /// a pure-bookkeeping no-op, since the two values are equal under today's
+    /// rules. Returns how many were pruned. Real divergences are untouched.
+    pub fn prune_stale(&self) -> ConflictsResult<usize> {
+        let parse = |v: &Option<String>| {
+            v.as_deref()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                .unwrap_or(serde_json::Value::Null)
+        };
+        let mut pruned = 0;
+        for c in self.list_unresolved()? {
+            if !sync_engine::conflict_still_genuine(
+                c.row_kind,
+                &c.field,
+                &parse(&c.local_value),
+                &parse(&c.remote_value),
+            ) {
+                self.mark_resolved(c.id, ResolutionChoice::KeepLocal)?;
+                pruned += 1;
+            }
+        }
+        Ok(pruned)
+    }
+
     /// Fetch one conflict by id. Returns `Err(NotFound)` when no
     /// row matches — the command layer translates that to a
     /// "stale dialog" message.
@@ -343,6 +372,51 @@ mod tests {
         let rows = repo.list_unresolved().unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].local_value.as_deref(), Some("\"new-local\""));
+    }
+
+    #[test]
+    fn prune_stale_drops_spurious_recurrence_but_keeps_real_conflict() {
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        let repo = ConflictsRepo::new(&shared);
+        // Spurious: the SAME daily recurrence, but the remote payload (older
+        // build) omits the §9.12 default axes the current model always emits.
+        // These are the exact shapes from a real cross-device conflict.
+        repo.record(NewConflict {
+            row_kind: ConflictKind::Task,
+            row_id: "task-1".into(),
+            field: "recurrence".into(),
+            local_value: Some(
+                r#"{"anchor":"from_date","day_of_month":null,"day_of_week":null,"end":{"type":"never"},"fixed_dates":null,"frequency":"daily","interval":1,"placement":"schedule"}"#
+                    .into(),
+            ),
+            remote_value: Some(
+                r#"{"day_of_month":null,"day_of_week":null,"end":{"type":"never"},"frequency":"daily","interval":1}"#
+                    .into(),
+            ),
+            remote_device_id: "dev-other".into(),
+            remote_timestamp: Utc::now(),
+        })
+        .unwrap();
+        // Real: genuinely different status — must survive the prune.
+        repo.record(NewConflict {
+            row_kind: ConflictKind::Task,
+            row_id: "task-1".into(),
+            field: "status".into(),
+            local_value: Some("\"completed\"".into()),
+            remote_value: Some("\"open\"".into()),
+            remote_device_id: "dev-other".into(),
+            remote_timestamp: Utc::now(),
+        })
+        .unwrap();
+
+        assert_eq!(repo.unresolved_count().unwrap(), 2);
+        assert_eq!(repo.prune_stale().unwrap(), 1, "only the recurrence one");
+        let rows = repo.list_unresolved().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].field, "status", "the real conflict stays");
+        // Idempotent — a second pass finds nothing to prune.
+        assert_eq!(repo.prune_stale().unwrap(), 0);
     }
 
     #[test]

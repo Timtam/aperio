@@ -53,6 +53,9 @@ impl From<ConflictsError> for CommandError {
 pub async fn list_sync_conflicts(db: State<'_, DbHandle>) -> CommandResult<Vec<ConflictRecord>> {
     let shared = db.shared();
     let repo = ConflictsRepo::new(&shared);
+    // Self-heal before listing so a pre-fix spurious conflict (recurrence
+    // serialization drift, a metadata field) never reaches the dialog.
+    repo.prune_stale()?;
     Ok(repo.list_unresolved()?)
 }
 
@@ -63,6 +66,9 @@ pub async fn list_sync_conflicts(db: State<'_, DbHandle>) -> CommandResult<Vec<C
 pub async fn get_sync_conflicts_count(db: State<'_, DbHandle>) -> CommandResult<usize> {
     let shared = db.shared();
     let repo = ConflictsRepo::new(&shared);
+    // Self-heal so the badge doesn't count a phantom the newer build no longer
+    // considers a conflict (mirrors list_sync_conflicts + the mobile FFI host).
+    repo.prune_stale()?;
     Ok(repo.unresolved_count()?)
 }
 
