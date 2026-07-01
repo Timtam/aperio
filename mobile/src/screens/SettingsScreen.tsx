@@ -7,9 +7,13 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Settings hub — the app-config home (the SettingsTab stack root). A clean list
 // of destinations only: General (language / week start / sounds), Tasks,
-// Accounts, Contacts, Sync, Reminders, Colour labels, Logs. The actual controls
-// live on the pushed sub-screens, so the hub doesn't mix inline settings with
-// links. Screen-reader-first: each row is a button announcing its destination.
+// Calendars, Task lists, Accounts, Contacts, Sync, Reminders, Colour labels,
+// Logs. The actual controls live on the pushed sub-screens. Calendars / Task
+// lists cross-navigate to the same catalog screens the Calendar / Tasks tabs use
+// (tap an item → its editor, where per-calendar default reminders + sound and
+// per-list overrides + sound live) — a discoverable path from Settings to the
+// container-level settings that would otherwise only be reachable via the tabs.
+// Screen-reader-first: each row is a button announcing its destination.
 
 export default function SettingsScreen({
   navigation,
@@ -39,6 +43,24 @@ export default function SettingsScreen({
           style={({ pressed }) => [styles.link, pressed && styles.pressed]}
         >
           <Text style={styles.linkText}>{t('dialogs.settings.tabs.tasks')}</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('dialogs.settings.tabs.calendars')}
+          onPress={() => navigation.navigate('Calendars')}
+          style={({ pressed }) => [styles.link, pressed && styles.pressed]}
+        >
+          <Text style={styles.linkText}>
+            {t('dialogs.settings.tabs.calendars')}
+          </Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('mobile.listsButtonLabel')}
+          onPress={() => navigation.navigate('Lists')}
+          style={({ pressed }) => [styles.link, pressed && styles.pressed]}
+        >
+          <Text style={styles.linkText}>{t('mobile.listsButtonLabel')}</Text>
         </Pressable>
         <Pressable
           accessibilityRole="button"
