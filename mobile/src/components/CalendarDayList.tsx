@@ -68,6 +68,7 @@ import { resolveEventColor } from '../intl/eventColor';
 import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
 import type { RootStackParamList } from '../navigation/types';
 import { useCacheReload } from '../state/cacheObserver';
+import { hapticLoadBegin, hapticLoadEnd } from '../state/haptics';
 import { useCalendarVisibility } from '../state/calendarVisibility';
 import { useCurrentUserByList } from '../state/currentUser';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
@@ -440,6 +441,12 @@ export function CalendarDayList({
   // this, a slow earlier resolution could overwrite the newer window's data and
   // leave events mismatched against the day headers (derived from `days`).
   const reqToken = useRef(0);
+  // Whether a load has ever completed with data on screen. The FIRST load blanks
+  // to the "loading" text (nothing to show yet); every later reload — focus
+  // return after an editor, a delete/edit, a background-cache refresh — keeps the
+  // current content visible and refreshes in place, so the view stays open
+  // desktop-style instead of flashing the loading screen.
+  const hasLoadedRef = useRef(false);
 
   // ── Grid auto-scroll (dayLayout='grid' only; sighted/low-vision nicety) ──────
   // The grid renders a windowed-height canvas (dayHours × HOUR_PX) inside this
@@ -497,8 +504,12 @@ export function CalendarDayList({
 
   const load = useCallback(async () => {
     const token = (reqToken.current += 1);
-    setLoading(true);
+    // Blank ONLY the first load; later reloads keep the current content on
+    // screen (see hasLoadedRef). The haptic coordinator gives a tactile cue
+    // when a load is slow enough to notice, and stays silent on fast warm ones.
+    if (!hasLoadedRef.current) setLoading(true);
     setError(null);
+    hapticLoadBegin();
     try {
       // listCalendars also primes the Host's route map (getEvents routes by
       // calendar id), so it must resolve before the per-calendar fetch. Palette,
@@ -529,6 +540,7 @@ export function CalendarDayList({
       setEvents(expandAll(perCalendar.flat(), { start: range.start, end: range.end }));
       setTasks(perList.flat());
       setSections(perListSections.flat());
+      hasLoadedRef.current = true;
     } catch (err) {
       if (reqToken.current !== token) return;
       const message = errorMessage(err);
@@ -536,6 +548,8 @@ export function CalendarDayList({
       announce(t('mobile.error', { message }));
     } finally {
       if (reqToken.current === token) setLoading(false);
+      // Balances the hapticLoadBegin above — always, even for a superseded load.
+      hapticLoadEnd();
     }
   }, [announce, range, t]);
 

@@ -16,7 +16,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { CacheRefreshStatus } from '../api/sync';
 import { setCacheRefreshProgress } from './cacheRefreshProgress';
-import { hapticSyncEnd, hapticSyncStart, loadHapticsPref } from './haptics';
+import { hapticLoadBegin, hapticLoadEnd, loadHapticsPref } from './haptics';
 import CalFfi from '../../modules/cal-ffi';
 
 /** Coarse category a cache scope belongs to — drives the announcement string +
@@ -131,8 +131,11 @@ export function useCacheUpdates(): void {
       AccessibilityInfo.announceForAccessibility(
         t(next ? 'cacheRefresh.refreshing' : 'cacheRefresh.done'),
       );
-      if (next) hapticSyncStart();
-      else hapticSyncEnd();
+      // Route through the shared loading coordinator so a refresh pass that
+      // overlaps a view load (the common case: an external delete reloads the
+      // view AND kicks this pass) is felt as one cue, not two.
+      if (next) hapticLoadBegin();
+      else hapticLoadEnd();
     });
     return () => {
       subData.remove();

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -32,6 +32,7 @@ import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import { useTabBarInset } from '../hooks/useTabBarInset';
 import { resolveEventColor } from '../intl/eventColor';
 import { useCacheReload } from '../state/cacheObserver';
+import { hapticLoadBegin, hapticLoadEnd } from '../state/haptics';
 import { useCalendarVisibility } from '../state/calendarVisibility';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -88,6 +89,16 @@ export default function AgendaScreen({
   const [occurrences, setOccurrences] = useState<DayOccurrence<CalendarEvent>[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // First load blanks; later reloads (focus return, delete/edit, cache refresh)
+  // keep the current list on screen and refresh in place — the view stays open
+  // instead of flashing the loading screen.
+  const hasLoadedRef = useRef(false);
+  // Request epoch — focus, a cache-refresh push and an anchor change can each
+  // fire load() while another is in flight; a slower OLDER load must not
+  // overwrite a newer window's results (mirrors CalendarDayList). With
+  // keep-view-open there's no loading flash to mask such a lost update, so the
+  // guard matters more.
+  const reqToken = useRef(0);
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
@@ -137,15 +148,15 @@ export default function AgendaScreen({
   );
 
   const load = useCallback(async () => {
-    setLoading(true);
+    const token = (reqToken.current += 1);
+    if (!hasLoadedRef.current) setLoading(true);
     setError(null);
+    hapticLoadBegin();
     try {
       const [cals, labels] = await Promise.all([
         listCalendars(),
         listColorLabels().catch(() => [] as ColorLabel[]),
       ]);
-      setCalendars(cals);
-      setColorLabels(labels);
       const startIso = range.start.toISOString();
       const endIso = range.end.toISOString();
       const perCalendar = await Promise.all(
@@ -153,18 +164,27 @@ export default function AgendaScreen({
           getEvents({ calendar_id: c.id, start: startIso, end: endIso }).catch(() => []),
         ),
       );
+      // A newer load superseded this one — drop these stale results so a slow
+      // older window can't overwrite the fresh one.
+      if (reqToken.current !== token) return;
+      setCalendars(cals);
+      setColorLabels(labels);
       // Expand recurring series across the whole window first, then spread
       // multi-day all-day events into one occurrence per covered day.
       const expanded = expandAll(perCalendar.flat(), { start: range.start, end: range.end });
       // Drop events from calendars the user hid (the Calendars-screen toggles).
       const visible = expanded.filter((e) => !hidden.has(e.calendar_id));
       setOccurrences(expandToDayOccurrences(visible, range));
+      hasLoadedRef.current = true;
     } catch (err) {
+      if (reqToken.current !== token) return;
       const message = errorMessage(err);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
-      setLoading(false);
+      if (reqToken.current === token) setLoading(false);
+      // Balances hapticLoadBegin above — always, even for a superseded load.
+      hapticLoadEnd();
     }
   }, [announce, range, t, hidden]);
 
