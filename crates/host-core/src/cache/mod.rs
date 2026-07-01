@@ -25,7 +25,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use cal_core::{Calendar, Contact, ContactList, DateRange, Event, Task, TaskList};
+use cal_core::{Calendar, Contact, ContactList, DateRange, Event, Section, Task, TaskList};
 
 use crate::db::{DbError, DbHandle, DbResult};
 
@@ -96,7 +96,7 @@ pub use refresh::{
 };
 pub use swr::{
     event_self_warm_needed, has_snapshot, is_stale, refresh_contacts, refresh_events,
-    refresh_tasks, spawn_item_refresh, spawn_refresh, SWR_TTL_SECS,
+    refresh_sections, refresh_tasks, spawn_item_refresh, spawn_refresh, SWR_TTL_SECS,
 };
 
 /// The "unbounded" snapshot window recorded for folder-complete containers
@@ -152,6 +152,9 @@ pub enum SyncScope {
     Events,
     Tasks,
     Contacts,
+    /// The sections (Vikunja buckets / Todoist sections) of one task list —
+    /// per-container like `Tasks`, keyed by the same `list_id`.
+    Sections,
 }
 
 impl SyncScope {
@@ -164,6 +167,7 @@ impl SyncScope {
             SyncScope::Events => "events",
             SyncScope::Tasks => "tasks",
             SyncScope::Contacts => "contacts",
+            SyncScope::Sections => "sections",
         }
     }
 }
@@ -429,6 +433,31 @@ impl CacheStore {
         self.apply_by_list_delta("cache_tasks", SyncScope::Tasks, account, list, delta, |t| {
             t.id.as_str()
         })
+    }
+
+    // ── Sections ─────────────────────────────────────────────────────
+    // A task list's sections are per-container like its tasks, but have no
+    // provider delta path (`TasksFeature::list_sections` returns the full
+    // set), so only the full-replace + read are cached — no delta apply.
+
+    pub fn read_sections(&self, account: &str, list: &str) -> DbResult<Vec<Section>> {
+        self.read_by_list("cache_sections", account, list)
+    }
+
+    pub fn replace_sections(
+        &self,
+        account: &str,
+        list: &str,
+        sections: &[Section],
+    ) -> DbResult<()> {
+        self.replace_by_list(
+            "cache_sections",
+            SyncScope::Sections,
+            account,
+            list,
+            sections,
+            |s| s.id.as_str(),
+        )
     }
 
     // ── Contacts ─────────────────────────────────────────────────────
@@ -1017,6 +1046,7 @@ impl CacheStore {
 const CACHE_TABLES: &[&str] = &[
     "cache_events",
     "cache_tasks",
+    "cache_sections",
     "cache_contacts",
     "cache_calendars",
     "cache_task_lists",

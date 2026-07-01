@@ -72,6 +72,13 @@ async function autoSyncIfConfigured(reason: Parameters<typeof syncNow>[0]): Prom
   try {
     if (!(await syncStatus()).configured) return;
     await syncNow(reason);
+    // A completed sync writes the LOCAL store but leaves the external SWR
+    // read-cache cold (the two are orthogonal), so the next day/week open would
+    // do a slow LIVE provider read. Warm the external snapshots now — right
+    // after the round the user already waited for — so those reads serve from
+    // cache instead. Fire-and-forget on the Host worker; per-container
+    // `cache_updated` re-renders any open view.
+    void warmCacheOnForeground().catch(() => undefined);
   } catch {
     // missing target / transient network error — silent, as a background action
     // the user didn't invoke must never surface an error.
@@ -146,10 +153,11 @@ export function useSyncTriggers(): void {
       });
     };
 
-    // Initial pull on launch (the Host opens lazily on the first bridge call)
-    // + a warm pass over the external SWR caches (the mobile stand-in for the
-    // desktop periodic warm loop) + arm the foreground periodic timer (the app
-    // starts active).
+    // Initial pull on launch (the Host opens lazily on the first bridge call) —
+    // which now warms the external SWR caches once it completes (see
+    // autoSyncIfConfigured) — plus a standalone warm so an UNSYNCED-but-external
+    // setup (no sync target, external accounts) still warms, and the foreground
+    // periodic timer (the app starts active).
     void autoSyncIfConfigured('app_start');
     void warmCacheOnForeground().catch(() => undefined);
     startPeriodic();

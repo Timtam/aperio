@@ -311,6 +311,30 @@ pub async fn refresh_tasks(
     }
 }
 
+/// Refresh one external task list's SECTIONS into the snapshot cache.
+///
+/// Sections have no provider delta path (`TasksFeature::list_sections`
+/// always returns the full set), so this is a straight full-fetch +
+/// `replace_sections` — no token, no delta merge. The generation guard is
+/// kept identical to `refresh_tasks`: snapshot the container's refresh
+/// generation before the (slow) fetch and drop the write if a local
+/// mutation invalidated the list mid-fetch, so we can't clobber the
+/// invalidation with a pre-mutation snapshot.
+pub async fn refresh_sections(
+    cache: &CacheStore,
+    ext: &dyn TasksFeature,
+    account: &str,
+    list: &str,
+) -> cal_core::Result<()> {
+    let gen = cache.refresh_generation(account, SyncScope::Sections, list);
+    let sections = ext.list_sections(list).await?;
+    if cache.refresh_generation(account, SyncScope::Sections, list) != gen {
+        return Ok(());
+    }
+    let _ = cache.replace_sections(account, list, &sections);
+    Ok(())
+}
+
 /// Refresh one external contact list into the snapshot cache.
 pub async fn refresh_contacts(
     cache: &CacheStore,

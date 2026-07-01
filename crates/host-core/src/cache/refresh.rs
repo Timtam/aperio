@@ -96,6 +96,14 @@ enum RefreshTarget {
         adapter: Arc<dyn TasksFeature>,
         list_id: String,
     },
+    /// A task list's SECTIONS. Shares the list's `TasksFeature` adapter
+    /// (sections are enumerated via `list_sections` on the same trait), so
+    /// it's queued right beside the list's `Tasks` target.
+    Sections {
+        account: String,
+        adapter: Arc<dyn TasksFeature>,
+        list_id: String,
+    },
     Contacts {
         account: String,
         adapter: Arc<dyn ContactsFeature>,
@@ -317,7 +325,15 @@ impl CacheRefresher {
                     let _ = self.cache.replace_task_lists(&account, &lists);
                     self.emit_updated(SyncScope::TaskLists, &account, "");
                     for list in lists {
+                        // Warm the list's tasks AND its sections — both ride the
+                        // same TasksFeature adapter, so a section warm costs one
+                        // extra `list_sections` per external list.
                         out.push(RefreshTarget::Tasks {
+                            account: account.clone(),
+                            adapter: adapter.clone(),
+                            list_id: list.id.clone(),
+                        });
+                        out.push(RefreshTarget::Sections {
                             account: account.clone(),
                             adapter: adapter.clone(),
                             list_id: list.id,
@@ -406,6 +422,29 @@ impl CacheRefresher {
                         let _ = self.cache.mark_error(
                             &account,
                             SyncScope::Tasks,
+                            &list_id,
+                            &err.to_string(),
+                        );
+                    }
+                }
+                self.coord.release(&key);
+            }
+            RefreshTarget::Sections {
+                account,
+                adapter,
+                list_id,
+            } => {
+                let key = format!("sections:{account}:{list_id}");
+                if !self.coord.try_claim(&key) {
+                    return;
+                }
+                match swr::refresh_sections(&self.cache, adapter.as_ref(), &account, &list_id).await
+                {
+                    Ok(()) => self.emit_updated(SyncScope::Sections, &account, &list_id),
+                    Err(err) => {
+                        let _ = self.cache.mark_error(
+                            &account,
+                            SyncScope::Sections,
                             &list_id,
                             &err.to_string(),
                         );

@@ -53,8 +53,8 @@ use cal_core::{
 use host_core::accounts::{AccountsRepo, AdapterKind};
 use host_core::cache::{
     event_self_warm_needed, has_snapshot, is_stale, refresh_contacts, refresh_events,
-    refresh_tasks, spawn_item_refresh, spawn_refresh, CacheObserver, CacheRefresher, CacheStore,
-    RefreshCoordinator, SyncScope, SWR_TTL_SECS,
+    refresh_sections, refresh_tasks, spawn_item_refresh, spawn_refresh, CacheObserver,
+    CacheRefresher, CacheStore, RefreshCoordinator, SyncScope, SWR_TTL_SECS,
 };
 use host_core::conflicts::{
     ConflictKind, ConflictRecord, ConflictsError, ConflictsRepo, ResolutionChoice,
@@ -997,6 +997,20 @@ impl Host {
             .account_for_task_list(list_id)
             .unwrap_or_else(|| LOCAL_ID.to_string());
         let _ = self.cache.invalidate(&account, SyncScope::Tasks, list_id);
+    }
+
+    /// Invalidate the SECTIONS snapshot for `list_id` after a section mutation
+    /// (create / rename / delete / recolor), so the next `sections_json` sees it
+    /// as cold and re-fetches. A no-op for the local account (no cache row).
+    /// Mirrors `invalidate_tasks_cache` — sections share the list's account.
+    fn invalidate_sections_cache(&self, list_id: &str) {
+        let account = self
+            .registry
+            .account_for_task_list(list_id)
+            .unwrap_or_else(|| LOCAL_ID.to_string());
+        let _ = self
+            .cache
+            .invalidate(&account, SyncScope::Sections, list_id);
     }
 
     /// Invalidate the contacts snapshot for `list_id` after a contact mutation,
@@ -2073,13 +2087,17 @@ impl Host {
         // backend (one DbHandle, many Arc clones of its mutex).
         let adapter = LocalAdapter::new(db.shared());
 
-        // One-worker multi-thread runtime: `block_on` drives the
-        // CalendarFeature methods + sync rounds, while the event-log writer's
-        // drain task lives on the worker thread and keeps flushing appends
-        // between our calls. `enable_all` gives the time + I/O drivers the
-        // external-adapter shim's HTTP + the writer need.
+        // Multi-thread runtime: `block_on` drives the CalendarFeature methods +
+        // sync rounds, while the event-log writer's drain task + the SWR warm
+        // pass's spawned per-container refreshes live on the worker threads. A
+        // SMALL POOL (not one worker) so a warm pass refreshes several external
+        // containers' HTTP reads concurrently instead of one-at-a-time — the
+        // cache warms much faster after a sync, so the next day/week open serves
+        // from cache. All these futures are already `Send` (multi_thread requires
+        // it) + shared state is Arc/Mutex-guarded, so more workers is safe.
+        // `enable_all` gives the time + I/O drivers the HTTP shim + writer need.
         let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
+            .worker_threads(4)
             .enable_all()
             .build()
             .map_err(|e| StoreError::Open {
@@ -3428,10 +3446,29 @@ impl Host {
                     .append(SyncEvent::TaskListDeleted(IdPayload { id }));
                 Ok(())
             }
-            Some(ext) => self
-                .runtime
-                .block_on(async { ext.delete_task_list(&id).await })
-                .map_err(map_store_err),
+            Some(ext) => {
+                // Capture the owning account BEFORE the delete — the provider
+                // round-trip may self-sync and prune the registry mapping, so
+                // re-resolving afterward (as the invalidate_* helpers do) could
+                // fall back to LOCAL_ID and skip the real account's rows.
+                let account = self
+                    .registry
+                    .account_for_task_list(&id)
+                    .unwrap_or_else(|| LOCAL_ID.to_string());
+                self.runtime
+                    .block_on(async { ext.delete_task_list(&id).await })
+                    .map_err(map_store_err)?;
+                // The list is gone — drop its cached listing / tasks / sections
+                // snapshots (against the captured account) so nothing stale is
+                // served if the provider ever reuses the id. Mirrors the desktop
+                // delete_task_list write-through (commands/tasks.rs) plus the
+                // mobile-only Sections scope. Best-effort: a failed invalidate
+                // only costs a stale read, never the delete's correctness.
+                let _ = self.cache.invalidate(&account, SyncScope::TaskLists, "");
+                let _ = self.cache.invalidate(&account, SyncScope::Tasks, &id);
+                let _ = self.cache.invalidate(&account, SyncScope::Sections, &id);
+                Ok(())
+            }
         }
     }
 
@@ -3789,6 +3826,7 @@ impl Host {
     /// list's owning account.
     pub fn sections_json(&self, list_id: String) -> Result<String, StoreError> {
         match self.route_task_list(&list_id)? {
+            // LOCAL: a direct read (the local store isn't cached).
             None => {
                 let sections = self
                     .adapter
@@ -3796,14 +3834,59 @@ impl Host {
                     .map_err(map_store_err)?;
                 to_json(&sections)
             }
+            // EXTERNAL: stale-while-revalidate with a mobile cold-fallback —
+            // mirrors tasks_json. A WARM list (a section snapshot exists) serves
+            // the cached sections instantly + queues a background refresh when
+            // stale; a COLD one (no snapshot yet, or one just invalidated by a
+            // section edit) does a LIVE `list_sections` read so the first paint is
+            // never blank, and warms the cache in the background. Section reads
+            // used to ALWAYS hit the provider live (the unconditional
+            // `list_sections` below); the cache stops that on every day/week open.
             Some(ext) => {
-                let mut sections = self
-                    .runtime
-                    .block_on(async { ext.list_sections(&list_id).await })
-                    .map_err(map_store_err)?;
+                let account = self
+                    .registry
+                    .account_for_task_list(&list_id)
+                    .unwrap_or_else(|| LOCAL_ID.to_string());
+                let state = self
+                    .cache
+                    .get_sync_state(&account, SyncScope::Sections, &list_id)
+                    .ok()
+                    .flatten();
+                let warm = has_snapshot(&state);
+                let stale = is_stale(&state, SWR_TTL_SECS);
+                let mut sections = if warm {
+                    self.cache
+                        .read_sections(&account, &list_id)
+                        .unwrap_or_default()
+                } else {
+                    self.runtime
+                        .block_on(async { ext.list_sections(&list_id).await })
+                        .map_err(map_store_err)?
+                };
+                if !warm || stale {
+                    let cache_bg = Arc::clone(&self.cache);
+                    let ext_bg = Arc::clone(&ext);
+                    let acc = account.clone();
+                    let list = list_id.clone();
+                    spawn_item_refresh(
+                        self.runtime.handle(),
+                        self.observer(),
+                        Arc::clone(&self.cache),
+                        Arc::clone(&self.coord),
+                        SyncScope::Sections,
+                        account,
+                        list_id.clone(),
+                        move || async move {
+                            refresh_sections(&cache_bg, ext_bg.as_ref(), &acc, &list).await
+                        },
+                    );
+                }
                 // External sections have no provider colour field — stamp any
-                // host-local colour overrides. (Local sections carry their own
-                // synced binding, handled by the None arm.)
+                // host-local colour overrides. Runs on BOTH the cached and the
+                // live path (the cache stores the raw provider section without
+                // the override), exactly like the pre-cache live read did.
+                // (Local sections carry their own synced binding, handled by the
+                // None arm.)
                 let shared = self.db.shared();
                 let repo = OverridesRepo::new(&shared);
                 apply_color_to_sections(&repo, &mut sections);
@@ -3843,6 +3926,7 @@ impl Host {
                     .runtime
                     .block_on(async { ext.create_section(&list_id, &name).await })
                     .map_err(map_store_err)?;
+                self.invalidate_sections_cache(&list_id);
                 to_json(&section)
             }
         }
@@ -3876,6 +3960,7 @@ impl Host {
                             .await
                     })
                     .map_err(map_store_err)?;
+                self.invalidate_sections_cache(&section.list_id);
                 to_json(&updated)
             }
         }
@@ -3902,7 +3987,9 @@ impl Host {
                 let lid = list_id.unwrap_or_default();
                 self.runtime
                     .block_on(async { ext.delete_section(&lid, &id).await })
-                    .map_err(map_store_err)
+                    .map_err(map_store_err)?;
+                self.invalidate_sections_cache(&lid);
+                Ok(())
             }
         }
     }
@@ -6025,6 +6112,11 @@ impl Host {
                 .clear_section_color_label(&section_id)
                 .map_err(map_overrides_err)?,
         }
+        // The colour is a host-local override stamped at read-time by
+        // `apply_color_to_sections`, so it surfaces on the next read regardless
+        // of the section cache — but invalidate anyway to stay consistent with
+        // the other section mutations (and any future provider-side colour).
+        self.invalidate_sections_cache(&list_id);
         Ok(())
     }
 
