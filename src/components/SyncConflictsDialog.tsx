@@ -365,25 +365,29 @@ function ConflictGroupCard({
           device: group.conflicts[0].remote_device_id,
         })}
       </p>
-      {/* Primary path: resolve ALL of this item's fields the same way. */}
-      <div className="sync-conflict-group__actions">
-        <button
-          type="button"
-          disabled={busy}
-          aria-label={`${t('dialogs.syncConflicts.actionKeepAllLocal')} — ${groupContext}`}
-          onClick={() => onResolveGroup(group, 'keep_local')}
-        >
-          {t('dialogs.syncConflicts.actionKeepAllLocal')}
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          aria-label={`${t('dialogs.syncConflicts.actionTakeAllRemote')} — ${groupContext}`}
-          onClick={() => onResolveGroup(group, 'take_remote')}
-        >
-          {t('dialogs.syncConflicts.actionTakeAllRemote')}
-        </button>
-      </div>
+      {/* Primary path: resolve ALL of this item's fields the same way. Only
+          when there's more than one field — for a single-field item the group
+          buttons would just duplicate the field's own keep/take below. */}
+      {count > 1 && (
+        <div className="sync-conflict-group__actions">
+          <button
+            type="button"
+            disabled={busy}
+            aria-label={`${t('dialogs.syncConflicts.actionKeepAllLocal')} — ${groupContext}`}
+            onClick={() => onResolveGroup(group, 'keep_local')}
+          >
+            {t('dialogs.syncConflicts.actionKeepAllLocal')}
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            aria-label={`${t('dialogs.syncConflicts.actionTakeAllRemote')} — ${groupContext}`}
+            onClick={() => onResolveGroup(group, 'take_remote')}
+          >
+            {t('dialogs.syncConflicts.actionTakeAllRemote')}
+          </button>
+        </div>
+      )}
       {/* Per-field detail + escape hatch (rare mixed resolution). */}
       <ul className="sync-conflict-group__fields">
         {group.conflicts.map((c) => (
@@ -417,6 +421,8 @@ function ConflictFieldRow({
   onResolve,
 }: ConflictFieldRowProps) {
   const fieldId = useId();
+  const localId = useId();
+  const remoteId = useId();
   const saveBothHintId = useId();
   const fieldLabel = t(`dialogs.syncConflicts.fieldName.${conflict.field}`, {
     defaultValue: conflict.field,
@@ -428,18 +434,28 @@ function ConflictFieldRow({
     field: fieldLabel,
   });
   return (
-    <li className="sync-conflict-field" role="group" aria-labelledby={fieldId}>
+    // The label ties together the field name AND both candidate values, so the
+    // whole "Field: X — this device Y, other device Z" reads when a SR user tabs
+    // into the group. Without the values in the accessible name they'd be
+    // unreachable: the Modal body is role="application" (NVDA stays in focus
+    // mode), where only focusable elements — not the static value text — are
+    // navigable.
+    <li
+      className="sync-conflict-field"
+      role="group"
+      aria-labelledby={`${fieldId} ${localId} ${remoteId}`}
+    >
       <div id={fieldId} className="sync-conflict-field__label">
         {t('dialogs.syncConflicts.fieldLabel')}: {fieldLabel}
       </div>
       <div className="sync-conflict-field__values">
-        <div>
+        <div id={localId}>
           <span className="sync-conflict-field__valueLabel">
             {t('dialogs.syncConflicts.localValueLabel')}
           </span>
           <code>{decodeForDisplay(conflict.local_value)}</code>
         </div>
-        <div>
+        <div id={remoteId}>
           <span className="sync-conflict-field__valueLabel">
             {t('dialogs.syncConflicts.remoteValueLabel')}
           </span>
