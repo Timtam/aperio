@@ -3,7 +3,7 @@
 use super::{CacheStore, Delta, RefreshCoordinator, SyncScope, SyncState};
 use crate::db::DbHandle;
 use cal_core::{
-    Calendar, Contact, ContactList, DateRange, Event, EventRecurrence, Task, TaskList,
+    Calendar, Contact, ContactList, DateRange, Event, EventRecurrence, Section, Task, TaskList,
     TaskPriority, TaskStatus,
 };
 use chrono::{TimeZone, Utc};
@@ -97,6 +97,16 @@ fn task(id: &str) -> Task {
         updated_at: Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap(),
         completed_at: None,
         etag: None,
+    }
+}
+
+fn section(id: &str, order: u32) -> Section {
+    Section {
+        id: id.into(),
+        list_id: LIST.into(),
+        name: format!("Section {id}"),
+        color_label: None,
+        order,
     }
 }
 
@@ -395,6 +405,64 @@ fn tasks_roundtrip_and_delta() {
             .as_deref(),
         Some("tt")
     );
+}
+
+#[test]
+fn sections_roundtrip_and_replace_stamps_freshness() {
+    let store = setup();
+    // Cold: no snapshot yet.
+    assert!(store
+        .get_sync_state(ACC, SyncScope::Sections, LIST)
+        .unwrap()
+        .is_none());
+    assert!(store.read_sections(ACC, LIST).unwrap().is_empty());
+
+    // A full replace mirrors the provider set + stamps freshness.
+    store
+        .replace_sections(ACC, LIST, &[section("s1", 0), section("s2", 1)])
+        .unwrap();
+    let ids: Vec<String> = store
+        .read_sections(ACC, LIST)
+        .unwrap()
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    assert_eq!(ids, ["s1", "s2"]);
+    assert!(super::has_snapshot(
+        &store
+            .get_sync_state(ACC, SyncScope::Sections, LIST)
+            .unwrap()
+    ));
+
+    // A second replace mirrors the new set, not the union (replace, not append).
+    store
+        .replace_sections(ACC, LIST, &[section("only", 0)])
+        .unwrap();
+    let after: Vec<String> = store
+        .read_sections(ACC, LIST)
+        .unwrap()
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    assert_eq!(after, ["only"]);
+
+    // Sections are scoped per (account, list) — a different list is unaffected.
+    assert!(store.read_sections(ACC, "other-list").unwrap().is_empty());
+}
+
+#[test]
+fn prune_account_wipes_cached_sections() {
+    let store = setup();
+    store
+        .replace_sections(ACC, LIST, &[section("s1", 0)])
+        .unwrap();
+    assert_eq!(store.read_sections(ACC, LIST).unwrap().len(), 1);
+    store.prune_account(ACC).unwrap();
+    assert!(store.read_sections(ACC, LIST).unwrap().is_empty());
+    assert!(store
+        .get_sync_state(ACC, SyncScope::Sections, LIST)
+        .unwrap()
+        .is_none());
 }
 
 #[test]
@@ -713,6 +781,148 @@ async fn refresh_drops_a_write_whose_fetch_predates_an_invalidate() {
         ids,
         ["t1"],
         "a refresh whose fetch predates an invalidate must not overwrite the cache",
+    );
+}
+
+/// A fake tasks adapter that returns a fixed SECTION set from `list_sections`
+/// and counts the calls — so a warm read (served from the cache) can be proven
+/// NOT to hit the adapter, and a cold one to hit it exactly once and warm.
+struct SectionAdapter {
+    sections: Vec<Section>,
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[async_trait]
+impl Adapter for SectionAdapter {
+    async fn authenticate(&self, _credentials: Credentials) -> cal_core::Result<AuthToken> {
+        Err(cal_core::Error::Unsupported("test fake".into()))
+    }
+    fn capabilities(&self) -> &[Capability] {
+        &[]
+    }
+}
+
+#[async_trait]
+impl TasksFeature for SectionAdapter {
+    async fn list_task_lists(&self) -> cal_core::Result<Vec<TaskList>> {
+        Ok(vec![])
+    }
+    async fn get_tasks(&self, _list_id: &str) -> cal_core::Result<Vec<Task>> {
+        Ok(vec![])
+    }
+    async fn list_sections(&self, _list_id: &str) -> cal_core::Result<Vec<Section>> {
+        self.calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Ok(self.sections.clone())
+    }
+    async fn create_task(&self, _list_id: &str, _task: NewTask) -> cal_core::Result<Task> {
+        unreachable!("not exercised by the sections refresh path")
+    }
+    async fn update_task(&self, _task: Task) -> cal_core::Result<Task> {
+        unreachable!("not exercised by the sections refresh path")
+    }
+    async fn delete_task(&self, _task_id: &str) -> cal_core::Result<()> {
+        unreachable!("not exercised by the sections refresh path")
+    }
+}
+
+#[tokio::test]
+async fn refresh_sections_warms_the_cache_from_the_adapter() {
+    let store = Arc::new(setup());
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let adapter = SectionAdapter {
+        sections: vec![section("s1", 0), section("s2", 1)],
+        calls: calls.clone(),
+    };
+    // Cold: no snapshot → a section read would go live. The refresh hits the
+    // adapter once and warms the cache with its sections.
+    super::refresh_sections(&store, &adapter, ACC, LIST)
+        .await
+        .unwrap();
+    assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);
+    let ids: Vec<String> = store
+        .read_sections(ACC, LIST)
+        .unwrap()
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    assert_eq!(ids, ["s1", "s2"]);
+    // Warm: the sections now serve from the cache — `has_snapshot` is true, so
+    // the SWR read path uses `read_sections` instead of the live adapter call.
+    assert!(super::has_snapshot(
+        &store
+            .get_sync_state(ACC, SyncScope::Sections, LIST)
+            .unwrap()
+    ));
+}
+
+#[tokio::test]
+async fn refresh_sections_drops_a_write_whose_fetch_predates_an_invalidate() {
+    let store = Arc::new(setup());
+    // Warm the list's sections with s1.
+    store
+        .replace_sections(ACC, LIST, &[section("s1", 0)])
+        .unwrap();
+
+    // Invalidate mid-fetch (a section edit landing during a slow warm), then the
+    // adapter returns a DIFFERENT set (s2). The generation guard must drop that
+    // stale write, leaving the warmed s1 in place.
+    struct MidFetchSectionInvalidator {
+        cache: Arc<CacheStore>,
+        sections: Vec<Section>,
+    }
+    #[async_trait]
+    impl Adapter for MidFetchSectionInvalidator {
+        async fn authenticate(&self, _c: Credentials) -> cal_core::Result<AuthToken> {
+            Err(cal_core::Error::Unsupported("test fake".into()))
+        }
+        fn capabilities(&self) -> &[Capability] {
+            &[]
+        }
+    }
+    #[async_trait]
+    impl TasksFeature for MidFetchSectionInvalidator {
+        async fn list_task_lists(&self) -> cal_core::Result<Vec<TaskList>> {
+            Ok(vec![])
+        }
+        async fn get_tasks(&self, _l: &str) -> cal_core::Result<Vec<Task>> {
+            Ok(vec![])
+        }
+        async fn list_sections(&self, _l: &str) -> cal_core::Result<Vec<Section>> {
+            self.cache
+                .invalidate(ACC, SyncScope::Sections, LIST)
+                .unwrap();
+            Ok(self.sections.clone())
+        }
+        async fn create_task(&self, _l: &str, _t: NewTask) -> cal_core::Result<Task> {
+            unreachable!()
+        }
+        async fn update_task(&self, _t: Task) -> cal_core::Result<Task> {
+            unreachable!()
+        }
+        async fn delete_task(&self, _id: &str) -> cal_core::Result<()> {
+            unreachable!()
+        }
+    }
+
+    let adapter = MidFetchSectionInvalidator {
+        cache: store.clone(),
+        sections: vec![section("s2", 0)],
+    };
+    super::refresh_sections(&store, &adapter, ACC, LIST)
+        .await
+        .unwrap();
+
+    let ids: Vec<String> = store
+        .read_sections(ACC, LIST)
+        .unwrap()
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    assert_eq!(
+        ids,
+        ["s1"],
+        "a sections refresh whose fetch predates an invalidate must not overwrite the cache",
     );
 }
 
