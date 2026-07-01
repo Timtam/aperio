@@ -5085,3 +5085,86 @@ button[aria-disabled='true'] {
 .description-links__icon {
   flex: none;
 }
+
+/* ── Sync-conflict dialog ────────────────────────────────────────────────── */
+/* One CARD per conflicting item (task/event/…) with its resolved NAME + a
+   "resolve all" action; the per-field detail nests below as the escape hatch. */
+.sync-conflicts__copy {
+  margin-bottom: var(--space-3);
+}
+.sync-conflicts__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.sync-conflict-group {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  background: var(--color-bg-panel);
+}
+.sync-conflict-group__heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+.sync-conflict-group__kind {
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-fg-muted);
+}
+.sync-conflict-group__name {
+  font-size: var(--font-size-lg, 1.125rem);
+}
+.sync-conflict-group__count {
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-muted);
+}
+.sync-conflict-group__source {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-fg-muted);
+}
+/* Primary path: keep-all / take-all for the whole item. */
+.sync-conflict-group__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+/* Nested per-field detail + per-field buttons (rare mixed resolution). */
+.sync-conflict-group__fields {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-2) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border-top: 1px dashed var(--color-border);
+}
+.sync-conflict-field__label {
+  font-weight: 500;
+  font-size: var(--font-size-sm);
+}
+.sync-conflict-field__values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: var(--space-1) 0;
+  font-size: var(--font-size-sm);
+}
+.sync-conflict-field__valueLabel {
+  color: var(--color-fg-muted);
+  margin-right: var(--space-1);
+}
+.sync-conflict-field__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
