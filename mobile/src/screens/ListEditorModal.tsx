@@ -61,9 +61,11 @@ const fromTri = (s: TriState): boolean | undefined =>
 //   - SECTIONS create/rename/delete ROUTE to the owning provider, so they're
 //     offered for local lists (the local store supports sections) and for
 //     external lists whose adapter reports `manageable_sections`.
-// Renaming a LIST is a container-override on the desktop (deferred on mobile
-// with the rest of the overrides system, like colour labels + sharing), so it's
-// intentionally absent.
+// Renaming a LIST is a container-override: a LOCAL list renames on its own
+// synced row; an EXTERNAL list's rename is pushed to its provider, falling back
+// to a host-local name override (renameContainer). Colour labels + sharing are
+// available too now — the overrides system landed since this note first deferred
+// them on mobile.
 //
 // Screen-reader-first: the parent picker is an accessible RadioGroup (selecting
 // an option reparents immediately); each section is its own row with Rename +
@@ -108,8 +110,10 @@ export default function ListEditorModal({
   const [renameText, setRenameText] = useState(() => list?.name ?? '');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
-  // The section being edited also carries its colour ('' = none); only LOCAL
-  // sections store it on their row (external = override, deferred).
+  // The section being edited also carries its colour ('' = none): a LOCAL
+  // section stores it on its row, an EXTERNAL one as a host-local override
+  // (set_section_color routes it; the read path stamps it back via
+  // apply_color_to_sections when sections are listed).
   const [editingColor, setEditingColor] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
