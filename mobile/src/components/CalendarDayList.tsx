@@ -539,18 +539,39 @@ export function CalendarDayList({
     }
   }, [announce, range, t]);
 
+  // Coalesce reload requests: the two cache-reload subscriptions (calendar +
+  // tasks) usually fire TOGETHER (a warm pass refreshes both) and focus can race
+  // them, so without this each triggers its own full, SERIALIZED FFI pass over
+  // every calendar + list. Debounce so they collapse into ONE load(); the mount
+  // load stays immediate for a fast first paint. `reqToken` already drops any
+  // stale result, but this also avoids the redundant native work.
+  const loadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleLoad = useCallback(() => {
+    if (loadTimer.current != null) clearTimeout(loadTimer.current);
+    loadTimer.current = setTimeout(() => {
+      loadTimer.current = null;
+      void load();
+    }, 80);
+  }, [load]);
+  useEffect(
+    () => () => {
+      if (loadTimer.current != null) clearTimeout(loadTimer.current);
+    },
+    [],
+  );
+
   // Reload when the window changes or the screen regains focus (after an editor).
   useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => void load());
+    const unsubscribe = navigation.addListener('focus', () => scheduleLoad());
     void load();
     return unsubscribe;
-  }, [navigation, load]);
+  }, [navigation, load, scheduleLoad]);
 
   // Live-update while focused: this view loads BOTH events and tasks per day, so
-  // re-read on either an external calendar- or task-cache refresh (the root
-  // observer already announced it politely; same `load` covers both).
-  useCacheReload('calendar', load);
-  useCacheReload('tasks', load);
+  // re-read on either an external calendar- or task-cache refresh — coalesced via
+  // scheduleLoad so a paired refresh doesn't fire two full passes.
+  useCacheReload('calendar', scheduleLoad);
+  useCacheReload('tasks', scheduleLoad);
 
   // Per-list "show completed in calendar" opt-in (default hide). Shared store, so
   // a toggle on the Lists screen reflects here on the next render.

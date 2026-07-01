@@ -2073,13 +2073,17 @@ impl Host {
         // backend (one DbHandle, many Arc clones of its mutex).
         let adapter = LocalAdapter::new(db.shared());
 
-        // One-worker multi-thread runtime: `block_on` drives the
-        // CalendarFeature methods + sync rounds, while the event-log writer's
-        // drain task lives on the worker thread and keeps flushing appends
-        // between our calls. `enable_all` gives the time + I/O drivers the
-        // external-adapter shim's HTTP + the writer need.
+        // Multi-thread runtime: `block_on` drives the CalendarFeature methods +
+        // sync rounds, while the event-log writer's drain task + the SWR warm
+        // pass's spawned per-container refreshes live on the worker threads. A
+        // SMALL POOL (not one worker) so a warm pass refreshes several external
+        // containers' HTTP reads concurrently instead of one-at-a-time — the
+        // cache warms much faster after a sync, so the next day/week open serves
+        // from cache. All these futures are already `Send` (multi_thread requires
+        // it) + shared state is Arc/Mutex-guarded, so more workers is safe.
+        // `enable_all` gives the time + I/O drivers the HTTP shim + writer need.
         let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
+            .worker_threads(4)
             .enable_all()
             .build()
             .map_err(|e| StoreError::Open {
