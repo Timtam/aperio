@@ -6,44 +6,87 @@ import { listen } from '@tauri-apps/api/event';
 import { useAnnouncer } from '../a11y/announcerContext';
 import { FocusableNote } from '../a11y/FocusableNote';
 import {
+  getEventById,
+  getTaskById,
+  listCalendars,
+  listColorLabels,
   listSyncConflicts,
+  listTaskLists,
   resolveSyncConflict,
   type SyncConflict,
   type SyncResolutionChoice,
 } from '../api/client';
 import { useDateFormat } from '../intl/dateFormat';
+import {
+  groupSyncConflicts,
+  type ConflictGroup,
+} from '@aperio/shared';
 import { Modal } from './Modal';
 
 /**
  * Conflict-resolution dialog for the cross-device sync layer
  * (DESIGN.md §19.3, Phase Sh + Si).
  *
- * Loads the list of unresolved conflicts on open + on every
- * `sync-conflicts-changed` Tauri event (the backend emits this
- * after the applier records a new conflict and after the user
- * resolves one).
+ * The applier records ONE conflict per differing FIELD, so a task edited on two
+ * devices surfaces as several rows (status + scheduled_date + completed_at …).
+ * The dialog GROUPS them by owning row (task/event/…) so each item is ONE card
+ * with a "resolve all of this item" action — you almost never want to keep 2 of
+ * 3 fields from different devices — and resolves the raw UUID to the item's NAME
+ * (via getTaskById / getEventById / the list APIs) so it reads for casual users.
+ * The per-field values + per-field buttons stay under each card as the escape
+ * hatch for the rare mixed resolution.
  *
- * Each row shows:
- *   - Row kind + id (so the user knows which item is in conflict)
- *   - Field name (the differing column)
- *   - Both candidate values, JSON-decoded for display
- *   - A timestamp + device id for the remote edit
- *
- * Three resolution buttons per row, matching §19.3:
- *   - Meine Version behalten (keep_local)
- *   - Andere Version nehmen (take_remote)
- *   - Beide speichern (save_both) — backend rejects this with
- *     `unsupported` for now; the button surfaces a polite message
- *     and stays clickable so the UX is consistent once Sh's
- *     follow-up lands the fork logic.
- *
- * Resolutions fire optimistically: the row vanishes from the list
- * the moment the user clicks, and the next
- * `sync-conflicts-changed` event re-syncs the canonical state.
+ * Loads on open + on every `sync-conflicts-changed` Tauri event. Resolutions
+ * fire optimistically (the row/group vanishes on click; the next event re-syncs
+ * the canonical state).
  */
 export interface SyncConflictsDialogProps {
   isOpen: boolean;
   onClose: () => void;
+}
+
+/** Resolve each group's owning row to its human name (task/event title, list/
+ *  calendar/label name). Returns a fresh `key → name` map; unresolved rows
+ *  (deleted, or a kind we don't name) are simply absent and fall back to a short
+ *  label in the UI. The per-id fetches are cached backend-side, so re-running on
+ *  every list change is cheap. */
+async function resolveConflictLabels(
+  groups: ConflictGroup<SyncConflict>[],
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const [lists, cals, labels] = await Promise.all([
+    groups.some((g) => g.rowKind === 'task_list')
+      ? listTaskLists().catch(() => [])
+      : Promise.resolve([]),
+    groups.some((g) => g.rowKind === 'calendar')
+      ? listCalendars().catch(() => [])
+      : Promise.resolve([]),
+    groups.some((g) => g.rowKind === 'color_label')
+      ? listColorLabels().catch(() => [])
+      : Promise.resolve([]),
+  ]);
+  await Promise.all(
+    groups.map(async (g) => {
+      let name: string | undefined;
+      try {
+        if (g.rowKind === 'task') {
+          name = (await getTaskById(g.rowId))?.title;
+        } else if (g.rowKind === 'event') {
+          name = (await getEventById(g.rowId))?.title;
+        } else if (g.rowKind === 'task_list') {
+          name = lists.find((l) => l.id === g.rowId)?.name;
+        } else if (g.rowKind === 'calendar') {
+          name = cals.find((c) => c.id === g.rowId)?.name;
+        } else if (g.rowKind === 'color_label') {
+          name = labels.find((l) => l.id === g.rowId)?.name;
+        }
+      } catch {
+        // Deleted / unfetchable — leave it out; the UI shows the fallback.
+      }
+      if (name && name.trim()) map.set(g.key, name.trim());
+    }),
+  );
+  return map;
 }
 
 export function SyncConflictsDialog({
@@ -54,8 +97,13 @@ export function SyncConflictsDialog({
   const announce = useAnnouncer();
   const fmt = useDateFormat();
   const [conflicts, setConflicts] = useState<SyncConflict[]>([]);
-  const [busy, setBusy] = useState<number | null>(null);
+  const [labelByKey, setLabelByKey] = useState<Map<string, string>>(new Map());
+  // Group keys currently resolving — disables that card's buttons + marks it
+  // aria-busy until the round-trip settles.
+  const [busyKeys, setBusyKeys] = useState<Set<string>>(new Set());
   const listRef = useRef<HTMLUListElement>(null);
+
+  const groups = groupSyncConflicts(conflicts);
 
   const refresh = useCallback(() => {
     listSyncConflicts()
@@ -66,9 +114,6 @@ export function SyncConflictsDialog({
       });
   }, []);
 
-  // Initial load + subscribe to backend changes. The dialog stays
-  // mounted while open, so a refresh handler attaches once per
-  // open cycle.
   useEffect(() => {
     if (!isOpen) return undefined;
     refresh();
@@ -91,61 +136,107 @@ export function SyncConflictsDialog({
     };
   }, [isOpen, refresh]);
 
-  const resolve = useCallback(
-    async (conflict: SyncConflict, choice: SyncResolutionChoice) => {
-      setBusy(conflict.id);
-      // Optimistic remove: drop the row immediately so the user
-      // sees their click land. The `sync-conflicts-changed` event
-      // re-syncs the truth in case of an error.
-      setConflicts((prev) => prev.filter((c) => c.id !== conflict.id));
-      // Re-park focus on the listbox so the next row (or empty
-      // state) is reachable without the user having to hunt for
-      // focus. The button that was just clicked is unmounting
-      // along with its row, so without an explicit move the
-      // browser drops focus to <body> and NVDA loses context.
-      requestAnimationFrame(() => {
-        listRef.current?.focus({ preventScroll: true });
-      });
-      try {
-        await resolveSyncConflict(conflict.id, choice);
-        announce(t('dialogs.syncConflicts.resolved'));
-      } catch (err: unknown) {
-        // eslint-disable-next-line no-console
-        console.warn('resolve_sync_conflict failed', err);
-        // Surface the backend's code if it's the "save_both not
-        // implemented" branch — the user clicked, we owe them a
-        // hint.
-        if (
-          typeof err === 'object' &&
-          err !== null &&
-          'code' in err &&
-          (err as { code?: string }).code === 'unsupported'
-        ) {
-          announce(t('dialogs.syncConflicts.actionSaveBothUnsupported'), 'assertive');
-        }
-        // Put the row back so the user can try again.
-        refresh();
-      } finally {
-        setBusy(null);
+  // Resolve the owning-row names whenever the conflict set changes.
+  useEffect(() => {
+    if (conflicts.length === 0) {
+      setLabelByKey(new Map());
+      return undefined;
+    }
+    let cancelled = false;
+    void resolveConflictLabels(groupSyncConflicts(conflicts)).then((map) => {
+      if (!cancelled) setLabelByKey(map);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // `groups` is derived from conflicts; keying on conflicts is sufficient.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conflicts]);
+
+  // Re-park focus on the listbox so the user keeps walking the remaining
+  // cards after a row/group unmounts (otherwise focus drops to <body>).
+  const reparkFocus = useCallback(() => {
+    requestAnimationFrame(() => {
+      listRef.current?.focus({ preventScroll: true });
+    });
+  }, []);
+
+  const afterResolveError = useCallback(
+    (err: unknown) => {
+      // eslint-disable-next-line no-console
+      console.warn('resolve_sync_conflict failed', err);
+      if (
+        typeof err === 'object' &&
+        err !== null &&
+        'code' in err &&
+        (err as { code?: string }).code === 'unsupported'
+      ) {
+        announce(
+          t('dialogs.syncConflicts.actionSaveBothUnsupported'),
+          'assertive',
+        );
       }
+      refresh();
     },
     [announce, refresh, t],
   );
 
-  // Copy every conflict as readable text so a screen-reader user can report a
-  // sync problem without OCR'ing the dialog. Values use the same decode as the
-  // rows (scalars unquoted, objects as JSON) so a serialization difference — the
-  // kind of thing that causes a spurious conflict — stays visible in the dump.
+  // Resolve a single field (the escape hatch for mixed resolutions).
+  const resolveOne = useCallback(
+    async (conflict: SyncConflict, choice: SyncResolutionChoice) => {
+      setConflicts((prev) => prev.filter((c) => c.id !== conflict.id));
+      reparkFocus();
+      try {
+        await resolveSyncConflict(conflict.id, choice);
+        announce(t('dialogs.syncConflicts.resolved'));
+      } catch (err) {
+        afterResolveError(err);
+      }
+    },
+    [afterResolveError, announce, reparkFocus, t],
+  );
+
+  // Resolve EVERY field of one item at once — the common path.
+  const resolveGroup = useCallback(
+    async (group: ConflictGroup<SyncConflict>, choice: SyncResolutionChoice) => {
+      const ids = new Set(group.conflicts.map((c) => c.id));
+      setBusyKeys((prev) => new Set(prev).add(group.key));
+      setConflicts((prev) => prev.filter((c) => !ids.has(c.id)));
+      reparkFocus();
+      try {
+        // Sequential so a mid-list failure leaves a consistent state we can
+        // refresh back to, rather than half-applied parallel writes.
+        for (const id of ids) {
+          await resolveSyncConflict(id, choice);
+        }
+        announce(
+          t('dialogs.syncConflicts.resolvedGroup', { count: ids.size }),
+        );
+      } catch (err) {
+        afterResolveError(err);
+      } finally {
+        setBusyKeys((prev) => {
+          const next = new Set(prev);
+          next.delete(group.key);
+          return next;
+        });
+      }
+    },
+    [afterResolveError, announce, reparkFocus, t],
+  );
+
   const onCopy = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(conflictsToText(conflicts, t, fmt));
+      await navigator.clipboard.writeText(
+        conflictsToText(groups, labelByKey, t, fmt),
+      );
       announce(t('dialogs.syncConflicts.copied'));
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('copy sync conflicts failed', err);
       announce(t('dialogs.syncConflicts.copyFailed'), 'assertive');
     }
-  }, [conflicts, t, fmt, announce]);
+  }, [groups, labelByKey, t, fmt, announce]);
 
   const intro =
     conflicts.length === 1
@@ -159,12 +250,6 @@ export function SyncConflictsDialog({
       title={t('dialogs.syncConflicts.title')}
       className="sync-conflicts-dialog"
     >
-      {/* Modal's body lives in `role="application"` for the
-          dialog focus-mode trick (see Modal.tsx), so prose
-          paragraphs need to be focusable for NVDA's
-          arrow-navigation. FocusableNote wires the text as the
-          element's accessible name so the screen reader reads
-          the actual content instead of "Anmerkung". */}
       <FocusableNote className="sync-conflicts__intro">
         {conflicts.length === 0 ? t('dialogs.syncConflicts.empty') : intro}
       </FocusableNote>
@@ -177,25 +262,23 @@ export function SyncConflictsDialog({
           {t('dialogs.syncConflicts.copy')}
         </button>
       )}
-      {conflicts.length > 0 && (
-        // The list itself is a tab-stop landing target — after
-        // the user resolves a row, we re-park focus on the
-        // <ul> so they can keep walking the remaining rows
-        // without the browser dropping focus to <body>.
+      {groups.length > 0 && (
         <ul
           ref={listRef}
           tabIndex={-1}
           className="sync-conflicts__list"
           aria-label={t('dialogs.syncConflicts.listLabel')}
         >
-          {conflicts.map((c) => (
-            <ConflictRow
-              key={c.id}
-              conflict={c}
+          {groups.map((group) => (
+            <ConflictGroupCard
+              key={group.key}
+              group={group}
+              label={labelByKey.get(group.key)}
               fmt={fmt}
               t={t}
-              busy={busy === c.id}
-              onResolve={resolve}
+              busy={busyKeys.has(group.key)}
+              onResolveGroup={resolveGroup}
+              onResolveOne={resolveOne}
             />
           ))}
         </ul>
@@ -204,87 +287,170 @@ export function SyncConflictsDialog({
   );
 }
 
-interface ConflictRowProps {
-  conflict: SyncConflict;
+/** Kind label + short id when the name isn't resolved (deleted row, or an
+ *  unnamed kind) — some identity without dumping a full UUID on a casual user. */
+function fallbackLabel(
+  group: ConflictGroup<SyncConflict>,
+  t: ReturnType<typeof useTranslation>['t'],
+): string {
+  const kind = t(`dialogs.syncConflicts.rowKind.${group.rowKind}`);
+  return t('dialogs.syncConflicts.unnamedRow', {
+    kind,
+    shortId: group.rowId.slice(0, 8),
+  });
+}
+
+interface ConflictGroupCardProps {
+  group: ConflictGroup<SyncConflict>;
+  label: string | undefined;
   fmt: ReturnType<typeof useDateFormat>;
+  t: ReturnType<typeof useTranslation>['t'];
+  busy: boolean;
+  onResolveGroup: (
+    g: ConflictGroup<SyncConflict>,
+    choice: SyncResolutionChoice,
+  ) => void;
+  onResolveOne: (c: SyncConflict, choice: SyncResolutionChoice) => void;
+}
+
+function ConflictGroupCard({
+  group,
+  label,
+  fmt,
+  t,
+  busy,
+  onResolveGroup,
+  onResolveOne,
+}: ConflictGroupCardProps) {
+  const headingId = useId();
+  const kindLabel = t(`dialogs.syncConflicts.rowKind.${group.rowKind}`);
+  const name = label ?? fallbackLabel(group, t);
+  const count = group.conflicts.length;
+  // One source line for the whole item — same remote device, and (near enough)
+  // the same edit time across its fields; show the first conflict's.
+  const remoteTime = (() => {
+    try {
+      return fmt.format(new Date(group.conflicts[0].remote_timestamp), 'PPPp');
+    } catch {
+      return group.conflicts[0].remote_timestamp;
+    }
+  })();
+  // Context folded into every button's accessible name so an SR user knows which
+  // item they're acting on without back-arrowing to the heading.
+  const groupContext = t('dialogs.syncConflicts.groupActionAriaContext', {
+    kind: kindLabel,
+    name,
+    count,
+  });
+
+  return (
+    <li
+      className="sync-conflict-group"
+      role="group"
+      aria-labelledby={headingId}
+      aria-busy={busy || undefined}
+    >
+      <div id={headingId} className="sync-conflict-group__heading">
+        <span className="sync-conflict-group__kind">{kindLabel}</span>
+        <strong className="sync-conflict-group__name">{name}</strong>
+        <span className="sync-conflict-group__count">
+          {count === 1
+            ? t('dialogs.syncConflicts.groupConflictCount_one')
+            : t('dialogs.syncConflicts.groupConflictCount_other', { count })}
+        </span>
+      </div>
+      <p className="sync-conflict-group__source">
+        {t('dialogs.syncConflicts.remoteSourceLabel', {
+          time: remoteTime,
+          device: group.conflicts[0].remote_device_id,
+        })}
+      </p>
+      {/* Primary path: resolve ALL of this item's fields the same way. */}
+      <div className="sync-conflict-group__actions">
+        <button
+          type="button"
+          disabled={busy}
+          aria-label={`${t('dialogs.syncConflicts.actionKeepAllLocal')} — ${groupContext}`}
+          onClick={() => onResolveGroup(group, 'keep_local')}
+        >
+          {t('dialogs.syncConflicts.actionKeepAllLocal')}
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          aria-label={`${t('dialogs.syncConflicts.actionTakeAllRemote')} — ${groupContext}`}
+          onClick={() => onResolveGroup(group, 'take_remote')}
+        >
+          {t('dialogs.syncConflicts.actionTakeAllRemote')}
+        </button>
+      </div>
+      {/* Per-field detail + escape hatch (rare mixed resolution). */}
+      <ul className="sync-conflict-group__fields">
+        {group.conflicts.map((c) => (
+          <ConflictFieldRow
+            key={c.id}
+            conflict={c}
+            name={name}
+            t={t}
+            busy={busy}
+            onResolve={onResolveOne}
+          />
+        ))}
+      </ul>
+    </li>
+  );
+}
+
+interface ConflictFieldRowProps {
+  conflict: SyncConflict;
+  name: string;
   t: ReturnType<typeof useTranslation>['t'];
   busy: boolean;
   onResolve: (c: SyncConflict, choice: SyncResolutionChoice) => void;
 }
 
-function ConflictRow({
+function ConflictFieldRow({
   conflict,
-  fmt,
+  name,
   t,
   busy,
   onResolve,
-}: ConflictRowProps) {
-  const kindLabel = t(`dialogs.syncConflicts.rowKind.${conflict.row_kind}`);
-  const remoteTime = (() => {
-    try {
-      return fmt.format(new Date(conflict.remote_timestamp), 'PPPp');
-    } catch {
-      return conflict.remote_timestamp;
-    }
-  })();
-  const headingId = useId();
+}: ConflictFieldRowProps) {
+  const fieldId = useId();
   const saveBothHintId = useId();
-  // Per-row context for the three resolution buttons. Without
-  // this every row's "Keep my version" button reads identically
-  // — three rows × three buttons = nine generic labels. Threading
-  // the field + kind into each button's accessible name lets SR
-  // users know which conflict they're acting on without
-  // back-arrowing to the row heading.
-  const ariaContext = t('dialogs.syncConflicts.actionAriaContext', {
-    kind: kindLabel,
-    field: conflict.field,
+  const fieldLabel = t(`dialogs.syncConflicts.fieldName.${conflict.field}`, {
+    defaultValue: conflict.field,
+  });
+  // Per-field context: item name + THIS field, so a per-field button doesn't
+  // read identically to the group action or the sibling fields.
+  const fieldContext = t('dialogs.syncConflicts.fieldActionAriaContext', {
+    name,
+    field: fieldLabel,
   });
   return (
-    <li
-      className="sync-conflict-row"
-      // Group semantics: the buttons inside read as part of a
-      // discrete conflict group whose accessible name is the
-      // heading. NVDA announces "Konflikt-Gruppe: Termin, Feld
-      // title" once on entry rather than re-reading the
-      // heading for each button.
-      role="group"
-      aria-labelledby={headingId}
-      aria-busy={busy || undefined}
-    >
-      <div
-        id={headingId}
-        className="sync-conflict-row__heading"
-      >
-        <strong>{kindLabel}</strong>
-        <span className="sync-conflict-row__field">
-          {t('dialogs.syncConflicts.fieldLabel')}: {conflict.field}
-        </span>
+    <li className="sync-conflict-field" role="group" aria-labelledby={fieldId}>
+      <div id={fieldId} className="sync-conflict-field__label">
+        {t('dialogs.syncConflicts.fieldLabel')}: {fieldLabel}
       </div>
-      <p className="sync-conflict-row__source">
-        {t('dialogs.syncConflicts.remoteSourceLabel', {
-          time: remoteTime,
-          device: conflict.remote_device_id,
-        })}
-      </p>
-      <div className="sync-conflict-row__values">
+      <div className="sync-conflict-field__values">
         <div>
-          <span className="sync-conflict-row__valueLabel">
+          <span className="sync-conflict-field__valueLabel">
             {t('dialogs.syncConflicts.localValueLabel')}
           </span>
           <code>{decodeForDisplay(conflict.local_value)}</code>
         </div>
         <div>
-          <span className="sync-conflict-row__valueLabel">
+          <span className="sync-conflict-field__valueLabel">
             {t('dialogs.syncConflicts.remoteValueLabel')}
           </span>
           <code>{decodeForDisplay(conflict.remote_value)}</code>
         </div>
       </div>
-      <div className="sync-conflict-row__actions">
+      <div className="sync-conflict-field__actions">
         <button
           type="button"
           disabled={busy}
-          aria-label={`${t('dialogs.syncConflicts.actionKeepLocal')} — ${ariaContext}`}
+          aria-label={`${t('dialogs.syncConflicts.actionKeepLocal')} — ${fieldContext}`}
           onClick={() => onResolve(conflict, 'keep_local')}
         >
           {t('dialogs.syncConflicts.actionKeepLocal')}
@@ -292,7 +458,7 @@ function ConflictRow({
         <button
           type="button"
           disabled={busy}
-          aria-label={`${t('dialogs.syncConflicts.actionTakeRemote')} — ${ariaContext}`}
+          aria-label={`${t('dialogs.syncConflicts.actionTakeRemote')} — ${fieldContext}`}
           onClick={() => onResolve(conflict, 'take_remote')}
         >
           {t('dialogs.syncConflicts.actionTakeRemote')}
@@ -300,10 +466,7 @@ function ConflictRow({
         <button
           type="button"
           disabled={busy}
-          aria-label={`${t('dialogs.syncConflicts.actionSaveBoth')} — ${ariaContext}`}
-          // Use aria-describedby (not title) for the "not yet
-          // implemented" hint so SR users on platforms that
-          // ignore title still get the message.
+          aria-label={`${t('dialogs.syncConflicts.actionSaveBoth')} — ${fieldContext}`}
           aria-describedby={saveBothHintId}
           onClick={() => onResolve(conflict, 'save_both')}
         >
@@ -318,44 +481,51 @@ function ConflictRow({
 }
 
 /** Serialize every conflict to a readable, paste-able block — for reporting a
- *  sync problem from the dialog (a screen-reader user can't easily transcribe
- *  it otherwise). Uses the same value decode as the rows so a serialization
- *  difference between the two sides stays visible. */
+ *  sync problem from the dialog. Grouped by item with the resolved name, and the
+ *  same value decode as the rows so a serialization difference stays visible. */
 function conflictsToText(
-  conflicts: SyncConflict[],
+  groups: ConflictGroup<SyncConflict>[],
+  labelByKey: Map<string, string>,
   t: ReturnType<typeof useTranslation>['t'],
   fmt: ReturnType<typeof useDateFormat>,
 ): string {
+  const total = groups.reduce((n, g) => n + g.conflicts.length, 0);
   const lines: string[] = [
-    t('dialogs.syncConflicts.copyHeader', { count: conflicts.length }),
+    t('dialogs.syncConflicts.copyHeader', { count: total }),
     '',
   ];
-  conflicts.forEach((c, i) => {
+  groups.forEach((g, gi) => {
+    const kind = t(`dialogs.syncConflicts.rowKind.${g.rowKind}`);
+    const name = labelByKey.get(g.key) ?? fallbackLabel(g, t);
     let remoteTime: string;
     try {
-      remoteTime = fmt.format(new Date(c.remote_timestamp), 'PPPp');
+      remoteTime = fmt.format(new Date(g.conflicts[0].remote_timestamp), 'PPPp');
     } catch {
-      remoteTime = c.remote_timestamp;
+      remoteTime = g.conflicts[0].remote_timestamp;
     }
     lines.push(
-      `[${i + 1}] ${t(`dialogs.syncConflicts.rowKind.${c.row_kind}`)} — ` +
-        `${t('dialogs.syncConflicts.fieldLabel')}: ${c.field} (${c.row_id})`,
-      `    ${t('dialogs.syncConflicts.localValueLabel')}: ${decodeForDisplay(c.local_value)}`,
-      `    ${t('dialogs.syncConflicts.remoteValueLabel')}: ${decodeForDisplay(c.remote_value)}`,
+      `[${gi + 1}] ${kind}: ${name} (${g.rowId})`,
       `    ${t('dialogs.syncConflicts.remoteSourceLabel', {
         time: remoteTime,
-        device: c.remote_device_id,
+        device: g.conflicts[0].remote_device_id,
       })}`,
-      '',
     );
+    g.conflicts.forEach((c) => {
+      const fieldLabel = t(`dialogs.syncConflicts.fieldName.${c.field}`, {
+        defaultValue: c.field,
+      });
+      lines.push(
+        `    ${t('dialogs.syncConflicts.fieldLabel')}: ${fieldLabel}`,
+        `        ${t('dialogs.syncConflicts.localValueLabel')}: ${decodeForDisplay(c.local_value)}`,
+        `        ${t('dialogs.syncConflicts.remoteValueLabel')}: ${decodeForDisplay(c.remote_value)}`,
+      );
+    });
+    lines.push('');
   });
   return lines.join('\n').trimEnd() + '\n';
 }
 
-/** Decode the JSON-encoded backend value into something readable.
- *  Numbers/booleans stringify naturally; quoted strings get
- *  unquoted; null → em-dash so the empty case is visible.
- *  Everything else falls back to the raw JSON. */
+/** Decode the JSON-encoded backend value into something readable. */
 function decodeForDisplay(raw: string | null): string {
   if (raw === null) return '—';
   try {
