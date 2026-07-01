@@ -5287,6 +5287,10 @@ impl Host {
     pub fn sync_conflict_count(&self) -> Result<u32, StoreError> {
         let shared = self.db.shared();
         let repo = ConflictsRepo::new(&shared);
+        // Self-heal: drop stored conflicts a newer build no longer considers
+        // genuine (e.g. a recurrence serialization-drift conflict recorded before
+        // the canonicalize fix) so the badge doesn't count a phantom.
+        repo.prune_stale().map_err(map_conflicts_err)?;
         Ok(repo.unresolved_count().map_err(map_conflicts_err)? as u32)
     }
 
@@ -5295,6 +5299,9 @@ impl Host {
     pub fn list_sync_conflicts_json(&self) -> Result<String, StoreError> {
         let shared = self.db.shared();
         let repo = ConflictsRepo::new(&shared);
+        // Self-heal before listing so a pre-fix spurious conflict (recurrence
+        // serialization drift, a metadata field) never reaches the dialog.
+        repo.prune_stale().map_err(map_conflicts_err)?;
         let records = repo.list_unresolved().map_err(map_conflicts_err)?;
         to_json(&records)
     }
