@@ -125,11 +125,11 @@ export default function ListsScreen() {
         />
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={t('mobile.add')}
+          accessibilityLabel={t('mobile.newListLabel')}
           onPress={() => void addList()}
           style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
         >
-          <Text style={styles.buttonText}>{t('mobile.add')}</Text>
+          <Text style={styles.buttonText}>{t('mobile.newListLabel')}</Text>
         </Pressable>
       </View>
 

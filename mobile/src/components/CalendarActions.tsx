@@ -9,6 +9,7 @@ import { listCalendars, type Calendar } from '../api/calendar';
 import { useCalendarVisibility } from '../state/calendarVisibility';
 import type { RootStackParamList } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
+import { chrome } from '../theme/uiScale';
 
 // The shared calendar action bar — Calendars (toggle which calendars show),
 // Search, and New Event. These three are cross-cutting (they apply to every
@@ -106,23 +107,23 @@ export function CalendarActions({ navigation, anchorDay }: Props) {
 const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
     ghostButton: {
-      paddingVertical: 12,
-      paddingHorizontal: 18,
+      paddingVertical: chrome(10),
+      paddingHorizontal: chrome(13),
       borderRadius: 10,
       borderWidth: 1,
       borderColor: c.border,
       backgroundColor: c.surfaceAlt,
     },
-    ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
+    ghostButtonText: { fontSize: 15, fontWeight: '600', color: c.link },
     primaryButton: {
-      paddingVertical: 12,
-      paddingHorizontal: 18,
+      paddingVertical: chrome(10),
+      paddingHorizontal: chrome(13),
       borderRadius: 10,
       backgroundColor: c.accent,
       alignItems: 'center',
     },
     primaryPressed: { backgroundColor: c.accentPressed },
     primaryDisabled: { backgroundColor: c.accentDisabled },
-    primaryButtonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
+    primaryButtonText: { fontSize: 15, fontWeight: '700', color: c.textOnAccent },
     pressed: { opacity: 0.7 },
   });

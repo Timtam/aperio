@@ -12,6 +12,7 @@ import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import type { RootStackScreenProps } from '../navigation/types';
 import { readTaskBehaviour, writeDayViewMode } from '../state/taskBehaviour';
 import { useThemedStyles, type ThemeColors } from '../theme';
+import { chrome, chromeTouch } from '../theme/uiScale';
 
 // Accessible day view — the screen-reader-first equivalent of the desktop
 // DayView. It owns only the day chrome: the Day/Week/Month/Agenda switcher,
@@ -214,14 +215,14 @@ const makeStyles = (c: ThemeColors) =>
     },
     dayHeading: {
       flex: 1,
-      fontSize: 18,
+      fontSize: 16,
       fontWeight: '700',
       color: c.textPrimary,
       textAlign: 'center',
     },
     navButton: {
-      width: 48,
-      height: 48,
+      width: chromeTouch(44),
+      height: chromeTouch(44),
       borderRadius: 10,
       borderWidth: 1,
       borderColor: c.border,
@@ -246,13 +247,13 @@ const makeStyles = (c: ThemeColors) =>
       alignItems: 'center',
     },
     ghostButton: {
-      paddingVertical: 12,
-      paddingHorizontal: 18,
+      paddingVertical: chrome(10),
+      paddingHorizontal: chrome(13),
       borderRadius: 10,
       borderWidth: 1,
       borderColor: c.border,
       backgroundColor: c.surfaceAlt,
     },
-    ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
+    ghostButtonText: { fontSize: 15, fontWeight: '600', color: c.link },
     pressed: { opacity: 0.7 },
   });

@@ -4,6 +4,7 @@ import { Platform, Pressable, StyleSheet, Text } from 'react-native';
 import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 
 import { useThemedStyles, type ThemeColors } from '../theme';
+import { chrome } from '../theme/uiScale';
 import { AppDialog } from './AppDialog';
 
 // "Jump to date" control — a real, obviously-tappable app button (a Pressable
@@ -95,8 +96,8 @@ const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
     // Matches the calendar toolbars' ghost buttons so it reads as one of them.
     button: {
-      paddingVertical: 12,
-      paddingHorizontal: 18,
+      paddingVertical: chrome(10),
+      paddingHorizontal: chrome(13),
       borderRadius: 10,
       borderWidth: 1,
       borderColor: c.border,
@@ -104,5 +105,5 @@ const makeStyles = (c: ThemeColors) =>
       alignItems: 'center',
     },
     pressed: { opacity: 0.7 },
-    buttonText: { fontSize: 16, fontWeight: '600', color: c.link },
+    buttonText: { fontSize: 15, fontWeight: '600', color: c.link },
   });

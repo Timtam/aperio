@@ -102,6 +102,12 @@ const TAB_ROOT_ROUTES = new Set([
 // accessible control like this status pill — so it lives in the header instead.
 const syncHeaderRight = () => <SyncStatusButton />;
 
+// Native header page titles ("Monatsansicht", …) render very large by
+// default; a smaller title keeps the chrome proportionate to the content.
+const stackScreenOptions = {
+  headerTitleStyle: { fontSize: 15, fontWeight: '600' as const },
+};
+
 /** Name of the deepest focused route across the nested navigators. */
 function deepestRouteName(
   state: NavigationState | PartialState<NavigationState> | undefined,
@@ -115,7 +121,7 @@ function deepestRouteName(
 function TasksStackNav() {
   const { t } = useTranslation();
   return (
-    <TasksStack.Navigator initialRouteName="Tasks">
+    <TasksStack.Navigator initialRouteName="Tasks" screenOptions={stackScreenOptions}>
       <TasksStack.Screen
         name="Tasks"
         component={TasksScreen}
@@ -177,7 +183,7 @@ function TasksStackNav() {
 function CalendarStackNav() {
   const { t } = useTranslation();
   return (
-    <CalendarStack.Navigator initialRouteName="Events">
+    <CalendarStack.Navigator initialRouteName="Events" screenOptions={stackScreenOptions}>
       <CalendarStack.Screen
         name="Events"
         component={EventsScreen}
@@ -255,7 +261,7 @@ function CalendarStackNav() {
 function ContactsStackNav() {
   const { t } = useTranslation();
   return (
-    <ContactsStack.Navigator initialRouteName="Contacts">
+    <ContactsStack.Navigator initialRouteName="Contacts" screenOptions={stackScreenOptions}>
       <ContactsStack.Screen
         name="Contacts"
         component={ContactsScreen}
@@ -278,7 +284,7 @@ function ContactsStackNav() {
 function SettingsStackNav() {
   const { t } = useTranslation();
   return (
-    <SettingsStack.Navigator initialRouteName="Settings">
+    <SettingsStack.Navigator initialRouteName="Settings" screenOptions={stackScreenOptions}>
       <SettingsStack.Screen
         name="Settings"
         component={SettingsScreen}

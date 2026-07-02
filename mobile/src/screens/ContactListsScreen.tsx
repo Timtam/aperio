@@ -236,11 +236,11 @@ export default function ContactListsScreen({
         />
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={t('mobile.add')}
+          accessibilityLabel={t('sidebar.newContactList')}
           onPress={() => void addBook()}
           style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
         >
-          <Text style={styles.buttonText}>{t('mobile.add')}</Text>
+          <Text style={styles.buttonText}>{t('sidebar.newContactList')}</Text>
         </Pressable>
       </View>
 
