@@ -10,10 +10,36 @@ import androidx.core.content.FileProvider
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.File
+import java.util.concurrent.Executors
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.cancel
 import uniffi.cal_ffi.Host
 import uniffi.cal_ffi.parseAttendee as uniffiParseAttendee
 
 class CalFfiModule : Module() {
+  // Expo runs EVERY AsyncFunction body on ONE single-threaded HandlerThread
+  // dispatcher ("expo.modules.AsyncFunctionQueue"), so a seconds-long sync
+  // round makes every read call queue behind it — on app open the views then
+  // sit on "Loading…" until the launch sync finishes, even with a warm SWR
+  // cache. The long NETWORK-bound operations therefore run on their own
+  // single-thread scope: sync rounds stay mutually exclusive among themselves,
+  // while the short reads/writes on the default queue flow past them. (The
+  // Rust Host is Send+Sync — uniffi's contract — and its SQLite access is
+  // mutex-guarded, so both dispatchers may safely call into it concurrently.)
+  // Mirrors the iOS module's `slowQueue`.
+  // The dispatcher is kept separately so OnDestroy can close it — expo-modules
+  // only cancels its OWN queues on teardown, so without this every React-host
+  // re-creation (dev reload) would leak one "calffi.slow" thread.
+  private val slowDispatcher =
+    Executors.newSingleThreadExecutor { r -> Thread(r, "calffi.slow") }
+      .asCoroutineDispatcher()
+  private val slowScope = CoroutineScope(
+    slowDispatcher + SupervisorJob() + CoroutineName("calffi.slow"),
+  )
+
   // The full on-device engine: tasks + lists + sections + accounts + the
   // statically-embedded adapter registry + cross-device sync, all over one
   // `<filesDir>/aperio.sqlite` (the same schema the desktop migrates). Tasks
@@ -77,6 +103,13 @@ class CalFfiModule : Module() {
     // { payload: "<CacheUpdatedPayload JSON>" }; onCacheRefreshStatus carries
     // { status: "<CacheRefreshStatus JSON>" }.
     Events("onCacheUpdated", "onCacheRefreshStatus", "onContactsSynced")
+
+    // Release the slow-ops thread when the module is torn down (dev reload /
+    // React-host restart) — expo-modules cancels only its own queues.
+    OnDestroy {
+      slowScope.cancel()
+      slowDispatcher.close()
+    }
 
     // Calls the Rust `cal_ffi::parse_attendee` through the UniFFI-generated
     // Kotlin bindings (uniffi/cal_ffi/cal_ffi.kt), backed by libcal_ffi.so.
@@ -169,7 +202,7 @@ class CalFfiModule : Module() {
 
     AsyncFunction("testAccountJson") { requestJson: String ->
       host.testAccountJson(requestJson)
-    }
+    }.runOnQueue(slowScope)
 
     AsyncFunction("deleteAccount") { accountId: String ->
       host.deleteAccount(accountId)
@@ -230,7 +263,7 @@ class CalFfiModule : Module() {
 
     AsyncFunction("queryFreeBusyJson") { requestJson: String ->
       host.queryFreeBusyJson(requestJson)
-    }
+    }.runOnQueue(slowScope)
 
     AsyncFunction("createEventJson") { requestJson: String ->
       host.createEventJson(requestJson)
@@ -254,7 +287,7 @@ class CalFfiModule : Module() {
 
     AsyncFunction("configureSyncAdapterJson") { configJson: String ->
       host.configureSyncAdapterJson(configJson)
-    }
+    }.runOnQueue(slowScope)
 
     AsyncFunction("syncStatusJson") {
       host.syncStatusJson()
@@ -262,7 +295,7 @@ class CalFfiModule : Module() {
 
     AsyncFunction("syncNowJson") { trigger: String ->
       host.syncNowJson(trigger)
-    }
+    }.runOnQueue(slowScope)
 
     AsyncFunction("disconnectSync") {
       host.disconnectSync()
@@ -274,7 +307,7 @@ class CalFfiModule : Module() {
 
     AsyncFunction("pushNow") { trigger: String ->
       host.pushNow(trigger).toInt()
-    }
+    }.runOnQueue(slowScope)
 
     AsyncFunction("listSyncLogJson") { limit: Int ->
       host.listSyncLogJson(limit.toUInt())
@@ -286,7 +319,7 @@ class CalFfiModule : Module() {
 
     AsyncFunction("compactNowJson") {
       host.compactNowJson()
-    }
+    }.runOnQueue(slowScope)
 
     AsyncFunction("refreshExternalCache") {
       host.refreshExternalCache()
@@ -304,7 +337,7 @@ class CalFfiModule : Module() {
     // foreground); the interval + include-read-only prefs are device-local.
     AsyncFunction("syncContactsNow") { includeReadOnly: Boolean? ->
       host.syncContactsNow(includeReadOnly)
-    }
+    }.runOnQueue(slowScope)
 
     AsyncFunction("getContactsSyncStatusJson") {
       host.getContactsSyncStatusJson()
@@ -591,11 +624,11 @@ class CalFfiModule : Module() {
 
     AsyncFunction("completeOauthJson") { pluginId: String, requestJson: String ->
       host.completeOauthJson(pluginId, requestJson)
-    }
+    }.runOnQueue(slowScope)
 
     AsyncFunction("completeOauthReconnectJson") { pluginId: String, accountId: String, requestJson: String ->
       host.completeOauthReconnectJson(pluginId, accountId, requestJson)
-    }
+    }.runOnQueue(slowScope)
 
     // ─── Discovery (EWS Autodiscover; host-driven, like the desktop) ──────────
     // discoverJson runs a plugin's endpoint discovery (EWS: {email, password} →
@@ -604,7 +637,7 @@ class CalFfiModule : Module() {
 
     AsyncFunction("discoverJson") { pluginId: String, argsJson: String ->
       host.discoverJson(pluginId, argsJson)
-    }
+    }.runOnQueue(slowScope)
 
     // ─── Sync-target OAuth (Dropbox / Google Drive) ───────────────────────────
     // completeSyncOauthJson exchanges the redirect's code for tokens (network)
@@ -613,7 +646,7 @@ class CalFfiModule : Module() {
 
     AsyncFunction("completeSyncOauthJson") { pluginId: String, requestJson: String ->
       host.completeSyncOauthJson(pluginId, requestJson)
-    }
+    }.runOnQueue(slowScope)
 
     // ─── E2E sync encryption (§19.7) ──────────────────────────────────────────
     // enableSyncEncryptionJson turns on E2E for the configured target (mint key,
@@ -621,26 +654,26 @@ class CalFfiModule : Module() {
 
     AsyncFunction("enableSyncEncryptionJson") { passphrase: String ->
       host.enableSyncEncryptionJson(passphrase)
-    }
+    }.runOnQueue(slowScope)
 
     // disableSyncEncryptionJson turns E2E OFF: rewrites every log + snapshot as
     // plaintext, flips the meta, drops the device key (other devices re-onboard).
     AsyncFunction("disableSyncEncryptionJson") { passphrase: String ->
       host.disableSyncEncryptionJson(passphrase)
-    }
+    }.runOnQueue(slowScope)
 
     // changeSyncPassphraseJson rotates the E2E passphrase (re-wraps the same
     // data key; existing devices keep working, future joins need the new one).
     AsyncFunction("changeSyncPassphraseJson") { oldPassphrase: String, newPassphrase: String ->
       host.changeSyncPassphraseJson(oldPassphrase, newPassphrase)
-    }
+    }.runOnQueue(slowScope)
 
     // adoptRemoteEncryptionJson: a peer turned E2E on while this device synced
     // plaintext; derive the key from the passphrase + swap to an encrypting
     // adapter so the next round (which had failed with encryption_required) works.
     AsyncFunction("adoptRemoteEncryptionJson") { passphrase: String ->
       host.adoptRemoteEncryptionJson(passphrase)
-    }
+    }.runOnQueue(slowScope)
 
     // ─── Onboarding: preview + join an existing dataset (§19.11) ──────────────
     // previewSyncTargetJson reads the target's meta.json WITHOUT committing →
@@ -649,21 +682,21 @@ class CalFfiModule : Module() {
 
     AsyncFunction("previewSyncTargetJson") { configJson: String ->
       host.previewSyncTargetJson(configJson)
-    }
+    }.runOnQueue(slowScope)
 
     AsyncFunction("acceptRemoteDatasetJson") { configJson: String, deviceName: String?, passphrase: String? ->
       host.acceptRemoteDatasetJson(configJson, deviceName, passphrase)
-    }
+    }.runOnQueue(slowScope)
 
     // adoptLocalDatasetJson initialises a FRESH dataset (the unified Connect
     // button's empty-target path), optionally enabling E2E at creation.
     AsyncFunction("adoptLocalDatasetJson") { configJson: String, deviceName: String?, passphrase: String? ->
       host.adoptLocalDatasetJson(configJson, deviceName, passphrase)
-    }
+    }.runOnQueue(slowScope)
 
     AsyncFunction("resumeStaleDeviceJson") {
       host.resumeStaleDeviceJson()
-    }
+    }.runOnQueue(slowScope)
 
     // ─── SFTP host-key trust (§19.5 TOFU) ─────────────────────────────────────
     // previewSftpHostKeyJson probes the server's fingerprint (network) + compares
@@ -672,7 +705,7 @@ class CalFfiModule : Module() {
 
     AsyncFunction("previewSftpHostKeyJson") { argsJson: String ->
       host.previewSftpHostKeyJson(argsJson)
-    }
+    }.runOnQueue(slowScope)
 
     AsyncFunction("trustSftpHostKey") { hostPort: String, fingerprint: String ->
       host.trustSftpHostKey(hostPort, fingerprint)
