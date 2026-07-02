@@ -7,6 +7,8 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { selectableTaskLists } from '@aperio/shared';
+
 import { useAnnouncer } from '../a11y/announcerContext';
 import { createTask as apiCreateTask, isCommandError } from '../api/client';
 import { useCalendarStore } from '../state/calendarStoreContext';
@@ -35,12 +37,12 @@ export function QuickAddTaskDialog({
 }) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
-  const { taskLists } = useCalendarStore();
+  const { taskLists, selectedTaskListIds } = useCalendarStore();
   const { openTaskDialog } = useDialogState();
 
   const initial = useMemo(
-    () => buildInitial(taskLists, defaultDate),
-    [taskLists, defaultDate],
+    () => buildInitial(taskLists, selectedTaskListIds, defaultDate),
+    [taskLists, selectedTaskListIds, defaultDate],
   );
 
   const [title, setTitle] = useState(initial.title);
@@ -121,7 +123,12 @@ export function QuickAddTaskDialog({
     });
   }, [onClose, openTaskDialog, listId, date, title]);
 
-  const writableLists = taskLists.filter((l) => !l.read_only);
+  // Writable + checked in the sidebar — the same set TaskDialog offers, plus
+  // the current pick so a pre-seeded list never vanishes from its own picker.
+  const selectableLists = selectableTaskLists(taskLists, {
+    selectedIds: selectedTaskListIds,
+    currentId: listId,
+  });
 
   return (
     <Modal
@@ -168,7 +175,7 @@ export function QuickAddTaskDialog({
             <option value="" disabled>
               {t('dialogs.task.pickList')}
             </option>
-            {writableLists.map((list) => (
+            {selectableLists.map((list) => (
               <option key={list.id} value={list.id}>
                 {list.name}
               </option>
@@ -220,18 +227,21 @@ interface Initial {
 
 function buildInitial(
   taskLists: { id: string; read_only: boolean }[],
+  selectedTaskListIds: ReadonlySet<string>,
   defaultDate?: string,
 ): Initial {
-  // Default list mirrors TaskDialog: last-used (if still present + writable),
-  // else the first writable list, else any list.
-  const writable = taskLists.filter((l) => !l.read_only);
+  // Default list mirrors TaskDialog: last-used (if still selectable), else the
+  // first selectable (writable + checked) list, else any list (degenerate).
+  const selectable = selectableTaskLists(taskLists, {
+    selectedIds: selectedTaskListIds,
+  });
   const lastUsed = readLastUsedTaskList();
   const lastUsedValid =
-    lastUsed && writable.some((l) => l.id === lastUsed) ? lastUsed : null;
+    lastUsed && selectable.some((l) => l.id === lastUsed) ? lastUsed : null;
   return {
     title: '',
     // Dateless by default → backlog; an activated calendar day schedules it.
     date: defaultDate ?? '',
-    listId: lastUsedValid ?? writable[0]?.id ?? taskLists[0]?.id ?? '',
+    listId: lastUsedValid ?? selectable[0]?.id ?? taskLists[0]?.id ?? '',
   };
 }

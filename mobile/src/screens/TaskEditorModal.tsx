@@ -30,6 +30,7 @@ import type {
 import {
   TASK_RECURRENCE_DEFAULT,
   fromBackend,
+  selectableTaskLists,
   selfAssignOnStatusChange,
   toBackend,
 } from '@aperio/shared';
@@ -211,8 +212,14 @@ export default function TaskEditorModal({
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { taskId, listId, parentId, initialTitle, initialScheduledDate } = route.params;
-  const { taskLists, sectionsByList, loadSections, colorLabels, invalidateData } =
-    useTaskStore();
+  const {
+    taskLists,
+    selectedTaskListIds,
+    sectionsByList,
+    loadSections,
+    colorLabels,
+    invalidateData,
+  } = useTaskStore();
 
   const [form, setForm] = useState<FormState>(() =>
     buildInitialState(null, listId, {
@@ -411,9 +418,18 @@ export default function TaskEditorModal({
     [t],
   );
 
+  // Offer only lists the user can write to AND still checks in the Lists
+  // catalog (shared `selectableTaskLists`, mirroring the event editor's
+  // calendar picker): a read-only list rejects writes, a deselected list is a
+  // confusing target. The task's own list is kept via `currentId` so editing a
+  // task on such a list still shows its real home.
   const listOptions = useMemo(
-    () => taskLists.map((l) => ({ value: l.id, label: l.name })),
-    [taskLists],
+    () =>
+      selectableTaskLists(taskLists, {
+        selectedIds: selectedTaskListIds,
+        currentId: form.listId,
+      }).map((l) => ({ value: l.id, label: l.name })),
+    [taskLists, selectedTaskListIds, form.listId],
   );
   const sectionOptions = useMemo(
     () => [

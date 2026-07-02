@@ -27,7 +27,7 @@ import {
   type ContextMenuItemRequest,
 } from '../api/client';
 import { invoke } from '@tauri-apps/api/core';
-import { selfAssignOnStatusChange } from '@aperio/shared';
+import { selectableTaskLists, selfAssignOnStatusChange } from '@aperio/shared';
 import { todayIsoKey } from '../intl/taskDay';
 import {
   effortSuffix,
@@ -148,7 +148,7 @@ export function TaskDialog({
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const fmt = useDateFormat();
-  const { taskLists, colorLabels, sectionsByList, loadSections } =
+  const { taskLists, selectedTaskListIds, colorLabels, sectionsByList, loadSections } =
     useCalendarStore();
   const { tasks } = useTasks();
   const { invalidateData } = useDialogState();
@@ -214,8 +214,16 @@ export function TaskDialog({
     }
   }, [subtasks.length, focusedSubtaskIdx]);
   const initialState = useMemo<FormState>(
-    () => buildInitialState(task, defaultListId, defaultDate, defaultTitle, taskLists),
-    [task, defaultListId, defaultDate, defaultTitle, taskLists],
+    () =>
+      buildInitialState(
+        task,
+        defaultListId,
+        defaultDate,
+        defaultTitle,
+        taskLists,
+        selectedTaskListIds,
+      ),
+    [task, defaultListId, defaultDate, defaultTitle, taskLists, selectedTaskListIds],
   );
 
   const [form, setForm] = useState<FormState>(initialState);
@@ -1075,7 +1083,16 @@ export function TaskDialog({
             <option value="" disabled>
               {t('dialogs.task.pickList')}
             </option>
-            {taskLists.map((list) => (
+            {/* Offer only lists the user can write to AND still checks in the
+                sidebar (`selectableTaskLists` — the task twin of the event
+                editor's calendar filter): a read-only list rejects writes, and
+                a deselected list is a confusing target. The task being edited
+                might itself live on such a list — `currentId` keeps it so the
+                picker still matches `form.listId`. */}
+            {selectableTaskLists(taskLists, {
+              selectedIds: selectedTaskListIds,
+              currentId: form.listId,
+            }).map((list) => (
               <option key={list.id} value={list.id}>
                 {list.name}
               </option>
@@ -1720,6 +1737,7 @@ function buildInitialState(
   defaultDate: string | undefined,
   defaultTitle: string | undefined,
   taskLists: { id: string; read_only: boolean }[],
+  selectedTaskListIds: ReadonlySet<string>,
 ): FormState {
   if (task) {
     // Direct field-by-field mapping. Each slot is independently
@@ -1748,18 +1766,19 @@ function buildInitialState(
   // task on that day. When unset, the task starts dateless (backlog).
   const anchored = defaultDate ? defaultDate.slice(0, 10) : '';
   // Same fallback chain as the event picker: explicit default →
-  // last-used (if still present and writable) → first writable →
-  // first list at all.
-  const writableLists = taskLists.filter((l) => !l.read_only);
+  // last-used (if still selectable) → first selectable (writable +
+  // checked in the sidebar, the same set the dropdown offers) →
+  // first list at all (degenerate case; submit blocks on it anyway).
+  const selectable = selectableTaskLists(taskLists, {
+    selectedIds: selectedTaskListIds,
+  });
   const lastUsed = readLastUsedTaskList();
   const lastUsedIfValid =
-    lastUsed && writableLists.some((l) => l.id === lastUsed)
-      ? lastUsed
-      : null;
+    lastUsed && selectable.some((l) => l.id === lastUsed) ? lastUsed : null;
   const fallbackList =
     defaultListId ??
     lastUsedIfValid ??
-    writableLists[0]?.id ??
+    selectable[0]?.id ??
     taskLists[0]?.id ??
     '';
   return {
