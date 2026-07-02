@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CalendarActions } from '../components/CalendarActions';
 import { CalendarDayList } from '../components/CalendarDayList';
+import { CalendarPager } from '../components/CalendarPager';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { JumpToDateButton } from '../components/JumpToDateButton';
 import { SegmentedSelect } from '../components/SegmentedSelect';
@@ -62,7 +63,24 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
     day: 'numeric',
   });
 
+  // Announce the period on navigation (the three-finger swipe / prev-next change
+  // the day silently otherwise). Skip the first render — nothing changed yet.
+  // Mirrors MonthScreen.
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    AccessibilityInfo.announceForAccessibility(dayLabel);
+  }, [dayLabel]);
+
   const goToday = useCallback(() => setDay(localMidnight(new Date())), []);
+
+  const stepDay = useCallback(
+    (delta: number) => setDay((d) => addDays(d, delta)),
+    [],
+  );
 
   // The synced single-day layout (`calendar.dayViewMode`, default 'grid'):
   // proportional hour-grid vs. compact list. Hydrated on mount and re-read on
@@ -105,7 +123,7 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('mobile.prevDay')}
-          onPress={() => setDay((d) => addDays(d, -1))}
+          onPress={() => stepDay(-1)}
           style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
         >
           <Text style={styles.navButtonText} importantForAccessibility="no">
@@ -118,7 +136,7 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('mobile.nextDay')}
-          onPress={() => setDay((d) => addDays(d, 1))}
+          onPress={() => stepDay(1)}
           style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
         >
           <Text style={styles.navButtonText} importantForAccessibility="no">
@@ -160,22 +178,26 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
         <CalendarActions navigation={navigation} anchorDay={day} />
       </View>
 
-      <CalendarDayList
-        navigation={navigation}
-        days={days}
-        range={range}
-        gridLabel={t('views.day.gridLabel')}
-        emptyText={t('views.day.empty')}
-        dayAnnounceKey="views.day.dayAnnounce"
-        showDayHeaders={false}
-        // Single-day view → the synced `calendar.dayViewMode`: 'grid' = the
-        // proportional 24h hour-grid (events placed by start, sized by
-        // duration), 'list' = the compact chronological list (event blocks sized
-        // by duration, tasks by effort). Visual only; the list semantics are
-        // unchanged. Week/Month/Agenda render CalendarDayList without this prop
-        // (plain linear list).
-        dayLayout={dayViewMode}
-      />
+      {/* Three-finger swipe (VoiceOver) / horizontal flick pages between days;
+          vertical scrolling stays with the day list. Mirrors MonthScreen. */}
+      <CalendarPager onPrev={() => stepDay(-1)} onNext={() => stepDay(1)}>
+        <CalendarDayList
+          navigation={navigation}
+          days={days}
+          range={range}
+          gridLabel={t('views.day.gridLabel')}
+          emptyText={t('views.day.empty')}
+          dayAnnounceKey="views.day.dayAnnounce"
+          showDayHeaders={false}
+          // Single-day view → the synced `calendar.dayViewMode`: 'grid' = the
+          // proportional 24h hour-grid (events placed by start, sized by
+          // duration), 'list' = the compact chronological list (event blocks sized
+          // by duration, tasks by effort). Visual only; the list semantics are
+          // unchanged. Week/Month/Agenda render CalendarDayList without this prop
+          // (plain linear list).
+          dayLayout={dayViewMode}
+        />
+      </CalendarPager>
     </View>
   );
 }
