@@ -73,6 +73,7 @@
     "jumpToDate": "Zu Datum springen (JJJJ-MM-TT)",
     "jumpToDateAction": "Zum Datum",
     "jumpToDateNative": "Zu Datum springen",
+    "applyAction": "Übernehmen",
     "renameListLabel": "Liste umbenennen",
     "listRenamed": "Liste umbenannt in „{{name}}“.",
     "calendarsButtonLabel": "Kalender",

@@ -1,4 +1,3 @@
-import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import {
   useCallback,
   useEffect,
@@ -45,6 +44,7 @@ import {
 } from '../api/client';
 import { AssigneePicker } from '../components/AssigneePicker';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
+import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { DescriptionLinks } from '../components/DescriptionLinks';
 import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
@@ -54,12 +54,7 @@ import { SoundSelect } from '../components/SoundSelect';
 import { SubtaskSection } from '../components/SubtaskSection';
 import { TaskRecurrenceSelector } from '../components/TaskRecurrenceSelector';
 import { useCancelHeader } from '../components/useCancelHeader';
-import {
-  formatLocalDate,
-  formatLocalTime,
-  parseLocalDate,
-  parseLocalTime,
-} from '../intl/dateTimeField';
+import { formatLocalDate, formatLocalTime } from '../intl/dateTimeField';
 import { currentUserForList } from '../state/currentUser';
 import { writeLastUsedTaskList } from '../state/lastUsedTaskList';
 import { readTaskBehaviour } from '../state/taskBehaviour';
@@ -895,7 +890,6 @@ export default function TaskEditorModal({
         onClear={() => clearSlot('scheduled')}
         fieldRef={scheduledDateRef}
         editable={!loading}
-        locale={i18n.language}
       />
 
       <DateTimeField
@@ -914,7 +908,6 @@ export default function TaskEditorModal({
         onClear={() => clearSlot('deadline')}
         fieldRef={deadlineDateRef}
         editable={!loading}
-        locale={i18n.language}
       />
 
       {/* The per-task reminder override only matters when a deadline is set; it
@@ -1106,7 +1099,6 @@ function DateTimeField({
   onClear,
   fieldRef,
   editable,
-  locale,
 }: {
   legend: string;
   hint: string;
@@ -1123,7 +1115,6 @@ function DateTimeField({
   onClear: () => void;
   fieldRef: RefObject<View | null>;
   editable: boolean;
-  locale: string;
 }) {
   const styles = useThemedStyles(makeStyles);
   const hasDate = dateValue.trim() !== '';
@@ -1154,13 +1145,21 @@ function DateTimeField({
       ) : (
         <>
           <View style={styles.pickerRow}>
-            <Text style={styles.pickerLabel}>{`${legend} – ${dateLabel}`}</Text>
-            <DateTimePicker
+            {/* The visible label is folded into the field button's a11y label,
+                so it's hidden from the screen reader — one swipe stop, not two. */}
+            <Text
+              style={styles.pickerLabel}
+              accessibilityElementsHidden
+              importantForAccessibility="no"
+            >
+              {`${legend} – ${dateLabel}`}
+            </Text>
+            <DateTimeFieldButton
+              label={`${legend} – ${dateLabel}`}
               mode="date"
-              display="compact"
-              value={parseLocalDate(dateValue)}
-              onValueChange={(_, d) => onChangeDate(formatLocalDate(d))}
-              locale={locale}
+              value={dateValue}
+              onChange={onChangeDate}
+              disabled={!editable}
             />
           </View>
           {!hasTime ? (
@@ -1176,13 +1175,19 @@ function DateTimeField({
             </Pressable>
           ) : (
             <View style={styles.pickerRow}>
-              <Text style={styles.pickerLabel}>{`${legend} – ${timeLabel}`}</Text>
-              <DateTimePicker
+              <Text
+                style={styles.pickerLabel}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              >
+                {`${legend} – ${timeLabel}`}
+              </Text>
+              <DateTimeFieldButton
+                label={`${legend} – ${timeLabel}`}
                 mode="time"
-                display="compact"
-                value={parseLocalTime(timeValue)}
-                onValueChange={(_, d) => onChangeTime(formatLocalTime(d))}
-                locale={locale}
+                value={timeValue}
+                onChange={onChangeTime}
+                disabled={!editable}
               />
               <Pressable
                 accessibilityRole="button"

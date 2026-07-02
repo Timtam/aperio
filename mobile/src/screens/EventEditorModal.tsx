@@ -1,4 +1,3 @@
-import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -17,6 +16,7 @@ import { selectableEventCalendars } from '@aperio/shared';
 import { AttendeesEditor } from '../components/AttendeesEditor';
 import { AvailabilityChecker } from '../components/AvailabilityChecker';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
+import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { DescriptionLinks } from '../components/DescriptionLinks';
 import { EventRsvp } from '../components/EventRsvp';
 import { FormScrollView } from '../components/FormScrollView';
@@ -36,12 +36,6 @@ import {
 } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
 import { setEventColor } from '../api/containerColor';
-import {
-  formatLocalDate,
-  formatLocalTime,
-  parseLocalDate,
-  parseLocalTime,
-} from '../intl/dateTimeField';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useCalendarVisibility } from '../state/calendarVisibility';
 import { useSoundPref } from '../state/useSoundPref';
@@ -49,8 +43,8 @@ import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
 // Create / edit a calendar event. Screen-reader-first: every control is an
 // addressable element with an explicit label; the calendar picker is a
-// RadioGroup; all-day is a switch; start/end date + time use the native
-// @expo/ui DateTimePicker (always present — an event has a start and end). On edit the
+// RadioGroup; all-day is a switch; start/end date + time are accessible
+// DateTimeFieldButtons (always present — an event has a start and end). On edit the
 // loaded event is sent back whole with the edits applied, so recurrence /
 // reminders / attendees / the inline sound field round-trip untouched (the
 // per-event sound OVERRIDE is a `sound.item.{id}` pref, edited below).
@@ -121,7 +115,7 @@ export default function EventEditorModal({
   route,
   navigation,
 }: RootStackScreenProps<'EventEditor'>) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const { hidden: hiddenCalendars } = useCalendarVisibility();
@@ -498,48 +492,73 @@ export default function EventEditorModal({
         </View>
       </Pressable>
 
+      {/* Date/time FIELDS as accessible buttons (value in the label, picker in
+          a dialog — DateTimeFieldButton): the inline compact picker never
+          joined the VoiceOver swipe order. Each visible label is folded into
+          its button's a11y label and hidden from the screen reader, so a field
+          is one swipe stop, not two. */}
       <View style={styles.field}>
-        <Text style={styles.label}>{t('dialogs.event.fields.startDate')}</Text>
-        <DateTimePicker
+        <Text
+          style={styles.label}
+          accessibilityElementsHidden
+          importantForAccessibility="no"
+        >
+          {t('dialogs.event.fields.startDate')}
+        </Text>
+        <DateTimeFieldButton
+          label={t('dialogs.event.fields.startDate')}
           mode="date"
-          display="compact"
-          value={parseLocalDate(startDate)}
-          onValueChange={(_, d) => setStartDate(formatLocalDate(d))}
-          locale={i18n.language}
+          value={startDate}
+          onChange={setStartDate}
         />
       </View>
       {!allDay && (
         <View style={styles.field}>
-          <Text style={styles.label}>{t('dialogs.event.fields.startTime')}</Text>
-          <DateTimePicker
+          <Text
+            style={styles.label}
+            accessibilityElementsHidden
+            importantForAccessibility="no"
+          >
+            {t('dialogs.event.fields.startTime')}
+          </Text>
+          <DateTimeFieldButton
+            label={t('dialogs.event.fields.startTime')}
             mode="time"
-            display="compact"
-            value={parseLocalTime(startTime)}
-            onValueChange={(_, d) => setStartTime(formatLocalTime(d))}
-            locale={i18n.language}
+            value={startTime}
+            onChange={setStartTime}
           />
         </View>
       )}
 
       <View style={styles.field}>
-        <Text style={styles.label}>{t('dialogs.event.fields.endDate')}</Text>
-        <DateTimePicker
+        <Text
+          style={styles.label}
+          accessibilityElementsHidden
+          importantForAccessibility="no"
+        >
+          {t('dialogs.event.fields.endDate')}
+        </Text>
+        <DateTimeFieldButton
+          label={t('dialogs.event.fields.endDate')}
           mode="date"
-          display="compact"
-          value={parseLocalDate(endDate)}
-          onValueChange={(_, d) => setEndDate(formatLocalDate(d))}
-          locale={i18n.language}
+          value={endDate}
+          onChange={setEndDate}
         />
       </View>
       {!allDay && (
         <View style={styles.field}>
-          <Text style={styles.label}>{t('dialogs.event.fields.endTime')}</Text>
-          <DateTimePicker
+          <Text
+            style={styles.label}
+            accessibilityElementsHidden
+            importantForAccessibility="no"
+          >
+            {t('dialogs.event.fields.endTime')}
+          </Text>
+          <DateTimeFieldButton
+            label={t('dialogs.event.fields.endTime')}
             mode="time"
-            display="compact"
-            value={parseLocalTime(endTime)}
-            onValueChange={(_, d) => setEndTime(formatLocalTime(d))}
-            locale={i18n.language}
+            value={endTime}
+            onChange={setEndTime}
           />
         </View>
       )}

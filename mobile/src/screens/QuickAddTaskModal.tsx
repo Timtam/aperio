@@ -1,4 +1,3 @@
-import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -14,10 +13,11 @@ import {
 import { selectableTaskLists } from '@aperio/shared';
 
 import { createTask } from '../api/client';
+import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
 import { useCancelHeader } from '../components/useCancelHeader';
-import { formatLocalDate, parseLocalDate } from '../intl/dateTimeField';
+import { formatLocalDate } from '../intl/dateTimeField';
 import { readLastUsedTaskList, writeLastUsedTaskList } from '../state/lastUsedTaskList';
 import { useTaskStore } from '../state/taskStoreContext';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -47,7 +47,7 @@ export default function QuickAddTaskModal({
   navigation,
   route,
 }: RootStackScreenProps<'QuickAdd'>) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { taskLists, selectedTaskListIds, invalidateData } = useTaskStore();
 
@@ -223,12 +223,14 @@ export default function QuickAddTaskModal({
           </Pressable>
         ) : (
           <View style={styles.pickerRow}>
-            <DateTimePicker
+            {/* Accessible field button (value in the label, picker in a
+                dialog) — the inline compact picker never joined the VoiceOver
+                swipe order. */}
+            <DateTimeFieldButton
+              label={t('dialogs.task.fields.scheduled.legend')}
               mode="date"
-              display="compact"
-              value={parseLocalDate(date)}
-              onValueChange={(_, d) => setDate(formatLocalDate(d))}
-              locale={i18n.language}
+              value={date}
+              onChange={setDate}
             />
             <Pressable
               accessibilityRole="button"

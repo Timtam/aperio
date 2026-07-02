@@ -1,4 +1,3 @@
-import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -14,15 +13,11 @@ import {
 import { selectableEventCalendars } from '@aperio/shared';
 
 import { createEvent, listCalendars, type Calendar } from '../api/calendar';
+import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
 import { useCancelHeader } from '../components/useCancelHeader';
-import {
-  formatLocalDate,
-  formatLocalTime,
-  parseLocalDate,
-  parseLocalTime,
-} from '../intl/dateTimeField';
+import { formatLocalDate, formatLocalTime } from '../intl/dateTimeField';
 import { useCalendarVisibility } from '../state/calendarVisibility';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -45,7 +40,7 @@ export default function QuickAddEventModal({
   navigation,
   route,
 }: RootStackScreenProps<'QuickAddEvent'>) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { hidden } = useCalendarVisibility();
 
@@ -189,25 +184,38 @@ export default function QuickAddEventModal({
         />
       </View>
 
+      {/* Date/time as accessible field buttons (value in the label, picker in
+          a dialog) — the inline compact picker never joined the VoiceOver
+          swipe order; the visible label is SR-hidden (folded into the button). */}
       <View style={styles.field}>
-        <Text style={styles.legend}>{t('dialogs.event.fields.startDate')}</Text>
-        <DateTimePicker
+        <Text
+          style={styles.legend}
+          accessibilityElementsHidden
+          importantForAccessibility="no"
+        >
+          {t('dialogs.event.fields.startDate')}
+        </Text>
+        <DateTimeFieldButton
+          label={t('dialogs.event.fields.startDate')}
           mode="date"
-          display="compact"
-          value={parseLocalDate(date)}
-          onValueChange={(_, d) => setDate(formatLocalDate(d))}
-          locale={i18n.language}
+          value={date}
+          onChange={setDate}
         />
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.legend}>{t('dialogs.event.fields.startTime')}</Text>
-        <DateTimePicker
+        <Text
+          style={styles.legend}
+          accessibilityElementsHidden
+          importantForAccessibility="no"
+        >
+          {t('dialogs.event.fields.startTime')}
+        </Text>
+        <DateTimeFieldButton
+          label={t('dialogs.event.fields.startTime')}
           mode="time"
-          display="compact"
-          value={parseLocalTime(time)}
-          onValueChange={(_, d) => setTime(formatLocalTime(d))}
-          locale={i18n.language}
+          value={time}
+          onChange={setTime}
         />
       </View>
 
