@@ -2580,9 +2580,9 @@ impl Host {
 
             // External calendars via SWR, per account: a WARM account serves its
             // cached catalogue instantly (offline, no PROPFIND/folder-walk gating
-            // the whole UI); a COLD account does a live fetch so its routes are
-            // primed + the first paint isn't empty (no cache-updated push yet to
-            // re-run this listing). Prime routes from whatever we serve, and
+            // the whole UI); a COLD account serves its RETAINED catalogue when one
+            // exists (a live per-account fetch would gate the first paint), and
+            // only a never-listed account fetches live. Prime routes from whatever we serve, and
             // background-refresh (which also primes routes + caches) when cold or
             // stale. Mirrors the desktop external_calendars_swr + the mobile
             // cold-fallback. Per-adapter errors are swallowed so one dead account
@@ -2598,7 +2598,18 @@ impl Host {
                 let cals = if warm {
                     self.cache.read_calendars(&account).unwrap_or_default()
                 } else {
-                    adapter.list_calendars().await.unwrap_or_default()
+                    // COLD: serve the RETAINED catalogue when there is one (a
+                    // sync-state reset — cache-generation reconcile, listing
+                    // invalidate after a rename — keeps the rows); the spawned
+                    // refresh below swaps in the truth. Only a never-listed
+                    // account fetches live. Keeps a cold app start from doing
+                    // a per-account network listing before the first paint.
+                    let retained = self.cache.read_calendars(&account).unwrap_or_default();
+                    if retained.is_empty() {
+                        adapter.list_calendars().await.unwrap_or_default()
+                    } else {
+                        retained
+                    }
                 };
                 for c in &cals {
                     self.registry.note_calendar_route(&c.id, &account);
@@ -3293,8 +3304,9 @@ impl Host {
         // External task lists via SWR, per account — same shape as the calendar
         // listing (see list_calendars_json): a WARM account serves its cached
         // catalogue instantly (offline, no provider round-trip gating the UI); a
-        // COLD account does a live fetch so its routes are primed + the first
-        // paint isn't empty (no cache-updated push yet to re-run this listing).
+        // COLD account serves its RETAINED catalogue when one exists (a live
+        // per-account fetch would gate the tasks tab's first load), and only a
+        // never-listed account fetches live.
         // Prime routes from whatever we serve, and background-refresh (which also
         // primes routes + caches) when cold or stale. Per-adapter errors are
         // swallowed so one dead account can't blank the whole list.
@@ -3311,7 +3323,18 @@ impl Host {
                 let lists = if warm {
                     self.cache.read_task_lists(&account).unwrap_or_default()
                 } else {
-                    adapter.list_task_lists().await.unwrap_or_default()
+                    // COLD: serve the RETAINED catalogue when there is one —
+                    // the tasks tab gates its FIRST load on this listing, so a
+                    // live per-account fetch here is exactly the app-start
+                    // "Laden…" stall. The spawned refresh below swaps in the
+                    // truth; only a never-listed account fetches live. Mirrors
+                    // list_calendars_json.
+                    let retained = self.cache.read_task_lists(&account).unwrap_or_default();
+                    if retained.is_empty() {
+                        adapter.list_task_lists().await.unwrap_or_default()
+                    } else {
+                        retained
+                    }
                 };
                 for l in &lists {
                     self.registry.note_task_list_route(&l.id, &account);
@@ -6209,9 +6232,8 @@ impl Host {
             // External contact lists via SWR, per account — same shape as the
             // calendar listing (see list_calendars_json): a WARM account serves
             // its cached catalogue instantly (offline, no provider round-trip
-            // gating the UI); a COLD account does a live fetch so its routes are
-            // primed + the first paint isn't empty (no cache-updated push yet to
-            // re-run this listing). Prime routes from whatever we serve, and
+            // gating the UI); a COLD account serves its RETAINED catalogue when one
+            // exists, and only a never-listed account fetches live. Prime routes from whatever we serve, and
             // background-refresh (which also primes routes + caches) when cold or
             // stale. Per-adapter errors are swallowed so one dead account can't
             // blank the whole list.
@@ -6227,7 +6249,16 @@ impl Host {
                 let lists = if warm {
                     self.cache.read_contact_lists(&account).unwrap_or_default()
                 } else {
-                    adapter.list_contact_lists().await.unwrap_or_default()
+                    // COLD: serve the RETAINED catalogue when there is one (the
+                    // spawned refresh below swaps in the truth); only a
+                    // never-listed account fetches live. Mirrors
+                    // list_calendars_json.
+                    let retained = self.cache.read_contact_lists(&account).unwrap_or_default();
+                    if retained.is_empty() {
+                        adapter.list_contact_lists().await.unwrap_or_default()
+                    } else {
+                        retained
+                    }
                 };
                 for l in &lists {
                     self.registry.note_contact_list_route(&l.id, &account);
