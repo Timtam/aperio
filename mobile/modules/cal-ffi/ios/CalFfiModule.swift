@@ -32,6 +32,17 @@ private final class JsContactSyncObserver: ContactSyncObserverBridge {
 }
 
 public class CalFfiModule: Module {
+  // Expo runs EVERY AsyncFunction body on ONE shared serial queue
+  // ("expo.modules.AsyncFunctionQueue"), so a seconds-long sync round makes
+  // every read call queue behind it — on app open the views then sit on
+  // "Loading…" until the launch sync finishes, even with a warm SWR cache.
+  // The long NETWORK-bound operations therefore run on their own serial
+  // queue: sync rounds stay mutually exclusive among themselves, while the
+  // short reads/writes on the default queue flow past them. (The Rust Host is
+  // Send+Sync — uniffi's contract — and its SQLite access is mutex-guarded,
+  // so both queues may safely call into it concurrently.)
+  private let slowQueue = DispatchQueue(label: "expo.modules.calffi.slow", qos: .userInitiated)
+
   // The full on-device engine: accounts + the statically-embedded adapter
   // registry, opened lazily at the app-sandbox database path. Credentials
   // route through IosKeychain (Security-framework Keychain). Mirrors the
@@ -144,7 +155,7 @@ public class CalFfiModule: Module {
 
     AsyncFunction("testAccountJson") { (requestJson: String) in
       try self.host.testAccountJson(requestJson: requestJson)
-    }
+    }.runOnQueue(slowQueue)
 
     AsyncFunction("deleteAccount") { (accountId: String) in
       try self.host.deleteAccount(accountId: accountId)
@@ -202,7 +213,7 @@ public class CalFfiModule: Module {
 
     AsyncFunction("queryFreeBusyJson") { (requestJson: String) -> String in
       try self.host.queryFreeBusyJson(requestJson: requestJson)
-    }
+    }.runOnQueue(slowQueue)
 
     AsyncFunction("createEventJson") { (requestJson: String) -> String in
       try self.host.createEventJson(requestJson: requestJson)
@@ -224,7 +235,7 @@ public class CalFfiModule: Module {
 
     AsyncFunction("configureSyncAdapterJson") { (configJson: String) in
       try self.host.configureSyncAdapterJson(configJson: configJson)
-    }
+    }.runOnQueue(slowQueue)
 
     AsyncFunction("syncStatusJson") { () -> String in
       try self.host.syncStatusJson()
@@ -232,7 +243,7 @@ public class CalFfiModule: Module {
 
     AsyncFunction("syncNowJson") { (trigger: String) -> String in
       try self.host.syncNowJson(trigger: trigger)
-    }
+    }.runOnQueue(slowQueue)
 
     AsyncFunction("disconnectSync") { () in
       try self.host.disconnectSync()
@@ -244,7 +255,7 @@ public class CalFfiModule: Module {
 
     AsyncFunction("pushNow") { (trigger: String) -> Int in
       Int(try self.host.pushNow(trigger: trigger))
-    }
+    }.runOnQueue(slowQueue)
 
     AsyncFunction("listSyncLogJson") { (limit: Int) -> String in
       try self.host.listSyncLogJson(limit: UInt32(limit))
@@ -256,7 +267,7 @@ public class CalFfiModule: Module {
 
     AsyncFunction("compactNowJson") { () -> String in
       try self.host.compactNowJson()
-    }
+    }.runOnQueue(slowQueue)
 
     AsyncFunction("refreshExternalCache") {
       self.host.refreshExternalCache()
@@ -274,7 +285,7 @@ public class CalFfiModule: Module {
     // foreground); the interval + include-read-only prefs are device-local.
     AsyncFunction("syncContactsNow") { (includeReadOnly: Bool?) -> Bool in
       try self.host.syncContactsNow(includeReadOnly: includeReadOnly)
-    }
+    }.runOnQueue(slowQueue)
 
     AsyncFunction("getContactsSyncStatusJson") { () -> String in
       try self.host.getContactsSyncStatusJson()
@@ -518,72 +529,72 @@ public class CalFfiModule: Module {
 
     AsyncFunction("completeOauthJson") { (pluginId: String, requestJson: String) -> String in
       try self.host.completeOauthJson(pluginId: pluginId, requestJson: requestJson)
-    }
+    }.runOnQueue(slowQueue)
 
     AsyncFunction("completeOauthReconnectJson") {
       (pluginId: String, accountId: String, requestJson: String) -> String in
       try self.host.completeOauthReconnectJson(
         pluginId: pluginId, accountId: accountId, requestJson: requestJson)
-    }
+    }.runOnQueue(slowQueue)
 
     // ─── Discovery (EWS Autodiscover; host-driven, like the desktop) ──────────
 
     AsyncFunction("discoverJson") { (pluginId: String, argsJson: String) -> String in
       try self.host.discoverJson(pluginId: pluginId, argsJson: argsJson)
-    }
+    }.runOnQueue(slowQueue)
 
     // ─── Sync-target OAuth (Dropbox / Google Drive) ───────────────────────────
 
     AsyncFunction("completeSyncOauthJson") { (pluginId: String, requestJson: String) in
       try self.host.completeSyncOauthJson(pluginId: pluginId, requestJson: requestJson)
-    }
+    }.runOnQueue(slowQueue)
 
     // ─── E2E sync encryption (§19.7) ──────────────────────────────────────────
 
     AsyncFunction("enableSyncEncryptionJson") { (passphrase: String) -> String in
       try self.host.enableSyncEncryptionJson(passphrase: passphrase)
-    }
+    }.runOnQueue(slowQueue)
 
     AsyncFunction("disableSyncEncryptionJson") { (passphrase: String) -> String in
       try self.host.disableSyncEncryptionJson(passphrase: passphrase)
-    }
+    }.runOnQueue(slowQueue)
 
     AsyncFunction("changeSyncPassphraseJson") { (oldPassphrase: String, newPassphrase: String) in
       try self.host.changeSyncPassphraseJson(
         oldPassphrase: oldPassphrase, newPassphrase: newPassphrase)
-    }
+    }.runOnQueue(slowQueue)
 
     AsyncFunction("adoptRemoteEncryptionJson") { (passphrase: String) in
       try self.host.adoptRemoteEncryptionJson(passphrase: passphrase)
-    }
+    }.runOnQueue(slowQueue)
 
     // ─── Onboarding: preview + join an existing dataset (§19.11) ──────────────
 
     AsyncFunction("previewSyncTargetJson") { (configJson: String) -> String in
       try self.host.previewSyncTargetJson(configJson: configJson)
-    }
+    }.runOnQueue(slowQueue)
 
     AsyncFunction("acceptRemoteDatasetJson") { (configJson: String, deviceName: String?, passphrase: String?) -> String in
       try self.host.acceptRemoteDatasetJson(
         configJson: configJson, deviceName: deviceName, passphrase: passphrase)
-    }
+    }.runOnQueue(slowQueue)
 
     // adoptLocalDatasetJson initialises a FRESH dataset (the unified Connect
     // button's empty-target path), optionally enabling E2E at creation.
     AsyncFunction("adoptLocalDatasetJson") { (configJson: String, deviceName: String?, passphrase: String?) -> String in
       try self.host.adoptLocalDatasetJson(
         configJson: configJson, deviceName: deviceName, passphrase: passphrase)
-    }
+    }.runOnQueue(slowQueue)
 
     AsyncFunction("resumeStaleDeviceJson") { () -> String in
       try self.host.resumeStaleDeviceJson()
-    }
+    }.runOnQueue(slowQueue)
 
     // ─── SFTP host-key trust (§19.5 TOFU) ─────────────────────────────────────
 
     AsyncFunction("previewSftpHostKeyJson") { (argsJson: String) -> String in
       try self.host.previewSftpHostKeyJson(argsJson: argsJson)
-    }
+    }.runOnQueue(slowQueue)
 
     AsyncFunction("trustSftpHostKey") { (hostPort: String, fingerprint: String) in
       try self.host.trustSftpHostKey(hostPort: hostPort, fingerprint: fingerprint)

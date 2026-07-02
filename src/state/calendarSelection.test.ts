@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { selectableEventCalendars } from '@aperio/shared';
+import { selectableEventCalendars, selectableTaskLists } from '@aperio/shared';
 
 const cals = [
   { id: 'writable-visible', read_only: false },
@@ -39,5 +39,37 @@ describe('selectableEventCalendars', () => {
       currentId: 'writable-visible',
     }).map((c) => c.id);
     expect(ids).toEqual(['writable-visible']);
+  });
+});
+
+// The task twin shares the container filter — assert the same contract so a
+// drift between the two exports can't go unnoticed.
+describe('selectableTaskLists', () => {
+  const lists = [
+    { id: 'writable-checked', read_only: false },
+    { id: 'writable-unchecked', read_only: false },
+    { id: 'readonly-checked', read_only: true },
+  ];
+
+  it('keeps only writable + checked lists when a selection is given', () => {
+    const checked = new Set(['writable-checked', 'readonly-checked']);
+    const ids = selectableTaskLists(lists, { selectedIds: checked }).map(
+      (l) => l.id,
+    );
+    expect(ids).toEqual(['writable-checked']);
+  });
+
+  it('keeps only writable lists when no selection is given', () => {
+    const ids = selectableTaskLists(lists).map((l) => l.id);
+    expect(ids).toEqual(['writable-checked', 'writable-unchecked']);
+  });
+
+  it('always keeps the current list, even unchecked + read-only', () => {
+    const checked = new Set<string>();
+    const ids = selectableTaskLists(lists, {
+      selectedIds: checked,
+      currentId: 'readonly-checked',
+    }).map((l) => l.id);
+    expect(ids).toEqual(['readonly-checked']);
   });
 });

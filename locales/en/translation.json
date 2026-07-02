@@ -73,6 +73,7 @@
     "jumpToDate": "Jump to date (YYYY-MM-DD)",
     "jumpToDateAction": "Go to date",
     "jumpToDateNative": "Jump to date",
+    "applyAction": "Apply",
     "renameListLabel": "Rename list",
     "listRenamed": "List renamed to \"{{name}}\".",
     "calendarsButtonLabel": "Calendars",

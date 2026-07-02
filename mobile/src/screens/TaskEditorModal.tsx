@@ -1,4 +1,3 @@
-import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import {
   useCallback,
   useEffect,
@@ -30,6 +29,7 @@ import type {
 import {
   TASK_RECURRENCE_DEFAULT,
   fromBackend,
+  selectableTaskLists,
   selfAssignOnStatusChange,
   toBackend,
 } from '@aperio/shared';
@@ -44,6 +44,7 @@ import {
 } from '../api/client';
 import { AssigneePicker } from '../components/AssigneePicker';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
+import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { DescriptionLinks } from '../components/DescriptionLinks';
 import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
@@ -53,12 +54,7 @@ import { SoundSelect } from '../components/SoundSelect';
 import { SubtaskSection } from '../components/SubtaskSection';
 import { TaskRecurrenceSelector } from '../components/TaskRecurrenceSelector';
 import { useCancelHeader } from '../components/useCancelHeader';
-import {
-  formatLocalDate,
-  formatLocalTime,
-  parseLocalDate,
-  parseLocalTime,
-} from '../intl/dateTimeField';
+import { formatLocalDate, formatLocalTime } from '../intl/dateTimeField';
 import { currentUserForList } from '../state/currentUser';
 import { writeLastUsedTaskList } from '../state/lastUsedTaskList';
 import { readTaskBehaviour } from '../state/taskBehaviour';
@@ -211,8 +207,14 @@ export default function TaskEditorModal({
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { taskId, listId, parentId, initialTitle, initialScheduledDate } = route.params;
-  const { taskLists, sectionsByList, loadSections, colorLabels, invalidateData } =
-    useTaskStore();
+  const {
+    taskLists,
+    selectedTaskListIds,
+    sectionsByList,
+    loadSections,
+    colorLabels,
+    invalidateData,
+  } = useTaskStore();
 
   const [form, setForm] = useState<FormState>(() =>
     buildInitialState(null, listId, {
@@ -411,9 +413,18 @@ export default function TaskEditorModal({
     [t],
   );
 
+  // Offer only lists the user can write to AND still checks in the Lists
+  // catalog (shared `selectableTaskLists`, mirroring the event editor's
+  // calendar picker): a read-only list rejects writes, a deselected list is a
+  // confusing target. The task's own list is kept via `currentId` so editing a
+  // task on such a list still shows its real home.
   const listOptions = useMemo(
-    () => taskLists.map((l) => ({ value: l.id, label: l.name })),
-    [taskLists],
+    () =>
+      selectableTaskLists(taskLists, {
+        selectedIds: selectedTaskListIds,
+        currentId: form.listId,
+      }).map((l) => ({ value: l.id, label: l.name })),
+    [taskLists, selectedTaskListIds, form.listId],
   );
   const sectionOptions = useMemo(
     () => [
@@ -879,7 +890,6 @@ export default function TaskEditorModal({
         onClear={() => clearSlot('scheduled')}
         fieldRef={scheduledDateRef}
         editable={!loading}
-        locale={i18n.language}
       />
 
       <DateTimeField
@@ -898,7 +908,6 @@ export default function TaskEditorModal({
         onClear={() => clearSlot('deadline')}
         fieldRef={deadlineDateRef}
         editable={!loading}
-        locale={i18n.language}
       />
 
       {/* The per-task reminder override only matters when a deadline is set; it
@@ -1090,7 +1099,6 @@ function DateTimeField({
   onClear,
   fieldRef,
   editable,
-  locale,
 }: {
   legend: string;
   hint: string;
@@ -1107,7 +1115,6 @@ function DateTimeField({
   onClear: () => void;
   fieldRef: RefObject<View | null>;
   editable: boolean;
-  locale: string;
 }) {
   const styles = useThemedStyles(makeStyles);
   const hasDate = dateValue.trim() !== '';
@@ -1138,13 +1145,21 @@ function DateTimeField({
       ) : (
         <>
           <View style={styles.pickerRow}>
-            <Text style={styles.pickerLabel}>{`${legend} – ${dateLabel}`}</Text>
-            <DateTimePicker
+            {/* The visible label is folded into the field button's a11y label,
+                so it's hidden from the screen reader — one swipe stop, not two. */}
+            <Text
+              style={styles.pickerLabel}
+              accessibilityElementsHidden
+              importantForAccessibility="no"
+            >
+              {`${legend} – ${dateLabel}`}
+            </Text>
+            <DateTimeFieldButton
+              label={`${legend} – ${dateLabel}`}
               mode="date"
-              display="compact"
-              value={parseLocalDate(dateValue)}
-              onValueChange={(_, d) => onChangeDate(formatLocalDate(d))}
-              locale={locale}
+              value={dateValue}
+              onChange={onChangeDate}
+              disabled={!editable}
             />
           </View>
           {!hasTime ? (
@@ -1160,13 +1175,19 @@ function DateTimeField({
             </Pressable>
           ) : (
             <View style={styles.pickerRow}>
-              <Text style={styles.pickerLabel}>{`${legend} – ${timeLabel}`}</Text>
-              <DateTimePicker
+              <Text
+                style={styles.pickerLabel}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              >
+                {`${legend} – ${timeLabel}`}
+              </Text>
+              <DateTimeFieldButton
+                label={`${legend} – ${timeLabel}`}
                 mode="time"
-                display="compact"
-                value={parseLocalTime(timeValue)}
-                onValueChange={(_, d) => onChangeTime(formatLocalTime(d))}
-                locale={locale}
+                value={timeValue}
+                onChange={onChangeTime}
+                disabled={!editable}
               />
               <Pressable
                 accessibilityRole="button"

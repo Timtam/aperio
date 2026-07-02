@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 
 import type { Task } from '@aperio/shared';
-import { isExpandedOccurrence } from '@aperio/shared';
+import { isExpandedOccurrence, selectableTaskLists } from '@aperio/shared';
 
 import { Calendar, listCalendars } from '../api/calendar';
 import { getTaskById, getTasks } from '../api/client';
@@ -47,7 +47,7 @@ export default function MoveCopyModal({
   const params = route.params;
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
-  const { taskLists, invalidateData } = useTaskStore();
+  const { taskLists, selectedTaskListIds, invalidateData } = useTaskStore();
   const { hidden: hiddenCalendars } = useCalendarVisibility();
   useCancelHeader(navigation);
 
@@ -100,9 +100,14 @@ export default function MoveCopyModal({
   }, [params, t]);
 
   const containerOptions = useMemo(() => {
+    // Targets must accept writes AND still be checked in the catalog — the
+    // same set the editors' pickers offer (shared `selectableTaskLists` for
+    // lists, the hidden-set filter for calendars, both matching desktop).
     const writable =
       params.kind === 'task'
-        ? taskLists.filter((l) => !l.read_only).map((l) => ({ id: l.id, name: l.name }))
+        ? selectableTaskLists(taskLists, {
+            selectedIds: selectedTaskListIds,
+          }).map((l) => ({ id: l.id, name: l.name }))
         : calendars
             .filter((c) => !c.read_only && !hiddenCalendars.has(c.id))
             .map((c) => ({ id: c.id, name: c.name }));
@@ -113,7 +118,15 @@ export default function MoveCopyModal({
           ? `${c.name} ${t('dialogs.moveCopy.currentSuffix')}`
           : c.name,
     }));
-  }, [params.kind, taskLists, calendars, hiddenCalendars, initialContainerId, t]);
+  }, [
+    params.kind,
+    taskLists,
+    selectedTaskListIds,
+    calendars,
+    hiddenCalendars,
+    initialContainerId,
+    t,
+  ]);
 
   const itemTitle = params.kind === 'task' ? (task?.title ?? '') : params.event.title;
 

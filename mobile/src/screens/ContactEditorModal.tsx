@@ -1,4 +1,3 @@
-import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -26,9 +25,10 @@ import {
   setContactPhoto,
   updateContact,
 } from '../api/contacts';
+import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
-import { formatLocalDate, parseLocalDate } from '../intl/dateTimeField';
+import { formatLocalDate } from '../intl/dateTimeField';
 import { useListFocusManager } from '../a11y/useListFocusManager';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
@@ -157,7 +157,7 @@ export default function ContactEditorModal({
   route,
   navigation,
 }: RootStackScreenProps<'ContactEditor'>) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const { contactId, listId } = route.params;
@@ -661,12 +661,14 @@ export default function ContactEditorModal({
           </Pressable>
         ) : (
           <View style={styles.pickerRow}>
-            <DateTimePicker
+            {/* Accessible field button (value in the label, picker in a
+                dialog) — the inline compact picker never joined the VoiceOver
+                swipe order. */}
+            <DateTimeFieldButton
+              label={t('dialogs.contact.birthdayLabel')}
               mode="date"
-              display="compact"
-              value={parseLocalDate(birthday)}
-              onValueChange={(_, d) => setBirthday(formatLocalDate(d))}
-              locale={i18n.language}
+              value={birthday}
+              onChange={setBirthday}
             />
             <Pressable
               accessibilityRole="button"

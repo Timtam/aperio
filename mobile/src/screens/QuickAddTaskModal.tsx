@@ -1,4 +1,3 @@
-import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -11,11 +10,14 @@ import {
   View,
 } from 'react-native';
 
+import { selectableTaskLists } from '@aperio/shared';
+
 import { createTask } from '../api/client';
+import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
 import { useCancelHeader } from '../components/useCancelHeader';
-import { formatLocalDate, parseLocalDate } from '../intl/dateTimeField';
+import { formatLocalDate } from '../intl/dateTimeField';
 import { readLastUsedTaskList, writeLastUsedTaskList } from '../state/lastUsedTaskList';
 import { useTaskStore } from '../state/taskStoreContext';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -45,17 +47,23 @@ export default function QuickAddTaskModal({
   navigation,
   route,
 }: RootStackScreenProps<'QuickAdd'>) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
-  const { taskLists, invalidateData } = useTaskStore();
+  const { taskLists, selectedTaskListIds, invalidateData } = useTaskStore();
 
-  const writable = useMemo(() => taskLists.filter((l) => !l.read_only), [taskLists]);
+  // Lists eligible as a create target: writable + checked in the Lists catalog
+  // (shared `selectableTaskLists`, mirroring the event quick-add's calendar
+  // filter). Degenerate fallback to any list matches the desktop quick-add.
+  const selectable = useMemo(
+    () => selectableTaskLists(taskLists, { selectedIds: selectedTaskListIds }),
+    [taskLists, selectedTaskListIds],
+  );
 
   const [title, setTitle] = useState('');
   // A tapped calendar day pre-schedules the task; otherwise dateless (backlog).
   const [date, setDate] = useState(route.params?.initialScheduledDate ?? '');
   const [listId, setListId] = useState<string>(
-    () => writable[0]?.id ?? taskLists[0]?.id ?? '',
+    () => selectable[0]?.id ?? taskLists[0]?.id ?? '',
   );
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -64,18 +72,18 @@ export default function QuickAddTaskModal({
   // Don't let the async last-used read clobber a list the user already picked.
   const userPicked = useRef(false);
 
-  // Default to the last-used list (if still present + writable). Async read, so
-  // it lands a tick after first paint — guarded against a manual pick.
+  // Default to the last-used list (if still selectable). Async read, so it
+  // lands a tick after first paint — guarded against a manual pick.
   useEffect(() => {
     let cancelled = false;
     void readLastUsedTaskList().then((id) => {
       if (cancelled || userPicked.current) return;
-      if (id && writable.some((l) => l.id === id)) setListId(id);
+      if (id && selectable.some((l) => l.id === id)) setListId(id);
     });
     return () => {
       cancelled = true;
     };
-  }, [writable]);
+  }, [selectable]);
 
   // Cancel button in the header (first element) so the user can back out fast.
   useCancelHeader(navigation);
@@ -97,9 +105,15 @@ export default function QuickAddTaskModal({
     setListId(id);
   }, []);
 
+  // The current pick is kept via `currentId` so a pre-seeded (or degenerate-
+  // fallback) list never vanishes from its own picker.
   const listOptions = useMemo(
-    () => writable.map((l) => ({ value: l.id, label: l.name })),
-    [writable],
+    () =>
+      selectableTaskLists(taskLists, {
+        selectedIds: selectedTaskListIds,
+        currentId: listId,
+      }).map((l) => ({ value: l.id, label: l.name })),
+    [taskLists, selectedTaskListIds, listId],
   );
 
   const fail = useCallback((message: string) => {
@@ -209,12 +223,14 @@ export default function QuickAddTaskModal({
           </Pressable>
         ) : (
           <View style={styles.pickerRow}>
-            <DateTimePicker
+            {/* Accessible field button (value in the label, picker in a
+                dialog) — the inline compact picker never joined the VoiceOver
+                swipe order. */}
+            <DateTimeFieldButton
+              label={t('dialogs.task.fields.scheduled.legend')}
               mode="date"
-              display="compact"
-              value={parseLocalDate(date)}
-              onValueChange={(_, d) => setDate(formatLocalDate(d))}
-              locale={i18n.language}
+              value={date}
+              onChange={setDate}
             />
             <Pressable
               accessibilityRole="button"

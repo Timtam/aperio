@@ -2772,16 +2772,19 @@ impl Host {
             // EXTERNAL: stale-while-revalidate. A WARM container (a snapshot
             // exists) serves the cached rows for the range instantly (never
             // blocks on the network, works offline) and queues a background
-            // refresh when the snapshot is stale. A COLD container (no snapshot
-            // yet, or one just invalidated by a write) does a LIVE read so the
-            // first paint is never blank, and warms the cache in the background
-            // for next time — the mobile stand-in until the cache-updated push
-            // can fill an empty snapshot in place. Whether to self-warm (stale,
-            // OR a coverage miss outside the brief cooldown that prevents the
-            // cold-cache refresh -> re-read feedback loop) is the SHARED
-            // `event_self_warm_needed`, identical to the desktop get_events. The
-            // background refresh runs on the Host's one worker thread (it advances
-            // between block_on calls, like the writer drain task).
+            // refresh when the snapshot is stale. A COLD container serves the
+            // RETAINED rows when it has any — an invalidate (after an external
+            // write) deliberately keeps them as the fallback, so the post-save
+            // reload paints instantly with the pre-write rows and the
+            // background refresh swaps in the truth via the cache-updated push
+            // (desktop parity; also keeps the seconds-long live read off the
+            // native module's shared read queue). Only a NEVER-warmed container
+            // (no rows at all — first open) does a LIVE read so the first paint
+            // is never blank, warming the cache in the background for next
+            // time. Whether to self-warm (stale, OR a coverage miss outside the
+            // brief cooldown that prevents the cold-cache refresh -> re-read
+            // feedback loop) is the SHARED `event_self_warm_needed`, identical
+            // to the desktop get_events.
             Some(ext) => {
                 let account = self
                     .registry
@@ -2798,9 +2801,17 @@ impl Host {
                         .read_events(&account, &req.calendar_id, range)
                         .unwrap_or_default()
                 } else {
-                    self.runtime
-                        .block_on(async { ext.get_events(&req.calendar_id, range).await })
-                        .map_err(map_store_err)?
+                    let retained = self
+                        .cache
+                        .read_events(&account, &req.calendar_id, range)
+                        .unwrap_or_default();
+                    if retained.is_empty() {
+                        self.runtime
+                            .block_on(async { ext.get_events(&req.calendar_id, range).await })
+                            .map_err(map_store_err)?
+                    } else {
+                        retained
+                    }
                 };
                 // Colour: map a colour-capable provider's native color_hex back
                 // to a label FIRST, then stamp host-local overrides (which skip
@@ -3487,11 +3498,11 @@ impl Host {
             // EXTERNAL: stale-while-revalidate with a mobile cold-fallback — see
             // get_events_json for the full rationale. A WARM list (a snapshot
             // exists) serves the cached rows instantly + queues a background
-            // refresh when stale; a COLD one (no snapshot yet, or one just
-            // invalidated by a write) does a LIVE read so the first paint is
-            // never blank, and warms the cache in the background. The refresh is
-            // gated on stale|cold (not coverage) and runs on the Host's one
-            // worker thread. Mirrors the desktop tasks read.
+            // refresh when stale; a COLD one serves the RETAINED rows when it
+            // has any (an invalidate keeps them as the fallback; the refresh
+            // swaps in the truth), and only a never-warmed list does a LIVE
+            // read so the first paint is never blank. The refresh is gated on
+            // stale|cold (not coverage). Mirrors the desktop tasks read.
             Some(ext) => {
                 let account = self
                     .registry
@@ -3509,9 +3520,22 @@ impl Host {
                         .read_tasks(&account, &list_id)
                         .unwrap_or_default()
                 } else {
-                    self.runtime
-                        .block_on(async { ext.get_tasks(&list_id).await })
-                        .map_err(map_store_err)?
+                    // COLD: serve the RETAINED rows when there are any (an
+                    // invalidate after a write keeps them as the fallback) —
+                    // the background refresh below swaps in the truth; only a
+                    // never-warmed list live-reads (first paint never blank).
+                    // Mirrors get_events_json.
+                    let retained = self
+                        .cache
+                        .read_tasks(&account, &list_id)
+                        .unwrap_or_default();
+                    if retained.is_empty() {
+                        self.runtime
+                            .block_on(async { ext.get_tasks(&list_id).await })
+                            .map_err(map_store_err)?
+                    } else {
+                        retained
+                    }
                 };
                 if !warm || stale {
                     let cache_bg = Arc::clone(&self.cache);
@@ -3837,9 +3861,9 @@ impl Host {
             // EXTERNAL: stale-while-revalidate with a mobile cold-fallback —
             // mirrors tasks_json. A WARM list (a section snapshot exists) serves
             // the cached sections instantly + queues a background refresh when
-            // stale; a COLD one (no snapshot yet, or one just invalidated by a
-            // section edit) does a LIVE `list_sections` read so the first paint is
-            // never blank, and warms the cache in the background. Section reads
+            // stale; a COLD one serves the RETAINED rows when it has any (an
+            // invalidate keeps them; the refresh swaps in the truth), and only a
+            // never-warmed list does a LIVE `list_sections` read. Section reads
             // used to ALWAYS hit the provider live (the unconditional
             // `list_sections` below); the cache stops that on every day/week open.
             Some(ext) => {
@@ -3859,9 +3883,21 @@ impl Host {
                         .read_sections(&account, &list_id)
                         .unwrap_or_default()
                 } else {
-                    self.runtime
-                        .block_on(async { ext.list_sections(&list_id).await })
-                        .map_err(map_store_err)?
+                    // COLD: serve the RETAINED rows when there are any (an
+                    // invalidate after a section edit keeps them) — the
+                    // background refresh below swaps in the truth; only a
+                    // never-warmed list live-reads. Mirrors get_events_json.
+                    let retained = self
+                        .cache
+                        .read_sections(&account, &list_id)
+                        .unwrap_or_default();
+                    if retained.is_empty() {
+                        self.runtime
+                            .block_on(async { ext.list_sections(&list_id).await })
+                            .map_err(map_store_err)?
+                    } else {
+                        retained
+                    }
                 };
                 if !warm || stale {
                     let cache_bg = Arc::clone(&self.cache);

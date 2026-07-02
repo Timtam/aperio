@@ -13,6 +13,7 @@ import { expandAll } from '@aperio/shared';
 
 import { getEvents, listCalendars } from '../api/calendar';
 import { CalendarActions } from '../components/CalendarActions';
+import { CalendarPager } from '../components/CalendarPager';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import { useTabBarInset } from '../hooks/useTabBarInset';
@@ -119,6 +120,18 @@ export default function YearScreen({ navigation, route }: RootStackScreenProps<'
     [navigation, year],
   );
 
+  // Announce the period on navigation (the three-finger swipe / prev-next change
+  // the year silently otherwise). Skip the first render — nothing changed yet.
+  // Mirrors MonthScreen.
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    announce(String(year));
+  }, [year, announce]);
+
   return (
     <View style={styles.screen}>
       <CalendarViewSwitcher
@@ -174,32 +187,39 @@ export default function YearScreen({ navigation, route }: RootStackScreenProps<'
         </Text>
       )}
 
-      <ScrollView
-        accessibilityRole="list"
-        accessibilityLabel={t('views.year.gridLabel')}
-        contentContainerStyle={[styles.list, { paddingBottom: tabBarInset }]}
-        keyboardShouldPersistTaps="handled"
-      >
-        {months.map((mo) => (
-          <Pressable
-            key={mo.index}
-            accessibilityRole="button"
-            accessibilityLabel={t('views.year.monthAnnounce', {
-              month: mo.label,
-              count: counts[mo.index] ?? 0,
-            })}
-            onPress={() => openMonth(mo.index)}
-            style={({ pressed }) => [styles.monthRow, pressed && styles.pressed]}
-          >
-            <Text style={styles.monthName} importantForAccessibility="no">
-              {mo.label}
-            </Text>
-            <Text style={styles.monthCount} importantForAccessibility="no">
-              {loading ? '…' : String(counts[mo.index] ?? 0)}
-            </Text>
-          </Pressable>
-        ))}
-      </ScrollView>
+      {/* Three-finger swipe (VoiceOver) / horizontal flick pages between years;
+          vertical scrolling stays with the month list. Mirrors MonthScreen. */}
+      <CalendarPager onPrev={() => setYear((y) => y - 1)} onNext={() => setYear((y) => y + 1)}>
+        <ScrollView
+          accessibilityRole="list"
+          accessibilityLabel={t('views.year.gridLabel')}
+          // flex:1 so the list fills the pager's fixed-size page and keeps its
+          // own vertical scrolling (the CalendarDayList precedent).
+          style={styles.scroll}
+          contentContainerStyle={[styles.list, { paddingBottom: tabBarInset }]}
+          keyboardShouldPersistTaps="handled"
+        >
+          {months.map((mo) => (
+            <Pressable
+              key={mo.index}
+              accessibilityRole="button"
+              accessibilityLabel={t('views.year.monthAnnounce', {
+                month: mo.label,
+                count: counts[mo.index] ?? 0,
+              })}
+              onPress={() => openMonth(mo.index)}
+              style={({ pressed }) => [styles.monthRow, pressed && styles.pressed]}
+            >
+              <Text style={styles.monthName} importantForAccessibility="no">
+                {mo.label}
+              </Text>
+              <Text style={styles.monthCount} importantForAccessibility="no">
+                {loading ? '…' : String(counts[mo.index] ?? 0)}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </CalendarPager>
     </View>
   );
 }
@@ -242,6 +262,7 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surfaceAlt,
     },
     ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
+    scroll: { flex: 1 },
     list: { gap: 8, padding: 16 },
     monthRow: {
       flexDirection: 'row',

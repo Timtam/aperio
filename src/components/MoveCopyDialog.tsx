@@ -6,7 +6,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { selectableEventCalendars } from '@aperio/shared';
+import { selectableEventCalendars, selectableTaskLists } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import { createTask as apiCreateTask, isCommandError } from '../api/client';
@@ -54,7 +54,8 @@ export function MoveCopyDialog({
 }: MoveCopyDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
-  const { calendars, taskLists, selectedCalendarIds } = useCalendarStore();
+  const { calendars, taskLists, selectedCalendarIds, selectedTaskListIds } =
+    useCalendarStore();
 
   const initialContainerId =
     target.kind === 'event' ? target.event.calendar_id : target.task.list_id;
@@ -89,17 +90,17 @@ export function MoveCopyDialog({
     // Move / copy targets must accept writes — drop read-only
     // containers (iCal feeds, future shared read-only sources) so
     // the picker never offers a destination the backend would
-    // reject with "Unsupported". For events also drop calendars the
-    // sidebar hides, matching the event editor's target picker.
+    // reject with "Unsupported". Also drop containers the sidebar
+    // hides / unchecks, matching the editors' target pickers.
     if (target.kind === 'event') {
       return selectableEventCalendars(calendars, {
         selectedIds: selectedCalendarIds,
       }).map((c) => ({ id: c.id, name: c.name }));
     }
-    return taskLists
-      .filter((l) => !l.read_only)
-      .map((l) => ({ id: l.id, name: l.name }));
-  }, [target.kind, calendars, taskLists, selectedCalendarIds]);
+    return selectableTaskLists(taskLists, {
+      selectedIds: selectedTaskListIds,
+    }).map((l) => ({ id: l.id, name: l.name }));
+  }, [target.kind, calendars, taskLists, selectedCalendarIds, selectedTaskListIds]);
 
   const itemTitle =
     target.kind === 'event' ? target.event.title : target.task.title;

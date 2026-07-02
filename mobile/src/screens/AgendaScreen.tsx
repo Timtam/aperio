@@ -26,6 +26,7 @@ import {
 } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
 import { CalendarActions } from '../components/CalendarActions';
+import { CalendarPager } from '../components/CalendarPager';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { JumpToDateButton } from '../components/JumpToDateButton';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
@@ -237,6 +238,29 @@ export default function AgendaScreen({
 
   const goToday = useCallback(() => setAnchor(localMidnight(new Date())), []);
 
+  const stepMonths = useCallback(
+    (delta: number) => setAnchor((a) => localMidnight(addMonths(a, delta))),
+    [],
+  );
+
+  const rangeLabel = useMemo(
+    () =>
+      `${fmtShortDate(range.start)} – ${fmtShortDate(localMidnight(addDays(anchor, AGENDA_DAYS)))}`,
+    [anchor, fmtShortDate, range.start],
+  );
+
+  // Announce the period on navigation (the three-finger swipe / prev-next shift
+  // the window silently otherwise). Skip the first render — nothing changed yet.
+  // Mirrors MonthScreen.
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    announce(rangeLabel);
+  }, [rangeLabel, announce]);
+
   const editEvent = useCallback(
     (ev: CalendarEvent) =>
       navigation.navigate('EventEditor', {
@@ -309,18 +333,18 @@ export default function AgendaScreen({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('toolbar.prev')}
-          onPress={() => setAnchor((a) => localMidnight(addMonths(a, -1)))}
+          onPress={() => stepMonths(-1)}
           style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
         >
           <Text style={styles.navButtonText} importantForAccessibility="no">‹</Text>
         </Pressable>
         <Text style={styles.rangeHeading} accessibilityRole="header">
-          {`${fmtShortDate(range.start)} – ${fmtShortDate(localMidnight(addDays(anchor, AGENDA_DAYS)))}`}
+          {rangeLabel}
         </Text>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('toolbar.next')}
-          onPress={() => setAnchor((a) => localMidnight(addMonths(a, 1)))}
+          onPress={() => stepMonths(1)}
           style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
         >
           <Text style={styles.navButtonText} importantForAccessibility="no">›</Text>
@@ -354,6 +378,10 @@ export default function AgendaScreen({
         </Text>
       )}
 
+      {/* Three-finger swipe (VoiceOver) / horizontal flick pages between the
+          monthly agenda windows — the pager wraps the loading/empty states too,
+          so paging out of an empty window works. Mirrors MonthScreen. */}
+      <CalendarPager onPrev={() => stepMonths(-1)} onNext={() => stepMonths(1)}>
       {loading ? (
         <Text style={styles.muted} accessibilityLabel={t('views.loading')}>
           {t('views.loading')}
@@ -364,6 +392,9 @@ export default function AgendaScreen({
         <ScrollView
           accessibilityRole="list"
           accessibilityLabel={t('views.agenda.eventList')}
+          // flex:1 so the list fills the pager's fixed-size page and keeps its
+          // own vertical scrolling (the CalendarDayList precedent).
+          style={styles.scroll}
           contentContainerStyle={[styles.list, { paddingBottom: tabBarInset }]}
           keyboardShouldPersistTaps="handled"
         >
@@ -416,6 +447,7 @@ export default function AgendaScreen({
           })()}
         </ScrollView>
       )}
+      </CalendarPager>
     </View>
   );
 
@@ -536,6 +568,7 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surfaceAlt,
     },
     ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
+    scroll: { flex: 1 },
     list: { gap: 10, padding: 16 },
     dayHeader: {
       fontSize: 15,

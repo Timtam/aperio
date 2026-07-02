@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CalendarActions } from '../components/CalendarActions';
 import { CalendarDayList } from '../components/CalendarDayList';
+import { CalendarPager } from '../components/CalendarPager';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { JumpToDateButton } from '../components/JumpToDateButton';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
@@ -90,7 +91,43 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
   // visual start (matches the desktop header).
   const isoWeek = useMemo(() => isoWeekNumber(addDays(days[0], 3)), [days]);
 
+  const weekLabel = useMemo(
+    () =>
+      `${t('views.week.kw', { week: isoWeek })} · ${fmtShortDate(days[0])} – ${fmtShortDate(days[6])}`,
+    [days, fmtShortDate, isoWeek, t],
+  );
+
+  // Announce the period on navigation (the three-finger swipe / prev-next change
+  // the week silently otherwise). Keyed on the ANCHOR, not the label: the synced
+  // week-start pref hydrates ASYNC after mount and recomputes the label, and a
+  // label-keyed skip-first-render guard would then announce on plain screen
+  // OPEN for every non-Monday-start user (racing VoiceOver's own screen-change
+  // announcement). Only user navigation changes the anchor.
+  const announce = useCallback(
+    (message: string) => AccessibilityInfo.announceForAccessibility(message),
+    [],
+  );
+  // TRIGGER on the anchor changing (only user navigation touches it — the
+  // async hydration only shifts days[0], so it can never announce), FILTER on
+  // the week actually changing (a jump to another day of the SAME week stays
+  // silent, like MonthScreen's label-keyed announce).
+  const lastAnchor = useRef(anchor.getTime());
+  const lastWeekStart = useRef(days[0].getTime());
+  useEffect(() => {
+    const weekStart = days[0].getTime();
+    const anchorChanged = anchor.getTime() !== lastAnchor.current;
+    const weekChanged = weekStart !== lastWeekStart.current;
+    lastAnchor.current = anchor.getTime();
+    lastWeekStart.current = weekStart;
+    if (anchorChanged && weekChanged) announce(weekLabel);
+  }, [anchor, days, weekLabel, announce]);
+
   const goToday = useCallback(() => setAnchor(localMidnight(new Date())), []);
+
+  const stepWeek = useCallback(
+    (delta: number) => setAnchor((a) => localMidnight(addDays(a, delta * 7))),
+    [],
+  );
 
   return (
     <View style={styles.screen}>
@@ -107,18 +144,18 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('toolbar.prev')}
-          onPress={() => setAnchor((a) => localMidnight(addDays(a, -7)))}
+          onPress={() => stepWeek(-1)}
           style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
         >
           <Text style={styles.navButtonText} importantForAccessibility="no">‹</Text>
         </Pressable>
         <Text style={styles.rangeHeading} accessibilityRole="header">
-          {`${t('views.week.kw', { week: isoWeek })} · ${fmtShortDate(days[0])} – ${fmtShortDate(days[6])}`}
+          {weekLabel}
         </Text>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('toolbar.next')}
-          onPress={() => setAnchor((a) => localMidnight(addDays(a, 7)))}
+          onPress={() => stepWeek(1)}
           style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
         >
           <Text style={styles.navButtonText} importantForAccessibility="no">›</Text>
@@ -139,14 +176,18 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
         <CalendarActions navigation={navigation} anchorDay={anchor} />
       </View>
 
-      <CalendarDayList
-        navigation={navigation}
-        days={days}
-        range={range}
-        gridLabel={t('views.week.gridLabel')}
-        emptyText={t('views.week.empty')}
-        dayAnnounceKey="views.week.dayAnnounce"
-      />
+      {/* Three-finger swipe (VoiceOver) / horizontal flick pages between weeks;
+          vertical scrolling stays with the day list. Mirrors MonthScreen. */}
+      <CalendarPager onPrev={() => stepWeek(-1)} onNext={() => stepWeek(1)}>
+        <CalendarDayList
+          navigation={navigation}
+          days={days}
+          range={range}
+          gridLabel={t('views.week.gridLabel')}
+          emptyText={t('views.week.empty')}
+          dayAnnounceKey="views.week.dayAnnounce"
+        />
+      </CalendarPager>
     </View>
   );
 }

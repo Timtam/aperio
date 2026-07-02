@@ -1,4 +1,3 @@
-import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -14,9 +13,10 @@ import type { Task } from '@aperio/shared';
 import { isoNextMonday, isoToday, isoTomorrow } from '@aperio/shared';
 
 import { getTaskById, updateTask } from '../api/client';
+import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { FormScrollView } from '../components/FormScrollView';
 import { useCancelHeader } from '../components/useCancelHeader';
-import { formatLocalDate, parseLocalDate } from '../intl/dateTimeField';
+import { formatLocalDate } from '../intl/dateTimeField';
 import { useTaskStore } from '../state/taskStoreContext';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -209,13 +209,21 @@ export default function PlanTaskModal({ route, navigation }: RootStackScreenProp
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.legend}>{t('dialogs.plan.customDate')}</Text>
-        <DateTimePicker
+        {/* The visible legend is folded into the field button's a11y label —
+            one swipe stop; the button opens the picker in a dialog (the inline
+            compact picker never joined the VoiceOver swipe order). */}
+        <Text
+          style={styles.legend}
+          accessibilityElementsHidden
+          importantForAccessibility="no"
+        >
+          {t('dialogs.plan.customDate')}
+        </Text>
+        <DateTimeFieldButton
+          label={t('dialogs.plan.customDate')}
           mode="date"
-          display="compact"
-          value={parseLocalDate(customDate)}
-          onValueChange={(_, d) => setCustomDate(formatLocalDate(d))}
-          locale={i18n.language}
+          value={customDate}
+          onChange={setCustomDate}
         />
         <Pressable
           accessibilityRole="button"
