@@ -343,6 +343,36 @@ function SettingsStackNav() {
         component={ContactsSettingsScreen}
         options={{ title: t('dialogs.settings.tabs.contacts') }}
       />
+      {/* The Settings hub cross-links to the calendar/list catalogs (the
+          per-container settings live in their editors), so the catalogs AND
+          their whole drill chain (editor, members) must live on THIS stack —
+          navigate() to a route only another tab's stack knows is silently
+          dropped (same rule as the reminders editors above). */}
+      <SettingsStack.Screen
+        name="Calendars"
+        component={CalendarsScreen}
+        options={{ title: t('sidebar.calendars') }}
+      />
+      <SettingsStack.Screen
+        name="CalendarEditor"
+        component={CalendarEditorModal}
+        options={{ presentation: 'modal', title: t('sidebar.calendars') }}
+      />
+      <SettingsStack.Screen
+        name="Lists"
+        component={ListsScreen}
+        options={{ title: t('mobile.listsButtonLabel') }}
+      />
+      <SettingsStack.Screen
+        name="ListEditor"
+        component={ListEditorModal}
+        options={{ presentation: 'modal', title: t('mobile.manageList') }}
+      />
+      <SettingsStack.Screen
+        name="TaskMembers"
+        component={TaskMembersScreen}
+        options={{ title: t('mobile.manageList') }}
+      />
     </SettingsStack.Navigator>
   );
 }
@@ -412,7 +442,13 @@ function AppContent() {
       .then((saved) => {
         if (cancelled || saved == null) return;
         try {
-          setInitialNavState(JSON.parse(saved) as PartialState<NavigationState>);
+          const parsed = JSON.parse(saved) as PartialState<NavigationState>;
+          setInitialNavState(parsed);
+          // onStateChange does NOT fire for a restored initialState, so compute
+          // the tab-bar visibility from it here — otherwise relaunching the app
+          // on a drill-down screen shows the bar (in VoiceOver's swipe order)
+          // until the next navigation.
+          setTabBarHidden(!TAB_ROOT_ROUTES.has(deepestRouteName(parsed) ?? ''));
         } catch {
           // Corrupt value — ignore and use the default initial route.
         }
