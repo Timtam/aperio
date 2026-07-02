@@ -848,7 +848,10 @@ export default function TaskEditorModal({
         />
       )}
 
-      <SegmentedSelect<TaskStatus>
+      {/* Status is a RadioGroup, not a SegmentedSelect: four options with long
+          localized labels ("In Bearbeitung", "Abgebrochen") get truncated in a
+          segment row, while each radio renders its full label on its own row. */}
+      <RadioGroup<TaskStatus>
         label={t('dialogs.task.fields.status')}
         value={form.status}
         options={statusOptions}

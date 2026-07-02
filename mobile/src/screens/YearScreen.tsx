@@ -21,6 +21,7 @@ import type { RootStackScreenProps } from '../navigation/types';
 import { useCacheReload } from '../state/cacheObserver';
 import { useCalendarVisibility } from '../state/calendarVisibility';
 import { useThemedStyles, type ThemeColors } from '../theme';
+import { chrome, chromeTouch } from '../theme/uiScale';
 
 // Accessible Year view — the screen-reader-first port of the desktop YearView.
 // The desktop's 12×31 mini-grid is a purely visual navigation aid; the faithful
@@ -236,14 +237,14 @@ const makeStyles = (c: ThemeColors) =>
     },
     rangeHeading: {
       flex: 1,
-      fontSize: 16,
+      fontSize: 15,
       fontWeight: '700',
       color: c.textPrimary,
       textAlign: 'center',
     },
     navButton: {
-      width: 48,
-      height: 48,
+      width: chromeTouch(44),
+      height: chromeTouch(44),
       borderRadius: 10,
       borderWidth: 1,
       borderColor: c.border,
@@ -254,22 +255,22 @@ const makeStyles = (c: ThemeColors) =>
     navButtonText: { fontSize: 26, color: c.textPrimary, lineHeight: 30 },
     actionBar: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, padding: 12, alignItems: 'center' },
     ghostButton: {
-      paddingVertical: 12,
-      paddingHorizontal: 16,
+      paddingVertical: chrome(10),
+      paddingHorizontal: chrome(13),
       borderRadius: 10,
       borderWidth: 1,
       borderColor: c.border,
       backgroundColor: c.surfaceAlt,
     },
-    ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
+    ghostButtonText: { fontSize: 15, fontWeight: '600', color: c.link },
     scroll: { flex: 1 },
-    list: { gap: 8, padding: 16 },
+    list: { gap: chrome(8), padding: chrome(12) },
     monthRow: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      gap: 12,
-      padding: 16,
+      gap: chrome(10),
+      padding: chrome(12),
       borderRadius: 12,
       borderWidth: 1,
       borderColor: c.border,

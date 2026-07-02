@@ -147,7 +147,7 @@ export default function CalendarsScreen({
           onPress={() => void addCalendar()}
           style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
         >
-          <Text style={styles.buttonText}>{t('mobile.add')}</Text>
+          <Text style={styles.buttonText}>{t('sidebar.newCalendar')}</Text>
         </Pressable>
       </View>
 

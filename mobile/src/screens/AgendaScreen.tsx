@@ -25,6 +25,7 @@ import {
   listCalendars,
 } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
+import { ActionsMenu, type MenuAction } from '../components/ActionsMenu';
 import { CalendarActions } from '../components/CalendarActions';
 import { CalendarPager } from '../components/CalendarPager';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
@@ -38,6 +39,7 @@ import { useCalendarVisibility } from '../state/calendarVisibility';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
+import { chrome, chromeTouch } from '../theme/uiScale';
 
 // Accessible Agenda view — a flat ~30-day-forward list of events grouped by
 // day, the screen-reader-natural sibling of the day view (EventsScreen). Same
@@ -94,6 +96,13 @@ export default function AgendaScreen({
   // keep the current list on screen and refresh in place — the view stays open
   // instead of flashing the loading screen.
   const hasLoadedRef = useRef(false);
+  // Long-press action menu — the sighted twin of the rows'/headers' SR custom
+  // actions (one shared action list feeds both).
+  const [menu, setMenu] = useState<{
+    title: string;
+    actions: MenuAction[];
+    onAction: (name: string) => void;
+  } | null>(null);
   // Request epoch — focus, a cache-refresh push and an anchor change can each
   // fire load() while another is in flight; a slower OLDER load must not
   // overwrite a newer window's results (mirrors CalendarDayList). With
@@ -400,54 +409,71 @@ export default function AgendaScreen({
         >
           {(() => {
             let prevKey: string | null = null;
-            let prevDay: Date | null = null;
             const rows: ReactNode[] = [];
-            // Close the current day group with a "+ new event" affordance seeded
-            // to that day (only when a writable calendar exists to host it).
-            const pushDayFooter = () => {
-              if (prevKey == null || prevDay == null || firstWritableCalendarId == null) return;
-              const dayKey = prevKey;
-              const day = prevDay;
-              rows.push(
-                <Pressable
-                  key={`add-${dayKey}`}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${t('toolbar.newEvent')}, ${fmtFullDate(day)}`}
-                  onPress={() => addEventOnDay(dayKey)}
-                  style={({ pressed }) => [styles.newEventButton, pressed && styles.pressed]}
-                >
-                  <Text style={styles.newEventText}>{t('toolbar.newEvent')}</Text>
-                </Pressable>,
-              );
-            };
             for (const occ of occurrences) {
               const key = localDateKey(occ.day);
               if (key !== prevKey) {
-                pushDayFooter();
                 prevKey = key;
-                prevDay = occ.day;
+                // Day-anchored create lives on the HEADER (SR custom action +
+                // sighted long-press) — the old per-day "+ new event" footer
+                // buttons were toolbar duplicates under every day (tester
+                // feedback; same treatment as Week/Month).
+                const headerActions: MenuAction[] =
+                  firstWritableCalendarId != null
+                    ? [{ name: 'newEvent', label: t('toolbar.newEvent') }]
+                    : [];
+                const dayKey = key;
+                const headerTitle = fmtFullDate(occ.day);
+                const runHeaderAction = (name: string) => {
+                  if (name === 'newEvent') addEventOnDay(dayKey);
+                };
+                // Hosted in a Pressable (not a bare Text) — the device-proven
+                // accessibilityActions pattern; role="header" keeps the
+                // headings rotor. Mirrors CalendarDayList.
                 rows.push(
-                  <Text
+                  <Pressable
                     key={`h-${key}`}
+                    accessible
                     accessibilityRole="header"
                     accessibilityLabel={t('views.agenda.dayLabel', {
                       day: fmtFullDate(occ.day),
                       count: dayCounts.get(key) ?? 0,
                     })}
-                    style={styles.dayHeader}
+                    accessibilityActions={headerActions}
+                    onAccessibilityAction={(e) => runHeaderAction(e.nativeEvent.actionName)}
+                    onLongPress={
+                      headerActions.length > 0
+                        ? () =>
+                            setMenu({
+                              title: headerTitle,
+                              actions: headerActions,
+                              onAction: runHeaderAction,
+                            })
+                        : undefined
+                    }
                   >
-                    {fmtFullDate(occ.day)}
-                  </Text>,
+                    <Text style={styles.dayHeader} importantForAccessibility="no">
+                      {fmtFullDate(occ.day)}
+                    </Text>
+                  </Pressable>,
                 );
               }
               rows.push(renderRow(occ, key));
             }
-            pushDayFooter();
             return rows;
           })()}
         </ScrollView>
       )}
       </CalendarPager>
+
+      {/* The long-press action menu (one instance for the whole screen). */}
+      <ActionsMenu
+        visible={menu != null}
+        title={menu?.title ?? ''}
+        actions={menu?.actions ?? []}
+        onAction={menu?.onAction ?? (() => undefined)}
+        onClose={() => setMenu(null)}
+      />
     </View>
   );
 
@@ -455,14 +481,10 @@ export default function AgendaScreen({
     const ev = occ.ev;
     const rowKey = `${ev.id}@${dayKey}`;
     const hex = resolveEventColor(ev, calendarsById, labelsById).hex;
-    const dot =
-      hex != null ? (
-        <View
-          accessible={false}
-          importantForAccessibility="no"
-          style={[styles.colorDot, { backgroundColor: hex }]}
-        />
-      ) : null;
+    // Sighted colour: tint the whole tile (replaces the colour dot) — matches
+    // the CalendarDayList event rows; SR users get the label NAME in rowLabel.
+    const tint =
+      hex != null ? { backgroundColor: `${hex}2E`, borderColor: `${hex}66` } : null;
     const badge = occ.span
       ? ` ${t('views.multiDayCompact', { day: occ.span.dayIndex, total: occ.span.totalDays })}`
       : '';
@@ -473,9 +495,8 @@ export default function AgendaScreen({
           accessible
           accessibilityRole="text"
           accessibilityLabel={rowLabel(ev, occ.day, occ.span)}
-          style={styles.row}
+          style={[styles.row, tint]}
         >
-          {dot}
           <View style={styles.rowText}>
             <Text style={styles.eventTitle} importantForAccessibility="no">
               {ev.title}
@@ -488,6 +509,19 @@ export default function AgendaScreen({
         </View>
       );
     }
+    // ONE action list feeds the SR custom actions AND the sighted long-press
+    // menu; the per-row delete button is gone (delete lives in the editor, the
+    // menu and the SR action). Mirrors CalendarDayList.
+    const actions: MenuAction[] = [
+      { name: 'activate', label: t('mobile.editTaskLabel') },
+      { name: 'moveCopy', label: t('mobile.moveCopy') },
+      { name: 'delete', label: t('dialogs.event.delete'), destructive: true },
+    ];
+    const runAction = (name: string) => {
+      if (name === 'delete') removeEvent(ev);
+      else if (name === 'moveCopy') moveCopyEvent(ev);
+      else editEvent(ev);
+    };
     return (
       <View
         key={rowKey}
@@ -495,20 +529,16 @@ export default function AgendaScreen({
         accessibilityRole="button"
         accessibilityLabel={rowLabel(ev, occ.day, occ.span)}
         accessibilityHint={t('mobile.taskHint')}
-        accessibilityActions={[
-          { name: 'activate', label: t('mobile.editTaskLabel') },
-          { name: 'moveCopy', label: t('mobile.moveCopy') },
-          { name: 'delete', label: t('dialogs.event.delete') },
-        ]}
-        onAccessibilityAction={(e) => {
-          if (e.nativeEvent.actionName === 'delete') removeEvent(ev);
-          else if (e.nativeEvent.actionName === 'moveCopy') moveCopyEvent(ev);
-          else editEvent(ev);
-        }}
-        style={styles.row}
+        accessibilityActions={actions}
+        onAccessibilityAction={(e) => runAction(e.nativeEvent.actionName)}
+        style={[styles.row, tint]}
       >
-        {dot}
-        <Pressable accessible={false} onPress={() => editEvent(ev)} style={styles.rowText}>
+        <Pressable
+          accessible={false}
+          onPress={() => editEvent(ev)}
+          onLongPress={() => setMenu({ title: ev.title, actions, onAction: runAction })}
+          style={styles.rowText}
+        >
           <Text style={styles.eventTitle} importantForAccessibility="no">
             {ev.title}
             {badge}
@@ -516,14 +546,6 @@ export default function AgendaScreen({
           <Text style={styles.eventTime} importantForAccessibility="no">
             {timeLabel(ev)}
           </Text>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`${t('dialogs.event.delete')}: ${ev.title}`}
-          onPress={() => removeEvent(ev)}
-          style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
-        >
-          <Text style={styles.deleteButtonText}>{t('dialogs.event.delete')}</Text>
         </Pressable>
       </View>
     );
@@ -542,14 +564,14 @@ const makeStyles = (c: ThemeColors) =>
     },
     rangeHeading: {
       flex: 1,
-      fontSize: 16,
+      fontSize: 15,
       fontWeight: '700',
       color: c.textPrimary,
       textAlign: 'center',
     },
     navButton: {
-      width: 48,
-      height: 48,
+      width: chromeTouch(44),
+      height: chromeTouch(44),
       borderRadius: 10,
       borderWidth: 1,
       borderColor: c.border,
@@ -560,16 +582,16 @@ const makeStyles = (c: ThemeColors) =>
     navButtonText: { fontSize: 26, color: c.textPrimary, lineHeight: 30 },
     actionBar: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, padding: 12, alignItems: 'center' },
     ghostButton: {
-      paddingVertical: 12,
-      paddingHorizontal: 16,
+      paddingVertical: chrome(10),
+      paddingHorizontal: chrome(13),
       borderRadius: 10,
       borderWidth: 1,
       borderColor: c.border,
       backgroundColor: c.surfaceAlt,
     },
-    ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
+    ghostButtonText: { fontSize: 15, fontWeight: '600', color: c.link },
     scroll: { flex: 1 },
-    list: { gap: 10, padding: 16 },
+    list: { gap: chrome(8), padding: chrome(12) },
     dayHeader: {
       fontSize: 15,
       fontWeight: '700',
@@ -580,42 +602,16 @@ const makeStyles = (c: ThemeColors) =>
     row: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 12,
-      padding: 16,
+      gap: chrome(10),
+      padding: chrome(12),
       borderRadius: 12,
       borderWidth: 1,
       borderColor: c.border,
       backgroundColor: c.surfaceAlt,
     },
     rowText: { flex: 1, gap: 2 },
-    colorDot: {
-      width: 12,
-      height: 12,
-      borderRadius: 6,
-      borderWidth: 1,
-      borderColor: c.borderOverlay,
-    },
     eventTitle: { fontSize: 18, fontWeight: '600', color: c.textPrimary },
     eventTime: { fontSize: 14, color: c.textSecondary },
-    deleteButton: {
-      paddingVertical: 10,
-      paddingHorizontal: 14,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: c.dangerBorder,
-      backgroundColor: c.dangerBg,
-    },
-    deleteButtonText: { fontSize: 15, fontWeight: '600', color: c.danger },
-    newEventButton: {
-      paddingVertical: 10,
-      paddingHorizontal: 14,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: c.border,
-      backgroundColor: c.surface,
-      alignItems: 'center',
-    },
-    newEventText: { fontSize: 15, fontWeight: '600', color: c.link },
     pressed: { opacity: 0.7 },
     muted: { fontSize: 15, color: c.textSecondary, padding: 16 },
     error: { fontSize: 15, fontWeight: '600', color: c.danger, paddingHorizontal: 16 },

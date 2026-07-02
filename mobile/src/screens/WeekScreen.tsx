@@ -11,6 +11,7 @@ import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import { readWeekStart, type WeekStart } from '../settings/weekStart';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
+import { chrome, chromeTouch } from '../theme/uiScale';
 
 // Accessible Week view — the screen-reader-first port of the desktop WeekView.
 // The desktop's 7-column aria-activedescendant grid has no TalkBack/VoiceOver
@@ -204,14 +205,14 @@ const makeStyles = (c: ThemeColors) =>
     },
     rangeHeading: {
       flex: 1,
-      fontSize: 16,
+      fontSize: 15,
       fontWeight: '700',
       color: c.textPrimary,
       textAlign: 'center',
     },
     navButton: {
-      width: 48,
-      height: 48,
+      width: chromeTouch(44),
+      height: chromeTouch(44),
       borderRadius: 10,
       borderWidth: 1,
       borderColor: c.border,
@@ -222,13 +223,13 @@ const makeStyles = (c: ThemeColors) =>
     navButtonText: { fontSize: 26, color: c.textPrimary, lineHeight: 30 },
     actionBar: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, padding: 12, alignItems: 'center' },
     ghostButton: {
-      paddingVertical: 12,
-      paddingHorizontal: 16,
+      paddingVertical: chrome(10),
+      paddingHorizontal: chrome(13),
       borderRadius: 10,
       borderWidth: 1,
       borderColor: c.border,
       backgroundColor: c.surfaceAlt,
     },
-    ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
+    ghostButtonText: { fontSize: 15, fontWeight: '600', color: c.link },
     pressed: { opacity: 0.7 },
   });

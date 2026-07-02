@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  AccessibilityActionEvent,
   AccessibilityInfo,
   ActivityIndicator,
   Alert,
@@ -34,6 +33,7 @@ import {
   selectableCheckState,
   selectableRole,
 } from '../a11y/roles';
+import { ActionsMenu, type MenuAction } from '../components/ActionsMenu';
 import { deleteTask, duplicateTask } from '../api/client';
 import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
 import { useTabBarInset } from '../hooks/useTabBarInset';
@@ -48,6 +48,7 @@ import { readTaskBehaviour } from '../state/taskBehaviour';
 import { applyTaskToggle, recomputeAncestors, statusAnnounce } from '../state/taskToggle';
 import { useTasks } from '../state/useTasks';
 import { useThemedStyles, type ThemeColors } from '../theme';
+import { chrome } from '../theme/uiScale';
 import type { RootStackScreenProps } from '../navigation/types';
 
 // The grouped tasks tree — a faithful port of the desktop TaskView, adapted to
@@ -199,6 +200,14 @@ export default function TasksScreen({
   const emptyRef = useRef<Text>(null);
   const pendingFocusId = useRef<string | null>(null);
   const pendingEmptyFocus = useRef(false);
+
+  // Long-press action menu — the sighted twin of the rows' SR custom actions
+  // (one shared action list feeds both).
+  const [menu, setMenu] = useState<{
+    title: string;
+    actions: MenuAction[];
+    onAction: (name: string) => void;
+  } | null>(null);
 
   // Load sections for every list that has tasks so buildEntries can group by
   // section. Mirrors TaskView's sections-loading effect; lazy + sticky.
@@ -463,10 +472,11 @@ export default function TasksScreen({
     [announce, collapsed, t],
   );
 
-  const onAction = useCallback(
-    (entry: Entry, event: AccessibilityActionEvent) => {
+  // ONE dispatcher feeds the SR custom actions AND the sighted long-press menu.
+  const runAction = useCallback(
+    (entry: Entry, name: string) => {
       const task = entry.task;
-      switch (event.nativeEvent.actionName) {
+      switch (name) {
         case 'toggle':
           void toggleDone(task);
           break;
@@ -634,8 +644,19 @@ export default function TasksScreen({
             )
           : {})}
         accessibilityActions={actions}
-        onAccessibilityAction={(event) => onAction(entry, event)}
+        onAccessibilityAction={(event) => runAction(entry, event.nativeEvent.actionName)}
         onPress={() => openEditor(task)}
+        // Long-press = the sighted twin of the SR custom actions ("wie Rotor"):
+        // the same action list opens as a menu.
+        onLongPress={() =>
+          setMenu({
+            title: task.title,
+            actions: actions.map((a) =>
+              a.name === 'delete' ? { ...a, destructive: true } : a,
+            ),
+            onAction: (name) => runAction(entry, name),
+          })
+        }
         style={({ pressed }) => [
           styles.task,
           effortStyle,
@@ -690,7 +711,9 @@ export default function TasksScreen({
           onPress={newTask}
           style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
         >
-          <Text style={styles.buttonText}>{t('mobile.add')}</Text>
+          {/* Visible text matches the a11y label — the generic "Add" read
+              differently from every other view's specific create wording. */}
+          <Text style={styles.buttonText}>{t('mobile.newTaskLabel')}</Text>
         </Pressable>
         <Pressable
           accessibilityRole="button"
@@ -788,6 +811,15 @@ export default function TasksScreen({
           removeClippedSubviews={false}
         />
       )}
+
+      {/* The long-press action menu (one instance for the whole screen). */}
+      <ActionsMenu
+        visible={menu != null}
+        title={menu?.title ?? ''}
+        actions={menu?.actions ?? []}
+        onAction={menu?.onAction ?? (() => undefined)}
+        onClose={() => setMenu(null)}
+      />
     </View>
   );
 }
@@ -843,8 +875,8 @@ const makeStyles = (c: ThemeColors) =>
     },
     groupByLabel: { fontSize: 14, color: c.textSecondary, marginRight: 4 },
     groupByOption: {
-      paddingVertical: 6,
-      paddingHorizontal: 14,
+      paddingVertical: chrome(5),
+      paddingHorizontal: chrome(11),
       borderRadius: 8,
       borderWidth: 1,
       borderColor: c.border,
@@ -853,26 +885,26 @@ const makeStyles = (c: ThemeColors) =>
     groupByOptionActive: { backgroundColor: c.accent, borderColor: c.accent },
     groupByOptionText: { fontSize: 15, fontWeight: '600', color: c.link },
     groupByOptionTextActive: { color: c.textOnAccent },
-    list: { gap: 8, padding: 16 },
+    list: { gap: chrome(8), padding: chrome(12) },
     button: {
-      paddingVertical: 12,
-      paddingHorizontal: 18,
+      paddingVertical: chrome(10),
+      paddingHorizontal: chrome(13),
       borderRadius: 10,
       backgroundColor: c.accent,
       alignItems: 'center',
     },
     buttonPressed: { backgroundColor: c.accentPressed },
-    buttonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
+    buttonText: { fontSize: 15, fontWeight: '700', color: c.textOnAccent },
     ghostButton: {
-      paddingVertical: 12,
-      paddingHorizontal: 18,
+      paddingVertical: chrome(10),
+      paddingHorizontal: chrome(13),
       borderRadius: 10,
       borderWidth: 1,
       borderColor: c.border,
       backgroundColor: c.surfaceAlt,
       alignItems: 'center',
     },
-    ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
+    ghostButtonText: { fontSize: 15, fontWeight: '600', color: c.link },
     center: { alignItems: 'center', gap: 8, paddingVertical: 24 },
     muted: { fontSize: 15, color: c.textSecondary, padding: 16 },
     header: {
@@ -889,8 +921,8 @@ const makeStyles = (c: ThemeColors) =>
     task: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 14,
-      padding: 16,
+      gap: chrome(10),
+      padding: chrome(12),
       borderRadius: 12,
       borderWidth: 1,
       borderColor: c.border,
@@ -898,8 +930,8 @@ const makeStyles = (c: ThemeColors) =>
     },
     // Effort-driven tile sizing (gated on the visualEffortSizing pref). Medium
     // uses the base `task` size; small is more compact, large a bit taller.
-    taskEffortSmall: { paddingVertical: 8, minHeight: 0 },
-    taskEffortLarge: { paddingVertical: 24, minHeight: 96 },
+    taskEffortSmall: { paddingVertical: chrome(6), minHeight: 0 },
+    taskEffortLarge: { paddingVertical: chrome(20), minHeight: chrome(88) },
     rowPressed: { backgroundColor: c.surfacePressed },
     taskCheckButton: { borderRadius: 8, padding: 4 },
     taskCheck: { fontSize: 20, width: 26, textAlign: 'center', color: c.textPrimary },

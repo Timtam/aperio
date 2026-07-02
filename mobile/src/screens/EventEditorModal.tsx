@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 
-import type { ColorLabel, Reminder } from '@aperio/shared';
+import type { ColorLabel, ExpandedOccurrence, Reminder } from '@aperio/shared';
 import { selectableEventCalendars } from '@aperio/shared';
 
 import { AttendeesEditor } from '../components/AttendeesEditor';
@@ -38,6 +38,7 @@ import { listColorLabels } from '../api/colorLabels';
 import { setEventColor } from '../api/containerColor';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useCalendarVisibility } from '../state/calendarVisibility';
+import { confirmDeleteEvent } from '../state/eventDeleteScope';
 import { useSoundPref } from '../state/useSoundPref';
 import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
@@ -418,6 +419,33 @@ export default function EventEditorModal({
     title,
   ]);
 
+  // Delete with recurrence scope — the same shared confirm the list rows pop
+  // (occurrence-vs-series for a recurring event, plain delete otherwise). The
+  // loaded `original` is the series MASTER (getEventById), which carries no
+  // occurrence context, so when the editor was opened FROM an occurrence row
+  // re-attach the route's instant — gated on the freshly-loaded recurrence like
+  // the edit-scope UI above (a stale occurrence param degrades to a plain
+  // whole-event delete). On success announce + close, matching the row surfaces.
+  const remove = useCallback(() => {
+    if (original == null) return;
+    const target: ExpandedOccurrence<CalendarEvent> | CalendarEvent =
+      isOccurrence && occurrence != null && original.recurrence != null
+        ? { ...original, series_id: original.id, occurrence_start: occurrence }
+        : original;
+    confirmDeleteEvent(
+      target,
+      t,
+      (message) => {
+        AccessibilityInfo.announceForAccessibility(message);
+        navigation.goBack();
+      },
+      (message) => {
+        setError(message);
+        AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
+      },
+    );
+  }, [isOccurrence, navigation, occurrence, original, t]);
+
   if (loading) {
     return (
       <View style={styles.screen}>
@@ -689,6 +717,30 @@ export default function EventEditorModal({
       >
         <Text style={styles.primaryButtonText}>{t('mobile.save')}</Text>
       </Pressable>
+
+      {/* Delete — edit-only (a new event has nothing to delete), after Save and
+          visually destructive; disabled while a save runs. Hidden on a
+          READ-ONLY calendar: the row surfaces gate their delete action the same
+          way, but Search + Reminders open this editor for ANY event — without
+          the gate the button would just dead-end in a provider rejection. */}
+      {editing &&
+        original != null &&
+        !(calendars.find((c) => c.id === original.calendar_id)?.read_only ?? false) && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: saving }}
+          accessibilityLabel={`${t('dialogs.event.delete')}: ${original.title}`}
+          disabled={saving}
+          onPress={remove}
+          style={({ pressed }) => [
+            styles.deleteButton,
+            pressed && styles.pressed,
+            saving && styles.deleteDisabled,
+          ]}
+        >
+          <Text style={styles.deleteButtonText}>{t('dialogs.event.delete')}</Text>
+        </Pressable>
+      )}
     </FormScrollView>
   );
 }
@@ -732,6 +784,17 @@ const makeStyles = (c: ThemeColors) =>
     primaryPressed: { backgroundColor: c.accentPressed },
     primaryDisabled: { backgroundColor: c.accentDisabled },
     primaryButtonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
+    deleteButton: {
+      marginTop: 8,
+      paddingVertical: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.dangerBorder,
+      backgroundColor: c.dangerBg,
+      alignItems: 'center',
+    },
+    deleteDisabled: { opacity: 0.5 },
+    deleteButtonText: { fontSize: 16, fontWeight: '700', color: c.danger },
     muted: { fontSize: 15, color: c.textSecondary, padding: 16 },
     pressed: { opacity: 0.7 },
     error: { fontSize: 15, fontWeight: '600', color: c.danger },

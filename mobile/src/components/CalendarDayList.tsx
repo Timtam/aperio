@@ -67,6 +67,7 @@ import { useTabBarInset } from '../hooks/useTabBarInset';
 import { resolveEventColor } from '../intl/eventColor';
 import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
 import type { RootStackParamList } from '../navigation/types';
+import { ActionsMenu, type MenuAction } from './ActionsMenu';
 import { useCacheReload } from '../state/cacheObserver';
 import { hapticLoadBegin, hapticLoadEnd } from '../state/haptics';
 import { useCalendarVisibility } from '../state/calendarVisibility';
@@ -76,6 +77,7 @@ import { readTaskBehaviour } from '../state/taskBehaviour';
 import { applyTaskToggle, statusAnnounce } from '../state/taskToggle';
 import { useTaskListShowCompleted } from '../state/useTaskListShowCompleted';
 import { useThemedStyles, type ThemeColors } from '../theme';
+import { chrome } from '../theme/uiScale';
 
 // The shared, screen-reader-first calendar day list — the rendering + data
 // engine behind both the Week and Month views (and any future day-range view).
@@ -440,6 +442,15 @@ export function CalendarDayList({
   // and re-fires load while an earlier fetch may still be in flight; without
   // this, a slow earlier resolution could overwrite the newer window's data and
   // leave events mismatched against the day headers (derived from `days`).
+  // Long-press action menu — the sighted twin of the rows' SR custom actions
+  // (one shared action list feeds both). Set by a row's / day header's
+  // long-press; one menu instance renders for the whole list.
+  const [menu, setMenu] = useState<{
+    title: string;
+    actions: MenuAction[];
+    onAction: (name: string) => void;
+  } | null>(null);
+
   const reqToken = useRef(0);
   // Whether a load has ever completed with data on screen. The FIRST load blanks
   // to the "loading" text (nothing to show yet); every later reload — focus
@@ -853,14 +864,12 @@ export function CalendarDayList({
     const rowKey = `e-${ev.id}@${localDateKey(day)}`;
     const hex = resolveEventColor(ev, calendarsById, labelsById).hex;
     const grid = slot != null;
-    const dot =
-      hex != null ? (
-        <View
-          accessible={false}
-          importantForAccessibility="no"
-          style={[styles.colorDot, { backgroundColor: hex }]}
-        />
-      ) : null;
+    // Sighted colour: TINT the whole tile in the event's resolved colour (the
+    // per-tester ask; replaces the old colour dot) — a low-alpha fill keeps the
+    // text contrast on both themes, the stronger border keeps the hue readable
+    // on tiny grid chips. SR users get the label NAME in eventLabel unchanged.
+    const tint =
+      hex != null ? { backgroundColor: `${hex}2E`, borderColor: `${hex}66` } : null;
     const badge = span
       ? ` ${t('views.multiDayCompact', { day: span.dayIndex, total: span.totalDays })}`
       : '';
@@ -871,9 +880,12 @@ export function CalendarDayList({
           accessible
           accessibilityRole="text"
           accessibilityLabel={eventLabel(ev, day, span)}
-          style={grid ? [styles.gridChip, slotStyle(slot, canvasPx)] : [styles.row, extraStyle]}
+          style={
+            grid
+              ? [styles.gridChip, slotStyle(slot, canvasPx), tint]
+              : [styles.row, extraStyle, tint]
+          }
         >
-          {dot}
           <View style={styles.rowText}>
             <Text
               style={styles.itemTitle}
@@ -892,6 +904,19 @@ export function CalendarDayList({
         </View>
       );
     }
+    // ONE action list feeds the SR custom actions AND the sighted long-press
+    // menu; the per-row delete button is gone (delete lives in the editor, the
+    // menu and the SR action — the visible button was row clutter).
+    const actions: MenuAction[] = [
+      { name: 'activate', label: t('mobile.editTaskLabel') },
+      { name: 'moveCopy', label: t('mobile.moveCopy') },
+      { name: 'delete', label: t('dialogs.event.delete'), destructive: true },
+    ];
+    const runAction = (name: string) => {
+      if (name === 'delete') removeEvent(ev);
+      else if (name === 'moveCopy') moveCopyEvent(ev);
+      else editEvent(ev);
+    };
     return (
       <View
         key={rowKey}
@@ -899,20 +924,20 @@ export function CalendarDayList({
         accessibilityRole="button"
         accessibilityLabel={eventLabel(ev, day, span)}
         accessibilityHint={t('mobile.taskHint')}
-        accessibilityActions={[
-          { name: 'activate', label: t('mobile.editTaskLabel') },
-          { name: 'moveCopy', label: t('mobile.moveCopy') },
-          { name: 'delete', label: t('dialogs.event.delete') },
-        ]}
-        onAccessibilityAction={(e) => {
-          if (e.nativeEvent.actionName === 'delete') removeEvent(ev);
-          else if (e.nativeEvent.actionName === 'moveCopy') moveCopyEvent(ev);
-          else editEvent(ev);
-        }}
-        style={grid ? [styles.gridChip, slotStyle(slot, canvasPx)] : [styles.row, extraStyle]}
+        accessibilityActions={actions}
+        onAccessibilityAction={(e) => runAction(e.nativeEvent.actionName)}
+        style={
+          grid
+            ? [styles.gridChip, slotStyle(slot, canvasPx), tint]
+            : [styles.row, extraStyle, tint]
+        }
       >
-        {dot}
-        <Pressable accessible={false} onPress={() => editEvent(ev)} style={styles.rowText}>
+        <Pressable
+          accessible={false}
+          onPress={() => editEvent(ev)}
+          onLongPress={() => setMenu({ title: ev.title, actions, onAction: runAction })}
+          style={styles.rowText}
+        >
           <Text
             style={styles.itemTitle}
             importantForAccessibility="no"
@@ -927,18 +952,6 @@ export function CalendarDayList({
             </Text>
           )}
         </Pressable>
-        {/* In the compact grid chip the inline delete button would crowd out
-            the title; SR users keep the row's "delete" custom action. */}
-        {!grid && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${t('dialogs.event.delete')}: ${ev.title}`}
-            onPress={() => removeEvent(ev)}
-            style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
-          >
-            <Text style={styles.deleteButtonText}>{t('dialogs.event.delete')}</Text>
-          </Pressable>
-        )}
       </View>
     );
   };
@@ -981,6 +994,20 @@ export function CalendarDayList({
         deadline: fmtDateOnly(task.deadline_date),
       })}`;
     }
+    // ONE action list feeds the SR custom actions AND the sighted long-press
+    // menu (same model as the event rows).
+    const actions: MenuAction[] = [
+      { name: 'toggle', label: done ? t('mobile.reopen') : t('mobile.complete') },
+      { name: 'edit', label: t('mobile.rename') },
+      { name: 'moveCopy', label: t('mobile.moveCopy') },
+      { name: 'delete', label: t('mobile.delete'), destructive: true },
+    ];
+    const runAction = (name: string) => {
+      if (name === 'toggle') void toggleTask(task);
+      else if (name === 'delete') removeTask(task);
+      else if (name === 'moveCopy') moveCopyTask(task);
+      else openTask(task);
+    };
     return (
       <View
         key={`t-${task.id}@${key}`}
@@ -988,19 +1015,8 @@ export function CalendarDayList({
         accessibilityRole="button"
         accessibilityLabel={taskLabel(task, key, resolved.labelName)}
         accessibilityHint={t('mobile.taskHint')}
-        accessibilityActions={[
-          { name: 'toggle', label: done ? t('mobile.reopen') : t('mobile.complete') },
-          { name: 'edit', label: t('mobile.rename') },
-          { name: 'moveCopy', label: t('mobile.moveCopy') },
-          { name: 'delete', label: t('mobile.delete') },
-        ]}
-        onAccessibilityAction={(e) => {
-          const name = e.nativeEvent.actionName;
-          if (name === 'toggle') void toggleTask(task);
-          else if (name === 'delete') removeTask(task);
-          else if (name === 'moveCopy') moveCopyTask(task);
-          else openTask(task);
-        }}
+        accessibilityActions={actions}
+        onAccessibilityAction={(e) => runAction(e.nativeEvent.actionName)}
         style={
           grid
             ? [
@@ -1036,7 +1052,12 @@ export function CalendarDayList({
             style={[styles.colorDot, { backgroundColor: hex }]}
           />
         )}
-        <Pressable accessible={false} onPress={() => openTask(task)} style={styles.rowText}>
+        <Pressable
+          accessible={false}
+          onPress={() => openTask(task)}
+          onLongPress={() => setMenu({ title: task.title, actions, onAction: runAction })}
+          style={styles.rowText}
+        >
           <Text
             style={[styles.itemTitle, done && styles.itemTitleDone]}
             importantForAccessibility="no"
@@ -1338,18 +1359,53 @@ export function CalendarDayList({
             if (dayLayout === 'list') return renderDayList(b);
             const rows: ReactNode[] = [];
             if (showDayHeaders) {
+              // Day-anchored create moved INTO the header (SR custom actions +
+              // sighted long-press) — the per-day "+ new event / task" buttons
+              // repeated under EVERY day were toolbar duplicates (tester
+              // feedback); the function survives without the clutter.
+              const headerActions: MenuAction[] = [
+                ...(firstWritableCalendarId != null
+                  ? [{ name: 'newEvent', label: t('toolbar.newEvent') }]
+                  : []),
+                ...(firstWritableTaskListId != null
+                  ? [{ name: 'newTask', label: t('toolbar.newTask') }]
+                  : []),
+              ];
+              const runHeaderAction = (name: string) => {
+                if (name === 'newEvent') addEventOnDay(b.key);
+                else if (name === 'newTask') addTaskOnDay(b.key);
+              };
+              // Hosted in a Pressable (not a bare Text): every device-proven
+              // accessibilityActions site in this app sits on a View/Pressable,
+              // and custom actions on a raw Text host have platform quirks —
+              // this is the ONLY per-day create path here, so it rides the
+              // proven pattern. role="header" keeps the headings rotor.
               rows.push(
-                <Text
+                <Pressable
                   key={`h-${b.key}`}
+                  accessible
                   accessibilityRole="header"
                   accessibilityLabel={t(dayAnnounceKey, {
                     day: fmtFullDate(b.date),
                     count: b.count,
                   })}
-                  style={styles.dayHeader}
+                  accessibilityActions={headerActions}
+                  onAccessibilityAction={(e) => runHeaderAction(e.nativeEvent.actionName)}
+                  onLongPress={
+                    headerActions.length > 0
+                      ? () =>
+                          setMenu({
+                            title: fmtFullDate(b.date),
+                            actions: headerActions,
+                            onAction: runHeaderAction,
+                          })
+                      : undefined
+                  }
                 >
-                  {fmtFullDate(b.date)}
-                </Text>,
+                  <Text style={styles.dayHeader} importantForAccessibility="no">
+                    {fmtFullDate(b.date)}
+                  </Text>
+                </Pressable>,
               );
             }
             for (const ev of b.allDay) {
@@ -1368,12 +1424,25 @@ export function CalendarDayList({
             return (
               <View key={b.key} style={styles.daySection}>
                 {rows}
-                {renderDayCreateButtons(b)}
+                {/* Per-day create buttons only on a SINGLE-day surface (the day
+                    view); on Week/Month they repeated under every day — the
+                    header's long-press / SR actions carry the day-anchored
+                    create there instead. */}
+                {days.length === 1 && renderDayCreateButtons(b)}
               </View>
             );
           })}
         </ScrollView>
       )}
+
+      {/* The long-press action menu (one instance for the whole list). */}
+      <ActionsMenu
+        visible={menu != null}
+        title={menu?.title ?? ''}
+        actions={menu?.actions ?? []}
+        onAction={menu?.onAction ?? (() => undefined)}
+        onClose={() => setMenu(null)}
+      />
     </>
   );
 }
@@ -1381,11 +1450,11 @@ export function CalendarDayList({
 const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
     scroll: { flex: 1 },
-    list: { gap: 8, padding: 16 },
+    list: { gap: chrome(8), padding: chrome(12) },
     daySection: { gap: 8 },
     newEventButton: {
-      paddingVertical: 10,
-      paddingHorizontal: 14,
+      paddingVertical: chrome(8),
+      paddingHorizontal: chrome(12),
       borderRadius: 10,
       borderWidth: 1,
       borderColor: c.border,
@@ -1403,8 +1472,8 @@ const makeStyles = (c: ThemeColors) =>
     row: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 12,
-      padding: 16,
+      gap: chrome(10),
+      padding: chrome(12),
       borderRadius: 12,
       borderWidth: 1,
       borderColor: c.border,
@@ -1412,8 +1481,9 @@ const makeStyles = (c: ThemeColors) =>
     },
     // Effort-driven chip height (gated on the visualEffortSizing pref). Medium
     // uses the base `row` size; small is more compact, large a bit taller.
-    rowEffortSmall: { paddingVertical: 8, minHeight: 0 },
-    rowEffortLarge: { paddingVertical: 24, minHeight: 96 },
+    // Chrome-scaled in lockstep with TasksScreen's effort tiles.
+    rowEffortSmall: { paddingVertical: chrome(6), minHeight: 0 },
+    rowEffortLarge: { paddingVertical: chrome(20), minHeight: chrome(88) },
     rowText: { flex: 1, gap: 2 },
     taskCheckButton: { borderRadius: 8, padding: 4 },
     taskCheck: { fontSize: 20, width: 26, textAlign: 'center', color: c.textPrimary },
@@ -1483,23 +1553,14 @@ const makeStyles = (c: ThemeColors) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
-      paddingVertical: 4,
-      paddingHorizontal: 8,
+      paddingVertical: chrome(3),
+      paddingHorizontal: chrome(6),
       borderRadius: 8,
       borderWidth: 1,
       borderColor: c.border,
       backgroundColor: c.surfaceAlt,
       overflow: 'hidden',
     },
-    deleteButton: {
-      paddingVertical: 10,
-      paddingHorizontal: 14,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: c.dangerBorder,
-      backgroundColor: c.dangerBg,
-    },
-    deleteButtonText: { fontSize: 15, fontWeight: '600', color: c.danger },
     pressed: { opacity: 0.7 },
     muted: { fontSize: 15, color: c.textSecondary, padding: 16 },
     error: { fontSize: 15, fontWeight: '600', color: c.danger, paddingHorizontal: 16 },
