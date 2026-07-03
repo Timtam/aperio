@@ -128,8 +128,10 @@ function naturalCompare(a: string, b: string): number {
 
 /** Sibling order within a group / under a parent: high priority floats up
  *  (unchanged), then natural ascending title — replacing the old insertion-order
- *  tiebreaker so each group reads A→Z within a priority band. */
-function taskOrder(a: Task, b: Task): number {
+ *  tiebreaker so each group reads A→Z within a priority band. Exported as THE
+ *  task ordering: the calendar day surfaces (`filterTasksOnDay`) sort a day's
+ *  tasks with the same comparator so the planner reads like the task list. */
+export function taskOrder(a: Task, b: Task): number {
   return (
     priorityRank(a.priority) - priorityRank(b.priority) ||
     naturalCompare(a.title, b.title)

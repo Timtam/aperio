@@ -507,11 +507,29 @@ export function MonthView() {
   // grid AND no events clip; the grid scrolls when that exceeds the window. The
   // count drives a rem-based row min-height in CSS, so it tracks the UI
   // font-size without a DOM measurement.
-  const maxItems = useMemo(
-    () => buckets.reduce((m, b) => Math.max(m, b.items.length), 0),
-    [buckets],
+  // Effort-sized task chips are TALLER than the 1.4rem/item budget assumes
+  // (`.month-task--effort-medium` 1.9em / `--effort-large` 2.6em plus their
+  // padding at the cell font), so they count as more than one unit — without
+  // the weight, a day dense with large-effort tasks would outgrow its row's
+  // min-height and break the uniform month grid the budget exists for.
+  const itemUnits = useCallback(
+    (item: MonthDayItem): number => {
+      if (!visualEffortSizing || item.kind !== 'task') return 1;
+      if (item.task.effort === 'medium') return 1.6;
+      if (item.task.effort === 'large') return 2.2;
+      return 1;
+    },
+    [visualEffortSizing],
   );
-  // Uniform row height — overhead + the busiest day's item count, in rem so it
+  const maxItems = useMemo(
+    () =>
+      buckets.reduce(
+        (m, b) => Math.max(m, b.items.reduce((n, it) => n + itemUnits(it), 0)),
+        0,
+      ),
+    [buckets, itemUnits],
+  );
+  // Uniform row height — overhead + the busiest day's item units, in rem so it
   // scales with the UI font-size. Set INLINE on every row so they're all
   // identical (and so it can't be lost to var inheritance / calc resolution).
   const rowMinHeight = `${(2 + maxItems * 1.4).toFixed(2)}rem`;

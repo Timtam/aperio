@@ -1,9 +1,11 @@
 // Theme tokens — the mobile twin of the desktop CSS custom properties in
-// src/styles.css. The desktop is entirely system-driven (no in-app theme
-// toggle): `prefers-color-scheme` picks light/dark and `forced-colors: active`
-// switches to a Windows high-contrast palette. Mobile mirrors that — the active
-// mode is derived from the OS (useColorScheme + the platform high-contrast
-// accessibility flag), never a persisted preference. See [[ThemeProvider]].
+// src/styles.css. Light vs dark follows the device-local theme-mode setting
+// (see themeMode.ts: 'system' — the default — tracks the OS via
+// useColorScheme; 'light'/'dark' pin the palette, mirroring the desktop's
+// data-theme resolution in src/state/themeMode.ts). The platform
+// high-contrast accessibility flag switches to the high-contrast palette and
+// wins over any choice, matching the desktop's `forced-colors: active`
+// override. See [[ThemeProvider]].
 //
 // The LIGHT palette is byte-identical to the hexes the screens hardcoded before
 // this migration, so light mode has ZERO visual regression; dark + high-contrast
@@ -11,8 +13,9 @@
 // used (e.g. two slightly different delete-button backgrounds) are deliberately
 // unified onto the canonical token here.
 
-/** Active appearance mode, derived from the OS — never user-selected (matches
- *  the desktop's system-driven theming). */
+/** Active appearance mode, as RESOLVED by ThemeProvider: the device-local
+ *  theme-mode choice (or the OS scheme when it's 'system'), with the
+ *  platform high-contrast flag overriding both. */
 export type ThemeMode = 'light' | 'dark' | 'highContrast';
 
 /**

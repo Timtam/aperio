@@ -588,11 +588,13 @@ export default function TasksScreen({
     const task = entry.task;
     const done = task.status === 'completed';
     // Visual tile-size by effort (sighted users), only when the synced pref is
-    // on; medium = neutral base size (no extra style). Purely cosmetic — the
+    // on. The scale sits one step above the original mapping (tester
+    // feedback), so SMALL is the neutral base size — `effortSizeModifier`
+    // returns '' for it and no extra style applies. Purely cosmetic — the
     // effort is always in the row's accessibilityLabel via effortSuffix.
     const effortStyle = effortSizing
-      ? effortSizeModifier(task.effort) === 'small'
-        ? styles.taskEffortSmall
+      ? effortSizeModifier(task.effort) === 'medium'
+        ? styles.taskEffortMedium
         : effortSizeModifier(task.effort) === 'large'
           ? styles.taskEffortLarge
           : null
@@ -932,10 +934,11 @@ const makeStyles = (c: ThemeColors) =>
       borderColor: c.border,
       backgroundColor: c.surfaceAlt,
     },
-    // Effort-driven tile sizing (gated on the visualEffortSizing pref). Medium
-    // uses the base `task` size; small is more compact, large a bit taller.
-    taskEffortSmall: { paddingVertical: chrome(6), minHeight: 0 },
-    taskEffortLarge: { paddingVertical: chrome(20), minHeight: chrome(88) },
+    // Effort-driven tile sizing (gated on the visualEffortSizing pref). One
+    // step above the original mapping (tester feedback): small uses the base
+    // `task` size, medium the former large size, large grew beyond it.
+    taskEffortMedium: { paddingVertical: chrome(20), minHeight: chrome(88) },
+    taskEffortLarge: { paddingVertical: chrome(28), minHeight: chrome(112) },
     rowPressed: { backgroundColor: c.surfacePressed },
     taskCheckButton: { borderRadius: 8, padding: 4 },
     taskCheck: { fontSize: 20, width: 26, textAlign: 'center', color: c.textPrimary },

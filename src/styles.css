@@ -4,11 +4,12 @@
  * The native-feel defaults from DESIGN.md section 15 plus the Phase 2
  * design-token surface.
  *
- * Tokens are declared as CSS custom properties under `:root` (light) and
- * overridden under `@media (prefers-color-scheme: dark)` and under
+ * Tokens are declared as CSS custom properties under `:root` (light),
+ * overridden under `:root[data-theme='dark']` (the resolved device-local
+ * theme mode — see src/state/themeMode.ts) and under
  * `@media (forced-colors: active)` (high-contrast / Windows
- * High-Contrast). Every color satisfies WCAG AA contrast against its
- * companion in the same theme.
+ * High-Contrast), which wins over both. Every color satisfies WCAG AA
+ * contrast against its companion in the same theme.
  *
  * Component-level CSS reaches for variables rather than literal colors,
  * so themes propagate by editing this file alone.
@@ -73,27 +74,41 @@
 
 /* ── Tokens — dark theme ───────────────────────────────────────────────── */
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-bg: #16191d;
-    --color-bg-elevated: #1e2126;
-    --color-bg-panel: #21252b;
-    --color-fg: #e9ecef;
-    --color-fg-muted: #9aa0a6;
-    --color-border: rgba(233, 236, 239, 0.15);
-    --color-border-strong: rgba(233, 236, 239, 0.32);
-    --color-accent: #64b5f6;
-    --color-accent-fg: #0a1929;
-    --color-danger: #ef5350;
-    --color-warning: #ffb74d;
-    --color-success: #81c784;
-  }
+/* Keyed on the RESOLVED theme main.tsx writes to <html data-theme> (the
+ * device-local light/dark/system setting; 'system' resolves via matchMedia
+ * and tracks OS switches live) — not on the media query directly, so the
+ * user's explicit choice can override the OS without duplicating the token
+ * block. `color-scheme` follows so native widgets (scrollbars, form
+ * controls) match the palette. */
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --color-bg: #16191d;
+  --color-bg-elevated: #1e2126;
+  --color-bg-panel: #21252b;
+  --color-fg: #e9ecef;
+  --color-fg-muted: #9aa0a6;
+  --color-border: rgba(233, 236, 239, 0.15);
+  --color-border-strong: rgba(233, 236, 239, 0.32);
+  --color-accent: #64b5f6;
+  --color-accent-fg: #0a1929;
+  --color-danger: #ef5350;
+  --color-warning: #ffb74d;
+  --color-success: #81c784;
 }
 
 /* ── Forced-colors / Windows High-Contrast ─────────────────────────────── */
 
 @media (forced-colors: active) {
-  :root {
+  /* `:root:root` (0,2,0) deliberately matches the dark block's
+     `:root[data-theme='dark']` specificity and wins by source order — a
+     media query adds none of its own, and data-theme is ALWAYS set (dark
+     Windows HC themes report prefers-color-scheme: dark, so a plain
+     `:root` here would lose every token to the dark palette). */
+  :root:root {
     --color-bg: Canvas;
     --color-bg-elevated: Canvas;
     --color-bg-panel: Canvas;
@@ -2987,6 +3002,13 @@ button[aria-disabled='true'] {
   box-shadow: inset 0 0 0 2px var(--color-accent);
 }
 
+/* Day view's hour-grid canvas while a task drag hovers it (drag-to-time
+ * drop target) — same accent treatment as the week cell above. */
+.day-list--drag-over {
+  background-color: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
 .week-grid__events {
   list-style: none;
   margin: 0;
@@ -4458,49 +4480,48 @@ button[aria-disabled='true'] {
 
 /* ── Effort tile sizing (DESIGN: visual effort estimate) ───────────────────
  * A task's `effort` ('small' | 'medium' | 'large') optionally drives the
- * chip's tile size when the synced `visualEffortSizing` pref is on. `medium`
- * is the neutral base size (no class), so only `--effort-small` (compact) and
- * `--effort-large` (taller) are defined here, for every task-chip surface.
+ * chip's tile size when the synced `visualEffortSizing` pref is on. The
+ * scale sits one step above the original mapping (tester feedback): `small`
+ * is the neutral base size (no class — `effortSizeModifier` returns '' for
+ * it), `medium` takes the former "large" size, and `large` grew beyond it.
+ * Only grow rules remain, so an effort class can never drop a chip below
+ * its surface's slot floor (`.week-grid__slot` / `.day-list__slot` are
+ * min-height: 1.2em).
  *
  * Only `min-height` + the vertical padding vary — the horizontal padding,
  * the task-list `--task-depth` indent (a `padding-left`), and the backlog
  * accent stripe (also a `padding-left`) are untouched, so the grid/flex
- * alignment of each surface is preserved. The visible progression is roughly
- * 1.0 / 1.4 / 1.9em across small / medium / large. SR users get the effort
- * spoken via the aria-label suffix regardless of this toggle. */
-.task-list__item--effort-small {
-  min-height: 1.4em;
-  padding-block: calc(var(--space-1) / 2);
-}
-.task-list__item--effort-large {
+ * alignment of each surface is preserved. SR users get the effort spoken
+ * via the aria-label suffix regardless of this toggle. */
+.task-list__item--effort-medium {
   min-height: 2.6em;
   padding-block: calc(var(--space-1) * 2);
 }
+.task-list__item--effort-large {
+  min-height: 3.4em;
+  padding-block: calc(var(--space-1) * 3);
+}
 
-.day-task--effort-small,
-.week-task--effort-small,
-.month-task--effort-small {
-  /* >= the grid slot floor (`.week-grid__slot` / `.day-list__slot` are
-     min-height: 1.2em). These effort rules win the cascade on a small-effort
-     timed task's <li>, so a value below 1.2em would LOWER that slot's
-     short-event legibility floor — effort may only raise it, never drop it. */
-  min-height: 1.2em;
-  padding-block: 1px;
+.day-task--effort-medium,
+.week-task--effort-medium,
+.month-task--effort-medium {
+  min-height: 1.9em;
+  padding-block: 6px;
 }
 .day-task--effort-large,
 .week-task--effort-large,
 .month-task--effort-large {
-  min-height: 1.9em;
-  padding-block: 6px;
+  min-height: 2.6em;
+  padding-block: 8px;
 }
 
-.backlog-rail__chip--effort-small {
-  min-height: 1.6em;
-  padding-block: calc(var(--space-1) / 2);
-}
-.backlog-rail__chip--effort-large {
+.backlog-rail__chip--effort-medium {
   min-height: 3em;
   padding-block: calc(var(--space-1) * 2);
+}
+.backlog-rail__chip--effort-large {
+  min-height: 3.8em;
+  padding-block: calc(var(--space-1) * 3);
 }
 
 /* Deadline badge on a SCHEDULED calendar chip ("bis 01.07."). A task with a

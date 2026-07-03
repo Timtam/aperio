@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { addDays, isSameDay, startOfWeek } from 'date-fns';
 import { invoke } from '@tauri-apps/api/core';
@@ -25,6 +25,8 @@ import {
   EVENT_DND_TYPE,
   moveEventToDay,
   readEventDrag,
+  readTaskDrag,
+  scheduleTaskAtTime,
   setEventDrag,
   setTaskDrag,
   TASK_DND_TYPE,
@@ -69,6 +71,7 @@ import {
   isCommandError,
 } from '../../api/client';
 import {
+  dropMinuteInWindow,
   eventBlockFactor,
   eventSpanForDay,
   layoutDayColumn,
@@ -98,6 +101,19 @@ const WEEK_LIST_BLOCK_BASE_REM = 2.25;
  *  `minFraction` arg. Matches DayView's MIN_SLOT_FRACTION. */
 const MIN_SLOT_FRACTION = 0.018;
 
+/** How much taller than the base 1.2em slot floor the effort classes render
+ *  a TASK chip (`.week-task--effort-medium` 1.9em / `--effort-large` 2.6em in
+ *  styles.css). The top-clamp must reserve the REAL rendered height, or a
+ *  floored chip near the window end paints past the canvas bottom over the
+ *  outside band / untimed lane — the desktop twin of mobile's
+ *  GRID_TASK_EFFORT_PX floor. '' (small, or sizing off) keeps the base floor.
+ *  Matches DayView's effortSlotFactor. */
+function effortSlotFactor(effortMod: string): number {
+  if (effortMod === 'medium') return 1.9 / 1.2;
+  if (effortMod === 'large') return 2.6 / 1.2;
+  return 1;
+}
+
 /** Absolute placement of a timed chip's `<li>` inside the day column's
  *  visible-window hour-grid (positioning is purely visual; DOM order is
  *  unchanged). The TOP is clamped (not the height) so a chip whose effective
@@ -112,8 +128,8 @@ function slotStyle(
   p: PositionedSpan,
   minFraction = MIN_SLOT_FRACTION,
 ): React.CSSProperties {
-  const eh = Math.max(p.heightFraction, minFraction);
-  const top = Math.min(p.topFraction, 1 - eh);
+  const eh = Math.min(1, Math.max(p.heightFraction, minFraction));
+  const top = Math.max(0, Math.min(p.topFraction, 1 - eh));
   return {
     position: 'absolute',
     top: `${top * 100}%`,
@@ -621,6 +637,12 @@ export function WeekView() {
   //     drop target. Drives the highlight class on the cell.
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const [dragOverDayKey, setDragOverDayKey] = useState<string | null>(null);
+  // Where the current drag of a GRID chip started (cleared on its dragend).
+  // The browser can misfire a few-pixel drag out of a double-click; the
+  // day-drop below no-ops those via its same-day check, but the canvas
+  // time-drop would happily write a new minute — so drops that barely moved
+  // from this point are ignored (see dropTaskAtTime).
+  const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
 
   const rescheduleTaskByDrop = useCallback(
     async (taskId: string, newDayKey: string) => {
@@ -659,6 +681,61 @@ export function WeekView() {
       }
     },
     [tasks, announce, t, fmt, invalidateData],
+  );
+
+  // Drag-to-time: a task dropped onto a day's hour-grid CANVAS (not just
+  // the cell) gets the drop position's wall-clock time (snapped to 15 min)
+  // on top of the day — it turns into a timed chip right where it landed.
+  // The plain cell drop below keeps the day-only reschedule for drops on
+  // the untimed band / cell padding. Grid mode only (the canvas exists
+  // only there).
+  const dropTaskAtTime = useCallback(
+    (e: React.DragEvent<HTMLElement>, dayKey: string) => {
+      const payload = readTaskDrag(e.dataTransfer);
+      if (!payload) return; // event drag → bubble on to the cell handler
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOverDayKey(null);
+      const origin = dragOriginRef.current;
+      if (
+        origin &&
+        Math.abs(e.clientX - origin.x) < 8 &&
+        Math.abs(e.clientY - origin.y) < 8
+      ) {
+        return; // double-click misfire, not a reposition
+      }
+      const rect = e.currentTarget.getBoundingClientRect();
+      const fraction =
+        rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0;
+      const minute = dropMinuteInWindow(fraction, {
+        startMin: dayStartMin,
+        endMin: dayEndMin,
+      });
+      const clock = `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}:00`;
+      // Write the CURRENT row, not the dragstart snapshot — a sync refresh
+      // can land mid-drag, and re-sending the stale snapshot with a fresh
+      // updated_at would silently revert another device's edit (the sibling
+      // day-drop resolves from the store for the same reason).
+      const current =
+        tasks.find((row) => row.id === payload.task.id) ?? payload.task;
+      void (async () => {
+        try {
+          await scheduleTaskAtTime(current, dayKey, minute);
+          announce(
+            t('views.taskScheduledAtTime', {
+              title: current.title,
+              date: fmt.format(new Date(`${dayKey}T00:00:00`), 'PPP'),
+              time: fmt.format(new Date(`${dayKey}T${clock}`), 'p'),
+            }),
+          );
+          invalidateData();
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('drop scheduleTaskAtTime failed', err);
+        }
+      })();
+    },
+    [tasks, dayStartMin, dayEndMin, announce, t, fmt, invalidateData],
   );
 
   // Event chip dropped on a day cell → move it there (time + duration
@@ -1253,6 +1330,12 @@ export function WeekView() {
                             backgroundPositionY: gridLineOffset,
                           }
                     }
+                    // Task drop ON the canvas → day + wall-clock time from the
+                    // drop position (grid mode only; event drags bubble to the
+                    // cell's day-move handler unchanged).
+                    onDrop={
+                      listMode ? undefined : (e) => dropTaskAtTime(e, dayKey)
+                    }
                   >
                     {timedItems.map((item, itemIdx) => {
                       const isFocusedItem =
@@ -1325,7 +1408,11 @@ export function WeekView() {
                             }
                             style={
                               slotIn && slot
-                                ? slotStyle(slot, slotMinFraction)
+                                ? slotStyle(
+                                    slot,
+                                    slotMinFraction *
+                                      effortSlotFactor(effortMod),
+                                  )
                                 : undefined
                             }
                           >
@@ -1373,8 +1460,13 @@ export function WeekView() {
                                   tasks.filter((c) => c.parent_id === task.id),
                                 );
                                 setDraggingTaskId(task.id);
+                                dragOriginRef.current = {
+                                  x: ev.clientX,
+                                  y: ev.clientY,
+                                };
                               }}
                               onDragEnd={() => {
+                                dragOriginRef.current = null;
                                 setDraggingTaskId(null);
                                 setDragOverDayKey(null);
                               }}

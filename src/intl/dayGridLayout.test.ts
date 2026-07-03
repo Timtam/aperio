@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  dropMinuteInWindow,
   eventBlockFactor,
   layoutDayColumn,
   minutesFromMidnight,
@@ -163,6 +164,41 @@ describe('layoutDayColumn — visible window', () => {
       W7to23,
     );
     expect(out.map((p) => p.placement)).toEqual(['in', 'before', 'after']);
+  });
+});
+
+describe('dropMinuteInWindow', () => {
+  const FULL = { startMin: 0, endMin: MINUTES_PER_DAY };
+  const WINDOW = { startMin: at(7), endMin: at(23) }; // 7:00–23:00
+
+  it('maps the fraction linearly into the window, snapped to 15 min', () => {
+    // Halfway down a 7–23 window is 15:00 exactly.
+    expect(dropMinuteInWindow(0.5, WINDOW)).toBe(at(15));
+    // A bit past halfway snaps to the NEAREST quarter hour, either way.
+    expect(dropMinuteInWindow(0.505, WINDOW)).toBe(at(15));
+    expect(dropMinuteInWindow(0.52, WINDOW)).toBe(at(15, 15));
+  });
+
+  it('clamps to strictly inside the window', () => {
+    expect(dropMinuteInWindow(-0.2, WINDOW)).toBe(at(7));
+    expect(dropMinuteInWindow(0, WINDOW)).toBe(at(7));
+    // endMin is the EXCLUSIVE bottom edge — a chip AT it would band as
+    // "after" and vanish from the grid it was just dropped on, so the
+    // bottom lands on the last in-window step instead.
+    expect(dropMinuteInWindow(1, WINDOW)).toBe(at(22, 45));
+    expect(dropMinuteInWindow(1.5, WINDOW)).toBe(at(22, 45));
+    // A drop just above the edge that would SNAP onto it is held back too.
+    expect(dropMinuteInWindow(0.995, WINDOW)).toBe(at(22, 45));
+  });
+
+  it('never yields 24:00 on the full-day window', () => {
+    // The exclusive day end is not a schedulable minute; the bottom of a
+    // full-day grid lands on the last snap step instead.
+    expect(dropMinuteInWindow(1, FULL)).toBe(MINUTES_PER_DAY - 15);
+  });
+
+  it('tolerates a non-finite fraction (degenerate geometry)', () => {
+    expect(dropMinuteInWindow(Number.NaN, WINDOW)).toBe(at(7));
   });
 });
 

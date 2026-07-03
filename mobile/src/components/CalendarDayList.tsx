@@ -158,13 +158,14 @@ const LIST_EVENT_BASE_PX = Math.round(69 * FONT_SCALE);
 /** Per-effort slot-height FLOOR for a TIMED TASK in the hour-grid (gated on the
  *  visualEffortSizing pref). Passed as slotStyle's `floorPx`, so it raises BOTH
  *  the min-height AND the top-clamp — a large task near midnight stays fully
- *  on-canvas. small < neutral < large; medium == MIN_SLOT_PX, so a medium task
- *  keeps the unmodified slot floor (NEUTRAL, matching desktop where only the
- *  small/large effort classes exist). */
+ *  on-canvas. One step above the original mapping (tester feedback):
+ *  small == MIN_SLOT_PX keeps the unmodified slot floor (NEUTRAL, matching
+ *  desktop where small has no effort class), medium takes the former large
+ *  height, large grew beyond it. */
 const GRID_TASK_EFFORT_PX = {
-  small: Math.round(22 * FONT_SCALE),
-  medium: MIN_SLOT_PX,
-  large: Math.round(46 * FONT_SCALE),
+  small: MIN_SLOT_PX,
+  medium: Math.round(46 * FONT_SCALE),
+  large: Math.round(72 * FONT_SCALE),
 } as const;
 
 /** Timed event's clamped duration in minutes on `day` (for the list-view block
@@ -185,12 +186,18 @@ function eventDurationMinForDay(start: Date, end: Date, day: Date): number {
  *  floor (GRID_TASK_EFFORT_PX) so a higher-effort task reads as a taller block.
  *  Events use the default MIN_SLOT_PX. */
 function slotStyle(p: PositionedSpan, canvasPx: number, floorPx = MIN_SLOT_PX) {
-  const height = Math.max(p.heightFraction * canvasPx, floorPx);
+  // The floor itself is capped at the canvas: a degenerate day window shorter
+  // than the largest effort floor (e.g. a 1h window vs the 72px large floor)
+  // must not push the top clamp negative and draw the chip above the canvas.
+  const height = Math.min(
+    Math.max(p.heightFraction * canvasPx, floorPx),
+    canvasPx,
+  );
   // Clamp the TOP (not the height) so a chip near the window's late edge keeps
   // its full height and stays on-canvas — it shifts up a few px rather than
   // being squeezed below the tap target. Clamp by the chip's own (floored)
   // height, matching the desktop reference, so even a large-effort task fits.
-  const top = Math.min(p.topFraction * canvasPx, canvasPx - height);
+  const top = Math.max(0, Math.min(p.topFraction * canvasPx, canvasPx - height));
   return {
     position: 'absolute' as const,
     top,
@@ -962,18 +969,20 @@ export function CalendarDayList({
     const resolved = resolveTaskColor(task, listsById, labelsById, sectionColorById);
     const hex = resolved.hex;
     // Visual tile-size by effort (sighted users), only when the synced pref is
-    // on; medium = neutral base row height. Purely cosmetic — the effort is
-    // always in the row's accessibilityLabel via effortSuffix.
+    // on. The scale sits one step above the original mapping (tester
+    // feedback), so SMALL is the neutral base row height (the modifier
+    // returns '' for it). Purely cosmetic — the effort is always in the
+    // row's accessibilityLabel via effortSuffix.
     // In the LINEAR list (and the compact list-view) this is a row style
-    // (rowEffortSmall/Large). In the hour-GRID a chip is absolutely positioned
-    // by time, so we can't restyle its row height freely; instead we RAISE its
-    // slot FLOOR per effort (small/neutral/large) via slotStyle's `floorPx`
-    // below — the slot's TOP (its time position) is preserved, so higher-effort
+    // (rowEffortMedium/Large). In the hour-GRID a chip is absolutely
+    // positioned by time, so we can't restyle its row height freely; instead
+    // we RAISE its slot FLOOR per effort via slotStyle's `floorPx` below —
+    // the slot's TOP (its time position) is preserved, so higher-effort
     // tasks read as taller blocks without drifting off their time.
     const effortStyle =
       !grid && effortSizing
-        ? effortSizeModifier(task.effort) === 'small'
-          ? styles.rowEffortSmall
+        ? effortSizeModifier(task.effort) === 'medium'
+          ? styles.rowEffortMedium
           : effortSizeModifier(task.effort) === 'large'
             ? styles.rowEffortLarge
             : null
@@ -1479,11 +1488,12 @@ const makeStyles = (c: ThemeColors) =>
       borderColor: c.border,
       backgroundColor: c.surfaceAlt,
     },
-    // Effort-driven chip height (gated on the visualEffortSizing pref). Medium
-    // uses the base `row` size; small is more compact, large a bit taller.
+    // Effort-driven chip height (gated on the visualEffortSizing pref). One
+    // step above the original mapping (tester feedback): small uses the base
+    // `row` size, medium the former large size, large grew beyond it.
     // Chrome-scaled in lockstep with TasksScreen's effort tiles.
-    rowEffortSmall: { paddingVertical: chrome(6), minHeight: 0 },
-    rowEffortLarge: { paddingVertical: chrome(20), minHeight: chrome(88) },
+    rowEffortMedium: { paddingVertical: chrome(20), minHeight: chrome(88) },
+    rowEffortLarge: { paddingVertical: chrome(28), minHeight: chrome(112) },
     rowText: { flex: 1, gap: 2 },
     taskCheckButton: { borderRadius: 8, padding: 4 },
     taskCheck: { fontSize: 20, width: 26, textAlign: 'center', color: c.textPrimary },

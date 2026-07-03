@@ -4,6 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Aperio</title>
+    <script>
+      // Resolve the device-local theme mode onto <html data-theme> BEFORE the
+      // stylesheet paints, so a dark-mode window never flashes light. Mirrors
+      // src/state/themeMode.ts (which takes over once the bundle runs — this
+      // inline copy only covers the pre-bundle instant).
+      (function () {
+        var mode = null;
+        try {
+          mode = localStorage.getItem('aperio.ui.themeMode');
+        } catch (e) {
+          /* no storage — follow the system below */
+        }
+        var dark =
+          mode === 'dark' ||
+          (mode !== 'light' &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
