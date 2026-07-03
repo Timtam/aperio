@@ -1811,6 +1811,7 @@
     "multiDayCompact": "({{day}}/{{total}})",
     "multiDaySuffix": ", Tag {{day}} von {{total}}",
     "eventMovedToDay": "„{{title}}“ auf {{date}} verschoben.",
+    "taskScheduledAtTime": "Aufgabe „{{title}}“ am {{date}} um {{time}} eingeplant.",
     "backlog": {
       "heading": "Backlog ({{count}})",
       "deadlineHeading": "Deadline ({{count}})",

@@ -18,7 +18,13 @@ import {
   seriesIdOf,
 } from '../../intl/recurrence';
 import { useCalendarStore } from '../../state/calendarStoreContext';
-import { setEventDrag, setTaskDrag } from '../../state/moveActions';
+import {
+  readTaskDrag,
+  scheduleTaskAtTime,
+  setEventDrag,
+  setTaskDrag,
+  TASK_DND_TYPE,
+} from '../../state/moveActions';
 import { useDialogState } from '../../state/dialogStateContext';
 import { useEvents } from '../../state/useEvents';
 import { useTaskListShowCompleted } from '../../state/useTaskListShowCompleted';
@@ -62,6 +68,7 @@ import type {
   TaskList,
 } from '../../api/types';
 import {
+  dropMinuteInWindow,
   eventBlockFactor,
   eventSpanForDay,
   layoutDayColumn,
@@ -481,6 +488,59 @@ export function DayView() {
   );
   const [scopeTarget, setScopeTarget] = useState<CalendarEvent | null>(null);
 
+  // Drag-to-time: a task chip dropped onto the hour-grid canvas gets the
+  // drop position's wall-clock time (snapped to 15 min) as its scheduled
+  // day + time, so it turns into a timed chip right where it landed. Grid
+  // mode only — the compact list has no time geometry to read a minute off.
+  const [gridDragOver, setGridDragOver] = useState(false);
+  const handleGridDragOver = (e: React.DragEvent<HTMLElement>) => {
+    if (listMode || !e.dataTransfer.types.includes(TASK_DND_TYPE)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setGridDragOver(true);
+  };
+  const handleGridDragLeave = (e: React.DragEvent<HTMLElement>) => {
+    // Moving between the canvas' own chips isn't a leave.
+    if (
+      e.relatedTarget instanceof Node &&
+      e.currentTarget.contains(e.relatedTarget)
+    ) {
+      return;
+    }
+    setGridDragOver(false);
+  };
+  const handleGridDrop = (e: React.DragEvent<HTMLElement>) => {
+    setGridDragOver(false);
+    if (listMode) return;
+    const payload = readTaskDrag(e.dataTransfer);
+    if (!payload) return;
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const fraction =
+      rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0;
+    const minute = dropMinuteInWindow(fraction, {
+      startMin: dayStartMin,
+      endMin: dayEndMin,
+    });
+    const clock = `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}:00`;
+    void (async () => {
+      try {
+        await scheduleTaskAtTime(payload.task, dayKey, minute);
+        announce(
+          t('views.taskScheduledAtTime', {
+            title: payload.task.title,
+            date: fmt.format(new Date(`${dayKey}T00:00:00`), 'PPP'),
+            time: fmt.format(new Date(`${dayKey}T${clock}`), 'p'),
+          }),
+        );
+        invalidateData();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('drop scheduleTaskAtTime failed', err);
+      }
+    })();
+  };
+
   const performDelete = useCallback(
     async (ev: CalendarEvent, scope: 'occurrence' | 'series') => {
       try {
@@ -747,7 +807,14 @@ export function DayView() {
             timedItems.length > 0 ? itemId(focusIndex) : undefined
           }
           onKeyDown={handleKeyDown}
-          className={'day-list' + (listMode ? ' day-list--flow' : '')}
+          onDragOver={handleGridDragOver}
+          onDragLeave={handleGridDragLeave}
+          onDrop={handleGridDrop}
+          className={
+            'day-list' +
+            (listMode ? ' day-list--flow' : '') +
+            (gridDragOver ? ' day-list--drag-over' : '')
+          }
         >
         {timedItems.length === 0 ? (
           <li role="presentation" className="day-list__empty">

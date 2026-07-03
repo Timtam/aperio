@@ -25,6 +25,8 @@ import {
   EVENT_DND_TYPE,
   moveEventToDay,
   readEventDrag,
+  readTaskDrag,
+  scheduleTaskAtTime,
   setEventDrag,
   setTaskDrag,
   TASK_DND_TYPE,
@@ -69,6 +71,7 @@ import {
   isCommandError,
 } from '../../api/client';
 import {
+  dropMinuteInWindow,
   eventBlockFactor,
   eventSpanForDay,
   layoutDayColumn,
@@ -659,6 +662,47 @@ export function WeekView() {
       }
     },
     [tasks, announce, t, fmt, invalidateData],
+  );
+
+  // Drag-to-time: a task dropped onto a day's hour-grid CANVAS (not just
+  // the cell) gets the drop position's wall-clock time (snapped to 15 min)
+  // on top of the day — it turns into a timed chip right where it landed.
+  // The plain cell drop below keeps the day-only reschedule for drops on
+  // the untimed band / cell padding. Grid mode only (the canvas exists
+  // only there).
+  const dropTaskAtTime = useCallback(
+    (e: React.DragEvent<HTMLElement>, dayKey: string) => {
+      const payload = readTaskDrag(e.dataTransfer);
+      if (!payload) return; // event drag → bubble on to the cell handler
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOverDayKey(null);
+      const rect = e.currentTarget.getBoundingClientRect();
+      const fraction =
+        rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0;
+      const minute = dropMinuteInWindow(fraction, {
+        startMin: dayStartMin,
+        endMin: dayEndMin,
+      });
+      const clock = `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}:00`;
+      void (async () => {
+        try {
+          await scheduleTaskAtTime(payload.task, dayKey, minute);
+          announce(
+            t('views.taskScheduledAtTime', {
+              title: payload.task.title,
+              date: fmt.format(new Date(`${dayKey}T00:00:00`), 'PPP'),
+              time: fmt.format(new Date(`${dayKey}T${clock}`), 'p'),
+            }),
+          );
+          invalidateData();
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('drop scheduleTaskAtTime failed', err);
+        }
+      })();
+    },
+    [dayStartMin, dayEndMin, announce, t, fmt, invalidateData],
   );
 
   // Event chip dropped on a day cell → move it there (time + duration
@@ -1252,6 +1296,12 @@ export function WeekView() {
                             height: gridHeight,
                             backgroundPositionY: gridLineOffset,
                           }
+                    }
+                    // Task drop ON the canvas → day + wall-clock time from the
+                    // drop position (grid mode only; event drags bubble to the
+                    // cell's day-move handler unchanged).
+                    onDrop={
+                      listMode ? undefined : (e) => dropTaskAtTime(e, dayKey)
                     }
                   >
                     {timedItems.map((item, itemIdx) => {

@@ -2987,6 +2987,13 @@ button[aria-disabled='true'] {
   box-shadow: inset 0 0 0 2px var(--color-accent);
 }
 
+/* Day view's hour-grid canvas while a task drag hovers it (drag-to-time
+ * drop target) — same accent treatment as the week cell above. */
+.day-list--drag-over {
+  background-color: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
 .week-grid__events {
   list-style: none;
   margin: 0;

@@ -132,6 +132,29 @@ export async function scheduleTaskOnDay(
 }
 
 /**
+ * Schedule a task on a specific day AND wall-clock minute (drag onto the
+ * hour grid in the day/week grid views). Sets `scheduled_date` plus
+ * `scheduled_time` in the editor's `HH:MM:00` wire shape, so the task
+ * turns into a timed chip positioned at the drop time.
+ */
+export async function scheduleTaskAtTime(
+  task: Task,
+  dayKey: string,
+  minuteOfDay: number,
+): Promise<Task> {
+  const hh = String(Math.floor(minuteOfDay / 60)).padStart(2, '0');
+  const mm = String(minuteOfDay % 60).padStart(2, '0');
+  return invoke<Task>('update_task', {
+    task: {
+      ...task,
+      scheduled_date: dayKey,
+      scheduled_time: `${hh}:${mm}:00`,
+      updated_at: new Date().toISOString(),
+    },
+  });
+}
+
+/**
  * Pull a deferred task into the active backlog now by clearing its
  * `resurface_date` (DESIGN §9.12). The "Zukünftig" group's context-menu
  * action — the user decides they want the task back before its scheduled

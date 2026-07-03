@@ -66,6 +66,27 @@ function clampMinute(min: number): number {
 }
 
 /**
+ * Minute-of-day for a DROP at `fraction` (0 = the window's top edge, 1 = its
+ * bottom) of the visible grid window, snapped to `stepMin` (default 15 — fine
+ * enough to feel intentional, coarse enough to hit without pixel-precision).
+ * Clamped so the result is a valid wall-clock minute inside the window and
+ * never 24:00 (the exclusive day end). Drives the desktop "drag a task onto
+ * the hour grid" time assignment.
+ */
+export function dropMinuteInWindow(
+  fraction: number,
+  window: DayWindow,
+  stepMin = 15,
+): number {
+  const windowMin = Math.max(1, window.endMin - window.startMin);
+  const frac = Number.isFinite(fraction) ? Math.min(1, Math.max(0, fraction)) : 0;
+  const raw = window.startMin + frac * windowMin;
+  const snapped = Math.round(raw / stepMin) * stepMin;
+  const top = Math.min(window.endMin, MINUTES_PER_DAY - stepMin);
+  return Math.max(window.startMin, Math.min(top, snapped));
+}
+
+/**
  * The local minutes-from-midnight span an event occupies on `day`, clamped to
  * the day so a multi-day event clips to [0, 1440]. `day` is any instant on the
  * target day; the span is measured from that day's LOCAL midnight. Shared by the
