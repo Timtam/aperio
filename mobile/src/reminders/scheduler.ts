@@ -7,6 +7,7 @@ import i18n from '../../i18n';
 import { UpcomingReminder, upcomingReminders } from '../api/reminders';
 import { customSoundPath } from '../api/sounds';
 import { getHiddenCalendars } from '../state/calendarVisibility';
+import { upcomingDayStartNotifications } from './dayStartSchedule';
 
 // Mobile reminder delivery. The desktop fires reminders from a live tokio
 // worker that sleeps until the next trigger; iOS suspends background JS, so
@@ -125,16 +126,44 @@ export async function rescheduleReminders(): Promise<void> {
     await ensureAndroidChannel();
     const items = await upcomingReminders(HORIZON_MINUTES);
     const hidden = await getHiddenCalendars();
+    // Day-start "today's tasks" notifications, pre-computed for the same
+    // horizon — the in-app day-start check only runs while the app is open,
+    // so without these the 9:00 nudge arrived only when the user next opened
+    // the app. Best-effort: a failure must never cost the explicit reminders.
+    const dayStarts = await upcomingDayStartNotifications(
+      Math.floor(HORIZON_MINUTES / (24 * 60)),
+    ).catch(() => []);
     // Cancel-then-reschedule: the cheapest way to stay consistent with the
     // current data (a deleted/rescheduled item simply isn't in the new list).
     await Notifications.cancelAllScheduledNotificationsAsync();
     const now = Date.now();
+    // The day-start nudges are the headline reminders — schedule them first
+    // and cap the explicit ones so the total stays under the OS pending limit.
+    for (const ds of dayStarts) {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: i18n.t('dialogs.dayStartReview.reminders.notificationTitle'),
+          body: i18n.t('dialogs.dayStartReview.reminders.notificationBody', {
+            count: ds.count,
+          }),
+          sound: 'default',
+          // No itemId: a tap just opens the app, where the live in-app
+          // day-start review (announce + dialog) takes over with fresh data.
+          data: { dayStart: true },
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DATE,
+          date: ds.triggerAt,
+          channelId: CHANNEL_ID,
+        },
+      });
+    }
     const due = items
       .filter((r) => new Date(r.trigger_at).getTime() > now)
       // Hidden calendars (the Calendars-screen toggles) silence their event
       // reminders; tasks are unaffected (visibility is calendar-only).
       .filter((r) => !(r.item_kind === 'event' && hidden.has(r.container_id)))
-      .slice(0, MAX_SCHEDULED);
+      .slice(0, Math.max(0, MAX_SCHEDULED - dayStarts.length));
     for (const r of due) {
       // §14.4: the channel carries the sound on Android (silent / custom / default);
       // iOS has no channels, so the per-notification `sound` is what matters there

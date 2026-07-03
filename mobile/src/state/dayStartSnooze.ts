@@ -23,13 +23,20 @@ export async function snoozeDayStartReview(hours: number): Promise<void> {
 }
 
 export async function isDayStartReviewSnoozed(): Promise<boolean> {
+  const until = await readDayStartSnoozeUntil();
+  return until != null && Date.now() < until;
+}
+
+/** The active snooze's end (epoch ms), or null when not snoozed / unreadable.
+ *  The reminder scheduler uses it to skip pre-scheduling a day-start OS
+ *  notification into a window the user just asked to be left alone in. */
+export async function readDayStartSnoozeUntil(): Promise<number | null> {
   try {
     const raw = await AsyncStorage.getItem(SNOOZE_KEY);
-    if (!raw) return false;
+    if (!raw) return null;
     const until = Number.parseInt(raw, 10);
-    if (Number.isNaN(until)) return false;
-    return Date.now() < until;
+    return Number.isNaN(until) ? null : until;
   } catch {
-    return false;
+    return null;
   }
 }

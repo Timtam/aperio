@@ -29,6 +29,7 @@ import type { Task } from '@aperio/shared';
 
 import { deleteTask as apiDeleteTask, updateTask } from '../api/client';
 import { navigateNested } from '../navigation/navigationRef';
+import { refreshRemindersSoon } from '../reminders/scheduler';
 import { snoozeDayStartReview } from '../state/dayStartSnooze';
 import {
   effectiveForList,
@@ -278,6 +279,9 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
     if (resolvedIds.size > 0) {
       announce(t('dialogs.dayStartReview.allHandled'));
       void snoozeDayStartReview(4);
+      // Re-plan the pre-scheduled day-start notifications so none fires into
+      // the fresh snooze window (the scheduler reads the snooze end).
+      refreshRemindersSoon();
     }
     onClose();
   }, [
@@ -524,6 +528,9 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
     if (behaviour != null) {
       void snoozeDayStartReview(4);
       announce(t('dialogs.dayStartReview.snoozed'));
+      // Re-plan the pre-scheduled day-start notifications so none fires into
+      // the fresh snooze window (the scheduler reads the snooze end).
+      refreshRemindersSoon();
     }
     onClose();
   }, [announce, behaviour, onClose, t]);

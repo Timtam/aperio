@@ -735,3 +735,50 @@ describe('daysUntilDeadline (today = 2026-05-20)', () => {
     expect(daysUntilDeadline({ ...baseTask, deadline_date: null })).toBeNull();
   });
 });
+
+describe('day-key anchored groups (the mobile ahead-of-time scheduler)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 4, 20, 12, 0, 0)); // 2026-05-20
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('anchors untimed / due-today to the given future day', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'u', scheduled_date: '2026-05-22' },
+      { ...baseTask, id: 'd', deadline_date: '2026-05-22' },
+      { ...baseTask, id: 'today', scheduled_date: '2026-05-20' },
+    ];
+    const groups = buildReminderGroups(tasks, allRemindersOn, undefined, '2026-05-22');
+    expect(groups.dueToday.map((t) => t.id)).toEqual(['d']);
+    expect(groups.untimed.map((t) => t.id)).toEqual(['u']);
+    expect(reminderCount(groups)).toBe(2);
+  });
+
+  it('anchors the countdown window to the given day', () => {
+    const tasks: Task[] = [{ ...baseTask, id: 'c', deadline_date: '2026-05-25' }];
+    // From the 22nd the deadline is 3 days out — inside the window of 3 …
+    expect(
+      buildReminderGroups(tasks, allRemindersOn, undefined, '2026-05-22').countdown.map(
+        (t) => t.id,
+      ),
+    ).toEqual(['c']);
+    // … from today (the 20th) it is 5 days out — outside.
+    expect(buildReminderGroups(tasks, allRemindersOn).countdown).toEqual([]);
+  });
+
+  it('daysUntilDeadline honours the anchor', () => {
+    expect(
+      daysUntilDeadline({ ...baseTask, deadline_date: '2026-05-25' }, '2026-05-22'),
+    ).toBe(3);
+  });
+
+  it('defaults to today when no anchor is given (desktop callers unchanged)', () => {
+    const tasks: Task[] = [{ ...baseTask, id: 'now', scheduled_date: '2026-05-20' }];
+    expect(
+      buildReminderGroups(tasks, allRemindersOn).untimed.map((t) => t.id),
+    ).toEqual(['now']);
+  });
+});
