@@ -18,6 +18,7 @@ import { SyncStatusButton } from './components/SyncStatusButton';
 import { useCacheUpdates } from './state/cacheObserver';
 import { SyncStatusContext } from './state/syncStatusContext';
 import { ThemeProvider, useTheme, navigationThemeFor } from './theme';
+import { loadThemeModePref } from './theme/themeMode';
 import { navigationRef } from './navigation/navigationRef';
 import type { RootStackParamList, RootTabParamList } from './navigation/types';
 import { useReminderTriggers } from './reminders/scheduler';
@@ -444,7 +445,11 @@ function AppContent() {
   >(undefined);
   useEffect(() => {
     let cancelled = false;
-    AsyncStorage.getItem(NAV_STATE_KEY)
+    // Load the device-local theme choice alongside the nav state: both gate
+    // `navReady`, so a pinned theme is resolved BEFORE the first visible
+    // frame (the splash screen covers the wait) instead of racing it and
+    // flashing the system palette on cold start.
+    const navRestore = AsyncStorage.getItem(NAV_STATE_KEY)
       .then((saved) => {
         if (cancelled || saved == null) return;
         try {
@@ -459,10 +464,10 @@ function AppContent() {
           // Corrupt value — ignore and use the default initial route.
         }
       })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setNavReady(true);
-      });
+      .catch(() => {});
+    Promise.allSettled([navRestore, loadThemeModePref()]).then(() => {
+      if (!cancelled) setNavReady(true);
+    });
     return () => {
       cancelled = true;
     };

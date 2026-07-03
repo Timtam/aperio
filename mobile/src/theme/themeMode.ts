@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Appearance } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Device-local light/dark/system theme mode, the mobile twin of the desktop's
@@ -26,10 +27,28 @@ function notify(): void {
   for (const listener of listeners) listener(cached);
 }
 
-/** One-shot load of the stored pref into the cache (idempotent; every hook
- *  mount calls it, only the first actually reads). */
-async function loadOnce(): Promise<void> {
-  if (loaded) return;
+/** Propagate a pinned choice to the OS-drawn surfaces too — the software
+ *  keyboard, native date/time picker sheets and alerts follow the app-level
+ *  colour scheme, not our JS tokens (the mobile analogue of the desktop's
+ *  `color-scheme` CSS). `null` restores the system follow. */
+function applyNativeColorScheme(mode: ThemeModeChoice): void {
+  try {
+    // 'unspecified' restores the system follow (this RN's setColorScheme
+    // takes 'light' | 'dark' | 'unspecified').
+    Appearance.setColorScheme(mode === 'system' ? 'unspecified' : mode);
+  } catch {
+    // Older runtime without the setter — the JS palette still applies.
+  }
+}
+
+/** One-shot load of the stored pref into the cache (idempotent — every hook
+ *  mount and the App-start gate call it; only the first actually reads).
+ *  Exported for App.tsx's readiness gate so a pinned theme is resolved
+ *  BEFORE the first frame instead of racing it. */
+export async function loadThemeModePref(): Promise<void> {
+  if (loaded) {
+    return;
+  }
   loaded = true;
   try {
     const raw = await AsyncStorage.getItem(KEY);
@@ -40,11 +59,13 @@ async function loadOnce(): Promise<void> {
   } catch {
     // Best-effort; the default (system) stays.
   }
+  applyNativeColorScheme(cached);
 }
 
 async function persist(next: ThemeModeChoice): Promise<void> {
   cached = next;
   notify();
+  applyNativeColorScheme(next);
   try {
     await AsyncStorage.setItem(KEY, next);
   } catch {
@@ -59,7 +80,7 @@ export function useThemeModeChoice(): ThemeModeChoice {
   useEffect(() => {
     listeners.add(setChoice);
     setChoice(cached);
-    void loadOnce();
+    void loadThemeModePref();
     return () => {
       listeners.delete(setChoice);
     };

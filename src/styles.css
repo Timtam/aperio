@@ -4,11 +4,12 @@
  * The native-feel defaults from DESIGN.md section 15 plus the Phase 2
  * design-token surface.
  *
- * Tokens are declared as CSS custom properties under `:root` (light) and
- * overridden under `@media (prefers-color-scheme: dark)` and under
+ * Tokens are declared as CSS custom properties under `:root` (light),
+ * overridden under `:root[data-theme='dark']` (the resolved device-local
+ * theme mode — see src/state/themeMode.ts) and under
  * `@media (forced-colors: active)` (high-contrast / Windows
- * High-Contrast). Every color satisfies WCAG AA contrast against its
- * companion in the same theme.
+ * High-Contrast), which wins over both. Every color satisfies WCAG AA
+ * contrast against its companion in the same theme.
  *
  * Component-level CSS reaches for variables rather than literal colors,
  * so themes propagate by editing this file alone.
@@ -102,7 +103,12 @@
 /* ── Forced-colors / Windows High-Contrast ─────────────────────────────── */
 
 @media (forced-colors: active) {
-  :root {
+  /* `:root:root` (0,2,0) deliberately matches the dark block's
+     `:root[data-theme='dark']` specificity and wins by source order — a
+     media query adds none of its own, and data-theme is ALWAYS set (dark
+     Windows HC themes report prefers-color-scheme: dark, so a plain
+     `:root` here would lose every token to the dark palette). */
+  :root:root {
     --color-bg: Canvas;
     --color-bg-elevated: Canvas;
     --color-bg-panel: Canvas;
