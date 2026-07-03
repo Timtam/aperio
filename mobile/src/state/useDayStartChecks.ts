@@ -15,6 +15,7 @@ import type { Task, TaskUser } from '@aperio/shared';
 import i18n from '../../i18n';
 
 import { getTasks, listTaskLists, updateTask } from '../api/client';
+import { dayStartPreschedulesOsNotification } from '../reminders/dayStartSchedule';
 import { notify } from './notify';
 import { currentUserForList } from './currentUser';
 import { readFiredDayKey, writeFiredDayKey } from './dayStartFired';
@@ -210,11 +211,14 @@ async function runDayStartReview(
   if (reminderParts.length > 0) {
     AccessibilityInfo.announceForAccessibility(reminderParts.join('. '));
   }
-  if (reminderTotal > 0) {
+  if (reminderTotal > 0 && !dayStartPreschedulesOsNotification(behaviour.dayStartTrigger)) {
     // One combined OS notification for the "you're not looking at Aperio"
-    // reach. The single live announcement above already carries the per-group
-    // detail for assistive tech; this is the secondary channel and is
-    // suppressed silently if permission isn't granted.
+    // reach — but ONLY for the modes the reminder scheduler does NOT
+    // pre-schedule ('app-start' / the '00:00' default). For an explicit
+    // morning HH:MM the ahead-of-time OS notification already fired at the
+    // trigger instant; posting another here would double-notify minutes
+    // apart. The live announcement above (the assistive-tech channel) and the
+    // review modal always run regardless.
     void notify(
       i18n.t('dialogs.dayStartReview.reminders.notificationTitle'),
       i18n.t('dialogs.dayStartReview.reminders.notificationBody', { count: reminderTotal }),

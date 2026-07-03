@@ -45,6 +45,15 @@ function categoryForScope(scope: string): CacheCategory | null {
 type BusListener = (category: CacheCategory) => void;
 const busListeners = new Set<BusListener>();
 
+// Reminder-scheduler hook — REGISTERED by the scheduler at its module init
+// (a direct import here would close a module cycle through the api layer).
+// Invoked whenever data lands that can change what should be scheduled: a
+// peer sync round applied changes, or an external-cache refresh finished.
+let remindersRefreshHook: (() => void) | null = null;
+export function setRemindersRefreshHook(cb: () => void): void {
+  remindersRefreshHook = cb;
+}
+
 function subscribeBus(cb: BusListener): () => void {
   busListeners.add(cb);
   return () => {
@@ -65,6 +74,12 @@ export function notifyDataReload(): void {
   for (const cat of categories) {
     busListeners.forEach((l) => l(cat));
   }
+  // Peer data just landed (a sync round applied changes) — the scheduled OS
+  // notifications may now be stale (a task synced in from the desktop can add/
+  // remove reminders or change the day-start counts). Debounced re-plan; the
+  // background-sync task does the same after ITS round, this covers the
+  // foreground rounds (launch / resume / periodic / manual Sync now).
+  remindersRefreshHook?.();
 }
 
 /** Coalesce window: a warm pass emits one event per container in a burst; wait
@@ -110,6 +125,11 @@ export function useCacheUpdates(): void {
         const categories = Array.from(pending.current);
         pending.current.clear();
         for (const cat of categories) busListeners.forEach((l) => l(cat));
+        // An external-cache refresh can change reminder-relevant data too
+        // (provider-side edits to events/tasks) — re-plan the scheduled OS
+        // notifications. Coalesced here + debounced in the scheduler, so a
+        // warm pass touching many containers costs one reschedule.
+        remindersRefreshHook?.();
       }, COALESCE_MS);
     });
 

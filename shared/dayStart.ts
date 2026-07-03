@@ -148,12 +148,18 @@ export function filterDeadlinePinTargets(
 // open subtasks are the real units), and never remind about a task owned by a
 // concrete OTHER user. PURE — `todayIsoKey()` reads the local wall-clock.
 
-/** Whole local calendar days from today until `task.deadline_date`: 0 = today,
- *  negative = past, null = no deadline. Drives the countdown WINDOW check + the
- *  per-task "in N days" label. Rounds so a 23/25h DST day doesn't drift. */
-export function daysUntilDeadline(task: Task): number | null {
+/** Whole local calendar days from `fromDayKey` (default: today) until
+ *  `task.deadline_date`: 0 = that day, negative = past, null = no deadline.
+ *  Drives the countdown WINDOW check + the per-task "in N days" label. Rounds
+ *  so a 23/25h DST day doesn't drift. The anchor parameter lets the mobile
+ *  scheduler pre-compute FUTURE days' reminder groups for ahead-of-time OS
+ *  notifications. */
+export function daysUntilDeadline(
+  task: Task,
+  fromDayKey: string = todayIsoKey(),
+): number | null {
   if (!task.deadline_date) return null;
-  const [ty, tm, td] = todayIsoKey().split('-').map(Number);
+  const [ty, tm, td] = fromDayKey.split('-').map(Number);
   const [dy, dm, dd] = task.deadline_date.split('-').map(Number);
   const todayMs = new Date(ty, tm - 1, td).getTime();
   const deadlineMs = new Date(dy, dm - 1, dd).getTime();
@@ -169,8 +175,9 @@ export function daysUntilDeadline(task: Task): number | null {
 export function filterUntimedToday(
   tasks: Task[],
   meFor?: (listId: string) => TaskUser | null,
+  dayKey: string = todayIsoKey(),
 ): Task[] {
-  const today = todayIsoKey();
+  const today = dayKey;
   return tasks.filter((task) => {
     if (task.scheduled_date !== today) return false;
     if (task.scheduled_time != null) return false;
@@ -189,8 +196,9 @@ export function filterUntimedToday(
 export function filterDeadlineArrived(
   tasks: Task[],
   meFor?: (listId: string) => TaskUser | null,
+  dayKey: string = todayIsoKey(),
 ): Task[] {
-  const today = todayIsoKey();
+  const today = dayKey;
   return tasks.filter((task) => {
     if (task.deadline_date !== today) return false;
     if (task.status === 'completed' || task.status === 'cancelled') return false;
@@ -215,6 +223,7 @@ export function filterDeadlineCountdown(
   tasks: Task[],
   daysUntil: number,
   meFor?: (listId: string) => TaskUser | null,
+  dayKey: string = todayIsoKey(),
 ): Task[] {
   const globalValid = Number.isFinite(daysUntil) && daysUntil >= 1;
   return tasks.filter((task) => {
@@ -228,7 +237,7 @@ export function filterDeadlineCountdown(
           : null;
     if (window == null) return false;
     if (task.status === 'completed' || task.status === 'cancelled') return false;
-    const days = daysUntilDeadline(task);
+    const days = daysUntilDeadline(task, dayKey);
     // 1..window: skip the deadline day (0 → filterDeadlineArrived) and anything
     // already past or beyond the window.
     if (days == null || days < 1 || days > window) return false;
@@ -269,18 +278,19 @@ export function buildReminderGroups(
   tasks: Task[],
   settings: ReminderSettings,
   meFor?: (listId: string) => TaskUser | null,
+  dayKey: string = todayIsoKey(),
 ): ReminderGroups {
   const dueToday = settings.remindDeadlineArrived
-    ? filterDeadlineArrived(tasks, meFor)
+    ? filterDeadlineArrived(tasks, meFor, dayKey)
     : [];
   const seen = new Set(dueToday.map((t) => t.id));
   const untimed = (
-    settings.remindUntimedToday ? filterUntimedToday(tasks, meFor) : []
+    settings.remindUntimedToday ? filterUntimedToday(tasks, meFor, dayKey) : []
   ).filter((t) => !seen.has(t.id));
   untimed.forEach((t) => seen.add(t.id));
   const countdown = (
     settings.remindDeadlineCountdown
-      ? filterDeadlineCountdown(tasks, settings.deadlineCountdownDays, meFor)
+      ? filterDeadlineCountdown(tasks, settings.deadlineCountdownDays, meFor, dayKey)
       : []
   ).filter((t) => !seen.has(t.id));
   return { untimed, dueToday, countdown };
