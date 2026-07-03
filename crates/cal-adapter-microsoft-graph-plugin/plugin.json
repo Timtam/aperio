@@ -10,8 +10,7 @@
   "description": "Bundled Microsoft Graph adapter — Outlook calendars, Microsoft To Do tasks and Outlook contacts (Microsoft 365 / Exchange Online).",
   "signed": false,
   "tasks": {
-    "subtasks": true,
-    "max_subtask_depth": 1,
+    "subtasks": false,
     "create_lists": true,
     "delete_lists": true
   }

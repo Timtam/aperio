@@ -529,7 +529,24 @@ impl CaldavAdapter {
             sync::calendar_multiget(&self.http, list_url, &result.changed, &self.credentials)
                 .await
                 .map_err(to_core_error)?;
-        let changes = tasks::parse_task_entries(&entries, list_url.as_str());
+        let mut changes = tasks::parse_task_entries(&entries, list_url.as_str());
+        // A changed subtask's RELATED-TO may name a parent that didn't
+        // itself change — its `{href}|{uid}` id then isn't derivable from
+        // the delta alone. One id listing supplies the missing uid → id
+        // entries (rare: only deltas whose parent link crosses the change
+        // set pay for it; the listing parses tolerantly, so one garbled
+        // resource can't sink it). When even that read fails, FAIL the
+        // whole delta: the token isn't advanced and the next sync retries,
+        // instead of persisting a falsified flat parent into the cache —
+        // which a later Aperio edit would then write back to the server.
+        let mut index = tasks::uid_index(&changes);
+        if tasks::any_unresolved_parent(&changes, &index) {
+            let full = tasks::get_task_uid_index(&self.http, list_url, &self.credentials)
+                .await
+                .map_err(to_core_error)?;
+            index.extend(full);
+        }
+        tasks::resolve_parent_ids(&mut changes, &index);
         Ok(ChangeSet {
             changes,
             deletions: result.deleted,
