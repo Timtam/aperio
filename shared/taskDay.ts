@@ -1,4 +1,5 @@
 import { isMineOrUnassigned } from './taskAssignment';
+import { taskOrder } from './taskGrouping';
 import type { Task, TaskUser } from './types';
 
 // Pure date + calendar-bucketing helpers shared by the desktop and mobile
@@ -69,7 +70,7 @@ export function filterTasksOnDay(
   isCompletedVisible?: (listId: string) => boolean,
   meFor?: (listId: string) => TaskUser | null,
 ): Task[] {
-  return tasks.filter((task) => {
+  const onDay = tasks.filter((task) => {
     // A subtask surfaces only when it carries its own date — an undated subtask
     // travels with its parent and stays hidden; a scheduled/deadline-bearing one
     // becomes its own day chip (labelled as a subtask of its parent).
@@ -93,6 +94,12 @@ export function filterTasksOnDay(
     if (!task.scheduled_date && task.deadline_date === dayIsoKey) return true;
     return false;
   });
+  // Same order as the task list (priority band, then natural A→Z title) so a
+  // day's planned work reads identically on every surface. Timed tasks are
+  // re-sorted chronologically by `mergeDayItems`; the untimed lane and the
+  // month cells keep this order. (`filter` returned a fresh array, so the
+  // in-place sort can't reorder the caller's snapshot.)
+  return onDay.sort(taskOrder);
 }
 
 /**

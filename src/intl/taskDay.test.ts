@@ -200,6 +200,28 @@ describe('filterTasksOnDay', () => {
     expect(filterTasksOnDay(tasks, '2026-05-20', visible)).toEqual([]);
   });
 
+  it("orders a day's tasks like the task list (priority band, natural A→Z)", () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'b10', title: 'Aufgabe 10', scheduled_date: '2026-05-20' },
+      { ...baseTask, id: 'b2', title: 'Aufgabe 2', scheduled_date: '2026-05-20' },
+      // High priority floats above the band regardless of title.
+      {
+        ...baseTask,
+        id: 'hi',
+        title: 'Zuletzt im Alphabet',
+        priority: 'high',
+        scheduled_date: '2026-05-20',
+      },
+      { ...baseTask, id: 'lo', title: 'Anfang', priority: 'low', scheduled_date: '2026-05-20' },
+    ];
+    expect(filterTasksOnDay(tasks, '2026-05-20').map((t) => t.id)).toEqual([
+      'hi',
+      'b2',
+      'b10',
+      'lo',
+    ]);
+  });
+
   it('returns empty when nothing matches', () => {
     expect(filterTasksOnDay([baseTask], '2026-05-20')).toEqual([]);
   });
