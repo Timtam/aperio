@@ -69,9 +69,12 @@ function clampMinute(min: number): number {
  * Minute-of-day for a DROP at `fraction` (0 = the window's top edge, 1 = its
  * bottom) of the visible grid window, snapped to `stepMin` (default 15 — fine
  * enough to feel intentional, coarse enough to hit without pixel-precision).
- * Clamped so the result is a valid wall-clock minute inside the window and
- * never 24:00 (the exclusive day end). Drives the desktop "drag a task onto
- * the hour grid" time assignment.
+ * Clamped to STRICTLY INSIDE the window: `endMin` is the exclusive bottom
+ * edge (`layoutDayColumn` bands a point AT it as "after"), so a bottom-edge
+ * drop must yield the last in-window step — otherwise the chip would vanish
+ * from the grid into the outside-hours band right after being dropped there.
+ * The same clamp keeps a full-day drop off the invalid 24:00. Drives the
+ * desktop "drag a task onto the hour grid" time assignment.
  */
 export function dropMinuteInWindow(
   fraction: number,
@@ -82,7 +85,7 @@ export function dropMinuteInWindow(
   const frac = Number.isFinite(fraction) ? Math.min(1, Math.max(0, fraction)) : 0;
   const raw = window.startMin + frac * windowMin;
   const snapped = Math.round(raw / stepMin) * stepMin;
-  const top = Math.min(window.endMin, MINUTES_PER_DAY - stepMin);
+  const top = Math.min(window.endMin, MINUTES_PER_DAY) - stepMin;
   return Math.max(window.startMin, Math.min(top, snapped));
 }
 

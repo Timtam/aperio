@@ -186,12 +186,18 @@ function eventDurationMinForDay(start: Date, end: Date, day: Date): number {
  *  floor (GRID_TASK_EFFORT_PX) so a higher-effort task reads as a taller block.
  *  Events use the default MIN_SLOT_PX. */
 function slotStyle(p: PositionedSpan, canvasPx: number, floorPx = MIN_SLOT_PX) {
-  const height = Math.max(p.heightFraction * canvasPx, floorPx);
+  // The floor itself is capped at the canvas: a degenerate day window shorter
+  // than the largest effort floor (e.g. a 1h window vs the 72px large floor)
+  // must not push the top clamp negative and draw the chip above the canvas.
+  const height = Math.min(
+    Math.max(p.heightFraction * canvasPx, floorPx),
+    canvasPx,
+  );
   // Clamp the TOP (not the height) so a chip near the window's late edge keeps
   // its full height and stays on-canvas — it shifts up a few px rather than
   // being squeezed below the tap target. Clamp by the chip's own (floored)
   // height, matching the desktop reference, so even a large-effort task fits.
-  const top = Math.min(p.topFraction * canvasPx, canvasPx - height);
+  const top = Math.max(0, Math.min(p.topFraction * canvasPx, canvasPx - height));
   return {
     position: 'absolute' as const,
     top,

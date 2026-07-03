@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { isSameDay } from 'date-fns';
 
@@ -96,6 +96,18 @@ const DAY_LIST_BLOCK_BASE_REM = 2.5;
  *  Matches WeekView's MIN_SLOT_FRACTION. */
 const MIN_SLOT_FRACTION = 0.018;
 
+/** How much taller than the base 1.2em slot floor the effort classes render
+ *  a TASK chip (`.day-task--effort-medium` 1.9em / `--effort-large` 2.6em in
+ *  styles.css). The top-clamp must reserve the REAL rendered height, or a
+ *  floored chip near the window end paints past the canvas bottom — the
+ *  desktop twin of mobile's GRID_TASK_EFFORT_PX floor. '' (small, or sizing
+ *  off) keeps the base floor. Matches WeekView's effortSlotFactor. */
+function effortSlotFactor(effortMod: string): number {
+  if (effortMod === 'medium') return 1.9 / 1.2;
+  if (effortMod === 'large') return 2.6 / 1.2;
+  return 1;
+}
+
 /** Absolute placement of a timed chip's `<li>` inside the visible-window
  *  hour-grid (positioning is purely visual; DOM order is unchanged). `minFraction`
  *  is the floored option's min-height as a fraction of the CURRENT canvas (the
@@ -105,8 +117,8 @@ function slotStyle(
   p: PositionedSpan,
   minFraction = MIN_SLOT_FRACTION,
 ): React.CSSProperties {
-  const eh = Math.max(p.heightFraction, minFraction);
-  const top = Math.min(p.topFraction, 1 - eh);
+  const eh = Math.min(1, Math.max(p.heightFraction, minFraction));
+  const top = Math.max(0, Math.min(p.topFraction, 1 - eh));
   return {
     position: 'absolute',
     top: `${top * 100}%`,
@@ -493,6 +505,13 @@ export function DayView() {
   // day + time, so it turns into a timed chip right where it landed. Grid
   // mode only — the compact list has no time geometry to read a minute off.
   const [gridDragOver, setGridDragOver] = useState(false);
+  // Where the current drag of one of OUR grid chips started (cleared on its
+  // dragend). The browser can misfire a few-pixel drag out of a double-click
+  // on a chip; the week planner's day-drop no-ops those via its same-day
+  // check, but on the time path ANY drop writes a minute — so drops that
+  // barely moved from this point are ignored (a deliberate reposition
+  // travels at least a slot).
+  const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
   const handleGridDragOver = (e: React.DragEvent<HTMLElement>) => {
     if (listMode || !e.dataTransfer.types.includes(TASK_DND_TYPE)) return;
     e.preventDefault();
@@ -515,6 +534,14 @@ export function DayView() {
     const payload = readTaskDrag(e.dataTransfer);
     if (!payload) return;
     e.preventDefault();
+    const origin = dragOriginRef.current;
+    if (
+      origin &&
+      Math.abs(e.clientX - origin.x) < 8 &&
+      Math.abs(e.clientY - origin.y) < 8
+    ) {
+      return; // double-click misfire, not a reposition
+    }
     const rect = e.currentTarget.getBoundingClientRect();
     const fraction =
       rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0;
@@ -523,12 +550,17 @@ export function DayView() {
       endMin: dayEndMin,
     });
     const clock = `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}:00`;
+    // Write the CURRENT row, not the dragstart snapshot — a sync refresh can
+    // land mid-drag, and re-sending the stale snapshot with a fresh
+    // updated_at would silently revert another device's edit.
+    const current =
+      tasks.find((row) => row.id === payload.task.id) ?? payload.task;
     void (async () => {
       try {
-        await scheduleTaskAtTime(payload.task, dayKey, minute);
+        await scheduleTaskAtTime(current, dayKey, minute);
         announce(
           t('views.taskScheduledAtTime', {
-            title: payload.task.title,
+            title: current.title,
             date: fmt.format(new Date(`${dayKey}T00:00:00`), 'PPP'),
             time: fmt.format(new Date(`${dayKey}T${clock}`), 'p'),
           }),
@@ -889,7 +921,12 @@ export function DayView() {
                     (slotOut ? ' day-list__item--outside' : '')
                   }
                   style={{
-                    ...(slotIn && slot ? slotStyle(slot, slotMinFraction) : {}),
+                    ...(slotIn && slot
+                      ? slotStyle(
+                          slot,
+                          slotMinFraction * effortSlotFactor(effortMod),
+                        )
+                      : {}),
                     ...(color.hex
                       ? ({ '--event-color': color.hex } as React.CSSProperties)
                       : {}),
@@ -901,6 +938,13 @@ export function DayView() {
                       task,
                       tasks.filter((c) => c.parent_id === task.id),
                     );
+                    dragOriginRef.current = {
+                      x: dev.clientX,
+                      y: dev.clientY,
+                    };
+                  }}
+                  onDragEnd={() => {
+                    dragOriginRef.current = null;
                   }}
                   onClick={() => setFocusIndex(i)}
                   onDoubleClick={(e) => {

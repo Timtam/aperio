@@ -179,12 +179,16 @@ describe('dropMinuteInWindow', () => {
     expect(dropMinuteInWindow(0.52, WINDOW)).toBe(at(15, 15));
   });
 
-  it('clamps to the window edges', () => {
+  it('clamps to strictly inside the window', () => {
     expect(dropMinuteInWindow(-0.2, WINDOW)).toBe(at(7));
     expect(dropMinuteInWindow(0, WINDOW)).toBe(at(7));
-    // The bottom edge is the window end — a valid wall-clock time here.
-    expect(dropMinuteInWindow(1, WINDOW)).toBe(at(23));
-    expect(dropMinuteInWindow(1.5, WINDOW)).toBe(at(23));
+    // endMin is the EXCLUSIVE bottom edge — a chip AT it would band as
+    // "after" and vanish from the grid it was just dropped on, so the
+    // bottom lands on the last in-window step instead.
+    expect(dropMinuteInWindow(1, WINDOW)).toBe(at(22, 45));
+    expect(dropMinuteInWindow(1.5, WINDOW)).toBe(at(22, 45));
+    // A drop just above the edge that would SNAP onto it is held back too.
+    expect(dropMinuteInWindow(0.995, WINDOW)).toBe(at(22, 45));
   });
 
   it('never yields 24:00 on the full-day window', () => {
