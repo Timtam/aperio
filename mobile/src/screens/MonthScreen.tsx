@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CalendarActions } from '../components/CalendarActions';
+import { useNewEventOnDay } from '../components/useNewEventOnDay';
 import { CalendarDayList } from '../components/CalendarDayList';
 import { CalendarPager } from '../components/CalendarPager';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
@@ -72,8 +73,12 @@ export default function MonthScreen({ navigation, route }: RootStackScreenProps<
     [],
   );
 
+  // VoiceOver MAGIC TAP (two-finger double-tap) creates a new event on the
+  // month's anchor day — the same flow as the toolbar's New Event.
+  const { addEvent: magicTapCreate } = useNewEventOnDay(navigation, anchor);
+
   return (
-    <View style={styles.screen}>
+    <View style={styles.screen} onMagicTap={magicTapCreate}>
       <CalendarViewSwitcher
         active="month"
         onSelect={(v) =>

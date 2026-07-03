@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CalendarActions } from '../components/CalendarActions';
+import { useNewEventOnDay } from '../components/useNewEventOnDay';
 import { CalendarDayList } from '../components/CalendarDayList';
 import { CalendarPager } from '../components/CalendarPager';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
@@ -83,6 +84,11 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
     [],
   );
 
+  // VoiceOver MAGIC TAP (two-finger double-tap anywhere on the screen) creates
+  // a new event on the focused day — the same flow as the toolbar's New Event
+  // (one shared hook; CalendarActions uses it too).
+  const { addEvent: magicTapCreate } = useNewEventOnDay(navigation, day);
+
   // The synced single-day layout (`calendar.dayViewMode`, default 'grid'):
   // proportional hour-grid vs. compact list. Hydrated on mount and re-read on
   // focus so a Settings change or a peer-device sync reflects without a restart
@@ -108,7 +114,7 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
   );
 
   return (
-    <View style={styles.screen}>
+    <View style={styles.screen} onMagicTap={magicTapCreate}>
       <CalendarViewSwitcher
         active="day"
         // replace (not push): the calendar views are siblings, so swap in place

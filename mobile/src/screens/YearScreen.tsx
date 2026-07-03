@@ -13,6 +13,7 @@ import { expandAll } from '@aperio/shared';
 
 import { getEvents, listCalendars } from '../api/calendar';
 import { CalendarActions } from '../components/CalendarActions';
+import { useNewEventOnDay } from '../components/useNewEventOnDay';
 import { CalendarPager } from '../components/CalendarPager';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
@@ -116,6 +117,11 @@ export default function YearScreen({ navigation, route }: RootStackScreenProps<'
     }));
   }, [i18n.language, year]);
 
+  // VoiceOver MAGIC TAP (two-finger double-tap) creates a new event on the
+  // year's anchor day (Jan 1) — the same flow as the toolbar's New Event.
+  const yearAnchor = useMemo(() => new Date(year, 0, 1), [year]);
+  const { addEvent: magicTapCreate } = useNewEventOnDay(navigation, yearAnchor);
+
   const openMonth = useCallback(
     (m: number) => navigation.replace('Month', { anchor: new Date(year, m, 1).toISOString() }),
     [navigation, year],
@@ -134,7 +140,7 @@ export default function YearScreen({ navigation, route }: RootStackScreenProps<'
   }, [year, announce]);
 
   return (
-    <View style={styles.screen}>
+    <View style={styles.screen} onMagicTap={magicTapCreate}>
       <CalendarViewSwitcher
         active="year"
         onSelect={(v) =>
