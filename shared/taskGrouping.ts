@@ -172,6 +172,49 @@ export function buildEntries(
   // natural title) — so a parent's children also read A→Z, not add-order.
   childrenByParent.forEach((bucket) => bucket.sort(taskOrder));
 
+  // Cycle guard: parent links can come from external providers (e.g. two
+  // Vikunja tasks each carrying a `parenttask` relation onto the other), and
+  // a parent CYCLE has no top-level member — without this, every task in the
+  // cycle (plus its subtree) would silently vanish from the view, and
+  // emitting one would recurse forever. Chase each unreachable task's parent
+  // chain onto its cycle and promote that member to top level, cutting its
+  // parent edge in the LOCAL buckets only (the task object itself is shared
+  // state and stays untouched) so the whole cluster renders as a tree again.
+  const reachable = new Set<string>();
+  const markReachable = (task: Task) => {
+    if (reachable.has(task.id)) return;
+    reachable.add(task.id);
+    (childrenByParent.get(task.id) ?? []).forEach(markReachable);
+  };
+  topLevel.forEach(markReachable);
+  if (reachable.size < tasks.length) {
+    const byId = new Map(tasks.map((task) => [task.id, task]));
+    tasks.forEach((task) => {
+      if (reachable.has(task.id)) return;
+      // Walk up until the next parent would revisit the chain — `member` is
+      // then on the cycle. (Every parent exists here: a missing parent would
+      // have put the task in `topLevel` and made the cluster reachable.)
+      let member = task;
+      const walked = new Set<string>([member.id]);
+      while (member.parent_id) {
+        const parent = byId.get(member.parent_id);
+        if (!parent || walked.has(parent.id)) break;
+        walked.add(parent.id);
+        member = parent;
+      }
+      const parentId = member.parent_id;
+      if (parentId) {
+        const bucket = childrenByParent.get(parentId) ?? [];
+        childrenByParent.set(
+          parentId,
+          bucket.filter((child) => child.id !== member.id),
+        );
+      }
+      topLevel.push(member);
+      markReachable(member);
+    });
+  }
+
   // Total tasks contained under one task (its whole subtask subtree) and under
   // a list of tasks (each task + its subtree) — drives the "(N)" count
   // indicators on group headers and tasks-with-subtasks, matching the existing

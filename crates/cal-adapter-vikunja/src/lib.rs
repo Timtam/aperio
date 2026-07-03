@@ -20,9 +20,9 @@
 //!   - Create / update / delete tasks
 //!   - Rename a project
 //!
-//! See `tasks.rs` for the mapping decisions (status, dates,
-//! priority) and the list of fields that are intentionally not
-//! round-tripped yet (recurrence, reminders, subtasks, labels).
+//! See `tasks.rs` for the mapping decisions (status, dates, priority,
+//! recurrence, subtask relations) and the list of fields that are
+//! intentionally not round-tripped yet (reminders, labels).
 
 pub mod api;
 pub mod error;

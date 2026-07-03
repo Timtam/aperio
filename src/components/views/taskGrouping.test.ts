@@ -430,6 +430,55 @@ describe('buildEntries natural ordering', () => {
   });
 });
 
+describe('buildEntries parent-cycle guard', () => {
+  it('surfaces a parent cycle instead of losing every member', () => {
+    // External providers (e.g. Vikunja relations) can hand us a loop; no
+    // member is top-level, so without the guard all of them would vanish.
+    const tasks = [
+      baseTask({ id: 'a', title: 'A', parent_id: 'b' }),
+      baseTask({ id: 'b', title: 'B', parent_id: 'a' }),
+    ];
+    const result = build(tasks);
+    const ids = taskRows(result).map((e) => e.task.id).sort();
+    expect(ids).toEqual(['a', 'b']);
+    // One member is promoted to the top of the cluster, the other stays
+    // nested beneath it — a tree, not two loose rows.
+    const depths = taskRows(result).map((e) => e.depth).sort();
+    expect(depths[1]).toBe(depths[0] + 1);
+  });
+
+  it('keeps a tree hanging off a cycle attached to its parent', () => {
+    const tasks = [
+      baseTask({ id: 'a', title: 'A', parent_id: 'b' }),
+      baseTask({ id: 'b', title: 'B', parent_id: 'a' }),
+      // A real subtask under cycle member b must ride along, not detach.
+      baseTask({ id: 'leaf', title: 'Leaf', parent_id: 'b' }),
+    ];
+    const result = build(tasks);
+    const rows = taskRows(result);
+    expect(rows.map((e) => e.task.id).sort()).toEqual(['a', 'b', 'leaf']);
+    const b = rows.find((e) => e.task.id === 'b')!;
+    const leaf = rows.find((e) => e.task.id === 'leaf')!;
+    expect(leaf.depth).toBe(b.depth + 1);
+  });
+
+  it('leaves ordinary trees and orphans untouched', () => {
+    const tasks = [
+      baseTask({ id: 'p', title: 'Parent' }),
+      baseTask({ id: 'c', title: 'Child', parent_id: 'p' }),
+      // Orphan (parent not in the snapshot) already surfaces at top level.
+      baseTask({ id: 'o', title: 'Orphan', parent_id: 'missing' }),
+    ];
+    const rows = taskRows(build(tasks));
+    expect(rows.map((e) => e.task.id).sort()).toEqual(['c', 'o', 'p']);
+    const p = rows.find((e) => e.task.id === 'p')!;
+    const c = rows.find((e) => e.task.id === 'c')!;
+    const o = rows.find((e) => e.task.id === 'o')!;
+    expect(c.depth).toBe(p.depth + 1);
+    expect(o.depth).toBe(p.depth);
+  });
+});
+
 describe('isTaskDeferred', () => {
   it('is true only for a future resurface date', () => {
     expect(

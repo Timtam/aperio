@@ -1853,10 +1853,14 @@ async function applyAncestorWrites(
 function collectDescendants(parentId: string, all: Task[]): Task[] {
   const out: Task[] = [];
   const stack: string[] = [parentId];
+  // Visit every task at most once — external providers can deliver a
+  // parent cycle, which would otherwise loop (and grow `out`) forever.
+  const seen = new Set<string>([parentId]);
   while (stack.length > 0) {
     const id = stack.pop()!;
     for (const t of all) {
-      if (t.parent_id === id) {
+      if (t.parent_id === id && !seen.has(t.id)) {
+        seen.add(t.id);
         out.push(t);
         stack.push(t.id);
       }
