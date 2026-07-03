@@ -126,12 +126,14 @@ export function effortSuffix(
 
 /**
  * The chip-class modifier token for an effort's visual tile size, or '' for
- * `medium` (the neutral base size needs no class). Single source of truth for
- * the effort→size hook: a caller builds `${prefix}--effort-${token}` only when
+ * `small` — the whole scale sits one step above the original mapping (tester
+ * feedback): small renders at the neutral base size (no class), medium at the
+ * former "large" size, large bigger still. Single source of truth for the
+ * effort→size hook: a caller builds `${prefix}--effort-${token}` only when
  * the token is non-empty AND the user's `visualEffortSizing` pref is on.
  */
 export function effortSizeModifier(effort: TaskEffort): string {
-  return effort === 'medium' ? '' : effort;
+  return effort === 'small' ? '' : effort;
 }
 
 /**
