@@ -27,6 +27,7 @@ import {
 import { listColorLabels } from '../api/colorLabels';
 import { ActionsMenu, type MenuAction } from '../components/ActionsMenu';
 import { CalendarActions } from '../components/CalendarActions';
+import { useNewEventOnDay } from '../components/useNewEventOnDay';
 import { CalendarPager } from '../components/CalendarPager';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { JumpToDateButton } from '../components/JumpToDateButton';
@@ -252,6 +253,10 @@ export default function AgendaScreen({
     [],
   );
 
+  // VoiceOver MAGIC TAP (two-finger double-tap) creates a new event on the
+  // window's anchor day — the same flow as the toolbar's New Event.
+  const { addEvent: magicTapCreate } = useNewEventOnDay(navigation, anchor);
+
   const rangeLabel = useMemo(
     () =>
       `${fmtShortDate(range.start)} – ${fmtShortDate(localMidnight(addDays(anchor, AGENDA_DAYS)))}`,
@@ -327,7 +332,7 @@ export default function AgendaScreen({
   );
 
   return (
-    <View style={styles.screen}>
+    <View style={styles.screen} onMagicTap={magicTapCreate}>
       {/* Day ⇄ Week ⇄ Month ⇄ Agenda, carrying the anchor so the date survives
           the switch. replace (not push): sibling views swap in place, keeping
           the stack flat. Pressing the active view is suppressed by the switcher. */}

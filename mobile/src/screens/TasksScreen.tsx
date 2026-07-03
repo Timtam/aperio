@@ -703,7 +703,9 @@ export default function TasksScreen({
   };
 
   return (
-    <View style={styles.screen}>
+    // VoiceOver MAGIC TAP (two-finger double-tap) = the screen's primary
+    // create action: a new task (same flow as the toolbar button).
+    <View style={styles.screen} onMagicTap={newTask}>
       <View style={styles.toolbar}>
         <Pressable
           accessibilityRole="button"

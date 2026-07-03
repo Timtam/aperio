@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CalendarActions } from '../components/CalendarActions';
+import { useNewEventOnDay } from '../components/useNewEventOnDay';
 import { CalendarDayList } from '../components/CalendarDayList';
 import { CalendarPager } from '../components/CalendarPager';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
@@ -130,8 +131,12 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
     [],
   );
 
+  // VoiceOver MAGIC TAP (two-finger double-tap) creates a new event on the
+  // week's anchor day — the same flow as the toolbar's New Event.
+  const { addEvent: magicTapCreate } = useNewEventOnDay(navigation, anchor);
+
   return (
-    <View style={styles.screen}>
+    <View style={styles.screen} onMagicTap={magicTapCreate}>
       <CalendarViewSwitcher
         active="week"
         // replace (not push): sibling views swap in place, keeping the stack

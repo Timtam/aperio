@@ -372,7 +372,9 @@ export default function ContactsScreen({
   );
 
   return (
-    <View style={styles.screen}>
+    // VoiceOver MAGIC TAP (two-finger double-tap) = the screen's primary
+    // create action: a new contact (same flow as the add button).
+    <View style={styles.screen} onMagicTap={addContact}>
       <View style={styles.actionBar}>
         <Pressable
           accessibilityRole="button"

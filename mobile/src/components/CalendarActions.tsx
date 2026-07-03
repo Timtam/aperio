@@ -1,15 +1,11 @@
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
-import { localDateKey } from '@aperio/shared';
-
-import { listCalendars, type Calendar } from '../api/calendar';
-import { useCalendarVisibility } from '../state/calendarVisibility';
 import type { RootStackParamList } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { chrome } from '../theme/uiScale';
+import { useNewEventOnDay } from './useNewEventOnDay';
 
 // The shared calendar action bar — Calendars (toggle which calendars show),
 // Search, and New Event. These three are cross-cutting (they apply to every
@@ -31,40 +27,9 @@ interface Props {
 export function CalendarActions({ navigation, anchorDay }: Props) {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
-  const { hidden } = useCalendarVisibility();
-  const [calendars, setCalendars] = useState<Calendar[]>([]);
-
-  // Refresh the calendar list on focus (calendars can be added/removed on the
-  // Calendars screen and on other devices via sync).
-  useEffect(() => {
-    const read = () =>
-      void listCalendars()
-        .then(setCalendars)
-        .catch(() => setCalendars([]));
-    const unsubscribe = navigation.addListener('focus', read);
-    read();
-    return unsubscribe;
-  }, [navigation]);
-
-  // Seed "New Event" on a writable calendar the user hasn't hidden, so a new
-  // event never defaults to a read-only or hidden one; fall back to any writable
-  // calendar (the picker still lets the user change it).
-  const firstCalendarId = useMemo(
-    () =>
-      calendars.find((c) => !c.read_only && !hidden.has(c.id))?.id ??
-      calendars.find((c) => !c.read_only)?.id ??
-      null,
-    [calendars, hidden],
-  );
-
-  const addEvent = useCallback(() => {
-    if (firstCalendarId == null) return;
-    // → the event quick-add (expands to the full editor via "More details …").
-    navigation.navigate('QuickAddEvent', {
-      calendarId: firstCalendarId,
-      anchor: localDateKey(anchorDay),
-    });
-  }, [firstCalendarId, navigation, anchorDay]);
+  // The shared "new event on this day" flow — the same hook feeds the host
+  // screens' VoiceOver magic tap, so both entry points seed identically.
+  const { addEvent, enabled } = useNewEventOnDay(navigation, anchorDay);
 
   // A Fragment (not a wrapping View) so the buttons flow with the host
   // screen's action bar (which already lays out + wraps Today / Jump-to-date).
@@ -88,14 +53,14 @@ export function CalendarActions({ navigation, anchorDay }: Props) {
       </Pressable>
       <Pressable
         accessibilityRole="button"
-        accessibilityState={{ disabled: firstCalendarId == null }}
+        accessibilityState={{ disabled: !enabled }}
         accessibilityLabel={t('toolbar.newEvent')}
-        disabled={firstCalendarId == null}
+        disabled={!enabled}
         onPress={addEvent}
         style={({ pressed }) => [
           styles.primaryButton,
           pressed && styles.primaryPressed,
-          firstCalendarId == null && styles.primaryDisabled,
+          !enabled && styles.primaryDisabled,
         ]}
       >
         <Text style={styles.primaryButtonText}>{t('toolbar.newEvent')}</Text>
