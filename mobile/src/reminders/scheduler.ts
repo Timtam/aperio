@@ -7,6 +7,7 @@ import i18n from '../../i18n';
 import { UpcomingReminder, upcomingReminders } from '../api/reminders';
 import { customSoundPath } from '../api/sounds';
 import { getHiddenCalendars } from '../state/calendarVisibility';
+import { setRemindersRefreshHook } from '../state/cacheObserver';
 import { upcomingDayStartNotifications } from './dayStartSchedule';
 
 // Mobile reminder delivery. The desktop fires reminders from a live tokio
@@ -205,6 +206,13 @@ export function refreshRemindersSoon(): void {
     void rescheduleReminders();
   }, DEBOUNCE_MS);
 }
+
+// Re-plan whenever fresh data lands outside a local mutation: a peer sync
+// round applied changes (a desktop-created task can add/remove reminders or
+// change the day-start counts) or an external-cache refresh finished.
+// Registered as a callback because cacheObserver importing this module
+// directly would close a module cycle through the api layer.
+setRemindersRefreshHook(refreshRemindersSoon);
 
 /** Mount once near the app root: reschedule on launch + every foreground-resume
  *  (the latter catches reminders synced in from a peer while we were away). */
