@@ -559,6 +559,12 @@ export function DayStartReviewDialog({
       title={t('dialogs.dayStartReview.title')}
       className="modal--form modal--day-start-review"
       initialFocusRef={introRef}
+      // A stray click OUTSIDE the dialog must not defer the whole review —
+      // this is the day's work list, and the backdrop-click was read as
+      // "remind me later" (4h snooze), silently for a mouse user. Deferring
+      // stays an EXPLICIT action: the "remind me later" button, or Escape
+      // (which routes to the same announced snooze via onClose).
+      dismissOnBackdrop={false}
     >
       <p ref={introRef} tabIndex={-1} className="form__hint">
         {t('dialogs.dayStartReview.hint')}
