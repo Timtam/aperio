@@ -58,6 +58,19 @@ Apple's well-known endpoints.
   those poisoned tokens so books re-bootstrap).
 - **Stable ids.** A resource is keyed by `{href}|{uid}` so renames/moves
   and per-resource deletions resolve correctly.
+- **Subtasks ride `RELATED-TO`.** A VTODO's parameter-less `RELATED-TO`
+  (RELTYPE defaults to PARENT; CHILD/SIBLING entries are ignored) carries
+  the parent's **bare UID** on the wire; the read path resolves it to the
+  composite `{href}|{uid}` task id against the fetched set. Because the
+  `icalendar` crate keeps only one `RELATED-TO` per component when
+  parsing, the link is scanned from the **raw iCal text** — several
+  `RELATED-TO` lines (RFC-legal; e.g. jtx Board's reciprocal
+  `RELTYPE=CHILD` entries) would otherwise drop the parent
+  order-dependently. An incremental delta whose parent didn't itself
+  change falls back to one tolerant `uid → id` listing; if that read
+  fails the delta fails too (token not advanced) rather than caching a
+  falsified flat parent. Writes strip the composite id back to the UID;
+  removing the parent just regenerates the VTODO without the property.
 - **Keep recurring masters.** The folder-complete sync keeps every event
   regardless of date; the legacy windowed fallback still keeps any event
   with a recurrence even when its first occurrence is outside the window

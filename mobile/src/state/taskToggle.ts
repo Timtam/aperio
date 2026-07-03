@@ -85,11 +85,15 @@ export async function recomputeAncestors(
 export function collectDescendants(parentId: string, all: Task[]): Task[] {
   const out: Task[] = [];
   const stack: string[] = [parentId];
+  // Visit every task at most once — external providers can deliver a
+  // parent cycle, which would otherwise loop (and grow `out`) forever.
+  const seen = new Set<string>([parentId]);
   while (stack.length > 0) {
     const id = stack.pop();
     if (id == null) continue;
     for (const tk of all) {
-      if (tk.parent_id === id) {
+      if (tk.parent_id === id && !seen.has(tk.id)) {
+        seen.add(tk.id);
         out.push(tk);
         stack.push(tk.id);
       }

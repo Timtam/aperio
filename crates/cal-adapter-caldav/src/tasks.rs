@@ -18,11 +18,13 @@
 //!     resource URL with the matching iCal body
 //!
 //! Status, priority, scheduled/due dates, recurrence (`RRULE`, via
-//! `cal_core::{task_recurrence_to_rrule, rrule_to_task_recurrence}`) and
-//! the completed_at flag all round-trip. Per-occurrence overrides
-//! (`EXDATE`) aren't surfaced for tasks yet. Reminders (VALARM) and sound
-//! overrides come with the later wave that addresses VALARM mapping in
-//! general.
+//! `cal_core::{task_recurrence_to_rrule, rrule_to_task_recurrence}`),
+//! the completed_at flag and the subtask link (`RELATED-TO` with the
+//! default RELTYPE=PARENT; see `resolve_parent_ids` for how the bare
+//! UID becomes a composite task id) all round-trip. Per-occurrence
+//! overrides (`EXDATE`) aren't surfaced for tasks yet. Reminders
+//! (VALARM) and sound overrides come with the later wave that
+//! addresses VALARM mapping in general.
 
 use cal_core::{
     apply_task_extras, decode_payload, encode_payload, extras_for_task, recurrence_needs_extras,
@@ -223,14 +225,15 @@ pub async fn delete_task_list(
     Ok(())
 }
 
-/// REPORT calendar-query for VTODO and map each task into the
-/// `cal_core::Task` shape. ETag from the server is preserved on
-/// every task so the write paths can use If-Match.
-pub async fn get_tasks(
+/// REPORT calendar-query for VTODO, returning the raw multistatus
+/// entries. Shared by `get_tasks` (full mapping) and
+/// `get_task_uid_index` (id harvesting for the delta path's parent
+/// resolution).
+async fn vtodo_query(
     client: &Client,
     list_url: &Url,
     credentials: &Credentials,
-) -> CaldavResult<Vec<Task>> {
+) -> CaldavResult<Vec<ResponseEntry>> {
     let method = Method::from_bytes(b"REPORT").expect("REPORT");
     let mut headers = auth_header(credentials)?;
     headers.insert(
@@ -260,7 +263,32 @@ pub async fn get_tasks(
         });
     }
     let text = response.text().await?;
-    let entries = parse_multistatus(&text)?;
+    parse_multistatus(&text)
+}
+
+/// `uid → composite id` over the FULL collection, parsed tolerantly (a
+/// single garbled VTODO is skipped like in `parse_task_entries`, not
+/// fatal — the delta path only needs the ids it can see, and a strict
+/// parse would make one broken resource sink every cross-delta parent
+/// resolution forever).
+pub async fn get_task_uid_index(
+    client: &Client,
+    list_url: &Url,
+    credentials: &Credentials,
+) -> CaldavResult<std::collections::HashMap<String, String>> {
+    let entries = vtodo_query(client, list_url, credentials).await?;
+    Ok(uid_index(&parse_task_entries(&entries, list_url.as_str())))
+}
+
+/// REPORT calendar-query for VTODO and map each task into the
+/// `cal_core::Task` shape. ETag from the server is preserved on
+/// every task so the write paths can use If-Match.
+pub async fn get_tasks(
+    client: &Client,
+    list_url: &Url,
+    credentials: &Credentials,
+) -> CaldavResult<Vec<Task>> {
+    let entries = vtodo_query(client, list_url, credentials).await?;
     let list_id = list_url.as_str();
     let mut out = Vec::new();
     for entry in entries {
@@ -276,7 +304,7 @@ pub async fn get_tasks(
                 // — without it, delete/update later would build a
                 // URL from the UID alone, which doesn't match how
                 // iCloud (and others) name their VTODO resources.
-                if let Some(mut task) = map_todo(&todo, list_id, Some(&entry.href)) {
+                if let Some(mut task) = map_todo(&todo, list_id, Some(&entry.href), Some(&ical)) {
                     if let Some(etag) = &entry.etag {
                         task.etag = Some(etag.clone());
                     }
@@ -285,6 +313,10 @@ pub async fn get_tasks(
             }
         }
     }
+    // The full listing is the authoritative set: a parent UID it can't
+    // resolve doesn't exist on the server, so it's dropped inside.
+    let index = uid_index(&out);
+    resolve_parent_ids(&mut out, &index);
     Ok(out)
 }
 
@@ -294,6 +326,12 @@ pub async fn get_tasks(
 /// the delta read can't be sunk by one bad VTODO. The `{href}|{uid}` id
 /// shape matches `get_tasks` exactly so the cache stays consistent across
 /// the full and incremental read paths.
+///
+/// `parent_id` still holds the BARE parent UID here: an incremental
+/// change set may reference a parent that didn't itself change, so the
+/// caller decides which set to resolve against (see `uid_index` +
+/// `resolve_parent_ids`; the delta path in `lib.rs` falls back to
+/// `get_task_uid_index` when a UID points outside the change set).
 pub fn parse_task_entries(entries: &[ResponseEntry], list_id: &str) -> Vec<Task> {
     let mut out = Vec::new();
     for entry in entries {
@@ -305,7 +343,7 @@ pub fn parse_task_entries(entries: &[ResponseEntry], list_id: &str) -> Vec<Task>
         };
         for comp in parsed.components {
             if let icalendar::CalendarComponent::Todo(todo) = comp {
-                if let Some(mut task) = map_todo(&todo, list_id, Some(&entry.href)) {
+                if let Some(mut task) = map_todo(&todo, list_id, Some(&entry.href), Some(ical)) {
                     if let Some(etag) = &entry.etag {
                         task.etag = Some(etag.clone());
                     }
@@ -588,9 +626,25 @@ fn apply_common(todo: &mut Todo, uid: &str, task: &NewTask, completed_at: Option
     if let Some(payload) = encode_payload(&extras) {
         todo.add_property("X-APERIO-EXTRAS", payload);
     }
+
+    // Subtask link: RELATED-TO names the PARENT's UID (RFC 5545 §3.2.15;
+    // the parameter-less form defaults to RELTYPE=PARENT, which is what
+    // every other client emits). `parent_id` may be our composite
+    // `{href}|{uid}` — strip it to the bare UID so other clients (and our
+    // own read path) can resolve it. No parent ⇒ no property, which is
+    // also how an update REMOVES the link: the whole VTODO is regenerated.
+    if let Some(parent) = &task.parent_id {
+        let (_, parent_uid) = decode_id(parent);
+        if !parent_uid.is_empty() {
+            todo.add_property("RELATED-TO", parent_uid);
+        }
+    }
 }
 
-fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
+/// `raw` is the resource's raw iCalendar text when the caller has it —
+/// needed for a correct RELATED-TO read (see the comment at the
+/// extraction below); `None` falls back to the parsed component.
+fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>, raw: Option<&str>) -> Option<Task> {
     let uid_raw = todo.get_uid()?.to_string();
     // Encode the server's resource href into the id when we have it
     // (`{href}|{uid}`). This lets the write paths reach the right URL
@@ -602,7 +656,7 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
     // and continue to work via the fallback in `resource_url_for_task`.
     let uid = match href {
         Some(h) if !h.is_empty() => format!("{h}|{uid_raw}"),
-        _ => uid_raw,
+        _ => uid_raw.clone(),
     };
     let title = todo.get_summary().unwrap_or("").to_string();
     let description = todo.get_description().map(|s| s.to_string());
@@ -639,6 +693,41 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
         .and_then(parse_compact_utc)
         .or_else(|| todo.property_value("DTSTAMP").and_then(parse_compact_utc))
         .unwrap_or(created_at);
+
+    // Subtask link: RELATED-TO carries the PARENT's bare UID (a missing
+    // RELTYPE parameter defaults to PARENT per RFC 5545 §3.2.15;
+    // CHILD/SIBLING entries are other clients' bookkeeping and are
+    // ignored). The bare UID is rewritten to the fetched set's composite
+    // `{href}|{uid}` id by `resolve_parent_ids` once the whole set is
+    // known — a raw `map_todo` result is NOT directly comparable to task
+    // ids yet.
+    //
+    // The link is scanned from the RAW iCalendar text when the caller has
+    // it: icalendar 0.16.17 files RELATED-TO into its single-value
+    // property map (the property is missing from the parser's multi
+    // list), so of several RELATED-TO lines — RFC 5545 allows any number,
+    // and clients like jtx Board write reciprocal RELTYPE=CHILD entries
+    // next to the parent link — only the LAST survives parsing. Reading
+    // the parsed component would flatten such tasks order-dependently,
+    // and the next Aperio edit would then regenerate the VTODO without
+    // the link, deleting it from the server. The parsed-property fallback
+    // below only serves callers without the raw text.
+    let parent_uid = raw
+        .and_then(|text| parent_uid_from_raw(text, &uid_raw))
+        .unwrap_or_else(|| {
+            todo.properties()
+                .get("RELATED-TO")
+                .filter(|p| {
+                    related_to_is_parent(
+                        p.params()
+                            .iter()
+                            .find(|(k, _)| k.eq_ignore_ascii_case("RELTYPE"))
+                            .map(|(_, v)| v.value()),
+                    )
+                })
+                .map(|p| p.value().to_string())
+        })
+        .filter(|uid| !uid.is_empty());
 
     // DESIGN §9.12: a plain scheduled rule comes from RRULE; the on-demand
     // axes / resurface_date / series_id come from the X-property and
@@ -679,7 +768,7 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
         deadline_time,
         deadline_reminder_days,
         recurrence,
-        parent_id: None,
+        parent_id: parent_uid,
         section_id: None,
         color_label: None,
         reminders: Vec::new(),
@@ -768,6 +857,143 @@ async fn propfind(
 fn resource_url(list_url: &Url, uid: &str) -> CaldavResult<Url> {
     let slug = format!("{}.ics", urlencoding(uid));
     list_url.join(&slug).map_err(Into::into)
+}
+
+/// `uid → task id` lookup over mapped tasks, for resolving the bare
+/// parent UIDs a `RELATED-TO` property carries into the composite
+/// `{href}|{uid}` ids the rest of the app compares against.
+pub fn uid_index(tasks: &[Task]) -> std::collections::HashMap<String, String> {
+    tasks
+        .iter()
+        .map(|t| {
+            let (_, uid) = decode_id(&t.id);
+            (uid.to_string(), t.id.clone())
+        })
+        .collect()
+}
+
+/// True when at least one task's `parent_id` (a bare UID fresh out of
+/// `map_todo`) has no entry in `index` — i.e. the parent lives outside
+/// the mapped set and resolving needs a wider index.
+pub fn any_unresolved_parent(
+    tasks: &[Task],
+    index: &std::collections::HashMap<String, String>,
+) -> bool {
+    tasks.iter().any(|t| {
+        t.parent_id
+            .as_ref()
+            .is_some_and(|uid| !index.contains_key(uid))
+    })
+}
+
+/// Rewrite the bare parent UIDs `map_todo` leaves in `parent_id` into
+/// the composite ids from `index`, so a subtask's `parent_id` matches
+/// its parent's `Task.id` exactly. A UID with no entry (parent deleted
+/// or a dangling RELATED-TO) and a self-reference (malformed VTODO —
+/// keeping it would send the UI's tree walk in a circle) both clear to
+/// `None`.
+pub fn resolve_parent_ids(tasks: &mut [Task], index: &std::collections::HashMap<String, String>) {
+    for task in tasks.iter_mut() {
+        let Some(uid) = task.parent_id.take() else {
+            continue;
+        };
+        match index.get(&uid) {
+            Some(id) if *id != task.id => task.parent_id = Some(id.clone()),
+            _ => {}
+        }
+    }
+}
+
+/// Unfold RFC 5545 §3.1 line continuations: a line break followed by a
+/// space or tab continues the previous line. Handles CRLF and bare-LF
+/// input (servers emit both).
+fn unfold_ical(raw: &str) -> String {
+    raw.replace("\r\n ", "")
+        .replace("\r\n\t", "")
+        .replace("\n ", "")
+        .replace("\n\t", "")
+}
+
+/// Split one unfolded content line into its `name[;params]` head and its
+/// value, honouring quoted parameter values (a `:` inside `"…"` is not
+/// the separator).
+fn split_property_line(line: &str) -> Option<(&str, &str)> {
+    let mut in_quotes = false;
+    for (i, ch) in line.char_indices() {
+        match ch {
+            '"' => in_quotes = !in_quotes,
+            ':' if !in_quotes => return Some((&line[..i], &line[i + 1..])),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Whether a RELATED-TO's RELTYPE value means "this names my parent".
+/// `None` (no parameter) defaults to PARENT per RFC 5545 §3.2.15; the
+/// compare is case-insensitive and tolerates a quoted value.
+fn related_to_is_parent(reltype: Option<&str>) -> bool {
+    match reltype {
+        None => true,
+        Some(v) => v.trim_matches('"').eq_ignore_ascii_case("PARENT"),
+    }
+}
+
+/// Scan the raw iCalendar text for the parent UID of the VTODO carrying
+/// `uid`. Returns `None` when no VTODO block with that UID exists in the
+/// text (caller falls back to the parsed component), `Some(None)` when
+/// the block exists but has no parent-typed RELATED-TO, and
+/// `Some(Some(parent_uid))` for the first parent link.
+///
+/// This exists because icalendar 0.16.17 keeps only ONE RELATED-TO per
+/// component (last line wins — the property is missing from its
+/// multi-property list), while RFC 5545 allows several and real clients
+/// write reciprocal RELTYPE=CHILD entries next to the parent link.
+/// Names and parameter keys compare case-insensitively (RFC 5545 §2).
+fn parent_uid_from_raw(raw: &str, uid: &str) -> Option<Option<String>> {
+    let unfolded = unfold_ical(raw);
+    let mut in_vtodo = false;
+    let mut block_uid: Option<String> = None;
+    let mut block_parent: Option<String> = None;
+    for line in unfolded.lines() {
+        let line = line.trim_end_matches('\r');
+        if line.eq_ignore_ascii_case("BEGIN:VTODO") {
+            in_vtodo = true;
+            block_uid = None;
+            block_parent = None;
+            continue;
+        }
+        if line.eq_ignore_ascii_case("END:VTODO") {
+            if in_vtodo && block_uid.as_deref() == Some(uid) {
+                return Some(block_parent);
+            }
+            in_vtodo = false;
+            continue;
+        }
+        if !in_vtodo {
+            continue;
+        }
+        let Some((head, value)) = split_property_line(line) else {
+            continue;
+        };
+        let mut parts = head.split(';');
+        let name = parts.next().unwrap_or("");
+        if name.eq_ignore_ascii_case("UID") {
+            block_uid = Some(value.trim().to_string());
+        } else if name.eq_ignore_ascii_case("RELATED-TO") && block_parent.is_none() {
+            let reltype = parts
+                .filter_map(|param| param.split_once('='))
+                .find(|(k, _)| k.trim().eq_ignore_ascii_case("RELTYPE"))
+                .map(|(_, v)| v);
+            if related_to_is_parent(reltype) {
+                let value = value.trim();
+                if !value.is_empty() {
+                    block_parent = Some(value.to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Split a task id into `(Some(href), uid)` when it carries the
@@ -962,6 +1188,195 @@ END:VCALENDAR</c:calendar-data>
         assert_eq!(tasks[0].etag.as_deref(), Some("\"todo-1\""));
     }
 
+    #[tokio::test]
+    async fn get_tasks_resolves_related_to_into_the_parents_composite_id() {
+        let body = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:response>
+    <d:href>/calendars/alice/tasks/p.ics</d:href>
+    <d:propstat><d:prop>
+      <d:getetag>"p"</d:getetag>
+      <c:calendar-data>BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//test//EN
+BEGIN:VTODO
+UID:parent-1@aperio
+SUMMARY:Parent
+STATUS:NEEDS-ACTION
+END:VTODO
+END:VCALENDAR</c:calendar-data>
+    </d:prop></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/calendars/alice/tasks/c.ics</d:href>
+    <d:propstat><d:prop>
+      <d:getetag>"c"</d:getetag>
+      <c:calendar-data>BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//test//EN
+BEGIN:VTODO
+UID:child-1@aperio
+SUMMARY:Child
+STATUS:NEEDS-ACTION
+RELATED-TO:parent-1@aperio
+END:VTODO
+END:VCALENDAR</c:calendar-data>
+    </d:prop></d:propstat>
+  </d:response>
+</d:multistatus>"#;
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("REPORT", "/calendars/alice/tasks/")
+            .with_status(207)
+            .with_body(body)
+            .create_async()
+            .await;
+        let url = Url::parse(&format!("{}/calendars/alice/tasks/", server.url())).unwrap();
+        let tasks = get_tasks(&client(), &url, &creds(&server.url()))
+            .await
+            .unwrap();
+        // The bare RELATED-TO UID resolves to the parent's full
+        // `{href}|{uid}` id, so the subtask groups under it everywhere
+        // task ids are compared.
+        let child = tasks.iter().find(|t| t.title == "Child").unwrap();
+        assert_eq!(
+            child.parent_id.as_deref(),
+            Some("/calendars/alice/tasks/p.ics|parent-1@aperio"),
+        );
+        let parent = tasks.iter().find(|t| t.title == "Parent").unwrap();
+        assert_eq!(parent.parent_id, None);
+    }
+
+    /// Parse a one-VTODO calendar exactly like the read path does and map
+    /// it. `extra_lines` lets a test inject e.g. a RELATED-TO property
+    /// (include the trailing newline).
+    fn mapped_task(uid: &str, extra_lines: &str, href: &str) -> Task {
+        let body = format!(
+            "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//test//EN\nBEGIN:VTODO\nUID:{uid}\nSUMMARY:x\nSTATUS:NEEDS-ACTION\n{extra_lines}END:VTODO\nEND:VCALENDAR",
+        );
+        let parsed = body.parse::<ICalendar>().expect("valid ical");
+        let todo = parsed
+            .components
+            .iter()
+            .find_map(|c| match c {
+                icalendar::CalendarComponent::Todo(t) => Some(t),
+                _ => None,
+            })
+            .expect("has a VTODO");
+        map_todo(todo, "list", Some(href), Some(&body)).expect("maps")
+    }
+
+    #[test]
+    fn map_todo_reads_only_parent_typed_related_to() {
+        // Parameter-less RELATED-TO defaults to RELTYPE=PARENT → captured
+        // as the (unresolved) bare parent UID.
+        let plain = mapped_task("c@x", "RELATED-TO:p@x\n", "/cal/c.ics");
+        assert_eq!(plain.parent_id.as_deref(), Some("p@x"));
+        // An explicit PARENT (any case, quoted or not) is the same link.
+        let explicit = mapped_task("c@x", "RELATED-TO;RELTYPE=parent:p@x\n", "/cal/c.ics");
+        assert_eq!(explicit.parent_id.as_deref(), Some("p@x"));
+        let quoted = mapped_task("c@x", "RELATED-TO;RELTYPE=\"PARENT\":p@x\n", "/cal/c.ics");
+        assert_eq!(quoted.parent_id.as_deref(), Some("p@x"));
+        // CHILD/SIBLING relations are other clients' bookkeeping, not a
+        // parent link — regardless of the parameter key's case (RFC 5545
+        // names are case-insensitive; some emitters lowercase them).
+        let child_typed = mapped_task("c@x", "RELATED-TO;RELTYPE=CHILD:p@x\n", "/cal/c.ics");
+        assert_eq!(child_typed.parent_id, None);
+        let lowercase = mapped_task("c@x", "RELATED-TO;reltype=CHILD:p@x\n", "/cal/c.ics");
+        assert_eq!(lowercase.parent_id, None);
+    }
+
+    #[test]
+    fn map_todo_survives_multiple_related_to_lines() {
+        // RFC 5545 allows several RELATED-TO per component; clients like
+        // jtx Board keep reciprocal RELTYPE=CHILD bookkeeping next to the
+        // parent link. icalendar 0.16.17 only keeps the LAST parsed line,
+        // so the raw-text scan must find the parent REGARDLESS of order —
+        // before it, a trailing CHILD line flattened the task and the next
+        // Aperio edit deleted the parent link from the server.
+        let child_last = mapped_task(
+            "c@x",
+            "RELATED-TO:p@x\nRELATED-TO;RELTYPE=CHILD:kid@x\n",
+            "/cal/c.ics",
+        );
+        assert_eq!(child_last.parent_id.as_deref(), Some("p@x"));
+        let child_first = mapped_task(
+            "c@x",
+            "RELATED-TO;RELTYPE=CHILD:kid@x\nRELATED-TO:p@x\n",
+            "/cal/c.ics",
+        );
+        assert_eq!(child_first.parent_id.as_deref(), Some("p@x"));
+        // Only CHILD entries ⇒ no parent.
+        let only_child = mapped_task(
+            "c@x",
+            "RELATED-TO;RELTYPE=CHILD:kid@x\nRELATED-TO;RELTYPE=CHILD:kid2@x\n",
+            "/cal/c.ics",
+        );
+        assert_eq!(only_child.parent_id, None);
+    }
+
+    #[test]
+    fn parent_uid_from_raw_unfolds_continuation_lines() {
+        // RFC 5545 §3.1 folds long lines with CRLF + space; the raw scan
+        // must see the logical line, not the physical fragments.
+        let raw = "BEGIN:VCALENDAR\r\nBEGIN:VTODO\r\nUID:c@x\r\nRELATED-TO:very-long-\r\n parent-uid@x\r\nEND:VTODO\r\nEND:VCALENDAR";
+        assert_eq!(
+            parent_uid_from_raw(raw, "c@x"),
+            Some(Some("very-long-parent-uid@x".into())),
+        );
+        // Unknown UID ⇒ outer None (caller falls back to the parsed
+        // component); block without a parent link ⇒ Some(None).
+        assert_eq!(parent_uid_from_raw(raw, "other@x"), None);
+        let flat = "BEGIN:VTODO\nUID:c@x\nSUMMARY:x\nEND:VTODO";
+        assert_eq!(parent_uid_from_raw(flat, "c@x"), Some(None));
+    }
+
+    #[test]
+    fn resolve_parent_ids_maps_dangling_and_self_references_to_none() {
+        // Resolvable: the child's bare UID becomes the parent's composite id.
+        let parent = mapped_task("p@x", "", "/cal/p.ics");
+        let child = mapped_task("c@x", "RELATED-TO:p@x\n", "/cal/c.ics");
+        let mut tasks = vec![parent, child];
+        let index = uid_index(&tasks);
+        assert!(!any_unresolved_parent(&tasks, &index));
+        resolve_parent_ids(&mut tasks, &index);
+        assert_eq!(tasks[1].parent_id.as_deref(), Some("/cal/p.ics|p@x"));
+
+        // Dangling: the referenced UID isn't in the set → flagged for the
+        // delta path's wider lookup, cleared on resolve.
+        let mut dangling = vec![mapped_task("c@x", "RELATED-TO:gone@x\n", "/cal/c.ics")];
+        let index = uid_index(&dangling);
+        assert!(any_unresolved_parent(&dangling, &index));
+        resolve_parent_ids(&mut dangling, &index);
+        assert_eq!(dangling[0].parent_id, None);
+
+        // Self-reference: a malformed VTODO naming itself must not produce
+        // a task that is its own parent (the UI's tree walk would cycle).
+        let mut selfy = vec![mapped_task("s@x", "RELATED-TO:s@x\n", "/cal/s.ics")];
+        let index = uid_index(&selfy);
+        resolve_parent_ids(&mut selfy, &index);
+        assert_eq!(selfy[0].parent_id, None);
+    }
+
+    #[test]
+    fn build_vtodo_emits_related_to_with_the_bare_parent_uid() {
+        let mut new = sample_new_task();
+        // The caller hands us the parent's COMPOSITE id; the wire property
+        // must carry only the UID so other clients can resolve it.
+        new.parent_id = Some("/calendars/alice/tasks/p.ics|parent-1@aperio".into());
+        let body = build_vtodo_body("uid-child", &new, None);
+        assert!(
+            body.contains("RELATED-TO:parent-1@aperio"),
+            "VTODO must carry the bare parent UID, got:\n{body}",
+        );
+        // No parent ⇒ no property (also how an update removes the link,
+        // since the whole VTODO is regenerated).
+        let mut flat = sample_new_task();
+        flat.parent_id = None;
+        let body = build_vtodo_body("uid-flat", &flat, None);
+        assert!(!body.contains("RELATED-TO"), "got:\n{body}");
+    }
+
     #[test]
     fn build_vtodo_emits_value_date_parameter_for_date_only_fields() {
         // Regression for the iCloud "task saves but date is gone"
@@ -1089,7 +1504,7 @@ END:VCALENDAR</c:calendar-data>
                 _ => None,
             })
             .expect("has a VTODO");
-        let task = map_todo(todo, "list", None).expect("maps");
+        let task = map_todo(todo, "list", None, None).expect("maps");
         assert_eq!(task.recurrence, Some(rec));
     }
 
@@ -1135,7 +1550,7 @@ END:VCALENDAR</c:calendar-data>
                 _ => None,
             })
             .expect("has a VTODO");
-        let task = map_todo(todo, "list", None).expect("maps");
+        let task = map_todo(todo, "list", None, None).expect("maps");
         assert_eq!(task.recurrence, Some(rec));
         assert_eq!(
             task.resurface_date,

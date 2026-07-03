@@ -313,6 +313,48 @@ describe('planAncestorRecompute', () => {
   });
 });
 
+describe('parent cycles (external-provider data)', () => {
+  // External providers can hand us a parent LOOP (e.g. two Vikunja tasks
+  // each relating to the other). No planner may spin forever on it —
+  // before the visited guards, a single check-off froze the whole app.
+  const cycle = (aStatus: TaskStatus, bStatus: TaskStatus): Task[] => [
+    child('a', 'b', aStatus),
+    child('b', 'a', bStatus),
+  ];
+
+  it('terminates the down-cascade on a two-task cycle', () => {
+    const writes = planStatusCascade('a', 'completed', cycle('open', 'open'));
+    // a is the root write; b follows as its "descendant"; then the walk
+    // stops instead of alternating a→b→a forever.
+    expect(writes).toEqual([
+      { taskId: 'a', status: 'completed' },
+      { taskId: 'b', status: 'completed' },
+    ]);
+  });
+
+  it('terminates the down-cascade when the cycle is already at the target', () => {
+    const writes = planStatusCascade('a', 'completed', [
+      child('a', 'b', 'open'),
+      child('b', 'a', 'completed'),
+    ]);
+    expect(writes).toEqual([{ taskId: 'a', status: 'completed' }]);
+  });
+
+  it('terminates the up-cascade on a cycle', () => {
+    // Reopening skips the down-cascade and climbs parents — the climb
+    // must stop when it re-reaches a visited node.
+    const writes = planStatusCascade('a', 'open', cycle('completed', 'completed'));
+    expect(writes.length).toBeGreaterThan(0);
+    expect(writes.length).toBeLessThan(10);
+  });
+
+  it('terminates planAncestorRecompute on a cycle', () => {
+    const writes = planAncestorRecompute('a', cycle('open', 'completed'));
+    // Each member is recomputed at most once; no infinite climb.
+    expect(writes.length).toBeLessThan(10);
+  });
+});
+
 describe('auto-date (todayKey)', () => {
   const TODAY = '2026-05-21';
 

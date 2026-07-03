@@ -1129,6 +1129,10 @@ pub fn map_task(entry: TodoTaskEntry, list_id: &str) -> GraphResult<Task> {
         resurface_date,
         series_id,
         recurrence,
+        // Microsoft To Do has no task→task parent link: its
+        // "checklistItems" are read-only strings without a write API, so
+        // subtasks can't round-trip. The plugin manifest declares
+        // `subtasks: false` so the UI never offers them on Graph lists.
         parent_id: None,
         section_id: None,
         color_label: None,

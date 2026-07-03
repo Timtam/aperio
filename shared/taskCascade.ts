@@ -235,10 +235,16 @@ export function planStatusCascade(
     const oppositeTerminal: TaskStatus =
       target === 'completed' ? 'cancelled' : 'completed';
     const stack: string[] = [taskId];
+    // External providers can deliver a parent CYCLE (e.g. two Vikunja
+    // tasks each carrying a relation onto the other); expand every node
+    // at most once or the walk re-pushes the cycle members forever.
+    const expanded = new Set<string>([taskId]);
     while (stack.length > 0) {
       const id = stack.pop()!;
       const kids = childrenByParent.get(id) ?? [];
       for (const kid of kids) {
+        if (expanded.has(kid.id)) continue;
+        expanded.add(kid.id);
         const kidStatus = statusOf(kid.id);
         if (kidStatus === oppositeTerminal) continue;
         if (kidStatus === target) {
@@ -255,8 +261,11 @@ export function planStatusCascade(
   // Cascade up: walk parents, recomputing each against the latest
   // sibling state (with overrides applied).
   let current = byId.get(taskId);
+  const climbed = new Set<string>([taskId]);
   while (current?.parent_id) {
     const parentId = current.parent_id;
+    if (climbed.has(parentId)) break; // parent cycle — stop the climb
+    climbed.add(parentId);
     const parent = byId.get(parentId);
     if (!parent) break; // orphan — stop
     const siblings = childrenByParent.get(parentId) ?? [];
@@ -301,7 +310,10 @@ export function planAncestorRecompute(
   const childrenByParent = buildChildrenIndex(allTasks);
 
   let currentId: string | undefined = parentId;
+  const climbed = new Set<string>();
   while (currentId) {
+    if (climbed.has(currentId)) break; // parent cycle — stop the climb
+    climbed.add(currentId);
     const current = byId.get(currentId);
     if (!current) break;
     const siblings = childrenByParent.get(currentId) ?? [];

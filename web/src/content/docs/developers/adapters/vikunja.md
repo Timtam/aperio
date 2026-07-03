@@ -27,6 +27,15 @@ instance).
 - **Priority** maps by label: Vikunja 1/2/3 (Low/Medium/High) ↔ Aperio
   Low/Medium/High. Unset (0) reads as Low; Urgent (4) and DO NOW (5) collapse
   to High and write back as High (3) — Aperio has only three levels.
+- **Subtasks are task *relations***, not a task field: the child's
+  `parenttask` relation (`PUT /tasks/{child}/relations`, removed via
+  `DELETE /tasks/{child}/relations/parenttask/{parent}`) maps onto
+  `Task.parent_id`; reads take the first non-zero
+  `related_tasks.parenttask` entry. Updates reconcile against an
+  authoritative `GET /tasks/{id}` — Vikunja populates `related_tasks` only
+  on reads, never on the update echo — unlink every stale parent (Vikunja
+  allows several), and treat PUT→409 (already linked) / DELETE→404
+  (already gone) as success.
 
 ## Collaboration (assignment + membership)
 

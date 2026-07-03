@@ -19,8 +19,12 @@
 //!     the alignment).
 //!   - **Subtasks** in Vikunja are not a `parent_id` field but a
 //!     symmetric `related_tasks` relation with kind `parenttask` /
-//!     `subtask`. Out of scope for the first cut — Aperio surfaces a
-//!     flat list and the `Task.parent_id` round-trips as `None`.
+//!     `subtask`. The adapter maps them both ways: on READ the child's
+//!     `related_tasks.parenttask[0]` becomes `Task.parent_id`; on
+//!     create/update the relation is set/removed via the dedicated
+//!     `PUT/DELETE /tasks/{id}/relations…` endpoints (a separate call —
+//!     the task body has no parent field). Vikunja mirrors the inverse
+//!     `subtask` entry on the parent automatically.
 //!
 //! Status mapping (DESIGN.md §9.7):
 //!
@@ -58,7 +62,6 @@
 //!   - Reminders (Vikunja's `reminders[]` is rich enough — relative
 //!     periods, multiple reminders — but Aperio's per-task reminder
 //!     edit UI doesn't surface a multi-row editor for it yet).
-//!   - Subtasks via `related_tasks`.
 //!   - Labels (the field is there in `Task`, but Aperio's
 //!     ColorLabel system is local-only at the moment).
 
@@ -517,6 +520,28 @@ pub async fn create_task(
         // `None` ⇒ the move couldn't be determined; keep the default bucket
         // `map_task` already resolved rather than claim the requested section.
     }
+    // Link the subtask to its parent — Vikunja models subtasks as a
+    // `parenttask` RELATION set in a separate call (the create body has no
+    // parent field; this used to be dropped with a warn, which silently
+    // flattened every subtask created on a Vikunja list). Best-effort like
+    // the bucket move: the task itself is already created, so a failed link
+    // leaves it visible-but-flat (`parent_id: None` in the returned task)
+    // rather than erroring after the fact.
+    if let Some(parent) = task.parent_id.as_deref() {
+        match parse_id(parent, "parent task id") {
+            Ok(parent_id) => match set_parent_relation(client, new_id, parent_id).await {
+                Ok(()) => mapped.parent_id = Some(parent.to_string()),
+                Err(err) => tracing::warn!(
+                    error = %err,
+                    "Vikunja adapter could not link the new subtask to its parent",
+                ),
+            },
+            Err(err) => tracing::warn!(
+                error = %err,
+                "Vikunja adapter could not link the new subtask to its parent",
+            ),
+        }
+    }
     Ok(mapped)
 }
 
@@ -557,7 +582,142 @@ pub async fn update_task(client: &VikunjaClient, task: &Task) -> VikunjaResult<T
     if let Some(bucket) = effective_section {
         mapped.section_id = Some(bucket.to_string());
     }
+    // Reconcile the parent RELATION (subtasks are relations, not a body
+    // field). The update response can't drive this — like the per-view
+    // bucket above, Vikunja populates `related_tasks` only on reads, never
+    // on the POST echo — so `reconcile_parent` fetches the authoritative
+    // state itself. Best-effort like the other follow-ups; the returned
+    // value is the parent actually in effect afterwards.
+    mapped.parent_id = reconcile_parent(client, task_id, task.parent_id.as_deref()).await;
     Ok(mapped)
+}
+
+/// Read the task's current `parenttask` relations from an authoritative
+/// `GET /tasks/{id}`. The ReadOne handler is what populates
+/// `related_tasks` — update responses echo the request and leave it
+/// empty (same reason `current_bucket` does its own GET). `None` when
+/// the read fails — callers skip the reconcile rather than guess.
+async fn current_parents(client: &VikunjaClient, task_id: i64) -> Option<Vec<i64>> {
+    let entry: TaskEntry = client.get_json(&format!("/tasks/{task_id}")).await.ok()?;
+    Some(
+        entry
+            .related_tasks
+            .map(|r| {
+                r.parenttask
+                    .iter()
+                    .map(|t| t.id)
+                    .filter(|&id| id != 0)
+                    .collect()
+            })
+            .unwrap_or_default(),
+    )
+}
+
+/// Bring the server's `parenttask` relations in line with `desired` and
+/// return the parent that's ACTUALLY in effect afterwards.
+///
+/// Vikunja doesn't enforce a single parent (its own UI can attach
+/// several `parenttask` relations), so every stale parent is unlinked,
+/// not just the first. Every step is best-effort: a failed call is
+/// warned about and reflected in the return value rather than failing
+/// the surrounding edit, and when the authoritative state can't even be
+/// read the relations are left untouched and the caller's intent is
+/// reported (the overwhelmingly common edit doesn't change the parent).
+async fn reconcile_parent(
+    client: &VikunjaClient,
+    task_id: i64,
+    desired: Option<&str>,
+) -> Option<String> {
+    let desired_id = match desired {
+        Some(p) => match parse_id(p, "parent task id") {
+            Ok(id) => Some(id),
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "Vikunja adapter can't express this parent id — parent left unchanged",
+                );
+                return desired.map(str::to_string);
+            }
+        },
+        None => None,
+    };
+    let Some(current) = current_parents(client, task_id).await else {
+        tracing::warn!(
+            task_id,
+            "Vikunja adapter can't read the current parent relations — parent left unchanged",
+        );
+        return desired.map(str::to_string);
+    };
+    let mut remaining = current.clone();
+    for old in current {
+        if Some(old) == desired_id {
+            continue;
+        }
+        match remove_parent_relation(client, task_id, old).await {
+            Ok(()) => remaining.retain(|&p| p != old),
+            Err(err) => tracing::warn!(
+                error = %err,
+                "Vikunja adapter could not unlink the task's old parent",
+            ),
+        }
+    }
+    if let Some(new_parent) = desired_id {
+        if !remaining.contains(&new_parent) {
+            match set_parent_relation(client, task_id, new_parent).await {
+                Ok(()) => remaining.push(new_parent),
+                Err(err) => tracing::warn!(
+                    error = %err,
+                    "Vikunja adapter could not link the task to its new parent",
+                ),
+            }
+        }
+    }
+    // Report what the NEXT READ will report: `map_task` takes the first
+    // usable `parenttask` entry, and `remaining` preserves the server's
+    // order (the freshly-linked desired parent went to the END). So when
+    // a stale parent survived a failed unlink, IT is reported — not the
+    // desired one — and the editor stays consistent with the next
+    // refresh instead of silently flipping back.
+    remaining.first().map(|p| p.to_string())
+}
+
+/// `PUT /tasks/{child}/relations` — link `child` under `parent` via the
+/// `parenttask` relation (from the child's perspective: "the other task is
+/// my parent"). Vikunja mirrors the inverse `subtask` entry on the parent
+/// automatically, so one call establishes the pair. A 409 means the
+/// relation already exists (ErrRelationAlreadyExists) — that's the state
+/// we wanted, so it counts as success.
+async fn set_parent_relation(
+    client: &VikunjaClient,
+    child_id: i64,
+    parent_id: i64,
+) -> VikunjaResult<()> {
+    let path = format!("/tasks/{child_id}/relations");
+    let body = serde_json::json!({
+        "task_id": child_id,
+        "other_task_id": parent_id,
+        "relation_kind": "parenttask",
+    });
+    let res: VikunjaResult<serde_json::Value> = client.put_json(&path, &body).await;
+    match res {
+        Ok(_) | Err(VikunjaError::Http { status: 409, .. }) => Ok(()),
+        Err(err) => Err(err),
+    }
+}
+
+/// `DELETE /tasks/{child}/relations/parenttask/{parent}` — unlink `child`
+/// from `parent` (Vikunja removes the mirrored `subtask` entry too). A 404
+/// means the relation is already gone — also the state we wanted.
+async fn remove_parent_relation(
+    client: &VikunjaClient,
+    child_id: i64,
+    parent_id: i64,
+) -> VikunjaResult<()> {
+    let path = format!("/tasks/{child_id}/relations/parenttask/{parent_id}");
+    match client.delete(&path).await {
+        Ok(()) | Err(VikunjaError::Http { status: 404, .. }) => Ok(()),
+        Err(err) => Err(err),
+    }
 }
 
 /// `DELETE /tasks/{id}`.
@@ -1016,6 +1176,28 @@ struct TaskEntry {
     /// the flat `bucket_id` above.
     #[serde(default, skip_serializing)]
     buckets: Vec<TaskBucketRef>,
+    /// Task relations, grouped by kind (`models.RelatedTaskMap`). Read-only:
+    /// we surface the `parenttask` bucket as `Task.parent_id`; writes go
+    /// through the dedicated relations endpoints, never the task body.
+    #[serde(default, skip_serializing)]
+    related_tasks: Option<RelatedTasks>,
+}
+
+/// The slice of Vikunja's `related_tasks` map we consume: the child's
+/// pointer(s) at its parent. Other relation kinds (blocking, duplicates,
+/// …) are unknown fields serde skips.
+#[derive(Debug, Default, Deserialize)]
+struct RelatedTasks {
+    #[serde(default)]
+    parenttask: Vec<RelatedTaskRef>,
+}
+
+/// A related task reduced to its id — the full task rides along in the
+/// response, but the parent link only needs the identity.
+#[derive(Debug, Default, Deserialize)]
+struct RelatedTaskRef {
+    #[serde(default)]
+    id: i64,
 }
 
 // ── Mappers ────────────────────────────────────────────────────────────
@@ -1181,12 +1363,19 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         deadline_date: deadline.map(|dt| dt.date_naive()),
         deadline_time: deadline.map(|dt| dt.time()).filter(non_midnight),
         deadline_reminder_days,
-        // parent_id + reminders are intentionally dropped on read;
-        // documented in the module preamble. Recurrence round-trips the
-        // shapes Vikunja can store (daily/weekly periods + monthly) plus the
-        // on-demand axes carried in the extras block.
+        // Reminders are intentionally dropped on read; documented in the
+        // module preamble. Recurrence round-trips the shapes Vikunja can
+        // store (daily/weekly periods + monthly) plus the on-demand axes
+        // carried in the extras block.
         recurrence,
-        parent_id: None,
+        // Subtask link: the child's `parenttask` relation → parent_id.
+        // Vikunja doesn't enforce a single parent, so take the first
+        // usable entry rather than giving up on a zero-id placeholder.
+        parent_id: entry
+            .related_tasks
+            .as_ref()
+            .and_then(|r| r.parenttask.iter().find(|t| t.id != 0))
+            .map(|t| t.id.to_string()),
         resurface_date,
         series_id,
         // Kanban bucket → section. `0` is Vikunja's "no bucket".
@@ -1246,11 +1435,9 @@ fn new_task_to_body(new: &NewTask) -> TaskEntry {
             "Vikunja adapter dropping reminders on create — Vikunja's reminders[] schema not surfaced yet",
         );
     }
-    if new.parent_id.is_some() {
-        tracing::warn!(
-            "Vikunja adapter dropping parent_id on create — subtasks need a separate related_tasks call",
-        );
-    }
+    // NB: `parent_id` is deliberately NOT part of the body — subtasks are
+    // relations, linked by `create_task` via `set_parent_relation` after
+    // the task exists.
     TaskEntry {
         id: 0,
         title: Some(new.title.clone()),
@@ -1269,6 +1456,7 @@ fn new_task_to_body(new: &NewTask) -> TaskEntry {
         repeat_mode,
         assignees: None,
         buckets: Vec::new(),
+        related_tasks: None,
     }
 }
 
@@ -1305,11 +1493,8 @@ fn task_to_body(task: &Task) -> TaskEntry {
             "Vikunja adapter dropping reminders on update — Vikunja's reminders[] schema not surfaced yet",
         );
     }
-    if task.parent_id.is_some() {
-        tracing::warn!(
-            "Vikunja adapter dropping parent_id on update — subtasks need a separate related_tasks call",
-        );
-    }
+    // NB: `parent_id` is deliberately NOT part of the body — subtasks are
+    // relations, reconciled by `update_task` via the relations endpoints.
     TaskEntry {
         id: parse_id(&task.id, "task id").unwrap_or(0),
         title: Some(task.title.clone()),
@@ -1330,6 +1515,7 @@ fn task_to_body(task: &Task) -> TaskEntry {
         repeat_mode,
         assignees: None,
         buckets: Vec::new(),
+        related_tasks: None,
     }
 }
 
@@ -2625,5 +2811,326 @@ mod tests {
         let client = fixture_client(&server.url());
         delete_task_list(&client, "7").await.unwrap();
         m.assert_async().await;
+    }
+
+    // ── Subtask relations (parenttask) ─────────────────────────
+
+    #[tokio::test]
+    async fn get_tasks_maps_parenttask_relation_to_parent_id() {
+        let mut server = Server::new_async().await;
+        let _views = server
+            .mock("GET", "/api/v1/projects/3/views")
+            .with_status(200)
+            .with_body("[]")
+            .create_async()
+            .await;
+        let _m = server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(r"^/api/v1/projects/3/tasks.*$".into()),
+            )
+            .with_status(200)
+            .with_body(
+                r#"[
+                    {"id":5,"title":"Parent","project_id":3},
+                    {"id":6,"title":"Child","project_id":3,
+                     "related_tasks":{"parenttask":[{"id":5,"title":"Parent"}]}}
+                ]"#,
+            )
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let tasks = get_tasks(&client, "3").await.unwrap();
+        let parent = tasks.iter().find(|t| t.id == "5").unwrap();
+        let child = tasks.iter().find(|t| t.id == "6").unwrap();
+        assert_eq!(parent.parent_id, None);
+        assert_eq!(child.parent_id.as_deref(), Some("5"));
+    }
+
+    #[tokio::test]
+    async fn create_task_links_subtask_to_its_parent() {
+        let mut server = Server::new_async().await;
+        let _create = server
+            .mock("PUT", "/api/v1/projects/5/tasks")
+            .with_status(200)
+            .with_body(r#"{"id":99,"title":"Child","project_id":5}"#)
+            .create_async()
+            .await;
+        let relation = server
+            .mock("PUT", "/api/v1/tasks/99/relations")
+            .match_body(mockito::Matcher::PartialJsonString(
+                r#"{"other_task_id":42,"relation_kind":"parenttask"}"#.into(),
+            ))
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let mut new = new_task_min("Child");
+        new.parent_id = Some("42".into());
+        let task = create_task(&client, "5", new).await.unwrap();
+        relation.assert_async().await;
+        assert_eq!(task.parent_id.as_deref(), Some("42"));
+    }
+
+    #[tokio::test]
+    async fn create_task_survives_a_failed_parent_link() {
+        let mut server = Server::new_async().await;
+        let _create = server
+            .mock("PUT", "/api/v1/projects/5/tasks")
+            .with_status(200)
+            .with_body(r#"{"id":99,"title":"Child","project_id":5}"#)
+            .create_async()
+            .await;
+        let _relation = server
+            .mock("PUT", "/api/v1/tasks/99/relations")
+            .with_status(500)
+            .with_body(r#"{"message":"boom"}"#)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let mut new = new_task_min("Child");
+        new.parent_id = Some("42".into());
+        // Best-effort: the task is created; the failed link reports as flat.
+        let task = create_task(&client, "5", new).await.unwrap();
+        assert_eq!(task.parent_id, None);
+    }
+
+    /// Mount the three mocks every `update_task` round-trip hits: the
+    /// field POST (whose echo realistically carries NO `related_tasks` —
+    /// Vikunja populates relations only on reads), the assignee sync,
+    /// and an empty views listing (no kanban → no bucket traffic).
+    async fn mount_update_scaffolding(server: &mut Server) {
+        server
+            .mock("POST", "/api/v1/tasks/7")
+            .with_status(200)
+            .with_body(r#"{"id":7,"title":"Edit me","project_id":3}"#)
+            .create_async()
+            .await;
+        server
+            .mock("POST", "/api/v1/tasks/7/assignees/bulk")
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        server
+            .mock("GET", "/api/v1/projects/3/views")
+            .with_status(200)
+            .with_body("[]")
+            .create_async()
+            .await;
+    }
+
+    /// Mount the authoritative ReadOne the reconcile consults for the
+    /// task's current `parenttask` relations.
+    async fn mount_current_parents(server: &mut Server, parents_json: &str) {
+        server
+            .mock("GET", "/api/v1/tasks/7")
+            .with_status(200)
+            .with_body(format!(
+                r#"{{"id":7,"title":"Edit me","project_id":3,
+                    "related_tasks":{{"parenttask":{parents_json}}}}}"#,
+            ))
+            .create_async()
+            .await;
+    }
+
+    #[tokio::test]
+    async fn update_task_reparents_via_relations() {
+        let mut server = Server::new_async().await;
+        mount_update_scaffolding(&mut server).await;
+        // The authoritative read reports the CURRENT parent (5)…
+        mount_current_parents(&mut server, r#"[{"id":5}]"#).await;
+        // …so moving under 8 must unlink 5 and link 8.
+        let unlink = server
+            .mock("DELETE", "/api/v1/tasks/7/relations/parenttask/5")
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        let link = server
+            .mock("PUT", "/api/v1/tasks/7/relations")
+            .match_body(mockito::Matcher::PartialJsonString(
+                r#"{"other_task_id":8,"relation_kind":"parenttask"}"#.into(),
+            ))
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let mut task = task_fixture("7", "3", None);
+        task.parent_id = Some("8".into());
+        let result = update_task(&client, &task).await.unwrap();
+        unlink.assert_async().await;
+        link.assert_async().await;
+        assert_eq!(result.parent_id.as_deref(), Some("8"));
+    }
+
+    #[tokio::test]
+    async fn update_task_unparents_via_relation_delete() {
+        let mut server = Server::new_async().await;
+        mount_update_scaffolding(&mut server).await;
+        mount_current_parents(&mut server, r#"[{"id":5}]"#).await;
+        let unlink = server
+            .mock("DELETE", "/api/v1/tasks/7/relations/parenttask/5")
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        // task_fixture has parent_id: None → the server's 5 must be unlinked.
+        let result = update_task(&client, &task_fixture("7", "3", None))
+            .await
+            .unwrap();
+        unlink.assert_async().await;
+        assert_eq!(result.parent_id, None);
+    }
+
+    #[tokio::test]
+    async fn update_task_keeps_parent_when_unchanged() {
+        let mut server = Server::new_async().await;
+        mount_update_scaffolding(&mut server).await;
+        mount_current_parents(&mut server, r#"[{"id":5}]"#).await;
+        // Matching parents must make NO relation calls — assert the
+        // endpoints stay untouched (best-effort would otherwise swallow
+        // a stray call without failing the test).
+        let no_unlink = server
+            .mock("DELETE", "/api/v1/tasks/7/relations/parenttask/5")
+            .expect(0)
+            .create_async()
+            .await;
+        let no_link = server
+            .mock("PUT", "/api/v1/tasks/7/relations")
+            .expect(0)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let mut task = task_fixture("7", "3", None);
+        task.parent_id = Some("5".into());
+        let result = update_task(&client, &task).await.unwrap();
+        no_unlink.assert_async().await;
+        no_link.assert_async().await;
+        assert_eq!(result.parent_id.as_deref(), Some("5"));
+    }
+
+    #[tokio::test]
+    async fn update_task_unlinks_every_stale_parent() {
+        let mut server = Server::new_async().await;
+        mount_update_scaffolding(&mut server).await;
+        // Vikunja allows several parenttask relations; keeping 9 must
+        // still unlink the stale 5 — and NOT re-link the already-present 9.
+        mount_current_parents(&mut server, r#"[{"id":5},{"id":9}]"#).await;
+        let unlink = server
+            .mock("DELETE", "/api/v1/tasks/7/relations/parenttask/5")
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        let no_link = server
+            .mock("PUT", "/api/v1/tasks/7/relations")
+            .expect(0)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let mut task = task_fixture("7", "3", None);
+        task.parent_id = Some("9".into());
+        let result = update_task(&client, &task).await.unwrap();
+        unlink.assert_async().await;
+        no_link.assert_async().await;
+        assert_eq!(result.parent_id.as_deref(), Some("9"));
+    }
+
+    #[tokio::test]
+    async fn update_task_reports_the_surviving_parent_when_unlink_fails() {
+        let mut server = Server::new_async().await;
+        mount_update_scaffolding(&mut server).await;
+        mount_current_parents(&mut server, r#"[{"id":5}]"#).await;
+        // The unlink of the old parent genuinely fails while the link of
+        // the new one succeeds — the server now has BOTH relations, and
+        // the next read (map_task takes the FIRST parenttask entry) will
+        // report the surviving old parent. The update result must say the
+        // same, not claim the reparent succeeded and then "revert".
+        server
+            .mock("DELETE", "/api/v1/tasks/7/relations/parenttask/5")
+            .with_status(500)
+            .with_body(r#"{"message":"boom"}"#)
+            .create_async()
+            .await;
+        server
+            .mock("PUT", "/api/v1/tasks/7/relations")
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let mut task = task_fixture("7", "3", None);
+        task.parent_id = Some("8".into());
+        let result = update_task(&client, &task).await.unwrap();
+        assert_eq!(result.parent_id.as_deref(), Some("5"));
+    }
+
+    #[tokio::test]
+    async fn update_task_treats_already_linked_as_success() {
+        let mut server = Server::new_async().await;
+        mount_update_scaffolding(&mut server).await;
+        // Race: the authoritative read predates a concurrent link, so the
+        // PUT answers 409 ErrRelationAlreadyExists — the desired state.
+        mount_current_parents(&mut server, "[]").await;
+        server
+            .mock("PUT", "/api/v1/tasks/7/relations")
+            .with_status(409)
+            .with_body(r#"{"code":4009,"message":"The task relation already exists."}"#)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let mut task = task_fixture("7", "3", None);
+        task.parent_id = Some("8".into());
+        let result = update_task(&client, &task).await.unwrap();
+        assert_eq!(result.parent_id.as_deref(), Some("8"));
+    }
+
+    #[tokio::test]
+    async fn update_task_treats_missing_relation_delete_as_success() {
+        let mut server = Server::new_async().await;
+        mount_update_scaffolding(&mut server).await;
+        mount_current_parents(&mut server, r#"[{"id":5}]"#).await;
+        // Someone already removed the relation → 404 is the desired state.
+        server
+            .mock("DELETE", "/api/v1/tasks/7/relations/parenttask/5")
+            .with_status(404)
+            .with_body(r#"{"code":4008,"message":"The task relation does not exist."}"#)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let result = update_task(&client, &task_fixture("7", "3", None))
+            .await
+            .unwrap();
+        assert_eq!(result.parent_id, None);
+    }
+
+    #[tokio::test]
+    async fn update_task_keeps_intent_when_relations_unreadable() {
+        let mut server = Server::new_async().await;
+        mount_update_scaffolding(&mut server).await;
+        // The authoritative read fails → don't guess at unlinks, make no
+        // relation calls, and report the caller's intent (the common edit
+        // doesn't change the parent at all).
+        server
+            .mock("GET", "/api/v1/tasks/7")
+            .with_status(500)
+            .with_body(r#"{"message":"boom"}"#)
+            .create_async()
+            .await;
+        let no_link = server
+            .mock("PUT", "/api/v1/tasks/7/relations")
+            .expect(0)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let mut task = task_fixture("7", "3", None);
+        task.parent_id = Some("8".into());
+        let result = update_task(&client, &task).await.unwrap();
+        no_link.assert_async().await;
+        assert_eq!(result.parent_id.as_deref(), Some("8"));
     }
 }

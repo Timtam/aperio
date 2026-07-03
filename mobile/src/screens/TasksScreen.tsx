@@ -614,9 +614,11 @@ export default function TasksScreen({
     if (task.resurface_date != null) {
       actions.push({ name: 'surface', label: t('chipMenu.bringToBacklog') });
     }
-    // Subtasks ride parent_id on the local store; offer "Add subtask" only for
-    // local lists (external subtask support is provider-dependent — deferred).
-    if (taskListById.get(task.list_id)?.account_id === 'local') {
+    // Offer "Add subtask" wherever the list's adapter supports subtasks —
+    // the same capability gate the desktop TaskDialog uses (absent
+    // capabilities default to the cal-core-native subtasks: true; EWS
+    // declares false). Vikunja links them via task relations now.
+    if (taskListById.get(task.list_id)?.task_capabilities?.subtasks ?? true) {
       actions.push({ name: 'addSubtask', label: t('mobile.addSubtask') });
     }
     if (entry.hasChildren) {

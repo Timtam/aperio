@@ -34,6 +34,10 @@ flow and token refresh; the adapter sends a `Bearer` token.
   months).
 - **MS To Do has no assignment.** Task assignment is a *Planner* concept,
   which is a separate, heavier surface and out of scope.
+- **MS To Do has no subtasks either.** Its `checklistItems` are plain
+  strings without a usable write API and don't map onto task→task
+  parents, so the plugin manifest declares `subtasks: false` and the
+  editors never offer subtasks on a Graph list.
 
 ## Testing
 

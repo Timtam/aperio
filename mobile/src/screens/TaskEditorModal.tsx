@@ -463,14 +463,19 @@ export default function TaskEditorModal({
     () => (loaded ? taskLists.find((l) => l.id === loaded.list_id) : undefined),
     [loaded, taskLists],
   );
-  // Subtasks ride parent_id on the LOCAL store; mirror TasksScreen's gate
-  // (account_id === 'local'). Edit mode keys off the LOADED task's list (where
+  // Subtasks are offered wherever the list's adapter supports them — the
+  // desktop TaskDialog's capability gate (absent capabilities default to the
+  // cal-core-native subtasks: true; EWS declares false; Vikunja links them
+  // via task relations). Edit mode keys off the LOADED task's list (where
   // its children actually live) so an unsaved list-picker change doesn't hide
   // the live manager; create mode stages drafts against the form's chosen list
   // (but not when creating a subtask — no nested-draft staging).
   const showSubtaskEditor =
-    taskId != null && loaded != null && loadedList?.account_id === 'local';
-  const showDraftSubtasks = taskId == null && isLocalList && parentId == null;
+    taskId != null &&
+    loaded != null &&
+    (loadedList?.task_capabilities?.subtasks ?? true);
+  const showDraftSubtasks =
+    taskId == null && (caps?.subtasks ?? true) && parentId == null;
 
   const addDraftSubtask = useCallback(() => {
     const trimmed = newSubtaskTitle.trim();
@@ -574,6 +579,17 @@ export default function TaskEditorModal({
       AccessibilityInfo.announceForAccessibility(t('dialogs.task.listRequired'));
       return;
     }
+    // Don't silently drop staged subtasks: switching the (create-mode) list
+    // to one that can't hold them hides the draft section but keeps the
+    // drafts — block the save so the user removes them or picks another
+    // list, rather than creating flat loose tasks (desktop TaskDialog parity).
+    if (taskId == null && draftSubtasks.length > 0 && !(caps?.subtasks ?? true)) {
+      setError(t('dialogs.task.subtasks.listNoSubtasks'));
+      AccessibilityInfo.announceForAccessibility(
+        t('dialogs.task.subtasks.listNoSubtasks'),
+      );
+      return;
+    }
     if (
       slotInvalid(form.scheduledDate, form.scheduledTime) ||
       slotInvalid(form.deadlineDate, form.deadlineTime) ||
@@ -621,8 +637,9 @@ export default function TaskEditorModal({
         });
         // Write any staged draft subtasks under the freshly-created parent (they
         // default to open/medium and inherit the parent's section, matching the
-        // edit-mode add), then recompute the new parent's derived status.
-        if (draftSubtasks.length > 0) {
+        // edit-mode add), then recompute the new parent's derived status. The
+        // capability re-check backs up the save-time block above.
+        if (draftSubtasks.length > 0 && (caps?.subtasks ?? true)) {
           for (const subTitle of draftSubtasks) {
             await createTask({
               list_id: created.list_id,
@@ -777,6 +794,7 @@ export default function TaskEditorModal({
   }, [
     canRecur,
     canSection,
+    caps,
     isLocalList,
     form,
     loaded,
