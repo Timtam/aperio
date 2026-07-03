@@ -19,6 +19,7 @@ import { useHapticsPref } from '../state/haptics';
 import { readTaskBehaviour, writeDayViewMode } from '../state/taskBehaviour';
 import { useSoundPref } from '../state/useSoundPref';
 import { useThemedStyles, type ThemeColors } from '../theme';
+import { useThemeModePref, type ThemeModeChoice } from '../theme/themeMode';
 
 // General settings — the mobile twin of the desktop Settings "General" tab,
 // pushed from the Settings hub so the hub stays a clean list of destinations
@@ -40,6 +41,8 @@ export default function GeneralSettingsScreen() {
   // — Custom needs an asset store the host lacks; a custom value synced from
   // desktop still round-trips and is shown read-only by SoundSelect.
   const globalSound = useSoundPref('sound.global');
+  // Device-local light/dark/system theme mode (default: follow the OS).
+  const [themeMode, setThemeMode] = useThemeModePref();
   // Device-local haptic feedback for the external-sync start/end cues (default on).
   const [haptics, setHaptics] = useHapticsPref();
   // Device-local app-icon badge (today's open tasks + upcoming events; default on).
@@ -136,6 +139,23 @@ export default function GeneralSettingsScreen() {
         />
         <Text style={styles.hint} accessibilityRole="text">
           {t('dialogs.settings.calendars.dayViewMode.hint')}
+        </Text>
+      </View>
+
+      <View style={styles.section}>
+        <RadioGroup<ThemeModeChoice>
+          label={t('dialogs.settings.general.themeLabel')}
+          labelAsHeading
+          value={themeMode}
+          options={[
+            { value: 'system', label: t('dialogs.settings.general.themeSystem') },
+            { value: 'light', label: t('dialogs.settings.general.themeLight') },
+            { value: 'dark', label: t('dialogs.settings.general.themeDark') },
+          ]}
+          onChange={setThemeMode}
+        />
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.settings.general.themeHint')}
         </Text>
       </View>
 

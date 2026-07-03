@@ -73,21 +73,30 @@
 
 /* ── Tokens — dark theme ───────────────────────────────────────────────── */
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-bg: #16191d;
-    --color-bg-elevated: #1e2126;
-    --color-bg-panel: #21252b;
-    --color-fg: #e9ecef;
-    --color-fg-muted: #9aa0a6;
-    --color-border: rgba(233, 236, 239, 0.15);
-    --color-border-strong: rgba(233, 236, 239, 0.32);
-    --color-accent: #64b5f6;
-    --color-accent-fg: #0a1929;
-    --color-danger: #ef5350;
-    --color-warning: #ffb74d;
-    --color-success: #81c784;
-  }
+/* Keyed on the RESOLVED theme main.tsx writes to <html data-theme> (the
+ * device-local light/dark/system setting; 'system' resolves via matchMedia
+ * and tracks OS switches live) — not on the media query directly, so the
+ * user's explicit choice can override the OS without duplicating the token
+ * block. `color-scheme` follows so native widgets (scrollbars, form
+ * controls) match the palette. */
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --color-bg: #16191d;
+  --color-bg-elevated: #1e2126;
+  --color-bg-panel: #21252b;
+  --color-fg: #e9ecef;
+  --color-fg-muted: #9aa0a6;
+  --color-border: rgba(233, 236, 239, 0.15);
+  --color-border-strong: rgba(233, 236, 239, 0.32);
+  --color-accent: #64b5f6;
+  --color-accent-fg: #0a1929;
+  --color-danger: #ef5350;
+  --color-warning: #ffb74d;
+  --color-success: #81c784;
 }
 
 /* ── Forced-colors / Windows High-Contrast ─────────────────────────────── */

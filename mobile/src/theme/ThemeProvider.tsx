@@ -7,16 +7,17 @@ import {
 } from 'react-native';
 
 import { ThemeContext } from './context';
+import { useThemeModeChoice } from './themeMode';
 import { THEMES, type ThemeMode } from './tokens';
 
-// System-driven theming, mirroring the desktop (which keys entirely off
-// `prefers-color-scheme` + `forced-colors`): the active mode is derived from the
-// OS, never a stored preference.
-//   - light / dark ← useColorScheme()
+// Theming, mirroring the desktop:
+//   - light / dark ← the device-local theme-mode setting; its default
+//     'system' follows useColorScheme() live, 'light'/'dark' pin the palette
+//     (Settings → Allgemein, same three-way choice as the desktop).
 //   - high-contrast ← the platform "increase contrast" accessibility flag
 //     (iOS "Increase Contrast" = darkerSystemColors; Android = highTextContrast),
-//     which wins over light/dark when on, matching the desktop forced-colors
-//     override.
+//     which wins over the light/dark choice when on, matching the desktop
+//     forced-colors override.
 
 /** Whether the platform's high-contrast accessibility setting is on. iOS and
  *  Android expose different flags; query whichever exists. */
@@ -37,6 +38,7 @@ async function readHighContrast(): Promise<boolean> {
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const scheme = useColorScheme();
+  const choice = useThemeModeChoice();
   const [highContrast, setHighContrast] = useState(false);
 
   useEffect(() => {
@@ -68,9 +70,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const mode: ThemeMode = highContrast
     ? 'highContrast'
-    : scheme === 'dark'
-      ? 'dark'
-      : 'light';
+    : choice === 'system'
+      ? scheme === 'dark'
+        ? 'dark'
+        : 'light'
+      : choice;
 
   return (
     <ThemeContext.Provider value={THEMES[mode]}>

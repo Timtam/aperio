@@ -10,6 +10,7 @@ import {
   setLanguagePref,
   type LanguagePref,
 } from '../intl/language';
+import { useThemeMode, type ThemeMode } from '../state/themeMode';
 import {
   UI_MAX_SCALE,
   UI_MIN_SCALE,
@@ -36,6 +37,7 @@ export function GeneralPanel() {
   const { t, i18n } = useTranslation();
   const { weekStartsOn, setWeekStartsOn } = useViewState();
   const [uiScale, setUiScale] = useUiScale();
+  const [themeMode, setThemeMode] = useThemeMode();
   const [language, setLanguage] = useState<LanguagePref>('system');
 
   // Current scale as a percent label — the slider's spoken value
@@ -200,6 +202,28 @@ export function GeneralPanel() {
         </label>
         <p className="form__hint">
           {t('dialogs.settings.general.fontSizeHint')}
+        </p>
+        <label className="form__field">
+          <span className="form__label">
+            {t('dialogs.settings.general.themeLabel')}
+          </span>
+          <select
+            value={themeMode}
+            onChange={(e) => setThemeMode(e.target.value as ThemeMode)}
+          >
+            <option value="system">
+              {t('dialogs.settings.general.themeSystem')}
+            </option>
+            <option value="light">
+              {t('dialogs.settings.general.themeLight')}
+            </option>
+            <option value="dark">
+              {t('dialogs.settings.general.themeDark')}
+            </option>
+          </select>
+        </label>
+        <p className="form__hint">
+          {t('dialogs.settings.general.themeHint')}
         </p>
       </section>
 
