@@ -429,10 +429,6 @@ fn write_through_task_updates_retained_rows_and_marks_stale() {
         .unwrap();
     assert!(state.last_refreshed_at.is_none(), "must be marked stale");
 
-    // A create write-through adds the new row to the retained set.
-    store.write_through_task(ACC, LIST, &task("t3")).unwrap();
-    assert_eq!(store.read_tasks(ACC, LIST).unwrap().len(), 3);
-
     // Removal write-through drops the row so it can't resurrect.
     store.write_through_task_removal(ACC, LIST, "t2").unwrap();
     let ids: Vec<String> = store
@@ -442,6 +438,29 @@ fn write_through_task_updates_retained_rows_and_marks_stale() {
         .map(|t| t.id)
         .collect();
     assert!(!ids.contains(&"t2".to_string()));
+}
+
+#[test]
+fn write_through_task_dedups_a_rotated_composite_id() {
+    // EWS rotates the ChangeKey suffix of a task's id on every edit, so an
+    // update returns `item|ckB` for the row the snapshot holds as `item|ckA`.
+    // A plain upsert (keyed on the full id) would leave BOTH — the task would
+    // show twice, one copy still open. The write-through purges the native
+    // group (everything before `|`) first, so the stale row is replaced, not
+    // duplicated.
+    let store = setup();
+    let mut before = task("item|ckA");
+    before.status = TaskStatus::Open;
+    store.replace_list_tasks(ACC, LIST, &[before]).unwrap();
+
+    let mut after = task("item|ckB");
+    after.status = TaskStatus::Completed;
+    store.write_through_task(ACC, LIST, &after).unwrap();
+
+    let rows = store.read_tasks(ACC, LIST).unwrap();
+    assert_eq!(rows.len(), 1, "the rotated id must not duplicate the row");
+    assert_eq!(rows[0].id, "item|ckB");
+    assert_eq!(rows[0].status, TaskStatus::Completed);
 }
 
 #[test]

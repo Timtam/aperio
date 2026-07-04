@@ -3649,10 +3649,13 @@ impl Host {
                     .runtime
                     .block_on(async { ext.create_task(&list_id, new).await })
                     .map_err(map_store_err)?;
-                // Write-through: without the upsert, the retained snapshot
-                // lacks the new row and the next read shows the list WITHOUT
-                // the just-created task until a refresh lands.
-                self.write_through_task(&task);
+                // Invalidate-only, NOT write-through: a created row's id may
+                // not match the read path's later id for the same task
+                // (CalDAV create → bare uid, reads → `{href}|{uid}`), so
+                // planting it would produce a persistent duplicate once the
+                // delta brings the composite-id row. The new task surfaces
+                // on the next refresh instead.
+                self.invalidate_tasks_cache(&task.list_id);
                 to_json(&task)
             }
         }
@@ -3807,22 +3810,19 @@ impl Host {
                     id: source_task_id.clone(),
                 }));
             }
-            // A move touches both ends — write through both so neither
-            // retained snapshot serves the pre-move state (the source would
-            // resurrect the moved-away row, the target would miss the new
-            // one). Local sides stay invalidate-only: the local store isn't
-            // cached, and an upsert would plant never-read rows under the
-            // local account.
+            // The move's SOURCE loses the moved-away row via a removal
+            // write-through so its retained snapshot can't resurrect it. The
+            // TARGET is a create → invalidate-only (a created row's id may
+            // not match the read path's later id — CalDAV bare uid vs
+            // `{href}|{uid}` — so a write-through would plant a duplicate);
+            // the moved task surfaces on the next refresh. Local sides are
+            // invalidate-only regardless (the local store isn't cached).
             if source_local {
                 self.invalidate_tasks_cache(&previous);
             } else {
                 self.write_through_task_removal(&previous, &source_task_id);
             }
-            if target_local {
-                self.invalidate_tasks_cache(&target_list_id);
-            } else {
-                self.write_through_task(&created);
-            }
+            self.invalidate_tasks_cache(&target_list_id);
             return to_json(&created);
         }
 

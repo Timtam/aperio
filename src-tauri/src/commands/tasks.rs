@@ -833,12 +833,13 @@ pub async fn create_task(
             }));
         }
     } else {
-        // Write-through: upsert the created row into the retained snapshot
-        // FIRST (invalidate alone kept the PRE-create rows, so the next
-        // read — the SWR cold-with-retained fallback — showed the list
-        // WITHOUT the new task until a background refresh landed), then
-        // mark stale so a refresh reconciles provider-side effects.
-        let _ = cache.write_through_task(&account, &request.list_id, &task);
+        // Invalidate-only, NOT write-through: a created row's id may not
+        // match the id the read path later assigns the same task (CalDAV
+        // create returns the bare uid, reads return `{href}|{uid}`), so
+        // planting it would produce a persistent duplicate once the delta
+        // brings the composite-id row. The new task surfaces on the next
+        // refresh instead (the pre-write-through behaviour).
+        let _ = cache.invalidate(&account, SyncScope::Tasks, &request.list_id);
     }
     scheduler.invalidate();
     Ok(task)
@@ -994,12 +995,12 @@ pub async fn update_task(
             }));
         }
 
-        // Write-through both ends of an external move: the target snapshot
-        // gains the created row, the source loses the moved-away one —
-        // otherwise the retained snapshots showed the pre-move state until
-        // a background refresh landed. Both mark their list stale too.
+        // The move's TARGET is a create → invalidate-only (same bare-uid vs
+        // composite-id mismatch as a plain create; write-through would plant
+        // a duplicate). The SOURCE loses the moved-away row via a removal
+        // write-through so the retained snapshot can't resurrect it.
         if target_account != LOCAL_ID {
-            let _ = cache.write_through_task(&target_account, &task.list_id, &created);
+            let _ = cache.invalidate(&target_account, SyncScope::Tasks, &task.list_id);
         }
         if source_account != LOCAL_ID {
             let _ = cache.write_through_task_removal(&source_account, &previous, &task.id);

@@ -529,6 +529,20 @@ pub async fn create_task(
             // `None` ⇒ the move couldn't be determined; keep the default bucket
             // `map_task` already resolved rather than claim the requested section.
         }
+    } else {
+        // Created done: `map_task` may have read `done_at`/`bucket_id` from
+        // the create echo, but not every Vikunja version stamps them there.
+        // (1) Ensure a completion instant — a Completed row with no
+        // `completed_at` mis-sorts the Done group and gives the recurrence
+        // spawner no anchor (mirrors the local/CalDAV create stamp + the
+        // Todoist adapter's defensive close-stamp). (2) Blank the section:
+        // the done task sits in the kanban done bucket, whose id an older
+        // flat-bucket server may have echoed as `bucket_id` — the Done group
+        // ignores sections, so don't surface the done bucket as one.
+        if mapped.completed_at.is_none() {
+            mapped.completed_at = Some(chrono::Utc::now());
+        }
+        mapped.section_id = None;
     }
     // Link the subtask to its parent — Vikunja models subtasks as a
     // `parenttask` RELATION set in a separate call (the create body has no
@@ -2836,6 +2850,12 @@ mod tests {
         let task = create_task(&client, "5", new).await.unwrap();
         views.assert_async().await;
         assert_eq!(task.status, TaskStatus::Completed);
+        // The create echo omits `done_at` (older Vikunja) — the adapter must
+        // still stamp a completion instant so the Done group sorts it and the
+        // recurrence spawner has an anchor, and must NOT surface the done
+        // bucket as a section.
+        assert!(task.completed_at.is_some());
+        assert_eq!(task.section_id, None);
     }
 
     #[tokio::test]
