@@ -511,14 +511,38 @@ pub async fn create_task(
     // sectioned task (e.g. a spawned recurring instance, DESIGN §9.12) drifts
     // to the default column. Best-effort: a move failure never fails the
     // create, and the done bucket is filtered inside `move_task_bucket`.
-    if let Some(requested) = task.section_id.clone() {
-        let mut probe = mapped.clone();
-        probe.section_id = Some(requested);
-        if let Some(bucket) = move_task_bucket(client, &probe, new_id).await {
-            mapped.section_id = Some(bucket.to_string());
+    //
+    // EXCEPT for a task CREATED as completed — the same guard `update_task`
+    // has: Vikunja files a done task into the kanban done bucket, and moving
+    // it out of there to the requested section flips it back to NOT done
+    // server-side. That silently reopened every "create as completed with a
+    // section" save (the create response still claimed done, so the flip
+    // only surfaced on the next refresh). A done task's bucket is irrelevant
+    // in Aperio, so leave it where Vikunja put it.
+    if !matches!(task.status, TaskStatus::Completed) {
+        if let Some(requested) = task.section_id.clone() {
+            let mut probe = mapped.clone();
+            probe.section_id = Some(requested);
+            if let Some(bucket) = move_task_bucket(client, &probe, new_id).await {
+                mapped.section_id = Some(bucket.to_string());
+            }
+            // `None` ⇒ the move couldn't be determined; keep the default bucket
+            // `map_task` already resolved rather than claim the requested section.
         }
-        // `None` ⇒ the move couldn't be determined; keep the default bucket
-        // `map_task` already resolved rather than claim the requested section.
+    } else {
+        // Created done: `map_task` may have read `done_at`/`bucket_id` from
+        // the create echo, but not every Vikunja version stamps them there.
+        // (1) Ensure a completion instant — a Completed row with no
+        // `completed_at` mis-sorts the Done group and gives the recurrence
+        // spawner no anchor (mirrors the local/CalDAV create stamp + the
+        // Todoist adapter's defensive close-stamp). (2) Blank the section:
+        // the done task sits in the kanban done bucket, whose id an older
+        // flat-bucket server may have echoed as `bucket_id` — the Done group
+        // ignores sections, so don't surface the done bucket as one.
+        if mapped.completed_at.is_none() {
+            mapped.completed_at = Some(chrono::Utc::now());
+        }
+        mapped.section_id = None;
     }
     // Link the subtask to its parent — Vikunja models subtasks as a
     // `parenttask` RELATION set in a separate call (the create body has no
@@ -2797,6 +2821,41 @@ mod tests {
         m.assert_async().await;
         assert_eq!(task.id, "99");
         assert_eq!(task.list_id, "5");
+    }
+
+    #[tokio::test]
+    async fn create_task_completed_with_section_skips_bucket_move() {
+        // Vikunja files a task CREATED as done into its kanban done bucket;
+        // honouring the requested section would move it out of there, which
+        // flips it back to NOT done server-side (the exact reopen hazard the
+        // update path guards against). So a create-as-completed must skip
+        // the whole move path — views lookup included — and the task stays
+        // done where Vikunja put it.
+        let mut server = Server::new_async().await;
+        server
+            .mock("PUT", "/api/v1/projects/5/tasks")
+            .with_status(200)
+            .with_body(r#"{"id":99,"title":"Done deal","project_id":5,"done":true}"#)
+            .create_async()
+            .await;
+        let views = server
+            .mock("GET", "/api/v1/projects/5/views")
+            .expect(0)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let mut new = new_task_min("Done deal");
+        new.status = TaskStatus::Completed;
+        new.section_id = Some("12".into());
+        let task = create_task(&client, "5", new).await.unwrap();
+        views.assert_async().await;
+        assert_eq!(task.status, TaskStatus::Completed);
+        // The create echo omits `done_at` (older Vikunja) — the adapter must
+        // still stamp a completion instant so the Done group sorts it and the
+        // recurrence spawner has an anchor, and must NOT surface the done
+        // bucket as a section.
+        assert!(task.completed_at.is_some());
+        assert_eq!(task.section_id, None);
     }
 
     #[tokio::test]

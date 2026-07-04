@@ -230,6 +230,11 @@ impl LocalAdapter {
         let status = task_status_str(task.status);
         let priority = task_priority_str(task.priority);
         let effort = effort_str(task.effort);
+        // `NewTask` carries no completion instant, so a task CREATED as
+        // completed stamps "now" — a completed row with a NULL completed_at
+        // would sort to the wrong end of the Done group and give the
+        // recurrence spawner no anchor.
+        let completed_at = matches!(task.status, TaskStatus::Completed).then_some(now);
 
         self.db()
             .lock()
@@ -241,7 +246,7 @@ impl LocalAdapter {
                     deadline_reminder_days,
                     recurrence, resurface_date, series_id, color_label_id, reminders, sound,
                     created_at, updated_at, completed_at, etag
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
                 params![
                     id,
                     list_id,
@@ -265,6 +270,7 @@ impl LocalAdapter {
                     sound_json,
                     now_s,
                     now_s,
+                    completed_at.as_ref().map(fmt_utc),
                 ],
             )
             .map_err(map_sql_err)?;
@@ -293,7 +299,7 @@ impl LocalAdapter {
             sound: task.sound,
             created_at: now,
             updated_at: now,
-            completed_at: None,
+            completed_at,
             etag: None,
         })
     }
@@ -1035,6 +1041,32 @@ mod tests {
         let (a, list) = adapter_with_list();
         let tasks = a.get_tasks(&list.id).await.unwrap();
         assert!(tasks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_as_completed_stamps_completed_at() {
+        // A task CREATED in the completed state (the editor allows it) must
+        // get a completion instant — NewTask carries none, and a completed
+        // row with a NULL completed_at used to slip through, mis-sorting the
+        // Done group and giving the recurrence spawner no anchor.
+        let (a, list) = adapter_with_list();
+        let mut new = mk_task("Already done");
+        new.status = TaskStatus::Completed;
+        let created = a.create_task(&list.id, new).await.unwrap();
+        assert_eq!(created.status, TaskStatus::Completed);
+        assert!(created.completed_at.is_some());
+
+        // And the PERSISTED row agrees (the returned task isn't a lie).
+        let tasks = a.get_tasks(&list.id).await.unwrap();
+        assert_eq!(tasks[0].status, TaskStatus::Completed);
+        assert!(tasks[0].completed_at.is_some());
+
+        // An open create keeps completed_at empty.
+        let open = a
+            .create_task(&list.id, mk_task("Still to do"))
+            .await
+            .unwrap();
+        assert!(open.completed_at.is_none());
     }
 
     #[tokio::test]

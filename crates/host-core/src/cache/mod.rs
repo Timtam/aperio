@@ -573,6 +573,67 @@ impl CacheStore {
         self.remove_by_list("cache_tasks", account, list, id)
     }
 
+    /// Write-through for a successful EXTERNAL task UPDATE: replace the
+    /// provider's returned row in the snapshot, then mark the list stale.
+    ///
+    /// Invalidate-only left the RETAINED pre-write rows as what the SWR
+    /// cold fallback served, so a check-off stayed visibly open until a
+    /// background refresh landed — which on the device-reminders adapter
+    /// lags long enough to read as "nothing happened".
+    ///
+    /// USE ONLY FOR UPDATES, not creates. The row must already exist in the
+    /// snapshot under its READ id, because we key the replace on
+    /// [`native_id`] (the stable underlying identity — the CalDAV `href`,
+    /// the EWS `ItemId`), NOT the full composite id. That matters for
+    /// adapters that ROTATE the composite id on write: EWS rotates the
+    /// ChangeKey suffix on every edit, so a plain upsert would leave the
+    /// pre-edit `item|ckA` row alongside the fresh `item|ckB` and show the
+    /// task twice. Purging the native group first collapses them. For
+    /// stable-id adapters (device reminders, Vikunja, Google, Todoist,
+    /// Graph) native_id == id, so this is exactly the row a plain upsert
+    /// would have replaced.
+    ///
+    /// Creates deliberately do NOT go through here: a created row's id may
+    /// not match the id the READ path later assigns the same task (CalDAV's
+    /// create returns the bare uid, reads return `{href}|{uid}` — different
+    /// native ids), so upserting it would plant a row the next delta can't
+    /// reconcile, producing a persistent duplicate. Creates stay
+    /// invalidate-only (the new task surfaces on the next refresh, as before
+    /// this whole write-through change).
+    ///
+    /// Skipped entirely when the list holds NO cached rows: a never-warmed
+    /// list live-reads on the cold fallback anyway, and a lone row would
+    /// masquerade as the whole list. (For a real update the list is always
+    /// warm — the task being edited was read from it.)
+    pub fn write_through_task(&self, account: &str, list: &str, task: &Task) -> DbResult<()> {
+        let has_rows = self
+            .read_tasks(account, list)
+            .map(|rows| !rows.is_empty())
+            .unwrap_or(false);
+        if has_rows {
+            let native = native_id(&task.id);
+            self.db.with_conn(|c| {
+                c.execute(
+                    "DELETE FROM cache_tasks
+                      WHERE account_id = ?1 AND list_id = ?2 AND native_id = ?3",
+                    params![account, list, native],
+                )?;
+                Ok::<_, DbError>(())
+            })?;
+            self.upsert_task(account, list, task)?;
+        }
+        self.invalidate(account, SyncScope::Tasks, list)
+    }
+
+    /// Delete-side twin of [`Self::write_through_task`]: drop the row so the
+    /// retained snapshot can't resurrect it, then mark the list stale.
+    /// Callers pass the task's READ id (the composite the UI holds), which is
+    /// exactly the snapshot row's id, so the keyed-on-`id` delete matches.
+    pub fn write_through_task_removal(&self, account: &str, list: &str, id: &str) -> DbResult<()> {
+        self.remove_task(account, list, id)?;
+        self.invalidate(account, SyncScope::Tasks, list)
+    }
+
     pub fn upsert_contact(&self, account: &str, list: &str, contact: &Contact) -> DbResult<()> {
         self.upsert_by_list(
             "cache_contacts",

@@ -638,14 +638,21 @@ export default function TaskEditorModal({
         // Write any staged draft subtasks under the freshly-created parent (they
         // default to open/medium and inherit the parent's section, matching the
         // edit-mode add), then recompute the new parent's derived status. The
-        // capability re-check backs up the save-time block above.
+        // capability re-check backs up the save-time block above. A parent
+        // CREATED in a terminal state passes it down (cascade-down semantics)
+        // — otherwise the recompute below would derive the fresh completed
+        // parent right back to open from its open children.
         if (draftSubtasks.length > 0 && (caps?.subtasks ?? true)) {
+          const draftStatus =
+            form.status === 'completed' || form.status === 'cancelled'
+              ? form.status
+              : 'open';
           for (const subTitle of draftSubtasks) {
             await createTask({
               list_id: created.list_id,
               title: subTitle,
               description: null,
-              status: 'open',
+              status: draftStatus,
               priority: 'medium',
               effort: 'medium',
               scheduled_date: null,

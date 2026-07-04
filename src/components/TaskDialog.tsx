@@ -248,14 +248,45 @@ export function TaskDialog({
   const [members, setMembers] = useState<TaskUser[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
+  // Live mirrors for the pristine check below — refs, so the reset effect
+  // reads the CURRENT values without needing them as deps (which would
+  // re-run it on every keystroke).
+  const formRef = useRef(form);
+  formRef.current = form;
+  const draftSubtasksRef = useRef(draftSubtasks);
+  draftSubtasksRef.current = draftSubtasks;
+  const newSubtaskTitleRef = useRef(newSubtaskTitle);
+  newSubtaskTitleRef.current = newSubtaskTitle;
+  // The initialState this dialog last reset to — the baseline the pristine
+  // check compares against.
+  const appliedInitialRef = useRef<FormState | null>(null);
+
   useEffect(() => {
-    if (isOpen) {
-      setForm(initialState);
-      statusTouched.current = false;
-      setError(null);
-      setDraftSubtasks([]);
-      setNewSubtaskTitle('');
-    }
+    if (!isOpen) return;
+    // `initialState` re-derives while the dialog is OPEN whenever its memo
+    // inputs churn identity — routinely: every background task-list catalog
+    // refresh (CacheSyncListener → refreshTaskLists) rebuilds `taskLists`
+    // and the selection Set. Resetting then silently wiped the user's
+    // in-progress form back to the defaults (status to 'open', edits gone)
+    // with no announcement — a screen-reader user saved a task whose fields
+    // had been swapped under them. So: adopt a fresh initialState only
+    // while the form is still PRISTINE (byte-identical to the last one we
+    // applied, no staged subtasks, nothing typed in the subtask box). Once
+    // the user touched anything, their form wins until the dialog closes.
+    const baseline = appliedInitialRef.current;
+    const pristine =
+      baseline === null ||
+      ((formRef.current === baseline ||
+        JSON.stringify(formRef.current) === JSON.stringify(baseline)) &&
+        draftSubtasksRef.current.length === 0 &&
+        newSubtaskTitleRef.current === '');
+    if (!pristine) return;
+    appliedInitialRef.current = initialState;
+    setForm(initialState);
+    statusTouched.current = false;
+    setError(null);
+    setDraftSubtasks([]);
+    setNewSubtaskTitle('');
   }, [isOpen, initialState]);
 
   // Mirror a subtask-cascade-updated status into the Status field while the
@@ -952,14 +983,21 @@ export function TaskDialog({
           });
           // Create the subtasks staged on the form now that the parent
           // has an id. They inherit the parent's section so they group
-          // with it, and default to open/medium like the inline add.
+          // with it, and default to open/medium like the inline add — but a
+          // parent CREATED in a terminal state passes it down (cascade-down
+          // semantics: open children under a completed parent would derive
+          // the parent right back to open on the next recompute).
           if (createSupportsSubtasks) {
+            const draftStatus =
+              form.status === 'completed' || form.status === 'cancelled'
+                ? form.status
+                : 'open';
             for (const subtaskTitle of draftSubtasks) {
               await apiCreateTask({
                 list_id: form.listId,
                 title: subtaskTitle,
                 description: null,
-                status: 'open',
+                status: draftStatus,
                 priority: 'medium',
                 effort: 'medium',
                 scheduled_date: null,

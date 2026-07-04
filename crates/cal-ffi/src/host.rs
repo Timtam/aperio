@@ -999,6 +999,31 @@ impl Host {
         let _ = self.cache.invalidate(&account, SyncScope::Tasks, list_id);
     }
 
+    /// Write-through after a successful EXTERNAL task mutation — the shared
+    /// `CacheStore::write_through_task` (upsert the returned row into the
+    /// retained snapshot, then mark stale) with this host's account
+    /// resolution. Best-effort: a failed write-through costs staleness,
+    /// never correctness.
+    fn write_through_task(&self, task: &cal_core::Task) {
+        let account = self
+            .registry
+            .account_for_task_list(&task.list_id)
+            .unwrap_or_else(|| LOCAL_ID.to_string());
+        let _ = self.cache.write_through_task(&account, &task.list_id, task);
+    }
+
+    /// Delete-side twin of `write_through_task`: drop the row from the
+    /// retained snapshot so the next read doesn't resurrect it.
+    fn write_through_task_removal(&self, list_id: &str, task_id: &str) {
+        let account = self
+            .registry
+            .account_for_task_list(list_id)
+            .unwrap_or_else(|| LOCAL_ID.to_string());
+        let _ = self
+            .cache
+            .write_through_task_removal(&account, list_id, task_id);
+    }
+
     /// Invalidate the SECTIONS snapshot for `list_id` after a section mutation
     /// (create / rename / delete / recolor), so the next `sections_json` sees it
     /// as cold and re-fetches. A no-op for the local account (no cache row).
@@ -3624,6 +3649,12 @@ impl Host {
                     .runtime
                     .block_on(async { ext.create_task(&list_id, new).await })
                     .map_err(map_store_err)?;
+                // Invalidate-only, NOT write-through: a created row's id may
+                // not match the read path's later id for the same task
+                // (CalDAV create → bare uid, reads → `{href}|{uid}`), so
+                // planting it would produce a persistent duplicate once the
+                // delta brings the composite-id row. The new task surfaces
+                // on the next refresh instead.
                 self.invalidate_tasks_cache(&task.list_id);
                 to_json(&task)
             }
@@ -3775,13 +3806,22 @@ impl Host {
                 }
             }
             if source_local {
-                self.writer
-                    .append(SyncEvent::TaskDeleted(IdPayload { id: source_task_id }));
+                self.writer.append(SyncEvent::TaskDeleted(IdPayload {
+                    id: source_task_id.clone(),
+                }));
             }
-            // A move touches both ends — invalidate the source + the target so
-            // neither serves a stale snapshot (no-op for any local side; mirrors
-            // the desktop's both-ends invalidate).
-            self.invalidate_tasks_cache(&previous);
+            // The move's SOURCE loses the moved-away row via a removal
+            // write-through so its retained snapshot can't resurrect it. The
+            // TARGET is a create → invalidate-only (a created row's id may
+            // not match the read path's later id — CalDAV bare uid vs
+            // `{href}|{uid}` — so a write-through would plant a duplicate);
+            // the moved task surfaces on the next refresh. Local sides are
+            // invalidate-only regardless (the local store isn't cached).
+            if source_local {
+                self.invalidate_tasks_cache(&previous);
+            } else {
+                self.write_through_task_removal(&previous, &source_task_id);
+            }
             self.invalidate_tasks_cache(&target_list_id);
             return to_json(&created);
         }
@@ -3835,7 +3875,10 @@ impl Host {
                     .await;
                     Ok::<_, StoreError>(updated)
                 })?;
-                self.invalidate_tasks_cache(&updated.list_id);
+                // Write-through: the retained snapshot must reflect the edit
+                // immediately — a completed check-off used to stay visibly
+                // open until the background refresh landed.
+                self.write_through_task(&updated);
                 to_json(&updated)
             }
         }
@@ -3862,7 +3905,9 @@ impl Host {
                     .block_on(async { ext.delete_task(&id).await })
                     .map_err(map_store_err)?;
                 if let Some(lid) = list_id.as_deref() {
-                    self.invalidate_tasks_cache(lid);
+                    // Write-through removal: the retained snapshot would
+                    // otherwise resurrect the deleted row on the next read.
+                    self.write_through_task_removal(lid, &id);
                 }
                 Ok(())
             }

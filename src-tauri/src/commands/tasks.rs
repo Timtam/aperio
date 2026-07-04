@@ -833,8 +833,12 @@ pub async fn create_task(
             }));
         }
     } else {
-        // Write-through: force the next read of this list to re-fetch so
-        // the new task shows up rather than the pre-create snapshot.
+        // Invalidate-only, NOT write-through: a created row's id may not
+        // match the id the read path later assigns the same task (CalDAV
+        // create returns the bare uid, reads return `{href}|{uid}`), so
+        // planting it would produce a persistent duplicate once the delta
+        // brings the composite-id row. The new task surfaces on the next
+        // refresh instead (the pre-write-through behaviour).
         let _ = cache.invalidate(&account, SyncScope::Tasks, &request.list_id);
     }
     scheduler.invalidate();
@@ -991,12 +995,15 @@ pub async fn update_task(
             }));
         }
 
-        // Write-through: re-fetch both ends of an external move.
+        // The move's TARGET is a create → invalidate-only (same bare-uid vs
+        // composite-id mismatch as a plain create; write-through would plant
+        // a duplicate). The SOURCE loses the moved-away row via a removal
+        // write-through so the retained snapshot can't resurrect it.
         if target_account != LOCAL_ID {
             let _ = cache.invalidate(&target_account, SyncScope::Tasks, &task.list_id);
         }
         if source_account != LOCAL_ID {
-            let _ = cache.invalidate(&source_account, SyncScope::Tasks, &previous);
+            let _ = cache.write_through_task_removal(&source_account, &previous, &task.id);
         }
 
         scheduler.invalidate();
@@ -1049,7 +1056,11 @@ pub async fn update_task(
             &completed,
         )
         .await;
-        let _ = cache.invalidate(&target_account, SyncScope::Tasks, &updated.list_id);
+        // Write-through: the retained snapshot must reflect the edit
+        // immediately — a completed check-off used to stay visibly open
+        // until the background refresh landed. Marks stale too, so a
+        // refresh reconciles provider-side effects beyond the returned row.
+        let _ = cache.write_through_task(&target_account, &updated.list_id, &updated);
         scheduler.invalidate();
         Ok(updated)
     }
@@ -1084,7 +1095,9 @@ pub async fn delete_task(
     if is_local {
         event_log.append(SyncEvent::TaskDeleted(IdPayload { id: id.clone() }));
     } else if let Some(lid) = &list_id {
-        let _ = cache.invalidate(&account, SyncScope::Tasks, lid);
+        // Write-through removal: the retained snapshot would otherwise
+        // resurrect the deleted row on the next read.
+        let _ = cache.write_through_task_removal(&account, lid, &id);
     }
     scheduler.invalidate();
     Ok(())

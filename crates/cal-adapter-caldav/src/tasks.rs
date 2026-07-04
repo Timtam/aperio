@@ -363,7 +363,13 @@ pub async fn create_task(
 ) -> CaldavResult<Task> {
     let uid = format!("{}@aperio", Uuid::new_v4());
     let resource = resource_url(list_url, &uid)?;
-    let body = build_vtodo_body(&uid, &new, None);
+    // A task CREATED as completed stamps "now" as its completion instant:
+    // `NewTask` carries none, and a VTODO claiming STATUS:COMPLETED without
+    // a COMPLETED date is a shape Apple's own clients never produce —
+    // servers that key completion on the date (EventKit does) may normalize
+    // it back to NEEDS-ACTION, silently reopening the task on the next read.
+    let completed_at = matches!(new.status, TaskStatus::Completed).then(Utc::now);
+    let body = build_vtodo_body(&uid, &new, completed_at);
     let mut headers = auth_header(credentials)?;
     headers.insert(
         CONTENT_TYPE,
@@ -400,7 +406,7 @@ pub async fn create_task(
         sound: new.sound,
         created_at: now,
         updated_at: now,
-        completed_at: None,
+        completed_at,
         etag,
         resurface_date: new.resurface_date,
         series_id: new.series_id,
@@ -1356,6 +1362,46 @@ END:VCALENDAR</c:calendar-data>
         let index = uid_index(&selfy);
         resolve_parent_ids(&mut selfy, &index);
         assert_eq!(selfy[0].parent_id, None);
+    }
+
+    #[test]
+    fn build_vtodo_completed_carries_the_completion_instant() {
+        // STATUS:COMPLETED alone is a shape Apple's own clients never write
+        // (EventKit keys completion on the date); a server normalizing it
+        // could silently reopen the task. The body builder must emit the
+        // COMPLETED property whenever a completion instant is supplied.
+        let mut new = sample_new_task();
+        new.status = TaskStatus::Completed;
+        let body = build_vtodo_body("uid-done", &new, Some(Utc::now()));
+        assert!(body.contains("STATUS:COMPLETED"), "got:\n{body}");
+        assert!(body.contains("COMPLETED:"), "got:\n{body}");
+    }
+
+    #[tokio::test]
+    async fn create_task_completed_stamps_completed_at() {
+        // The create path supplies that instant itself (NewTask carries
+        // none) and reports it on the returned Task, so later edits keep
+        // re-uploading the COMPLETED property instead of stripping it.
+        let mut server = Server::new_async().await;
+        let m = server
+            .mock(
+                "PUT",
+                mockito::Matcher::Regex(r"^/calendars/alice/tasks/.+\.ics$".into()),
+            )
+            .match_body(mockito::Matcher::Regex(r"COMPLETED:\d{8}T\d{6}Z".into()))
+            .with_status(201)
+            .with_header("etag", "\"done\"")
+            .create_async()
+            .await;
+        let url = Url::parse(&format!("{}/calendars/alice/tasks/", server.url())).unwrap();
+        let mut new = sample_new_task();
+        new.status = TaskStatus::Completed;
+        let created = create_task(&client(), &url, new, &creds(&server.url()))
+            .await
+            .unwrap();
+        m.assert_async().await;
+        assert_eq!(created.status, TaskStatus::Completed);
+        assert!(created.completed_at.is_some());
     }
 
     #[test]
