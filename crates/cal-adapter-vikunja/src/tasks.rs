@@ -28,11 +28,16 @@
 //!
 //! Status mapping (DESIGN.md §9.7):
 //!
-//!   - Aperio Open / InProgress  → Vikunja `done = false`
+//!   - Aperio Open        → Vikunja `done = false`, `percent_done = 0`
+//!   - Aperio InProgress  → Vikunja `done = false`, `percent_done = 0.5`
+//!     — Vikunja has no boolean in-progress state, so it rides
+//!     `percent_done`; on read, a not-done task with any progress is
+//!     InProgress (so a task nudged to e.g. 50% in Vikunja's own UI
+//!     round-trips as InProgress too)
 //!   - Aperio Completed          → Vikunja `done = true` (Vikunja
-//!     also sets `done_at` to the server clock)
-//!   - Aperio Cancelled          → Vikunja `done = false` (Vikunja
-//!     has no equivalent; the cancelled marker only exists locally)
+//!     also sets `done_at` + `percent_done = 1` on the server clock)
+//!   - Aperio Cancelled          → Vikunja `done = false`, `percent_done = 0`
+//!     (Vikunja has no equivalent; the cancelled marker only exists locally)
 //!
 //! Date semantics:
 //!
@@ -1142,6 +1147,13 @@ struct TaskEntry {
     description: Option<String>,
     #[serde(default)]
     done: bool,
+    /// Fraction complete, 0.0..=1.0 (`0` = untouched, `1` = done). Vikunja's
+    /// only "in between" signal — a not-done task with `percent_done > 0` is
+    /// how Aperio represents `InProgress` here (Vikunja has no boolean
+    /// in-progress state). Always serialized so an update can move it back to
+    /// 0 when a task returns to Open.
+    #[serde(default)]
+    percent_done: f64,
     /// RFC 3339 timestamp; Vikunja emits the sentinel
     /// `"0001-01-01T00:00:00Z"` for "no date".
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1326,8 +1338,14 @@ fn recurrence_to_vikunja(rec: &TaskRecurrence) -> Option<(i64, i32)> {
 }
 
 fn map_task(entry: TaskEntry, list_id: &str) -> Task {
+    // Vikunja has no boolean "in progress"; it exposes `percent_done`. A
+    // not-done task with any progress reads as InProgress — so Aperio's
+    // three-step check-off round-trips (and a task a user nudged to e.g. 50%
+    // in Vikunja's own UI shows as InProgress here too).
     let status = if entry.done {
         TaskStatus::Completed
+    } else if entry.percent_done > 0.0 {
+        TaskStatus::InProgress
     } else {
         TaskStatus::Open
     };
@@ -1444,6 +1462,19 @@ fn vikunja_body_extras(
     (description, repeat_after, repeat_mode)
 }
 
+/// Vikunja's `percent_done` for an Aperio status. Vikunja has no boolean
+/// in-progress state, so InProgress rides `percent_done` (any non-zero
+/// fraction reads back as InProgress); Open/Cancelled are 0, Completed is 1
+/// (Vikunja also sets it from `done`, but we send it explicitly so an update
+/// that moves a task Open ⇄ InProgress ⇄ Completed is deterministic).
+fn status_percent_done(status: TaskStatus) -> f64 {
+    match status {
+        TaskStatus::InProgress => 0.5,
+        TaskStatus::Completed => 1.0,
+        TaskStatus::Open | TaskStatus::Cancelled => 0.0,
+    }
+}
+
 fn new_task_to_body(new: &NewTask) -> TaskEntry {
     let (description, repeat_after, repeat_mode) = vikunja_body_extras(
         new.description.as_deref(),
@@ -1467,6 +1498,7 @@ fn new_task_to_body(new: &NewTask) -> TaskEntry {
         title: Some(new.title.clone()),
         description,
         done: matches!(new.status, TaskStatus::Completed),
+        percent_done: status_percent_done(new.status),
         done_at: None,
         due_date: combine_date_time(new.deadline_date, new.deadline_time),
         start_date: combine_date_time(new.scheduled_date, new.scheduled_time),
@@ -1524,6 +1556,7 @@ fn task_to_body(task: &Task) -> TaskEntry {
         title: Some(task.title.clone()),
         description,
         done: matches!(task.status, TaskStatus::Completed),
+        percent_done: status_percent_done(task.status),
         // We never write `done_at` ourselves — Vikunja sets it
         // server-side when `done` flips to true.
         done_at: None,
@@ -1805,6 +1838,66 @@ mod tests {
         // Priority 0 collapses to Low (the "no priority" bucket
         // round-trips to a real Aperio value).
         assert_eq!(task.priority, TaskPriority::Low);
+    }
+
+    #[test]
+    fn map_task_reads_percent_done_as_in_progress() {
+        // Vikunja has no boolean in-progress state; a not-done task with any
+        // progress reads as InProgress so the three-step check-off round-trips.
+        let entry = TaskEntry {
+            id: 5,
+            title: Some("Doing".into()),
+            done: false,
+            percent_done: 0.5,
+            project_id: 1,
+            ..Default::default()
+        };
+        assert_eq!(map_task(entry, "1").status, TaskStatus::InProgress);
+
+        // `done` wins over any percent: a completed task is Completed even if
+        // percent_done is mid-range.
+        let done = TaskEntry {
+            id: 6,
+            title: Some("Finished".into()),
+            done: true,
+            percent_done: 0.5,
+            project_id: 1,
+            ..Default::default()
+        };
+        assert_eq!(map_task(done, "1").status, TaskStatus::Completed);
+
+        // Zero progress + not done = Open.
+        let open = TaskEntry {
+            id: 7,
+            title: Some("Untouched".into()),
+            done: false,
+            percent_done: 0.0,
+            project_id: 1,
+            ..Default::default()
+        };
+        assert_eq!(map_task(open, "1").status, TaskStatus::Open);
+    }
+
+    #[test]
+    fn body_maps_in_progress_to_percent_done() {
+        let mut new = new_task_min("Start it");
+        new.status = TaskStatus::InProgress;
+        let body = new_task_to_body(&new);
+        assert!(!body.done);
+        assert!(body.percent_done > 0.0);
+
+        // The update body clears percent back to 0 when a task returns to Open.
+        let mut task = task_fixture("9", "1", None);
+        task.status = TaskStatus::Open;
+        let body = task_to_body(&task);
+        assert!(!body.done);
+        assert_eq!(body.percent_done, 0.0);
+
+        // Completed → done true.
+        let mut task = task_fixture("9", "1", None);
+        task.status = TaskStatus::Completed;
+        let body = task_to_body(&task);
+        assert!(body.done);
     }
 
     #[test]
