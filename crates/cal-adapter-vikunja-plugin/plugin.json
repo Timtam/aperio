@@ -14,7 +14,7 @@
     "sections": true,
     "manageable_sections": true,
     "subtasks": true,
-    "supports_in_progress": false,
+    "supports_in_progress": true,
     "create_lists": true,
     "delete_lists": true,
     "manageable": true,

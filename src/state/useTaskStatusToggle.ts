@@ -71,9 +71,9 @@ export function useTaskStatusActions(): TaskStatusActions {
       if (task.status === nextStatus) return;
       const { cascade, autoDate } = effectiveForList(task.list_id);
       // Skip the auto-pin when the owning provider can't store
-      // in_progress (Google Tasks / Vikunja / Todoist): the status
-      // reverts to open on the next read, so silently moving the date
-      // to today would be a surprise with nothing to show for it. The
+      // in_progress (e.g. Google Tasks / Todoist): the status reverts to
+      // open on the next read, so silently moving the date to today would
+      // be a surprise with nothing to show for it. The
       // explicit scheduling paths (drag onto a day, the plan dialog)
       // are untouched — they don't go through this cascade.
       const inProgressSticks = canStoreInProgress(taskListById.get(task.list_id));
@@ -125,10 +125,10 @@ export function useTaskStatusActions(): TaskStatusActions {
       const nextStatus: TaskStatus =
         checkoffMode === 'cycle'
           ? // Skip the in_progress step on providers that can't store it
-            // (Google Tasks / Vikunja / Todoist): it would revert to open
-            // on read-back, trapping the cycle at open so a check-off could
+            // (e.g. Google Tasks / Todoist): it would revert to open on
+            // read-back, trapping the cycle at open so a check-off could
             // never reach completed. There the cycle is open → completed →
-            // open.
+            // open. (Vikunja CAN store it, via percent_done.)
             nextCycleStatus(
               task.status,
               canStoreInProgress(taskListById.get(task.list_id)),
@@ -164,8 +164,8 @@ export function useTaskStatusToggle(): (task: Task) => Promise<void> {
  * cycle at `open` so a check-off un-cancels it rather than dead-ending.
  *
  * `canInProgress` (default `true`) drops the in_progress step for providers
- * that can't store it (Google Tasks / Vikunja / Todoist) — there the cycle
- * is `open → completed → open`, so a check-off isn't trapped at open by a
+ * that can't store it (e.g. Google Tasks / Todoist) — there the cycle is
+ * `open → completed → open`, so a check-off isn't trapped at open by a
  * status that reverts on the next read.
  */
 export function nextCycleStatus(

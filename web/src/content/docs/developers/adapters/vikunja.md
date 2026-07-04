@@ -27,6 +27,14 @@ instance).
 - **Priority** maps by label: Vikunja 1/2/3 (Low/Medium/High) ↔ Aperio
   Low/Medium/High. Unset (0) reads as Low; Urgent (4) and DO NOW (5) collapse
   to High and write back as High (3) — Aperio has only three levels.
+- **Status / in-progress.** Vikunja has no boolean "in progress", only
+  `done` + `percent_done`. Aperio rides `percent_done`: Completed →
+  `done = true`; **InProgress → `done = false`, `percent_done = 0.5`**;
+  Open → `done = false`, `percent_done = 0`. On read a not-done task with
+  any progress is InProgress, so a task nudged to e.g. 50% in Vikunja's own
+  UI round-trips too, and the three-step check-off works
+  (`supports_in_progress: true`). Cancelled has no Vikunja equivalent
+  (`done = false`, `percent_done = 0`) — the marker stays local.
 - **Subtasks are task *relations***, not a task field: the child's
   `parenttask` relation (`PUT /tasks/{child}/relations`, removed via
   `DELETE /tasks/{child}/relations/parenttask/{parent}`) maps onto
