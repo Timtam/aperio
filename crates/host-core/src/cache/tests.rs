@@ -408,6 +408,53 @@ fn tasks_roundtrip_and_delta() {
 }
 
 #[test]
+fn write_through_task_updates_retained_rows_and_marks_stale() {
+    let store = setup();
+    store
+        .replace_list_tasks(ACC, LIST, &[task("t1"), task("t2")])
+        .unwrap();
+
+    // A check-off write-through: the returned row lands in the snapshot
+    // immediately, so the SWR retained fallback serves the truth instead of
+    // the pre-write state — and the list is marked stale for reconciling.
+    let mut done = task("t1");
+    done.status = TaskStatus::Completed;
+    store.write_through_task(ACC, LIST, &done).unwrap();
+    let rows = store.read_tasks(ACC, LIST).unwrap();
+    let t1 = rows.iter().find(|t| t.id == "t1").unwrap();
+    assert_eq!(t1.status, TaskStatus::Completed);
+    let state = store
+        .get_sync_state(ACC, SyncScope::Tasks, LIST)
+        .unwrap()
+        .unwrap();
+    assert!(state.last_refreshed_at.is_none(), "must be marked stale");
+
+    // A create write-through adds the new row to the retained set.
+    store.write_through_task(ACC, LIST, &task("t3")).unwrap();
+    assert_eq!(store.read_tasks(ACC, LIST).unwrap().len(), 3);
+
+    // Removal write-through drops the row so it can't resurrect.
+    store.write_through_task_removal(ACC, LIST, "t2").unwrap();
+    let ids: Vec<String> = store
+        .read_tasks(ACC, LIST)
+        .unwrap()
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    assert!(!ids.contains(&"t2".to_string()));
+}
+
+#[test]
+fn write_through_task_skips_upsert_on_a_never_warmed_list() {
+    // No snapshot, no rows: the cold fallback live-reads, and planting a
+    // lone row here would masquerade as the whole list. The write-through
+    // must leave the cache row-less.
+    let store = setup();
+    store.write_through_task(ACC, LIST, &task("t1")).unwrap();
+    assert!(store.read_tasks(ACC, LIST).unwrap().is_empty());
+}
+
+#[test]
 fn sections_roundtrip_and_replace_stamps_freshness() {
     let store = setup();
     // Cold: no snapshot yet.

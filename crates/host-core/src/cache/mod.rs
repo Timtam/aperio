@@ -573,6 +573,34 @@ impl CacheStore {
         self.remove_by_list("cache_tasks", account, list, id)
     }
 
+    /// Write-through for a successful EXTERNAL task mutation: upsert the
+    /// provider's returned row into the snapshot, then mark the list stale.
+    ///
+    /// Invalidate-only left the RETAINED pre-write rows as what the SWR
+    /// cold fallback served, so a check-off stayed visibly open (and a new
+    /// task stayed missing) until a background refresh landed — which on
+    /// the device-reminders adapter lags long enough to read as "nothing
+    /// happened". The upsert is skipped when the list holds NO cached rows:
+    /// a never-warmed list live-reads on the cold fallback anyway, and a
+    /// lone upserted row would masquerade as the whole list.
+    pub fn write_through_task(&self, account: &str, list: &str, task: &Task) -> DbResult<()> {
+        let has_rows = self
+            .read_tasks(account, list)
+            .map(|rows| !rows.is_empty())
+            .unwrap_or(false);
+        if has_rows {
+            self.upsert_task(account, list, task)?;
+        }
+        self.invalidate(account, SyncScope::Tasks, list)
+    }
+
+    /// Delete-side twin of [`Self::write_through_task`]: drop the row so the
+    /// retained snapshot can't resurrect it, then mark the list stale.
+    pub fn write_through_task_removal(&self, account: &str, list: &str, id: &str) -> DbResult<()> {
+        self.remove_task(account, list, id)?;
+        self.invalidate(account, SyncScope::Tasks, list)
+    }
+
     pub fn upsert_contact(&self, account: &str, list: &str, contact: &Contact) -> DbResult<()> {
         self.upsert_by_list(
             "cache_contacts",
