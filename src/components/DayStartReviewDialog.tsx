@@ -70,7 +70,7 @@ export function DayStartReviewDialog({
 }: DayStartReviewDialogProps) {
   const { t, i18n } = useTranslation();
   const announce = useAnnouncer();
-  const { tasks } = useTasks();
+  const { tasks, loading: tasksLoading } = useTasks();
   const { invalidateData, openTaskDialog } = useDialogState();
   // Per-list cascade resolution: each row obeys its OWN list's
   // status-coupling preference. The filter below treats a slipped
@@ -547,7 +547,20 @@ export function DayStartReviewDialog({
   // snoozing — there's no reason to suppress a real future trigger.
   // Reminders are a valid reason to stay open even with no actionable
   // rows, so a reminders-only review isn't dismissed here.
-  if (totalRemaining === 0 && resolvedIds.size === 0 && !hasReminders) {
+  //
+  // NEVER while useTasks is still loading: opening a task editor from a
+  // review row unmounts this dialog (the dialog stack renders only its
+  // top), and any mutation in the editor clears the useTasks SWR cache —
+  // so the RE-mount after closing the editor briefly sees zero tasks.
+  // Without the loading gate that instant read as "nothing to show" and
+  // silently killed the review the user was mid-way through (the mobile
+  // modal's twin guard has always waited for the fetch).
+  if (
+    !tasksLoading &&
+    totalRemaining === 0 &&
+    resolvedIds.size === 0 &&
+    !hasReminders
+  ) {
     onClose();
     return null;
   }
