@@ -150,15 +150,26 @@ impl WebDavSyncAdapter {
             // pinning the version costs nothing and removes a
             // class of "works once, fails next round" reports.
             .http1_only()
-            // Don't pool idle connections. Servers behind home
-            // routers / reverse proxies often have short keep-
-            // alive timeouts (~10 s); reqwest's pool would hand
-            // out a stale socket on the next round, which then
-            // surfaces as "connection closed" before we've even
-            // sent a request. Sync round-trips are infrequent
-            // enough that the per-request TCP+TLS handshake cost
-            // is unnoticeable next to the round latency anyway.
-            .pool_max_idle_per_host(0)
+            // Reuse the connection WITHIN a round, drop it BETWEEN rounds.
+            //
+            // A single round fires 3–4 requests back-to-back (fetch_meta →
+            // push_log → PROPFIND → GETs); with pooling off, each paid a
+            // fresh TCP+TLS handshake, so a WAN link spent seconds on
+            // handshakes alone — the "why is a push 4 s?" complaint. Keep-
+            // alive collapses those onto ONE connection (one handshake per
+            // round).
+            //
+            // The reason pooling was OFF was a BETWEEN-rounds hazard: servers
+            // behind home routers / reverse proxies keep sockets alive only
+            // ~10 s, so a pooled socket idle since the last round (30 s+ ago)
+            // is dead, and reusing it surfaced as "connection closed before
+            // message completed". A short pool_idle_timeout fixes that
+            // directly — we drop our end after 3 s, comfortably under even
+            // Apache's 5 s default KeepAliveTimeout (and long before the next
+            // round), so a stale socket is never handed out, while the
+            // sub-second within-round gaps still reuse the live connection.
+            .pool_max_idle_per_host(2)
+            .pool_idle_timeout(std::time::Duration::from_secs(3))
             .build()
             .map_err(|err| SyncError::internal(format!("build reqwest client: {err}")))?;
         Ok(Self {
