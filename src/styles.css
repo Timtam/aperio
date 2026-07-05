@@ -1862,6 +1862,57 @@ button[aria-disabled='true'] {
   gap: var(--space-2);
 }
 
+/* ── Sync protocol (Settings → Synchronisation → Protokoll) ─────────────── */
+
+/* The detailed sync log is a `listbox`: one tab stop, arrow to browse (see
+ * SyncProtocolSection). Reset the default list chrome and give the active
+ * row a visible highlight so a sighted keyboard user can see where they
+ * are — the `<ul>`'s own focus ring comes from the global :focus-visible. */
+.sync-panel__protocol-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: 320px;
+  overflow: auto;
+}
+
+.sync-panel__protocol-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.sync-panel__protocol-row--active {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.sync-panel__protocol-row--fail .sync-panel__protocol-glyph {
+  color: var(--color-danger);
+}
+
+.sync-panel__protocol-row--ok .sync-panel__protocol-glyph {
+  color: var(--color-success);
+}
+
+.sync-panel__protocol-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-2);
+  color: var(--color-fg-muted);
+  font-size: var(--font-size-sm);
+}
+
+.sync-panel__protocol-summary {
+  margin: 0;
+}
+
 /* ── Search ─────────────────────────────────────────────────────────────── */
 
 .search-filters {

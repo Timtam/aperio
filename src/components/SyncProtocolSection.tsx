@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { listen } from '@tauri-apps/api/event';
 
@@ -46,6 +46,51 @@ export function SyncProtocolSection({ headingId }: SyncProtocolSectionProps) {
   const announce = useAnnouncer();
   const [entries, setEntries] = useState<SyncLogEntry[]>([]);
   const [busyClear, setBusyClear] = useState(false);
+  // Keyboard access for the read-only log: the rows were plain <li>s with no
+  // tab stop, so in a focus-mode screen reader (NVDA in the Settings modal)
+  // they were unreachable — you couldn't read the sync history at all. The
+  // list is now a `listbox` with `option` rows: ONE tab stop lands on the
+  // list, then Up/Down/Home/End move the active row (whose full text is its
+  // aria-label). Mirrors the ColorLabels / Accounts panels.
+  const [focusIndex, setFocusIndex] = useState(0);
+  // Gate `aria-activedescendant`/`aria-selected` on real DOM focus — set
+  // unconditionally, NVDA reads the top row aloud the moment the list enters
+  // the a11y tree, even while focus is still on the Settings tab.
+  const [hasFocus, setHasFocus] = useState(false);
+  const idPrefix = useId();
+  const optionId = (i: number) => `${idPrefix}-round-${i}`;
+  const listRef = useRef<HTMLUListElement>(null);
+
+  // Clamp the active row when the list shrinks (a new round prepends, a clear
+  // empties it) so the index never dangles past the end.
+  useEffect(() => {
+    if (focusIndex > 0 && focusIndex >= entries.length) {
+      setFocusIndex(Math.max(0, entries.length - 1));
+    }
+  }, [entries.length, focusIndex]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.ctrlKey || e.metaKey || e.altKey || entries.length === 0) return;
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setFocusIndex((i) => Math.min(i + 1, entries.length - 1));
+        return;
+      case 'ArrowUp':
+        e.preventDefault();
+        setFocusIndex((i) => Math.max(i - 1, 0));
+        return;
+      case 'Home':
+        e.preventDefault();
+        setFocusIndex(0);
+        return;
+      case 'End':
+        e.preventDefault();
+        setFocusIndex(entries.length - 1);
+        return;
+      default:
+    }
+  };
 
   const refresh = useCallback(() => {
     listSyncLogEntries()
@@ -112,11 +157,24 @@ export function SyncProtocolSection({ headingId }: SyncProtocolSectionProps) {
         </p>
       ) : (
         <ul
+          ref={listRef}
+          role="listbox"
+          tabIndex={0}
           className="sync-panel__protocol-list"
           aria-label={t('dialogs.settings.sync.protocolListLabel')}
+          aria-activedescendant={hasFocus ? optionId(focusIndex) : undefined}
+          onFocus={() => setHasFocus(true)}
+          onBlur={() => setHasFocus(false)}
+          onKeyDown={handleKeyDown}
         >
-          {entries.map((e) => (
-            <ProtocolRow key={e.id} entry={e} fmt={fmt} />
+          {entries.map((e, i) => (
+            <ProtocolRow
+              key={e.id}
+              entry={e}
+              fmt={fmt}
+              id={optionId(i)}
+              selected={hasFocus && i === focusIndex}
+            />
           ))}
         </ul>
       )}
@@ -143,9 +201,15 @@ export function SyncProtocolSection({ headingId }: SyncProtocolSectionProps) {
 function ProtocolRow({
   entry,
   fmt,
+  id,
+  selected,
 }: {
   entry: SyncLogEntry;
   fmt: ReturnType<typeof useDateFormat>;
+  /** `option` id the listbox's `aria-activedescendant` points at. */
+  id: string;
+  /** True when this is the active row AND the listbox owns focus. */
+  selected: boolean;
 }) {
   const { t } = useTranslation();
   const triggerLabel = (() => {
@@ -199,30 +263,48 @@ function ProtocolRow({
     });
   })();
 
+  const durationText =
+    typeof entry.duration_ms === 'number'
+      ? t('dialogs.settings.sync.protocolDuration', { ms: entry.duration_ms })
+      : null;
+
+  // The option's accessible NAME — every field folded into one string so a
+  // focus-mode screen reader reads the whole round on arrow. The success/
+  // failure state is carried by `summary` itself (a failure reads
+  // "Fehlgeschlagen: …"), so the ✓/✗ glyph stays decorative. The visible
+  // spans are aria-hidden to avoid NVDA reading them a second time after the
+  // composed label.
+  const rowLabel = [timestamp, triggerLabel, durationText, summary]
+    .filter(Boolean)
+    .join(', ');
+
   return (
     <li
+      id={id}
+      role="option"
+      aria-selected={selected}
+      aria-label={rowLabel}
       className={
         `sync-panel__protocol-row sync-panel__protocol-row--${
           entry.success ? 'ok' : 'fail'
         }` +
-        (isCompaction ? ' sync-panel__protocol-row--compaction' : '')
+        (isCompaction ? ' sync-panel__protocol-row--compaction' : '') +
+        (selected ? ' sync-panel__protocol-row--active' : '')
       }
     >
       <span aria-hidden="true" className="sync-panel__protocol-glyph">
         {entry.success ? '✓' : '✗'}
       </span>
-      <div className="sync-panel__protocol-meta">
+      <div aria-hidden="true" className="sync-panel__protocol-meta">
         <span className="sync-panel__protocol-time">{timestamp}</span>
         <span className="sync-panel__protocol-trigger">{triggerLabel}</span>
-        {typeof entry.duration_ms === 'number' && (
-          <span className="sync-panel__protocol-duration">
-            {t('dialogs.settings.sync.protocolDuration', {
-              ms: entry.duration_ms,
-            })}
-          </span>
+        {durationText && (
+          <span className="sync-panel__protocol-duration">{durationText}</span>
         )}
       </div>
-      <p className="sync-panel__protocol-summary">{summary}</p>
+      <p aria-hidden="true" className="sync-panel__protocol-summary">
+        {summary}
+      </p>
     </li>
   );
 }
