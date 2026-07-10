@@ -781,12 +781,13 @@ fn master_due(
     deadline_date: Option<chrono::NaiveDate>,
     deadline_time: Option<NaiveTime>,
 ) -> Option<DateTime<Utc>> {
-    let (date, time) = if let Some(d) = scheduled_date {
-        (d, scheduled_time)
-    } else if let Some(d) = deadline_date {
-        (d, deadline_time)
-    } else {
-        return None;
+    // Scheduled day wins (carrying its time); else the deadline day; else no
+    // anchor. A `match` rather than `if let … else if let … else return` so the
+    // newer clippy's `question-mark` lint has nothing to fire on.
+    let (date, time) = match (scheduled_date, deadline_date) {
+        (Some(d), _) => (d, scheduled_time),
+        (None, Some(d)) => (d, deadline_time),
+        (None, None) => return None,
     };
     let nt = time.unwrap_or_else(|| NaiveTime::from_hms_opt(9, 0, 0).expect("9:00 is valid"));
     let local = chrono::Local
