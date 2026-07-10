@@ -395,9 +395,10 @@ async fn drain_events_delta(
                     continue;
                 }
             };
-            // A cancellation arrives as a normal row with isCancelled=true
-            // — `map_event` returns None for it. Treat that as a deletion
-            // so the cached copy is removed (a full read would drop it).
+            // A cancellation arrives as a normal row with isCancelled=true;
+            // `map_event` keeps it VISIBLE (flagged `cancelled`) rather than
+            // dropping it. Genuine removals come as `@removed` tombstones,
+            // handled above — so a `None` here is only a real map failure/skip.
             let id = entry.id.clone();
             match map_event(entry, calendar_id)? {
                 Some(ev) if event_in_window(&ev, start, end) => delta.changes.push(ev),
@@ -456,6 +457,21 @@ pub async fn delete_event(state: &ApiState, event_id: &str) -> GraphResult<()> {
     let id_enc = urlencoding(event_id);
     let path = format!("/me/events/{id_enc}");
     state.delete_request(&path).await
+}
+
+/// `POST /me/events/{id}/cancel` — the ORGANIZER cancels a meeting: Graph
+/// emails a cancellation to every attendee and marks the event cancelled
+/// server-side (it stays on the organizer's calendar as `isCancelled` until
+/// deleted). Organizer-only; Graph rejects it for a non-organizer or a
+/// non-meeting. The caller (`delete_event` with `send_cancellations`) pairs it
+/// with a follow-up DELETE to actually remove the row.
+pub async fn cancel_event(state: &ApiState, event_id: &str) -> GraphResult<()> {
+    let id_enc = urlencoding(event_id);
+    let path = format!("/me/events/{id_enc}/cancel");
+    // Graph accepts an optional `{ "Comment": "…" }`; we send none.
+    #[derive(Serialize)]
+    struct CancelBody {}
+    state.post_no_content(&path, &CancelBody {}).await
 }
 
 /// RSVP via Graph's dedicated action endpoints
@@ -974,14 +990,15 @@ mod tests {
             server.url()
         );
         // e1 updated (in window) → change; e2 tombstone → deletion;
-        // e3 isCancelled → deletion; e4 out of window → skipped.
+        // e3 isCancelled (in window) → change, flagged cancelled (stays visible,
+        // reminder-free); e4 out of window → skipped.
         let body = r##"{
           "value": [
             {"id":"e1","subject":"Updated","isAllDay":false,"isReminderOn":false,
              "start":{"dateTime":"2026-05-10T08:00:00","timeZone":"UTC"},
              "end":{"dateTime":"2026-05-10T09:00:00","timeZone":"UTC"}},
             {"id":"e2","@removed":{"reason":"deleted"}},
-            {"id":"e3","subject":"Gone","isCancelled":true,"isAllDay":false,"isReminderOn":false,
+            {"id":"e3","subject":"Canceled: Gone","isCancelled":true,"isAllDay":false,"isReminderOn":false,
              "start":{"dateTime":"2026-05-12T08:00:00","timeZone":"UTC"},
              "end":{"dateTime":"2026-05-12T09:00:00","timeZone":"UTC"}},
             {"id":"e4","subject":"Far","isAllDay":false,"isReminderOn":false,
@@ -1006,17 +1023,17 @@ mod tests {
         let delta = follow_events_delta(&state, &prev_link, "cal-1", from, to)
             .await
             .unwrap();
-        assert_eq!(
-            delta
-                .changes
-                .iter()
-                .map(|e| e.id.as_str())
-                .collect::<Vec<_>>(),
-            ["e1"]
-        );
-        let mut dels = delta.deletions.clone();
-        dels.sort();
-        assert_eq!(dels, vec!["e2".to_string(), "e3".to_string()]);
+        let mut changed = delta
+            .changes
+            .iter()
+            .map(|e| e.id.as_str())
+            .collect::<Vec<_>>();
+        changed.sort_unstable();
+        assert_eq!(changed, ["e1", "e3"]);
+        // e3 rides in as a change but flagged cancelled (visible, reminder-free).
+        let e3 = delta.changes.iter().find(|e| e.id == "e3").unwrap();
+        assert!(e3.cancelled);
+        assert_eq!(delta.deletions, vec!["e2".to_string()]);
         assert_eq!(delta.new_token.as_deref(), Some(next_link.as_str()));
     }
 
@@ -1201,6 +1218,19 @@ mod tests {
             .await;
         let state = fixture_state(&server.url());
         delete_event(&state, "ev-x").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancel_event_posts_to_cancel_action() {
+        let mut server = mockito::Server::new_async().await;
+        let m = server
+            .mock("POST", "/me/events/ev-x/cancel")
+            .with_status(202)
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        cancel_event(&state, "ev-x").await.unwrap();
+        m.assert_async().await;
     }
 
     #[tokio::test]

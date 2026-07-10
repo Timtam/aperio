@@ -120,6 +120,16 @@ pub struct Event {
     /// providers that don't report response status.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attendee_responses: Vec<AttendeeResponse>,
+    /// The meeting is CANCELLED (RFC 5545 `STATUS:CANCELLED`, EWS
+    /// `calendar:IsCancelled`, Graph `isCancelled`, Google `status:
+    /// "cancelled"`). Read-only, provider-populated. A cancelled event NEVER
+    /// schedules reminders (the host's reminder scan skips it unconditionally),
+    /// and the calendar surfaces hide it when the user turns off
+    /// `view.showCancelledEvents`. `false` for local events and any provider
+    /// that doesn't report cancellation. `#[serde(default, skip…)]` keeps it off
+    /// the wire / out of stores when `false`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub cancelled: bool,
 }
 
 /// An attendee's RSVP status — RFC 5545 `PARTSTAT`, normalised across

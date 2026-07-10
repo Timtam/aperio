@@ -74,7 +74,7 @@ export function useEvents(range: { start: Date; end: Date }) {
   const { selectedCalendarIds, calendars, calendarsLoading } =
     useCalendarStore();
   const { dataVersion } = useDialogState();
-  const { focusedCalendarId } = useViewState();
+  const { focusedCalendarId, showCancelledEvents } = useViewState();
 
   // Stabilise the range to ISO strings so we only re-fetch when the
   // boundary actually moves, not on every render that re-creates a Date.
@@ -219,5 +219,14 @@ export function useEvents(range: { start: Date; end: Date }) {
     return map;
   }, [calendars]);
 
-  return { events, loading, error, calendarById };
+  // Cancelled events are cached raw; the show-cancelled toggle filters them at
+  // read time so flipping it re-filters instantly without a refetch. (Reminders
+  // for cancelled events are suppressed separately, core-side, regardless.)
+  const visibleEvents = useMemo(
+    () =>
+      showCancelledEvents ? events : events.filter((e) => !e.cancelled),
+    [events, showCancelledEvents],
+  );
+
+  return { events: visibleEvents, loading, error, calendarById };
 }

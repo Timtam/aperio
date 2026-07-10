@@ -41,6 +41,10 @@ const WEEK_START_PREF = 'view.weekStart';
  *  launch decision is available SYNCHRONOUSLY (before the async pref hydrate)
  *  — otherwise the view would flash yesterday's day then jump to today. */
 const START_ON_TODAY_PREF = 'view.startOnToday';
+/** Synced pref: show cancelled events in the calendar (default on, for Outlook
+ *  consistency) or hide them. Reminders for cancelled events are always
+ *  suppressed regardless of this toggle. */
+const SHOW_CANCELLED_PREF = 'view.showCancelledEvents';
 
 function isValidWeekStart(n: number): n is WeekStart {
   return Number.isInteger(n) && n >= 0 && n <= 6;
@@ -95,6 +99,10 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
   // Synced view pref (cross-device), hydrated from user_prefs on mount.
   // Defaults to Monday (ISO) until the round-trip returns.
   const [weekStartsOn, setWeekStartsOnState] = useState<WeekStart>(1);
+  // Synced pref: show cancelled events (default on). Hidden events are filtered
+  // out in `useEvents`; reminders for them are always suppressed core-side.
+  const [showCancelledEvents, setShowCancelledEventsState] =
+    useState<boolean>(true);
   useEffect(() => {
     let cancelled = false;
     getUserPref(WEEK_START_PREF)
@@ -105,6 +113,15 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => {
         // Backend unreachable during init → keep the Monday default.
+      });
+    // Hydrate the show-cancelled pref (default on until the round-trip returns).
+    getUserPref(SHOW_CANCELLED_PREF)
+      .then((raw) => {
+        if (cancelled || raw == null) return;
+        setShowCancelledEventsState(raw !== 'false');
+      })
+      .catch(() => {
+        // Backend unreachable → keep the default (show).
       });
     // Hydrate the synced start-on-today pref. This only refreshes the toggle
     // state + the local mirror (written back by the persist effect) for the
@@ -163,6 +180,10 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
     setStartOnTodayState(v);
     void setUserPref(START_ON_TODAY_PREF, v ? 'true' : 'false');
   }, []);
+  const setShowCancelledEvents = useCallback((v: boolean) => {
+    setShowCancelledEventsState(v);
+    void setUserPref(SHOW_CANCELLED_PREF, v ? 'true' : 'false');
+  }, []);
 
   const value = useMemo<ViewStateValue>(
     () => ({
@@ -180,6 +201,8 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
       setWeekStartsOn,
       startOnToday,
       setStartOnToday,
+      showCancelledEvents,
+      setShowCancelledEvents,
     }),
     [
       view,
@@ -196,6 +219,8 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
       setWeekStartsOn,
       startOnToday,
       setStartOnToday,
+      showCancelledEvents,
+      setShowCancelledEvents,
     ],
   );
 

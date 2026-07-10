@@ -305,9 +305,13 @@ pub struct RecurrenceRange {
 }
 
 pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Event>> {
-    if entry.is_cancelled {
-        return Ok(None);
-    }
+    // A cancelled meeting stays VISIBLE (flagged `cancelled`, reminder-free,
+    // hidden only by the user's show-cancelled setting) rather than being
+    // dropped. `/calendarView` returns pre-expanded occurrences
+    // (recurrence=None → no frontend re-expansion), so a lingering cancelled
+    // instance never doubles up against a master. Genuine removals arrive as
+    // `@removed` tombstones, handled by the caller before map_event.
+    let cancelled = entry.is_cancelled;
     // All-day boundaries carry the intended calendar day in the wire
     // string — anchor those at LOCAL midnight (the app-internal all-day
     // convention) instead of converting the instant.
@@ -409,6 +413,7 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Eve
         etag: entry.etag,
         organizer,
         attendee_responses,
+        cancelled,
     }))
 }
 
@@ -1668,16 +1673,23 @@ mod tests {
     }
 
     #[test]
-    fn cancelled_event_is_filtered() {
+    fn cancelled_event_stays_visible_and_flagged() {
+        // A cancelled meeting stays VISIBLE, flagged `cancelled` — the host
+        // suppresses its reminders and the user setting can hide it, but it is
+        // not silently deleted (genuine removals arrive as `@removed`).
+        // calendarView returns pre-expanded occurrences, so this is safe for
+        // both a cancelled single and a cancelled series' instances.
         let raw = r#"{
             "id": "ev-x",
+            "subject": "Canceled: Sync",
             "isCancelled": true,
             "isAllDay": false,
             "start": { "dateTime": "2026-05-25T10:00:00", "timeZone": "UTC" },
             "end":   { "dateTime": "2026-05-25T11:00:00", "timeZone": "UTC" }
         }"#;
         let entry: EventEntry = serde_json::from_str(raw).unwrap();
-        assert!(map_event(entry, "primary").unwrap().is_none());
+        let ev = map_event(entry, "primary").unwrap().unwrap();
+        assert!(ev.cancelled);
     }
 
     #[test]

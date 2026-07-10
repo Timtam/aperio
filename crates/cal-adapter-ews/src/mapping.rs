@@ -320,6 +320,13 @@ pub struct ParsedItem {
     pub end: Option<DateTime<Utc>>,
     pub is_all_day: bool,
     pub is_recurring: bool,
+    /// `<t:IsCancelled>` — the meeting was cancelled by its organizer.
+    /// Exchange keeps the item in the calendar (with a "Canceled:" subject)
+    /// rather than deleting it, so Aperio surfaces it but never schedules
+    /// reminders for it. `#[serde(default)]` so sync-state files written before
+    /// this field existed load as `false` without forcing a re-sync.
+    #[serde(default)]
+    pub cancelled: bool,
     pub reminder_is_set: bool,
     pub reminder_minutes_before_start: Option<i64>,
     pub created: Option<DateTime<Utc>>,
@@ -461,6 +468,7 @@ pub fn parse_find_item_response(xml: &str) -> EwsResult<Vec<ParsedItem>> {
                     b"end" => text_target = Some("end"),
                     b"isalldayevent" => text_target = Some("all_day"),
                     b"isrecurring" => text_target = Some("recurring"),
+                    b"iscancelled" => text_target = Some("cancelled"),
                     b"reminderisset" => text_target = Some("reminder_on"),
                     b"reminderminutesbeforestart" => text_target = Some("reminder_mins"),
                     b"datetimecreated" => text_target = Some("created"),
@@ -506,6 +514,9 @@ pub fn parse_find_item_response(xml: &str) -> EwsResult<Vec<ParsedItem>> {
                     }
                     Some("recurring") => {
                         current.is_recurring = s.eq_ignore_ascii_case("true");
+                    }
+                    Some("cancelled") => {
+                        current.cancelled = s.eq_ignore_ascii_case("true");
                     }
                     Some("reminder_on") => {
                         current.reminder_is_set = s.eq_ignore_ascii_case("true");
@@ -737,6 +748,9 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                     b"isrecurring" if inside_item => {
                         text_target = Some("recurring");
                     }
+                    b"iscancelled" if inside_item => {
+                        text_target = Some("cancelled");
+                    }
                     b"reminderisset" if inside_item => {
                         text_target = Some("reminder_on");
                     }
@@ -908,6 +922,9 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                     }
                     Some("recurring") => {
                         current.is_recurring = s.eq_ignore_ascii_case("true");
+                    }
+                    Some("cancelled") => {
+                        current.cancelled = s.eq_ignore_ascii_case("true");
                     }
                     Some("reminder_on") => {
                         current.reminder_is_set = s.eq_ignore_ascii_case("true");
@@ -1615,6 +1632,7 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         etag: item.change_key,
         organizer,
         attendee_responses,
+        cancelled: item.cancelled,
     })
 }
 
@@ -3384,6 +3402,7 @@ mod tests {
                 <t:Location>Online</t:Location>
                 <t:IsAllDayEvent>false</t:IsAllDayEvent>
                 <t:IsRecurring>false</t:IsRecurring>
+                <t:IsCancelled>true</t:IsCancelled>
               </t:CalendarItem>
             </t:Items>
           </m:RootFolder>
@@ -3402,6 +3421,7 @@ mod tests {
         assert_eq!(it.location.as_deref(), Some("Online"));
         assert!(!it.is_all_day);
         assert!(!it.is_recurring);
+        assert!(it.cancelled);
         assert!(it.reminder_is_set);
         assert_eq!(it.reminder_minutes_before_start, Some(10));
         assert_eq!(it.start.unwrap().to_rfc3339(), "2026-05-20T08:00:00+00:00");
@@ -3455,6 +3475,7 @@ mod tests {
             organizer: None,
             attendees: Vec::new(),
             detail_fetched: false,
+            cancelled: false,
         };
         let ev = to_event(item, "FID|CK").unwrap();
         // No `<t:CalendarItemType>` element → defaults to Single,
@@ -3468,6 +3489,22 @@ mod tests {
             other => panic!("expected Relative reminder, got {other:?}"),
         }
         assert_eq!(ev.etag.as_deref(), Some("ICK"));
+    }
+
+    #[test]
+    fn to_event_maps_cancelled() {
+        // A cancelled EWS meeting (IsCancelled=true) carries the flag onto the
+        // Event so the host suppresses its reminders + can hide it.
+        let item = ParsedItem {
+            item_id: "IID".into(),
+            subject: "Canceled: Sync".into(),
+            start: Some("2026-05-20T12:00:00Z".parse().unwrap()),
+            end: Some("2026-05-20T12:30:00Z".parse().unwrap()),
+            cancelled: true,
+            ..Default::default()
+        };
+        let ev = to_event(item, "FID|CK").unwrap();
+        assert!(ev.cancelled);
     }
 
     #[test]
@@ -3578,6 +3615,7 @@ mod tests {
             etag: Some("CK".into()),
             organizer: None,
             attendee_responses: Vec::new(),
+            cancelled: false,
         };
         let (set, _del) = event_to_update_field_xml(&ev).unwrap();
         assert!(
@@ -3836,6 +3874,7 @@ mod tests {
             etag: Some("CK".into()),
             organizer: None,
             attendee_responses: Vec::new(),
+            cancelled: false,
         };
         let (set, del) = event_to_update_field_xml(&ev).unwrap();
         assert!(set.contains("<t:Subject>Updated</t:Subject>"));
@@ -3919,6 +3958,7 @@ mod tests {
             organizer: None,
             attendees: Vec::new(),
             detail_fetched: false,
+            cancelled: false,
         };
         assert_eq!(to_event(mk(Some("Single")), "FID").unwrap().id, "S:IID|ICK");
         assert_eq!(

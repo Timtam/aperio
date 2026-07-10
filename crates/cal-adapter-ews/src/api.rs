@@ -821,6 +821,8 @@ fn build_event_from_new(
         // Write path: organizer/RSVP metadata are read-only fields.
         organizer: None,
         attendee_responses: Vec::new(),
+        // Freshly created/updated by us — never a cancellation.
+        cancelled: false,
     }
 }
 
@@ -1318,6 +1320,7 @@ mod tests {
             etag: Some("CK-V1".into()),
             organizer: None,
             attendee_responses: Vec::new(),
+            cancelled: false,
         };
         let updated = update_event(&client_for(&server), &starting).await.unwrap();
         // ChangeKey advances on every successful UpdateItem; the
@@ -1521,6 +1524,7 @@ mod tests {
             etag: Some("OCK".into()),
             organizer: None,
             attendee_responses: Vec::new(),
+            cancelled: false,
         };
         let updated = update_event(&client_for(&server), &starting).await.unwrap();
         // After series-wide write the kind flips to RecurringMaster

@@ -5,9 +5,9 @@ import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-nati
 import {
   AttendeeStatus,
   CalendarEvent,
-  calendarCurrentUserEmail,
   respondToEvent,
 } from '../api/calendar';
+import { resolveCalendarUserEmail } from '../state/currentUserEmail';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 // RSVP affordance for an existing meeting (DESIGN §7.3) — the mobile twin of the
@@ -53,7 +53,7 @@ export function EventRsvp({
       setMyEmail(null);
       return;
     }
-    calendarCurrentUserEmail(event.calendar_id)
+    resolveCalendarUserEmail(event.calendar_id)
       .then((email) => {
         if (!cancelled) setMyEmail(email);
       })

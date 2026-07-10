@@ -35,8 +35,14 @@ const MINIMIZE_TO_TRAY = 'window.minimizeToTray';
  */
 export function GeneralPanel() {
   const { t, i18n } = useTranslation();
-  const { weekStartsOn, setWeekStartsOn, startOnToday, setStartOnToday } =
-    useViewState();
+  const {
+    weekStartsOn,
+    setWeekStartsOn,
+    startOnToday,
+    setStartOnToday,
+    showCancelledEvents,
+    setShowCancelledEvents,
+  } = useViewState();
   const [uiScale, setUiScale] = useUiScale();
   const [themeMode, setThemeMode] = useThemeMode();
   const [language, setLanguage] = useState<LanguagePref>('system');
@@ -178,6 +184,17 @@ export function GeneralPanel() {
         </label>
         <p className="form__hint general-panel__toggle-hint">
           {t('dialogs.settings.general.startOnTodayHint')}
+        </p>
+        <label className="general-panel__toggle">
+          <input
+            type="checkbox"
+            checked={showCancelledEvents}
+            onChange={(e) => setShowCancelledEvents(e.target.checked)}
+          />
+          <span>{t('dialogs.settings.general.showCancelledLabel')}</span>
+        </label>
+        <p className="form__hint general-panel__toggle-hint">
+          {t('dialogs.settings.general.showCancelledHint')}
         </p>
       </section>
 

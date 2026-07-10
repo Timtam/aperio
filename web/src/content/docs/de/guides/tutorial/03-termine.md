@@ -54,8 +54,14 @@ Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
 > erscheint das Kontrollkästchen **Teilnehmer benachrichtigen** (standardmäßig
 > aktiv). Ist es gesetzt, verschickt der Anbieter beim Speichern automatisch
 > Einladungen bzw. Aktualisierungen – Aperio selbst versendet keine E-Mails.
-> Beim Löschen eines Termins mit Teilnehmern wird entsprechend eine Absage
-> ausgelöst.
+>
+> Löschst du eine **Besprechung, die du organisierst** (mit Teilnehmern, auf
+> einem Konto mit Server-Terminplanung), fragt Aperio nach: **Absagen &
+> Teilnehmer benachrichtigen** oder **ohne Benachrichtigung entfernen**. Bei
+> einer Besprechung, zu der du nur eingeladen bist, oder einem Termin ohne
+> Teilnehmer wird ohne Rückfrage gelöscht. (Auf iCloud/CalDAV entscheidet der
+> Server über den Absageversand – dort ist „ohne Benachrichtigung" nicht
+> garantiert.)
 
 > **Verfügbarkeit prüfen:** Unter demselben Schalter erscheint die
 > Schaltfläche **Verfügbarkeit prüfen**. Sie fragt für das aktuell

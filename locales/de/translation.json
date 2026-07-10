@@ -146,6 +146,8 @@
   "chipMenu": {
     "edit": "Bearbeiten …",
     "delete": "Löschen",
+    "cancelNotify": "Absagen & Teilnehmer benachrichtigen",
+    "cancelSilent": "Ohne Benachrichtigung entfernen",
     "moveTo": "Verschieben nach …",
     "copyTo": "Kopieren nach …",
     "bringToBacklog": "Ins Backlog holen",
@@ -482,6 +484,8 @@
         "weekStartHint": "Bestimmt, mit welchem Wochentag die Wochen- und Monatsansicht beginnt. Kalenderwochen werden weiterhin nach ISO 8601 (Montag) berechnet.",
         "startOnTodayLabel": "Beim Start heutiges Datum anzeigen",
         "startOnTodayHint": "Wenn aktiv, öffnet jede Kalenderansicht bei jedem App-Start auf dem heutigen Tag statt auf dem zuletzt geöffneten. Wird zwischen deinen Geräten synchronisiert.",
+        "showCancelledLabel": "Abgesagte Termine anzeigen",
+        "showCancelledHint": "Wenn aktiv, bleiben abgesagte Termine im Kalender sichtbar (wie in Outlook). Wenn aus, werden sie ausgeblendet. In beiden Fällen lösen abgesagte Termine nie Erinnerungen aus. Wird zwischen deinen Geräten synchronisiert.",
         "appearanceHeading": "Darstellung",
         "fontSizeLabel": "Schriftgröße",
         "fontSizeHint": "Skaliert die gesamte Oberfläche — Text und Abstände. Standard 100 %, wird nur auf diesem Gerät gespeichert.",
@@ -1209,8 +1213,15 @@
       "created": "Termin „{{title}}\" wurde angelegt.",
       "updated": "Termin „{{title}}\" wurde aktualisiert.",
       "deleted": "Termin „{{title}}\" wurde gelöscht.",
+      "meetingCancelled": "Besprechung „{{title}}\" abgesagt; Teilnehmer benachrichtigt.",
       "occurrenceUpdated": "Dieser Einzeltermin von „{{title}}\" wurde geändert.",
       "occurrenceDeleted": "Dieser Einzeltermin von „{{title}}\" wurde gelöscht.",
+      "cancelChoice": {
+        "title": "Besprechung absagen?",
+        "message": "Du organisierst „{{title}}\". Absagen und die Teilnehmer benachrichtigen – oder nur aus deinem Kalender entfernen, ohne sie zu benachrichtigen?",
+        "cancelMeeting": "Absagen & Teilnehmer benachrichtigen",
+        "removeSilently": "Ohne Benachrichtigung entfernen"
+      },
       "birthdayTitle": "Geburtstag",
       "birthdayAge": "Wird {{age}} Jahre alt",
       "birthdayHint": "Geburtstage stammen aus deinen Kontakten. Bearbeite den Kontakt im Adressbuch, um das Datum zu ändern.",

@@ -146,6 +146,8 @@
   "chipMenu": {
     "edit": "Edit …",
     "delete": "Delete",
+    "cancelNotify": "Cancel & notify attendees",
+    "cancelSilent": "Remove without notifying",
     "moveTo": "Move to …",
     "copyTo": "Copy to …",
     "bringToBacklog": "Bring to backlog",
@@ -485,6 +487,8 @@
         "weekStartHint": "Sets which weekday the week and month views start on. Calendar week numbers stay ISO 8601 (Monday-based).",
         "startOnTodayLabel": "Open on today at launch",
         "startOnTodayHint": "When on, every calendar view opens on today each time you start the app, instead of the day you last had open. Synced across your devices.",
+        "showCancelledLabel": "Show cancelled events",
+        "showCancelledHint": "When on, cancelled meetings stay visible in the calendar (like Outlook). When off, they're hidden. Either way, cancelled events never trigger reminders. Synced across your devices.",
         "appearanceHeading": "Appearance",
         "fontSizeLabel": "Font size",
         "fontSizeHint": "Scales the whole interface — text and spacing alike. Default 100%, stored on this device only.",
@@ -1209,8 +1213,15 @@
       "created": "Event \"{{title}}\" created.",
       "updated": "Event \"{{title}}\" updated.",
       "deleted": "Event \"{{title}}\" deleted.",
+      "meetingCancelled": "Meeting \"{{title}}\" cancelled; attendees notified.",
       "occurrenceUpdated": "This occurrence of \"{{title}}\" was changed.",
       "occurrenceDeleted": "This occurrence of \"{{title}}\" was deleted.",
+      "cancelChoice": {
+        "title": "Cancel meeting?",
+        "message": "You organize \"{{title}}\". Cancel it and notify the attendees, or just remove it from your calendar without telling them?",
+        "cancelMeeting": "Cancel & notify attendees",
+        "removeSilently": "Remove without notifying"
+      },
       "birthdayTitle": "Birthday",
       "birthdayAge": "Turns {{age}} years old",
       "birthdayHint": "Birthdays come from your contacts. Edit the contact in your address book to change the date.",

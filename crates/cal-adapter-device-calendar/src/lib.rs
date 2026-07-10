@@ -215,6 +215,10 @@ fn map_event(d: DeviceEvent) -> Result<Event> {
         etag: None,
         organizer: None,
         attendee_responses: Vec::new(),
+        // The native bridge doesn't surface EKEventStatus/Android STATUS yet,
+        // and device-calendar events are OS-notified (Aperio never schedules
+        // their reminders), so cancellation is moot here for now.
+        cancelled: false,
     })
 }
 

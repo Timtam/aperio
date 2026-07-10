@@ -27,6 +27,11 @@ pub const SYNC_WHITELIST: &[&str] = &[
     // On app launch, seed every view to today instead of restoring the
     // last-opened day (default off — restore).
     "view.startOnToday",
+    // Show cancelled events (RFC 5545 STATUS:CANCELLED / EWS IsCancelled /
+    // Graph isCancelled) in the calendar, or hide them (default on — show, for
+    // Outlook consistency). Reminders for cancelled events are always
+    // suppressed regardless of this toggle.
+    "view.showCancelledEvents",
     // Backlog column width in the week/month planner — a layout choice the
     // user wants kept consistent across devices.
     "backlog.width",
@@ -106,6 +111,7 @@ mod tests {
     fn view_defaults_sync() {
         assert!(is_synced_key("view.weekStart"));
         assert!(is_synced_key("view.startOnToday"));
+        assert!(is_synced_key("view.showCancelledEvents"));
     }
 
     #[test]
