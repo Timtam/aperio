@@ -5542,7 +5542,26 @@ impl Host {
         let latest = now + chrono::Duration::minutes(i64::from(horizon_minutes));
         let shared = self.db.shared();
         let mut triggers = self.runtime.block_on(async {
-            host_core::reminders::enumerate_triggers(&shared, &self.registry, now, latest).await
+            let mut acc =
+                host_core::reminders::enumerate_triggers(&shared, &self.registry, now, latest)
+                    .await;
+            // Synthetic birthday calendars aren't adapters, so the external
+            // fan-out inside `enumerate_triggers` skips them. Fold their
+            // configured default reminders in here, windowed to [now, latest]
+            // the same way the external branch is.
+            for t in host_core::reminders::enumerate_birthday_triggers(
+                &self.adapter,
+                &self.registry,
+                &self.cache,
+                &shared,
+            )
+            .await
+            {
+                if t.trigger_at >= now && t.trigger_at <= latest {
+                    acc.push(t);
+                }
+            }
+            acc
         });
         triggers.sort_by_key(|t| t.trigger_at);
         let mut seen = std::collections::HashSet::new();

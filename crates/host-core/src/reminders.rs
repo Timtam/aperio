@@ -16,8 +16,8 @@
 use std::sync::Arc;
 
 use cal_core::{
-    DateRange, Event, EventRecurrence, RecurrenceEnd, RecurrenceFrequency, Reminder, ReminderKind,
-    SoundConfig, Task, TaskRecurrence, TaskUser,
+    ContactsFeature, DateRange, Event, EventRecurrence, RecurrenceEnd, RecurrenceFrequency,
+    Reminder, ReminderKind, SoundConfig, Task, TaskRecurrence, TaskUser,
 };
 use chrono::{DateTime, Duration as ChronoDuration, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use rrule::{RRule, RRuleSet, Tz as RruleTz};
@@ -26,6 +26,7 @@ use serde::Serialize;
 use tracing::warn;
 
 use crate::accounts::{AccountsRepo, AdapterKind};
+use crate::cache::CacheStore;
 use crate::db::SharedConn;
 use crate::registry::AdapterRegistry;
 use crate::sound::{ContainerKind, SoundPrefs};
@@ -84,11 +85,13 @@ const EXTERNAL_PAST_DAYS: i64 = 7;
 const EXTERNAL_FUTURE_DAYS: i64 = 90;
 
 /// `SELECT id, title, start_utc, end_utc, reminders, rrule, rrule_exceptions,
-/// calendar_id FROM events` — `end_utc` drives each event's duration (the
-/// catch-up relevance window); `rrule`/`rrule_exceptions` drive per-occurrence
-/// expansion; `calendar_id` resolves the §14.4 container sound.
+/// calendar_id, all_day FROM events` — `end_utc` drives each event's duration
+/// (the catch-up relevance window); `rrule`/`rrule_exceptions` drive
+/// per-occurrence expansion; `calendar_id` resolves the §14.4 container sound;
+/// `all_day` routes the reminder to the day-carryover anchor instead of a
+/// minutes-before-midnight offset.
 const EVENT_QUERY: &str = "SELECT id, title, start_utc, end_utc, reminders, \
-    rrule, rrule_exceptions, calendar_id FROM events";
+    rrule, rrule_exceptions, calendar_id, all_day FROM events";
 
 /// `SELECT id, title, scheduled_date, scheduled_time, deadline_date,
 /// deadline_time, reminders, recurrence, list_id FROM tasks` — `recurrence` is
@@ -110,6 +113,9 @@ pub fn enumerate_local_triggers(
     latest: DateTime<Utc>,
 ) -> Vec<Trigger> {
     let sound_prefs = SoundPrefs::load(db);
+    // Read the day-carryover anchor BEFORE locking the connection — the pref
+    // read takes its own lock and `std::sync::Mutex` isn't reentrant.
+    let day_start = day_start_time(db);
     let conn = match db.lock() {
         Ok(c) => c,
         Err(err) => {
@@ -133,6 +139,7 @@ pub fn enumerate_local_triggers(
                 let rrule: Option<String> = row.get(5).unwrap_or(None);
                 let exceptions_json: Option<String> = row.get(6).unwrap_or(None);
                 let calendar_id: String = row.get(7).unwrap_or_default();
+                let all_day: bool = row.get(8).unwrap_or(false);
                 let Some(reminders) = parse_reminders(reminders_json.as_deref()) else {
                     continue;
                 };
@@ -159,6 +166,7 @@ pub fn enumerate_local_triggers(
                     &sound_prefs,
                     ContainerKind::Calendar,
                     &calendar_id,
+                    all_day.then_some(day_start),
                 ));
             }
         }
@@ -218,6 +226,7 @@ pub fn enumerate_local_triggers(
                     &sound_prefs,
                     ContainerKind::TaskList,
                     &list_id,
+                    None, // tasks are never all-day
                 ));
             }
         }
@@ -258,6 +267,8 @@ pub async fn enumerate_external_triggers(
     // §14.4 sound snapshot. No connection lock is held on this async path, so
     // loading it here is deadlock-free.
     let sound_prefs = SoundPrefs::load(db);
+    // Day-carryover anchor for all-day events (below).
+    let day_start = day_start_time(db);
 
     // Device-local accounts (iOS EventKit / Android CalendarProvider) are
     // EXCLUDED from Aperio's reminder scheduling: the OS itself fires the alarms
@@ -297,7 +308,14 @@ pub async fn enumerate_external_triggers(
                     continue;
                 }
             };
-            acc.extend(event_triggers(&events, &defaults, &sound_prefs, from, to));
+            acc.extend(event_triggers(
+                &events,
+                &defaults,
+                &sound_prefs,
+                from,
+                to,
+                day_start,
+            ));
         }
     }
 
@@ -334,6 +352,63 @@ pub async fn enumerate_external_triggers(
         }
     }
 
+    acc
+}
+
+/// Birthday-calendar reminder triggers. The synthetic birthday calendars
+/// (§10.3) aren't adapters, so [`enumerate_external_triggers`] never sees them —
+/// left alone they'd fire nothing. This collector synthesises each birthday
+/// calendar's all-day events (LOCAL contacts in-process, EXTERNAL from the
+/// snapshot cache — never a network fetch) and applies that calendar's
+/// configured DEFAULT reminders (`calendar.<id>.defaultReminders`, via
+/// [`calendar_default_reminders`]).
+///
+/// Birthday events carry no per-event reminders of their own, so a birthday
+/// calendar with no configured defaults fires nothing — the feature is opt-in
+/// per calendar (e.g. the user adds "one week before"). Being all-day, each
+/// reminder fires at the day-carryover time a whole number of days before the
+/// birthday, exactly like a regular all-day event (see [`all_day_trigger_time`]).
+pub async fn enumerate_birthday_triggers(
+    local: &dyn ContactsFeature,
+    registry: &Arc<AdapterRegistry>,
+    cache: &Arc<CacheStore>,
+    db: &SharedConn,
+) -> Vec<Trigger> {
+    let now = Utc::now();
+    let from = now - ChronoDuration::days(EXTERNAL_PAST_DAYS);
+    let to = now + ChronoDuration::days(EXTERNAL_FUTURE_DAYS);
+    // Widen the synthesis window the same way the expansion does (a birthday
+    // occurrence inside the window may sit just outside `[from, to]`).
+    let (occ_from, occ_to) = occurrence_window(from, to);
+    let range = DateRange::new(occ_from, occ_to);
+
+    let sound_prefs = SoundPrefs::load(db);
+    let day_start = day_start_time(db);
+
+    let mut acc: Vec<Trigger> = Vec::new();
+    for (cal, _account_id) in
+        crate::birthdays::list_birthday_calendars(local, registry, cache).await
+    {
+        let defaults = calendar_default_reminders(db, &cal.id);
+        // Opt-in: no configured default reminders → nothing to fire.
+        if defaults.is_empty() {
+            continue;
+        }
+        let Some(events) =
+            crate::birthdays::synthesise_birthday_events(local, registry, cache, &cal.id, range)
+                .await
+        else {
+            continue;
+        };
+        acc.extend(event_triggers(
+            &events,
+            &defaults,
+            &sound_prefs,
+            from,
+            to,
+            day_start,
+        ));
+    }
     acc
 }
 
@@ -489,6 +564,7 @@ fn event_triggers(
     sound_prefs: &SoundPrefs,
     window_start: DateTime<Utc>,
     window_end: DateTime<Utc>,
+    day_start: NaiveTime,
 ) -> Vec<Trigger> {
     let mut out = Vec::new();
     for ev in events {
@@ -519,6 +595,7 @@ fn event_triggers(
             sound_prefs,
             ContainerKind::Calendar,
             &ev.calendar_id,
+            ev.all_day.then_some(day_start),
         ));
     }
     out
@@ -539,6 +616,7 @@ fn event_triggers(
 /// compute its `relevant_until` — events pass `event.end -
 /// event.start`, tasks pass `Duration::zero()` (a task's "relevant
 /// until" is the due time itself).
+#[allow(clippy::too_many_arguments)]
 fn occurrence_triggers(
     item_id: &str,
     item_kind: ItemKind,
@@ -552,6 +630,11 @@ fn occurrence_triggers(
     sound_prefs: &SoundPrefs,
     container_kind: ContainerKind,
     container_id: &str,
+    // `Some(day_start_local)` for an ALL-DAY item — reminders fire a whole
+    // number of days before the occurrence's date at this time-of-day (see
+    // `all_day_trigger_time`). `None` for a timed item (the relative offset
+    // subtracts from the start as before). Tasks always pass `None`.
+    all_day_anchor: Option<NaiveTime>,
 ) -> Vec<Trigger> {
     let starts: Vec<DateTime<Utc>> = match recurrence {
         Some(rec) => expand_occurrences(
@@ -568,7 +651,11 @@ fn occurrence_triggers(
     for occ_start in starts {
         let relevant_until = occ_start + duration;
         for r in reminders {
-            let Some(at) = trigger_time_for(&r.kind, occ_start) else {
+            let at = match all_day_anchor {
+                Some(day_start) => all_day_trigger_time(occ_start, &r.kind, day_start),
+                None => trigger_time_for(&r.kind, occ_start),
+            };
+            let Some(at) = at else {
                 continue;
             };
             if at < window_start || at > window_end {
@@ -751,6 +838,7 @@ fn task_triggers(
             sound_prefs,
             ContainerKind::TaskList,
             &t.list_id,
+            None, // tasks are never all-day
         ));
     }
     out
@@ -898,6 +986,77 @@ fn trigger_time_for(kind: &ReminderKind, reference: DateTime<Utc>) -> Option<Dat
     }
 }
 
+/// Fire time for a reminder on an ALL-DAY event (incl. synthesised birthdays).
+///
+/// A relative offset measured in MINUTES makes no sense against a midnight
+/// start — "1 hour before" would ring at 23:00 the night before (the reported
+/// bug). Instead we read the offset as whole DAYS and fire at the day-carryover
+/// time-of-day (`tasks.dayStartTrigger`, passed in as `day_start`): "1 h" and
+/// "on the day" both land on the event's own day at day-start, "1 day before"
+/// the day before, "1 week before" seven days before. An explicit `Absolute`
+/// reminder still wins. Days round to nearest (12 h → 1 day). The event's date
+/// is its LOCAL date — every all-day producer (the editor, CalDAV, and now
+/// birthdays via `birthdays::birthday_start_instant`) stores the start as
+/// local-midnight-as-UTC, so this reads back as the intended day in any zone.
+fn all_day_trigger_time(
+    occ_start: DateTime<Utc>,
+    kind: &ReminderKind,
+    day_start: NaiveTime,
+) -> Option<DateTime<Utc>> {
+    let minutes_before = match kind {
+        ReminderKind::Relative { minutes_before } => *minutes_before,
+        ReminderKind::Absolute { at } => return Some(*at),
+        ReminderKind::AppStart | ReminderKind::Email { .. } => return None,
+    };
+    all_day_fire_instant(occ_start, minutes_before, day_start, &chrono::Local)
+}
+
+/// Pure, zone-parameterised core of [`all_day_trigger_time`]: read `minutes`
+/// as whole DAYS before the occurrence's LOCAL date and anchor at `day_start`
+/// that day. Generic over the zone only so tests can pin a fixed offset —
+/// production always passes `chrono::Local`. Assumes the start is stored
+/// local-midnight-as-UTC (every all-day producer does).
+///
+/// DST-robust so a reminder is never silently dropped: on an ambiguous
+/// fall-back hour (the wall clock repeats) it takes the earlier instant; in a
+/// spring-forward gap (the chosen wall time doesn't exist that day) it steps
+/// past the ≤1 h gap. Only reachable at all if the user sets `day_start` to a
+/// clock time inside their DST transition — the `00:00` default never is.
+fn all_day_fire_instant<Tz: TimeZone>(
+    occ_start: DateTime<Utc>,
+    minutes: i64,
+    day_start: NaiveTime,
+    tz: &Tz,
+) -> Option<DateTime<Utc>> {
+    let event_day = occ_start.with_timezone(tz).date_naive();
+    let days = ((minutes as f64) / 1440.0).round() as i64;
+    let target_day = event_day - ChronoDuration::days(days);
+    let naive = NaiveDateTime::new(target_day, day_start);
+    tz.from_local_datetime(&naive)
+        .earliest()
+        .or_else(|| {
+            tz.from_local_datetime(&(naive + ChronoDuration::hours(1)))
+                .earliest()
+        })
+        .map(|local| local.with_timezone(&Utc))
+}
+
+/// The day-carryover time-of-day that anchors all-day / birthday reminders,
+/// read from the synced `tasks.dayStartTrigger` pref. `'HH:MM'` parses to that
+/// time; the `'00:00'` default and `'app-start'` (no clock time) both anchor at
+/// midnight — a midnight-triggered reminder still surfaces at app-start via the
+/// catch-up filter.
+fn day_start_time(db: &SharedConn) -> NaiveTime {
+    let midnight = NaiveTime::from_hms_opt(0, 0, 0).expect("00:00 is valid");
+    UserPrefsRepo::new(db)
+        .get("tasks.dayStartTrigger")
+        .ok()
+        .flatten()
+        .as_deref()
+        .and_then(parse_local_time)
+        .unwrap_or(midnight)
+}
+
 fn parse_reminders(json: Option<&str>) -> Option<Vec<Reminder>> {
     let raw = json?;
     if raw.is_empty() {
@@ -1015,6 +1174,9 @@ mod tests {
             &SoundPrefs::default(),
             window_start,
             window_end,
+            // Day-carryover anchor; only consulted for all-day events, which
+            // the all-day test constructs explicitly.
+            NaiveTime::from_hms_opt(9, 0, 0).expect("9:00 is valid"),
         )
     }
 
@@ -1055,6 +1217,163 @@ mod tests {
             etag: None,
             organizer: None,
             attendee_responses: Vec::new(),
+        }
+    }
+
+    /// An all-day event on `day`, stored the way the app stores all-day events:
+    /// LOCAL midnight → UTC. Keeps the day unambiguous regardless of the test
+    /// machine's timezone.
+    fn make_all_day_event(day: NaiveDate, reminders: Vec<Reminder>) -> Event {
+        let start_local = chrono::Local
+            .from_local_datetime(&day.and_hms_opt(0, 0, 0).unwrap())
+            .single()
+            .unwrap();
+        let mut ev = make_event(reminders);
+        ev.all_day = true;
+        ev.start = start_local.with_timezone(&Utc);
+        ev.end = ev.start + ChronoDuration::days(1);
+        ev
+    }
+
+    #[test]
+    fn all_day_reminder_fires_at_day_start_not_the_night_before() {
+        // "1 hour before" on an all-day event: timed this would ring 23:00 the
+        // night before (the reported bug); all-day it must ring at the
+        // day-carryover time (9:00 here, per ev_triggers) on the event's OWN day.
+        let day = NaiveDate::from_ymd_opt(2026, 5, 20).unwrap();
+        let ev = make_all_day_event(day, vec![rel(60)]);
+        let ws = Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
+        let we = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+        let triggers = ev_triggers(&[ev], &[], ws, we);
+        assert_eq!(triggers.len(), 1);
+        let local = chrono::Local.from_utc_datetime(&triggers[0].trigger_at.naive_utc());
+        assert_eq!(local.date_naive(), day);
+        assert_eq!(local.time(), NaiveTime::from_hms_opt(9, 0, 0).unwrap());
+    }
+
+    #[test]
+    fn all_day_fire_instant_is_correct_west_of_utc() {
+        // Deterministic west-of-UTC guard (independent of the test machine's
+        // timezone; CI runs UTC, where the "one day early" bug is invisible). An
+        // all-day start stored local-midnight-as-UTC in UTC−5 is 05:00Z.
+        let west = chrono::FixedOffset::west_opt(5 * 3600).unwrap();
+        let occ_start = Utc.with_ymd_and_hms(2026, 5, 20, 5, 0, 0).unwrap();
+        let day_start = NaiveTime::from_hms_opt(9, 0, 0).unwrap();
+
+        // "1 week before" → 7 days earlier at day-start, in that same zone.
+        let at = all_day_fire_instant(occ_start, 7 * 24 * 60, day_start, &west).unwrap();
+        let local = at.with_timezone(&west);
+        assert_eq!(
+            local.date_naive(),
+            NaiveDate::from_ymd_opt(2026, 5, 13).unwrap()
+        );
+        assert_eq!(local.time(), day_start);
+
+        // "1 h before" collapses to 0 days → the event's OWN day at day-start,
+        // NOT the day before (the exact west-of-UTC failure mode).
+        let same = all_day_fire_instant(occ_start, 60, day_start, &west).unwrap();
+        assert_eq!(
+            same.with_timezone(&west).date_naive(),
+            NaiveDate::from_ymd_opt(2026, 5, 20).unwrap()
+        );
+    }
+
+    #[test]
+    fn all_day_reminder_reads_the_offset_as_whole_days() {
+        // "1 week before" (10080 min) → 7 days before at the day-start time.
+        let day = NaiveDate::from_ymd_opt(2026, 5, 20).unwrap();
+        let ev = make_all_day_event(day, vec![rel(7 * 24 * 60)]);
+        let ws = Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
+        let we = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+        let triggers = ev_triggers(&[ev], &[], ws, we);
+        assert_eq!(triggers.len(), 1);
+        let local = chrono::Local.from_utc_datetime(&triggers[0].trigger_at.naive_utc());
+        assert_eq!(
+            local.date_naive(),
+            NaiveDate::from_ymd_opt(2026, 5, 13).unwrap()
+        );
+        assert_eq!(local.time(), NaiveTime::from_hms_opt(9, 0, 0).unwrap());
+    }
+
+    #[tokio::test]
+    async fn birthday_calendar_reminders_are_opt_in_and_fire_at_day_start() {
+        use crate::cache::CacheStore;
+        use crate::db::DbHandle;
+        use crate::user_prefs::UserPrefsRepo;
+        use cal_adapter_local::LocalAdapter;
+        use cal_core::{ContactsFeature, NewContact};
+        use chrono::Datelike;
+
+        let db = DbHandle::open_in_memory().expect("in-memory db");
+        let shared = db.shared();
+        let adapter = LocalAdapter::new(db.shared());
+        let cache = Arc::new(CacheStore::new(db.clone()));
+        let registry = Arc::new(AdapterRegistry::new(
+            Arc::new(plugin_core::PluginManager::new("0.1.0")),
+            Arc::new(sync_engine::test_support::FakeSecrets::default()),
+        ));
+
+        // A contact whose birthday is ~30 days out, so a "1 week before" reminder
+        // lands comfortably inside the 90-day scan horizon. Birth year 2000 (a
+        // leap year) keeps `from_ymd_opt` panic-free even on a Feb-29 anniversary.
+        let list = adapter
+            .create_contact_list("Friends", None, None)
+            .expect("create list");
+        let target = (Utc::now() + ChronoDuration::days(30))
+            .with_timezone(&chrono::Local)
+            .date_naive();
+        let bday = NaiveDate::from_ymd_opt(2000, target.month(), target.day()).unwrap();
+        adapter
+            .create_contact(
+                &list.id,
+                NewContact {
+                    display_name: "Alex".into(),
+                    given_name: None,
+                    family_name: None,
+                    organization: None,
+                    emails: vec![],
+                    phone_numbers: vec![],
+                    birthday: Some(bday),
+                    notes: None,
+                    addresses: vec![],
+                    members: None,
+                    photo: None,
+                },
+            )
+            .await
+            .expect("create contact");
+
+        let cal_id = crate::birthdays::birthday_calendar_id(&list.id);
+
+        // Opt-in: with no configured default reminders the birthday calendar
+        // fires nothing (birthday events carry none of their own).
+        let none = enumerate_birthday_triggers(&adapter, &registry, &cache, &shared).await;
+        assert!(
+            none.is_empty(),
+            "birthdays fire nothing until a default reminder is configured"
+        );
+
+        // Configure "one week before" (10080 min) for this birthday calendar.
+        UserPrefsRepo::new(&shared)
+            .set(
+                &format!("calendar.{cal_id}.defaultReminders"),
+                r#"[{"kind":{"type":"relative","minutes_before":10080}}]"#,
+            )
+            .expect("set pref");
+
+        let triggers = enumerate_birthday_triggers(&adapter, &registry, &cache, &shared).await;
+        assert!(
+            !triggers.is_empty(),
+            "a configured default reminder now fires"
+        );
+        for t in &triggers {
+            let local = chrono::Local.from_utc_datetime(&t.trigger_at.naive_utc());
+            // Fires AT the day-carryover time (default 00:00), not a clock offset.
+            assert_eq!(local.time(), NaiveTime::from_hms_opt(0, 0, 0).unwrap());
+            // …a whole 7 days before the birthday's month/day.
+            let anniversary = local.date_naive() + ChronoDuration::days(7);
+            assert_eq!(anniversary.month(), bday.month());
+            assert_eq!(anniversary.day(), bday.day());
         }
     }
 
