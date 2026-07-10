@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["A11yPagerModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.a11ypager.A11yPagerModule"]
+  }
+}
