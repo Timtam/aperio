@@ -13,10 +13,16 @@ import type {
  * locales. All four glyphs sit on a common visual spine (the circle) so the
  * user reads them as a progression rather than four unrelated symbols.
  *
- *   open        ○  empty circle
- *   in_progress ◐  half-filled circle — "started, not finished"
- *   completed   ⬤  large filled circle (U+2B24)
+ *   open        ○  empty circle (U+25CB)
+ *   in_progress ◐  half-filled circle (U+25D0) — "started, not finished"
+ *   completed   ●  filled circle (U+25CF)
  *   cancelled   ⊘  slashed circle — "abandoned / no longer pursued"
+ *
+ * All four are drawn from the same Geometric-Shapes family at a matching
+ * nominal size so they read as ONE progression. `completed` uses U+25CF
+ * (BLACK CIRCLE), the size-matched fill of the ○/◐ outline — NOT U+2B24
+ * (BLACK LARGE CIRCLE), which renders visibly oversized against the others
+ * on the mobile system fonts.
  *
  * Shared across every task surface so the symbols mean the same thing wherever
  * the user sees them.
@@ -24,7 +30,7 @@ import type {
 export function statusMarker(status: TaskStatus): string {
   switch (status) {
     case 'completed':
-      return '⬤';
+      return '●';
     case 'cancelled':
       return '⊘';
     case 'in_progress':

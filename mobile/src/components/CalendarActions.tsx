@@ -39,6 +39,7 @@ export function CalendarActions({ navigation, anchorDay }: Props) {
         accessibilityRole="button"
         accessibilityLabel={t('mobile.calendarsButtonLabel')}
         onPress={() => navigation.navigate('Calendars')}
+        hitSlop={8}
         style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
       >
         <Text style={styles.ghostButtonText}>{t('mobile.calendarsButtonLabel')}</Text>
@@ -47,6 +48,7 @@ export function CalendarActions({ navigation, anchorDay }: Props) {
         accessibilityRole="button"
         accessibilityLabel={t('dialogs.search.title')}
         onPress={() => navigation.navigate('Search')}
+        hitSlop={8}
         style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
       >
         <Text style={styles.ghostButtonText}>{t('toolbar.search')}</Text>
@@ -57,6 +59,7 @@ export function CalendarActions({ navigation, anchorDay }: Props) {
         accessibilityLabel={t('toolbar.newEvent')}
         disabled={!enabled}
         onPress={addEvent}
+        hitSlop={8}
         style={({ pressed }) => [
           styles.primaryButton,
           pressed && styles.primaryPressed,
@@ -72,8 +75,8 @@ export function CalendarActions({ navigation, anchorDay }: Props) {
 const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
     ghostButton: {
-      paddingVertical: chrome(10),
-      paddingHorizontal: chrome(13),
+      paddingVertical: chrome(6),
+      paddingHorizontal: chrome(12),
       borderRadius: 10,
       borderWidth: 1,
       borderColor: c.border,
@@ -81,8 +84,8 @@ const makeStyles = (c: ThemeColors) =>
     },
     ghostButtonText: { fontSize: 15, fontWeight: '600', color: c.link },
     primaryButton: {
-      paddingVertical: chrome(10),
-      paddingHorizontal: chrome(13),
+      paddingVertical: chrome(6),
+      paddingHorizontal: chrome(12),
       borderRadius: 10,
       backgroundColor: c.accent,
       alignItems: 'center',

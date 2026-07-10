@@ -13,7 +13,7 @@ import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import type { RootStackScreenProps } from '../navigation/types';
 import { readTaskBehaviour, writeDayViewMode } from '../state/taskBehaviour';
 import { useThemedStyles, type ThemeColors } from '../theme';
-import { chrome, chromeTouch } from '../theme/uiScale';
+import { chrome } from '../theme/uiScale';
 
 // Accessible day view — the screen-reader-first equivalent of the desktop
 // DayView. It owns only the day chrome: the Day/Week/Month/Agenda switcher,
@@ -131,6 +131,7 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
           accessibilityRole="button"
           accessibilityLabel={t('mobile.prevDay')}
           onPress={() => stepDay(-1)}
+          hitSlop={8}
           style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
         >
           <Text style={styles.navButtonText} importantForAccessibility="no">
@@ -144,6 +145,7 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
           accessibilityRole="button"
           accessibilityLabel={t('mobile.nextDay')}
           onPress={() => stepDay(1)}
+          hitSlop={8}
           style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
         >
           <Text style={styles.navButtonText} importantForAccessibility="no">
@@ -178,6 +180,7 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
           accessibilityRole="button"
           accessibilityLabel={t('mobile.today')}
           onPress={goToday}
+          hitSlop={8}
           style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
         >
           <Text style={styles.ghostButtonText}>{t('mobile.today')}</Text>
@@ -226,9 +229,12 @@ const makeStyles = (c: ThemeColors) =>
       color: c.textPrimary,
       textAlign: 'center',
     },
+    // Hug the chevron instead of a fixed 44×44 box (which left a big empty
+    // square around a narrow glyph, independent of font size). The 44pt tap
+    // target is preserved by `hitSlop` on the Pressable.
     navButton: {
-      width: chromeTouch(44),
-      height: chromeTouch(44),
+      paddingVertical: chrome(4),
+      paddingHorizontal: chrome(12),
       borderRadius: 10,
       borderWidth: 1,
       borderColor: c.border,
@@ -236,7 +242,7 @@ const makeStyles = (c: ThemeColors) =>
       justifyContent: 'center',
       backgroundColor: c.surfaceAlt,
     },
-    navButtonText: { fontSize: 26, color: c.textPrimary, lineHeight: 30 },
+    navButtonText: { fontSize: 24, color: c.textPrimary, lineHeight: 26 },
     // Wraps the jump-to-date button with the screen's horizontal padding;
     // flex-start keeps it content-width on the left.
     jumpBar: {
@@ -253,8 +259,8 @@ const makeStyles = (c: ThemeColors) =>
       alignItems: 'center',
     },
     ghostButton: {
-      paddingVertical: chrome(10),
-      paddingHorizontal: chrome(13),
+      paddingVertical: chrome(6),
+      paddingHorizontal: chrome(12),
       borderRadius: 10,
       borderWidth: 1,
       borderColor: c.border,

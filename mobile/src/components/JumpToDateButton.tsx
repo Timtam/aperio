@@ -47,6 +47,7 @@ export function JumpToDateButton({
         accessibilityRole="button"
         accessibilityLabel={label}
         onPress={openPicker}
+        hitSlop={8}
         style={({ pressed }) => [styles.button, pressed && styles.pressed]}
       >
         <Text style={styles.buttonText}>{label}</Text>
@@ -96,8 +97,8 @@ const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
     // Matches the calendar toolbars' ghost buttons so it reads as one of them.
     button: {
-      paddingVertical: chrome(10),
-      paddingHorizontal: chrome(13),
+      paddingVertical: chrome(6),
+      paddingHorizontal: chrome(12),
       borderRadius: 10,
       borderWidth: 1,
       borderColor: c.border,

@@ -22,7 +22,7 @@ import type { RootStackScreenProps } from '../navigation/types';
 import { useCacheReload } from '../state/cacheObserver';
 import { useCalendarVisibility } from '../state/calendarVisibility';
 import { useThemedStyles, type ThemeColors } from '../theme';
-import { chrome, chromeTouch } from '../theme/uiScale';
+import { chrome } from '../theme/uiScale';
 
 // Accessible Year view — the screen-reader-first port of the desktop YearView.
 // The desktop's 12×31 mini-grid is a purely visual navigation aid; the faithful
@@ -155,6 +155,7 @@ export default function YearScreen({ navigation, route }: RootStackScreenProps<'
           accessibilityRole="button"
           accessibilityLabel={t('toolbar.prev')}
           onPress={() => setYear((y) => y - 1)}
+          hitSlop={8}
           style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
         >
           <Text style={styles.navButtonText} importantForAccessibility="no">
@@ -168,6 +169,7 @@ export default function YearScreen({ navigation, route }: RootStackScreenProps<'
           accessibilityRole="button"
           accessibilityLabel={t('toolbar.next')}
           onPress={() => setYear((y) => y + 1)}
+          hitSlop={8}
           style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
         >
           <Text style={styles.navButtonText} importantForAccessibility="no">
@@ -181,6 +183,7 @@ export default function YearScreen({ navigation, route }: RootStackScreenProps<'
           accessibilityRole="button"
           accessibilityLabel={t('mobile.today')}
           onPress={() => setYear(new Date().getFullYear())}
+          hitSlop={8}
           style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
         >
           <Text style={styles.ghostButtonText}>{t('mobile.today')}</Text>
@@ -248,9 +251,12 @@ const makeStyles = (c: ThemeColors) =>
       color: c.textPrimary,
       textAlign: 'center',
     },
+    // Hug the chevron instead of a fixed 44×44 box (which left a big empty
+    // square around a narrow glyph, independent of font size). The 44pt tap
+    // target is preserved by `hitSlop` on the Pressable.
     navButton: {
-      width: chromeTouch(44),
-      height: chromeTouch(44),
+      paddingVertical: chrome(4),
+      paddingHorizontal: chrome(12),
       borderRadius: 10,
       borderWidth: 1,
       borderColor: c.border,
@@ -258,11 +264,11 @@ const makeStyles = (c: ThemeColors) =>
       justifyContent: 'center',
       backgroundColor: c.surfaceAlt,
     },
-    navButtonText: { fontSize: 26, color: c.textPrimary, lineHeight: 30 },
+    navButtonText: { fontSize: 24, color: c.textPrimary, lineHeight: 26 },
     actionBar: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, padding: 12, alignItems: 'center' },
     ghostButton: {
-      paddingVertical: chrome(10),
-      paddingHorizontal: chrome(13),
+      paddingVertical: chrome(6),
+      paddingHorizontal: chrome(12),
       borderRadius: 10,
       borderWidth: 1,
       borderColor: c.border,
