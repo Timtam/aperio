@@ -3,23 +3,33 @@ import {
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  Platform,
   ScrollView,
   StyleSheet,
   View,
 } from 'react-native';
 
-// Horizontal swipe-to-page wrapper for the calendar views — gives VoiceOver's
-// three-finger swipe (the system scroll gesture, which Apple Calendar maps to
-// month/week/day paging) something to page, and lets sighted users flick
-// horizontally too.
+import { A11yPagerView } from '../../modules/a11y-pager';
+import { useScreenReaderEnabled } from '../a11y/useScreenReaderEnabled';
+
+// Horizontal swipe-to-page wrapper for the calendar views — lets users flick
+// horizontally between periods.
 //
-// It's a pagingEnabled horizontal ScrollView with THREE full-size pages: empty
-// spacers either side of the live content (the middle). A horizontal swipe
-// lands on a spacer → we shift the period (onPrev / onNext) and snap straight
-// back to the middle, so paging feels "infinite". Only the middle renders
-// content, so there's no triple data-load; the spacers are hidden from the
-// reader. Vertical scrolling is a different axis, so the inner content's own
-// list keeps scrolling up/down.
+// SIGHTED path: a horizontal ScrollView with THREE full-size pages — empty
+// spacers either side of the live content (the middle). A horizontal swipe lands
+// on a spacer → we shift the period (onPrev / onNext) and snap straight back to
+// the middle, so paging feels "infinite". Only the middle renders content, so
+// there's no triple data-load. Vertical scrolling is a different axis, so the
+// inner content's own list keeps scrolling up/down.
+//
+// VOICEOVER path (iOS): that three-page ScrollView is wrong under VoiceOver — a
+// three-finger swipe scrolls onto a spacer, which makes iOS announce
+// "page 1 of 3 / 3 of 3" and throws focus onto the hidden spacer (out of the
+// view). Instead we wrap the content in the native `A11yPagerView`, which
+// intercepts the three-finger swipe (`accessibilityScroll:`), pages via onPage,
+// and suppresses the page announcement — the screen announces the new period.
+// TalkBack (Android) has no such gesture / announcement, so there we just render
+// the content directly and page with the toolbar ‹ / › buttons.
 
 export function CalendarPager({
   onPrev,
@@ -32,6 +42,25 @@ export function CalendarPager({
 }) {
   const ref = useRef<ScrollView>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
+  const screenReader = useScreenReaderEnabled();
+
+  if (screenReader) {
+    // iOS: the native pager turns a three-finger swipe into onPrev/onNext with
+    // no page announcement + no focus loss. Elsewhere, render content directly.
+    if (Platform.OS === 'ios') {
+      return (
+        <A11yPagerView
+          style={styles.flex}
+          onPage={(e) =>
+            e.nativeEvent.direction === 'next' ? onNext() : onPrev()
+          }
+        >
+          {children}
+        </A11yPagerView>
+      );
+    }
+    return <View style={styles.flex}>{children}</View>;
+  }
 
   const centerNow = (w: number) => {
     if (w > 0) ref.current?.scrollTo({ x: w, y: 0, animated: false });
