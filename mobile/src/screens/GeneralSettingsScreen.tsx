@@ -12,6 +12,7 @@ import {
   writeLanguageChoice,
   type LanguageChoice,
 } from '../settings/language';
+import { readStartOnToday, writeStartOnToday } from '../settings/startOnToday';
 import { readWeekStart, writeWeekStart, type WeekStart } from '../settings/weekStart';
 import { useAppBadgePref } from '../state/appBadge';
 import { useBackgroundSyncPref } from '../state/backgroundSync';
@@ -37,6 +38,10 @@ export default function GeneralSettingsScreen() {
   // like week-start, so it lives here (the mobile twin of the desktop Calendars
   // panel's setting), not under Tasks. Also switchable from the calendar toolbar.
   const [dayViewMode, setDayViewMode] = useState<'grid' | 'list'>('grid');
+  // Synced: open every view on today at launch instead of the last-opened day
+  // (default off). Takes effect on the NEXT launch (App.tsx reads it during the
+  // nav-state restore), so toggling it doesn't move the current view.
+  const [startOnToday, setStartOnToday] = useState(false);
   // The global default reminder sound (§14.4 root). System/Silent only on mobile
   // — Custom needs an asset store the host lacks; a custom value synced from
   // desktop still round-trips and is shown read-only by SoundSelect.
@@ -58,8 +63,14 @@ export default function GeneralSettingsScreen() {
       void readLanguageChoice().then(setLanguage);
       void readWeekStart().then(setWeekStart);
       void readTaskBehaviour().then((b) => setDayViewMode(b.dayViewMode));
+      void readStartOnToday().then(setStartOnToday);
     }, []),
   );
+
+  const onStartOnTodayChange = useCallback((next: boolean) => {
+    setStartOnToday(next);
+    void writeStartOnToday(next);
+  }, []);
 
   const onLanguageChange = useCallback((next: LanguageChoice) => {
     setLanguage(next);
@@ -118,6 +129,12 @@ export default function GeneralSettingsScreen() {
         <Text style={styles.hint} accessibilityRole="text">
           {t('dialogs.settings.general.weekStartHint')}
         </Text>
+        <SwitchRow
+          label={t('dialogs.settings.general.startOnTodayLabel')}
+          hint={t('dialogs.settings.general.startOnTodayHint')}
+          value={startOnToday}
+          onToggle={() => onStartOnTodayChange(!startOnToday)}
+        />
       </View>
 
       <View style={styles.section}>

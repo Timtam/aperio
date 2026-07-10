@@ -19,6 +19,7 @@ import { useCacheUpdates } from './state/cacheObserver';
 import { SyncStatusContext } from './state/syncStatusContext';
 import { ThemeProvider, useTheme, navigationThemeFor } from './theme';
 import { loadThemeModePref } from './theme/themeMode';
+import { readStartOnToday } from './settings/startOnToday';
 import { navigationRef } from './navigation/navigationRef';
 import type { RootStackParamList, RootTabParamList } from './navigation/types';
 import { useReminderTriggers } from './reminders/scheduler';
@@ -117,6 +118,30 @@ function deepestRouteName(
   const index = state.index ?? state.routes.length - 1;
   const route = state.routes[index];
   return route.state ? deepestRouteName(route.state) : route.name;
+}
+
+/** Rewrite every restored route's `anchor` param to today's ISO (recursing
+ *  into nested navigators), keeping route names + all other params intact.
+ *  Backs the "start on today" pref: the app reopens on the same view/tab but
+ *  centred on today. Screens seed their day from `route.params.anchor`, so
+ *  overwriting it is all that's needed. */
+function seedAnchorsToToday(
+  state: PartialState<NavigationState>,
+): PartialState<NavigationState> {
+  const todayIso = new Date().toISOString();
+  return {
+    ...state,
+    routes: state.routes.map((route) => {
+      const params = route.params as Record<string, unknown> | undefined;
+      return {
+        ...route,
+        ...(params && 'anchor' in params
+          ? { params: { ...params, anchor: todayIso } }
+          : {}),
+        ...(route.state ? { state: seedAnchorsToToday(route.state) } : {}),
+      };
+    }),
+  };
 }
 
 function TasksStackNav() {
@@ -448,12 +473,20 @@ function AppContent() {
     // Load the device-local theme choice alongside the nav state: both gate
     // `navReady`, so a pinned theme is resolved BEFORE the first visible
     // frame (the splash screen covers the wait) instead of racing it and
-    // flashing the system palette on cold start.
-    const navRestore = AsyncStorage.getItem(NAV_STATE_KEY)
-      .then((saved) => {
+    // flashing the system palette on cold start. The synced start-on-today
+    // pref joins them so, when on, the restored views open on today.
+    const navRestore = Promise.all([
+      AsyncStorage.getItem(NAV_STATE_KEY),
+      readStartOnToday(),
+    ])
+      .then(([saved, startToday]) => {
         if (cancelled || saved == null) return;
         try {
-          const parsed = JSON.parse(saved) as PartialState<NavigationState>;
+          let parsed = JSON.parse(saved) as PartialState<NavigationState>;
+          // Start-on-today: keep WHICH view/tab was open, but reset its date to
+          // today by rewriting every restored route's `anchor` param (screens
+          // seed their day from it). Off (default) restores the last day as-is.
+          if (startToday) parsed = seedAnchorsToToday(parsed);
           setInitialNavState(parsed);
           // onStateChange does NOT fire for a restored initialState, so compute
           // the tab-bar visibility from it here — otherwise relaunching the app

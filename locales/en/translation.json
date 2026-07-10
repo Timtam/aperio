@@ -481,6 +481,8 @@
         "viewsHeading": "Views",
         "weekStartLabel": "First day of the week",
         "weekStartHint": "Sets which weekday the week and month views start on. Calendar week numbers stay ISO 8601 (Monday-based).",
+        "startOnTodayLabel": "Open on today at launch",
+        "startOnTodayHint": "When on, every calendar view opens on today each time you start the app, instead of the day you last had open. Synced across your devices.",
         "appearanceHeading": "Appearance",
         "fontSizeLabel": "Font size",
         "fontSizeHint": "Scales the whole interface — text and spacing alike. Default 100%, stored on this device only.",

@@ -478,6 +478,8 @@
         "viewsHeading": "Ansichten",
         "weekStartLabel": "Wochenanfang",
         "weekStartHint": "Bestimmt, mit welchem Wochentag die Wochen- und Monatsansicht beginnt. Kalenderwochen werden weiterhin nach ISO 8601 (Montag) berechnet.",
+        "startOnTodayLabel": "Beim Start heutiges Datum anzeigen",
+        "startOnTodayHint": "Wenn aktiv, öffnet jede Kalenderansicht bei jedem App-Start auf dem heutigen Tag statt auf dem zuletzt geöffneten. Wird zwischen deinen Geräten synchronisiert.",
         "appearanceHeading": "Darstellung",
         "fontSizeLabel": "Schriftgröße",
         "fontSizeHint": "Skaliert die gesamte Oberfläche — Text und Abstände. Standard 100 %, wird nur auf diesem Gerät gespeichert.",
