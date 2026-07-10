@@ -55,6 +55,36 @@ describe('ViewStateProvider', () => {
     );
     expect(screen.getByTestId('view').textContent).toBe('week');
   });
+
+  it('restores the last-opened day when start-on-today is off (default)', () => {
+    localStorage.setItem(
+      'aperio.view.v1',
+      JSON.stringify({ anchor: '2020-03-10T00:00:00Z', startOnToday: false }),
+    );
+    render(
+      <ViewStateProvider>
+        <Probe />
+      </ViewStateProvider>,
+    );
+    expect(screen.getByTestId('anchor').textContent).toContain('2020-03-10');
+  });
+
+  it('seeds today at launch when start-on-today is on, ignoring the saved day', () => {
+    localStorage.setItem(
+      'aperio.view.v1',
+      JSON.stringify({ anchor: '2020-03-10T00:00:00Z', startOnToday: true }),
+    );
+    render(
+      <ViewStateProvider>
+        <Probe />
+      </ViewStateProvider>,
+    );
+    // The stale saved day is discarded — the anchor is today, not 2020.
+    // Compare LOCAL dates (the anchor is local midnight; a UTC-string compare
+    // would drift a day in positive-offset zones).
+    const iso = screen.getByTestId('anchor').textContent ?? '';
+    expect(new Date(iso).toDateString()).toBe(new Date().toDateString());
+  });
 });
 
 describe('useViewShortcuts', () => {

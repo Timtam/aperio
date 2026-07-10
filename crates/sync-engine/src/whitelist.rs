@@ -24,6 +24,9 @@ pub const SYNC_WHITELIST: &[&str] = &[
     "view.preferred",
     "view.weekStart",
     "view.weekNumbers",
+    // On app launch, seed every view to today instead of restoring the
+    // last-opened day (default off — restore).
+    "view.startOnToday",
     // Backlog column width in the week/month planner — a layout choice the
     // user wants kept consistent across devices.
     "backlog.width",
@@ -97,6 +100,12 @@ mod tests {
     #[test]
     fn backlog_width_syncs() {
         assert!(is_synced_key("backlog.width"));
+    }
+
+    #[test]
+    fn view_defaults_sync() {
+        assert!(is_synced_key("view.weekStart"));
+        assert!(is_synced_key("view.startOnToday"));
     }
 
     #[test]

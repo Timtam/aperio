@@ -31,6 +31,15 @@ export interface ViewStateValue {
    */
   weekStartsOn: WeekStart;
   setWeekStartsOn: (d: WeekStart) => void;
+  /**
+   * When on, every view opens on TODAY at each app launch instead of
+   * restoring the last-opened day. A synced user preference
+   * (`view.startOnToday`); defaults to off (restore last day). Only the
+   * launch seed is affected — navigating away during the session works
+   * normally.
+   */
+  startOnToday: boolean;
+  setStartOnToday: (v: boolean) => void;
 }
 
 export const ViewStateContext = createContext<ViewStateValue | null>(null);
