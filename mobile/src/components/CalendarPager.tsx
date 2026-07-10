@@ -8,18 +8,25 @@ import {
   View,
 } from 'react-native';
 
-// Horizontal swipe-to-page wrapper for the calendar views — gives VoiceOver's
-// three-finger swipe (the system scroll gesture, which Apple Calendar maps to
-// month/week/day paging) something to page, and lets sighted users flick
-// horizontally too.
+import { useScreenReaderEnabled } from '../a11y/useScreenReaderEnabled';
+
+// Horizontal swipe-to-page wrapper for the calendar views — lets SIGHTED users
+// flick horizontally between periods.
 //
-// It's a pagingEnabled horizontal ScrollView with THREE full-size pages: empty
-// spacers either side of the live content (the middle). A horizontal swipe
-// lands on a spacer → we shift the period (onPrev / onNext) and snap straight
-// back to the middle, so paging feels "infinite". Only the middle renders
-// content, so there's no triple data-load; the spacers are hidden from the
-// reader. Vertical scrolling is a different axis, so the inner content's own
+// It's a horizontal ScrollView with THREE full-size pages: empty spacers either
+// side of the live content (the middle). A horizontal swipe lands on a spacer →
+// we shift the period (onPrev / onNext) and snap straight back to the middle, so
+// paging feels "infinite". Only the middle renders content, so there's no triple
+// data-load. Vertical scrolling is a different axis, so the inner content's own
 // list keeps scrolling up/down.
+//
+// This is DISABLED under a screen reader: VoiceOver's three-finger swipe scrolls
+// the pager onto a spacer page, which (a) makes iOS announce "page 1 of 3 / 3 of
+// 3" and (b) throws the reader's focus onto the hidden spacer — out of the view,
+// so the user can't swipe again. A screen-reader user pages instead with the
+// toolbar's ‹ / › buttons, which are focus-stable (focus stays on the button for
+// rapid repeat taps) and announce the new period. So when a reader is on we
+// render the content directly, with no scroll wrapper.
 
 export function CalendarPager({
   onPrev,
@@ -32,6 +39,13 @@ export function CalendarPager({
 }) {
   const ref = useRef<ScrollView>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
+  const screenReader = useScreenReaderEnabled();
+
+  // Screen reader on → skip the swipe pager entirely (see the note above);
+  // the accessible toolbar ‹ / › buttons drive paging instead.
+  if (screenReader) {
+    return <View style={styles.flex}>{children}</View>;
+  }
 
   const centerNow = (w: number) => {
     if (w > 0) ref.current?.scrollTo({ x: w, y: 0, animated: false });
