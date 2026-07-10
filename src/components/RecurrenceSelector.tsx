@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { RecurrenceCapabilities, RecurrenceFreq } from '../api/types';
@@ -139,6 +139,26 @@ export function RecurrenceSelector({
   const selectedOptionKey = monthlyOptionKey(rule);
   const intervalEnabled = intervalSupported(rule.freq, caps);
 
+  // The interval field keeps its OWN draft text so the user can clear it
+  // mid-edit — binding straight to `rule.interval` (a number) snapped an
+  // emptied field back to 1, forcing "type the new digit first, then delete
+  // the old" (which silently produced e.g. "every 13 weeks"). We only push a
+  // number up to the rule when the draft parses to a valid one; an empty /
+  // invalid draft leaves the last valid value in place and restores it on
+  // blur. Resync from the rule whenever IT changes (freq switch, caps clamp,
+  // external edit).
+  const [intervalText, setIntervalText] = useState(String(rule.interval));
+  useEffect(() => {
+    setIntervalText(String(rule.interval));
+  }, [rule.interval]);
+  const commitInterval = (text: string) => {
+    setIntervalText(text);
+    const n = Number.parseInt(text, 10);
+    if (Number.isFinite(n) && n >= 1) {
+      update({ ...rule, interval: Math.min(365, n) });
+    }
+  };
+
   // Locale-aware weekday / month names for the option labels — reuse
   // the browser's Intl rather than carrying a full weekday/month
   // dictionary in the i18n files (the app already leans on Intl for
@@ -227,14 +247,10 @@ export function RecurrenceSelector({
               type="number"
               min={1}
               max={365}
-              value={rule.interval}
+              value={intervalText}
               disabled={!intervalEnabled}
-              onChange={(e) =>
-                update({
-                  ...rule,
-                  interval: Math.max(1, Number(e.target.value) || 1),
-                })
-              }
+              onChange={(e) => commitInterval(e.target.value)}
+              onBlur={() => setIntervalText(String(rule.interval))}
             />
             {!intervalEnabled && (
               <span className="form__hint recurrence__unsupported">

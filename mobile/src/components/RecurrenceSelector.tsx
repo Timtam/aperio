@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -120,6 +120,24 @@ export function RecurrenceSelector({
 
   const update = (next: ParsedRule) => onChange(buildRRule(next));
 
+  // Draft text for the interval field so the user can CLEAR it mid-edit —
+  // binding straight to `rule.interval` snapped an emptied field back to 1,
+  // forcing "type the new digit first, then delete the old" (which silently
+  // gave e.g. every-13-weeks). Push a number up only when the draft parses to
+  // a valid one; an empty/invalid draft keeps the last value and restores it
+  // on blur. Resync when the model changes (freq switch, caps clamp).
+  const [intervalText, setIntervalText] = useState(String(rule.interval));
+  useEffect(() => {
+    setIntervalText(String(rule.interval));
+  }, [rule.interval]);
+  const commitInterval = (text: string) => {
+    setIntervalText(text);
+    const n = Number.parseInt(text, 10);
+    if (Number.isFinite(n) && n >= 1) {
+      update({ ...rule, interval: Math.min(365, n) });
+    }
+  };
+
   const isMonthlyish = rule.freq === 'MONTHLY' || rule.freq === 'YEARLY';
   // Relative ("third Wednesday") is gated per-frequency; an explicit
   // day-of-month is gated by its own axis (Vikunja can't store one).
@@ -189,8 +207,9 @@ export function RecurrenceSelector({
                 styles.input,
                 !intervalSupported(rule.freq, caps) && styles.inputDisabled,
               ]}
-              value={String(rule.interval)}
-              onChangeText={(v) => update({ ...rule, interval: clampInt(v, 1, 365) })}
+              value={intervalText}
+              onChangeText={commitInterval}
+              onBlur={() => setIntervalText(String(rule.interval))}
               editable={intervalSupported(rule.freq, caps)}
               keyboardType="number-pad"
               accessibilityLabel={t('dialogs.event.recurrence.intervalLabel', {
