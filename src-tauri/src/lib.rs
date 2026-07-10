@@ -357,6 +357,9 @@ pub fn run() {
     // them via Tauri's State. Both handles point at the same
     // registry instance.
     let registry_for_scheduler = Arc::clone(&registry);
+    // The scheduler also reads the external-contacts snapshot cache to
+    // synthesise birthday-calendar reminders — same Arc-sharing pattern.
+    let cache_for_scheduler = Arc::clone(&cache_store);
     // Phase 10j: same Arc-sharing pattern for the contact sync
     // scheduler. A second clone lives in the background task; the
     // primary Arc keeps living inside Tauri State so the
@@ -747,6 +750,7 @@ pub fn run() {
             let scheduler = ReminderScheduler::spawn(
                 db_for_scheduler.clone(),
                 Arc::clone(&registry_for_scheduler),
+                Arc::clone(&cache_for_scheduler),
                 sounds_dir_for_scheduler.clone(),
                 audio_for_scheduler.clone(),
                 app.handle().clone(),

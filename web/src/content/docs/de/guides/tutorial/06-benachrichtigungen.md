@@ -26,6 +26,26 @@ In der Benachrichtigung kannst du:
 - oder **später erinnern** (Snooze) – die Erinnerung kommt nach der
   gewählten Zeit erneut.
 
+## Standard-Erinnerungen pro Kalender
+
+Neben den Erinnerungen an einzelnen Einträgen kannst du **Standard-Erinnerungen
+pro Kalender** festlegen. Sie greifen für Termine dieses Kalenders, die keine
+eigene Erinnerung mitbringen – nützlich etwa für abonnierte oder externe
+Kalender, deren Einträge ohne Alarm ankommen. Unter **Einstellungen → Kalender**
+wählst du einen Kalender und legst dort seine Standard-Erinnerungen fest.
+
+### Ganztägige Termine und Geburtstage
+
+Ganztägige Termine haben keine Uhrzeit, daher wird eine Erinnerung nicht „eine
+Stunde vorher" (also am Vorabend) ausgelöst, sondern **zum Tageswechsel** – zur
+selben Zeit wie deine Tages-Erinnerungen. Ein Vorlauf zählt dabei in ganzen
+**Tagen**: „1 Woche vorher" feuert sieben Tage früher zum Tageswechsel.
+
+Das gilt auch für die automatisch erzeugten **Geburtstagskalender**.
+Standardmäßig lösen sie keine Erinnerung aus; unter **Einstellungen → Kalender**
+(auf dem Handy über **Erinnerungen** in der Kalenderliste) kannst du ihnen eine
+Standard-Erinnerung geben, z. B. „1 Woche vorher".
+
 ## Benachrichtigungstöne
 
 Du kannst festlegen, welchen Ton eine Erinnerung abspielt – auf mehreren

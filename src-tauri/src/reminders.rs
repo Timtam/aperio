@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use cal_adapter_local::SharedConn;
+use cal_adapter_local::{LocalAdapter, SharedConn};
 use cal_core::SoundSource;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use tauri::{AppHandle, Runtime};
@@ -31,13 +31,14 @@ use tokio::sync::Notify;
 use tracing::{info, warn};
 
 use crate::audio::AudioPlayer;
+use crate::cache::CacheStore;
 use crate::registry::AdapterRegistry;
 // Trigger enumeration + the shared types it produces. Re-exported so existing
 // `crate::reminders::{Trigger, ItemKind, UpcomingReminder}` references (and the
 // `get_upcoming_reminders` command) keep resolving.
 use host_core::reminders::{
-    catchup_eligible, enumerate_app_start_triggers, enumerate_external_triggers,
-    enumerate_local_triggers, CATCH_UP_GRACE,
+    catchup_eligible, enumerate_app_start_triggers, enumerate_birthday_triggers,
+    enumerate_external_triggers, enumerate_local_triggers, CATCH_UP_GRACE,
 };
 pub use host_core::reminders::{ItemKind, Trigger, UpcomingReminder};
 
@@ -61,6 +62,10 @@ struct ExternalTriggerCache {
 pub struct ReminderScheduler {
     db: SharedConn,
     registry: Arc<AdapterRegistry>,
+    /// Snapshot cache for external contact books — read (never network-fetched)
+    /// when synthesising birthday-calendar reminders. See
+    /// [`enumerate_birthday_triggers`].
+    cache: Arc<CacheStore>,
     invalidate: Arc<Notify>,
     fired: Arc<Mutex<HashSet<FiredKey>>>,
     external_cache: Arc<Mutex<Option<ExternalTriggerCache>>>,
@@ -89,6 +94,7 @@ impl ReminderScheduler {
     pub fn spawn<R: Runtime>(
         db: SharedConn,
         registry: Arc<AdapterRegistry>,
+        cache: Arc<CacheStore>,
         sounds_dir: PathBuf,
         audio: AudioPlayer,
         app: AppHandle<R>,
@@ -96,6 +102,7 @@ impl ReminderScheduler {
         let scheduler = Arc::new(Self {
             db,
             registry,
+            cache,
             invalidate: Arc::new(Notify::new()),
             fired: Arc::new(Mutex::new(HashSet::new())),
             external_cache: Arc::new(Mutex::new(None)),
@@ -260,7 +267,15 @@ impl ReminderScheduler {
                 }
             }
         }
-        let fresh = enumerate_external_triggers(&self.registry, &self.db).await;
+        let mut fresh = enumerate_external_triggers(&self.registry, &self.db).await;
+        // Synthetic birthday calendars aren't adapters, so the external fan-out
+        // above skips them. Fold their configured default reminders in here so
+        // they share the same TTL cache (and the same
+        // `invalidate_external_cache` after a "Standard-Hinweise" change).
+        let local = LocalAdapter::new(self.db.clone());
+        fresh.extend(
+            enumerate_birthday_triggers(&local, &self.registry, &self.cache, &self.db).await,
+        );
         let mut guard = self.external_cache.lock().expect("external cache poison");
         *guard = Some(ExternalTriggerCache {
             fetched_at: Instant::now(),

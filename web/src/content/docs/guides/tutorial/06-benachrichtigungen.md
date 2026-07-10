@@ -25,6 +25,26 @@ In the notification you can:
 - **dismiss** the reminder (acknowledge it),
 - or **snooze** it – the reminder returns after the chosen time.
 
+## Per-calendar default reminders
+
+Besides the reminders on individual entries, you can set **default reminders per
+calendar**. They apply to events in that calendar that carry no reminder of
+their own – handy for subscribed or external calendars whose entries arrive
+without an alarm. Under **Settings → Calendars**, pick a calendar and set its
+default reminders there.
+
+### All-day events and birthdays
+
+All-day events have no time of day, so a reminder isn't fired "one hour before"
+(i.e. the previous evening) but **at the day-carryover time** – the same time as
+your day-start reminders. A lead time counts in whole **days**: "1 week before"
+fires seven days earlier at the day-carryover time.
+
+The same applies to the automatically generated **birthday calendars**. By
+default they fire no reminder; under **Settings → Calendars** (on the phone via
+**Reminders** in the calendar list) you can give them a default reminder, e.g.
+"1 week before".
+
 ## Notification sounds
 
 You can choose which sound a reminder plays, on several levels — each one

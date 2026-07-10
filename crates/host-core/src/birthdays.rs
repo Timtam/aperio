@@ -21,7 +21,7 @@
 use std::sync::Arc;
 
 use cal_core::{Calendar, ColorSource, Contact, ContactsFeature, ContainerColor, DateRange, Event};
-use chrono::{Datelike, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Utc};
 
 use crate::cache::CacheStore;
 use crate::registry::{AdapterRegistry, LOCAL_ID};
@@ -72,6 +72,27 @@ pub fn synthesise_calendar(contact_list_id: &str, list_name: &str) -> Calendar {
     }
 }
 
+/// The UTC instant for an all-day birthday on `date`: LOCAL midnight converted
+/// to UTC. This is the convention EVERY other all-day event uses — the CalDAV
+/// and local-editor paths store all-day starts as local-midnight-as-UTC — so a
+/// birthday renders on, and fires reminders for, the correct local day in every
+/// timezone. Storing literal UTC-midnight instead placed the birthday a day
+/// early for every viewer west of UTC (the whole of the Americas), both in the
+/// calendar grid and in the all-day reminder anchor. A local midnight that
+/// doesn't exist (a DST spring-forward gap — e.g. the historical midnight
+/// transitions some zones used) falls back to UTC-midnight so the occurrence is
+/// never dropped. Generic over the zone purely so tests can pin a fixed offset;
+/// production always passes `chrono::Local`.
+fn birthday_start_instant<Tz: TimeZone>(date: NaiveDate, tz: &Tz) -> Option<DateTime<Utc>> {
+    let midnight = date.and_hms_opt(0, 0, 0)?;
+    Some(
+        tz.from_local_datetime(&midnight)
+            .earliest()
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|| Utc.from_utc_datetime(&midnight)),
+    )
+}
+
 /// Materialise one all-day event per (contact, occurrence-year) overlapping
 /// `range`. Yearly expansion in-place (rather than an RRULE master) so the rest
 /// of the codebase — chip rendering, ARIA labels, navigation — doesn't have to
@@ -99,10 +120,9 @@ pub fn events_for_contacts(
             let Some(date) = NaiveDate::from_ymd_opt(year, bday.month(), bday.day()) else {
                 continue;
             };
-            let Some(midnight) = date.and_hms_opt(0, 0, 0) else {
+            let Some(start) = birthday_start_instant(date, &chrono::Local) else {
                 continue;
             };
-            let start = Utc.from_utc_datetime(&midnight);
             // All-day events span midnight-to-midnight (the existing convention);
             // the end is start + 1 day.
             let end = start + chrono::Duration::days(1);
@@ -321,6 +341,23 @@ mod tests {
             .collect();
         assert!(years.contains(&"2024".to_string()));
         assert!(years.contains(&"2026".to_string()));
+    }
+
+    #[test]
+    fn birthday_start_instant_lands_on_the_local_day_west_of_utc() {
+        // The regression guard for the "one day early west of UTC" bug: a
+        // birthday must resolve to LOCAL midnight, so its LOCAL date is the
+        // birthday's own date in EVERY zone — not UTC midnight, which reads back
+        // as the previous day anywhere with a negative offset. FixedOffset makes
+        // this deterministic regardless of the test machine's timezone (CI runs
+        // UTC, where the bug is invisible).
+        let west = chrono::FixedOffset::west_opt(5 * 3600).unwrap(); // e.g. New York (UTC−5)
+        let date = NaiveDate::from_ymd_opt(2026, 5, 20).unwrap();
+        let start = birthday_start_instant(date, &west).unwrap();
+        // Local-midnight-as-UTC in UTC−5 is 05:00Z; the key assertion is the
+        // round-trip: converted back to that zone, it's the birthday's own day.
+        assert_eq!(start.with_timezone(&west).date_naive(), date);
+        assert_eq!(start, Utc.with_ymd_and_hms(2026, 5, 20, 5, 0, 0).unwrap());
     }
 
     #[test]

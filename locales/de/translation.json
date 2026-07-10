@@ -82,6 +82,8 @@
     "calendarRenamed": "Kalender umbenannt in „{{name}}“.",
     "deleteCalendarMessage": "„{{name}}“ löschen? Die zugehörigen Termine werden ebenfalls entfernt.",
     "manageCalendar": "Verwalten",
+    "birthdayCalendarReminders": "Erinnerungen",
+    "birthdayCalendarRemindersHint": "Standard-Erinnerungen für diesen Geburtstagskalender – zum Beispiel eine Woche vorher. Geburtstage sind ganztägig, daher wird eine Erinnerung zum Tagesbeginn ausgelöst statt am Abend zuvor.",
     "duplicate": "Duplizieren",
     "addSubtask": "Unteraufgabe hinzufügen",
     "plan": "Einplanen",

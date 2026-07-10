@@ -82,6 +82,8 @@
     "calendarRenamed": "Calendar renamed to \"{{name}}\".",
     "deleteCalendarMessage": "Delete \"{{name}}\"? Its events are removed too.",
     "manageCalendar": "Manage",
+    "birthdayCalendarReminders": "Reminders",
+    "birthdayCalendarRemindersHint": "Default reminders for this birthday calendar — for example one week before. Birthdays are all-day, so a reminder fires at the start of the day rather than the night before.",
     "duplicate": "Duplicate",
     "addSubtask": "Add subtask",
     "plan": "Plan",

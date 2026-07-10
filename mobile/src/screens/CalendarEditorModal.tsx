@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 
-import type { ColorLabel } from '@aperio/shared';
+import { isBirthdayCalendarId, type ColorLabel } from '@aperio/shared';
 
 import { Calendar, deleteCalendar, listCalendars } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
@@ -95,6 +95,12 @@ export default function CalendarEditorModal({
   }, [reload]);
 
   const isLocal = calendar?.account_id === 'local';
+  // Synthetic birthday calendars have no backing row: rename/colour/delete
+  // don't apply, so the editor reduces to just their default reminders (+ the
+  // container sound). Those DO fire — the Host's reminder scan reads this
+  // calendar's `defaultReminders` and, being all-day, anchors them to the
+  // day-carryover time (e.g. "one week before" → 7 days earlier at day-start).
+  const isBirthday = isBirthdayCalendarId(calendarId);
 
   const renameCalendar = useCallback(async () => {
     if (busy || calendar == null) return;
@@ -208,39 +214,52 @@ export default function CalendarEditorModal({
         </Text>
       )}
 
-      {/* Rename */}
-      <Text style={styles.heading} accessibilityRole="header">
-        {t('mobile.renameCalendarLabel')}
-      </Text>
-      <View style={styles.addRow}>
-        <TextInput
-          style={styles.input}
-          value={renameText}
-          onChangeText={setRenameText}
-          accessibilityLabel={t('mobile.renameCalendarLabel')}
-          editable={!busy}
-          returnKeyType="done"
-          onSubmitEditing={() => void renameCalendar()}
-        />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ disabled: busy }}
-          accessibilityLabel={t('mobile.rename')}
-          disabled={busy}
-          onPress={() => void renameCalendar()}
-          style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}
-        >
-          <Text style={styles.addButtonText}>{t('mobile.rename')}</Text>
-        </Pressable>
-      </View>
+      {/* A birthday calendar is synthesised + read-only: skip rename/colour
+          (they'd no-op) and lead with a short hint that this screen just holds
+          its default reminders. */}
+      {isBirthday && (
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('mobile.birthdayCalendarRemindersHint')}
+        </Text>
+      )}
 
-      {/* Colour */}
-      <ColorLabelSelect
-        value={colorLabel}
-        labels={colorLabels}
-        onChange={(id) => void setColour(id)}
-        disabled={busy}
-      />
+      {/* Rename */}
+      {!isBirthday && (
+        <>
+          <Text style={styles.heading} accessibilityRole="header">
+            {t('mobile.renameCalendarLabel')}
+          </Text>
+          <View style={styles.addRow}>
+            <TextInput
+              style={styles.input}
+              value={renameText}
+              onChangeText={setRenameText}
+              accessibilityLabel={t('mobile.renameCalendarLabel')}
+              editable={!busy}
+              returnKeyType="done"
+              onSubmitEditing={() => void renameCalendar()}
+            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: busy }}
+              accessibilityLabel={t('mobile.rename')}
+              disabled={busy}
+              onPress={() => void renameCalendar()}
+              style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}
+            >
+              <Text style={styles.addButtonText}>{t('mobile.rename')}</Text>
+            </Pressable>
+          </View>
+
+          {/* Colour */}
+          <ColorLabelSelect
+            value={colorLabel}
+            labels={colorLabels}
+            onChange={(id) => void setColour(id)}
+            disabled={busy}
+          />
+        </>
+      )}
 
       {/* Default reminder sound (§14.4 container level) — System / Silent / use
           the global default. Host-local + inheritable. */}
@@ -270,8 +289,10 @@ export default function CalendarEditorModal({
       )}
 
       {/* Delete (its events cascade away) — local calendars only; an external
-          calendar is provider-owned, so it can't be deleted from here. */}
-      {isLocal && (
+          calendar is provider-owned, so it can't be deleted from here. A local
+          contact list's birthday calendar reports account_id 'local' too but is
+          synthetic (no backing row), so exclude it — there's nothing to delete. */}
+      {isLocal && !isBirthday && (
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ disabled: busy }}

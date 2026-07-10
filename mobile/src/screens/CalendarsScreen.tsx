@@ -231,20 +231,28 @@ export default function CalendarsScreen({
                 {/* Manageable calendars: a local one carries its colour/name on
                     its row; an external one stores a host-local colour/name
                     override (delete stays local-only). Synthetic birthday
-                    calendars are read-only with no backing row, so they offer no
-                    Manage — rename/colour/delete wouldn't apply to them. */}
-                {!isBirthdayCalendarId(cal.id) && (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`${t('mobile.manageCalendar')}: ${cal.name}`}
-                    onPress={() =>
-                      navigation.navigate('CalendarEditor', { calendarId: cal.id })
-                    }
-                    style={({ pressed }) => [styles.manageButton, pressed && styles.rowPressed]}
-                  >
-                    <Text style={styles.manageButtonText}>{t('mobile.manageCalendar')}</Text>
-                  </Pressable>
-                )}
+                    calendars are read-only with no backing row, so rename/colour/
+                    delete wouldn't apply — but the editor still hosts their
+                    default reminders (e.g. "one week before"), so it opens for
+                    them too, reduced to just that. */}
+                {(() => {
+                  const isBirthday = isBirthdayCalendarId(cal.id);
+                  const buttonLabel = isBirthday
+                    ? t('mobile.birthdayCalendarReminders')
+                    : t('mobile.manageCalendar');
+                  return (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`${buttonLabel}: ${cal.name}`}
+                      onPress={() =>
+                        navigation.navigate('CalendarEditor', { calendarId: cal.id })
+                      }
+                      style={({ pressed }) => [styles.manageButton, pressed && styles.rowPressed]}
+                    >
+                      <Text style={styles.manageButtonText}>{buttonLabel}</Text>
+                    </Pressable>
+                  );
+                })()}
               </View>
             );
           })}
