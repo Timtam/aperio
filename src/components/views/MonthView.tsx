@@ -389,7 +389,7 @@ export function MonthView() {
             openEventDialog(item.event);
           } else if (item?.kind === 'task') {
             // Match TaskView / WeekView: Enter opens the task, Space ticks
-            // it off (the visible ☐/⬤ marker).
+            // it off (the visible ○/● marker).
             if (e.key === 'Enter') openTaskDialog(item.task);
             else void toggleTaskStatus(item.task);
           }
