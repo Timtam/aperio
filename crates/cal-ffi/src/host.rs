@@ -231,6 +231,19 @@ fn external_reparent_unsupported() -> StoreError {
     }
 }
 
+/// The synced, default-ON "show cancelled events" setting
+/// (`view.showCancelledEvents`). Only an explicit `"false"` hides them; any
+/// other value (including unset) shows them, for Outlook consistency. The
+/// desktop twin lives in the frontend `ViewState` filter.
+fn show_cancelled_events(db: &SharedConn) -> bool {
+    UserPrefsRepo::new(db)
+        .get("view.showCancelledEvents")
+        .ok()
+        .flatten()
+        .as_deref()
+        != Some("false")
+}
+
 /// Parse a wire `AttendeeStatus` (kebab-case: "accepted" / "tentative" /
 /// "declined" / "needs-action") into the core enum, via its serde rename so the
 /// mapping never drifts from the type.
@@ -2879,6 +2892,13 @@ impl Host {
                             refresh_events(&cache_bg, ext_bg.as_ref(), &acc, &cal, range).await
                         },
                     );
+                }
+                // Hide cancelled events when the user turned OFF the (synced,
+                // default-on) show-cancelled setting. Only external providers
+                // surface cancelled rows; reminders for them are suppressed
+                // separately, core-side, regardless of this toggle.
+                if !show_cancelled_events(&self.db.shared()) {
+                    events.retain(|e| !e.cancelled);
                 }
                 to_json(&events)
             }

@@ -67,6 +67,7 @@ fn event(id: &str, start_h: u32, end_h: u32) -> Event {
         etag: Some(format!("etag-{id}")),
         organizer: None,
         attendee_responses: Vec::new(),
+        cancelled: false,
     }
 }
 

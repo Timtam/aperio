@@ -568,6 +568,13 @@ fn event_triggers(
 ) -> Vec<Trigger> {
     let mut out = Vec::new();
     for ev in events {
+        // A cancelled meeting never nags — skip it unconditionally, regardless
+        // of the user's show-cancelled visibility setting (that only governs
+        // rendering). EWS/CalDAV surface cancelled events as normal rows; Graph
+        // keeps a cancelled whole-series/single. All of them land here.
+        if ev.cancelled {
+            continue;
+        }
         let effective: &[Reminder] = if ev.reminders.is_empty() {
             calendar_defaults
         } else {
@@ -1217,6 +1224,7 @@ mod tests {
             etag: None,
             organizer: None,
             attendee_responses: Vec::new(),
+            cancelled: false,
         }
     }
 
@@ -1233,6 +1241,28 @@ mod tests {
         ev.start = start_local.with_timezone(&Utc);
         ev.end = ev.start + ChronoDuration::days(1);
         ev
+    }
+
+    #[test]
+    fn cancelled_event_schedules_no_reminders() {
+        // A cancelled meeting never nags — even with an explicit reminder, and
+        // regardless of the visibility setting (which only governs rendering).
+        let mut ev = make_event(vec![rel(30)]);
+        ev.cancelled = true;
+        let ws = Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
+        let we = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+        assert!(ev_triggers(&[ev], &[], ws, we).is_empty());
+    }
+
+    #[test]
+    fn cancelled_event_ignores_calendar_default_reminders_too() {
+        // The calendar-default fallback must not resurrect a cancelled event's
+        // reminders either.
+        let mut ev = make_event(vec![]);
+        ev.cancelled = true;
+        let ws = Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
+        let we = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+        assert!(ev_triggers(&[ev], &[rel(15)], ws, we).is_empty());
     }
 
     #[test]

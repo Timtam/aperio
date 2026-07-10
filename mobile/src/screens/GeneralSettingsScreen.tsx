@@ -13,6 +13,10 @@ import {
   type LanguageChoice,
 } from '../settings/language';
 import { readStartOnToday, writeStartOnToday } from '../settings/startOnToday';
+import {
+  readShowCancelledEvents,
+  writeShowCancelledEvents,
+} from '../settings/showCancelledEvents';
 import { readWeekStart, writeWeekStart, type WeekStart } from '../settings/weekStart';
 import { useAppBadgePref } from '../state/appBadge';
 import { useBackgroundSyncPref } from '../state/backgroundSync';
@@ -42,6 +46,9 @@ export default function GeneralSettingsScreen() {
   // (default off). Takes effect on the NEXT launch (App.tsx reads it during the
   // nav-state restore), so toggling it doesn't move the current view.
   const [startOnToday, setStartOnToday] = useState(false);
+  // Synced (default on): show cancelled events in the calendar, or hide them.
+  // Reminders for cancelled events are suppressed host-side regardless.
+  const [showCancelled, setShowCancelled] = useState(true);
   // The global default reminder sound (§14.4 root). System/Silent only on mobile
   // — Custom needs an asset store the host lacks; a custom value synced from
   // desktop still round-trips and is shown read-only by SoundSelect.
@@ -64,12 +71,18 @@ export default function GeneralSettingsScreen() {
       void readWeekStart().then(setWeekStart);
       void readTaskBehaviour().then((b) => setDayViewMode(b.dayViewMode));
       void readStartOnToday().then(setStartOnToday);
+      void readShowCancelledEvents().then(setShowCancelled);
     }, []),
   );
 
   const onStartOnTodayChange = useCallback((next: boolean) => {
     setStartOnToday(next);
     void writeStartOnToday(next);
+  }, []);
+
+  const onShowCancelledChange = useCallback((next: boolean) => {
+    setShowCancelled(next);
+    void writeShowCancelledEvents(next);
   }, []);
 
   const onLanguageChange = useCallback((next: LanguageChoice) => {
@@ -134,6 +147,12 @@ export default function GeneralSettingsScreen() {
           hint={t('dialogs.settings.general.startOnTodayHint')}
           value={startOnToday}
           onToggle={() => onStartOnTodayChange(!startOnToday)}
+        />
+        <SwitchRow
+          label={t('dialogs.settings.general.showCancelledLabel')}
+          hint={t('dialogs.settings.general.showCancelledHint')}
+          value={showCancelled}
+          onToggle={() => onShowCancelledChange(!showCancelled)}
         />
       </View>
 

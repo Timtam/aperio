@@ -363,6 +363,9 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
         etag: entry.etag,
         organizer,
         attendee_responses,
+        // Google surfaces a cancellation as a content-less `status:"cancelled"`
+        // tombstone, dropped above — so a mapped Google event is always active.
+        cancelled: false,
     }))
 }
 
@@ -809,6 +812,7 @@ mod tests {
             organizer: None,
             attendee_responses: vec![],
             send_invitations: false,
+            cancelled: false,
         };
         let json = serde_json::to_value(event_to_body(&ev)).unwrap();
         assert_eq!(json["start"]["timeZone"], "America/New_York");
@@ -971,6 +975,7 @@ mod tests {
             etag: None,
             organizer: None,
             attendee_responses: vec![],
+            cancelled: false,
         };
         let body = event_to_body(&ev);
         let json = serde_json::to_value(&body).unwrap();

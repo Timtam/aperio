@@ -349,9 +349,35 @@ impl CalendarFeature for MicrosoftGraphAdapter {
             .map_err(to_core_error)
     }
 
-    async fn delete_event(&self, event_id: &str, _send_cancellations: bool) -> CoreResult<()> {
+    async fn delete_event(&self, event_id: &str, send_cancellations: bool) -> CoreResult<()> {
         // Graph's event-id is mailbox-wide unique — no calendar
         // walk required, unlike Google.
+        if send_cancellations {
+            // Organizer cancellation: notify attendees first (Graph marks the
+            // event cancelled), then remove it. Graph's `/cancel` is
+            // ORGANIZER-ONLY, so a non-organizer gets 403 and a non-meeting /
+            // non-cancellable item gets 400. Match the tolerance of the EWS
+            // `DeleteItem` disposition and Google's `sendUpdates` query param:
+            // on ONLY those "you can't cancel this" rejections, fall back to a
+            // plain delete — there's nothing to notify, and removing your own
+            // copy must still work (regression guard for the list/chip-menu
+            // delete surfaces that pass send_cancellations = attendees>0 without
+            // an organizer check). Every other error — 401 auth, 404 gone, 409
+            // conflict, 429 throttling, any 5xx, network — PROPAGATES, so a
+            // transient failure doesn't silently drop the cancellation and
+            // delete anyway.
+            match api::cancel_event(&self.state, event_id).await {
+                Ok(()) => {}
+                Err(GraphError::Http { status, .. }) if status == 400 || status == 403 => {
+                    tracing::debug!(
+                        status,
+                        event_id,
+                        "graph /cancel rejected (non-organizer / not cancellable); plain delete",
+                    );
+                }
+                Err(err) => return Err(to_core_error(err)),
+            }
+        }
         api::delete_event(&self.state, event_id)
             .await
             .map_err(to_core_error)
@@ -787,6 +813,56 @@ mod delta_tests {
         assert_eq!(cs.changes.len(), 1);
         assert!(cs.deletions.is_empty());
         assert_eq!(cs.new_token.as_deref(), Some(link.as_str()));
+    }
+
+    #[tokio::test]
+    async fn cancel_non_organizer_falls_back_to_plain_delete() {
+        // send_cancellations=true from a NON-organizer surface: Graph's
+        // organizer-only /cancel returns 4xx, and delete_event must still remove
+        // the event via a plain DELETE rather than aborting (regression guard).
+        let mut server = Server::new_async().await;
+        let cancel = server
+            .mock("POST", "/me/events/ev-x/cancel")
+            .with_status(403)
+            .with_body(
+                r#"{"error":{"code":"ErrorCannotCancelMeetingForNonOrganizer","message":"no"}}"#,
+            )
+            .create_async()
+            .await;
+        let del = server
+            .mock("DELETE", "/me/events/ev-x")
+            .with_status(204)
+            .create_async()
+            .await;
+        adapter_for(&server)
+            .delete_event("ev-x", true)
+            .await
+            .unwrap();
+        cancel.assert_async().await;
+        del.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn cancel_throttled_propagates_and_does_not_delete() {
+        // A TRANSIENT /cancel failure (429/5xx) must NOT fall through to a plain
+        // delete — that would drop the cancellation and remove the meeting
+        // anyway. It propagates so the caller can retry.
+        let mut server = Server::new_async().await;
+        server
+            .mock("POST", "/me/events/ev-x/cancel")
+            .with_status(429)
+            .with_body(r#"{"error":{"code":"TooManyRequests","message":"slow down"}}"#)
+            .create_async()
+            .await;
+        // No DELETE mock: if delete_event wrongly falls back, the request 501s
+        // (mockito default) and the test still fails on the unwrap_err shape —
+        // but the intent is that DELETE is never issued.
+        let err = adapter_for(&server)
+            .delete_event("ev-x", true)
+            .await
+            .unwrap_err();
+        // 429 → CoreError::Protocol (to_core_error's catch-all), NOT swallowed.
+        assert!(matches!(err, cal_core::Error::Protocol(_)));
     }
 
     #[tokio::test]

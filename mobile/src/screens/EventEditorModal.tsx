@@ -432,6 +432,9 @@ export default function EventEditorModal({
       isOccurrence && occurrence != null && original.recurrence != null
         ? { ...original, series_id: original.id, occurrence_start: occurrence }
         : original;
+    // The shared helper resolves organizer status and offers the cancel/silent
+    // choice when this is a meeting we organize on a scheduling-capable provider.
+    const cal = calendars.find((c) => c.id === original.calendar_id);
     confirmDeleteEvent(
       target,
       t,
@@ -443,8 +446,9 @@ export default function EventEditorModal({
         setError(message);
         AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
       },
+      { supportsScheduling: cal?.supports_scheduling ?? false },
     );
-  }, [isOccurrence, navigation, occurrence, original, t]);
+  }, [calendars, isOccurrence, navigation, occurrence, original, t]);
 
   if (loading) {
     return (

@@ -40,6 +40,15 @@ export interface ViewStateValue {
    */
   startOnToday: boolean;
   setStartOnToday: (v: boolean) => void;
+  /**
+   * Show cancelled events (RFC 5545 STATUS:CANCELLED / EWS IsCancelled /
+   * Graph isCancelled) in the calendar, or hide them. A synced user preference
+   * (`view.showCancelledEvents`); defaults to ON (show, for Outlook
+   * consistency). Reminders for cancelled events are ALWAYS suppressed
+   * core-side, independent of this toggle.
+   */
+  showCancelledEvents: boolean;
+  setShowCancelledEvents: (v: boolean) => void;
 }
 
 export const ViewStateContext = createContext<ViewStateValue | null>(null);

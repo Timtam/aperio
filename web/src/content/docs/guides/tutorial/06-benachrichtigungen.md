@@ -45,6 +45,13 @@ default they fire no reminder; under **Settings → Calendars** (on the phone vi
 **Reminders** in the calendar list) you can give them a default reminder, e.g.
 "1 week before".
 
+### Cancelled events
+
+Cancelled events (for example a meeting series withdrawn by its organizer)
+**never** trigger reminders — regardless of any setting. By default they stay
+visible in the calendar (like Outlook); you can hide them under
+**Settings → General** via **Show cancelled events**.
+
 ## Notification sounds
 
 You can choose which sound a reminder plays, on several levels — each one

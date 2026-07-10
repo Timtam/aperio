@@ -20,9 +20,19 @@ import type {
 import { seriesIdOf } from '../intl/recurrence';
 import { useCalendarStore } from './calendarStoreContext';
 import { useDialogState } from './dialogStateContext';
+import {
+  peekCalendarUserEmail,
+  warmCalendarUserEmail,
+} from './currentUserEmail';
 import { surfaceTaskNow } from './moveActions';
 import { useTaskPriorityAction } from './useTaskPriority';
 import { useTaskStatusActions } from './useTaskStatusToggle';
+
+/** Lower-case, `mailto:`-stripped form for comparing addresses. */
+function normalizeEmail(value: string | null | undefined): string {
+  if (!value) return '';
+  return value.trim().replace(/^mailto:/i, '').toLowerCase();
+}
 
 /**
  * Native context menu for event chips and task rows. Mirrors the
@@ -136,13 +146,36 @@ export function useChipContextMenu(): ChipContextMenuActions {
             })),
         ],
       };
+      // A meeting the connected account ORGANIZES (with attendees, on a
+      // scheduling-capable provider) can be CANCELLED with an attendee
+      // notification — offer that vs a silent remove as two menu items instead
+      // of a single Delete. "Who am I" is a LIVE provider call, so we NEVER
+      // await it here (that would stall the native menu / hang offline): read
+      // it synchronously from the cache (warmed whenever a meeting is opened),
+      // and if it's not warm yet, prime it and just show plain Delete this time.
+      const cal = calById.get(event.calendar_id);
+      let offersChoice = false;
+      if ((cal?.supports_scheduling ?? false) && event.attendees.length > 0) {
+        const cached = peekCalendarUserEmail(event.calendar_id);
+        if (cached === undefined) {
+          warmCalendarUserEmail(event.calendar_id);
+        } else {
+          const me = normalizeEmail(cached);
+          offersChoice = !!me && normalizeEmail(event.organizer) === me;
+        }
+      }
       const items: ContextMenuItemRequest[] = [
         { id: 'edit', label: t('chipMenu.edit') },
         { id: 'move', label: t('chipMenu.moveTo') },
         { id: 'copy', label: t('chipMenu.copyTo') },
         colorSubmenu,
         { kind: 'separator' },
-        { id: 'delete', label: t('chipMenu.delete') },
+        ...(offersChoice
+          ? [
+              { id: 'cancel-notify', label: t('chipMenu.cancelNotify') },
+              { id: 'cancel-silent', label: t('chipMenu.cancelSilent') },
+            ]
+          : [{ id: 'delete', label: t('chipMenu.delete') }]),
       ];
       let selected: string | null = null;
       try {
@@ -157,21 +190,33 @@ export function useChipContextMenu(): ChipContextMenuActions {
         openMoveCopy({ kind: 'event', event, defaultMode: 'move' });
       } else if (selected === 'copy') {
         openMoveCopy({ kind: 'event', event, defaultMode: 'copy' });
-      } else if (selected === 'delete') {
+      } else if (
+        selected === 'delete' ||
+        selected === 'cancel-notify' ||
+        selected === 'cancel-silent'
+      ) {
         // Recurring events: deleting via the chip context menu maps
         // to "delete the whole series". The per-occurrence variant
         // (DeleteEventScopeDialog) lives behind the per-view
         // keyboard handlers; keeping the menu simple is intentional.
         const id = seriesIdOf(event);
+        // `cancel-notify`/`cancel-silent` only appear for a meeting we organize;
+        // plain `delete` keeps the prior heuristic (notify iff attendees — the
+        // adapters tolerate that from a non-organizer, falling back to a plain
+        // delete).
+        const send =
+          selected === 'cancel-notify'
+            ? true
+            : selected === 'cancel-silent'
+              ? false
+              : event.attendees.length > 0;
         try {
-          // Send cancellations when the deleted event has attendees;
-          // scheduling-capable providers email them, the rest ignore it.
-          await deleteEventById(
-            id,
-            event.calendar_id,
-            event.attendees.length > 0,
+          await deleteEventById(id, event.calendar_id, send);
+          announce(
+            selected === 'cancel-notify'
+              ? t('dialogs.event.meetingCancelled', { title: event.title })
+              : t('dialogs.event.deleted', { title: event.title }),
           );
-          announce(t('dialogs.event.deleted', { title: event.title }));
           invalidateData();
         } catch (err) {
           if (isCommandError(err)) {

@@ -574,6 +574,7 @@ fn persist_new_event(
         etag: None,
         organizer: None,
         attendee_responses: Vec::new(),
+        cancelled: false,
     })
 }
 
@@ -624,9 +625,11 @@ pub(crate) fn row_to_event(row: &rusqlite::Row<'_>) -> cal_core::Result<Event> {
         updated_at,
         etag,
         // Local events have no organizer/RSVP metadata; those are
-        // read-only fields populated only by external providers.
+        // read-only fields populated only by external providers. Local events
+        // are never cancelled (there's no cancel action — you delete them).
         organizer: None,
         attendee_responses: Vec::new(),
+        cancelled: false,
     })
 }
 

@@ -307,8 +307,13 @@ export default function AgendaScreen({
           setError(message);
           announce(t('mobile.error', { message }));
         },
+        {
+          supportsScheduling:
+            calendars.find((c) => c.id === ev.calendar_id)
+              ?.supports_scheduling ?? false,
+        },
       ),
-    [announce, load, t],
+    [announce, calendars, load, t],
   );
 
   const rowLabel = useCallback(

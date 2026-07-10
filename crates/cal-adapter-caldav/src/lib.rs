@@ -1028,6 +1028,15 @@ impl CalendarFeature for CaldavAdapter {
     }
 
     async fn delete_event(&self, event_id: &str, _send_cancellations: bool) -> CoreResult<()> {
+        // `send_cancellations` is not honoured here: CalDAV scheduling is
+        // SERVER-driven (RFC 6638 implicit scheduling). On a scheduling-aware
+        // collection (e.g. iCloud) the server itself emails a CANCEL to every
+        // attendee when the ORGANIZER's resource is DELETEd — Aperio can't
+        // reliably force that on or off from the client, so a plain DELETE is
+        // the honest behaviour either way (notify-on-delete, server's call).
+        // The precise choice is offered only where the adapter genuinely
+        // controls it (EWS / Graph / Google).
+        //
         // The trait signature only gives us the event id. CalDAV
         // needs the calendar collection URL too — we recover it
         // by re-reading the discovery cache; callers that know

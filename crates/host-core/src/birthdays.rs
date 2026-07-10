@@ -152,6 +152,7 @@ pub fn events_for_contacts(
                 etag: None,
                 organizer: None,
                 attendee_responses: Vec::new(),
+                cancelled: false,
             });
         }
     }

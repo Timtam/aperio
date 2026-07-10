@@ -487,6 +487,7 @@ mod tests {
             etag: None,
             organizer: None,
             attendee_responses: vec![],
+            cancelled: false,
         }
     }
 

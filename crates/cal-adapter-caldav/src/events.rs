@@ -195,6 +195,8 @@ pub async fn create_event(
         // only when reading the event back from the server.
         organizer: None,
         attendee_responses: Vec::new(),
+        // Freshly created by us — never a cancellation.
+        cancelled: false,
     })
 }
 
@@ -880,6 +882,7 @@ END:VCALENDAR</c:calendar-data>
             etag: Some("\"old-etag\"".into()),
             organizer: None,
             attendee_responses: Vec::new(),
+            cancelled: false,
         };
         let updated = update_event(&client(), existing, &creds(&server.url()), None)
             .await
@@ -922,6 +925,7 @@ END:VCALENDAR</c:calendar-data>
             etag: Some("\"stale-etag\"".into()),
             organizer: None,
             attendee_responses: Vec::new(),
+            cancelled: false,
         };
         let err = update_event(&client(), existing, &creds(&server.url()), None)
             .await

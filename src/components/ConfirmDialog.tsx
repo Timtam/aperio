@@ -27,6 +27,12 @@ export interface ConfirmDialogProps {
   cancelLabel?: string;
   /** Hint passed through to assistive tech via aria-describedby. */
   describedById?: string;
+  /**
+   * Optional middle actions rendered between Cancel and the primary button —
+   * for a 3-way choice (e.g. "cancel the meeting and notify attendees" /
+   * "remove without notifying" / "keep"). Each closes the dialog after running.
+   */
+  extraActions?: Array<{ label: string; onClick: () => void; danger?: boolean }>;
 }
 
 export function ConfirmDialog({
@@ -37,6 +43,7 @@ export function ConfirmDialog({
   message,
   confirmLabel,
   cancelLabel,
+  extraActions,
 }: ConfirmDialogProps) {
   const { t } = useTranslation();
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -65,6 +72,21 @@ export function ConfirmDialog({
         >
           {cancelLabel ?? t('dialogs.confirm.cancel')}
         </button>
+        {extraActions?.map((action) => (
+          <button
+            key={action.label}
+            type="button"
+            onClick={() => {
+              action.onClick();
+              onClose();
+            }}
+            className={`form__action${
+              action.danger ? ' form__action--danger' : ''
+            }`}
+          >
+            {action.label}
+          </button>
+        ))}
         <button
           type="button"
           onClick={() => {

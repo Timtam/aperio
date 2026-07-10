@@ -83,6 +83,9 @@ export interface CalendarEvent {
   etag: string | null;
   organizer?: string | null;
   attendee_responses?: AttendeeResponse[];
+  /** The meeting is cancelled. Read-only. Cancelled events never fire
+   *  reminders and are hidden when "show cancelled events" is off. */
+  cancelled?: boolean;
 }
 
 /** A new (unsaved) event — the desktop `NewEvent` wire shape. */

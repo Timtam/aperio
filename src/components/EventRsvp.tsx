@@ -2,13 +2,10 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/announcerContext';
-import {
-  calendarCurrentUserEmail,
-  isCommandError,
-  respondToEvent,
-} from '../api/client';
+import { isCommandError, respondToEvent } from '../api/client';
 import type { AttendeeStatus, CalendarEvent } from '../api/types';
 import { seriesIdOf } from '../intl/recurrence';
+import { resolveCalendarUserEmail } from '../state/currentUserEmail';
 
 /** The three respondable statuses, in the order we render the buttons. */
 const RESPONSE_ACTIONS: AttendeeStatus[] = [
@@ -59,7 +56,7 @@ export function EventRsvp({ event, onResponded }: EventRsvpProps) {
       setMyEmail(null);
       return;
     }
-    calendarCurrentUserEmail(event.calendar_id)
+    resolveCalendarUserEmail(event.calendar_id)
       .then((email) => {
         if (!cancelled) setMyEmail(email);
       })

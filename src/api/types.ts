@@ -96,6 +96,11 @@ export interface CalendarEvent {
   /** Per-attendee RSVP state, populated on read where the provider reports
    *  it. Read-only; absent/empty otherwise. */
   attendee_responses?: AttendeeResponse[];
+  /** The meeting is cancelled (RFC 5545 STATUS:CANCELLED / EWS IsCancelled /
+   *  Graph isCancelled). Read-only. Cancelled events never fire reminders and
+   *  are hidden when the user turns off "show cancelled events". Absent/false
+   *  for local events and providers that don't report cancellation. */
+  cancelled?: boolean;
 }
 
 /** An attendee's RSVP status (RFC 5545 PARTSTAT), normalised across

@@ -50,8 +50,14 @@ In the event dialog you can also set:
 > supports server-side scheduling (iCloud, Google, Exchange/Outlook), a
 > **Notify attendees** checkbox appears (on by default). When ticked, the
 > provider sends invitations or updates automatically on save – Aperio
-> itself never sends email. Deleting an event that has attendees likewise
-> triggers a cancellation.
+> itself never sends email.
+>
+> When you delete a **meeting you organize** (with attendees, on an account
+> with server-side scheduling), Aperio asks: **Cancel & notify attendees** or
+> **remove without notifying**. A meeting you were only invited to, or an event
+> with no attendees, is deleted without asking. (On iCloud/CalDAV the server
+> decides whether a cancellation goes out, so "without notifying" isn't
+> guaranteed there.)
 
 > **Check availability:** Below that toggle sits a **Check availability**
 > button. It looks up, for the currently entered time window, which

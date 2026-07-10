@@ -46,6 +46,14 @@ Standardmäßig lösen sie keine Erinnerung aus; unter **Einstellungen → Kalen
 (auf dem Handy über **Erinnerungen** in der Kalenderliste) kannst du ihnen eine
 Standard-Erinnerung geben, z. B. „1 Woche vorher".
 
+### Abgesagte Termine
+
+Abgesagte Termine (z. B. eine von der Organisatorin zurückgezogene
+Besprechungsserie) lösen **nie** Erinnerungen aus – unabhängig von jeder
+Einstellung. Sichtbar bleiben sie standardmäßig im Kalender (wie in Outlook);
+unter **Einstellungen → Allgemein** kannst du sie über **Abgesagte Termine
+anzeigen** ausblenden.
+
 ## Benachrichtigungstöne
 
 Du kannst festlegen, welchen Ton eine Erinnerung abspielt – auf mehreren

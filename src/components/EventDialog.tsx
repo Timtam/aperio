@@ -30,7 +30,9 @@ import {
 } from '../intl/recurrence';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
+import { useCancellationChoice } from '../state/useCancellationChoice';
 import { AttendeePicker } from './AttendeePicker';
+import { ConfirmDialog } from './ConfirmDialog';
 import { ColorLabelSelect } from './ColorLabelSelect';
 import {
   allDayFormEndDate,
@@ -559,35 +561,82 @@ export function EventDialog({
     ],
   );
 
+  // A meeting you organize (with attendees) offers "cancel + notify" vs
+  // "remove silently"; everything else is a plain delete.
+  const { offersChoice } = useCancellationChoice(event);
+  const [cancelChoiceOpen, setCancelChoiceOpen] = useState(false);
+
+  // The actual removal, parameterised by whether the provider should email a
+  // cancellation to the attendees. Used both by the plain-delete path and the
+  // cancel-choice dialog.
+  const performDelete = useCallback(
+    async (sendCancellations: boolean) => {
+      if (!event) return;
+      setError(null);
+      setSubmitting(true);
+      try {
+        const seriesId = seriesIdOf(event);
+        await deleteEventById(seriesId, event.calendar_id, sendCancellations);
+        announce(
+          sendCancellations
+            ? t('dialogs.event.meetingCancelled', { title: event.title })
+            : t('dialogs.event.deleted', { title: event.title }),
+        );
+        onClose();
+      } catch (err) {
+        if (isCommandError(err)) {
+          setError(`${err.code}: ${err.message}`);
+        } else {
+          setError(String(err));
+        }
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [event, announce, onClose, t],
+  );
+
   const onDelete = useCallback(async () => {
     if (!event) return;
     if (submitting) return;
-    setError(null);
-    setSubmitting(true);
-    try {
-      const seriesId = seriesIdOf(event);
-      if (isOccurrence && editScope === 'occurrence' && event.recurrence) {
-        const occIso = occurrenceIsoOf(event);
-        if (occIso) {
-          await addEventExdate(seriesId, occIso, event.calendar_id);
-          announce(t('dialogs.event.occurrenceDeleted', { title: event.title }));
+    // Removing a single occurrence of a recurring event is a local EXDATE edit
+    // (no attendee notification) — keep that path unchanged.
+    if (isOccurrence && editScope === 'occurrence' && event.recurrence) {
+      const occIso = occurrenceIsoOf(event);
+      if (occIso) {
+        setError(null);
+        setSubmitting(true);
+        try {
+          await addEventExdate(seriesIdOf(event), occIso, event.calendar_id);
+          announce(
+            t('dialogs.event.occurrenceDeleted', { title: event.title }),
+          );
           onClose();
-          return;
+        } catch (err) {
+          setError(isCommandError(err) ? `${err.code}: ${err.message}` : String(err));
+        } finally {
+          setSubmitting(false);
         }
+        return;
       }
-      await deleteEventById(seriesId, event.calendar_id);
-      announce(t('dialogs.event.deleted', { title: event.title }));
-      onClose();
-    } catch (err) {
-      if (isCommandError(err)) {
-        setError(`${err.code}: ${err.message}`);
-      } else {
-        setError(String(err));
-      }
-    } finally {
-      setSubmitting(false);
     }
-  }, [event, submitting, isOccurrence, editScope, announce, onClose, t]);
+    // Organizer removing a meeting with attendees → ask whether to notify.
+    if (offersChoice) {
+      setCancelChoiceOpen(true);
+      return;
+    }
+    await performDelete(false);
+  }, [
+    event,
+    submitting,
+    isOccurrence,
+    editScope,
+    offersChoice,
+    performDelete,
+    announce,
+    onClose,
+    t,
+  ]);
 
   const title = isEdit ? t('dialogs.event.editTitle') : t('dialogs.event.newTitle');
 
@@ -631,6 +680,7 @@ export function EventDialog({
   }
 
   return (
+    <>
     <Modal
       isOpen={isOpen}
       onClose={onClose}
@@ -972,6 +1022,26 @@ export function EventDialog({
         </div>
       </form>
     </Modal>
+    {event && (
+      <ConfirmDialog
+        isOpen={cancelChoiceOpen}
+        onClose={() => setCancelChoiceOpen(false)}
+        title={t('dialogs.event.cancelChoice.title')}
+        message={t('dialogs.event.cancelChoice.message', {
+          title: event.title,
+        })}
+        confirmLabel={t('dialogs.event.cancelChoice.cancelMeeting')}
+        onConfirm={() => void performDelete(true)}
+        extraActions={[
+          {
+            label: t('dialogs.event.cancelChoice.removeSilently'),
+            onClick: () => void performDelete(false),
+            danger: true,
+          },
+        ]}
+      />
+    )}
+    </>
   );
 }
 

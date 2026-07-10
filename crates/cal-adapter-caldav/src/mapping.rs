@@ -195,6 +195,14 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
         }
     }
 
+    // RFC 5545 `STATUS:CANCELLED` — the event was cancelled. Aperio keeps it
+    // visible (subject to the show-cancelled setting) but never schedules
+    // reminders for it. Any other STATUS (TENTATIVE/CONFIRMED) reads as active.
+    let cancelled = ev
+        .property_value("STATUS")
+        .map(|s| s.trim().eq_ignore_ascii_case("CANCELLED"))
+        .unwrap_or(false);
+
     Ok(Event {
         send_invitations: false,
         id,
@@ -216,6 +224,7 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
         etag: None,
         organizer,
         attendee_responses,
+        cancelled,
     })
 }
 
@@ -825,6 +834,29 @@ END:VCALENDAR\r
         assert_eq!(ev.attendee_responses[1].status, AttendeeStatus::NeedsAction);
         assert_eq!(ev.attendee_responses[2].status, AttendeeStatus::Declined);
         assert_eq!(ev.attendee_responses[0].name.as_deref(), Some("The Boss"));
+    }
+
+    #[test]
+    fn maps_status_cancelled_to_cancelled_flag() {
+        let cancelled = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:mtg-x@aperio\r
+SUMMARY:Cancelled Planning\r
+DTSTART:20260520T080000Z\r
+DTEND:20260520T090000Z\r
+STATUS:CANCELLED\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let ev = &parse_calendar_data(cancelled, "cal-1").unwrap()[0];
+        assert!(ev.cancelled);
+
+        // A CONFIRMED (or absent) STATUS reads as active.
+        let confirmed = cancelled.replace("STATUS:CANCELLED", "STATUS:CONFIRMED");
+        let ev = &parse_calendar_data(&confirmed, "cal-1").unwrap()[0];
+        assert!(!ev.cancelled);
     }
 
     #[test]
