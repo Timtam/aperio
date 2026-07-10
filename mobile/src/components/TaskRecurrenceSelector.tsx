@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -89,6 +90,25 @@ export function TaskRecurrenceSelector({
   // on completion"); scheduled rules stay ≥ 1.
   const minInterval = value.placement === 'BACKLOG' ? 0 : 1;
   const showInterval = value.fixedDates.length === 0;
+  const shownInterval = intervalOk ? value.interval : 1;
+
+  // Draft text for the interval field so the user can CLEAR it mid-edit —
+  // binding straight to the number snapped an emptied field back to the
+  // minimum, forcing "type the new digit first, then delete the old" (which
+  // silently gave e.g. every-13-weeks). Push a number up only when the draft
+  // is valid (>= minInterval); an empty/invalid draft keeps the last value and
+  // restores it on blur. Resync when the model changes.
+  const [intervalText, setIntervalText] = useState(String(shownInterval));
+  useEffect(() => {
+    setIntervalText(String(shownInterval));
+  }, [shownInterval]);
+  const commitInterval = (text: string) => {
+    setIntervalText(text);
+    const n = Number.parseInt(text, 10);
+    if (Number.isFinite(n) && n >= minInterval) {
+      update({ interval: Math.min(365, n) });
+    }
+  };
   const showWeekdays =
     value.freq === 'WEEKLY' &&
     value.placement === 'SCHEDULE' &&
@@ -166,10 +186,9 @@ export function TaskRecurrenceSelector({
               </Text>
               <TextInput
                 style={[styles.input, !intervalOk && styles.inputDisabled]}
-                value={String(intervalOk ? value.interval : 1)}
-                onChangeText={(v) =>
-                  update({ interval: clampInt(v, minInterval, 365) })
-                }
+                value={intervalText}
+                onChangeText={commitInterval}
+                onBlur={() => setIntervalText(String(shownInterval))}
                 editable={intervalOk}
                 keyboardType="number-pad"
                 accessibilityLabel={t('dialogs.task.recurrence.intervalLabel', {

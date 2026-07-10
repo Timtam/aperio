@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { RecurrenceCapabilities, RecurrenceFreq } from '../api/types';
@@ -95,6 +96,26 @@ export function TaskRecurrenceSelector({
   // frequency, so the disabled input shows what'll actually round-trip
   // (matches the event selector).
   const shownInterval = intervalEnabled ? value.interval : minInterval;
+
+  // The interval field keeps its OWN draft text so the user can clear it
+  // mid-edit — binding straight to the number snapped an emptied field back
+  // to the minimum, forcing "type the new digit first, then delete the old"
+  // (which silently produced e.g. "every 13 weeks"). Push a number up only
+  // when the draft is a valid one (>= minInterval); an empty / invalid draft
+  // keeps the last value and restores it on blur. Resync when the model
+  // changes (freq switch, placement change, caps clamp).
+  const [intervalText, setIntervalText] = useState(String(shownInterval));
+  useEffect(() => {
+    setIntervalText(String(shownInterval));
+  }, [shownInterval]);
+  const commitInterval = (text: string) => {
+    setIntervalText(text);
+    const n = Number.parseInt(text, 10);
+    if (Number.isFinite(n) && n >= minInterval) {
+      update({ interval: Math.min(365, n) });
+    }
+  };
+
   const unsupportedHint = (
     <span className="form__hint recurrence__unsupported">
       {t('dialogs.task.recurrence.unsupportedHint')}
@@ -187,16 +208,10 @@ export function TaskRecurrenceSelector({
                 type="number"
                 min={minInterval}
                 max={365}
-                value={shownInterval}
+                value={intervalText}
                 disabled={!intervalEnabled}
-                onChange={(e) =>
-                  update({
-                    interval: Math.max(
-                      minInterval,
-                      Number(e.target.value) || minInterval,
-                    ),
-                  })
-                }
+                onChange={(e) => commitInterval(e.target.value)}
+                onBlur={() => setIntervalText(String(shownInterval))}
               />
               {!intervalEnabled && unsupportedHint}
               {minInterval === 0 && (
