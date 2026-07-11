@@ -139,6 +139,12 @@ const RULER_PX = Math.round(44 * FONT_SCALE);
  *  better. Purely visual; only the single-day grid auto-scroll uses it. */
 const GRID_SCROLL_PAD_PX = 12;
 
+/** Debounce (ms) for the day-list reload. Longer than a fast VoiceOver
+ *  three-finger-swipe interval so rapid paging collapses into a single reload on
+ *  the period the user settles on — instead of churning the accessibility tree on
+ *  every step (which delayed the announcement and blocked the next swipe). */
+const RELOAD_DEBOUNCE_MS = 300;
+
 // ── Single-day compact-list geometry (dayLayout='list') ──────────────────────
 // The lighter alternative to the hour-grid: a chronological list where a timed
 // EVENT block's STRICT height reflects its DURATION (via the shared, platform-
@@ -577,16 +583,22 @@ export function CalendarDayList({
   // Coalesce reload requests: the two cache-reload subscriptions (calendar +
   // tasks) usually fire TOGETHER (a warm pass refreshes both) and focus can race
   // them, so without this each triggers its own full, SERIALIZED FFI pass over
-  // every calendar + list. Debounce so they collapse into ONE load(); the mount
-  // load stays immediate for a fast first paint. `reqToken` already drops any
-  // stale result, but this also avoids the redundant native work.
+  // every calendar + list. It ALSO coalesces rapid PAGING: a VoiceOver
+  // three-finger swipe (or the ‹ › buttons held down) steps the period fast, and
+  // reloading the whole day/week/month on every step churned VoiceOver's
+  // accessibility tree mid-swipe — delaying the period announcement and blocking
+  // the next swipe. Debouncing so only the period the user SETTLES on reloads
+  // keeps swiping churn-free; the period announcement is immediate (CalendarPager)
+  // and independent of the data, so nothing waits on this. The window is a bit
+  // longer than a fast swipe interval for that reason; `reqToken` still drops any
+  // stale result. The FIRST mount load stays immediate for a fast first paint.
   const loadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleLoad = useCallback(() => {
     if (loadTimer.current != null) clearTimeout(loadTimer.current);
     loadTimer.current = setTimeout(() => {
       loadTimer.current = null;
       void load();
-    }, 80);
+    }, RELOAD_DEBOUNCE_MS);
   }, [load]);
   useEffect(
     () => () => {
@@ -596,9 +608,18 @@ export function CalendarDayList({
   );
 
   // Reload when the window changes or the screen regains focus (after an editor).
+  // First mount loads immediately (fast first paint); every LATER change — most
+  // importantly a page step, which recomputes `range` — goes through the debounce
+  // so rapid paging collapses into one reload on the period the user settles on.
+  const didFirstLoadRef = useRef(false);
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => scheduleLoad());
-    void load();
+    if (!didFirstLoadRef.current) {
+      didFirstLoadRef.current = true;
+      void load();
+    } else {
+      scheduleLoad();
+    }
     return unsubscribe;
   }, [navigation, load, scheduleLoad]);
 
