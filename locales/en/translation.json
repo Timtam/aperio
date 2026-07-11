@@ -1937,6 +1937,7 @@
       "subtaskProgressBadge": "{{done}}/{{total}}",
       "subtaskProgressBadgeAria": "{{done}} of {{total}} subtasks done",
       "assigneeSuffix": ", assigned to {{names}}",
+      "recurringOccurrence": ", recurring, planned",
       "dueScheduled": "Scheduled: {{date}}",
       "dueDeadline": "Due: {{date}}",
       "dueNone": "No date",

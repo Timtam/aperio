@@ -173,6 +173,16 @@ holds the final deadline and stays out of your way until the work is finished.
 Like events, tasks can recur (daily, weekly, monthly, yearly). When you
 check off a recurring task, Aperio automatically creates the next due date.
 
+> **In the calendar:** A recurring task with a **scheduled day** now shows on
+> **every** planned day in the day / week / month views — like a recurring
+> event — not just its next turn. Only the **current** instance is interactive;
+> the future days are read-only previews (announced *"recurring, planned"*, with
+> a ↻ in place of the checkbox). Check one off, reschedule or edit it from the
+> current instance — completing that advances the whole series. This applies to
+> **scheduled** recurrences that count **from the task's date**; *from
+> completion* and *resurface-in-backlog* recurrences can't be projected ahead,
+> so they still show only on their next day.
+
 > **Recurrence & providers:** Whether — and how much of — a recurrence can be
 > stored depends on the provider. The editor only appears where the list can
 > store it, and **greys out individual fields the provider can't do** (rather

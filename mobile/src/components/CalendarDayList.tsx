@@ -32,8 +32,10 @@ import {
   eventBlockFactor,
   eventSpanForDay,
   expandAll,
+  expandScheduledRecurringTasks,
   filterTasksOnDay,
   isDeadlineChip,
+  isRecurringProjection,
   layoutDayColumn,
   localDateKey,
   mergeDayItems,
@@ -42,6 +44,7 @@ import {
   multiDayInfo,
   occurrenceIsoOf,
   prioritySuffix,
+  recurringSeriesTaskId,
   seriesIdOf,
   statusI18nKey,
   statusMarker,
@@ -625,6 +628,24 @@ export function CalendarDayList({
     () => events.filter((ev) => !hiddenCalendars.has(ev.calendar_id)),
     [events, hiddenCalendars],
   );
+  // Expand recurring SCHEDULED tasks into one occurrence per planned day across
+  // the visible window — so a task recurring every day/week shows on EVERY due
+  // day here (like a recurring event), not only its single current
+  // scheduled_date. The occurrence on the task's own date is the real,
+  // interactive task; the others are read-only projections (isRecurringProjection)
+  // that route to the series on tap and offer no complete/delete (the current
+  // instance advances the series on completion — mirrors the backend spawner).
+  // Non-recurring / from-completion / backlog tasks pass through untouched.
+  const expandedTasks = useMemo(() => {
+    if (dayKeys.length === 0) return tasks;
+    let fromKey = dayKeys[0];
+    let toKey = dayKeys[0];
+    for (const k of dayKeys) {
+      if (k < fromKey) fromKey = k;
+      if (k > toKey) toKey = k;
+    }
+    return expandScheduledRecurringTasks(tasks, fromKey, toKey);
+  }, [tasks, dayKeys]);
   const buckets = useMemo<DayBucket[]>(() => {
     return days.map((date, i) => {
       const key = dayKeys[i];
@@ -637,7 +658,7 @@ export function CalendarDayList({
         // eventSpanForDay clamp each day's portion).
         (ev) => !ev.all_day && daysCoveredKeys(ev).includes(key),
       );
-      const dayTasks = filterTasksOnDay(tasks, key, showCompletedForList, meFor);
+      const dayTasks = filterTasksOnDay(expandedTasks, key, showCompletedForList, meFor);
       const { timed, untimed } = mergeDayItems(
         timedEvents,
         dayTasks,
@@ -653,7 +674,7 @@ export function CalendarDayList({
         count: allDay.length + timed.length + untimed.length,
       };
     });
-  }, [days, dayKeys, visibleEvents, tasks, showCompletedForList, meFor]);
+  }, [days, dayKeys, visibleEvents, expandedTasks, showCompletedForList, meFor]);
 
   const totalItems = useMemo(
     () => buckets.reduce((sum, b) => sum + b.count, 0),
@@ -701,7 +722,13 @@ export function CalendarDayList({
 
   const openTask = useCallback(
     (task: Task) =>
-      navigation.navigate('TaskEditor', { taskId: task.id, listId: task.list_id }),
+      // recurringSeriesTaskId strips a projection's occurrence suffix (and is a
+      // no-op for a real task id), so tapping a read-only recurring projection
+      // opens the underlying series, never a non-existent occurrence id.
+      navigation.navigate('TaskEditor', {
+        taskId: recurringSeriesTaskId(task.id),
+        listId: task.list_id,
+      }),
     [navigation],
   );
 
@@ -852,6 +879,12 @@ export function CalendarDayList({
       }
       if (colourName) {
         label += t('mobile.colorLabelSuffix', { name: colourName });
+      }
+      if (isRecurringProjection(task)) {
+        // A read-only FUTURE occurrence of a recurring task — announce it so the
+        // SR user knows this row is a preview and that completion happens on the
+        // current instance, not here.
+        label += t('views.tasks.recurringOccurrence');
       }
       // Effort suffix appended unconditionally (regardless of the visual-sizing
       // toggle) so a screen reader always hears it; '' for medium.
@@ -1008,15 +1041,29 @@ export function CalendarDayList({
         deadline: fmtDateOnly(task.deadline_date),
       })}`;
     }
+    // A read-only recurring PROJECTION (a future planned occurrence of a
+    // recurring task) is a preview only: completion / reschedule / delete act on
+    // the CURRENT instance (the real base row on its own scheduled day), which
+    // advances the series when checked off. So a projection offers just "open the
+    // task" — routed to the underlying series (recurringSeriesTaskId) via
+    // openTask — and shows a non-interactive recurrence marker instead of a
+    // checkbox.
+    const projection = isRecurringProjection(task);
     // ONE action list feeds the SR custom actions AND the sighted long-press
     // menu (same model as the event rows).
-    const actions: MenuAction[] = [
-      { name: 'toggle', label: done ? t('mobile.reopen') : t('mobile.complete') },
-      { name: 'edit', label: t('mobile.rename') },
-      { name: 'moveCopy', label: t('mobile.moveCopy') },
-      { name: 'delete', label: t('mobile.delete'), destructive: true },
-    ];
+    const actions: MenuAction[] = projection
+      ? [{ name: 'edit', label: t('mobile.editTaskLabel') }]
+      : [
+          { name: 'toggle', label: done ? t('mobile.reopen') : t('mobile.complete') },
+          { name: 'edit', label: t('mobile.rename') },
+          { name: 'moveCopy', label: t('mobile.moveCopy') },
+          { name: 'delete', label: t('mobile.delete'), destructive: true },
+        ];
     const runAction = (name: string) => {
+      if (projection) {
+        openTask(task);
+        return;
+      }
       if (name === 'toggle') void toggleTask(task);
       else if (name === 'delete') removeTask(task);
       else if (name === 'moveCopy') moveCopyTask(task);
@@ -1047,18 +1094,32 @@ export function CalendarDayList({
         {/* Sighted tap target to complete/reopen the task; the row otherwise
             opens the task on tap, so the marker needs its own Pressable. SR
             users use the row's "toggle" custom action, so this stays out of the
-            accessibility tree. */}
-        <Pressable
-          accessible={false}
-          importantForAccessibility="no"
-          onPress={() => void toggleTask(task)}
-          hitSlop={10}
-          style={({ pressed }) => [styles.taskCheckButton, pressed && styles.pressed]}
-        >
-          <Text style={styles.taskCheck} importantForAccessibility="no">
-            {statusMarker(task.status)}
-          </Text>
-        </Pressable>
+            accessibility tree. A read-only recurring projection shows a
+            non-interactive recurrence glyph instead (it has no completion of its
+            own — the current instance owns that). */}
+        {projection ? (
+          <View
+            accessible={false}
+            importantForAccessibility="no"
+            style={styles.taskCheckButton}
+          >
+            <Text style={styles.taskCheck} importantForAccessibility="no">
+              ↻
+            </Text>
+          </View>
+        ) : (
+          <Pressable
+            accessible={false}
+            importantForAccessibility="no"
+            onPress={() => void toggleTask(task)}
+            hitSlop={10}
+            style={({ pressed }) => [styles.taskCheckButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.taskCheck} importantForAccessibility="no">
+              {statusMarker(task.status)}
+            </Text>
+          </Pressable>
+        )}
         {hex != null && (
           <View
             accessible={false}

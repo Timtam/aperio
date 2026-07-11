@@ -39,7 +39,13 @@ import {
   eventDayTimes,
   multiDayInfo,
 } from '../../intl/multiDay';
-import { filterTasksOnDay, isDeadlineChip } from '../../intl/taskDay';
+import {
+  expandScheduledRecurringTasks,
+  filterTasksOnDay,
+  isDeadlineChip,
+  isRecurringProjection,
+  recurringSeriesTaskId,
+} from '../../intl/taskDay';
 import { useCurrentUserByList } from '../../state/currentUser';
 import {
   assigneeSuffix,
@@ -153,6 +159,39 @@ export function MonthView() {
 
   const eventsByDay = useMemo(() => groupEventsByDay(events), [events]);
 
+  // Expand recurring SCHEDULED tasks into one occurrence per planned day across
+  // the visible month grid — so a task recurring every day/week shows on EVERY
+  // due day (like a recurring event), not only its single current
+  // scheduled_date. The occurrence on the task's own date is the real,
+  // interactive task; the others are read-only projections (isRecurringProjection)
+  // that route to the series and offer no complete/reschedule/delete (the current
+  // instance advances the series on completion). Non-recurring / from-completion /
+  // backlog tasks pass through untouched. Keyed by the grid's covered range so a
+  // series recurring into an adjacent-month padding cell still shows there.
+  const expandedTasks = useMemo(() => {
+    if (cells.length === 0) return tasks;
+    let fromKey = keyOf(cells[0]);
+    let toKey = fromKey;
+    for (const c of cells) {
+      const k = keyOf(c);
+      if (k < fromKey) fromKey = k;
+      if (k > toKey) toKey = k;
+    }
+    return expandScheduledRecurringTasks(tasks, fromKey, toKey);
+  }, [tasks, cells]);
+
+  // Resolve a (possibly projected) task back to its real, interactive series
+  // task so opening/activating a projection opens the underlying task, never a
+  // non-existent occurrence id. A no-op for a real task.
+  const seriesTaskOf = useCallback(
+    (task: Task): Task => {
+      if (!isRecurringProjection(task)) return task;
+      const id = recurringSeriesTaskId(task.id);
+      return tasks.find((x) => x.id === id) ?? task;
+    },
+    [tasks],
+  );
+
   // Per-day items for the cells + keyboard nav: the day's events followed by
   // the tasks scheduled or due that day (a "due" task carries `isBy` for the
   // deadline ring). A discriminated union so the render loop, focus index and
@@ -170,7 +209,7 @@ export function MonthView() {
         event,
       });
       const taskItems: MonthDayItem[] = filterTasksOnDay(
-        tasks,
+        expandedTasks,
         key,
         shouldShowCompletedForList,
         meFor,
@@ -193,7 +232,7 @@ export function MonthView() {
       ]);
     }
     return map;
-  }, [cells, eventsByDay, tasks, shouldShowCompletedForList, meFor]);
+  }, [cells, eventsByDay, expandedTasks, shouldShowCompletedForList, meFor]);
 
   const focusIndex = useMemo(() => {
     const i = cells.findIndex((c) => isSameDay(c, anchor));
@@ -389,9 +428,11 @@ export function MonthView() {
             openEventDialog(item.event);
           } else if (item?.kind === 'task') {
             // Match TaskView / WeekView: Enter opens the task, Space ticks
-            // it off (the visible ○/● marker).
-            if (e.key === 'Enter') openTaskDialog(item.task);
-            else void toggleTaskStatus(item.task);
+            // it off (the visible ○/● marker). A read-only recurring projection
+            // opens its series on Enter and ignores Space (its completion lives
+            // on the current instance).
+            if (e.key === 'Enter') openTaskDialog(seriesTaskOf(item.task));
+            else if (!isRecurringProjection(item.task)) void toggleTaskStatus(item.task);
           }
           return;
         }
@@ -416,7 +457,9 @@ export function MonthView() {
               ? { x: rect.left, y: rect.bottom }
               : undefined;
             if (item.kind === 'event') void openEventMenu(item.event, pos);
-            else void openTaskMenu(item.task, pos);
+            // A projection has no context actions (complete/reschedule/delete
+            // live on the current instance) — the menu is suppressed for it.
+            else if (!isRecurringProjection(item.task)) void openTaskMenu(item.task, pos);
           }
           return;
         }
@@ -466,7 +509,7 @@ export function MonthView() {
           if (first?.kind === 'event') {
             openEventDialog(first.event);
           } else if (first?.kind === 'task') {
-            openTaskDialog(first.task);
+            openTaskDialog(seriesTaskOf(first.task));
           } else {
             // Empty day → the "Termin oder Aufgabe?" chooser, anchored here.
             openCreateChooser(keyOf(focusedDay));
@@ -492,6 +535,7 @@ export function MonthView() {
       openTaskDialog,
       openCreateChooser,
       toggleTaskStatus,
+      seriesTaskOf,
       handleTab,
       clearEventIndex,
       requestDelete,
@@ -760,6 +804,10 @@ export function MonthView() {
                         const hidden = idx >= visibleLimit;
                         if (item.kind === 'task') {
                           const task = item.task;
+                          // A read-only future occurrence of a recurring task —
+                          // rendered as a preview: no drag/complete/menu; it
+                          // opens its series on activate.
+                          const projection = isRecurringProjection(task);
                           const color = resolveTaskColor(
                             task,
                             taskListById,
@@ -807,7 +855,10 @@ export function MonthView() {
                               },
                             ) +
                             subtaskParentSuffix(t, task, tasks) +
-                            effortSuffix(t, task.effort);
+                            effortSuffix(t, task.effort) +
+                            (projection
+                              ? t('views.tasks.recurringOccurrence')
+                              : '');
                           return (
                             <span
                               key={item.id}
@@ -819,6 +870,9 @@ export function MonthView() {
                                   : '') +
                                 (hidden ? ' month-event--overflow' : '') +
                                 (item.isBy ? ' month-task--by' : '') +
+                                (projection
+                                  ? ' month-task--projection'
+                                  : '') +
                                 (draggingTaskId === task.id
                                   ? ' month-task--dragging'
                                   : '') +
@@ -829,24 +883,32 @@ export function MonthView() {
                               }
                               aria-label={aria}
                               aria-selected={isFocusedItem}
-                              draggable
-                              onDragStart={(dev) => {
-                                setTaskDrag(
-                                  dev.dataTransfer,
-                                  task,
-                                  tasks.filter((c) => c.parent_id === task.id),
-                                );
-                                setDraggingTaskId(task.id);
-                              }}
-                              onDragEnd={() => setDraggingTaskId(null)}
+                              // A projection is read-only: not draggable, and it
+                              // opens its series (never toggles/menus) on activate.
+                              draggable={!projection}
+                              onDragStart={
+                                projection
+                                  ? undefined
+                                  : (dev) => {
+                                      setTaskDrag(
+                                        dev.dataTransfer,
+                                        task,
+                                        tasks.filter((c) => c.parent_id === task.id),
+                                      );
+                                      setDraggingTaskId(task.id);
+                                    }
+                              }
+                              onDragEnd={
+                                projection ? undefined : () => setDraggingTaskId(null)
+                              }
                               onDoubleClick={(e) => {
                                 e.stopPropagation();
-                                openTaskDialog(task);
+                                openTaskDialog(seriesTaskOf(task));
                               }}
                               onContextMenu={(cmev) => {
                                 cmev.preventDefault();
                                 cmev.stopPropagation();
-                                void openTaskMenu(task);
+                                if (!projection) void openTaskMenu(task);
                               }}
                               style={
                                 color.hex
@@ -857,12 +919,16 @@ export function MonthView() {
                               <span
                                 className="month-task__check"
                                 aria-hidden="true"
-                                onClick={(cmev) => {
-                                  cmev.stopPropagation();
-                                  void toggleTaskStatus(task);
-                                }}
+                                onClick={
+                                  projection
+                                    ? undefined
+                                    : (cmev) => {
+                                        cmev.stopPropagation();
+                                        void toggleTaskStatus(task);
+                                      }
+                                }
                               >
-                                {statusMarker(task.status)}
+                                {projection ? '↻' : statusMarker(task.status)}
                               </span>
                               <span className="month-task__title">
                                 {task.parent_id ? '↳ ' : ''}
