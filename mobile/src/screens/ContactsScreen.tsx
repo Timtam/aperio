@@ -27,6 +27,7 @@ import { useTabBarInset } from '../hooks/useTabBarInset';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useCacheReload } from '../state/cacheObserver';
 import { useContactVisibility } from '../state/contactVisibility';
+import { MagicTapView } from '../components/MagicTapView';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Accessible address-book view — a linear, screen-reader-first list of every
@@ -374,7 +375,7 @@ export default function ContactsScreen({
   return (
     // VoiceOver MAGIC TAP (two-finger double-tap) = the screen's primary
     // create action: a new contact (same flow as the add button).
-    <View style={styles.screen} onMagicTap={addContact}>
+    <MagicTapView style={styles.screen} onMagicTap={addContact}>
       <View style={styles.actionBar}>
         <Pressable
           accessibilityRole="button"
@@ -522,7 +523,7 @@ export default function ContactsScreen({
           renderItem={({ item, section }) => renderContact(item, section.list)}
         />
       )}
-    </View>
+    </MagicTapView>
   );
 }
 

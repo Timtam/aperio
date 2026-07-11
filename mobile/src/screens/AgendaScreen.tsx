@@ -40,6 +40,7 @@ import { hapticLoadBegin, hapticLoadEnd } from '../state/haptics';
 import { useCalendarVisibility } from '../state/calendarVisibility';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
 import type { RootStackScreenProps } from '../navigation/types';
+import { MagicTapView } from '../components/MagicTapView';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { chrome } from '../theme/uiScale';
 
@@ -340,7 +341,7 @@ export default function AgendaScreen({
   );
 
   return (
-    <View style={styles.screen} onMagicTap={magicTapCreate}>
+    <MagicTapView style={styles.screen} onMagicTap={magicTapCreate}>
       {/* Day ⇄ Week ⇄ Month ⇄ Agenda, carrying the anchor so the date survives
           the switch. replace (not push): sibling views swap in place, keeping
           the stack flat. Pressing the active view is suppressed by the switcher. */}
@@ -496,7 +497,7 @@ export default function AgendaScreen({
         onAction={menu?.onAction ?? (() => undefined)}
         onClose={() => setMenu(null)}
       />
-    </View>
+    </MagicTapView>
   );
 
   function renderRow(occ: DayOccurrence<CalendarEvent>, dayKey: string) {

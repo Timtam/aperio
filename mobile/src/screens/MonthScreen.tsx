@@ -11,6 +11,7 @@ import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { JumpToDateButton } from '../components/JumpToDateButton';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import type { RootStackScreenProps } from '../navigation/types';
+import { MagicTapView } from '../components/MagicTapView';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { chrome } from '../theme/uiScale';
 
@@ -82,7 +83,7 @@ export default function MonthScreen({ navigation, route }: RootStackScreenProps<
   const { addEvent: magicTapCreate } = useNewEventOnDay(navigation, anchor);
 
   return (
-    <View style={styles.screen} onMagicTap={magicTapCreate}>
+    <MagicTapView style={styles.screen} onMagicTap={magicTapCreate}>
       <CalendarViewSwitcher
         active="month"
         onSelect={(v) =>
@@ -148,7 +149,7 @@ export default function MonthScreen({ navigation, route }: RootStackScreenProps<
           dayAnnounceKey="views.month.dayAnnounce"
         />
       </CalendarPager>
-    </View>
+    </MagicTapView>
   );
 }
 
