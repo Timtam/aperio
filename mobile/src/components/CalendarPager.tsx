@@ -1,8 +1,7 @@
-import { useFocusEffect } from '@react-navigation/native';
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { useRoute } from '@react-navigation/native';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
-  findNodeHandle,
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -14,7 +13,7 @@ import {
 } from 'react-native';
 
 import { A11yPagerView } from '../../modules/a11y-pager';
-import { setPageAction } from '../a11y/gestureHost';
+import { registerPageAction } from '../a11y/gestureHost';
 import { useScreenReaderEnabled } from '../a11y/useScreenReaderEnabled';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -74,64 +73,47 @@ export function CalendarPager({
   const screenReader = useScreenReaderEnabled();
   const styles = useThemedStyles(makeStyles);
 
-  // VoiceOver period-header focus management. Under the VoiceOver/iOS pager this
-  // component OWNS the period announcement (the screens skip theirs via
-  // `useCalendarPagerOwnsHeading`), so there's exactly one announcement per
-  // change and it never double-speaks with a focus move.
-  const headerRef = useRef<Text>(null);
-  // Set when a PAGE (three-finger swipe) drove the label change, so we only
-  // steal focus for an actual page — not for a toolbar change (‹ ›, Today,
-  // jump-to-date), where the user is operating a control we mustn't yank focus
-  // away from.
-  const pagedRef = useRef(false);
+  // The pager renders its own visible period header under VoiceOver (the screens
+  // drop theirs via `useCalendarPagerOwnsHeading`), announced on each change.
   const firstRun = useRef(true);
   useEffect(() => {
-    // Only the native VoiceOver pager owns announcements + focus.
+    // Only the native VoiceOver pager announces the period.
     if (!(screenReader && Platform.OS === 'ios')) return;
     if (firstRun.current) {
-      // Don't announce / refocus the initial period on mount — VoiceOver is
-      // already reading the freshly-shown screen.
+      // Don't announce the initial period on mount — VoiceOver is already
+      // reading the freshly-shown screen.
       firstRun.current = false;
       return;
     }
-    if (pagedRef.current) {
-      pagedRef.current = false;
-      // A three-finger swipe: move VoiceOver focus onto the (always-present)
-      // header, which VoiceOver then announces. This keeps focus INSIDE the
-      // pager (so the next swipe still bubbles here) and never depends on the
-      // next period's data being loaded. A short delay lets iOS settle the
-      // re-rendered label so the focus reliably lands.
-      const id = setTimeout(() => {
-        const tag = findNodeHandle(headerRef.current);
-        if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
-      }, 50);
-      return () => clearTimeout(id);
-    }
-    // A toolbar change OR a window-level page (a three-finger swipe made while
-    // focus was on chrome, routed here by the gesture host): announce the new
-    // period WITHOUT stealing focus. `queue: false` makes it INTERRUPT whatever
-    // VoiceOver is currently saying, so the range is spoken promptly and isn't
-    // dropped behind a stale utterance (the reported "announcement sometimes
-    // doesn't come / is delayed / doesn't interrupt").
+    // Announce the new period on ANY change — a three-finger swipe (in-content or
+    // window-routed from chrome) or a toolbar ‹ ›/Today/jump — promptly and
+    // INTERRUPTINGLY. `queue: false` cuts through so the range is spoken
+    // immediately instead of being dropped behind, or delayed seconds by, the day
+    // list's reload accessibility churn (the reported ~3 s delay). We deliberately
+    // no longer move VoiceOver focus onto the header after a swipe: that focus
+    // move was exactly what the reload delayed, and the window-level scroll
+    // fallback (modules/a11y-gestures) keeps paging working even if the cursor
+    // drifts off the pager.
     AccessibilityInfo.announceForAccessibilityWithOptions(periodLabel, {
       queue: false,
     });
   }, [periodLabel, screenReader]);
 
-  // Register this screen's pager step in the app-wide gesture host while it's
-  // focused, so a VoiceOver three-finger swipe made when focus is on chrome
-  // (a heading / the view switcher / the ‹ › buttons — outside the in-content
-  // A11yPagerView) still pages. The window-level native catcher
-  // (modules/a11y-gestures) routes such swipes here. Cleared on blur so a
-  // background screen never steals the gesture.
-  useFocusEffect(
-    useCallback(() => {
-      setPageAction((direction) => {
+  // Register this screen's pager step under its route name so a VoiceOver
+  // three-finger swipe made when focus is on chrome (a heading / the view
+  // switcher / the ‹ › buttons — outside the in-content A11yPagerView) still
+  // pages: the window-level native catcher (modules/a11y-gestures) routes such
+  // swipes to the active route's handler. Registered on mount, cleared on unmount
+  // — routing by the live active route is robust to the native tab bar's
+  // unreliable focus events.
+  const route = useRoute();
+  useEffect(
+    () =>
+      registerPageAction(route.name, (direction) => {
         if (direction === 'next') onNext();
         else onPrev();
-      });
-      return () => setPageAction(null);
-    }, [onNext, onPrev]),
+      }),
+    [route.name, onNext, onPrev],
   );
 
   if (screenReader) {
@@ -142,16 +124,11 @@ export function CalendarPager({
         <A11yPagerView
           style={styles.flex}
           onPage={(e) => {
-            pagedRef.current = true;
             if (e.nativeEvent.direction === 'next') onNext();
             else onPrev();
           }}
         >
-          <Text
-            ref={headerRef}
-            accessibilityRole="header"
-            style={styles.pagerHeader}
-          >
+          <Text accessibilityRole="header" style={styles.pagerHeader}>
             {periodLabel}
           </Text>
           {children}
