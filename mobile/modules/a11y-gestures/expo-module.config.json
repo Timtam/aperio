@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["A11yGesturesModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.a11ygestures.A11yGesturesModule"]
+  }
+}

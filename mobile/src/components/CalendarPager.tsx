@@ -1,4 +1,5 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   findNodeHandle,
@@ -13,6 +14,7 @@ import {
 } from 'react-native';
 
 import { A11yPagerView } from '../../modules/a11y-pager';
+import { setPageAction } from '../a11y/gestureHost';
 import { useScreenReaderEnabled } from '../a11y/useScreenReaderEnabled';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -105,10 +107,32 @@ export function CalendarPager({
       }, 50);
       return () => clearTimeout(id);
     }
-    // A toolbar change: announce the new period WITHOUT stealing focus from the
-    // control the user just operated.
-    AccessibilityInfo.announceForAccessibility(periodLabel);
+    // A toolbar change OR a window-level page (a three-finger swipe made while
+    // focus was on chrome, routed here by the gesture host): announce the new
+    // period WITHOUT stealing focus. `queue: false` makes it INTERRUPT whatever
+    // VoiceOver is currently saying, so the range is spoken promptly and isn't
+    // dropped behind a stale utterance (the reported "announcement sometimes
+    // doesn't come / is delayed / doesn't interrupt").
+    AccessibilityInfo.announceForAccessibilityWithOptions(periodLabel, {
+      queue: false,
+    });
   }, [periodLabel, screenReader]);
+
+  // Register this screen's pager step in the app-wide gesture host while it's
+  // focused, so a VoiceOver three-finger swipe made when focus is on chrome
+  // (a heading / the view switcher / the ‹ › buttons — outside the in-content
+  // A11yPagerView) still pages. The window-level native catcher
+  // (modules/a11y-gestures) routes such swipes here. Cleared on blur so a
+  // background screen never steals the gesture.
+  useFocusEffect(
+    useCallback(() => {
+      setPageAction((direction) => {
+        if (direction === 'next') onNext();
+        else onPrev();
+      });
+      return () => setPageAction(null);
+    }, [onNext, onPrev]),
+  );
 
   if (screenReader) {
     // iOS: the native pager turns a three-finger swipe into onPrev/onNext with
