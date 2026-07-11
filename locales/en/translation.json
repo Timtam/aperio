@@ -1915,6 +1915,8 @@
       "done": "Done ({{count}})",
       "doneSplit": "Done – {{mine}} by me, {{others}} by others",
       "deferred": "Upcoming ({{count}})",
+      "overdue": "Overdue ({{count}})",
+      "today": "Today ({{count}})",
       "taskList": "Task list",
       "sectionActions": "Actions for section \"{{name}}\"",
       "sectionColorSet": "Section \"{{name}}\" set to {{color}}.",

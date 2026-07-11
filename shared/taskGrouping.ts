@@ -6,9 +6,16 @@ import { priorityRank } from './taskStatus';
 export const DONE_GROUP_ID = '__aperio_done_group__';
 /** Sentinel id of the synthetic "Backlog" group row. */
 export const BACKLOG_GROUP_ID = '__aperio_backlog_group__';
-/** Sentinel id of the synthetic "Zukünftig (N)" group row — backlog tasks
- *  whose `resurface_date` is still in the future (DESIGN §9.12). */
+/** Sentinel id of the synthetic "Zukünftig (N)" group row — tasks waiting for a
+ *  future day: backlog tasks whose `resurface_date` is still ahead (DESIGN
+ *  §9.12) AND tasks scheduled on a fixed FUTURE day. */
 export const DEFERRED_GROUP_ID = '__aperio_deferred_group__';
+/** Sentinel id of the synthetic "Überfällig (N)" group row — open tasks whose
+ *  fixed scheduled day is already in the past. */
+export const OVERDUE_GROUP_ID = '__aperio_overdue_group__';
+/** Sentinel id of the synthetic "Heute (N)" group row — open tasks scheduled for
+ *  today. */
+export const TODAY_GROUP_ID = '__aperio_today_group__';
 
 /**
  * How the task view groups its top level:
@@ -34,7 +41,7 @@ export function isTaskDeferred(task: Task, today: string): boolean {
  *  the synthetic Done or Deferred group). When `group` is set on an
  *  {@link Entry}, the row is a collapsible header rather than a real task. */
 export interface GroupMeta {
-  kind: 'backlog' | 'list' | 'section' | 'done' | 'deferred';
+  kind: 'backlog' | 'list' | 'section' | 'done' | 'deferred' | 'overdue' | 'today';
   /** Section row id — present only for `kind: 'section'`; lets the header
    *  tint to the section colour and offer the ⋮ actions. */
   sectionId?: string;
@@ -245,10 +252,10 @@ export function buildEntries(
   // sort covers backlog + scheduled lists + sections + ungrouped alike.
   openTopLevel.sort(taskOrder);
 
-  // Deferred (DESIGN §9.12): a backlog task whose resurface day is still in
-  // the future is held out of the active groups and collected under
-  // "Zukünftig" — it's neither lost nor cluttering today's work. The same
-  // gate doubles as the §9.3 backlog filter (see `isTaskDeferred`).
+  // Deferred (DESIGN §9.12): a backlog task whose resurface day is still in the
+  // future is held out of the active groups. It joins the fixed-future-scheduled
+  // tasks under "Zukünftig" below. The same gate doubles as the §9.3 backlog
+  // filter (see `isTaskDeferred`).
   const deferred: Task[] = [];
   const active: Task[] = [];
   openTopLevel.forEach((task) => {
@@ -256,18 +263,33 @@ export function buildEntries(
     else active.push(task);
   });
 
-  // Backlog (no planned work day) vs the per-list groups (scheduled).
+  // Split the active (non-deferred) open tasks by their planned day relative to
+  // `today`: OVERDUE (a fixed day already past), TODAY, FUTURE (a fixed day still
+  // to come), or BACKLOG (no planned day). Overdue + Today become flat time
+  // groups; Future joins the deferred tasks in "Zukünftig"; only Backlog keeps
+  // the per-list → section structure. `active` is already in taskOrder, so each
+  // bucket inherits it.
   const backlog: Task[] = [];
-  const byList = new Map<string, Task[]>();
+  const overdue: Task[] = [];
+  const todayTasks: Task[] = [];
+  const futureScheduled: Task[] = [];
   active.forEach((task) => {
-    if (!task.scheduled_date) {
-      backlog.push(task);
-      return;
-    }
-    const bucket = byList.get(task.list_id) ?? [];
-    bucket.push(task);
-    byList.set(task.list_id, bucket);
+    const day = task.scheduled_date;
+    if (!day) backlog.push(task);
+    else if (day < today) overdue.push(task);
+    else if (day === today) todayTasks.push(task);
+    else futureScheduled.push(task);
   });
+
+  // "Zukünftig" = everything waiting for a future day: backlog tasks resurfacing
+  // later (ordered by resurface_date) + tasks scheduled on a fixed future day
+  // (ordered by scheduled_date). Sorted by that effective future date — soonest
+  // first — so the group reads as a countdown.
+  const futureDayOf = (task: Task): string =>
+    (isTaskDeferred(task, today) ? task.resurface_date : task.scheduled_date) ??
+    '';
+  const future = [...deferred, ...futureScheduled];
+  future.sort((a, b) => futureDayOf(a).localeCompare(futureDayOf(b)));
 
   const nameOf = (listId: string) => taskListById.get(listId)?.name ?? listId;
   const byName = (a: string, b: string) => nameOf(a).localeCompare(nameOf(b));
@@ -340,6 +362,29 @@ export function buildEntries(
       });
   }
 
+  // "Überfällig" — open tasks whose fixed day is already past. Surfaced FIRST as
+  // the most pressing. Flat (all lists together), in taskOrder. State mode only.
+  if (groupBy === 'state' && overdue.length > 0) {
+    forest.push({
+      t: 'group',
+      id: OVERDUE_GROUP_ID,
+      title: t('views.tasks.overdue', { count: totalUnder(overdue) }),
+      meta: { kind: 'overdue' },
+      children: overdue.map((task) => ({ t: 'task', task }) as GNode),
+    });
+  }
+
+  // "Heute" — open tasks planned for today. Flat, in taskOrder. State mode only.
+  if (groupBy === 'state' && todayTasks.length > 0) {
+    forest.push({
+      t: 'group',
+      id: TODAY_GROUP_ID,
+      title: t('views.tasks.today', { count: totalUnder(todayTasks) }),
+      meta: { kind: 'today' },
+      children: todayTasks.map((task) => ({ t: 'task', task }) as GNode),
+    });
+  }
+
   // Backlog → list → section. Grouping the backlog (not just the scheduled
   // tasks) is what makes e.g. a Vikunja project's buckets visible even when
   // nothing is scheduled.
@@ -368,34 +413,17 @@ export function buildEntries(
     });
   }
 
-  // Scheduled per-list groups, sorted by list name.
-  if (groupBy === 'state') {
-    Array.from(byList.entries())
-      .sort(([a], [b]) => byName(a, b))
-      .forEach(([listId, items]) => {
-        forest.push({
-          t: 'group',
-          id: `grp:sc:list:${listId}`,
-          title: `${nameOf(listId)} (${totalUnder(items)})`,
-          meta: { kind: 'list', listId },
-          children: listChildren(listId, items, `sc:${listId}`),
-        });
-      });
-  }
-
-  // "Zukünftig" group: backlog tasks waiting to resurface, soonest first.
-  // Sits just before Done — both are end-of-list, navigable, collapsible.
-  // (State mode only — in list mode these live in their list group above.)
-  if (groupBy === 'state' && deferred.length > 0) {
-    deferred.sort((a, b) =>
-      (a.resurface_date ?? '').localeCompare(b.resurface_date ?? ''),
-    );
+  // "Zukünftig" group: tasks waiting for a future day (deferred backlog + fixed
+  // future scheduled), soonest first (`future` is pre-sorted by that day). Sits
+  // between Backlog and Done — all end-of-list, navigable, collapsible. (State
+  // mode only — in list mode these live in their list group above.)
+  if (groupBy === 'state' && future.length > 0) {
     forest.push({
       t: 'group',
       id: DEFERRED_GROUP_ID,
-      title: t('views.tasks.deferred', { count: deferred.length }),
+      title: t('views.tasks.deferred', { count: totalUnder(future) }),
       meta: { kind: 'deferred' },
-      children: deferred.map((task) => ({ t: 'task', task }) as GNode),
+      children: future.map((task) => ({ t: 'task', task }) as GNode),
     });
   }
 

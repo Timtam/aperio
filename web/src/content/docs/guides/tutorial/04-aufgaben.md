@@ -111,9 +111,10 @@ your day or week, and work through them.
 
 The task-view header has a **Group by** selector:
 
-- **State** (default): tasks are grouped by where they are in their lifecycle —
-  the **Backlog**, the per-list **scheduled** groups, **Upcoming** (deferred tasks
-  waiting to resurface), and **Done**.
+- **State** (default): tasks are grouped by when they're due — **Overdue** (a
+  planned day already past), **Today**, the **Backlog** (no planned day, still
+  sub-grouped by list → section), **Upcoming** (tasks planned for a fixed future
+  day, plus deferred tasks waiting to resurface — soonest first), and **Done**.
 - **List**: every open / in-progress task is grouped under **its own list** (and
   sections), regardless of whether it's scheduled, in the backlog, or deferred —
   one place per list. **Done** still sits separately at the bottom, exactly as in
