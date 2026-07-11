@@ -1,5 +1,5 @@
-import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, type ReactNode } from 'react';
+import { useRoute } from '@react-navigation/native';
+import { useEffect, type ReactNode } from 'react';
 import {
   Platform,
   StyleSheet,
@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 
 import { A11yMagicTapView } from '../../modules/a11y-magic-tap';
-import { setMagicTapAction } from '../a11y/gestureHost';
+import { registerMagicTapAction } from '../a11y/gestureHost';
 
 // Wraps a screen's content so a VoiceOver MAGIC TAP (two-finger double-tap) runs
 // the screen's single most relevant action — creating its primary item (a new
@@ -43,12 +43,15 @@ export function MagicTapView({
   onMagicTap: () => void;
   children: ReactNode;
 }) {
-  // Window-level fallback: keep this screen's action current while it's focused.
-  useFocusEffect(
-    useCallback(() => {
-      setMagicTapAction(onMagicTap);
-      return () => setMagicTapAction(null);
-    }, [onMagicTap]),
+  // Window-level fallback: register this screen's action under its route name so
+  // a magic tap on chrome (routed to the window natively) reaches it. Routing by
+  // the live active route (in the gesture host) is robust to the native tab bar's
+  // unreliable focus events, so we register on mount and clear on unmount rather
+  // than on focus/blur.
+  const route = useRoute();
+  useEffect(
+    () => registerMagicTapAction(route.name, onMagicTap),
+    [route.name, onMagicTap],
   );
 
   if (Platform.OS === 'ios') {
