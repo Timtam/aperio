@@ -1917,6 +1917,7 @@
       "deferred": "Upcoming ({{count}})",
       "overdue": "Overdue ({{count}})",
       "today": "Today ({{count}})",
+      "cancelled": "Cancelled ({{count}})",
       "taskList": "Task list",
       "sectionActions": "Actions for section \"{{name}}\"",
       "sectionColorSet": "Section \"{{name}}\" set to {{color}}.",

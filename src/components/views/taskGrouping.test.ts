@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Section, Task, TaskUser } from '../../api/types';
 import {
   buildEntries,
+  CANCELLED_GROUP_ID,
   DEFERRED_GROUP_ID,
   DONE_GROUP_ID,
   isTaskDeferred,
@@ -230,6 +231,46 @@ describe('buildEntries time groups (state mode)', () => {
     const todayHeader = result.entries.find((e) => e.group?.kind === 'today');
     // parent + 2 subtasks = 3, not 1 — consistent with the Backlog header count.
     expect(todayHeader?.task.title).toBe('views.tasks.today (3)');
+  });
+});
+
+describe('buildEntries cancelled group', () => {
+  it('collects cancelled tasks into their own group after Done — never in a time group', () => {
+    const tasks = [
+      baseTask({ id: 'today', scheduled_date: TODAY }),
+      // Cancelled AND past-scheduled: must NOT land in Überfällig.
+      baseTask({
+        id: 'cx',
+        status: 'cancelled',
+        scheduled_date: '2026-05-10',
+        updated_at: '2026-05-19T00:00:00Z',
+      }),
+      baseTask({
+        id: 'done',
+        status: 'completed',
+        completed_at: '2026-05-20T00:00:00Z',
+      }),
+    ];
+    const result = build(tasks);
+    // Order: Heute → Erledigt → Abgebrochen (no Überfällig for the cancelled one).
+    expect(headers(result).map((h) => h.kind)).toEqual([
+      'today',
+      'done',
+      'cancelled',
+    ]);
+    const cancelledGroup = result.entries.find(
+      (e) => e.group?.kind === 'cancelled',
+    )!;
+    expect(cancelledGroup.task.id).toBe(CANCELLED_GROUP_ID);
+    expect(taskRows(result).map((e) => e.task.id)).toContain('cx');
+  });
+
+  it('sorts cancelled tasks most-recently-changed first (updated_at)', () => {
+    const tasks = [
+      baseTask({ id: 'old', status: 'cancelled', updated_at: '2026-05-10T00:00:00Z' }),
+      baseTask({ id: 'new', status: 'cancelled', updated_at: '2026-05-20T00:00:00Z' }),
+    ];
+    expect(taskRows(build(tasks)).map((e) => e.task.id)).toEqual(['new', 'old']);
   });
 });
 

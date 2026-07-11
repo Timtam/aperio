@@ -37,6 +37,7 @@ import type { Section, Task } from '../../api/types';
 import { duplicateTask } from '../duplicateActions';
 import {
   buildEntries,
+  CANCELLED_GROUP_ID,
   DEFERRED_GROUP_ID,
   DONE_GROUP_ID,
   type Entry,
@@ -123,6 +124,7 @@ export function TaskView() {
     const seed = new Set<string>();
     if (loadDoneCollapsed()) seed.add(DONE_GROUP_ID);
     if (loadDeferredCollapsed()) seed.add(DEFERRED_GROUP_ID);
+    if (loadCancelledCollapsed()) seed.add(CANCELLED_GROUP_ID);
     return seed;
   });
   const toggleCollapsed = useCallback((id: string) => {
@@ -134,6 +136,7 @@ export function TaskView() {
       // across reloads; per-subtree twisties stay session-local.
       if (id === DONE_GROUP_ID) saveDoneCollapsed(next.has(id));
       else if (id === DEFERRED_GROUP_ID) saveDeferredCollapsed(next.has(id));
+      else if (id === CANCELLED_GROUP_ID) saveCancelledCollapsed(next.has(id));
       return next;
     });
   }, []);
@@ -1119,6 +1122,27 @@ function loadDeferredCollapsed(): boolean {
 function saveDeferredCollapsed(value: boolean): void {
   try {
     localStorage.setItem(DEFERRED_COLLAPSED_KEY, String(value));
+  } catch {
+    // Non-fatal — see saveDoneCollapsed.
+  }
+}
+
+const CANCELLED_COLLAPSED_KEY = 'aperio.tasks.cancelledCollapsed';
+
+/** Read the persisted "Abgebrochen group collapsed" preference. Defaults to
+ *  collapsed (true) — cancelled tasks are terminal + out of the way, like Done —
+ *  and tolerates a missing / unreadable store. */
+function loadCancelledCollapsed(): boolean {
+  try {
+    return localStorage.getItem(CANCELLED_COLLAPSED_KEY) !== 'false';
+  } catch {
+    return true;
+  }
+}
+
+function saveCancelledCollapsed(value: boolean): void {
+  try {
+    localStorage.setItem(CANCELLED_COLLAPSED_KEY, String(value));
   } catch {
     // Non-fatal — see saveDoneCollapsed.
   }

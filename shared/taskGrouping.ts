@@ -16,6 +16,8 @@ export const OVERDUE_GROUP_ID = '__aperio_overdue_group__';
 /** Sentinel id of the synthetic "Heute (N)" group row — open tasks scheduled for
  *  today. */
 export const TODAY_GROUP_ID = '__aperio_today_group__';
+/** Sentinel id of the synthetic "Abgebrochen (N)" group row — cancelled tasks. */
+export const CANCELLED_GROUP_ID = '__aperio_cancelled_group__';
 
 /**
  * How the task view groups its top level:
@@ -41,7 +43,15 @@ export function isTaskDeferred(task: Task, today: string): boolean {
  *  the synthetic Done or Deferred group). When `group` is set on an
  *  {@link Entry}, the row is a collapsible header rather than a real task. */
 export interface GroupMeta {
-  kind: 'backlog' | 'list' | 'section' | 'done' | 'deferred' | 'overdue' | 'today';
+  kind:
+    | 'backlog'
+    | 'list'
+    | 'section'
+    | 'done'
+    | 'deferred'
+    | 'overdue'
+    | 'today'
+    | 'cancelled';
   /** Section row id — present only for `kind: 'section'`; lets the header
    *  tint to the section colour and offer the ⋮ actions. */
   sectionId?: string;
@@ -236,13 +246,17 @@ export function buildEntries(
   const totalUnder = (items: Task[]): number =>
     items.reduce((n, task) => n + 1 + countSubtasks(task.id), 0);
 
-  // Completed top-level tasks (with their subtree) collapse into a single
-  // "Done (N)" group; the active groups show only open work. A completed
-  // *subtask* under an open parent stays inline.
+  // Terminal top-level tasks (with their subtree) collapse into their own
+  // end-of-list groups so the active groups show only open work: completed →
+  // "Done", cancelled → "Abgebrochen". A terminal *subtask* under an open parent
+  // stays inline. (Splitting cancelled out here also keeps a cancelled task with
+  // a past scheduled day OUT of "Überfällig".)
   const doneTopLevel: Task[] = [];
+  const cancelledTopLevel: Task[] = [];
   const openTopLevel: Task[] = [];
   topLevel.forEach((task) => {
     if (task.status === 'completed') doneTopLevel.push(task);
+    else if (task.status === 'cancelled') cancelledTopLevel.push(task);
     else openTopLevel.push(task);
   });
 
@@ -450,6 +464,23 @@ export function buildEntries(
           : t('views.tasks.done', { count: doneTopLevel.length }),
       meta: { kind: 'done' },
       children: doneTopLevel.map((task) => ({ t: 'task', task }) as GNode),
+    });
+  }
+
+  // "Abgebrochen" group at the very end — cancelled tasks, most-recently-changed
+  // first (there's no cancelled_at, so `updated_at` stands in). A terminal group
+  // like Done, so it counts its top-level items (`.length`) rather than the whole
+  // subtree.
+  if (cancelledTopLevel.length > 0) {
+    cancelledTopLevel.sort((a, b) =>
+      (b.updated_at ?? '').localeCompare(a.updated_at ?? ''),
+    );
+    forest.push({
+      t: 'group',
+      id: CANCELLED_GROUP_ID,
+      title: t('views.tasks.cancelled', { count: cancelledTopLevel.length }),
+      meta: { kind: 'cancelled' },
+      children: cancelledTopLevel.map((task) => ({ t: 'task', task }) as GNode),
     });
   }
 

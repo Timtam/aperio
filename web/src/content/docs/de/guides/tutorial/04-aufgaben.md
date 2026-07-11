@@ -127,8 +127,10 @@ Im Kopf der Aufgabenansicht gibt es einen **Gruppieren nach**-Schalter:
   **Überfällig** (ein geplanter Tag liegt schon in der Vergangenheit), **Heute**,
   der **Backlog** (ohne geplanten Tag, weiterhin nach Liste → Abschnitt
   untergruppiert), **Zukünftig** (auf einen festen künftigen Tag geplante Aufgaben
-  plus aufgeschobene, die wieder auftauchen — nächster Termin zuerst) und
-  **Erledigt**.
+  plus aufgeschobene, die wieder auftauchen — nächster Termin zuerst),
+  **Erledigt** und **Abgebrochen** (abgebrochene Aufgaben — aus den aktiven
+  Gruppen heraus, ganz am Ende). Erledigt, Zukünftig und Abgebrochen starten
+  zugeklappt.
 - **Liste**: jede offene / begonnene Aufgabe wird unter **ihrer Liste** (samt
   Abschnitten) gruppiert — egal ob geplant, im Backlog oder aufgeschoben, alles an
   einer Stelle pro Liste. **Erledigt** bleibt unten separat, genau wie in der

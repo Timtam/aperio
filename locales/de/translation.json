@@ -1917,6 +1917,7 @@
       "deferred": "Zukünftig ({{count}})",
       "overdue": "Überfällig ({{count}})",
       "today": "Heute ({{count}})",
+      "cancelled": "Abgebrochen ({{count}})",
       "taskList": "Aufgabenliste",
       "sectionActions": "Aktionen für Abschnitt „{{name}}\"",
       "sectionColorSet": "Abschnitt „{{name}}\" auf {{color}} gesetzt.",
