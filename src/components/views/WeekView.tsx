@@ -43,9 +43,12 @@ import { useTasks } from '../../state/useTasks';
 import { useViewState } from '../../state/viewStateContext';
 import { visibleRange } from '../../state/viewMath';
 import {
+  expandScheduledRecurringTasks,
   groupTasksByDay,
   isDeadlineChip,
+  isRecurringProjection,
   mergeDayItems,
+  recurringSeriesTaskId,
   taskTimeOnDay,
 } from '../../intl/taskDay';
 import { useCurrentUserByList } from '../../state/currentUser';
@@ -338,8 +341,38 @@ export function WeekView() {
   // a single chip.
   const tasksByDay = useMemo(() => {
     const dayKeys = days.map((d) => keyOf(d));
-    return groupTasksByDay(tasks, dayKeys, shouldShowCompletedForList, meFor);
+    // Expand recurring SCHEDULED tasks into one occurrence per planned day
+    // across the visible week — so a task recurring every day/week shows on
+    // EVERY due day (like a recurring event), not only its single current
+    // scheduled_date. The occurrence on the task's own date is the real,
+    // interactive task; the others are read-only projections
+    // (isRecurringProjection) that open the series and offer no
+    // complete/reschedule/delete. Non-recurring / from-completion / backlog
+    // tasks pass through untouched.
+    let fromKey = dayKeys[0] ?? '';
+    let toKey = dayKeys[0] ?? '';
+    for (const k of dayKeys) {
+      if (k < fromKey) fromKey = k;
+      if (k > toKey) toKey = k;
+    }
+    const expanded =
+      dayKeys.length > 0
+        ? expandScheduledRecurringTasks(tasks, fromKey, toKey)
+        : tasks;
+    return groupTasksByDay(expanded, dayKeys, shouldShowCompletedForList, meFor);
   }, [tasks, days, shouldShowCompletedForList, meFor]);
+
+  // Resolve a (possibly projected) task back to its real series task so opening
+  // a projection opens the underlying task, not a non-existent occurrence id. A
+  // no-op for a real task.
+  const seriesTaskOf = useCallback(
+    (task: Task): Task => {
+      if (!isRecurringProjection(task)) return task;
+      const id = recurringSeriesTaskId(task.id);
+      return tasks.find((x) => x.id === id) ?? task;
+    },
+    [tasks],
+  );
 
   // Pre-merge each day's events + timed tasks into a single time-sorted
   // list, then split that list back into timed and untimed buckets.
@@ -478,7 +511,7 @@ export function WeekView() {
             colorHex:
               resolveTaskColor(task, taskListById, labelById, sectionColorById)
                 .hex ?? undefined,
-            onOpen: () => openTaskDialog(task),
+            onOpen: () => openTaskDialog(seriesTaskOf(task)),
           };
         }
         (slot.placement === 'before' ? before : after).push(entry);
@@ -497,6 +530,7 @@ export function WeekView() {
     fmt,
     openEventDialog,
     openTaskDialog,
+    seriesTaskOf,
   ]);
 
   // Build the all-day lane bars over the week. The lane is the
@@ -912,13 +946,16 @@ export function WeekView() {
         if (e.key === 'Enter') {
           e.preventDefault();
           if (item?.kind === 'event') openEventDialog(item.event);
-          else if (item?.kind === 'task') openTaskDialog(item.task);
+          // A projection opens its underlying series (seriesTaskOf).
+          else if (item?.kind === 'task') openTaskDialog(seriesTaskOf(item.task));
           return;
         }
         if (e.key === ' ' || e.key === 'Spacebar') {
           e.preventDefault();
           if (item?.kind === 'event') openEventDialog(item.event);
-          else if (item?.kind === 'task') void toggleTaskStatus(item.task);
+          // A read-only projection has no completion of its own — Space no-ops.
+          else if (item?.kind === 'task' && !isRecurringProjection(item.task))
+            void toggleTaskStatus(item.task);
           return;
         }
         if (
@@ -935,7 +972,8 @@ export function WeekView() {
               ? { x: rect.left, y: rect.bottom }
               : undefined;
             if (item.kind === 'event') void openEventMenu(item.event, pos);
-            else void openTaskMenu(item.task, pos);
+            // A projection has no context actions — the menu is suppressed.
+            else if (!isRecurringProjection(item.task)) void openTaskMenu(item.task, pos);
           }
           return;
         }
@@ -1014,6 +1052,7 @@ export function WeekView() {
       clearEventIndex,
       requestDelete,
       toggleTaskStatus,
+      seriesTaskOf,
       eventOptionId,
       openEventMenu,
       openTaskMenu,
@@ -1352,6 +1391,9 @@ export function WeekView() {
                       const slotOut = slot != null && slot.placement !== 'in';
                       if (item.kind === 'task') {
                         const task = item.task;
+                        // A read-only future occurrence of a recurring task — no
+                        // drag/toggle/menu; it opens its series on activate.
+                        const projection = isRecurringProjection(task);
                         // Pull the effective time-of-day for this row
                         // on this specific day — could come from either
                         // scheduled_time (the planned slot) or
@@ -1421,6 +1463,7 @@ export function WeekView() {
                               className={
                                 'week-task week-task--timed' +
                                 (isFocusedItem ? ' week-task--focused' : '') +
+                                (projection ? ' week-task--projection' : '') +
                                 (draggingTaskId === task.id
                                   ? ' week-task--dragging'
                                   : '') +
@@ -1438,12 +1481,12 @@ export function WeekView() {
                               // hook also fires a live-region
                               // announcement, so confirmation lands
                               // either way.
-                              aria-label={taskChipAriaLabel(
-                                t,
-                                task,
-                                time,
-                                tasks,
-                              )}
+                              aria-label={
+                                taskChipAriaLabel(t, task, time, tasks) +
+                                (projection
+                                  ? t('views.tasks.recurringOccurrence')
+                                  : '')
+                              }
                               aria-selected={isFocusedItem}
                               style={
                                 color.hex
@@ -1452,36 +1495,46 @@ export function WeekView() {
                                     } as React.CSSProperties)
                                   : undefined
                               }
-                              draggable
-                              onDragStart={(ev) => {
-                                setTaskDrag(
-                                  ev.dataTransfer,
-                                  task,
-                                  tasks.filter((c) => c.parent_id === task.id),
-                                );
-                                setDraggingTaskId(task.id);
-                                dragOriginRef.current = {
-                                  x: ev.clientX,
-                                  y: ev.clientY,
-                                };
-                              }}
-                              onDragEnd={() => {
-                                dragOriginRef.current = null;
-                                setDraggingTaskId(null);
-                                setDragOverDayKey(null);
-                              }}
+                              // A projection is read-only: not draggable, opens
+                              // its series (never toggles/menus) on activate.
+                              draggable={!projection}
+                              onDragStart={
+                                projection
+                                  ? undefined
+                                  : (ev) => {
+                                      setTaskDrag(
+                                        ev.dataTransfer,
+                                        task,
+                                        tasks.filter((c) => c.parent_id === task.id),
+                                      );
+                                      setDraggingTaskId(task.id);
+                                      dragOriginRef.current = {
+                                        x: ev.clientX,
+                                        y: ev.clientY,
+                                      };
+                                    }
+                              }
+                              onDragEnd={
+                                projection
+                                  ? undefined
+                                  : () => {
+                                      dragOriginRef.current = null;
+                                      setDraggingTaskId(null);
+                                      setDragOverDayKey(null);
+                                    }
+                              }
                               // Mouse: single click only focuses the day (the
                               // click bubbles to the cell); double click opens
                               // the editor. The marker (below) stops the bubble
                               // so toggling the checkbox doesn't move the anchor.
                               onDoubleClick={(e) => {
                                 e.stopPropagation();
-                                openTaskDialog(task);
+                                openTaskDialog(seriesTaskOf(task));
                               }}
                               onContextMenu={(ev) => {
                                 ev.preventDefault();
                                 ev.stopPropagation();
-                                void openTaskMenu(task);
+                                if (!projection) void openTaskMenu(task);
                               }}
                             >
                               {/* GRID mode: time is read off the hour-ruler, so
@@ -1503,12 +1556,16 @@ export function WeekView() {
                                 <span
                                   className="week-task__check"
                                   aria-hidden="true"
-                                  onClick={(ev) => {
-                                    ev.stopPropagation();
-                                    void toggleTaskStatus(task);
-                                  }}
+                                  onClick={
+                                    projection
+                                      ? undefined
+                                      : (ev) => {
+                                          ev.stopPropagation();
+                                          void toggleTaskStatus(task);
+                                        }
+                                  }
                                 >
-                                  {statusMarker(task.status)}
+                                  {projection ? '↻' : statusMarker(task.status)}
                                 </span>
                                 <span className="week-task__title">
                                   {task.parent_id ? '↳ ' : ''}
@@ -1968,6 +2025,13 @@ function WeekDayTasks({
         const effortMod = visualEffortSizing
           ? effortSizeModifier(task.effort)
           : '';
+        // A read-only future occurrence of a recurring task — a preview only:
+        // no drag/complete/menu, and it opens its underlying series (resolved
+        // from allTasks) on activate.
+        const projection = isRecurringProjection(task);
+        const seriesTask = projection
+          ? allTasks.find((x) => x.id === recurringSeriesTaskId(task.id)) ?? task
+          : task;
         // Bucket index of this untimed chip (after the timed lane). The
         // grid's keyboard nav focuses it via aria-activedescendant, so it's
         // a focus *target* (a span) like the timed chips — not a separate
@@ -1986,6 +2050,7 @@ function WeekDayTasks({
               className={
                 'week-task' +
                 (isFocused ? ' week-task--focused' : '') +
+                (projection ? ' week-task--projection' : '') +
                 ` week-task--${task.status.replace('_', '-')}` +
                 (isBy ? ' week-task--by' : '') +
                 (draggingTaskId === task.id
@@ -1994,17 +2059,19 @@ function WeekDayTasks({
                 (effortMod ? ` week-task--effort-${effortMod}` : '')
               }
               aria-selected={isFocused}
-              draggable
-              onDragStart={(ev) => onDragStart(task, ev)}
-              onDragEnd={onDragEnd}
+              // A projection is read-only: not draggable, opens its series
+              // (never toggles/menus) on activate.
+              draggable={!projection}
+              onDragStart={projection ? undefined : (ev) => onDragStart(task, ev)}
+              onDragEnd={projection ? undefined : onDragEnd}
               onDoubleClick={(e) => {
                 e.stopPropagation();
-                onOpen(task);
+                onOpen(seriesTask);
               }}
               onContextMenu={(ev) => {
                 ev.preventDefault();
                 ev.stopPropagation();
-                onContextMenu(task);
+                if (!projection) onContextMenu(task);
               }}
               style={
                 color.hex
@@ -2026,19 +2093,24 @@ function WeekDayTasks({
                   assignee: assigneeSuffix(t, task.assignees),
                 }) +
                 subtaskParentSuffix(t, task, allTasks) +
-                effortSuffix(t, task.effort)
+                effortSuffix(t, task.effort) +
+                (projection ? t('views.tasks.recurringOccurrence') : '')
               }
             >
               <span className="week-task__body">
                 <span
                   className="week-task__check"
                   aria-hidden="true"
-                  onClick={(ev) => {
-                    ev.stopPropagation();
-                    onToggle(task);
-                  }}
+                  onClick={
+                    projection
+                      ? undefined
+                      : (ev) => {
+                          ev.stopPropagation();
+                          onToggle(task);
+                        }
+                  }
                 >
-                  {statusMarker(task.status)}
+                  {projection ? '↻' : statusMarker(task.status)}
                 </span>
                 <span className="week-task__title">
                   {task.parent_id ? '↳ ' : ''}

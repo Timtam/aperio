@@ -8,6 +8,7 @@ export * from './taskDay';
 export * from './dayGridLayout';
 export * from './syncConflictGroups';
 export * from './taskRecurrence';
+export * from './expandTaskOccurrences';
 export * from './recurrence';
 export * from './rrule';
 export * from './dateKey';

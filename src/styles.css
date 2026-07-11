@@ -2470,6 +2470,22 @@ button[aria-disabled='true'] {
     color-mix(in srgb, var(--color-accent-fg) 65%, transparent);
 }
 
+/* A read-only recurring PROJECTION — a future planned occurrence of a recurring
+ * task (rendered on every planned day, like a recurring event) — reads as a
+ * preview: a muted fill plus a leading accent bar so sighted users tell it apart
+ * from the real, interactive current instance. The ↻ marker (in place of the
+ * checkbox) and the "recurring, planned" SR suffix carry the same meaning for
+ * keyboard/AT users. Placed after `--by` so the preview cue wins on a chip that
+ * is both. */
+.month-task--projection,
+.week-task--projection,
+.day-list__item--projection,
+.day-task--projection {
+  opacity: 0.8;
+  box-shadow: inset 2px 0 0 0
+    color-mix(in srgb, var(--color-accent-fg) 55%, transparent);
+}
+
 /* "Done with" treatment for completed and cancelled: dim the whole filled
  * chip so it recedes, and strike the title through (kept on the chip's own
  * text colour so it stays legible on the fill). In-progress and open keep

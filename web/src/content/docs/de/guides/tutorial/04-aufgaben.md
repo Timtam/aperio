@@ -192,6 +192,17 @@ Wie Termine können auch Aufgaben sich wiederholen (täglich, wöchentlich,
 monatlich, jährlich). Hakst du eine wiederkehrende Aufgabe ab, erzeugt
 Aperio automatisch die nächste Fälligkeit.
 
+> **Im Kalender:** Eine wiederkehrende Aufgabe mit **geplantem Tag** erscheint
+> jetzt an **jedem** geplanten Tag in der Tages-/Wochen-/Monatsansicht — wie ein
+> wiederkehrender Termin — nicht nur an ihrem nächsten Fälligkeitstag. Nur die
+> **aktuelle** Instanz ist interaktiv; die künftigen Tage sind schreibgeschützte
+> Vorschauen (angesagt als *„wiederkehrend, geplant"*, mit einem ↻ statt des
+> Kontrollkästchens). Abhaken, verschieben oder bearbeiten lässt sich eine
+> solche Vorschau über die aktuelle Instanz — deren Abschluss rückt die ganze
+> Serie weiter. Das gilt für **geplante** Wiederholungen, die **vom Datum der
+> Aufgabe** zählen; *ab Abschluss* und *im Backlog wiedervorlegen* lassen sich
+> nicht vorausberechnen und erscheinen weiter nur an ihrem nächsten Tag.
+
 > **Wiederholung & Anbieter:** Ob – und wie viel – von einer Wiederholung
 > gespeichert werden kann, hängt vom Anbieter ab. Der Editor erscheint nur
 > dort, wo die Liste sie auch speichern kann, und **blendet einzelne Felder

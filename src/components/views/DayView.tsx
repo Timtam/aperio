@@ -35,9 +35,12 @@ import { useViewState } from '../../state/viewStateContext';
 import { visibleRange } from '../../state/viewMath';
 import { localDateKey } from '../../intl/dateKey';
 import {
+  expandScheduledRecurringTasks,
   filterTasksOnDay,
   isDeadlineChip,
+  isRecurringProjection,
   mergeDayItems,
+  recurringSeriesTaskId,
   taskTimeOnDay,
 } from '../../intl/taskDay';
 import { useCurrentUserByList } from '../../state/currentUser';
@@ -290,18 +293,43 @@ export function DayView() {
     [events, anchor],
   );
 
+  // Expand recurring SCHEDULED tasks into per-day occurrences for this single
+  // day — so a task recurring every day/week shows here on its due day even when
+  // its stored `scheduled_date` is another turn of the series (like a recurring
+  // event). The occurrence on the task's own date is the real, interactive task;
+  // an occurrence on any OTHER day is a read-only projection (isRecurringProjection)
+  // that opens the series on activate and offers no complete/reschedule/delete
+  // (the current instance advances the series on completion). Non-recurring /
+  // from-completion / backlog tasks pass through untouched.
+  const expandedTasks = useMemo(() => {
+    const key = localDateKey(anchor);
+    return expandScheduledRecurringTasks(tasks, key, key);
+  }, [tasks, anchor]);
+
+  // Resolve a (possibly projected) task back to its real series task so opening
+  // a projection opens the underlying task, not a non-existent occurrence id. A
+  // no-op for a real task.
+  const seriesTaskOf = useCallback(
+    (task: Task): Task => {
+      if (!isRecurringProjection(task)) return task;
+      const id = recurringSeriesTaskId(task.id);
+      return tasks.find((x) => x.id === id) ?? task;
+    },
+    [tasks],
+  );
+
   // Tasks visible on this day (§9.4): scheduled, On-deadline, or
   // By-deadline window. Same filter as WeekView, including the
   // per-list "show completed" sidebar toggle.
   const dayTasks = useMemo(
     () =>
       filterTasksOnDay(
-        tasks,
+        expandedTasks,
         localDateKey(anchor),
         shouldShowCompletedForList,
         meFor,
       ),
-    [tasks, anchor, shouldShowCompletedForList, meFor],
+    [expandedTasks, anchor, shouldShowCompletedForList, meFor],
   );
 
   // Split tasks into "timed" (carry a deadline_time on this specific
@@ -400,7 +428,7 @@ export function DayView() {
           colorHex:
             resolveTaskColor(task, taskListById, labelById, sectionColorById)
               .hex ?? undefined,
-          onOpen: () => openTaskDialog(task),
+          onOpen: () => openTaskDialog(seriesTaskOf(task)),
         };
       }
       (slot.placement === 'before' ? before : after).push(entry);
@@ -418,6 +446,7 @@ export function DayView() {
     fmt,
     openEventDialog,
     openTaskDialog,
+    seriesTaskOf,
   ]);
 
   // Window-boundary time as a localised "HH:MM" for the outside-band labels.
@@ -665,7 +694,8 @@ export function DayView() {
           if (focusedItem?.kind === 'event') {
             openEventDialog(focusedItem.event);
           } else if (focusedItem?.kind === 'task') {
-            openTaskDialog(focusedItem.task);
+            // A projection opens its underlying series (seriesTaskOf).
+            openTaskDialog(seriesTaskOf(focusedItem.task));
           }
           return;
         }
@@ -678,7 +708,12 @@ export function DayView() {
           e.preventDefault();
           if (focusedItem?.kind === 'event') {
             openEventDialog(focusedItem.event);
-          } else if (focusedItem?.kind === 'task') {
+          } else if (
+            focusedItem?.kind === 'task' &&
+            // A read-only projection has no completion of its own — the current
+            // instance owns it, so Space is a no-op here.
+            !isRecurringProjection(focusedItem.task)
+          ) {
             void toggleTaskStatus(focusedItem.task);
           }
           return;
@@ -710,7 +745,8 @@ export function DayView() {
               : undefined;
             if (focusedItem.kind === 'event') {
               void openEventMenu(focusedItem.event, pos);
-            } else {
+            } else if (!isRecurringProjection(focusedItem.task)) {
+              // A projection has no context actions — the menu is suppressed.
               void openTaskMenu(focusedItem.task, pos);
             }
           }
@@ -730,6 +766,7 @@ export function DayView() {
       t,
       requestDelete,
       toggleTaskStatus,
+      seriesTaskOf,
       openEventMenu,
       openTaskMenu,
       itemId,
@@ -868,6 +905,9 @@ export function DayView() {
             const slotOut = slot != null && slot.placement !== 'in';
             if (item.kind === 'task') {
               const task = item.task;
+              // A read-only future occurrence of a recurring task — no
+              // drag/toggle/menu; it opens its series on activate.
+              const projection = isRecurringProjection(task);
               // Pull the effective time-of-day via the shared helper;
               // it returns scheduled_time when on the scheduled day,
               // deadline_time when on the deadline day, with the
@@ -906,11 +946,13 @@ export function DayView() {
                       assignee: assigneeSuffix(t, task.assignees),
                     }) +
                     subtaskParentSuffix(t, task, tasks) +
-                    effortSuffix(t, task.effort)
+                    effortSuffix(t, task.effort) +
+                    (projection ? t('views.tasks.recurringOccurrence') : '')
                   }
                   className={
                     'day-list__item day-list__item--task' +
                     (focused ? ' day-list__item--focused' : '') +
+                    (projection ? ' day-list__item--projection' : '') +
                     ` day-list__item--${task.status.replace('_', '-')}` +
                     // Deliberately reuses the `day-task--effort-*` size family
                     // (not a `day-list__item--*` one) so both DayView task
@@ -931,31 +973,41 @@ export function DayView() {
                       ? ({ '--event-color': color.hex } as React.CSSProperties)
                       : {}),
                   }}
-                  draggable
-                  onDragStart={(dev) => {
-                    setTaskDrag(
-                      dev.dataTransfer,
-                      task,
-                      tasks.filter((c) => c.parent_id === task.id),
-                    );
-                    dragOriginRef.current = {
-                      x: dev.clientX,
-                      y: dev.clientY,
-                    };
-                  }}
-                  onDragEnd={() => {
-                    dragOriginRef.current = null;
-                  }}
+                  // A projection is read-only: not draggable, opens its series
+                  // (never toggles/menus) on activate.
+                  draggable={!projection}
+                  onDragStart={
+                    projection
+                      ? undefined
+                      : (dev) => {
+                          setTaskDrag(
+                            dev.dataTransfer,
+                            task,
+                            tasks.filter((c) => c.parent_id === task.id),
+                          );
+                          dragOriginRef.current = {
+                            x: dev.clientX,
+                            y: dev.clientY,
+                          };
+                        }
+                  }
+                  onDragEnd={
+                    projection
+                      ? undefined
+                      : () => {
+                          dragOriginRef.current = null;
+                        }
+                  }
                   onClick={() => setFocusIndex(i)}
                   onDoubleClick={(e) => {
                     e.stopPropagation();
-                    openTaskDialog(task);
+                    openTaskDialog(seriesTaskOf(task));
                   }}
                   onContextMenu={(ev) => {
                     ev.preventDefault();
                     ev.stopPropagation();
                     setFocusIndex(i);
-                    void openTaskMenu(task);
+                    if (!projection) void openTaskMenu(task);
                   }}
                 >
                   {/* GRID mode: time is read off the hour-ruler, so the option
@@ -970,18 +1022,27 @@ export function DayView() {
                   )}
                   <span className="day-list__title">
                     <span
-                      className="day-task__marker day-task__marker--clickable"
+                      className={
+                        'day-task__marker' +
+                        (projection ? '' : ' day-task__marker--clickable')
+                      }
                       aria-hidden="true"
                       // Mouse: clicking the marker toggles the task
                       // without selecting the row, so users don't
                       // have to round-trip through the dialog just
-                      // to check something off.
-                      onClick={(ev) => {
-                        ev.stopPropagation();
-                        void toggleTaskStatus(task);
-                      }}
+                      // to check something off. A read-only projection shows a
+                      // recurrence glyph instead (its completion lives on the
+                      // current instance).
+                      onClick={
+                        projection
+                          ? undefined
+                          : (ev) => {
+                              ev.stopPropagation();
+                              void toggleTaskStatus(task);
+                            }
+                      }
                     >
-                      {statusMarker(task.status)}{' '}
+                      {projection ? '↻' : statusMarker(task.status)}{' '}
                     </span>
                     {task.parent_id ? '↳ ' : ''}
                     {task.title}
@@ -1284,12 +1345,21 @@ function DayUntimedTasks({
           const effortMod = visualEffortSizing
             ? effortSizeModifier(task.effort)
             : '';
+          // A read-only future occurrence of a recurring task — a preview only:
+          // no drag/complete/menu, and it opens its underlying series (resolved
+          // from allTasks) on activate. recurringSeriesTaskId strips the
+          // occurrence suffix; the base task is always in allTasks.
+          const projection = isRecurringProjection(task);
+          const seriesTask = projection
+            ? allTasks.find((x) => x.id === recurringSeriesTaskId(task.id)) ?? task
+            : task;
           return (
             <li key={task.id} className="day-tasks__item">
               <button
                 type="button"
                 className={
                   'day-task' +
+                  (projection ? ' day-task--projection' : '') +
                   ` day-task--${task.status.replace('_', '-')}` +
                   (isBy ? ' day-task--by' : '') +
                   (effortMod ? ` day-task--effort-${effortMod}` : '')
@@ -1301,15 +1371,17 @@ function DayUntimedTasks({
                 onKeyDown={(ev) => {
                   if (ev.key === ' ' || ev.key === 'Spacebar') {
                     ev.preventDefault();
-                    void onToggle(task);
+                    // A projection has no completion of its own — no-op.
+                    if (!projection) void onToggle(task);
                   } else if (ev.key === 'Enter') {
                     ev.preventDefault();
-                    onOpen(task);
+                    onOpen(seriesTask);
                   } else if (
                     ev.key === 'ContextMenu' ||
                     (ev.shiftKey && ev.key === 'F10')
                   ) {
                     ev.preventDefault();
+                    if (projection) return; // no context actions on a projection
                     const rect = (
                       ev.currentTarget as HTMLElement
                     ).getBoundingClientRect();
@@ -1321,21 +1393,22 @@ function DayUntimedTasks({
                 }}
                 onDoubleClick={(e) => {
                   e.stopPropagation();
-                  onOpen(task);
+                  onOpen(seriesTask);
                 }}
                 onContextMenu={(ev) => {
                   ev.preventDefault();
                   ev.stopPropagation();
-                  void onContextMenu(task);
+                  if (!projection) void onContextMenu(task);
                 }}
                 // Drag-to-reschedule is a band-only affordance: the
                 // pre-grid LIST section never carried it, so keep that
                 // surface byte-for-byte (no drag) and only the compact
                 // grid-mode band gets the draggable chip, matching how
-                // the grid's other task chips drag.
-                draggable={variant === 'band'}
+                // the grid's other task chips drag. A projection is never
+                // draggable (read-only).
+                draggable={variant === 'band' && !projection}
                 onDragStart={
-                  variant === 'band'
+                  variant === 'band' && !projection
                     ? (dev) => {
                         setTaskDrag(
                           dev.dataTransfer,
@@ -1367,18 +1440,26 @@ function DayUntimedTasks({
                     assignee: assigneeSuffix(t, task.assignees),
                   }) +
                   subtaskParentSuffix(t, task, allTasks) +
-                  effortSuffix(t, task.effort)
+                  effortSuffix(t, task.effort) +
+                  (projection ? t('views.tasks.recurringOccurrence') : '')
                 }
               >
                 <span
-                  className="day-task__marker day-task__marker--clickable"
+                  className={
+                    'day-task__marker' +
+                    (projection ? '' : ' day-task__marker--clickable')
+                  }
                   aria-hidden="true"
-                  onClick={(ev) => {
-                    ev.stopPropagation();
-                    void onToggle(task);
-                  }}
+                  onClick={
+                    projection
+                      ? undefined
+                      : (ev) => {
+                          ev.stopPropagation();
+                          void onToggle(task);
+                        }
+                  }
                 >
-                  {statusMarker(task.status)}
+                  {projection ? '↻' : statusMarker(task.status)}
                 </span>
                 <span className="day-task__title">
                   {task.parent_id ? '↳ ' : ''}
