@@ -47,6 +47,7 @@ import { surfaceTaskNow } from '../state/moveActions';
 import { readTaskBehaviour } from '../state/taskBehaviour';
 import { applyTaskToggle, recomputeAncestors, statusAnnounce } from '../state/taskToggle';
 import { useTasks } from '../state/useTasks';
+import { MagicTapView } from '../components/MagicTapView';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { chrome } from '../theme/uiScale';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -709,7 +710,7 @@ export default function TasksScreen({
   return (
     // VoiceOver MAGIC TAP (two-finger double-tap) = the screen's primary
     // create action: a new task (same flow as the toolbar button).
-    <View style={styles.screen} onMagicTap={newTask}>
+    <MagicTapView style={styles.screen} onMagicTap={newTask}>
       <View style={styles.toolbar}>
         <Pressable
           accessibilityRole="button"
@@ -826,7 +827,7 @@ export default function TasksScreen({
         onAction={menu?.onAction ?? (() => undefined)}
         onClose={() => setMenu(null)}
       />
-    </View>
+    </MagicTapView>
   );
 }
 

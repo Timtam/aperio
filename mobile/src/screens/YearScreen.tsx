@@ -22,6 +22,7 @@ import { useTabBarInset } from '../hooks/useTabBarInset';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useCacheReload } from '../state/cacheObserver';
 import { useCalendarVisibility } from '../state/calendarVisibility';
+import { MagicTapView } from '../components/MagicTapView';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { chrome } from '../theme/uiScale';
 
@@ -143,7 +144,7 @@ export default function YearScreen({ navigation, route }: RootStackScreenProps<'
   }, [year, announce, pagerOwnsHeading]);
 
   return (
-    <View style={styles.screen} onMagicTap={magicTapCreate}>
+    <MagicTapView style={styles.screen} onMagicTap={magicTapCreate}>
       <CalendarViewSwitcher
         active="year"
         onSelect={(v) =>
@@ -239,7 +240,7 @@ export default function YearScreen({ navigation, route }: RootStackScreenProps<'
           ))}
         </ScrollView>
       </CalendarPager>
-    </View>
+    </MagicTapView>
   );
 }
 

@@ -13,6 +13,7 @@ import { SegmentedSelect } from '../components/SegmentedSelect';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import type { RootStackScreenProps } from '../navigation/types';
 import { readTaskBehaviour, writeDayViewMode } from '../state/taskBehaviour';
+import { MagicTapView } from '../components/MagicTapView';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { chrome } from '../theme/uiScale';
 
@@ -117,7 +118,7 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
   );
 
   return (
-    <View style={styles.screen} onMagicTap={magicTapCreate}>
+    <MagicTapView style={styles.screen} onMagicTap={magicTapCreate}>
       <CalendarViewSwitcher
         active="day"
         // replace (not push): the calendar views are siblings, so swap in place
@@ -217,7 +218,7 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
           dayLayout={dayViewMode}
         />
       </CalendarPager>
-    </View>
+    </MagicTapView>
   );
 }
 

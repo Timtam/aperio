@@ -12,6 +12,7 @@ import { JumpToDateButton } from '../components/JumpToDateButton';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
 import { readWeekStart, type WeekStart } from '../settings/weekStart';
 import type { RootStackScreenProps } from '../navigation/types';
+import { MagicTapView } from '../components/MagicTapView';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { chrome } from '../theme/uiScale';
 
@@ -142,7 +143,7 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
   const { addEvent: magicTapCreate } = useNewEventOnDay(navigation, anchor);
 
   return (
-    <View style={styles.screen} onMagicTap={magicTapCreate}>
+    <MagicTapView style={styles.screen} onMagicTap={magicTapCreate}>
       <CalendarViewSwitcher
         active="week"
         // replace (not push): sibling views swap in place, keeping the stack
@@ -209,7 +210,7 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
           dayAnnounceKey="views.week.dayAnnounce"
         />
       </CalendarPager>
-    </View>
+    </MagicTapView>
   );
 }
 
