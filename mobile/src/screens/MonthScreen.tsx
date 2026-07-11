@@ -6,6 +6,7 @@ import { CalendarActions } from '../components/CalendarActions';
 import { useNewEventOnDay } from '../components/useNewEventOnDay';
 import { CalendarDayList } from '../components/CalendarDayList';
 import { CalendarPager } from '../components/CalendarPager';
+import { useCalendarPagerOwnsHeading } from '../components/useCalendarPagerOwnsHeading';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { JumpToDateButton } from '../components/JumpToDateButton';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
@@ -54,6 +55,8 @@ export default function MonthScreen({ navigation, route }: RootStackScreenProps<
     [anchor, i18n.language],
   );
 
+  // Under the VoiceOver/iOS pager, the pager owns the heading + announcement.
+  const pagerOwnsHeading = useCalendarPagerOwnsHeading();
   // Announce the period on navigation (the three-finger swipe / prev-next change
   // the month silently otherwise). Skip the first render — nothing changed yet.
   const firstRender = useRef(true);
@@ -62,8 +65,9 @@ export default function MonthScreen({ navigation, route }: RootStackScreenProps<
       firstRender.current = false;
       return;
     }
+    if (pagerOwnsHeading) return;
     announce(monthLabel);
-  }, [monthLabel, announce]);
+  }, [monthLabel, announce, pagerOwnsHeading]);
 
   const goToday = useCallback(() => setAnchor(localMidnight(new Date())), []);
 
@@ -96,9 +100,11 @@ export default function MonthScreen({ navigation, route }: RootStackScreenProps<
         >
           <Text style={styles.navButtonText} importantForAccessibility="no">‹</Text>
         </Pressable>
-        <Text style={styles.rangeHeading} accessibilityRole="header">
-          {monthLabel}
-        </Text>
+        {!pagerOwnsHeading && (
+          <Text style={styles.rangeHeading} accessibilityRole="header">
+            {monthLabel}
+          </Text>
+        )}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('toolbar.next')}
@@ -128,7 +134,11 @@ export default function MonthScreen({ navigation, route }: RootStackScreenProps<
 
       {/* Three-finger swipe (VoiceOver) / horizontal flick pages between months;
           vertical scrolling stays with the day list. */}
-      <CalendarPager onPrev={() => stepMonth(-1)} onNext={() => stepMonth(1)}>
+      <CalendarPager
+        onPrev={() => stepMonth(-1)}
+        onNext={() => stepMonth(1)}
+        periodLabel={monthLabel}
+      >
         <CalendarDayList
           navigation={navigation}
           days={days}

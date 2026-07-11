@@ -1,16 +1,20 @@
-import { type ReactNode, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
+  findNodeHandle,
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Platform,
   ScrollView,
   StyleSheet,
+  Text,
   View,
 } from 'react-native';
 
 import { A11yPagerView } from '../../modules/a11y-pager';
 import { useScreenReaderEnabled } from '../a11y/useScreenReaderEnabled';
+import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Horizontal swipe-to-page wrapper for the calendar views — lets users flick
 // horizontally between periods.
@@ -27,34 +31,105 @@ import { useScreenReaderEnabled } from '../a11y/useScreenReaderEnabled';
 // "page 1 of 3 / 3 of 3" and throws focus onto the hidden spacer (out of the
 // view). Instead we wrap the content in the native `A11yPagerView`, which
 // intercepts the three-finger swipe (`accessibilityScroll:`), pages via onPage,
-// and suppresses the page announcement — the screen announces the new period.
+// and suppresses the page announcement.
+//
+// Under VoiceOver we ALSO render a stable, focusable PERIOD HEADER at the top of
+// the pager, and after each page we move VoiceOver focus onto it. This is the
+// fix for two problems the raw pager had:
+//   1. On a period change the previously-focused chip unmounts, so VoiceOver's
+//      focus fell OUT of the pager onto the screen's heading (which sits above
+//      the pager) — and a three-finger swipe there no longer bubbles to the
+//      pager, so paging silently stopped working until the user navigated back
+//      in by hand.
+//   2. If the next period's data wasn't cached yet, there was briefly NO stable
+//      element inside the pager to land on, so VoiceOver "blocked".
+// The header is chrome (no data dependency, always mounted), lives INSIDE the
+// pager (so a swipe from it keeps paging), and announces the new period on each
+// flip. The screen therefore hides its own visual heading under this path (see
+// `pagerOwnsHeading` in the calendar screens) so there's exactly one heading.
+//
 // TalkBack (Android) has no such gesture / announcement, so there we just render
 // the content directly and page with the toolbar ‹ / › buttons.
+//
+// `useCalendarPagerOwnsHeading` (its own file, for fast-refresh) tells the
+// screens when this component owns the heading so they drop theirs.
 
 export function CalendarPager({
   onPrev,
   onNext,
+  periodLabel,
   children,
 }: {
   onPrev: () => void;
   onNext: () => void;
+  /** Current period, e.g. "Week of 3 March" — shown + focused as the pager's
+   *  own header under VoiceOver so focus never leaves the pager. */
+  periodLabel: string;
   children: ReactNode;
 }) {
   const ref = useRef<ScrollView>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const screenReader = useScreenReaderEnabled();
+  const styles = useThemedStyles(makeStyles);
+
+  // VoiceOver period-header focus management. Under the VoiceOver/iOS pager this
+  // component OWNS the period announcement (the screens skip theirs via
+  // `useCalendarPagerOwnsHeading`), so there's exactly one announcement per
+  // change and it never double-speaks with a focus move.
+  const headerRef = useRef<Text>(null);
+  // Set when a PAGE (three-finger swipe) drove the label change, so we only
+  // steal focus for an actual page — not for a toolbar change (‹ ›, Today,
+  // jump-to-date), where the user is operating a control we mustn't yank focus
+  // away from.
+  const pagedRef = useRef(false);
+  const firstRun = useRef(true);
+  useEffect(() => {
+    // Only the native VoiceOver pager owns announcements + focus.
+    if (!(screenReader && Platform.OS === 'ios')) return;
+    if (firstRun.current) {
+      // Don't announce / refocus the initial period on mount — VoiceOver is
+      // already reading the freshly-shown screen.
+      firstRun.current = false;
+      return;
+    }
+    if (pagedRef.current) {
+      pagedRef.current = false;
+      // A three-finger swipe: move VoiceOver focus onto the (always-present)
+      // header, which VoiceOver then announces. This keeps focus INSIDE the
+      // pager (so the next swipe still bubbles here) and never depends on the
+      // next period's data being loaded. A short delay lets iOS settle the
+      // re-rendered label so the focus reliably lands.
+      const id = setTimeout(() => {
+        const tag = findNodeHandle(headerRef.current);
+        if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+      }, 50);
+      return () => clearTimeout(id);
+    }
+    // A toolbar change: announce the new period WITHOUT stealing focus from the
+    // control the user just operated.
+    AccessibilityInfo.announceForAccessibility(periodLabel);
+  }, [periodLabel, screenReader]);
 
   if (screenReader) {
     // iOS: the native pager turns a three-finger swipe into onPrev/onNext with
-    // no page announcement + no focus loss. Elsewhere, render content directly.
+    // no page announcement; the header below keeps focus inside the pager.
     if (Platform.OS === 'ios') {
       return (
         <A11yPagerView
           style={styles.flex}
-          onPage={(e) =>
-            e.nativeEvent.direction === 'next' ? onNext() : onPrev()
-          }
+          onPage={(e) => {
+            pagedRef.current = true;
+            if (e.nativeEvent.direction === 'next') onNext();
+            else onPrev();
+          }}
         >
+          <Text
+            ref={headerRef}
+            accessibilityRole="header"
+            style={styles.pagerHeader}
+          >
+            {periodLabel}
+          </Text>
           {children}
         </A11yPagerView>
       );
@@ -125,4 +200,16 @@ export function CalendarPager({
   );
 }
 
-const styles = StyleSheet.create({ flex: { flex: 1 } });
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    flex: { flex: 1 },
+    // The VoiceOver-only period header. Visible (the screen drops its own
+    // heading under this path) + styled like the screens' range heading.
+    pagerHeader: {
+      fontSize: 17,
+      fontWeight: '700',
+      color: c.textPrimary,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+    },
+  });
