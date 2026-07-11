@@ -6,6 +6,7 @@ import { CalendarActions } from '../components/CalendarActions';
 import { useNewEventOnDay } from '../components/useNewEventOnDay';
 import { CalendarDayList } from '../components/CalendarDayList';
 import { CalendarPager } from '../components/CalendarPager';
+import { useCalendarPagerOwnsHeading } from '../components/useCalendarPagerOwnsHeading';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { JumpToDateButton } from '../components/JumpToDateButton';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
@@ -113,6 +114,10 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
   // async hydration only shifts days[0], so it can never announce), FILTER on
   // the week actually changing (a jump to another day of the SAME week stays
   // silent, like MonthScreen's label-keyed announce).
+  // Under the VoiceOver/iOS pager, the pager owns the period announcement (and
+  // renders its own focusable heading), so the screen drops its heading +
+  // announce to avoid a double heading / double announcement.
+  const pagerOwnsHeading = useCalendarPagerOwnsHeading();
   const lastAnchor = useRef(anchor.getTime());
   const lastWeekStart = useRef(days[0].getTime());
   useEffect(() => {
@@ -121,8 +126,9 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
     const weekChanged = weekStart !== lastWeekStart.current;
     lastAnchor.current = anchor.getTime();
     lastWeekStart.current = weekStart;
+    if (pagerOwnsHeading) return;
     if (anchorChanged && weekChanged) announce(weekLabel);
-  }, [anchor, days, weekLabel, announce]);
+  }, [anchor, days, weekLabel, announce, pagerOwnsHeading]);
 
   const goToday = useCallback(() => setAnchor(localMidnight(new Date())), []);
 
@@ -156,9 +162,11 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
         >
           <Text style={styles.navButtonText} importantForAccessibility="no">‹</Text>
         </Pressable>
-        <Text style={styles.rangeHeading} accessibilityRole="header">
-          {weekLabel}
-        </Text>
+        {!pagerOwnsHeading && (
+          <Text style={styles.rangeHeading} accessibilityRole="header">
+            {weekLabel}
+          </Text>
+        )}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('toolbar.next')}
@@ -187,7 +195,11 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
 
       {/* Three-finger swipe (VoiceOver) / horizontal flick pages between weeks;
           vertical scrolling stays with the day list. Mirrors MonthScreen. */}
-      <CalendarPager onPrev={() => stepWeek(-1)} onNext={() => stepWeek(1)}>
+      <CalendarPager
+        onPrev={() => stepWeek(-1)}
+        onNext={() => stepWeek(1)}
+        periodLabel={weekLabel}
+      >
         <CalendarDayList
           navigation={navigation}
           days={days}

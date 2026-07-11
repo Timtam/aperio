@@ -29,6 +29,7 @@ import { ActionsMenu, type MenuAction } from '../components/ActionsMenu';
 import { CalendarActions } from '../components/CalendarActions';
 import { useNewEventOnDay } from '../components/useNewEventOnDay';
 import { CalendarPager } from '../components/CalendarPager';
+import { useCalendarPagerOwnsHeading } from '../components/useCalendarPagerOwnsHeading';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { JumpToDateButton } from '../components/JumpToDateButton';
 import { CALENDAR_VIEW_ROUTE } from '../components/calendarViews';
@@ -266,14 +267,16 @@ export default function AgendaScreen({
   // Announce the period on navigation (the three-finger swipe / prev-next shift
   // the window silently otherwise). Skip the first render — nothing changed yet.
   // Mirrors MonthScreen.
+  const pagerOwnsHeading = useCalendarPagerOwnsHeading();
   const firstRender = useRef(true);
   useEffect(() => {
     if (firstRender.current) {
       firstRender.current = false;
       return;
     }
+    if (pagerOwnsHeading) return;
     announce(rangeLabel);
-  }, [rangeLabel, announce]);
+  }, [rangeLabel, announce, pagerOwnsHeading]);
 
   const editEvent = useCallback(
     (ev: CalendarEvent) =>
@@ -358,9 +361,11 @@ export default function AgendaScreen({
         >
           <Text style={styles.navButtonText} importantForAccessibility="no">‹</Text>
         </Pressable>
-        <Text style={styles.rangeHeading} accessibilityRole="header">
-          {rangeLabel}
-        </Text>
+        {!pagerOwnsHeading && (
+          <Text style={styles.rangeHeading} accessibilityRole="header">
+            {rangeLabel}
+          </Text>
+        )}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('toolbar.next')}
@@ -403,7 +408,11 @@ export default function AgendaScreen({
       {/* Three-finger swipe (VoiceOver) / horizontal flick pages between the
           monthly agenda windows — the pager wraps the loading/empty states too,
           so paging out of an empty window works. Mirrors MonthScreen. */}
-      <CalendarPager onPrev={() => stepMonths(-1)} onNext={() => stepMonths(1)}>
+      <CalendarPager
+        onPrev={() => stepMonths(-1)}
+        onNext={() => stepMonths(1)}
+        periodLabel={rangeLabel}
+      >
       {loading ? (
         <Text style={styles.muted} accessibilityLabel={t('views.loading')}>
           {t('views.loading')}

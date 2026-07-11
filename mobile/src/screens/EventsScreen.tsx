@@ -6,6 +6,7 @@ import { CalendarActions } from '../components/CalendarActions';
 import { useNewEventOnDay } from '../components/useNewEventOnDay';
 import { CalendarDayList } from '../components/CalendarDayList';
 import { CalendarPager } from '../components/CalendarPager';
+import { useCalendarPagerOwnsHeading } from '../components/useCalendarPagerOwnsHeading';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { JumpToDateButton } from '../components/JumpToDateButton';
 import { SegmentedSelect } from '../components/SegmentedSelect';
@@ -68,14 +69,16 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
   // Announce the period on navigation (the three-finger swipe / prev-next change
   // the day silently otherwise). Skip the first render — nothing changed yet.
   // Mirrors MonthScreen.
+  const pagerOwnsHeading = useCalendarPagerOwnsHeading();
   const firstRender = useRef(true);
   useEffect(() => {
     if (firstRender.current) {
       firstRender.current = false;
       return;
     }
+    if (pagerOwnsHeading) return;
     AccessibilityInfo.announceForAccessibility(dayLabel);
-  }, [dayLabel]);
+  }, [dayLabel, pagerOwnsHeading]);
 
   const goToday = useCallback(() => setDay(localMidnight(new Date())), []);
 
@@ -138,9 +141,11 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
             ‹
           </Text>
         </Pressable>
-        <Text style={styles.dayHeading} accessibilityRole="header">
-          {dayLabel}
-        </Text>
+        {!pagerOwnsHeading && (
+          <Text style={styles.dayHeading} accessibilityRole="header">
+            {dayLabel}
+          </Text>
+        )}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('mobile.nextDay')}
@@ -190,7 +195,11 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
 
       {/* Three-finger swipe (VoiceOver) / horizontal flick pages between days;
           vertical scrolling stays with the day list. Mirrors MonthScreen. */}
-      <CalendarPager onPrev={() => stepDay(-1)} onNext={() => stepDay(1)}>
+      <CalendarPager
+        onPrev={() => stepDay(-1)}
+        onNext={() => stepDay(1)}
+        periodLabel={dayLabel}
+      >
         <CalendarDayList
           navigation={navigation}
           days={days}
