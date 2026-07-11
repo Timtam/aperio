@@ -11,6 +11,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+// Activate the app-wide VoiceOver gesture host (window-level magic tap +
+// three-finger swipe routing) from app start, independent of which screen loads
+// first.
+import './a11y/gestureHost';
 import { useSyncTriggers } from './api/syncTriggers';
 import DayStartReviewModal from './components/DayStartReviewModal';
 import { FirstLaunchWizardGate } from './components/FirstLaunchWizardGate';
