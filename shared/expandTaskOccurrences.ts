@@ -238,6 +238,12 @@ export function expandScheduledRecurringTasks<T extends Task>(
 /** The parsed rule IF this task's recurrence is deterministic + dated +
  *  scheduled (so it can be projected); otherwise `null`. */
 function expandableRule(task: Task): TaskRecurrenceValue | null {
+  // A terminal instance never projects: a completed / cancelled recurring task
+  // shows only on its own day — the FUTURE occurrences belong to the next OPEN
+  // instance the backend spawns on completion. Without this, every past
+  // completed daily instance projects forward onto today (e.g. a "take pills"
+  // task appearing once per past completion — 15 times at 08:30).
+  if (task.status === 'completed' || task.status === 'cancelled') return null;
   if (task.recurrence == null) return null;
   const rule = fromBackend(task.recurrence);
   if (rule.freq === 'NONE') return null;
