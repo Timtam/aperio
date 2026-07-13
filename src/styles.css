@@ -3878,6 +3878,16 @@ button[aria-disabled='true'] {
   border-bottom: 0;
 }
 
+/* A LIST-mode TASK row is sized by EFFORT (the reused `.day-task--effort-*`
+   min-heights), not by duration. Center its content so the extra height reads as
+   a bigger TILE — like the centered, filled grid chip — instead of empty space
+   below a top-aligned title (the reported "the tile doesn't grow visually, only
+   the gap to the next one does"). Timed EVENTS keep `align-content: start` above:
+   a tall duration row should read from its top edge and clip a long title. */
+.day-list--flow .day-list__item--task {
+  align-content: center;
+}
+
 /* A positioned timed option's <li>. Inline style sets top/height/left/width
    from the layout algorithm; a min-height keeps a very short option legible (it
    overflows its slot downward). The inner content fills the slot and clips. */
