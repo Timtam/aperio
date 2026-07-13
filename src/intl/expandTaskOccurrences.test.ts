@@ -306,6 +306,33 @@ describe('expandScheduledRecurringTasks — pass-through (no expansion)', () => 
     expect(out[0]).toBe(task);
   });
 
+  it('does not project a COMPLETED recurring instance (its future days belong to the next open one)', () => {
+    // The reported bug: each past completed daily instance projected forward
+    // onto today, so a "take pills" task appeared once per past completion.
+    const task: Task = {
+      ...baseTask,
+      status: 'completed',
+      completed_at: '2026-05-01T08:30:00Z',
+      scheduled_date: '2026-05-01',
+      recurrence: rule({ freq: 'DAILY' }),
+    };
+    const out = expandScheduledRecurringTasks([task], '2026-05-01', '2026-05-10');
+    expect(out).toHaveLength(1);
+    expect(out[0]).toBe(task); // shown only on its own day, no projections
+  });
+
+  it('does not project a CANCELLED recurring instance', () => {
+    const task: Task = {
+      ...baseTask,
+      status: 'cancelled',
+      scheduled_date: '2026-05-01',
+      recurrence: rule({ freq: 'DAILY' }),
+    };
+    const out = expandScheduledRecurringTasks([task], '2026-05-01', '2026-05-10');
+    expect(out).toHaveLength(1);
+    expect(out[0]).toBe(task);
+  });
+
   it('passes non-expandable tasks through alongside expanded ones', () => {
     const recurring: Task = {
       ...baseTask,
