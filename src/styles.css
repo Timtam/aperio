@@ -4355,6 +4355,29 @@ button[aria-disabled='true'] {
   margin-top: var(--space-4, 1.25rem);
 }
 
+/* Overdue + Today are top-level time groups — same section spacing as Backlog. */
+.task-list__group-row--overdue,
+.task-list__group-row--today {
+  margin-top: var(--space-3);
+}
+
+/* Overdue is the most pressing group — a danger-tinted label so missed work
+   stands out for sighted users (the screen-reader label already says
+   "Überfällig"). */
+.task-list__group-row--overdue > .task-list__group-label {
+  color: var(--color-danger);
+}
+
+/* Cancelled is terminal like Done — same end-of-list spacing, with a muted
+   label so discarded work recedes. */
+.task-list__group-row--cancelled {
+  margin-top: var(--space-4, 1.25rem);
+}
+.task-list__group-row--cancelled > .task-list__group-label {
+  color: var(--color-fg-muted, var(--color-fg));
+  opacity: 0.75;
+}
+
 .task-list__group-row:first-child {
   margin-top: 0;
 }

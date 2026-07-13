@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Section, Task, TaskUser } from '../../api/types';
 import {
   buildEntries,
+  CANCELLED_GROUP_ID,
   DEFERRED_GROUP_ID,
   DONE_GROUP_ID,
   isTaskDeferred,
@@ -22,9 +23,11 @@ const baseTask = (over: Partial<Task>): Task => ({
   status: 'open',
   priority: 'medium',
   effort: 'medium',
-  // A date keeps the task out of the cross-list "backlog" bucket so it
-  // lands in its per-list group, where section grouping applies.
-  scheduled_date: '2026-05-22',
+  // No planned day by default → the task lands in the Backlog, where the
+  // per-list → section grouping applies. Time-group tests set a concrete
+  // scheduled_date (past / today / future) to target Überfällig / Heute /
+  // Zukünftig.
+  scheduled_date: null,
   scheduled_time: null,
   deadline_date: null,
   deadline_time: null,
@@ -145,6 +148,132 @@ describe('buildEntries group-by list', () => {
   });
 });
 
+describe('buildEntries time groups (state mode)', () => {
+  it('splits scheduled tasks into Überfällig / Heute / Zukünftig by day, in order', () => {
+    const tasks = [
+      baseTask({ id: 'past', scheduled_date: '2026-05-20' }), // < today → overdue
+      baseTask({ id: 'today', scheduled_date: TODAY }), // today → Heute
+      baseTask({ id: 'future', scheduled_date: '2026-05-22' }), // > today → Zukünftig
+      baseTask({ id: 'defer', resurface_date: '2026-06-01' }), // deferred → Zukünftig
+      baseTask({ id: 'bl' }), // no day → Backlog
+    ];
+    const hs = headers(build(tasks));
+    // Überfällig → Heute → Backlog (→ its list sub-head) → Zukünftig.
+    expect(hs.map((h) => h.kind)).toEqual([
+      'overdue',
+      'today',
+      'backlog',
+      'list',
+      'deferred',
+    ]);
+    // Identity `t` returns the bare key for count-interpolated labels; only the
+    // string-built Backlog / list heads carry a visible "(N)".
+    expect(hs.map((h) => h.label)).toEqual([
+      'views.tasks.overdue',
+      'views.tasks.today',
+      'views.tasks.backlog (1)',
+      'Inbox (1)',
+      'views.tasks.deferred', // future-scheduled + deferred, count 2
+    ]);
+  });
+
+  it('orders Zukünftig by the effective future day, soonest first', () => {
+    const tasks = [
+      baseTask({ id: 'far', scheduled_date: '2026-08-01' }),
+      baseTask({ id: 'defer', resurface_date: '2026-06-15' }),
+      baseTask({ id: 'near', scheduled_date: '2026-05-25' }),
+    ];
+    // near (2026-05-25) < defer (resurface 2026-06-15) < far (2026-08-01).
+    expect(taskRows(build(tasks)).map((e) => e.task.id)).toEqual([
+      'near',
+      'defer',
+      'far',
+    ]);
+  });
+
+  it('keeps Überfällig + Heute flat — no list / section sub-grouping', () => {
+    const tasks = [
+      baseTask({ id: 'a', scheduled_date: TODAY, section_id: 's1' }),
+      baseTask({ id: 'b', scheduled_date: TODAY, section_id: null }),
+    ];
+    const result = build(tasks, new Set(), {
+      L1: [section('s1', 'Bucket', 1)],
+    });
+    // Just the Heute head — sections are ignored for the flat time groups.
+    expect(headers(result).map((h) => h.kind)).toEqual(['today']);
+    expect(taskRows(result).map((e) => e.task.id)).toEqual(['a', 'b']);
+  });
+
+  it('starts Überfällig + Heute expanded (only Done + Zukünftig default collapsed elsewhere)', () => {
+    const tasks = [
+      baseTask({ id: 'past', scheduled_date: '2026-05-20' }),
+      baseTask({ id: 'today', scheduled_date: TODAY }),
+    ];
+    // No collapse set → their children are visible (not hidden).
+    const rows = taskRows(build(tasks));
+    expect(rows.map((e) => [e.task.id, e.hidden])).toEqual([
+      ['past', false],
+      ['today', false],
+    ]);
+  });
+
+  it('counts a time group by its whole subtree (totalUnder), like Backlog', () => {
+    // A count-aware `t` (the identity `t` used elsewhere drops the interpolated
+    // count) so the header count arithmetic is actually exercised.
+    const tCount = (key: string, vars?: Record<string, unknown>) =>
+      vars && typeof vars.count === 'number' ? `${key} (${vars.count})` : key;
+    const tasks = [
+      baseTask({ id: 'parent', scheduled_date: TODAY }),
+      baseTask({ id: 'c1', parent_id: 'parent', scheduled_date: TODAY }),
+      baseTask({ id: 'c2', parent_id: 'parent', scheduled_date: TODAY }),
+    ];
+    const result = buildEntries(tasks, listById, tCount, new Set(), {}, TODAY);
+    const todayHeader = result.entries.find((e) => e.group?.kind === 'today');
+    // parent + 2 subtasks = 3, not 1 — consistent with the Backlog header count.
+    expect(todayHeader?.task.title).toBe('views.tasks.today (3)');
+  });
+});
+
+describe('buildEntries cancelled group', () => {
+  it('collects cancelled tasks into their own group after Done — never in a time group', () => {
+    const tasks = [
+      baseTask({ id: 'today', scheduled_date: TODAY }),
+      // Cancelled AND past-scheduled: must NOT land in Überfällig.
+      baseTask({
+        id: 'cx',
+        status: 'cancelled',
+        scheduled_date: '2026-05-10',
+        updated_at: '2026-05-19T00:00:00Z',
+      }),
+      baseTask({
+        id: 'done',
+        status: 'completed',
+        completed_at: '2026-05-20T00:00:00Z',
+      }),
+    ];
+    const result = build(tasks);
+    // Order: Heute → Erledigt → Abgebrochen (no Überfällig for the cancelled one).
+    expect(headers(result).map((h) => h.kind)).toEqual([
+      'today',
+      'done',
+      'cancelled',
+    ]);
+    const cancelledGroup = result.entries.find(
+      (e) => e.group?.kind === 'cancelled',
+    )!;
+    expect(cancelledGroup.task.id).toBe(CANCELLED_GROUP_ID);
+    expect(taskRows(result).map((e) => e.task.id)).toContain('cx');
+  });
+
+  it('sorts cancelled tasks most-recently-changed first (updated_at)', () => {
+    const tasks = [
+      baseTask({ id: 'old', status: 'cancelled', updated_at: '2026-05-10T00:00:00Z' }),
+      baseTask({ id: 'new', status: 'cancelled', updated_at: '2026-05-20T00:00:00Z' }),
+    ];
+    expect(taskRows(build(tasks)).map((e) => e.task.id)).toEqual(['new', 'old']);
+  });
+});
+
 describe('buildEntries section grouping', () => {
   it('groups tasks by section in declared order, ungrouped first', () => {
     const tasks = [
@@ -156,14 +285,15 @@ describe('buildEntries section grouping', () => {
       L1: [section('s1', 'To Do', 1), section('s2', 'Doing', 2)],
     });
 
-    // List head (depth 0), then the section sub-headers in order. No
-    // sub-header precedes the ungrouped task — it just follows the list
-    // head, one level in.
-    // Headers now carry their contained-task count, like Done / Zukünftig.
+    // Backlog head (depth 0), the list head (depth 1), then the section
+    // sub-headers in order (depth 2). No sub-header precedes the ungrouped task —
+    // it just follows the list head, one level in. Headers carry their
+    // contained-task count, like Done / Zukünftig.
     expect(headers(result)).toEqual([
-      { label: 'Inbox (3)', level: 0, kind: 'list' },
-      { label: 'To Do (1)', level: 1, kind: 'section' },
-      { label: 'Doing (1)', level: 1, kind: 'section' },
+      { label: 'views.tasks.backlog (3)', level: 0, kind: 'backlog' },
+      { label: 'Inbox (3)', level: 1, kind: 'list' },
+      { label: 'To Do (1)', level: 2, kind: 'section' },
+      { label: 'Doing (1)', level: 2, kind: 'section' },
     ]);
 
     // Task order: ungrouped (c), then s1 (b), then s2 (a).
@@ -182,6 +312,7 @@ describe('buildEntries section grouping', () => {
     });
     // List Inbox = a + b + b1 = 3; section To Do likewise = 3.
     expect(headers(result).map((h) => h.label)).toEqual([
+      'views.tasks.backlog (3)',
       'Inbox (3)',
       'To Do (3)',
     ]);
@@ -192,7 +323,11 @@ describe('buildEntries section grouping', () => {
     const result = build(tasks, new Set(), {
       L1: [section('s1', 'To Do', 1), section('s2', 'Empty', 2)],
     });
-    expect(headers(result).map((h) => h.label)).toEqual(['Inbox (1)', 'To Do (1)']);
+    expect(headers(result).map((h) => h.label)).toEqual([
+      'views.tasks.backlog (1)',
+      'Inbox (1)',
+      'To Do (1)',
+    ]);
   });
 
   it('renders flat (just the list head) when the list has no sections', () => {
@@ -201,9 +336,10 @@ describe('buildEntries section grouping', () => {
       baseTask({ id: 'b' }),
     ];
     const result = build(tasks);
-    // Only the list head — section_id is ignored when no sections exist.
+    // Backlog head + list head — section_id is ignored when no sections exist.
     expect(headers(result)).toEqual([
-      { label: 'Inbox (2)', level: 0, kind: 'list' },
+      { label: 'views.tasks.backlog (2)', level: 0, kind: 'backlog' },
+      { label: 'Inbox (2)', level: 1, kind: 'list' },
     ]);
     expect(taskRows(result).map((e) => e.task.id)).toEqual(['a', 'b']);
   });

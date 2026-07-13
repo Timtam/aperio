@@ -17,6 +17,7 @@ import type { Entry, Task } from '@aperio/shared';
 import {
   assigneeSuffix,
   buildEntries,
+  CANCELLED_GROUP_ID,
   DEFERRED_GROUP_ID,
   DONE_GROUP_ID,
   effortSizeModifier,
@@ -65,6 +66,7 @@ import type { RootStackScreenProps } from '../navigation/types';
 // per-section and subtask twisties stay session-local.
 const DONE_COLLAPSE_KEY = 'aperio.tasks.doneCollapsed';
 const DEFERRED_COLLAPSE_KEY = 'aperio.tasks.deferredCollapsed';
+const CANCELLED_COLLAPSE_KEY = 'aperio.tasks.cancelledCollapsed';
 const GROUP_BY_KEY = 'aperio.tasks.groupBy';
 
 export default function TasksScreen({
@@ -144,27 +146,29 @@ export default function TasksScreen({
   // default); hydrated from storage, which can only EXPAND them (explicit
   // 'false') so a not-yet-loaded read never flickers them open.
   const [collapsed, setCollapsed] = useState<Set<string>>(
-    () => new Set([DONE_GROUP_ID, DEFERRED_GROUP_ID]),
+    () => new Set([DONE_GROUP_ID, DEFERRED_GROUP_ID, CANCELLED_GROUP_ID]),
   );
   useEffect(() => {
-    let cancelled = false;
+    let cancelledCleanup = false;
     void (async () => {
-      const [doneRaw, deferredRaw] = await Promise.all([
+      const [doneRaw, deferredRaw, cancelledRaw] = await Promise.all([
         AsyncStorage.getItem(DONE_COLLAPSE_KEY),
         AsyncStorage.getItem(DEFERRED_COLLAPSE_KEY),
+        AsyncStorage.getItem(CANCELLED_COLLAPSE_KEY),
       ]);
-      if (cancelled) return;
-      if (doneRaw === 'false' || deferredRaw === 'false') {
+      if (cancelledCleanup) return;
+      if (doneRaw === 'false' || deferredRaw === 'false' || cancelledRaw === 'false') {
         setCollapsed((prev) => {
           const next = new Set(prev);
           if (doneRaw === 'false') next.delete(DONE_GROUP_ID);
           if (deferredRaw === 'false') next.delete(DEFERRED_GROUP_ID);
+          if (cancelledRaw === 'false') next.delete(CANCELLED_GROUP_ID);
           return next;
         });
       }
     })();
     return () => {
-      cancelled = true;
+      cancelledCleanup = true;
     };
   }, []);
 
@@ -457,6 +461,8 @@ export default function TasksScreen({
           void AsyncStorage.setItem(DONE_COLLAPSE_KEY, String(next.has(id)));
         } else if (id === DEFERRED_GROUP_ID) {
           void AsyncStorage.setItem(DEFERRED_COLLAPSE_KEY, String(next.has(id)));
+        } else if (id === CANCELLED_GROUP_ID) {
+          void AsyncStorage.setItem(CANCELLED_COLLAPSE_KEY, String(next.has(id)));
         }
         return next;
       });
