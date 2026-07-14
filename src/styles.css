@@ -3869,13 +3869,42 @@ button[aria-disabled='true'] {
   display: grid;
   grid-template-columns: 140px 1fr;
   gap: var(--space-2);
-  border-bottom: 1px solid var(--color-border);
   align-content: start;
   overflow: hidden;
+  /* FILLED colour tile (like the hour-grid `.day-list__slot`) so a task's
+     effort height — and an event's duration height — reads as a bigger COLOURED
+     block, not growing unfilled padding around the content (the reported "the
+     tile doesn't fill the space, the unfilled margin grows"). Rows separate by a
+     small gap instead of the old divider stripe. `--event-color` is set inline
+     from resolveTaskColor / resolveEventColor. */
+  background: var(--event-color, var(--color-accent));
+  color: var(--color-accent-fg);
+  border-left: 0;
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-1);
 }
 
 .day-list--flow .day-list__item:last-child {
-  border-bottom: 0;
+  margin-bottom: 0;
+}
+
+/* Focus on a filled list tile: an outline (a tint would hide the colour),
+   mirroring the grid slot. Overrides the shared bg-tint focus below. */
+.day-list--flow .day-list__item--focused {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: -2px;
+}
+
+/* On the filled tile the muted-grey time stamp + struck-through completed title
+   need the tile's own foreground for contrast. */
+.day-list--flow .day-list__time {
+  color: var(--color-accent-fg);
+  opacity: 0.85;
+}
+.day-list--flow .day-list__item--completed .day-list__title,
+.day-list--flow .day-list__item--cancelled .day-list__title {
+  color: var(--color-accent-fg);
+  opacity: 0.7;
 }
 
 /* A LIST-mode TASK row is sized by EFFORT (the reused `.day-task--effort-*`
