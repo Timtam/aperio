@@ -23,12 +23,16 @@
 //!                    ACTION:EMAIL                       → Email,
 //!                    ACTION:DISPLAY / AUDIO             → Relative or Absolute
 //!
-//! VTIMEZONE and ATTENDEE mapping still live behind follow-up tasks.
+//! On WRITE, a zoned recurring master emits `DTSTART;TZID=<zone>` together with
+//! a derived `VTIMEZONE` (see [`vtimezone`](crate::vtimezone)) so RFC 5545 §3.6.5
+//! is satisfied; the reader still takes `RRULE`/`DTSTART` verbatim and resolves
+//! the zone itself, so it doesn't parse the `VTIMEZONE` body back. ATTENDEE
+//! mapping on read still lives behind a follow-up task.
 
 use cal_core::{
     AttendeeResponse, AttendeeStatus, Event, EventRecurrence, NewEvent, Reminder, ReminderKind,
 };
-use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use icalendar::{Calendar as ICalendar, Component, DatePerhapsTime, EventLike};
 
 use crate::error::{CaldavError, CaldavResult};
@@ -531,7 +535,39 @@ pub fn new_event_to_ical(uid: &str, event: &NewEvent, organizer: Option<&str>) -
     apply_common(&mut ical_ev, uid, event, organizer);
     let mut cal = ICalendar::new();
     cal.push(ical_ev.done());
-    cal.to_string()
+    with_vtimezone(cal.to_string(), event)
+}
+
+/// Inject the `VTIMEZONE` that `apply_common` implies. When the event is a
+/// zoned recurring master we emit `DTSTART;TZID=<zone>` — and RFC 5545 §3.6.5
+/// requires the referenced `TZID` to be DEFINED by a `VTIMEZONE` in the same
+/// `VCALENDAR`. Without it iCloud can't resolve the zone to compute a
+/// `COUNT`-bounded rule's Nth occurrence and silently drops the whole
+/// recurrence (a "repeat 2×" event lands only on day one). The `icalendar`
+/// crate has no timezone component, so we splice the generated block in front
+/// of the first `VEVENT` (timezones must precede the components referencing
+/// them). No `TZID` emitted → nothing to inject, so the string is returned
+/// unchanged for all-day and non-recurring (bare-UTC) events.
+fn with_vtimezone(mut ical: String, event: &NewEvent) -> String {
+    if event.all_day {
+        return ical;
+    }
+    let Some(tzid) = event.recurrence.as_ref().and_then(|r| r.tzid.as_deref()) else {
+        return ical;
+    };
+    // Seed the DST-rule probe with the event's start year. A yearly rule is
+    // stable across adjacent years for every modern zone, so the exact year
+    // only has to be in the right era. `vtimezone_for` parses `tzid` itself and
+    // yields `None` for UTC / an unresolvable zone — the same zones for which
+    // `apply_common` falls back to a bare-UTC `DTSTART` (no `TZID` to define).
+    let ref_year = event.start.year();
+    let Some(vtz) = crate::vtimezone::vtimezone_for(tzid, ref_year) else {
+        return ical;
+    };
+    if let Some(pos) = ical.find("BEGIN:VEVENT") {
+        ical.insert_str(pos, &vtz);
+    }
+    ical
 }
 
 /// Render an existing event back to iCal for the update PUT.
@@ -587,12 +623,21 @@ fn apply_common(
         // the local day of `event.end` is exactly the right exclusive
         // boundary.
         ical_ev.ends(event.end.with_timezone(&Local).date_naive());
-    } else if let Some(tzid) = event.recurrence.as_ref().and_then(|r| r.tzid.as_deref()) {
+    } else if let Some(tzid) = event
+        .recurrence
+        .as_ref()
+        .and_then(|r| r.tzid.as_deref())
+        .filter(|t| !t.eq_ignore_ascii_case("UTC"))
+    {
         // A zoned recurring master must keep its TZID on write-back, else the
         // next read flattens DTSTART to a bare UTC instant, drops the zone, and
         // the rule re-expands in UTC — the DST drift returns. Emit
         // DTSTART/DTEND;TZID=<zone>:<local wall-clock>. UNTIL + EXDATE stay UTC
         // `Z` (RFC 5545 requires UTC there), which the read side already parses.
+        // A literal `TZID=UTC` (a server can round-trip one) is excluded here so
+        // it takes the bare-UTC `else` branch: `vtimezone_for` emits no VTIMEZONE
+        // for UTC, so writing `DTSTART;TZID=UTC` would be an undefined reference
+        // (the very RFC 5545 §3.6.5 violation this path exists to avoid).
         match (
             zoned_datetime(event.start, tzid),
             zoned_datetime(event.end, tzid),
@@ -1028,6 +1073,120 @@ END:VCALENDAR\r
             reread.recurrence.as_ref().unwrap().tzid.as_deref(),
             Some("America/New_York")
         );
+    }
+
+    #[test]
+    fn zoned_recurring_master_carries_a_vtimezone_before_the_vevent() {
+        // The reason iCloud dropped a COUNT-bounded recurrence: a
+        // DTSTART;TZID=… with no matching VTIMEZONE is invalid per RFC 5545
+        // §3.6.5, and iCloud can't resolve the zone to bound the rule. The PUT
+        // body must now DEFINE the referenced zone, and the VTIMEZONE must
+        // precede the VEVENT that references it.
+        let body = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:meal@aperio\r
+SUMMARY:Essensplan\r
+DTSTART;TZID=Europe/Berlin:20260520T173000\r
+DTEND;TZID=Europe/Berlin:20260520T180000\r
+RRULE:FREQ=DAILY;COUNT=2\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let ev = parse_calendar_data(body, "cal-1").unwrap().remove(0);
+        let ical = event_to_ical(&ev, None);
+
+        let vtz = ical
+            .find("BEGIN:VTIMEZONE")
+            .expect("a zoned recurring master must define its VTIMEZONE");
+        let vevent = ical.find("BEGIN:VEVENT").expect("still has the VEVENT");
+        assert!(vtz < vevent, "VTIMEZONE must precede the VEVENT:\n{ical}");
+        assert!(
+            ical.contains("TZID:Europe/Berlin\r\n"),
+            "VTIMEZONE names the referenced zone:\n{ical}"
+        );
+        // The COUNT rule and the zoned DTSTART both survive the round-trip.
+        assert!(ical.contains("RRULE:FREQ=DAILY;COUNT=2"), "{ical}");
+        assert!(
+            ical.contains("DTSTART;TZID=Europe/Berlin:20260520T173000"),
+            "{ical}"
+        );
+    }
+
+    #[test]
+    fn non_recurring_and_all_day_events_get_no_vtimezone() {
+        // A bare-UTC single event references no TZID, so it needs no VTIMEZONE.
+        let single = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:lunch@aperio\r
+SUMMARY:Lunch\r
+DTSTART:20260520T080000Z\r
+DTEND:20260520T083000Z\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let ev = parse_calendar_data(single, "cal-1").unwrap().remove(0);
+        assert!(
+            !event_to_ical(&ev, None).contains("VTIMEZONE"),
+            "a non-recurring UTC event must not carry a VTIMEZONE"
+        );
+
+        // An all-day recurring event writes DATE values (no time, no TZID).
+        let all_day = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:standup@aperio\r
+SUMMARY:Standup\r
+DTSTART;VALUE=DATE:20260520\r
+RRULE:FREQ=WEEKLY;COUNT=4\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let ev = parse_calendar_data(all_day, "cal-1").unwrap().remove(0);
+        assert!(
+            !event_to_ical(&ev, None).contains("VTIMEZONE"),
+            "an all-day recurring event must not carry a VTIMEZONE"
+        );
+    }
+
+    #[test]
+    fn literal_tzid_utc_recurring_writes_bare_utc_not_an_undefined_tzid() {
+        // A server can round-trip a recurring master with a literal TZID=UTC. We
+        // must NOT write DTSTART;TZID=UTC (vtimezone_for emits no VTIMEZONE for
+        // UTC, so that would be an undefined TZID reference — RFC 5545 §3.6.5).
+        // Instead it takes the bare-UTC path: DTSTART:...Z, no TZID, no VTIMEZONE.
+        let body = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:utc@aperio\r
+SUMMARY:UTC sync\r
+DTSTART;TZID=UTC:20260520T170000\r
+DTEND;TZID=UTC:20260520T173000\r
+RRULE:FREQ=DAILY;COUNT=2\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let ev = parse_calendar_data(body, "cal-1").unwrap().remove(0);
+        // Precondition: the reader really did surface tzid = Some("UTC").
+        assert_eq!(ev.recurrence.as_ref().unwrap().tzid.as_deref(), Some("UTC"));
+
+        let ical = event_to_ical(&ev, None);
+        assert!(!ical.contains("VTIMEZONE"), "no VTIMEZONE for UTC:\n{ical}");
+        assert!(
+            !ical.contains("TZID=UTC"),
+            "no dangling TZID=UTC ref:\n{ical}"
+        );
+        assert!(
+            ical.contains("DTSTART:20260520T170000Z"),
+            "writes a bare-UTC DTSTART:\n{ical}"
+        );
+        // The recurrence itself still round-trips.
+        assert!(ical.contains("RRULE:FREQ=DAILY;COUNT=2"), "{ical}");
     }
 
     #[test]
