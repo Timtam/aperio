@@ -3138,6 +3138,39 @@ button[aria-disabled='true'] {
   display: inline;
 }
 
+/* LIST-mode task: the effort SIZE (min-height + padding-block) lives on the outer
+   <li> (`.week-task--effort-*`), but the FILLED tile is the inner `.week-task`
+   span — and the span only fills its <li> via the GRID-only
+   `.week-grid__slot > .week-task { height: 100% }` rule. In flow mode the <li>
+   has no definite height (just min-height), so `height: 100%` didn't resolve and
+   the span stayed content-sized: the effort height fell as EMPTY space around a
+   constant tile (the reported "the coloured tile stays the same size, only the
+   gap to the next tiles grows"). Make the <li> a flex column so the span
+   STRETCHES to fill the effort min-height, and drop the <li>'s effort padding so
+   the fill reaches the tile's edges (the span carries its own 2px padding). */
+.week-grid__events--flow .week-grid__task-item {
+  display: flex;
+  flex-direction: column;
+  padding-block: 0;
+}
+.week-grid__events--flow .week-grid__task-item > .week-task {
+  flex: 1;
+}
+
+/* Effort tile heights for the week LIST view. The shared `.week-task--effort-*`
+   min-heights (1.9em / 2.6em) are calibrated for the tight, smaller-font GRID
+   chip; on the list row they sit BELOW a two-line chip's natural height, so
+   `small` and `medium` came out the same size (measured 36 / 36 / 39.5px). Give
+   the list its own, clearly-stepped heights so effort reads at a glance — small
+   stays at its natural height, medium and large grow noticeably (≈ 36 / 52 / 76px
+   for a two-line chip). */
+.week-grid__events--flow .week-grid__task-item.week-task--effort-medium {
+  min-height: 3.4em;
+}
+.week-grid__events--flow .week-grid__task-item.week-task--effort-large {
+  min-height: 5em;
+}
+
 /* Visible "outside the shown hours" band — events/tasks before the window start
    (above the cell's canvas) / after the window end (below it). Decorative,
    aria-hidden; the a11y lives in the clipped chips inside the cell's listbox.
@@ -3869,52 +3902,13 @@ button[aria-disabled='true'] {
   display: grid;
   grid-template-columns: 140px 1fr;
   gap: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
   align-content: start;
   overflow: hidden;
-  /* FILLED colour tile (like the hour-grid `.day-list__slot`) so a task's
-     effort height — and an event's duration height — reads as a bigger COLOURED
-     block, not growing unfilled padding around the content (the reported "the
-     tile doesn't fill the space, the unfilled margin grows"). Rows separate by a
-     small gap instead of the old divider stripe. `--event-color` is set inline
-     from resolveTaskColor / resolveEventColor. */
-  background: var(--event-color, var(--color-accent));
-  color: var(--color-accent-fg);
-  border-left: 0;
-  border-radius: var(--radius-sm);
-  margin-bottom: var(--space-1);
 }
 
 .day-list--flow .day-list__item:last-child {
-  margin-bottom: 0;
-}
-
-/* Focus on a filled list tile: an outline (a tint would hide the colour),
-   mirroring the grid slot. Overrides the shared bg-tint focus below. */
-.day-list--flow .day-list__item--focused {
-  outline: 2px solid var(--focus-ring-color);
-  outline-offset: -2px;
-}
-
-/* On the filled tile the muted-grey time stamp + struck-through completed title
-   need the tile's own foreground for contrast. */
-.day-list--flow .day-list__time {
-  color: var(--color-accent-fg);
-  opacity: 0.85;
-}
-.day-list--flow .day-list__item--completed .day-list__title,
-.day-list--flow .day-list__item--cancelled .day-list__title {
-  color: var(--color-accent-fg);
-  opacity: 0.7;
-}
-
-/* A LIST-mode TASK row is sized by EFFORT (the reused `.day-task--effort-*`
-   min-heights), not by duration. Center its content so the extra height reads as
-   a bigger TILE — like the centered, filled grid chip — instead of empty space
-   below a top-aligned title (the reported "the tile doesn't grow visually, only
-   the gap to the next one does"). Timed EVENTS keep `align-content: start` above:
-   a tall duration row should read from its top edge and clip a long title. */
-.day-list--flow .day-list__item--task {
-  align-content: center;
+  border-bottom: 0;
 }
 
 /* A positioned timed option's <li>. Inline style sets top/height/left/width
