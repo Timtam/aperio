@@ -3171,6 +3171,16 @@ button[aria-disabled='true'] {
   min-height: 5em;
 }
 
+/* Untimed (dated, no time) week tasks carry the effort class on the .week-task
+   span ITSELF (it is the filled tile), so in the list view they just need the
+   same clearly-stepped heights — no wrapper flex. */
+.week-grid__tasks:not(.week-grid__tasks--grid) .week-task--effort-medium {
+  min-height: 3.4em;
+}
+.week-grid__tasks:not(.week-grid__tasks--grid) .week-task--effort-large {
+  min-height: 5em;
+}
+
 /* Visible "outside the shown hours" band — events/tasks before the window start
    (above the cell's canvas) / after the window end (below it). Decorative,
    aria-hidden; the a11y lives in the clipped chips inside the cell's listbox.
@@ -3909,6 +3919,21 @@ button[aria-disabled='true'] {
 
 .day-list--flow .day-list__item:last-child {
   border-bottom: 0;
+}
+
+/* LIST-mode day view: effort makes the STRIPED task rows taller (kept striped, no
+   fill — the user's choice). The shared 1.9em/2.6em min-heights sit below a row's
+   natural height so small≈medium; give clearly-stepped heights and center the
+   content so the taller row reads as a bigger tile rather than empty space below a
+   top-aligned title. Timed EVENTS keep their duration height + top alignment. */
+.day-list--flow .day-list__item--task {
+  align-content: center;
+}
+.day-list--flow .day-list__item--task.day-task--effort-medium {
+  min-height: 3.4em;
+}
+.day-list--flow .day-list__item--task.day-task--effort-large {
+  min-height: 5em;
 }
 
 /* A positioned timed option's <li>. Inline style sets top/height/left/width
