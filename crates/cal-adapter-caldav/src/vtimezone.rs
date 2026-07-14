@@ -7,12 +7,17 @@
 //! recurring event with a `COUNT` bound (it can't resolve the zone to compute the
 //! Nth occurrence), so a "repeat 2×" event silently lost its rule.
 //!
-//! We emit a compact, RRULE-based `VTIMEZONE` derived from `chrono-tz`'s ACTUAL
-//! transitions — not a hand-rolled table. `chrono-tz` doesn't expose its transition
-//! list publicly (the `TimeSpans` trait is private), so we probe the offset across
-//! the event's reference year, binary-search the exact transition instants, and
-//! express the current STANDARD/DAYLIGHT rule as a yearly RRULE (the same shape
-//! Apple/Thunderbird emit). Zones without DST get a single fixed STANDARD.
+//! We emit a `VTIMEZONE` derived from `chrono-tz`'s ACTUAL transitions — not a
+//! hand-rolled table. `chrono-tz` doesn't expose its transition list publicly
+//! (the `TimeSpans` trait is private), so we probe the offset across a year and
+//! binary-search the exact transition instants. A zone whose onsets follow a
+//! fixed yearly Gregorian rule (Berlin, New York, Sydney, …) gets the compact
+//! DAYLIGHT + STANDARD yearly RRULEs Apple/Thunderbird emit. A zone whose onsets
+//! DON'T (the Ramadan-tracking zones Africa/Casablanca, Asia/Gaza, … whose
+//! transitions drift ~11 days/year; America/Santiago's varying week) gets each
+//! real transition emitted explicitly across the event's window — a single
+//! yearly rule would place the onset weeks off and shift events by an hour on
+//! strict clients. Zones without DST get a single fixed STANDARD.
 
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, TimeZone};
 use chrono_tz::{OffsetComponents, OffsetName, Tz};
@@ -43,9 +48,8 @@ pub fn vtimezone_for(tzid: &str, ref_year: i32) -> Option<String> {
     // to the event's OWN year would leave a Jan–March event (before that year's
     // spring transition) with no preceding onset — the same unresolvable-zone
     // failure we're fixing. The prior year's onsets precede every instant in the
-    // event's year, and the yearly RRULE still extends forward; the rule is
-    // stable across adjacent years for every modern zone. (Apple anchors
-    // Europe/Berlin at 19810329 for the same reason.)
+    // event's year, and (for a fixed-rule zone) the yearly RRULE still extends
+    // forward. (Apple anchors Europe/Berlin at 19810329 for the same reason.)
     let base_year = ref_year - 1;
     let transitions = year_transitions(&tz, base_year)?;
 
@@ -59,10 +63,24 @@ pub fn vtimezone_for(tzid: &str, ref_year: i32) -> Option<String> {
     out.push_str(&format!("TZID:{tzid}\r\n"));
 
     match (standard, daylight) {
-        // A DST zone: one DAYLIGHT + one STANDARD sub-component, each a yearly rule.
+        // A DST zone. If its onsets follow a fixed yearly Gregorian rule (the
+        // overwhelming majority — Berlin, New York, Sydney, …) emit the compact,
+        // infinite-correct DAYLIGHT + STANDARD yearly rules. If they DON'T — a
+        // Ramadan-tracking zone (Africa/Casablanca, Asia/Gaza, …) whose onsets
+        // drift ~11 days/year, or a zone whose week varies (America/Santiago) —
+        // a single yearly rule would resolve the wrong offset, so emit each real
+        // transition explicitly across the event's window instead.
         (Some(std_t), Some(dst_t)) => {
-            out.push_str(&sub_component("DAYLIGHT", dst_t));
-            out.push_str(&sub_component("STANDARD", std_t));
+            if rule_is_stable(&tz, base_year) {
+                out.push_str(&sub_component("DAYLIGHT", dst_t));
+                out.push_str(&sub_component("STANDARD", std_t));
+            } else {
+                out.push_str(&explicit_observances(
+                    &tz,
+                    base_year,
+                    ref_year + IRREGULAR_HORIZON_YEARS,
+                ));
+            }
         }
         // No DST change in the year → a single fixed STANDARD at the base offset.
         _ => {
@@ -81,19 +99,33 @@ pub fn vtimezone_for(tzid: &str, ref_year: i32) -> Option<String> {
     Some(out)
 }
 
-/// A STANDARD/DAYLIGHT sub-component for a transition, as a yearly RRULE anchored
-/// on the transition's LOCAL wall-clock (in its offset-FROM, per RFC 5545).
-fn sub_component(kind: &str, t: &Transition) -> String {
-    // Local wall-clock of the transition, read in the OFFSET-FROM (RFC 5545: a
-    // VTIMEZONE DTSTART is local time in `TZOFFSETFROM`).
+/// How many years forward from the event an irregular zone's explicit
+/// observances cover. Beyond it a strict client reuses the last observance's
+/// offset — inherently approximate for an unbounded (NEVER) recurrence in a zone
+/// whose onsets can't be expressed as a fixed rule, which is the same trade-off
+/// real clients (Apple) make for these zones. A decade covers any COUNT/UNTIL
+/// series and a long stretch of an open-ended one.
+const IRREGULAR_HORIZON_YEARS: i32 = 10;
+
+/// Emit the shared `BEGIN:<kind> … DTSTART:` head of an observance and return it
+/// together with the transition's LOCAL wall-clock (read in the OFFSET-FROM —
+/// RFC 5545: a VTIMEZONE `DTSTART` is local time in `TZOFFSETFROM`).
+fn observance_open(kind: &str, t: &Transition) -> (String, NaiveDateTime) {
     let local = t.at_utc + Duration::seconds(t.from_total as i64);
-    let (ord, weekday) = nth_weekday(local.date());
     let mut s = String::new();
     s.push_str(&format!("BEGIN:{kind}\r\n"));
     s.push_str(&format!("TZOFFSETFROM:{}\r\n", fmt_offset(t.from_total)));
     s.push_str(&format!("TZOFFSETTO:{}\r\n", fmt_offset(t.to_total)));
     s.push_str(&format!("TZNAME:{}\r\n", t.to_name));
     s.push_str(&format!("DTSTART:{}\r\n", local.format("%Y%m%dT%H%M%S")));
+    (s, local)
+}
+
+/// A STANDARD/DAYLIGHT sub-component for a transition, as a yearly RRULE anchored
+/// on the transition's local wall-clock. Used for fixed-rule zones only.
+fn sub_component(kind: &str, t: &Transition) -> String {
+    let (mut s, local) = observance_open(kind, t);
+    let (ord, weekday) = nth_weekday(local.date());
     s.push_str(&format!(
         "RRULE:FREQ=YEARLY;BYMONTH={};BYDAY={}{}\r\n",
         local.month(),
@@ -102,6 +134,59 @@ fn sub_component(kind: &str, t: &Transition) -> String {
     ));
     s.push_str(&format!("END:{kind}\r\n"));
     s
+}
+
+/// One explicit observance PER real transition across `[from_year, to_year]`,
+/// each with an explicit `DTSTART` and NO `RRULE` — the correct representation
+/// for a zone whose onsets don't follow a fixed yearly rule (they'd be misplaced
+/// by a single `RRULE`). Every transition in the window resolves to its true
+/// offset; the anchor guarantee holds because the window starts in the year
+/// before the event.
+fn explicit_observances(tz: &Tz, from_year: i32, to_year: i32) -> String {
+    let mut out = String::new();
+    for year in from_year..=to_year {
+        let Some(transitions) = year_transitions(tz, year) else {
+            continue;
+        };
+        for t in &transitions {
+            let kind = if t.to_is_dst { "DAYLIGHT" } else { "STANDARD" };
+            let (head, _) = observance_open(kind, t);
+            out.push_str(&head);
+            out.push_str(&format!("END:{kind}\r\n"));
+        }
+    }
+    out
+}
+
+/// Whether the zone's DST onsets follow a fixed yearly Gregorian rule that a
+/// single `FREQ=YEARLY;BYMONTH;BYDAY` observance reproduces. Samples several
+/// consecutive years from `base_year`; stable iff every sampled year has the
+/// SAME set of `(is_dst, month, ordinal, weekday)` transition keys. Fails for
+/// zones whose onsets drift (Ramadan-tracking Africa/Casablanca, Asia/Gaza),
+/// vary by a week (America/Santiago), or key off a fixed day-of-month (whose
+/// weekday ordinal moves year to year) — all of which then take the explicit
+/// path.
+fn rule_is_stable(tz: &Tz, base_year: i32) -> bool {
+    const SAMPLE_YEARS: i32 = 6;
+    let key_for = |year: i32| -> Option<Vec<(bool, u32, i32, &'static str)>> {
+        let mut keys: Vec<_> = year_transitions(tz, year)?
+            .iter()
+            .map(|t| {
+                let local = t.at_utc + Duration::seconds(t.from_total as i64);
+                let (ord, wd) = nth_weekday(local.date());
+                (t.to_is_dst, local.month(), ord, wd)
+            })
+            .collect();
+        keys.sort();
+        Some(keys)
+    };
+    let Some(reference) = key_for(base_year) else {
+        return false;
+    };
+    if reference.is_empty() {
+        return false;
+    }
+    ((base_year + 1)..=(base_year + SAMPLE_YEARS)).all(|y| key_for(y).as_ref() == Some(&reference))
 }
 
 /// Every offset transition inside `year` (UTC), earliest first. Probes day by day
@@ -305,6 +390,49 @@ mod tests {
         let std = sub(&phoenix, "STANDARD").expect("has STANDARD");
         assert_eq!(line(std, "TZOFFSETTO:"), Some("-0700"));
         assert_eq!(line(std, "TZNAME:"), Some("MST"));
+    }
+
+    #[test]
+    fn fixed_rule_zones_are_detected_as_stable() {
+        // Ordinary DST zones follow a fixed yearly Gregorian rule.
+        assert!(rule_is_stable(&"Europe/Berlin".parse().unwrap(), 2025));
+        assert!(rule_is_stable(&"America/New_York".parse().unwrap(), 2025));
+        assert!(rule_is_stable(&"Australia/Sydney".parse().unwrap(), 2025));
+    }
+
+    #[test]
+    fn ramadan_zone_uses_explicit_observances_not_a_yearly_rule() {
+        // Africa/Casablanca's DST tracks Ramadan (onsets drift ~11 days/year), so
+        // a single FREQ=YEARLY;BYDAY rule would place the transition weeks off and
+        // shift events by an hour. It must be detected as unstable and emitted as
+        // explicit per-transition observances (no RRULE) across the event window.
+        let tz: Tz = "Africa/Casablanca".parse().unwrap();
+        assert!(
+            !rule_is_stable(&tz, 2025),
+            "Casablanca is not a fixed-rule zone"
+        );
+
+        let vtz = vtimezone_for("Africa/Casablanca", 2026).expect("Casablanca resolves");
+        assert!(
+            !vtz.contains("RRULE"),
+            "an irregular zone must not use a yearly RRULE:\n{vtz}"
+        );
+        // Explicit coverage spans multiple years, including the event's own year,
+        // so every occurrence resolves to its true offset.
+        assert!(
+            vtz.contains("DTSTART:2026"),
+            "covers the event year:\n{vtz}"
+        );
+        let observances =
+            vtz.matches("BEGIN:STANDARD").count() + vtz.matches("BEGIN:DAYLIGHT").count();
+        assert!(
+            observances >= 4,
+            "expected explicit observances across several years, got {observances}:\n{vtz}"
+        );
+        // Sanity: the observances that flip Casablanca to +01 (Ramadan end) and to
+        // +00 (Ramadan start) are both represented.
+        assert!(vtz.contains("TZOFFSETTO:+0100"), "{vtz}");
+        assert!(vtz.contains("TZOFFSETTO:+0000"), "{vtz}");
     }
 
     #[test]
