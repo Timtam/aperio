@@ -31,6 +31,7 @@ pub mod mapping;
 pub mod sync;
 pub mod tasks;
 pub mod vcard;
+mod vtimezone;
 mod xml;
 
 use std::sync::Mutex;
