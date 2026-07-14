@@ -3138,6 +3138,25 @@ button[aria-disabled='true'] {
   display: inline;
 }
 
+/* LIST-mode task: the effort SIZE (min-height + padding-block) lives on the outer
+   <li> (`.week-task--effort-*`), but the FILLED tile is the inner `.week-task`
+   span — and the span only fills its <li> via the GRID-only
+   `.week-grid__slot > .week-task { height: 100% }` rule. In flow mode the <li>
+   has no definite height (just min-height), so `height: 100%` didn't resolve and
+   the span stayed content-sized: the effort height fell as EMPTY space around a
+   constant tile (the reported "the coloured tile stays the same size, only the
+   gap to the next tiles grows"). Make the <li> a flex column so the span
+   STRETCHES to fill the effort min-height, and drop the <li>'s effort padding so
+   the fill reaches the tile's edges (the span carries its own 2px padding). */
+.week-grid__events--flow .week-grid__task-item {
+  display: flex;
+  flex-direction: column;
+  padding-block: 0;
+}
+.week-grid__events--flow .week-grid__task-item > .week-task {
+  flex: 1;
+}
+
 /* Visible "outside the shown hours" band — events/tasks before the window start
    (above the cell's canvas) / after the window end (below it). Decorative,
    aria-hidden; the a11y lives in the clipped chips inside the cell's listbox.
