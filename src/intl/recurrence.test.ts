@@ -211,6 +211,35 @@ describe('expandAll', () => {
     const moved = out.find((o) => o.start === '2026-05-20T14:00:00.000Z');
     expect(moved?.title).toBe('Standup (moved)');
   });
+
+  it('suppresses the master occurrence for a CANCELLED override too', () => {
+    const master = mkEvent({
+      id: 'series',
+      start: '2026-05-19T09:00:00.000Z',
+      end: '2026-05-19T09:30:00.000Z',
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=4', exceptions: [] },
+    });
+    // A DELETED single occurrence: Google surfaces it as a cancelled override at
+    // the original slot (its id carries the RECURRENCE-ID). expandAll must still
+    // drop the master's occurrence; the cancelled override is then hidden by the
+    // show-cancelled filter downstream, so the deleted occurrence vanishes.
+    const cancelledOverride = mkEvent({
+      id: 'series::rid::2026-05-20T09:00:00Z',
+      start: '2026-05-20T09:00:00.000Z',
+      end: '2026-05-20T09:00:00.000Z',
+      cancelled: true,
+    });
+    const out = expandAll([master, cancelledOverride], {
+      start: new Date('2026-05-19'),
+      end: new Date(Date.parse('2026-05-19') + 10 * ONE_DAY),
+    });
+    // The master's own 05-20 09:00 live copy is gone…
+    expect(
+      out.find((o) => o.start === '2026-05-20T09:00:00.000Z' && !o.cancelled),
+    ).toBeUndefined();
+    // …leaving 3 live occurrences (the cancelled override is filtered elsewhere).
+    expect(out.filter((o) => !o.cancelled).length).toBe(3);
+  });
 });
 
 describe('expandEvent timezone (DST-correct)', () => {

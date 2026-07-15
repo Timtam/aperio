@@ -22,8 +22,8 @@ use url::Url;
 use crate::auth::{self, TokenSet, GOOGLE_TOKEN_URL};
 use crate::error::{GoogleError, GoogleResult};
 use crate::mapping::{
-    event_id_for, event_to_body, map_calendar, map_event, new_event_to_body, CalendarListResponse,
-    EventEntry, EventListResponse,
+    event_to_body, map_calendar, map_event, new_event_to_body, CalendarListResponse, EventEntry,
+    EventListResponse,
 };
 
 const API_BASE: &str = "https://www.googleapis.com/calendar/v3";
@@ -405,11 +405,13 @@ pub async fn get_events(
 /// the incremental [`list_events_incremental`] path so subsequent
 /// refreshes only pull the delta.
 ///
-/// `showDeleted` is left at its default (false) — a full sync wants the
-/// current live set, not tombstones. The window bounds (`timeMin` /
-/// `timeMax`) are baked into the returned token by Google, so the
-/// incremental leg stays scoped to the same window without re-sending
-/// them (they're incompatible with `syncToken`).
+/// `showDeleted=true` so ALREADY-cancelled recurring instances are fetched: the
+/// master's RRULE still generates their slots, so `map_event` turns each into a
+/// cancelled RECURRENCE-ID override that suppresses the master occurrence (the
+/// show-cancelled filter then hides it). Whole-event tombstones map to `None` and
+/// are simply absent from the live set. The token bakes in `showDeleted` +
+/// `timeMin`/`timeMax`, so the incremental leg inherits them without re-sending
+/// (they're incompatible with `syncToken`).
 pub async fn list_events_full(
     state: &ApiState,
     calendar_id: &str,
@@ -422,8 +424,8 @@ pub async fn list_events_full(
     let cal_enc = urlencoding(calendar_id);
     loop {
         let mut path = format!(
-            "/calendars/{cal_enc}/events?singleEvents=false&maxResults=2500\
-             &timeMin={tm}&timeMax={tx}",
+            "/calendars/{cal_enc}/events?singleEvents=false&showDeleted=true\
+             &maxResults=2500&timeMin={tm}&timeMax={tx}",
             tm = urlencoding(&start.to_rfc3339()),
             tx = urlencoding(&end.to_rfc3339()),
         );
@@ -496,17 +498,13 @@ pub async fn list_events_incremental(
         }
         let resp: EventListResponse = state.get_json(&path).await?;
         for entry in resp.items {
-            // A cancelled row is a deletion. A cancelled MODIFIED instance was
-            // cached under its RECURRENCE-ID composite id (`{master}::rid::…`, see
-            // `map_event`), so its tombstone must delete THAT id — otherwise the
-            // reverted/removed override lingers. A cancelled whole event or plain
-            // instance keeps its native Google id.
-            if entry.status.as_deref() == Some("cancelled") {
-                delta.deletions.push(event_id_for(
-                    entry.id,
-                    entry.recurring_event_id.as_deref(),
-                    entry.original_start_time.as_ref(),
-                )?);
+            // A cancelled WHOLE event is a tombstone → delete by its native id. A
+            // cancelled recurring INSTANCE instead flows through `map_event`, which
+            // turns it into a `cancelled` RECURRENCE-ID override kept in `changes`
+            // so it SUPPRESSES (and hides) the master's now-deleted occurrence —
+            // deleting it would let the master's slot ghost back.
+            if entry.status.as_deref() == Some("cancelled") && entry.recurring_event_id.is_none() {
+                delta.deletions.push(entry.id);
                 continue;
             }
             if let Some(ev) = map_event(entry, calendar_id)? {
@@ -944,7 +942,7 @@ mod tests {
             .mock(
                 "GET",
                 mockito::Matcher::Regex(
-                    r"^/calendars/primary/events\?.*singleEvents=false.*timeMin=.*timeMax="
+                    r"^/calendars/primary/events\?.*singleEvents=false.*showDeleted=true.*timeMin=.*timeMax="
                         .to_string(),
                 ),
             )
@@ -1043,11 +1041,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancelled_modified_instance_deletes_by_recurrence_id() {
-        // A reverted/removed modified instance arrives as a cancelled row carrying
-        // recurringEventId + originalStartTime. It was cached under the composite
-        // `{master}::rid::{original}` id (map_event), so its tombstone must target
-        // THAT id — not the native `{master}_{compact}` instance id.
+    async fn cancelled_instance_surfaces_as_override_whole_event_is_a_deletion() {
+        // A cancelled recurring INSTANCE (has recurringEventId) must become a
+        // `cancelled` RECURRENCE-ID override in `changes` so it suppresses the
+        // master's slot — NOT a plain deletion, which would let the slot ghost
+        // back. A cancelled WHOLE event (no recurringEventId) stays a deletion.
         let mut server = mockito::Server::new_async().await;
         let m = server
             .mock(
@@ -1062,9 +1060,8 @@ mod tests {
                   "items": [
                     {"id":"master-1_20260614T100000Z","status":"cancelled",
                      "recurringEventId":"master-1",
-                     "originalStartTime":{"dateTime":"2026-06-14T10:00:00Z"},
-                     "start":{"dateTime":"2026-06-14T10:00:00Z"},
-                     "end":{"dateTime":"2026-06-14T10:30:00Z"}}
+                     "originalStartTime":{"dateTime":"2026-06-14T10:00:00Z"}},
+                    {"id":"whole-gone","status":"cancelled"}
                   ],
                   "nextSyncToken":"TOK-2"
                 }"##,
@@ -1077,10 +1074,12 @@ mod tests {
         let delta = list_events_incremental(&state, "primary", "TOK-1", from, to)
             .await
             .unwrap();
-        assert_eq!(
-            delta.deletions,
-            vec!["master-1::rid::2026-06-14T10:00:00Z".to_string()]
-        );
+        // The instance is a suppressing cancelled override…
+        let override_ids: Vec<_> = delta.changes.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(override_ids, ["master-1::rid::2026-06-14T10:00:00Z"]);
+        assert!(delta.changes[0].cancelled);
+        // …and only the whole-event cancellation is a deletion.
+        assert_eq!(delta.deletions, vec!["whole-gone".to_string()]);
         m.assert_async().await;
     }
 

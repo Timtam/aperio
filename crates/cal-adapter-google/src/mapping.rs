@@ -129,7 +129,12 @@ pub struct EventEntry {
     /// our recurrence expansion handles separately.
     #[serde(default)]
     pub status: Option<String>,
+    // Default so a content-less cancelled-instance tombstone (Google strips
+    // start/end on those) still deserializes; `map_event` falls back to
+    // `originalStartTime` for it.
+    #[serde(default)]
     pub start: EventDateTime,
+    #[serde(default)]
     pub end: EventDateTime,
     /// RFC 5545 RRULE / EXDATE strings. Each line is one rule.
     #[serde(default)]
@@ -211,7 +216,7 @@ pub struct ReminderOverride {
 
 /// Either `{ "dateTime": "2026-05-25T10:00:00+02:00" }` (timed event)
 /// or `{ "date": "2026-05-25" }` (all-day).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct EventDateTime {
     #[serde(default, rename = "dateTime")]
     pub date_time: Option<DateTime<Utc>>,
@@ -259,7 +264,7 @@ const RECURRENCE_ID_MARKER: &str = "::rid::";
 /// (carrying `recurringEventId` + `originalStartTime`) becomes
 /// `{master}::rid::{originalStart}` so the shared expander drops the master
 /// occurrence it stands in for; everything else keeps its native Google id.
-pub(crate) fn event_id_for(
+fn event_id_for(
     id: String,
     recurring_event_id: Option<&str>,
     original_start: Option<&EventDateTime>,
@@ -276,15 +281,38 @@ pub(crate) fn event_id_for(
     }
 }
 
-/// Convert one EventEntry into a cal_core::Event. Returns `Ok(None)`
-/// for cancelled rows (they're EXDATE-style deletions of recurring
-/// instances and we don't surface them).
+/// Convert one EventEntry into a cal_core::Event. Returns `Ok(None)` only for a
+/// cancelled WHOLE event (a tombstone the caller removes). A cancelled recurring
+/// INSTANCE is surfaced as a `cancelled` RECURRENCE-ID override: the master's
+/// RRULE still generates that slot, so we need the override present to SUPPRESS it
+/// (via `expandAll`) — the show-cancelled filter then hides the override itself,
+/// so a deleted occurrence vanishes instead of ghosting at its old time.
 pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Event>> {
-    if entry.status.as_deref() == Some("cancelled") {
+    let cancelled = entry.status.as_deref() == Some("cancelled");
+    // Only a recurring-instance exception carries recurringEventId +
+    // originalStartTime; a cancelled row without them is a whole-event tombstone.
+    let is_instance = entry.recurring_event_id.is_some() && entry.original_start_time.is_some();
+    if cancelled && !is_instance {
         return Ok(None);
     }
-    let (start, start_all_day) = entry.start.resolve()?;
-    let (end, end_all_day) = entry.end.resolve()?;
+    // A cancelled instance is often a content-less tombstone (no start/end); fall
+    // back to originalStartTime — the slot it vacates and the RECURRENCE-ID the
+    // override suppresses. A confirmed event/instance carries its real start.
+    let (start, start_all_day) = match entry.start.resolve() {
+        Ok(v) => v,
+        Err(_) if is_instance => entry
+            .original_start_time
+            .as_ref()
+            .expect("is_instance implies original_start_time")
+            .resolve()?,
+        Err(e) => return Err(e),
+    };
+    let (end, end_all_day) = match entry.end.resolve() {
+        Ok(v) => v,
+        // No end on a tombstone → zero-duration at the start (it's hidden anyway).
+        Err(_) if is_instance => (start, start_all_day),
+        Err(e) => return Err(e),
+    };
     // Either both or neither end of the range should be all-day. If
     // they disagree (Google quirk), trust the start.
     let all_day = start_all_day || end_all_day;
@@ -405,9 +433,10 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
         etag: entry.etag,
         organizer,
         attendee_responses,
-        // Google surfaces a cancellation as a content-less `status:"cancelled"`
-        // tombstone, dropped above — so a mapped Google event is always active.
-        cancelled: false,
+        // `false` for a normal event; `true` for a cancelled recurring instance
+        // surfaced as a suppressing override (a cancelled WHOLE event returned
+        // `None` above).
+        cancelled,
     }))
 }
 
@@ -928,6 +957,33 @@ mod tests {
         }"#;
         let entry: EventEntry = serde_json::from_str(raw).unwrap();
         assert!(map_event(entry, "primary").unwrap().is_none());
+    }
+
+    #[test]
+    fn cancelled_instance_becomes_suppressing_override() {
+        // A deleted single occurrence arrives as a content-less tombstone (no
+        // start/end) carrying recurringEventId + originalStartTime. It must surface
+        // as a `cancelled` RECURRENCE-ID override so the expander drops the master's
+        // slot (the show-cancelled filter then hides the override) — otherwise the
+        // master keeps generating the deleted occurrence.
+        let raw = r#"{
+            "id": "master-1_20260614T100000Z",
+            "status": "cancelled",
+            "recurringEventId": "master-1",
+            "originalStartTime": { "dateTime": "2026-06-14T10:00:00Z" }
+        }"#;
+        let entry: EventEntry = serde_json::from_str(raw).unwrap();
+        let ev = map_event(entry, "primary")
+            .unwrap()
+            .expect("surfaced as a suppressing override, not dropped");
+        assert_eq!(ev.id, "master-1::rid::2026-06-14T10:00:00Z");
+        assert!(ev.cancelled);
+        assert!(ev.recurrence.is_none());
+        // Falls back to originalStartTime for its (hidden) position.
+        assert_eq!(
+            ev.start,
+            Utc.with_ymd_and_hms(2026, 6, 14, 10, 0, 0).unwrap()
+        );
     }
 
     #[test]
