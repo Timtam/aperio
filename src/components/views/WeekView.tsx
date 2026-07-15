@@ -77,6 +77,7 @@ import {
   dropMinuteInWindow,
   eventBlockFactor,
   eventSpanForDay,
+  eventInstanceKey,
   layoutDayColumn,
   MINUTES_PER_DAY,
   minutesFromMidnight,
@@ -1153,7 +1154,7 @@ export function WeekView() {
                 if (color.hex) style['--event-color'] = color.hex;
                 return (
                   <div
-                    key={bar.event.id}
+                    key={eventInstanceKey(bar.event)}
                     className={
                       'week-allday-bar' +
                       (isBarFocused ? ' week-allday-bar--focused' : '') +
@@ -1658,7 +1659,7 @@ export function WeekView() {
                           : undefined;
                       return (
                         <li
-                          key={ev.id}
+                          key={eventInstanceKey(ev)}
                           role="listitem"
                           className={
                             slotIn

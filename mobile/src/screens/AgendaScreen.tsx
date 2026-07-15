@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 
 import type { ColorLabel, DayOccurrence, MultiDayInfo } from '@aperio/shared';
+import { eventInstanceKey } from '@aperio/shared';
 import {
   expandAll,
   expandToDayOccurrences,
@@ -502,7 +503,7 @@ export default function AgendaScreen({
 
   function renderRow(occ: DayOccurrence<CalendarEvent>, dayKey: string) {
     const ev = occ.ev;
-    const rowKey = `${ev.id}@${dayKey}`;
+    const rowKey = `${eventInstanceKey(ev)}@${dayKey}`;
     const hex = resolveEventColor(ev, calendarsById, labelsById).hex;
     // Sighted colour: tint the whole tile (replaces the colour dot) — matches
     // the CalendarDayList event rows; SR users get the label NAME in rowLabel.

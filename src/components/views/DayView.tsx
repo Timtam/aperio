@@ -75,6 +75,7 @@ import {
   eventBlockFactor,
   eventSpanForDay,
   layoutDayColumn,
+  eventInstanceKey,
   MINUTES_PER_DAY,
   minutesFromMidnight,
   type PositionedSpan,
@@ -412,7 +413,7 @@ export function DayView() {
           ? eventDayTimes(fmt, ev, anchor).startStr
           : fmt.format(new Date(ev.start), 'p');
         entry = {
-          key: `ev-${ev.id}`,
+          key: `ev-${eventInstanceKey(ev)}`,
           title: ev.title,
           time: startStr,
           colorHex: resolveEventColor(ev, calendarById, labelById).hex ?? undefined,
@@ -804,7 +805,7 @@ export function DayView() {
             const color = resolveEventColor(ev, calendarById, labelById);
             return (
               <button
-                key={`allday-${ev.id}`}
+                key={`allday-${eventInstanceKey(ev)}`}
                 type="button"
                 tabIndex={-1}
                 className="day-grid__allday-bar"
@@ -1103,7 +1104,7 @@ export function DayView() {
               : undefined;
             return (
               <li
-                key={ev.id}
+                key={eventInstanceKey(ev)}
                 id={itemId(i)}
                 role="option"
                 aria-selected={focused}

@@ -13,6 +13,7 @@ import {
   occurrenceIsoOf,
   seriesIdOf,
 } from '../../intl/recurrence';
+import { eventInstanceKey } from '@aperio/shared';
 import {
   expandToDayOccurrences,
   type DayOccurrence,
@@ -357,7 +358,7 @@ function renderOccurrences(
 
     out.push(
       <li
-        key={`${ev.id}@${dayKey}`}
+        key={`${eventInstanceKey(ev)}@${dayKey}`}
         id={ctx.itemId(i)}
         role="option"
         aria-selected={focused}
