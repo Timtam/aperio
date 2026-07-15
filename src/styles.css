@@ -4663,6 +4663,23 @@ button[aria-disabled='true'] {
   padding-block: 8px;
 }
 
+/* GRID mode (hour grid): the effort class rides the positioned slot <li>, whose
+   TOP edge is pinned to the task's start time. The shared effort `padding-block`
+   above would then inset the tile's content DOWNWARD from that anchor, so a
+   large-effort 08:30 task reads as ~08:45 (the reported "der Abstand oben ist zu
+   groß"). Restore each grid slot's own top inset — week: 0 (the inner .week-task
+   span carries its own 2px), day: the slot's own 2px — so the tile stays anchored
+   at its start time and the effort min-height grows it DOWNWARD instead. Mirrors
+   the `.week-grid__events--flow … { padding-block: 0 }` list-mode rule above. */
+.week-grid__slot.week-task--effort-medium,
+.week-grid__slot.week-task--effort-large {
+  padding-block: 0;
+}
+.day-list__slot.day-task--effort-medium,
+.day-list__slot.day-task--effort-large {
+  padding-block: 2px;
+}
+
 .backlog-rail__chip--effort-medium {
   min-height: 3em;
   padding-block: calc(var(--space-1) * 2);
