@@ -27,6 +27,7 @@ import {
   occurrenceIsoOf,
   seriesIdOf,
 } from '../../intl/recurrence';
+import { eventInstanceKey } from '@aperio/shared';
 import { useDateFormat } from '../../intl/dateFormat';
 import {
   labelsLookup,
@@ -666,7 +667,7 @@ export function MonthView() {
                         style['--event-color'] = color.hex;
                       return (
                         <div
-                          key={bar.event.id}
+                          key={eventInstanceKey(bar.event)}
                           className={
                             'month-allday-bar' +
                             (isBarFocused
@@ -997,7 +998,7 @@ export function MonthView() {
                           : ariaBase;
                         return (
                           <span
-                            key={item.id}
+                            key={eventInstanceKey(ev)}
                             id={eventOptionId(flatIndex, idx)}
                             className={
                               'month-event' +

@@ -17,7 +17,7 @@ import {
   View,
 } from 'react-native';
 
-import { statusI18nKey, type TaskStatus } from '@aperio/shared';
+import { eventInstanceKey, statusI18nKey, type TaskStatus } from '@aperio/shared';
 
 import { expandedA11y } from '../a11y/roles';
 import { Calendar, listCalendars } from '../api/calendar';
@@ -335,7 +335,7 @@ export default function SearchScreen({ navigation }: RootStackScreenProps<'Searc
             const secondary = eventSecondary(ev.calendar_id, ev.start, ev.all_day);
             return (
               <Pressable
-                key={`e-${ev.id}`}
+                key={`e-${eventInstanceKey(ev)}`}
                 accessibilityRole="button"
                 accessibilityLabel={t('dialogs.search.eventAria', {
                   title: ev.title,

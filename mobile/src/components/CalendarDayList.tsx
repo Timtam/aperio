@@ -24,6 +24,7 @@ import type {
   TaskList,
   TimedSpan,
 } from '@aperio/shared';
+import { eventInstanceKey } from '@aperio/shared';
 import {
   assigneeSuffix,
   daysCoveredKeys,
@@ -927,7 +928,7 @@ export function CalendarDayList({
     slot?: PositionedSpan,
     extraStyle?: StyleProp<ViewStyle>,
   ) => {
-    const rowKey = `e-${ev.id}@${localDateKey(day)}`;
+    const rowKey = `e-${eventInstanceKey(ev)}@${localDateKey(day)}`;
     const hex = resolveEventColor(ev, calendarsById, labelsById).hex;
     const grid = slot != null;
     // Sighted colour: TINT the whole tile in the event's resolved colour (the
