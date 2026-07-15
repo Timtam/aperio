@@ -813,6 +813,20 @@ export function WeekView() {
     [performEventDrop],
   );
 
+  // Map a drop's horizontal position to the day column under the cursor by
+  // testing the hour-grid day cells (which share the lane's column grid, so no
+  // gap/padding math). Lets an all-day bar dragged sideways along the lane — or
+  // dropped over another bar — still resolve to the day it landed on.
+  const dayKeyAtClientX = (clientX: number): string | null => {
+    for (let i = 0; i < days.length; i += 1) {
+      const cellEl = document.getElementById(cellId(i));
+      if (!cellEl) continue;
+      const r = cellEl.getBoundingClientRect();
+      if (clientX >= r.left && clientX < r.right) return keyOf(days[i]);
+    }
+    return null;
+  };
+
   const performDelete = useCallback(
     async (ev: CalendarEvent, scope: 'occurrence' | 'series') => {
       try {
@@ -1138,6 +1152,47 @@ export function WeekView() {
               style={
                 { '--lane-rows': laneRows } as React.CSSProperties
               }
+              // Sighted-only affordance: the all-day lane is a drop target so a
+              // bar can be dragged sideways to another day (its natural gesture —
+              // the hour-grid cells below only cover timed drops). A drop over
+              // another bar bubbles here, and the day is read from the cursor X.
+              // SR users move all-day events via the Move/Copy dialog instead.
+              onDragOver={(e) => {
+                const types = e.dataTransfer.types;
+                if (
+                  !types.includes(TASK_DND_TYPE) &&
+                  !types.includes(EVENT_DND_TYPE)
+                ) {
+                  return;
+                }
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                const key = dayKeyAtClientX(e.clientX);
+                if (key && key !== dragOverDayKey) setDragOverDayKey(key);
+              }}
+              onDragLeave={(e) => {
+                if (
+                  e.relatedTarget instanceof Node &&
+                  e.currentTarget.contains(e.relatedTarget)
+                ) {
+                  return;
+                }
+                setDragOverDayKey(null);
+              }}
+              onDrop={(e) => {
+                const key = dayKeyAtClientX(e.clientX);
+                setDragOverDayKey(null);
+                if (!key) return;
+                e.preventDefault();
+                const taskId =
+                  e.dataTransfer.getData('text/aperio-task') || draggingTaskId;
+                if (taskId) {
+                  void rescheduleTaskByDrop(taskId, key);
+                  return;
+                }
+                const dropped = readEventDrag(e.dataTransfer);
+                if (dropped) handleEventDayDrop(dropped, key);
+              }}
             >
               {allDayBars.map((bar) => {
                 const color = resolveEventColor(
