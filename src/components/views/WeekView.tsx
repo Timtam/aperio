@@ -847,7 +847,12 @@ export function WeekView() {
   );
 
   const requestDelete = useCallback((ev: CalendarEvent) => {
-    if (ev.id.includes('@') || ev.recurrence) {
+    // Only an expanded occurrence (its synthetic id carries `@`) has a single
+    // instance to delete, so only it gets the occurrence-vs-series choice. A bare
+    // recurring master row (unexpandable RRULE, no `@`) has none — offering "this
+    // occurrence" there would fall through to a full-series delete — so it takes
+    // the plain confirm (which deletes the series).
+    if (ev.id.includes('@')) {
       setScopeTarget(ev);
     } else {
       setConfirmTarget(ev);

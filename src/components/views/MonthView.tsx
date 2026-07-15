@@ -327,7 +327,11 @@ export function MonthView() {
   );
 
   const requestDelete = useCallback((ev: CalendarEvent) => {
-    if (isExpandedOccurrence(ev) || ev.recurrence) {
+    // Only an expanded occurrence has a single instance to delete; a bare
+    // recurring master row (unexpandable RRULE) has none, so it takes the plain
+    // confirm (series delete) instead of a scope choice that would otherwise fall
+    // through to deleting the whole series.
+    if (isExpandedOccurrence(ev)) {
       setScopeTarget(ev);
     } else {
       setConfirmTarget(ev);
