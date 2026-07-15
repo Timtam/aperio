@@ -23,6 +23,10 @@ import {
   type MoveCopyMode,
   type MoveCopyScope,
 } from '../state/moveActions';
+import {
+  useShowHiddenCalendarTargets,
+  useShowHiddenTaskListTargets,
+} from '../settings/hiddenTargets';
 import { useCalendarVisibility } from '../state/calendarVisibility';
 import { useTaskStore } from '../state/taskStoreContext';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -49,6 +53,8 @@ export default function MoveCopyModal({
   const styles = useThemedStyles(makeStyles);
   const { taskLists, selectedTaskListIds, invalidateData } = useTaskStore();
   const { hidden: hiddenCalendars } = useCalendarVisibility();
+  const showHiddenCalendarTargets = useShowHiddenCalendarTargets();
+  const showHiddenTaskListTargets = useShowHiddenTaskListTargets();
   useCancelHeader(navigation);
 
   const [task, setTask] = useState<Task | null>(null);
@@ -107,9 +113,14 @@ export default function MoveCopyModal({
       params.kind === 'task'
         ? selectableTaskLists(taskLists, {
             selectedIds: selectedTaskListIds,
+            includeHidden: showHiddenTaskListTargets,
           }).map((l) => ({ id: l.id, name: l.name }))
         : calendars
-            .filter((c) => !c.read_only && !hiddenCalendars.has(c.id))
+            .filter(
+              (c) =>
+                !c.read_only &&
+                (showHiddenCalendarTargets || !hiddenCalendars.has(c.id)),
+            )
             .map((c) => ({ id: c.id, name: c.name }));
     return writable.map((c) => ({
       value: c.id,
@@ -124,6 +135,8 @@ export default function MoveCopyModal({
     selectedTaskListIds,
     calendars,
     hiddenCalendars,
+    showHiddenCalendarTargets,
+    showHiddenTaskListTargets,
     initialContainerId,
     t,
   ]);

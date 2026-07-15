@@ -13,6 +13,7 @@ import { useAnnouncer } from '../a11y/announcerContext';
 import { createTask as apiCreateTask, isCommandError } from '../api/client';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
+import { useViewState } from '../state/viewStateContext';
 import { readLastUsedTaskList, writeLastUsedTaskList } from './lastUsedTaskList';
 import { Modal } from './Modal';
 
@@ -38,6 +39,7 @@ export function QuickAddTaskDialog({
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const { taskLists, selectedTaskListIds } = useCalendarStore();
+  const { showHiddenTaskListTargets } = useViewState();
   const { openTaskDialog } = useDialogState();
 
   const initial = useMemo(
@@ -128,6 +130,7 @@ export function QuickAddTaskDialog({
   const selectableLists = selectableTaskLists(taskLists, {
     selectedIds: selectedTaskListIds,
     currentId: listId,
+    includeHidden: showHiddenTaskListTargets,
   });
 
   return (

@@ -37,6 +37,7 @@ import {
 import { listColorLabels } from '../api/colorLabels';
 import { setEventColor } from '../api/containerColor';
 import type { RootStackScreenProps } from '../navigation/types';
+import { useShowHiddenCalendarTargets } from '../settings/hiddenTargets';
 import { useCalendarVisibility } from '../state/calendarVisibility';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
 import { useSoundPref } from '../state/useSoundPref';
@@ -120,6 +121,7 @@ export default function EventEditorModal({
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const { hidden: hiddenCalendars } = useCalendarVisibility();
+  const showHiddenCalendarTargets = useShowHiddenCalendarTargets();
   useCancelHeader(navigation);
   const { eventId, calendarId, occurrence, anchor, initialTitle } = route.params;
   const editing = eventId != null;
@@ -492,6 +494,7 @@ export default function EventEditorModal({
                 .map((c) => c.id),
             ),
             currentId: calId,
+            includeHidden: showHiddenCalendarTargets,
           }).map((c) => ({ value: c.id, label: c.name }))}
           onChange={setCalId}
         />

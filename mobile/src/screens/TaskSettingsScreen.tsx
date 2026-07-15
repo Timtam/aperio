@@ -4,6 +4,10 @@ import { useTranslation } from 'react-i18next';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
 import { RadioGroup } from '../components/RadioGroup';
+import {
+  readShowHiddenTaskListTargets,
+  writeShowHiddenTaskListTargets,
+} from '../settings/hiddenTargets';
 import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 import {
   readTaskBehaviour,
@@ -81,6 +85,8 @@ export default function TaskSettingsScreen() {
   const [autoDate, setAutoDate] = useState(true);
   const [autoSelfAssign, setAutoSelfAssign] = useState(true);
   const [visualEffortSizing, setVisualEffortSizing] = useState(true);
+  // Synced (default on): offer hidden task lists as targets in the pickers.
+  const [showHiddenListTargets, setShowHiddenListTargets] = useState(true);
   const [remindUntimedToday, setRemindUntimedToday] = useState(true);
   const [remindDeadlineArrived, setRemindDeadlineArrived] = useState(true);
   const [remindDeadlineCountdown, setRemindDeadlineCountdown] = useState(true);
@@ -105,12 +111,21 @@ export default function TaskSettingsScreen() {
         setCarryOver(b.carryOverDefault);
         setDayStart(b.dayStartTrigger);
       });
+      void readShowHiddenTaskListTargets().then(setShowHiddenListTargets);
     }, []),
   );
 
   const onCheckoffChange = useCallback((next: CheckoffMode) => {
     setCheckoffMode(next);
     void writeCheckoffMode(next);
+  }, []);
+
+  const onShowHiddenListTargetsToggle = useCallback(() => {
+    setShowHiddenListTargets((prev) => {
+      const next = !prev;
+      void writeShowHiddenTaskListTargets(next);
+      return next;
+    });
   }, []);
 
   const onCarryOverChange = useCallback((next: CarryOverDefault) => {
@@ -274,6 +289,20 @@ export default function TaskSettingsScreen() {
         />
         <Text style={styles.hint} accessibilityRole="text">
           {t('dialogs.tasks.visualEffortSizing.hint')}
+        </Text>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.heading} accessibilityRole="header">
+          {t('dialogs.tasks.showHiddenTaskListTargets.heading')}
+        </Text>
+        <SwitchRow
+          label={t('dialogs.tasks.showHiddenTaskListTargets.label')}
+          value={showHiddenListTargets}
+          onToggle={onShowHiddenListTargetsToggle}
+        />
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.tasks.showHiddenTaskListTargets.hint')}
         </Text>
       </View>
 

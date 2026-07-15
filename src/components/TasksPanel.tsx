@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
+import { useViewState } from '../state/viewStateContext';
 import type {
   CarryOverDefault,
   CheckoffMode,
@@ -94,6 +95,8 @@ export function TasksPanel() {
     setListOverride,
   } = useTaskCascadeEnabled();
   const { taskLists, accounts } = useCalendarStore();
+  const { showHiddenTaskListTargets, setShowHiddenTaskListTargets } =
+    useViewState();
 
   // Group lists by their owning account so the per-list editor reads
   // as "iCloud > Privat | Arbeit" rather than a flat alphabetical
@@ -141,6 +144,8 @@ export function TasksPanel() {
   const autoSelfAssignHintId = useId();
   const visualEffortSizingHeadingId = useId();
   const visualEffortSizingHintId = useId();
+  const showHiddenTargetsHeadingId = useId();
+  const showHiddenTargetsHintId = useId();
   const carryOverHeadingId = useId();
   const carryOverHintId = useId();
   const carryOverGroupId = useId();
@@ -306,6 +311,27 @@ export function TasksPanel() {
             onChange={(e) => setVisualEffortSizing(e.target.checked)}
           />
           <span>{t('dialogs.tasks.visualEffortSizing.label')}</span>
+        </label>
+      </section>
+
+      <section
+        aria-labelledby={showHiddenTargetsHeadingId}
+        className="tasks-settings__section"
+      >
+        <h3 id={showHiddenTargetsHeadingId} className="color-labels__heading">
+          {t('dialogs.tasks.showHiddenTaskListTargets.heading')}
+        </h3>
+        <p id={showHiddenTargetsHintId} className="tasks-settings__hint">
+          {t('dialogs.tasks.showHiddenTaskListTargets.hint')}
+        </p>
+        <label className="tasks-settings__toggle">
+          <input
+            type="checkbox"
+            checked={showHiddenTaskListTargets}
+            aria-describedby={showHiddenTargetsHintId}
+            onChange={(e) => setShowHiddenTaskListTargets(e.target.checked)}
+          />
+          <span>{t('dialogs.tasks.showHiddenTaskListTargets.label')}</span>
         </label>
       </section>
 

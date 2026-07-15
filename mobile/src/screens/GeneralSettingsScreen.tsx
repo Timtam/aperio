@@ -14,6 +14,10 @@ import {
 } from '../settings/language';
 import { readStartOnToday, writeStartOnToday } from '../settings/startOnToday';
 import {
+  readShowHiddenCalendarTargets,
+  writeShowHiddenCalendarTargets,
+} from '../settings/hiddenTargets';
+import {
   readShowCancelledEvents,
   writeShowCancelledEvents,
 } from '../settings/showCancelledEvents';
@@ -49,6 +53,8 @@ export default function GeneralSettingsScreen() {
   // Synced (default on): show cancelled events in the calendar, or hide them.
   // Reminders for cancelled events are suppressed host-side regardless.
   const [showCancelled, setShowCancelled] = useState(true);
+  // Synced (default on): offer hidden calendars as targets in the pickers.
+  const [showHiddenCalTargets, setShowHiddenCalTargets] = useState(true);
   // The global default reminder sound (§14.4 root). System/Silent only on mobile
   // — Custom needs an asset store the host lacks; a custom value synced from
   // desktop still round-trips and is shown read-only by SoundSelect.
@@ -72,6 +78,7 @@ export default function GeneralSettingsScreen() {
       void readTaskBehaviour().then((b) => setDayViewMode(b.dayViewMode));
       void readStartOnToday().then(setStartOnToday);
       void readShowCancelledEvents().then(setShowCancelled);
+      void readShowHiddenCalendarTargets().then(setShowHiddenCalTargets);
     }, []),
   );
 
@@ -83,6 +90,11 @@ export default function GeneralSettingsScreen() {
   const onShowCancelledChange = useCallback((next: boolean) => {
     setShowCancelled(next);
     void writeShowCancelledEvents(next);
+  }, []);
+
+  const onShowHiddenCalTargetsChange = useCallback((next: boolean) => {
+    setShowHiddenCalTargets(next);
+    void writeShowHiddenCalendarTargets(next);
   }, []);
 
   const onLanguageChange = useCallback((next: LanguageChoice) => {
@@ -153,6 +165,12 @@ export default function GeneralSettingsScreen() {
           hint={t('dialogs.settings.general.showCancelledHint')}
           value={showCancelled}
           onToggle={() => onShowCancelledChange(!showCancelled)}
+        />
+        <SwitchRow
+          label={t('dialogs.settings.general.showHiddenCalendarTargetsLabel')}
+          hint={t('dialogs.settings.general.showHiddenCalendarTargetsHint')}
+          value={showHiddenCalTargets}
+          onToggle={() => onShowHiddenCalTargetsChange(!showHiddenCalTargets)}
         />
       </View>
 

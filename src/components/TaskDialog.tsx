@@ -46,6 +46,7 @@ import type {
 } from '../api/types';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { currentUserForList } from '../state/currentUser';
+import { useViewState } from '../state/viewStateContext';
 import {
   canAssignSection,
   canMoveTaskBetweenLists,
@@ -150,6 +151,7 @@ export function TaskDialog({
   const fmt = useDateFormat();
   const { taskLists, selectedTaskListIds, colorLabels, sectionsByList, loadSections } =
     useCalendarStore();
+  const { showHiddenTaskListTargets } = useViewState();
   const { tasks } = useTasks();
   const { invalidateData } = useDialogState();
   // Shared status actions — they own the parent/subtask cascade
@@ -1130,6 +1132,7 @@ export function TaskDialog({
             {selectableTaskLists(taskLists, {
               selectedIds: selectedTaskListIds,
               currentId: form.listId,
+              includeHidden: showHiddenTaskListTargets,
             }).map((list) => (
               <option key={list.id} value={list.id}>
                 {list.name}

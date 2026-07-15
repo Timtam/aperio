@@ -42,6 +42,8 @@ export function GeneralPanel() {
     setStartOnToday,
     showCancelledEvents,
     setShowCancelledEvents,
+    showHiddenCalendarTargets,
+    setShowHiddenCalendarTargets,
   } = useViewState();
   const [uiScale, setUiScale] = useUiScale();
   const [themeMode, setThemeMode] = useThemeMode();
@@ -195,6 +197,17 @@ export function GeneralPanel() {
         </label>
         <p className="form__hint general-panel__toggle-hint">
           {t('dialogs.settings.general.showCancelledHint')}
+        </p>
+        <label className="general-panel__toggle">
+          <input
+            type="checkbox"
+            checked={showHiddenCalendarTargets}
+            onChange={(e) => setShowHiddenCalendarTargets(e.target.checked)}
+          />
+          <span>{t('dialogs.settings.general.showHiddenCalendarTargetsLabel')}</span>
+        </label>
+        <p className="form__hint general-panel__toggle-hint">
+          {t('dialogs.settings.general.showHiddenCalendarTargetsHint')}
         </p>
       </section>
 

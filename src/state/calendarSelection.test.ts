@@ -73,3 +73,39 @@ describe('selectableTaskLists', () => {
     expect(ids).toEqual(['readonly-checked']);
   });
 });
+
+// The "show hidden containers as targets" setting: includeHidden skips the
+// visibility filter so a deselected-but-writable container is still offered.
+describe('includeHidden (show hidden calendars/lists as targets)', () => {
+  it('offers hidden writable calendars while still excluding read-only ones', () => {
+    const visible = new Set(['writable-visible', 'readonly-visible']);
+    const ids = selectableEventCalendars(cals, {
+      selectedIds: visible,
+      includeHidden: true,
+    }).map((c) => c.id);
+    // Both writable calendars (incl. the hidden one) — read-only stays out.
+    expect(ids).toEqual(['writable-visible', 'writable-hidden']);
+  });
+
+  it('still hides deselected calendars when includeHidden is off', () => {
+    const visible = new Set(['writable-visible']);
+    const ids = selectableEventCalendars(cals, {
+      selectedIds: visible,
+      includeHidden: false,
+    }).map((c) => c.id);
+    expect(ids).toEqual(['writable-visible']);
+  });
+
+  it('offers hidden writable task lists too (twin contract)', () => {
+    const lists = [
+      { id: 'writable-checked', read_only: false },
+      { id: 'writable-unchecked', read_only: false },
+      { id: 'readonly-unchecked', read_only: true },
+    ];
+    const ids = selectableTaskLists(lists, {
+      selectedIds: new Set(['writable-checked']),
+      includeHidden: true,
+    }).map((l) => l.id);
+    expect(ids).toEqual(['writable-checked', 'writable-unchecked']);
+  });
+});

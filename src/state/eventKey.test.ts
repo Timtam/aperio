@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { eventInstanceKey } from './eventKey';
+import { eventInstanceKey } from '@aperio/shared';
 
 describe('eventInstanceKey', () => {
   it('gives the same shared event distinct keys per calendar', () => {

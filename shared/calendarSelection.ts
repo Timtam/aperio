@@ -24,16 +24,25 @@ export interface EventCalendarFilter {
    * container still shows its real target instead of a blank / wrong picker.
    */
   currentId?: string;
+  /**
+   * When true, deselected (hidden) but WRITABLE containers are STILL offered as
+   * targets — i.e. the `selectedIds` visibility filter is skipped. Drives the
+   * synced "show hidden calendars / task lists as assignment targets" setting
+   * (default on). Read-only containers stay excluded either way (you can't write
+   * to them), and `currentId` is always kept.
+   */
+  includeHidden?: boolean;
 }
 
 function selectableContainers<C extends SelectableCalendar>(
   containers: readonly C[],
-  { selectedIds, currentId }: EventCalendarFilter,
+  { selectedIds, currentId, includeHidden }: EventCalendarFilter,
 ): C[] {
   return containers.filter(
     (c) =>
       c.id === currentId ||
-      (!c.read_only && (selectedIds ? selectedIds.has(c.id) : true)),
+      (!c.read_only &&
+        (includeHidden || !selectedIds || selectedIds.has(c.id))),
   );
 }
 

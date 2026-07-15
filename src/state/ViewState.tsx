@@ -45,6 +45,11 @@ const START_ON_TODAY_PREF = 'view.startOnToday';
  *  consistency) or hide them. Reminders for cancelled events are always
  *  suppressed regardless of this toggle. */
 const SHOW_CANCELLED_PREF = 'view.showCancelledEvents';
+/** Synced prefs: whether HIDDEN (deselected) but writable calendars / task lists
+ *  are still offered as assignment targets in the editors + move/copy pickers
+ *  (default on). Off = only currently-visible containers are pickable. */
+const SHOW_HIDDEN_CALENDAR_TARGETS_PREF = 'pickers.showHiddenCalendarTargets';
+const SHOW_HIDDEN_TASK_LIST_TARGETS_PREF = 'pickers.showHiddenTaskListTargets';
 
 function isValidWeekStart(n: number): n is WeekStart {
   return Number.isInteger(n) && n >= 0 && n <= 6;
@@ -103,6 +108,12 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
   // out in `useEvents`; reminders for them are always suppressed core-side.
   const [showCancelledEvents, setShowCancelledEventsState] =
     useState<boolean>(true);
+  // Synced prefs: offer hidden (deselected) writable containers as targets in
+  // the pickers (default on until the round-trip returns).
+  const [showHiddenCalendarTargets, setShowHiddenCalendarTargetsState] =
+    useState<boolean>(true);
+  const [showHiddenTaskListTargets, setShowHiddenTaskListTargetsState] =
+    useState<boolean>(true);
   useEffect(() => {
     let cancelled = false;
     getUserPref(WEEK_START_PREF)
@@ -123,6 +134,19 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
       .catch(() => {
         // Backend unreachable → keep the default (show).
       });
+    // Hydrate the "show hidden … as targets" prefs (default on until returned).
+    getUserPref(SHOW_HIDDEN_CALENDAR_TARGETS_PREF)
+      .then((raw) => {
+        if (cancelled || raw == null) return;
+        setShowHiddenCalendarTargetsState(raw !== 'false');
+      })
+      .catch(() => {});
+    getUserPref(SHOW_HIDDEN_TASK_LIST_TARGETS_PREF)
+      .then((raw) => {
+        if (cancelled || raw == null) return;
+        setShowHiddenTaskListTargetsState(raw !== 'false');
+      })
+      .catch(() => {});
     // Hydrate the synced start-on-today pref. This only refreshes the toggle
     // state + the local mirror (written back by the persist effect) for the
     // NEXT launch — it deliberately does NOT move the current anchor, so a
@@ -184,6 +208,14 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
     setShowCancelledEventsState(v);
     void setUserPref(SHOW_CANCELLED_PREF, v ? 'true' : 'false');
   }, []);
+  const setShowHiddenCalendarTargets = useCallback((v: boolean) => {
+    setShowHiddenCalendarTargetsState(v);
+    void setUserPref(SHOW_HIDDEN_CALENDAR_TARGETS_PREF, v ? 'true' : 'false');
+  }, []);
+  const setShowHiddenTaskListTargets = useCallback((v: boolean) => {
+    setShowHiddenTaskListTargetsState(v);
+    void setUserPref(SHOW_HIDDEN_TASK_LIST_TARGETS_PREF, v ? 'true' : 'false');
+  }, []);
 
   const value = useMemo<ViewStateValue>(
     () => ({
@@ -203,6 +235,10 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
       setStartOnToday,
       showCancelledEvents,
       setShowCancelledEvents,
+      showHiddenCalendarTargets,
+      setShowHiddenCalendarTargets,
+      showHiddenTaskListTargets,
+      setShowHiddenTaskListTargets,
     }),
     [
       view,
@@ -221,6 +257,10 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
       setStartOnToday,
       showCancelledEvents,
       setShowCancelledEvents,
+      showHiddenCalendarTargets,
+      setShowHiddenCalendarTargets,
+      showHiddenTaskListTargets,
+      setShowHiddenTaskListTargets,
     ],
   );
 
