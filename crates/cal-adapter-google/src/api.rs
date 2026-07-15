@@ -22,8 +22,8 @@ use url::Url;
 use crate::auth::{self, TokenSet, GOOGLE_TOKEN_URL};
 use crate::error::{GoogleError, GoogleResult};
 use crate::mapping::{
-    event_to_body, map_calendar, map_event, new_event_to_body, CalendarListResponse, EventEntry,
-    EventListResponse,
+    event_id_for, event_to_body, map_calendar, map_event, new_event_to_body, CalendarListResponse,
+    EventEntry, EventListResponse,
 };
 
 const API_BASE: &str = "https://www.googleapis.com/calendar/v3";
@@ -496,10 +496,17 @@ pub async fn list_events_incremental(
         }
         let resp: EventListResponse = state.get_json(&path).await?;
         for entry in resp.items {
-            // A cancelled row is a deletion — its id is already the
-            // native id (Google ids carry no kind/etag adornment).
+            // A cancelled row is a deletion. A cancelled MODIFIED instance was
+            // cached under its RECURRENCE-ID composite id (`{master}::rid::…`, see
+            // `map_event`), so its tombstone must delete THAT id — otherwise the
+            // reverted/removed override lingers. A cancelled whole event or plain
+            // instance keeps its native Google id.
             if entry.status.as_deref() == Some("cancelled") {
-                delta.deletions.push(entry.id);
+                delta.deletions.push(event_id_for(
+                    entry.id,
+                    entry.recurring_event_id.as_deref(),
+                    entry.original_start_time.as_ref(),
+                )?);
                 continue;
             }
             if let Some(ev) = map_event(entry, calendar_id)? {
@@ -1032,6 +1039,48 @@ mod tests {
         );
         assert_eq!(delta.deletions, vec!["e2".to_string()]);
         assert_eq!(delta.new_token.as_deref(), Some("TOK-2"));
+        m.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn cancelled_modified_instance_deletes_by_recurrence_id() {
+        // A reverted/removed modified instance arrives as a cancelled row carrying
+        // recurringEventId + originalStartTime. It was cached under the composite
+        // `{master}::rid::{original}` id (map_event), so its tombstone must target
+        // THAT id — not the native `{master}_{compact}` instance id.
+        let mut server = mockito::Server::new_async().await;
+        let m = server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(
+                    r"^/calendars/primary/events\?.*syncToken=TOK-1".to_string(),
+                ),
+            )
+            .with_status(200)
+            .with_body(
+                r##"{
+                  "items": [
+                    {"id":"master-1_20260614T100000Z","status":"cancelled",
+                     "recurringEventId":"master-1",
+                     "originalStartTime":{"dateTime":"2026-06-14T10:00:00Z"},
+                     "start":{"dateTime":"2026-06-14T10:00:00Z"},
+                     "end":{"dateTime":"2026-06-14T10:30:00Z"}}
+                  ],
+                  "nextSyncToken":"TOK-2"
+                }"##,
+            )
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let from = chrono::Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+        let to = chrono::Utc.with_ymd_and_hms(2026, 7, 1, 0, 0, 0).unwrap();
+        let delta = list_events_incremental(&state, "primary", "TOK-1", from, to)
+            .await
+            .unwrap();
+        assert_eq!(
+            delta.deletions,
+            vec!["master-1::rid::2026-06-14T10:00:00Z".to_string()]
+        );
         m.assert_async().await;
     }
 

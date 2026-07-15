@@ -138,12 +138,21 @@ pub struct EventEntry {
     pub created: Option<DateTime<Utc>>,
     #[serde(default)]
     pub updated: Option<DateTime<Utc>>,
-    /// On a recurring-event instance Google sends a `recurringEventId`
-    /// pointing back to the master row. We don't expand instances on
-    /// the Google side (we expand client-side via rrule.js), so this
-    /// is ignored for now — kept as a field reference for 6d.2.
+    /// On a MODIFIED single instance of a recurring event Google sends a
+    /// `recurringEventId` pointing back to the master, plus `originalStartTime`
+    /// (the slot it replaces). The master keeps a clean RRULE that still
+    /// generates that slot, so without reconciliation the instance would render
+    /// TWICE (the master's occurrence at the old time + the moved instance at the
+    /// new time). We mint the override's id as `{master}::rid::{original}` so the
+    /// shared frontend expander drops the master's occurrence it stands in for —
+    /// the same RECURRENCE-ID scheme the CalDAV adapter uses.
     #[serde(default, rename = "recurringEventId")]
     pub recurring_event_id: Option<String>,
+    /// The slot a modified instance replaces (present with `recurringEventId`).
+    /// "Uniquely identifies the instance within the series even if it was moved"
+    /// (Google docs) — i.e. the RECURRENCE-ID instant, NOT the moved start.
+    #[serde(default, rename = "originalStartTime")]
+    pub original_start_time: Option<EventDateTime>,
     /// Google's per-row ETag for optimistic concurrency control. We
     /// stash it on Event.etag so update / delete can do `If-Match`.
     #[serde(default)]
@@ -237,6 +246,33 @@ impl EventDateTime {
         Err(GoogleError::Protocol(
             "event start/end has neither dateTime nor date".into(),
         ))
+    }
+}
+
+/// Separator between a recurring series' id and the RECURRENCE-ID instant an
+/// override replaces — e.g. `{master}::rid::2026-06-14T13:00:00Z`. Must match the
+/// CalDAV adapter and `shared/recurrence.ts`, which split the series id back out
+/// and skip the master occurrence the override stands in for.
+const RECURRENCE_ID_MARKER: &str = "::rid::";
+
+/// The cal-core id for `entry`: a MODIFIED single instance of a recurring event
+/// (carrying `recurringEventId` + `originalStartTime`) becomes
+/// `{master}::rid::{originalStart}` so the shared expander drops the master
+/// occurrence it stands in for; everything else keeps its native Google id.
+pub(crate) fn event_id_for(
+    id: String,
+    recurring_event_id: Option<&str>,
+    original_start: Option<&EventDateTime>,
+) -> GoogleResult<String> {
+    match (recurring_event_id, original_start) {
+        (Some(master), Some(orig)) => {
+            let (orig_utc, _) = orig.resolve()?;
+            Ok(format!(
+                "{master}{RECURRENCE_ID_MARKER}{}",
+                orig_utc.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+            ))
+        }
+        _ => Ok(id),
     }
 }
 
@@ -341,9 +377,15 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
         .and_then(|o| o.email)
         .filter(|e| !e.trim().is_empty());
 
+    let id = event_id_for(
+        entry.id,
+        entry.recurring_event_id.as_deref(),
+        entry.original_start_time.as_ref(),
+    )?;
+
     Ok(Some(Event {
         send_invitations: false,
-        id: entry.id,
+        id,
         calendar_id: calendar_id.to_string(),
         title: entry.summary.unwrap_or_default(),
         description: entry.description,
@@ -636,6 +678,63 @@ mod tests {
         assert!(!ev.all_day);
         assert_eq!(ev.etag.as_deref(), Some("\"123\""));
         assert!(ev.recurrence.is_none());
+    }
+
+    #[test]
+    fn map_event_modified_instance_gets_recurrence_id() {
+        // A moved single occurrence of a recurring series. Google's clean master
+        // RRULE still generates the 10:00 slot, so without a RECURRENCE-ID the
+        // frontend would render BOTH the master's 10:00 occurrence and this 14:00
+        // instance. The id must carry `::rid::{originalStart}` so the expander
+        // drops the master's occurrence.
+        let raw = r#"{
+            "id": "master-1_20260614T100000Z",
+            "summary": "Standup (moved)",
+            "start": { "dateTime": "2026-06-14T14:00:00Z" },
+            "end":   { "dateTime": "2026-06-14T14:30:00Z" },
+            "status": "confirmed",
+            "recurringEventId": "master-1",
+            "originalStartTime": { "dateTime": "2026-06-14T10:00:00Z" }
+        }"#;
+        let entry: EventEntry = serde_json::from_str(raw).unwrap();
+        let ev = map_event(entry, "primary").unwrap().unwrap();
+        assert_eq!(ev.id, "master-1::rid::2026-06-14T10:00:00Z");
+        // The event itself sits at its MOVED time and is a plain single.
+        assert_eq!(
+            ev.start,
+            Utc.with_ymd_and_hms(2026, 6, 14, 14, 0, 0).unwrap()
+        );
+        assert!(ev.recurrence.is_none());
+    }
+
+    #[test]
+    fn modified_instance_original_start_normalises_to_utc() {
+        // originalStartTime with an offset must resolve to the same UTC instant
+        // the master's (UTC) expansion produces, or the frontend match misses.
+        let raw = r#"{
+            "id": "m2_20260614T100000Z",
+            "summary": "Moved",
+            "start": { "dateTime": "2026-06-14T16:00:00+02:00" },
+            "end":   { "dateTime": "2026-06-14T16:30:00+02:00" },
+            "status": "confirmed",
+            "recurringEventId": "m2",
+            "originalStartTime": { "dateTime": "2026-06-14T12:00:00+02:00" }
+        }"#;
+        let entry: EventEntry = serde_json::from_str(raw).unwrap();
+        let ev = map_event(entry, "primary").unwrap().unwrap();
+        assert_eq!(ev.id, "m2::rid::2026-06-14T10:00:00Z");
+    }
+
+    #[test]
+    fn event_id_for_leaves_plain_events_untouched() {
+        // No recurringEventId → the native Google id is kept verbatim.
+        assert_eq!(event_id_for("ev-9".into(), None, None).unwrap(), "ev-9");
+        // A master (recurringEventId but... only instances carry originalStartTime)
+        // is defensively left alone when originalStartTime is absent.
+        assert_eq!(
+            event_id_for("ev-9".into(), Some("master"), None).unwrap(),
+            "ev-9"
+        );
     }
 
     #[test]

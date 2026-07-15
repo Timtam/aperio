@@ -188,7 +188,8 @@ describe('expandAll', () => {
     });
     // The 2026-05-20 occurrence was moved to 14:00. It arrives as a separate
     // non-recurring event whose id carries the series id + the replaced
-    // occurrence (the shape the CalDAV adapter mints).
+    // occurrence (the shape the CalDAV AND Google adapters mint — a bare series
+    // id with no `|` is exactly what Google's `{master}::rid::{original}` uses).
     const override = mkEvent({
       id: 'series::rid::2026-05-20T09:00:00Z',
       start: '2026-05-20T14:00:00.000Z',
