@@ -126,9 +126,12 @@ export function AgendaView() {
 
   const requestDelete = useCallback((ev: CalendarEvent) => {
     // Recurring-aware delete prompt: ask "this occurrence vs whole
-    // series" both for synthetic expanded occurrences AND for
-    // master rows that carry a recurrence rule.
-    if (isExpandedOccurrence(ev) || ev.recurrence) {
+    // Only a synthetic EXPANDED occurrence has a single instance to delete, so
+    // only it gets the occurrence-vs-series choice. A bare recurring master row
+    // (an unexpandable RRULE) has no single occurrence — offering "this
+    // occurrence" there would fall through to a full-series delete — so it takes
+    // the plain confirm (which deletes the series).
+    if (isExpandedOccurrence(ev)) {
       setScopeTarget(ev);
     } else {
       setConfirmTarget(ev);

@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use cal_core::{AttendeeStatus, Calendar, DateRange, Event, FreeBusy, FreeBusySlot, NewEvent};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, Utc};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -754,36 +754,46 @@ struct BusyPeriod {
     end: DateTime<Utc>,
 }
 
-/// Fetch the recurring master, append `occurrence` to its EXDATE
-/// list, PATCH back. Used for Aperio's "delete only this
-/// occurrence" flow on a recurring series.
+/// Delete a single occurrence of a recurring event (Aperio's "delete only this
+/// occurrence" flow).
+///
+/// Google models a per-occurrence deletion as a cancelled INSTANCE resource, NOT
+/// as an EXDATE on the master. Patching the master's `recurrence` with a UTC
+/// EXDATE is silently dropped for a zoned series (RFC 5545 wants the EXDATE in the
+/// DTSTART zone) and isn't Google's mechanism anyway, so it was a no-op. Instead
+/// we DELETE the instance `{master}_{originalStart}` — the exact id shape
+/// [`map_event`] turns back into a `{master}::rid::{start}` cancelled override, so
+/// the next read suppresses the occurrence. Never rewrites the master.
 pub async fn add_event_exdate(
     state: &ApiState,
     calendar_id: &str,
     event_id: &str,
-    occurrence: chrono::DateTime<chrono::Utc>,
+    occurrence: DateTime<Utc>,
 ) -> GoogleResult<()> {
     let cal_enc = urlencoding(calendar_id);
     let ev_enc = urlencoding(event_id);
-    let path = format!("/calendars/{cal_enc}/events/{ev_enc}");
-    let entry: EventEntry = state.get_json(&path).await?;
-    let mut master = map_event(entry, calendar_id)?.ok_or_else(|| {
-        GoogleError::Protocol("cannot add EXDATE to a cancelled / missing master".into())
-    })?;
-    // Append the new exception, keeping any existing ones. The
-    // RRULE itself is unchanged.
-    let mut rec = master
-        .recurrence
-        .unwrap_or_else(|| cal_core::EventRecurrence {
-            rrule: String::new(),
-            exceptions: Vec::new(),
-            tzid: None,
-        });
-    rec.exceptions.push(occurrence);
-    master.recurrence = Some(rec);
-    let body = event_to_body(&master);
-    let _: EventEntry = state.patch_json(&path, &body).await?;
-    Ok(())
+    // Fetch the master: confirms it exists (so the adapter's calendar walk can
+    // tell "wrong calendar" from a real error) and tells us whether it's all-day,
+    // which changes the instance-id suffix Google uses.
+    let master: EventEntry = state
+        .get_json(&format!("/calendars/{cal_enc}/events/{ev_enc}"))
+        .await?;
+    // Instance-id suffix = the occurrence's original start. Timed → compact UTC
+    // date-time (`20260601T180000Z`); all-day → the bare LOCAL day (`20260601`),
+    // the same day the all-day read/write path anchors to (a UTC day would be off
+    // by one east of UTC).
+    let suffix = if master.start.date.is_some() {
+        occurrence
+            .with_timezone(&Local)
+            .format("%Y%m%d")
+            .to_string()
+    } else {
+        occurrence.format("%Y%m%dT%H%M%SZ").to_string()
+    };
+    let instance_enc = urlencoding(&format!("{event_id}_{suffix}"));
+    state
+        .delete_request(&format!("/calendars/{cal_enc}/events/{instance_enc}"))
+        .await
 }
 
 /// `PATCH /calendars/{id}` with `{ "summary": "..." }`. Google's
@@ -1312,9 +1322,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn add_event_exdate_fetches_patches_with_new_exception() {
+    async fn add_event_exdate_deletes_the_timed_instance() {
         let mut server = mockito::Server::new_async().await;
-        // GET the master.
+        // GET the master (learns it's timed, confirms it exists).
         let get_mock = server
             .mock("GET", "/calendars/primary/events/master-1")
             .with_status(200)
@@ -1329,21 +1339,13 @@ mod tests {
             )
             .create_async()
             .await;
-        // PATCH with the new EXDATE in the recurrence body.
-        let patch_mock = server
-            .mock("PATCH", "/calendars/primary/events/master-1")
-            .match_body(mockito::Matcher::Regex(
-                "EXDATE;VALUE=DATE-TIME:20260601T180000Z".into(),
-            ))
-            .with_status(200)
-            .with_body(
-                r##"{
-                "id": "master-1",
-                "summary": "Weekly",
-                "start": { "dateTime": "2026-05-25T18:00:00Z" },
-                "end":   { "dateTime": "2026-05-25T19:00:00Z" }
-            }"##,
+        // DELETE the instance {master}_{originalStart} — NOT a PATCH of the master.
+        let delete_mock = server
+            .mock(
+                "DELETE",
+                "/calendars/primary/events/master-1_20260601T180000Z",
             )
+            .with_status(204)
             .create_async()
             .await;
 
@@ -1353,7 +1355,46 @@ mod tests {
             .await
             .unwrap();
         get_mock.assert_async().await;
-        patch_mock.assert_async().await;
+        delete_mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn add_event_exdate_deletes_the_all_day_instance_by_local_date() {
+        let mut server = mockito::Server::new_async().await;
+        // An all-day master (start carries `date`, not `dateTime`).
+        let get_mock = server
+            .mock("GET", "/calendars/primary/events/bday-1")
+            .with_status(200)
+            .with_body(
+                r##"{
+                  "id": "bday-1",
+                  "summary": "Standup",
+                  "start": { "date": "2026-05-25" },
+                  "end":   { "date": "2026-05-26" },
+                  "recurrence": ["RRULE:FREQ=DAILY"]
+                }"##,
+            )
+            .create_async()
+            .await;
+        // All-day instance id uses the bare LOCAL day of the occurrence. The occ is
+        // that day's local midnight expressed in UTC, so the local date is 06-01.
+        let delete_mock = server
+            .mock("DELETE", "/calendars/primary/events/bday-1_20260601")
+            .with_status(204)
+            .create_async()
+            .await;
+
+        let state = fixture_state(&server.url());
+        // Local midnight of 2026-06-01 as a UTC instant (the all-day convention).
+        let occ = chrono::Local
+            .with_ymd_and_hms(2026, 6, 1, 0, 0, 0)
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        add_event_exdate(&state, "primary", "bday-1", occ)
+            .await
+            .unwrap();
+        get_mock.assert_async().await;
+        delete_mock.assert_async().await;
     }
 
     #[tokio::test]

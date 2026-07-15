@@ -633,7 +633,12 @@ export function DayView() {
   );
 
   const requestDelete = useCallback((ev: CalendarEvent) => {
-    if (isExpandedOccurrence(ev) || ev.recurrence) {
+    // Only an EXPANDED occurrence has a specific instance to delete, so only it
+    // gets the occurrence-vs-series choice. A recurring MASTER row (e.g. an
+    // unparseable RRULE that couldn't be expanded) has no single occurrence —
+    // offering "this occurrence" there would fall through to a full-series
+    // delete — so it takes the plain confirm (which deletes the series).
+    if (isExpandedOccurrence(ev)) {
       setScopeTarget(ev);
     } else {
       setConfirmTarget(ev);
