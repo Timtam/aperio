@@ -6,7 +6,7 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use chrono::Utc;
+use chrono::{DateTime, Datelike, Duration, TimeZone, Utc};
 
 use cal_core::{CalendarFeature, ContactsFeature, DateRange, TasksFeature};
 
@@ -190,6 +190,17 @@ pub async fn refresh_events(
     calendar: &str,
     range: DateRange,
 ) -> cal_core::Result<()> {
+    // Widen the requested view range to whole months before fetching. A
+    // range-scoped adapter (Google/Graph) bakes `timeMin`/`timeMax` into its delta
+    // token, so the token only ever covers what THIS fetch asked for. Fetching the
+    // exact day/week on screen therefore makes every navigation a coverage miss
+    // that re-fetches and clobbers the previous range (the day-to-day thrash).
+    // Caching the surrounding month(s) instead makes the token AND the recorded
+    // window span the whole block, so panning within it is served from the
+    // snapshot and stays incrementally fresh. Folder-complete adapters (CalDAV/EWS)
+    // return the whole collection regardless of the range, so widening is a
+    // harmless no-op for them.
+    let range = snap_to_month_window(range);
     let state = cache
         .get_sync_state(account, SyncScope::Events, calendar)
         .ok()
@@ -259,6 +270,49 @@ pub async fn refresh_events(
         }
         Err(err) => Err(err),
     }
+}
+
+/// Expand a view-sized range to whole-month UTC boundaries so a range-scoped
+/// adapter caches (and tokenises) a block wide enough that day/week panning within
+/// it stays a snapshot hit. A range already wider than ~13 months — a
+/// folder-complete unbounded fetch, or an unusually large custom range — is left
+/// untouched. Never shrinks the requested range.
+fn snap_to_month_window(range: DateRange) -> DateRange {
+    if range.end <= range.start || range.end - range.start > Duration::days(400) {
+        return range;
+    }
+    let start = month_start(range.start);
+    let end = month_ceil(range.end);
+    if start <= range.start && end >= range.end {
+        DateRange::new(start, end)
+    } else {
+        // Defensive: any pathological calendar arithmetic → keep the exact range.
+        range
+    }
+}
+
+/// First instant (UTC) of `dt`'s month.
+fn month_start(dt: DateTime<Utc>) -> DateTime<Utc> {
+    Utc.with_ymd_and_hms(dt.year(), dt.month(), 1, 0, 0, 0)
+        .single()
+        .unwrap_or(dt)
+}
+
+/// Start of the month at or after `dt`: `dt` itself when it is already a month
+/// start, else the first instant of the following month.
+fn month_ceil(dt: DateTime<Utc>) -> DateTime<Utc> {
+    let start = month_start(dt);
+    if start == dt {
+        return dt;
+    }
+    let (year, month) = if dt.month() == 12 {
+        (dt.year() + 1, 1)
+    } else {
+        (dt.year(), dt.month() + 1)
+    };
+    Utc.with_ymd_and_hms(year, month, 1, 0, 0, 0)
+        .single()
+        .unwrap_or(dt)
 }
 
 /// Refresh one external task list into the snapshot cache.
@@ -405,6 +459,58 @@ mod tests {
     fn range() -> DateRange {
         let now = Utc::now();
         DateRange::new(now, now + Duration::days(1))
+    }
+
+    fn at(y: i32, m: u32, d: u32) -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(y, m, d, 0, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn snap_widens_a_single_day_to_its_whole_month() {
+        // A Wednesday in the middle of June → the whole of June.
+        let snapped = snap_to_month_window(DateRange::new(at(2026, 6, 17), at(2026, 6, 18)));
+        assert_eq!(snapped.start, at(2026, 6, 1));
+        assert_eq!(snapped.end, at(2026, 7, 1));
+    }
+
+    #[test]
+    fn snap_maps_every_day_of_a_month_to_the_same_window() {
+        // The whole point: day-to-day panning within a month lands on ONE window,
+        // so it's a snapshot hit instead of a re-fetch each day.
+        let june = snap_to_month_window(DateRange::new(at(2026, 6, 1), at(2026, 6, 2)));
+        for day in [3, 15, 30] {
+            let start = at(2026, 6, day);
+            let other = snap_to_month_window(DateRange::new(start, start + Duration::days(1)));
+            assert_eq!(other.start, june.start);
+            assert_eq!(other.end, june.end);
+        }
+    }
+
+    #[test]
+    fn snap_spans_both_months_for_a_cross_month_week() {
+        // A week Dec 28 2026 .. Jan 4 2027 → Dec 1 .. Feb 1 (both months).
+        let snapped = snap_to_month_window(DateRange::new(at(2026, 12, 28), at(2027, 1, 4)));
+        assert_eq!(snapped.start, at(2026, 12, 1));
+        assert_eq!(snapped.end, at(2027, 2, 1));
+    }
+
+    #[test]
+    fn snap_leaves_month_aligned_ends_alone() {
+        // A month view whose exclusive end is already a month boundary must not
+        // over-extend into the next month.
+        let snapped = snap_to_month_window(DateRange::new(at(2026, 6, 1), at(2026, 7, 1)));
+        assert_eq!(snapped.start, at(2026, 6, 1));
+        assert_eq!(snapped.end, at(2026, 7, 1));
+    }
+
+    #[test]
+    fn snap_leaves_a_huge_range_untouched() {
+        // A folder-complete unbounded fetch (or an outsized custom range) is not
+        // widened — snapping is only for view-sized ranges.
+        let huge = DateRange::new(at(2020, 1, 1), at(2030, 1, 1));
+        let snapped = snap_to_month_window(huge);
+        assert_eq!(snapped.start, huge.start);
+        assert_eq!(snapped.end, huge.end);
     }
 
     #[test]
