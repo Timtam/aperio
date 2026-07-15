@@ -49,6 +49,17 @@ export interface ViewStateValue {
    */
   showCancelledEvents: boolean;
   setShowCancelledEvents: (v: boolean) => void;
+  /**
+   * Offer HIDDEN (deselected) but writable calendars / task lists as assignment
+   * targets in the editors + move/copy pickers. Synced user preferences
+   * (`pickers.showHiddenCalendarTargets` / `pickers.showHiddenTaskListTargets`);
+   * both default ON. Off = only currently-visible containers are pickable (an
+   * item's own container is always kept, and read-only ones are never offered).
+   */
+  showHiddenCalendarTargets: boolean;
+  setShowHiddenCalendarTargets: (v: boolean) => void;
+  showHiddenTaskListTargets: boolean;
+  setShowHiddenTaskListTargets: (v: boolean) => void;
 }
 
 export const ViewStateContext = createContext<ViewStateValue | null>(null);

@@ -31,6 +31,7 @@ import {
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
 import { useCancellationChoice } from '../state/useCancellationChoice';
+import { useViewState } from '../state/viewStateContext';
 import { AttendeePicker } from './AttendeePicker';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ColorLabelSelect } from './ColorLabelSelect';
@@ -154,6 +155,7 @@ export function EventDialog({
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const { calendars, colorLabels, selectedCalendarIds } = useCalendarStore();
+  const { showHiddenCalendarTargets } = useViewState();
 
   const isEdit = event !== null;
   // Stable id for the attendees-picker label — used as the
@@ -724,6 +726,7 @@ export function EventDialog({
             {selectableEventCalendars(calendars, {
               selectedIds: selectedCalendarIds,
               currentId: form.calendarId,
+              includeHidden: showHiddenCalendarTargets,
             }).map((cal) => (
               <option key={cal.id} value={cal.id}>
                 {cal.name}

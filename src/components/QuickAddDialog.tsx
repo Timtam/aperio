@@ -44,14 +44,18 @@ export function QuickAddDialog({
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const { calendars, selectedCalendarIds } = useCalendarStore();
-  const { anchor } = useViewState();
+  const { anchor, showHiddenCalendarTargets } = useViewState();
   const { openEventDialog } = useDialogState();
 
-  // Only writable calendars the sidebar still shows can host a new event.
+  // Writable calendars that can host a new event: the sidebar-visible ones, plus
+  // hidden ones when the "show hidden as targets" pref is on.
   const selectable = useMemo(
     () =>
-      selectableEventCalendars(calendars, { selectedIds: selectedCalendarIds }),
-    [calendars, selectedCalendarIds],
+      selectableEventCalendars(calendars, {
+        selectedIds: selectedCalendarIds,
+        includeHidden: showHiddenCalendarTargets,
+      }),
+    [calendars, selectedCalendarIds, showHiddenCalendarTargets],
   );
   const initial = useMemo(
     () => buildInitial(selectable, anchor, defaultDate),

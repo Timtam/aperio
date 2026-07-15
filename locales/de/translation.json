@@ -486,6 +486,8 @@
         "startOnTodayHint": "Wenn aktiv, öffnet jede Kalenderansicht bei jedem App-Start auf dem heutigen Tag statt auf dem zuletzt geöffneten. Wird zwischen deinen Geräten synchronisiert.",
         "showCancelledLabel": "Abgesagte Termine anzeigen",
         "showCancelledHint": "Wenn aktiv, bleiben abgesagte Termine im Kalender sichtbar (wie in Outlook). Wenn aus, werden sie ausgeblendet. In beiden Fällen lösen abgesagte Termine nie Erinnerungen aus. Wird zwischen deinen Geräten synchronisiert.",
+        "showHiddenCalendarTargetsLabel": "Ausgeblendete Kalender als Ziele anbieten",
+        "showHiddenCalendarTargetsHint": "Wenn aktiv, können in der Seitenleiste ausgeblendete Kalender trotzdem als Ziel gewählt werden, wenn du einen Termin erstellst, bearbeitest oder verschiebst. Wenn aus, werden nur aktuell angezeigte Kalender angeboten (der eigene Kalender eines Termins bleibt immer verfügbar). Wird zwischen deinen Geräten synchronisiert.",
         "appearanceHeading": "Darstellung",
         "fontSizeLabel": "Schriftgröße",
         "fontSizeHint": "Skaliert die gesamte Oberfläche — Text und Abstände. Standard 100 %, wird nur auf diesem Gerät gespeichert.",
@@ -978,6 +980,11 @@
         "heading": "Aufwand als Kachelgröße",
         "label": "Aufgaben je nach Aufwand größer/kleiner darstellen",
         "hint": "Wenn aktiviert, werden Aufgabenkacheln je nach eingestelltem Aufwand (klein/mittel/groß) unterschiedlich groß dargestellt, damit auf einen Blick sichtbar ist, wie voll ein Tag ist. Rein visuell — der Aufwand wird unabhängig davon immer im Aufgaben-Label angesagt. Deaktiviert: alle Kacheln gleich groß."
+      },
+      "showHiddenTaskListTargets": {
+        "heading": "Ausgeblendete Listen als Ziele",
+        "label": "Ausgeblendete Listen als Ziele anbieten",
+        "hint": "Wenn aktiv, können in der Seitenleiste ausgeblendete Aufgabenlisten trotzdem als Ziel gewählt werden, wenn du eine Aufgabe erstellst, bearbeitest oder verschiebst. Wenn aus, werden nur aktuell angezeigte Listen angeboten (die eigene Liste einer Aufgabe bleibt immer verfügbar). Wird zwischen deinen Geräten synchronisiert."
       },
       "carryOverDefault": {
         "heading": "Übernahme-Standard",

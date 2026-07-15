@@ -20,6 +20,7 @@ import {
 import { useCalendarStore } from '../state/calendarStoreContext';
 import type { MoveCopyTarget } from '../state/DialogState';
 import { useTasks } from '../state/useTasks';
+import { useViewState } from '../state/viewStateContext';
 import { Modal } from './Modal';
 
 /**
@@ -56,6 +57,8 @@ export function MoveCopyDialog({
   const announce = useAnnouncer();
   const { calendars, taskLists, selectedCalendarIds, selectedTaskListIds } =
     useCalendarStore();
+  const { showHiddenCalendarTargets, showHiddenTaskListTargets } =
+    useViewState();
 
   const initialContainerId =
     target.kind === 'event' ? target.event.calendar_id : target.task.list_id;
@@ -95,12 +98,25 @@ export function MoveCopyDialog({
     if (target.kind === 'event') {
       return selectableEventCalendars(calendars, {
         selectedIds: selectedCalendarIds,
+        currentId: initialContainerId,
+        includeHidden: showHiddenCalendarTargets,
       }).map((c) => ({ id: c.id, name: c.name }));
     }
     return selectableTaskLists(taskLists, {
       selectedIds: selectedTaskListIds,
+      currentId: initialContainerId,
+      includeHidden: showHiddenTaskListTargets,
     }).map((l) => ({ id: l.id, name: l.name }));
-  }, [target.kind, calendars, taskLists, selectedCalendarIds, selectedTaskListIds]);
+  }, [
+    target.kind,
+    calendars,
+    taskLists,
+    selectedCalendarIds,
+    selectedTaskListIds,
+    initialContainerId,
+    showHiddenCalendarTargets,
+    showHiddenTaskListTargets,
+  ]);
 
   const itemTitle =
     target.kind === 'event' ? target.event.title : target.task.title;

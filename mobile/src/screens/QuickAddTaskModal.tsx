@@ -18,6 +18,7 @@ import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
 import { useCancelHeader } from '../components/useCancelHeader';
 import { formatLocalDate } from '../intl/dateTimeField';
+import { useShowHiddenTaskListTargets } from '../settings/hiddenTargets';
 import { readLastUsedTaskList, writeLastUsedTaskList } from '../state/lastUsedTaskList';
 import { useTaskStore } from '../state/taskStoreContext';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -50,6 +51,7 @@ export default function QuickAddTaskModal({
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { taskLists, selectedTaskListIds, invalidateData } = useTaskStore();
+  const showHiddenTaskListTargets = useShowHiddenTaskListTargets();
 
   // Lists eligible as a create target: writable + checked in the Lists catalog
   // (shared `selectableTaskLists`, mirroring the event quick-add's calendar
@@ -112,8 +114,9 @@ export default function QuickAddTaskModal({
       selectableTaskLists(taskLists, {
         selectedIds: selectedTaskListIds,
         currentId: listId,
+        includeHidden: showHiddenTaskListTargets,
       }).map((l) => ({ value: l.id, label: l.name })),
-    [taskLists, selectedTaskListIds, listId],
+    [taskLists, selectedTaskListIds, listId, showHiddenTaskListTargets],
   );
 
   const fail = useCallback((message: string) => {

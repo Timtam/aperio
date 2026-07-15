@@ -18,6 +18,7 @@ import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
 import { useCancelHeader } from '../components/useCancelHeader';
 import { formatLocalDate, formatLocalTime } from '../intl/dateTimeField';
+import { useShowHiddenCalendarTargets } from '../settings/hiddenTargets';
 import { useCalendarVisibility } from '../state/calendarVisibility';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -43,6 +44,7 @@ export default function QuickAddEventModal({
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { hidden } = useCalendarVisibility();
+  const includeHidden = useShowHiddenCalendarTargets();
 
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [title, setTitle] = useState('');
@@ -86,8 +88,9 @@ export default function QuickAddEventModal({
           calendars.filter((c) => !hidden.has(c.id)).map((c) => c.id),
         ),
         currentId: calId,
+        includeHidden,
       }).map((c) => ({ value: c.id, label: c.name })),
-    [calendars, hidden, calId],
+    [calendars, hidden, calId, includeHidden],
   );
 
   const fail = useCallback((message: string) => {

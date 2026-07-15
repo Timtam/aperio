@@ -55,6 +55,7 @@ import { SubtaskSection } from '../components/SubtaskSection';
 import { TaskRecurrenceSelector } from '../components/TaskRecurrenceSelector';
 import { useCancelHeader } from '../components/useCancelHeader';
 import { formatLocalDate, formatLocalTime } from '../intl/dateTimeField';
+import { useShowHiddenTaskListTargets } from '../settings/hiddenTargets';
 import { currentUserForList } from '../state/currentUser';
 import { writeLastUsedTaskList } from '../state/lastUsedTaskList';
 import { readTaskBehaviour } from '../state/taskBehaviour';
@@ -215,6 +216,7 @@ export default function TaskEditorModal({
     colorLabels,
     invalidateData,
   } = useTaskStore();
+  const showHiddenTaskListTargets = useShowHiddenTaskListTargets();
 
   const [form, setForm] = useState<FormState>(() =>
     buildInitialState(null, listId, {
@@ -423,8 +425,9 @@ export default function TaskEditorModal({
       selectableTaskLists(taskLists, {
         selectedIds: selectedTaskListIds,
         currentId: form.listId,
+        includeHidden: showHiddenTaskListTargets,
       }).map((l) => ({ value: l.id, label: l.name })),
-    [taskLists, selectedTaskListIds, form.listId],
+    [taskLists, selectedTaskListIds, form.listId, showHiddenTaskListTargets],
   );
   const sectionOptions = useMemo(
     () => [
