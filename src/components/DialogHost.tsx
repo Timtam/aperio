@@ -2,6 +2,7 @@ import { useDialogState } from '../state/dialogStateContext';
 import { ContactDialog } from './ContactDialog';
 import { CreateChooserDialog } from './CreateChooserDialog';
 import { DayStartReviewDialog } from './DayStartReviewDialog';
+import { EditEventScopeDialog } from './EditEventScopeDialog';
 import { EventDialog } from './EventDialog';
 import { FirstLaunchWizardDialog } from './FirstLaunchWizardDialog';
 import { MoveCopyDialog } from './MoveCopyDialog';
@@ -25,7 +26,8 @@ import { TaskMembersDialog } from './TaskMembersDialog';
  * always portal into the same place.
  */
 export function DialogHost() {
-  const { mode, close, invalidateData } = useDialogState();
+  const { mode, close, invalidateData, chooseEventEditScope } =
+    useDialogState();
 
   switch (mode.kind) {
     case 'event':
@@ -37,6 +39,17 @@ export function DialogHost() {
           defaultCalendarId={mode.calendarId}
           defaultDate={mode.defaultDate}
           defaultTitle={mode.defaultTitle}
+          initialScope={mode.initialScope}
+        />
+      );
+    case 'eventEditScope':
+      return (
+        <EditEventScopeDialog
+          isOpen
+          onClose={close}
+          title={mode.event.title}
+          onOccurrence={() => chooseEventEditScope('occurrence')}
+          onSeries={() => chooseEventEditScope('series')}
         />
       );
     case 'task':

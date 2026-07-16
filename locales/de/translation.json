@@ -1169,6 +1169,13 @@
       "series": "Ganze Serie",
       "cancel": "Abbrechen"
     },
+    "editScope": {
+      "title": "Serientermin bearbeiten",
+      "message": "„{{title}}\" ist Teil einer Serie. Nur diesen Termin oder die ganze Serie bearbeiten?",
+      "occurrence": "Nur diesen Termin",
+      "series": "Ganze Serie",
+      "cancel": "Abbrechen"
+    },
     "save": "Speichern",
     "create": "Anlegen",
     "close": "Schließen",

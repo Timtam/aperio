@@ -80,6 +80,10 @@ export type RootStackParamList = {
     // `initialTitle` seeds a fresh event with the title typed into the
     // event quick-add before "More details …".
     initialTitle?: string;
+    // The scope the up-front edit prompt resolved to (see eventEditScope). Seeds
+    // the editor's edit scope; absent ⇒ 'occurrence'. When set, the editor
+    // confirms the scope read-only instead of showing the segmented control.
+    initialScope?: 'occurrence' | 'series';
   };
   Calendars: undefined;
   CalendarEditor: { calendarId: string };

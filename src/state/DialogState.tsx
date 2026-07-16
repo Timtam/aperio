@@ -6,6 +6,8 @@ import {
   type ReactNode,
 } from 'react';
 
+import { isExpandedOccurrence } from '@aperio/shared';
+
 import type {
   Account,
   CalendarEvent,
@@ -16,6 +18,9 @@ import type {
 } from '../api/types';
 import { DialogStateContext } from './dialogStateContext';
 import type { SettingsTabId } from '../components/SettingsDialog';
+
+/** Which slice of a recurring series an edit applies to. */
+export type EventEditScope = 'series' | 'occurrence';
 
 /**
  * Which dialog (if any) is currently open.
@@ -46,6 +51,17 @@ export type DialogMode =
       defaultDate?: string;
       /** Pre-fill the title when creating (quick-add → "weitere Details"). */
       defaultTitle?: string;
+      /** When editing a recurring occurrence, the scope the up-front prompt
+       *  resolved to — the editor opens locked to it. Absent ⇒ the editor's
+       *  own default ('occurrence'). */
+      initialScope?: EventEditScope;
+    }
+  | {
+      // Outlook-style "this occurrence vs the whole series?" prompt shown
+      // before the editor opens for a recurring occurrence. Carries the
+      // event so the chosen scope can hand off to the event frame.
+      kind: 'eventEditScope';
+      event: CalendarEvent;
     }
   | {
       kind: 'task';
@@ -135,6 +151,10 @@ export interface DialogStateValue {
     event?: CalendarEvent | null,
     options?: OpenEventOptions,
   ) => void;
+  /** Resolve the recurring-edit scope prompt: swap the top `eventEditScope`
+   *  frame for the event editor locked to `scope` (keeps the opener's
+   *  focus-return). No-op if the top frame isn't the scope prompt. */
+  chooseEventEditScope: (scope: EventEditScope) => void;
   openTaskDialog: (task?: Task | null, options?: OpenTaskOptions) => void;
   /** Quick-add EVENT. `defaultDate` (YYYY-MM-DD) anchors it to a chosen day
    *  (the day-activation chooser / a calendar day); omit to use the view's
@@ -296,6 +316,14 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
 
   const openEventDialog = useCallback(
     (event: CalendarEvent | null = null, options?: OpenEventOptions) => {
+      // Editing one occurrence of a recurring series: ask up front whether the
+      // edit targets this occurrence or the whole series (Outlook-style), then
+      // hand off to the editor locked to that scope. Everything else — creating,
+      // or editing a non-recurring / master row — opens the editor directly.
+      if (event && isExpandedOccurrence(event)) {
+        push({ kind: 'eventEditScope', event });
+        return;
+      }
       push({
         kind: 'event',
         event,
@@ -306,6 +334,19 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     },
     [push],
   );
+  const chooseEventEditScope = useCallback((scope: EventEditScope) => {
+    // Swap the scope-prompt frame in place (no new trigger capture) so the
+    // editor inherits the opener's focus-return target, mirroring the
+    // createChooser → quick-add hand-off.
+    setStack((s) => {
+      const top = s[s.length - 1];
+      if (!top || top.kind !== 'eventEditScope') return s;
+      return [
+        ...s.slice(0, -1),
+        { kind: 'event', event: top.event, initialScope: scope },
+      ];
+    });
+  }, []);
   const openTaskDialog = useCallback(
     (task: Task | null = null, options?: OpenTaskOptions) => {
       push({
@@ -455,6 +496,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     () => ({
       mode,
       openEventDialog,
+      chooseEventEditScope,
       openTaskDialog,
       openQuickAdd,
       openQuickAddTask,
@@ -482,6 +524,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     [
       mode,
       openEventDialog,
+      chooseEventEditScope,
       openTaskDialog,
       openQuickAdd,
       openQuickAddTask,

@@ -92,8 +92,8 @@ Under **Recurrence** in the event dialog you choose a pattern:
 - daily, weekly (with weekdays), monthly, yearly,
 - an **end** (never, after X times, until a date).
 
-When editing or deleting a recurring event, Aperio asks whether the change
-should apply to **only this event**, **this and all following** or **all**.
+When editing or deleting a recurring event, Aperio asks up front whether the
+change should apply to **only this occurrence** or the **whole series**.
 
 > **Tip:** Recurring events from external calendars (e.g. iCloud) expand
 > correctly in every view – even when the first occurrence lies in the past.
