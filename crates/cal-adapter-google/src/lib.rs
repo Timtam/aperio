@@ -352,21 +352,25 @@ impl CalendarFeature for GoogleAdapter {
     }
 
     async fn delete_event(&self, event_id: &str, send_cancellations: bool) -> CoreResult<()> {
-        // Aperio's command layer hands us the calendar_id alongside
-        // the event_id when it can, but the legacy
-        // `delete_event(event_id)` trait method doesn't carry it.
-        // We walk every calendar in the listing cache and try the
-        // delete against each — the first 2xx wins, the rest get
-        // their 404s swallowed. Mirrors how the CalDAV adapter
-        // copes with the same signature gap.
+        // Aperio's command layer hands us the calendar_id alongside the event_id
+        // when it can, but the legacy `delete_event(event_id)` trait method doesn't
+        // carry it. We walk every calendar and try the delete against each. A 404 =
+        // "not on this calendar" (keep walking); a 410 = "already gone" anywhere =
+        // success (idempotent). Any OTHER error (403/412/5xx) on a calendar is a
+        // real failure — remember it and surface it after the walk instead of
+        // masking it as the misleading "not found in any calendar".
         let cals = self.list_calendars().await?;
+        let mut real_error: Option<GoogleError> = None;
         for cal in cals {
-            if api::delete_event(&self.state, &cal.id, event_id, send_cancellations)
-                .await
-                .is_ok()
-            {
-                return Ok(());
+            match api::delete_event(&self.state, &cal.id, event_id, send_cancellations).await {
+                Ok(()) => return Ok(()),
+                Err(GoogleError::Http { status: 404, .. }) => continue,
+                Err(GoogleError::Http { status: 410, .. }) => return Ok(()),
+                Err(e) => real_error = Some(e),
             }
+        }
+        if let Some(e) = real_error {
+            return Err(to_core_error(e));
         }
         Err(CoreError::NotFound(format!(
             "event '{event_id}' not found in any calendar"
@@ -422,15 +426,17 @@ impl CalendarFeature for GoogleAdapter {
         event_id: &str,
         occurrence: chrono::DateTime<chrono::Utc>,
     ) -> CoreResult<()> {
-        // Same calendar-id-walking pattern as delete_event — the
-        // trait method doesn't carry the calendar id.
+        // Same calendar-id-walking pattern as delete_event — the trait method
+        // doesn't carry the calendar id. api::add_event_exdate tells us whether the
+        // master lives on THIS calendar: `MasterNotHere` → keep walking; a real
+        // error (the DELETE failed on the owning calendar) → surface it instead of
+        // masking every failure as the misleading "not found in any calendar".
         let cals = self.list_calendars().await?;
         for cal in cals {
-            if api::add_event_exdate(&self.state, &cal.id, event_id, occurrence)
-                .await
-                .is_ok()
-            {
-                return Ok(());
+            match api::add_event_exdate(&self.state, &cal.id, event_id, occurrence).await {
+                Ok(api::ExdateOutcome::Cancelled) => return Ok(()),
+                Ok(api::ExdateOutcome::MasterNotHere) => continue,
+                Err(e) => return Err(to_core_error(e)),
             }
         }
         Err(CoreError::NotFound(format!(
