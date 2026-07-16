@@ -16,6 +16,7 @@ use cal_core::{
 };
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 use crate::error::{GoogleError, GoogleResult};
 
@@ -410,6 +411,26 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
         entry.recurring_event_id.as_deref(),
         entry.original_start_time.as_ref(),
     )?;
+
+    // Diagnostics for the recurring-occurrence delete/suppress path. A recurring
+    // master MUST carry its IANA zone (`tzid`) so the frontend expands it
+    // DST-correctly; without it, occurrences on the far side of a DST boundary
+    // drift an hour and a cancelled override (whose RECURRENCE-ID is the
+    // DST-correct instant) can't match and suppress them → the deleted occurrence
+    // ghosts. Also log that a cancelled instance arrived as a suppressing override
+    // at all, with the exact instant it should cancel.
+    if let Some(rec) = recurrence.as_ref() {
+        debug!(
+            id = %id,
+            rrule = %rec.rrule,
+            tzid = ?rec.tzid,
+            start = %start,
+            "google recurring master mapped"
+        );
+    }
+    if cancelled {
+        debug!(id = %id, start = %start, "google cancelled-instance override mapped");
+    }
 
     Ok(Some(Event {
         send_invitations: false,

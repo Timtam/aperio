@@ -240,6 +240,39 @@ describe('expandAll', () => {
     // …leaving 3 live occurrences (the cancelled override is filtered elsewhere).
     expect(out.filter((o) => !o.cancelled).length).toBe(3);
   });
+
+  it('suppresses a cancelled override on a DST-summer occurrence of a zoned master', () => {
+    // Reproduces Lea's Google series: a weekly Monday 12:30 Europe/Berlin master
+    // whose DTSTART is in WINTER (CET, +1 → 11:30Z) and a single SUMMER occurrence
+    // (CEST, +2 → 10:30Z) deleted. Google surfaces the deletion as a cancelled
+    // override whose RECURRENCE-ID is the occurrence's DST-correct instant
+    // (10:30Z). Suppression only works if the master expands that Monday to the
+    // same 10:30Z — i.e. DST-correctly — not to the DTSTART's flat 11:30Z.
+    const master = mkEvent({
+      id: 'series',
+      start: '2026-01-05T11:30:00.000Z', // Mon 2026-01-05 12:30 Berlin (CET)
+      end: '2026-01-05T12:00:00.000Z',
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;BYDAY=MO',
+        exceptions: [],
+        tzid: 'Europe/Berlin',
+      },
+    });
+    const cancelledOverride = mkEvent({
+      id: 'series::rid::2026-07-13T10:30:00Z',
+      start: '2026-07-13T10:30:00.000Z',
+      end: '2026-07-13T10:30:00.000Z',
+      cancelled: true,
+    });
+    const out = expandAll([master, cancelledOverride], {
+      start: new Date('2026-07-06T00:00:00Z'),
+      end: new Date('2026-07-20T00:00:00Z'),
+    });
+    // The deleted Monday (2026-07-13) must have NO live occurrence left.
+    expect(
+      out.find((o) => !o.cancelled && o.start.startsWith('2026-07-13')),
+    ).toBeUndefined();
+  });
 });
 
 describe('expandEvent timezone (DST-correct)', () => {
