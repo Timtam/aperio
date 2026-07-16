@@ -235,7 +235,7 @@ impl EventDateTime {
     /// local-day bucketing and the write-side round-trip line up in any
     /// timezone. DST edge: a zone can skip midnight on a transition
     /// day; fall forward to the first valid local time then.
-    fn resolve(&self) -> GoogleResult<(DateTime<Utc>, bool)> {
+    pub(crate) fn resolve(&self) -> GoogleResult<(DateTime<Utc>, bool)> {
         if let Some(dt) = self.date_time {
             return Ok((dt, false));
         }
