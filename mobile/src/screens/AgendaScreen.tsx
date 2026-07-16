@@ -15,8 +15,6 @@ import {
   expandAll,
   expandToDayOccurrences,
   localDateKey,
-  occurrenceIsoOf,
-  seriesIdOf,
 } from '@aperio/shared';
 
 import {
@@ -40,6 +38,7 @@ import { useCacheReload } from '../state/cacheObserver';
 import { hapticLoadBegin, hapticLoadEnd } from '../state/haptics';
 import { useCalendarVisibility } from '../state/calendarVisibility';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
+import { editEventWithScope } from '../state/eventEditScope';
 import type { RootStackScreenProps } from '../navigation/types';
 import { MagicTapView } from '../components/MagicTapView';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -282,12 +281,12 @@ export default function AgendaScreen({
 
   const editEvent = useCallback(
     (ev: CalendarEvent) =>
-      navigation.navigate('EventEditor', {
-        eventId: seriesIdOf(ev),
-        calendarId: ev.calendar_id,
-        occurrence: occurrenceIsoOf(ev),
-      }),
-    [navigation],
+      // A recurring occurrence pops the "this occurrence vs whole series" prompt
+      // first, then opens the editor locked to the choice (shared helper).
+      editEventWithScope(ev, t, (params) =>
+        navigation.navigate('EventEditor', params),
+      ),
+    [navigation, t],
   );
 
   // Move / copy to another calendar — pass the full (possibly expanded) row so

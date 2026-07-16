@@ -107,6 +107,9 @@ export interface EventDialogProps {
    *  from the event quick-add's "weitere Details" hand-off. Ignored when
    *  editing. */
   defaultTitle?: string;
+  /** When editing a recurring occurrence, the scope the up-front prompt
+   *  resolved to. Seeds the editScope radios; absent ⇒ 'occurrence'. */
+  initialScope?: EditScope;
 }
 
 interface FormState {
@@ -151,6 +154,7 @@ export function EventDialog({
   defaultCalendarId,
   defaultDate,
   defaultTitle,
+  initialScope,
 }: EventDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
@@ -251,7 +255,9 @@ export function EventDialog({
   // can apply changes to just this occurrence (creates an EXDATE +
   // standalone override) or to the whole series.
   const isOccurrence = isEdit && !!event && isExpandedOccurrence(event);
-  const [editScope, setEditScope] = useState<EditScope>('occurrence');
+  const [editScope, setEditScope] = useState<EditScope>(
+    initialScope ?? 'occurrence',
+  );
 
   // Reset the form whenever the dialog is opened with new context. We
   // key on isOpen + initialState; isOpen=false keeps the previous form
@@ -260,7 +266,7 @@ export function EventDialog({
     if (isOpen) {
       setForm(initialState);
       setError(null);
-      setEditScope('occurrence');
+      setEditScope(initialScope ?? 'occurrence');
       // Re-arm the "keep defaults out of the wire" flag every time
       // the dialog (re-)opens with a fresh event.
       setKeepRemindersAsDefault(remindersWereFromDefault);
@@ -269,7 +275,7 @@ export function EventDialog({
       setAvailabilityWindow(null);
       setAvailabilityError(null);
     }
-  }, [isOpen, initialState, remindersWereFromDefault]);
+  }, [isOpen, initialState, remindersWereFromDefault, initialScope]);
 
   // Any change to the attendee set, the start/end window, the all-day
   // flag, or the target calendar invalidates a previous availability
@@ -958,7 +964,22 @@ export function EventDialog({
           <SoundPrefField prefKey={`sound.item.${seriesIdOf(event)}`} />
         )}
 
-        {isOccurrence && (
+        {/* The recurring-edit scope is normally chosen in the up-front
+            prompt (see EditEventScopeDialog), so the editor just confirms it
+            read-only — one clear choice beats a radio group a screen-reader
+            user could miss. The radios remain as a fallback for any path that
+            opens an occurrence without going through the prompt. */}
+        {isOccurrence && initialScope != null && (
+          <p className="form__hint">
+            {t('dialogs.event.scope.label')}:{' '}
+            {t(
+              editScope === 'occurrence'
+                ? 'dialogs.event.scope.occurrence'
+                : 'dialogs.event.scope.series',
+            )}
+          </p>
+        )}
+        {isOccurrence && initialScope == null && (
           <fieldset className="form__field">
             <legend className="form__label">
               {t('dialogs.event.scope.label')}

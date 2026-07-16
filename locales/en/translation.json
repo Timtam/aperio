@@ -1172,6 +1172,13 @@
       "series": "Whole series",
       "cancel": "Cancel"
     },
+    "editScope": {
+      "title": "Edit recurring event",
+      "message": "\"{{title}}\" is part of a series. Edit just this occurrence, or the whole series?",
+      "occurrence": "This occurrence only",
+      "series": "Whole series",
+      "cancel": "Cancel"
+    },
     "colorPicker": {
       "title": "Custom color",
       "intro": "Enter a color as a hex value (#rrggbb) or pick it with the swatch.",

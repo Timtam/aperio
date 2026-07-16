@@ -43,10 +43,8 @@ import {
   MINUTES_PER_DAY,
   minutesFromMidnight,
   multiDayInfo,
-  occurrenceIsoOf,
   prioritySuffix,
   recurringSeriesTaskId,
-  seriesIdOf,
   statusI18nKey,
   statusMarker,
   subtaskParentSuffix,
@@ -77,6 +75,7 @@ import { hapticLoadBegin, hapticLoadEnd } from '../state/haptics';
 import { useCalendarVisibility } from '../state/calendarVisibility';
 import { useCurrentUserByList } from '../state/currentUser';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
+import { editEventWithScope } from '../state/eventEditScope';
 import { readTaskBehaviour } from '../state/taskBehaviour';
 import { applyTaskToggle, statusAnnounce } from '../state/taskToggle';
 import { useTaskListShowCompleted } from '../state/useTaskListShowCompleted';
@@ -705,12 +704,12 @@ export function CalendarDayList({
 
   const editEvent = useCallback(
     (ev: CalendarEvent) =>
-      navigation.navigate('EventEditor', {
-        eventId: seriesIdOf(ev),
-        calendarId: ev.calendar_id,
-        occurrence: occurrenceIsoOf(ev),
-      }),
-    [navigation],
+      // A recurring occurrence pops the "this occurrence vs whole series" prompt
+      // first, then opens the editor locked to the choice (shared helper).
+      editEventWithScope(ev, t, (params) =>
+        navigation.navigate('EventEditor', params),
+      ),
+    [navigation, t],
   );
 
   // Move / copy to another calendar — pass the full (possibly expanded) row so

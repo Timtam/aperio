@@ -98,9 +98,9 @@ Im Termin-Dialog unter **Wiederholung** wählst du ein Muster:
 - täglich, wöchentlich (mit Wochentagen), monatlich, jährlich,
 - ein **Ende** (nie, nach X Malen, bis zu einem Datum).
 
-Beim Bearbeiten oder Löschen eines wiederkehrenden Termins fragt Aperio, ob
-sich die Änderung auf **nur diesen Termin**, **diesen und alle folgenden**
-oder **alle** beziehen soll.
+Beim Bearbeiten oder Löschen eines wiederkehrenden Termins fragt Aperio vorab,
+ob sich die Änderung auf **nur diesen Termin** oder die **ganze Serie**
+beziehen soll.
 
 > **Tipp:** Wiederkehrende Termine aus externen Kalendern (z. B. iCloud)
 > werden in allen Ansichten korrekt aufgeklappt – auch dann, wenn die erste

@@ -123,12 +123,17 @@ export default function EventEditorModal({
   const { hidden: hiddenCalendars } = useCalendarVisibility();
   const showHiddenCalendarTargets = useShowHiddenCalendarTargets();
   useCancelHeader(navigation);
-  const { eventId, calendarId, occurrence, anchor, initialTitle } = route.params;
+  const { eventId, calendarId, occurrence, anchor, initialTitle, initialScope } =
+    route.params;
   const editing = eventId != null;
   // A single occurrence of a recurring series was opened (occurrence = its
   // instant) — offer the edit scope + seed the dates from the occurrence.
   const isOccurrence = occurrence != null;
-  const [editScope, setEditScope] = useState<'occurrence' | 'series'>('occurrence');
+  // Seeded from the up-front "this occurrence vs whole series" prompt
+  // (eventEditScope). When the prompt set it, the control below is read-only.
+  const [editScope, setEditScope] = useState<'occurrence' | 'series'>(
+    initialScope ?? 'occurrence',
+  );
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -633,8 +638,22 @@ export default function EventEditorModal({
 
       {/* Edit scope — only when a single occurrence of a recurring series was
           opened. "This occurrence only" excludes it + saves a standalone; "Whole
-          series" edits the master (incl. its recurrence rule). */}
-      {isOccurrence && original?.recurrence != null && (
+          series" edits the master (incl. its recurrence rule). The scope is
+          normally chosen in the up-front prompt (see eventEditScope), so the
+          editor confirms it read-only — one clear choice beats a control a
+          screen-reader user could miss. The segmented control stays as a fallback
+          for any path that opens an occurrence without the prompt. */}
+      {isOccurrence && original?.recurrence != null && initialScope != null && (
+        <Text style={styles.muted}>
+          {t('dialogs.event.scope.label')}:{' '}
+          {t(
+            editScope === 'occurrence'
+              ? 'dialogs.event.scope.occurrence'
+              : 'dialogs.event.scope.series',
+          )}
+        </Text>
+      )}
+      {isOccurrence && original?.recurrence != null && initialScope == null && (
         <RadioGroup<'occurrence' | 'series'>
           label={t('dialogs.event.scope.label')}
           value={editScope}
