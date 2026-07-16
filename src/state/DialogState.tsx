@@ -16,6 +16,7 @@ import type {
   Task,
   TaskCapabilities,
 } from '../api/types';
+import { focusActiveView } from '../a11y/focusView';
 import { DialogStateContext } from './dialogStateContext';
 import type { SettingsTabId } from '../components/SettingsDialog';
 
@@ -458,6 +459,11 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
 
   const close = useCallback(() => {
     const target = triggerStackRef.current.pop() ?? null;
+    // The trigger stack is parallel to the dialog stack, so once we've popped
+    // this frame's trigger an empty stack means we're returning to the view (no
+    // parent dialog underneath). Only then may we fall back to the view; when a
+    // parent dialog remains, its own Modal focus handling takes over.
+    const returningToView = triggerStackRef.current.length === 0;
     setStack((s) => s.slice(0, -1));
     // Closing a dialog is the canonical "data may have changed" hint
     // — the user just confirmed an edit / create / delete. Bump
@@ -465,7 +471,6 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     // tick. Doing it here keeps every existing call site working
     // without remembering to call invalidateData() itself.
     setDataVersion((v) => v + 1);
-    if (!target) return;
     // Restore focus on the next animation frame. queueMicrotask was
     // too eager on Chromium — it ran before the React commit that
     // drops `inert` from the shell, so the focus() call hit an inert
@@ -474,15 +479,19 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     // next frame and re-focus if the element is no longer the
     // active one (e.g. because useEvents re-rendered after a
     // mutation between the two frames).
-    //
-    // When the popped trigger belonged to a parent dialog that is
-    // now re-mounting (stack length > 0), the saved element is no
-    // longer in the DOM. The `contains` check turns the restore
-    // into a no-op and Modal's own mount-time focus handler takes
-    // over for the re-mounted dialog.
     const restore = () => {
-      if (!document.body.contains(target)) return;
-      target.focus({ preventScroll: true });
+      if (target && document.body.contains(target)) {
+        target.focus({ preventScroll: true });
+        return;
+      }
+      // The trigger is null (a GLOBAL shortcut like Alt+N fired while focus was
+      // already on <body>) or was unmounted by the post-close re-render. If we're
+      // returning to a view, land focus on the view's focusable container instead
+      // of leaving it stranded on <body> — which sits OUTSIDE #app-root's
+      // role="application" and drops the screen reader out of application mode.
+      // When a parent dialog is re-mounting (returningToView false), the saved
+      // element being gone is expected — leave it to that Modal's focus handler.
+      if (returningToView) focusActiveView();
     };
     requestAnimationFrame(() => {
       restore();
