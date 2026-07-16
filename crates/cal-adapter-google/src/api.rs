@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use cal_core::{AttendeeStatus, Calendar, DateRange, Event, FreeBusy, FreeBusySlot, NewEvent};
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -141,9 +141,17 @@ impl ApiState {
             return Ok(());
         }
         let text = response.text().await.unwrap_or_default();
+        let message: String = text.chars().take(300).collect();
+        warn!(
+            method = "DELETE",
+            path,
+            status = status.as_u16(),
+            body = %message,
+            "google request failed"
+        );
         Err(GoogleError::Http {
             status: status.as_u16(),
-            message: text.chars().take(300).collect(),
+            message,
         })
     }
 
@@ -227,9 +235,13 @@ pub(crate) async fn decode_json<T: DeserializeOwned>(
     let status = response.status();
     let text = response.text().await.unwrap_or_default();
     if !status.is_success() {
+        let message: String = text.chars().take(300).collect();
+        // Log the body — Google's error payload says WHY (e.g. "Invalid resource id
+        // value") and is otherwise lost inside the propagated error.
+        warn!(status = status.as_u16(), body = %message, "google request failed");
         return Err(GoogleError::Http {
             status: status.as_u16(),
-            message: text.chars().take(300).collect(),
+            message,
         });
     }
     serde_json::from_str(&text).map_err(|e| GoogleError::Protocol(format!("json: {e}: {text}")))
@@ -814,44 +826,75 @@ pub async fn add_event_exdate(
 ) -> GoogleResult<ExdateOutcome> {
     let cal_enc = urlencoding(calendar_id);
     let ev_enc = urlencoding(event_id);
-    // The master's presence on THIS calendar is what tells "wrong calendar" (keep
-    // walking) apart from a real failure (surface it) — so a 404 here is the only
-    // thing that lets the walk continue; anything else propagates.
-    let master: EventEntry = match state
-        .get_json(&format!("/calendars/{cal_enc}/events/{ev_enc}"))
+    // The master's presence on THIS calendar tells "wrong calendar" (keep walking)
+    // apart from a real failure (surface it) — a 404 here is the only thing that
+    // lets the walk continue; anything else propagates.
+    match state
+        .get_json::<EventEntry>(&format!("/calendars/{cal_enc}/events/{ev_enc}"))
         .await
     {
-        Ok(m) => m,
+        Ok(_) => {}
         Err(GoogleError::Http { status: 404, .. }) => return Ok(ExdateOutcome::MasterNotHere),
         Err(e) => return Err(e),
+    }
+    // Cancel one occurrence the way Google documents: expand the master over the
+    // occurrence's day and cancel the instance id GOOGLE returns — do NOT build
+    // `{master}_{time}` ourselves. A self-constructed instance id is rejected with
+    // HTTP 400 ("invalid resource id") even when the UTC instant is correct; only an
+    // id the API handed back is a valid address. Google returns each instance's
+    // start in the EVENT's zone (e.g. `2026-07-23T13:00:00+02:00`), so we match on
+    // the parsed-to-UTC instant, never the wall-clock digits. `showDeleted=true`
+    // keeps an already-cancelled slot visible so a re-delete stays idempotent.
+    let lo = occurrence - Duration::days(1);
+    let hi = occurrence + Duration::days(1);
+    let path = format!(
+        "/calendars/{cal_enc}/events/{ev_enc}/instances\
+         ?showDeleted=true&maxResults=250&timeMin={}&timeMax={}",
+        urlencoding(&lo.to_rfc3339()),
+        urlencoding(&hi.to_rfc3339()),
+    );
+    let resp: EventListResponse = state.get_json(&path).await?;
+    // Nearest instance by resolved (offset-parsed) start to the wanted occurrence.
+    let target = resp
+        .items
+        .iter()
+        .filter_map(|it| {
+            let src = it.original_start_time.as_ref().unwrap_or(&it.start);
+            let (got, _) = src.resolve().ok()?;
+            Some((it, (got - occurrence).num_seconds().abs()))
+        })
+        .min_by_key(|(_, dist)| *dist);
+    let matched = target.map(|(it, dist)| format!("{} (delta {dist}s)", it.id));
+    debug!(
+        event_id,
+        occurrence = %occurrence,
+        instances = resp.items.len(),
+        ?matched,
+        "add_event_exdate: instance lookup"
+    );
+    let Some((instance, _)) = target else {
+        // No instance for that day — already cancelled or never materialised; the
+        // occurrence is gone either way, so a delete is an idempotent success.
+        return Ok(ExdateOutcome::Cancelled);
     };
-    // Google's per-instance id is `{master}_{originalStart}` — the id it assigns
-    // every generated occurrence. Timed → the occurrence's compact UTC instant
-    // (`20260723T110000Z`); all-day → the bare LOCAL day (`20260601`, since a UTC
-    // day would be off by one east of UTC). DELETE that id and Google cancels
-    // exactly that occurrence — the id `map_event` reads back as a
-    // `{master}::rid::{start}` cancelled override, so the next read suppresses it.
-    //
-    // (An earlier revision resolved the id via `events/{id}/instances` to be robust
-    // to a DST-drifted caller instant. In practice that lookup returned no match for
-    // valid future occurrences and left them undeletable, whereas the masters carry
-    // their IANA zone so the caller's instant already matches this direct id.)
-    let suffix = if master.start.date.is_some() {
-        occurrence
-            .with_timezone(&Local)
-            .format("%Y%m%d")
-            .to_string()
-    } else {
-        occurrence.format("%Y%m%dT%H%M%SZ").to_string()
-    };
-    let instance_enc = urlencoding(&format!("{event_id}_{suffix}"));
+    if instance.status.as_deref() == Some("cancelled") {
+        return Ok(ExdateOutcome::Cancelled);
+    }
+    // Cancel via PATCH status:"cancelled" on the id GOOGLE returned — its documented
+    // "retrieve the instance then update it" path. The id is guaranteed valid, so no
+    // 400; `map_event` reads the resulting cancelled instance back as a
+    // `{master}::rid::{start}` override that suppresses the occurrence on next read.
+    let inst_enc = urlencoding(&instance.id);
+    let patch_path = format!("/calendars/{cal_enc}/events/{inst_enc}?sendUpdates=none");
     match state
-        .delete_request(&format!("/calendars/{cal_enc}/events/{instance_enc}"))
+        .patch_json::<_, serde_json::Value>(
+            &patch_path,
+            &serde_json::json!({ "status": "cancelled" }),
+        )
         .await
     {
-        Ok(()) => Ok(ExdateOutcome::Cancelled),
-        // 404/410 → the occurrence is already gone (already cancelled, or never
-        // materialised), so a re-delete is an idempotent success, not an error.
+        Ok(_) => Ok(ExdateOutcome::Cancelled),
+        // Already gone → idempotent success.
         Err(GoogleError::Http {
             status: 404 | 410, ..
         }) => Ok(ExdateOutcome::Cancelled),
@@ -1427,30 +1470,51 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn add_event_exdate_deletes_the_timed_instance() {
+    async fn add_event_exdate_cancels_the_matched_instance_via_patch() {
         let mut server = mockito::Server::new_async().await;
-        // GET the master (confirms it's on this calendar + learns it's timed).
+        // GET master (the calendar-walk lands here).
         let get_master = server
             .mock("GET", "/calendars/primary/events/master-1")
             .with_status(200)
             .with_body(
-                r##"{
-                  "id": "master-1",
-                  "summary": "Weekly",
-                  "start": { "dateTime": "2026-05-25T18:00:00Z" },
-                  "end":   { "dateTime": "2026-05-25T19:00:00Z" },
-                  "recurrence": ["RRULE:FREQ=WEEKLY"]
-                }"##,
+                r##"{"id":"master-1","start":{"dateTime":"2026-05-25T18:00:00Z"},
+                     "end":{"dateTime":"2026-05-25T19:00:00Z"},
+                     "recurrence":["RRULE:FREQ=WEEKLY"]}"##,
             )
             .create_async()
             .await;
-        // DELETE the instance `{master}_{originalStart}` — the id Google assigns.
-        let delete_mock = server
+        // Expand the day → Google returns the instance in the EVENT'S ZONE (+02:00)
+        // with its own id. We must match on the parsed-to-UTC instant (18:00Z), not
+        // the wall-clock "20:00" — the bug that made the earlier lookup find nothing.
+        let get_instances = server
             .mock(
-                "DELETE",
-                "/calendars/primary/events/master-1_20260601T180000Z",
+                "GET",
+                mockito::Matcher::Regex(
+                    r"^/calendars/primary/events/master-1/instances\?.*showDeleted=true"
+                        .to_string(),
+                ),
             )
-            .with_status(204)
+            .with_status(200)
+            .with_body(
+                r##"{"items":[
+                  {"id":"master-1_20260601T180000Z","status":"confirmed",
+                   "start":{"dateTime":"2026-06-01T20:00:00+02:00"},
+                   "originalStartTime":{"dateTime":"2026-06-01T20:00:00+02:00"}}
+                ]}"##,
+            )
+            .create_async()
+            .await;
+        // Cancel via PATCH status:cancelled on the id GOOGLE returned.
+        let patch = server
+            .mock(
+                "PATCH",
+                "/calendars/primary/events/master-1_20260601T180000Z?sendUpdates=none",
+            )
+            .match_body(mockito::Matcher::Regex(
+                r#""status":"cancelled""#.to_string(),
+            ))
+            .with_status(200)
+            .with_body(r#"{"id":"master-1_20260601T180000Z","status":"cancelled"}"#)
             .create_async()
             .await;
 
@@ -1461,36 +1525,50 @@ mod tests {
             .unwrap();
         assert!(matches!(outcome, ExdateOutcome::Cancelled));
         get_master.assert_async().await;
-        delete_mock.assert_async().await;
+        get_instances.assert_async().await;
+        patch.assert_async().await;
     }
 
     #[tokio::test]
-    async fn add_event_exdate_deletes_the_all_day_instance_by_local_date() {
+    async fn add_event_exdate_cancels_an_all_day_instance() {
         let mut server = mockito::Server::new_async().await;
-        // An all-day master (start carries `date`, not `dateTime`).
-        let get_master = server
+        server
             .mock("GET", "/calendars/primary/events/bday-1")
             .with_status(200)
             .with_body(
-                r##"{
-                  "id": "bday-1",
-                  "summary": "Standup",
-                  "start": { "date": "2026-05-25" },
-                  "end":   { "date": "2026-05-26" },
-                  "recurrence": ["RRULE:FREQ=DAILY"]
-                }"##,
+                r##"{"id":"bday-1","start":{"date":"2026-05-25"},"end":{"date":"2026-05-26"},
+                     "recurrence":["RRULE:FREQ=DAILY"]}"##,
             )
             .create_async()
             .await;
-        // All-day instance id uses the bare LOCAL day of the occurrence.
-        let delete_mock = server
-            .mock("DELETE", "/calendars/primary/events/bday-1_20260601")
-            .with_status(204)
+        server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(
+                    r"^/calendars/primary/events/bday-1/instances\?.*".to_string(),
+                ),
+            )
+            .with_status(200)
+            .with_body(
+                r##"{"items":[
+                  {"id":"bday-1_20260601","status":"confirmed",
+                   "start":{"date":"2026-06-01"},
+                   "originalStartTime":{"date":"2026-06-01"}}
+                ]}"##,
+            )
+            .create_async()
+            .await;
+        let patch = server
+            .mock(
+                "PATCH",
+                "/calendars/primary/events/bday-1_20260601?sendUpdates=none",
+            )
+            .with_status(200)
+            .with_body(r#"{"id":"bday-1_20260601","status":"cancelled"}"#)
             .create_async()
             .await;
 
         let state = fixture_state(&server.url());
-        // Local midnight of 2026-06-01 as a UTC instant (the all-day convention).
         let occ = chrono::Local
             .with_ymd_and_hms(2026, 6, 1, 0, 0, 0)
             .unwrap()
@@ -1499,12 +1577,11 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(outcome, ExdateOutcome::Cancelled));
-        get_master.assert_async().await;
-        delete_mock.assert_async().await;
+        patch.assert_async().await;
     }
 
     #[tokio::test]
-    async fn add_event_exdate_is_idempotent_when_instance_already_gone() {
+    async fn add_event_exdate_is_idempotent_when_instance_already_cancelled() {
         let mut server = mockito::Server::new_async().await;
         server
             .mock("GET", "/calendars/primary/events/master-2")
@@ -1516,15 +1593,23 @@ mod tests {
             )
             .create_async()
             .await;
-        // Re-deleting an already-cancelled occurrence: Google answers 410 Gone —
-        // which must read as an idempotent success, not an error.
+        // The slot is ALREADY cancelled — showDeleted surfaces it — so we recognise
+        // it and issue NO PATCH (no PATCH mock below, so a stray call would 501/panic).
         server
             .mock(
-                "DELETE",
-                "/calendars/primary/events/master-2_20260601T180000Z",
+                "GET",
+                mockito::Matcher::Regex(
+                    r"^/calendars/primary/events/master-2/instances\?.*showDeleted=true"
+                        .to_string(),
+                ),
             )
-            .with_status(410)
-            .with_body(r#"{"error":{"code":410,"message":"deleted"}}"#)
+            .with_status(200)
+            .with_body(
+                r##"{"items":[
+                  {"id":"master-2_20260601T180000Z","status":"cancelled",
+                   "originalStartTime":{"dateTime":"2026-06-01T18:00:00Z"}}
+                ]}"##,
+            )
             .create_async()
             .await;
 
