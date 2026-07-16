@@ -26,6 +26,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use cal_core::{Calendar, Contact, ContactList, DateRange, Event, Section, Task, TaskList};
+use tracing::debug;
 
 use crate::db::{DbError, DbHandle, DbResult};
 
@@ -286,7 +287,7 @@ impl CacheStore {
     ) -> DbResult<Vec<Event>> {
         let start = ts(&range.start);
         let end = ts(&range.end);
-        self.db.with_read_conn(|c| {
+        let events: Vec<Event> = self.db.with_read_conn(|c| {
             let mut stmt = c.prepare(
                 "SELECT payload FROM cache_events
                  WHERE account_id = ?1 AND calendar_id = ?2
@@ -297,7 +298,24 @@ impl CacheStore {
                 r.get::<_, String>(0)
             })?;
             rows_to_structs(rows, "cache_events")
-        })
+        })?;
+        // Diagnostic: how many suppressing `::rid::` cancelled overrides came back
+        // for this calendar+range. A deleted recurring occurrence only stays hidden
+        // if its override is here; if this logs 0 overrides while the occurrence
+        // still ghosts, the override was dropped upstream (sync/cache write), not in
+        // the frontend. Only logs when the result actually holds cancelled rows.
+        let cancelled = events.iter().filter(|e| e.cancelled).count();
+        if cancelled > 0 {
+            let rid_overrides = events.iter().filter(|e| e.id.contains("::rid::")).count();
+            debug!(
+                calendar,
+                total = events.len(),
+                cancelled,
+                rid_overrides,
+                "read_events cache result"
+            );
+        }
+        Ok(events)
     }
 
     /// Full-refresh write: replace the entire cached set for `calendar`

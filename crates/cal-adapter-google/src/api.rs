@@ -529,7 +529,17 @@ pub async fn list_events_incremental(
                 continue;
             }
             if let Some(ev) = map_event(entry, calendar_id)? {
-                if event_in_window(&ev, start, end) {
+                // A cancelled recurring-instance override is a SUPPRESSION marker,
+                // not a displayable event: it MUST reach the cache so the master's
+                // now-deleted occurrence stays hidden — even when the override's own
+                // (zero-duration, often PAST-dated) slot falls outside the sync
+                // window. Range-filtering it here, as we do for real singles to keep
+                // the cache lean, dropped it while the token still advanced past the
+                // cancellation, so the deleted occurrence ghosted back and only a
+                // full resync could recover it. It carries its OWN native id (the
+                // `::rid::` id, not the master's), so keeping it never purges the
+                // master group in apply_events_delta.
+                if ev.cancelled || event_in_window(&ev, start, end) {
                     delta.changes.push(ev);
                 }
             }
@@ -844,13 +854,21 @@ pub async fn add_event_exdate(
     // Match by the instance's ORIGINAL start — the stable slot key that stays
     // fixed even if the instance was moved, and the exact value `map_event` turns
     // into a `::rid::` override on read-back.
-    let instance = closest_instance(&resp.items, occurrence, all_day).ok_or_else(|| {
-        // The master IS on this calendar (the GET above succeeded), so a miss is a
-        // real error to surface — never let the walk mask it as "not found".
-        GoogleError::Protocol(format!(
-            "occurrence {occurrence} is not among the instances of '{event_id}'"
-        ))
-    })?;
+    let Some(instance) = closest_instance(&resp.items, occurrence, all_day) else {
+        // No instance matched among those Google returned. For a DELETE this means
+        // the occurrence is already gone — it was cancelled before (Google's
+        // /instances omits some already-cancelled slots) or was never a real slot —
+        // so the user's intent is already satisfied. Treat it as an idempotent
+        // success instead of surfacing a confusing "not among instances" error on a
+        // re-delete. The master IS on this calendar (the GET above succeeded), so we
+        // are not masking a wrong-calendar case.
+        debug!(
+            event_id,
+            occurrence = %occurrence,
+            "add_event_exdate: no matching instance — treating occurrence as already cancelled"
+        );
+        return Ok(ExdateOutcome::Cancelled);
+    };
     // Already cancelled → nothing to do (idempotent re-delete).
     if instance.status.as_deref() == Some("cancelled") {
         return Ok(ExdateOutcome::Cancelled);
@@ -1182,6 +1200,48 @@ mod tests {
         assert!(delta.changes[0].cancelled);
         // …and only the whole-event cancellation is a deletion.
         assert_eq!(delta.deletions, vec!["whole-gone".to_string()]);
+        m.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn cancelled_instance_override_is_kept_even_when_out_of_window() {
+        // A PAST-dated cancelled instance — its slot is BEFORE the sync window start
+        // — must still be kept as a suppressing override. Range-filtering it (as we
+        // do for real singles) dropped the cancellation while the token advanced
+        // past it, so the deleted occurrence ghosted back until a full resync. The
+        // override carries its own `::rid::` native id, so caching it never purges
+        // the master group. (Root cause of Lea's Google occurrence-delete ghost.)
+        let mut server = mockito::Server::new_async().await;
+        let m = server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(
+                    r"^/calendars/primary/events\?.*syncToken=TOK-1".to_string(),
+                ),
+            )
+            .with_status(200)
+            .with_body(
+                r##"{
+                  "items": [
+                    {"id":"m_20260713T103000Z","status":"cancelled",
+                     "recurringEventId":"m",
+                     "originalStartTime":{"dateTime":"2026-07-13T10:30:00Z"}}
+                  ],
+                  "nextSyncToken":"TOK-2"
+                }"##,
+            )
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        // The window STARTS after the cancelled slot (07-13 is in the past).
+        let from = chrono::Utc.with_ymd_and_hms(2026, 7, 16, 0, 0, 0).unwrap();
+        let to = chrono::Utc.with_ymd_and_hms(2026, 10, 28, 0, 0, 0).unwrap();
+        let delta = list_events_incremental(&state, "primary", "TOK-1", from, to)
+            .await
+            .unwrap();
+        let ids: Vec<_> = delta.changes.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, ["m::rid::2026-07-13T10:30:00Z"]);
+        assert!(delta.changes[0].cancelled);
         m.assert_async().await;
     }
 
@@ -1588,7 +1648,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn add_event_exdate_surfaces_error_when_occurrence_not_among_instances() {
+    async fn add_event_exdate_is_idempotent_when_no_instance_matches() {
         let mut server = mockito::Server::new_async().await;
         // Master IS on this calendar…
         server
@@ -1601,8 +1661,8 @@ mod tests {
             )
             .create_async()
             .await;
-        // …but no instance matches — a real error, NOT a "wrong calendar" the walk
-        // would mask as "not found in any calendar".
+        // …but no instance matches (already cancelled → Google omits it). A DELETE
+        // treats that as an idempotent success, NOT a scary "not among instances".
         server
             .mock(
                 "GET",
@@ -1616,10 +1676,10 @@ mod tests {
             .await;
         let state = fixture_state(&server.url());
         let occ = chrono::Utc.with_ymd_and_hms(2026, 6, 1, 18, 0, 0).unwrap();
-        let err = add_event_exdate(&state, "primary", "master-4", occ)
+        let outcome = add_event_exdate(&state, "primary", "master-4", occ)
             .await
-            .unwrap_err();
-        assert!(matches!(err, GoogleError::Protocol(_)));
+            .unwrap();
+        assert!(matches!(outcome, ExdateOutcome::Cancelled));
     }
 
     #[tokio::test]

@@ -273,6 +273,45 @@ describe('expandAll', () => {
       out.find((o) => !o.cancelled && o.start.startsWith('2026-07-13')),
     ).toBeUndefined();
   });
+
+  it("suppresses Lea's exact Google series shape (summer DTSTART + summer cancels)", () => {
+    // The actual data from Lea's log: master 5nqo9avp8 — weekly Monday, tzid
+    // Europe/Berlin, DTSTART 2025-08-11 10:30Z (= Mon 12:30 CEST), with cancelled
+    // overrides on 2026-07-06 and 2026-07-13 (both 10:30Z). All three land at
+    // 10:30Z, so suppression must drop BOTH Mondays.
+    const master = mkEvent({
+      id: '5nqo9avp8',
+      start: '2025-08-11T10:30:00.000Z',
+      end: '2025-08-11T11:00:00.000Z',
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;BYDAY=MO',
+        exceptions: [],
+        tzid: 'Europe/Berlin',
+      },
+    });
+    const cancel06 = mkEvent({
+      id: '5nqo9avp8::rid::2026-07-06T10:30:00Z',
+      start: '2026-07-06T10:30:00.000Z',
+      end: '2026-07-06T10:30:00.000Z',
+      cancelled: true,
+    });
+    const cancel13 = mkEvent({
+      id: '5nqo9avp8::rid::2026-07-13T10:30:00Z',
+      start: '2026-07-13T10:30:00.000Z',
+      end: '2026-07-13T10:30:00.000Z',
+      cancelled: true,
+    });
+    const out = expandAll([master, cancel06, cancel13], {
+      start: new Date('2026-07-01T00:00:00Z'),
+      end: new Date('2026-07-31T00:00:00Z'),
+    });
+    const liveMondays = out.filter(
+      (o) =>
+        !o.cancelled &&
+        (o.start.startsWith('2026-07-06') || o.start.startsWith('2026-07-13')),
+    );
+    expect(liveMondays).toEqual([]);
+  });
 });
 
 describe('expandEvent timezone (DST-correct)', () => {
