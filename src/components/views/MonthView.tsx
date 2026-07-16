@@ -650,6 +650,36 @@ export function MonthView() {
                     style={
                       { '--lane-rows': laneRows } as React.CSSProperties
                     }
+                    // Sighted-only affordance: the all-day lane is a drop target
+                    // so a bar can be dragged sideways to another day (its natural
+                    // gesture — the day cells below only catch drops in their own
+                    // body). A drop over another bar bubbles here; the target day
+                    // is read from the cursor X against this row's cells. SR users
+                    // move all-day events via the Move/Copy dialog instead.
+                    onDragOver={(e) => {
+                      const types = e.dataTransfer.types;
+                      if (
+                        !types.includes(TASK_DND_TYPE) &&
+                        !types.includes(EVENT_DND_TYPE)
+                      ) {
+                        return;
+                      }
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'move';
+                    }}
+                    onDrop={(e) => {
+                      for (let col = 0; col < rowCells.length; col += 1) {
+                        const cellEl = document.getElementById(
+                          cellId(row * 7 + col),
+                        );
+                        if (!cellEl) continue;
+                        const r = cellEl.getBoundingClientRect();
+                        if (e.clientX >= r.left && e.clientX < r.right) {
+                          void scheduleByDrop(rowCells[col], e);
+                          return;
+                        }
+                      }
+                    }}
                   >
                     {rowBars.map((bar) => {
                       const color = resolveEventColor(
