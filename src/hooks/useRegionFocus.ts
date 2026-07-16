@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
 
+import { findFirstFocusable } from '../a11y/focusView';
+
 /**
  * F6 cycles focus between the major regions of the app shell.
  *
@@ -49,18 +51,4 @@ export function useRegionFocus(): void {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
-}
-
-function findFirstFocusable(root: HTMLElement): HTMLElement | null {
-  // Anything natively focusable that isn't disabled and isn't aria-hidden.
-  const candidates = root.querySelectorAll<HTMLElement>(
-    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-  );
-  for (const el of candidates) {
-    if (el.hasAttribute('disabled')) continue;
-    if (el.getAttribute('aria-hidden') === 'true') continue;
-    if (el.closest('[inert]')) continue;
-    return el;
-  }
-  return null;
 }

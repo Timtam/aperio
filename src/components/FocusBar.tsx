@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { focusActiveView } from '../a11y/focusView';
 import { useAnnouncer } from '../a11y/announcerContext';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
@@ -49,17 +50,12 @@ export function FocusBar() {
     // Defer past React's commit so we focus *after* the FocusBar has
     // unmounted; otherwise the focused element is gone before the
     // browser settles on a default fallback.
+    // Prefer the first natively-focusable descendant of the view (a button, a
+    // tabbable grid cell) so the user lands on something interactive; fall back
+    // to the view wrapper itself (tabIndex=-1). Shared with the dialog-close
+    // focus-return so both keep the user inside role="application".
     requestAnimationFrame(() => {
-      const root = document.querySelector(
-        '[data-active-view-root]',
-      ) as HTMLElement | null;
-      if (!root) return;
-      // Prefer the first natively-focusable descendant of the view
-      // (a button, a tabbable grid cell) so the user lands on
-      // something interactive. Fall back to the wrapper itself (it
-      // carries tabIndex=-1 for exactly this case).
-      const target = findFirstFocusable(root) ?? root;
-      target.focus({ preventScroll: true });
+      focusActiveView();
     });
   }, [exitFocus, announce, t]);
 
@@ -129,20 +125,3 @@ export function FocusBar() {
   );
 }
 
-/**
- * Find the first natively-focusable descendant of `root`. Matches
- * the same heuristic `useRegionFocus` uses for F6 navigation —
- * buttons, links, form controls, and anything with a non-negative
- * tabindex. Excludes disabled and aria-hidden nodes.
- */
-function findFirstFocusable(root: HTMLElement): HTMLElement | null {
-  const candidates = root.querySelectorAll<HTMLElement>(
-    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-  );
-  for (const el of candidates) {
-    if (el.hasAttribute('disabled')) continue;
-    if (el.getAttribute('aria-hidden') === 'true') continue;
-    return el;
-  }
-  return null;
-}
