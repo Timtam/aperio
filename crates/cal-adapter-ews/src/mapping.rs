@@ -2122,8 +2122,17 @@ pub fn rrule_to_ews_recurrence(rrule: &str, start: DateTime<Utc>) -> EwsResult<S
                 .map(rrule_byday_to_ews_days)
                 .transpose()?
                 .unwrap_or_else(|| weekday_for(start));
+            // Pin the week-start explicitly (honouring WKST, default Monday) so
+            // Exchange doesn't expand an INTERVAL>=2 series with the mailbox's
+            // own FirstDayOfWeek — which would drift from the RRULE we stored.
+            // EWS schema order: Interval, DaysOfWeek, FirstDayOfWeek.
+            let first_day = parts
+                .get("WKST")
+                .map(|w| rrule_byday_to_ews_days(w.as_str()))
+                .transpose()?
+                .unwrap_or_else(|| "Monday".to_string());
             format!(
-                "<t:WeeklyRecurrence><t:Interval>{interval}</t:Interval><t:DaysOfWeek>{days}</t:DaysOfWeek></t:WeeklyRecurrence>",
+                "<t:WeeklyRecurrence><t:Interval>{interval}</t:Interval><t:DaysOfWeek>{days}</t:DaysOfWeek><t:FirstDayOfWeek>{first_day}</t:FirstDayOfWeek></t:WeeklyRecurrence>",
             )
         }
         "MONTHLY" => {
@@ -2509,6 +2518,12 @@ pub enum EwsRecurrencePattern {
     Weekly {
         interval: u32,
         days_of_week: Vec<EwsDay>,
+        /// EWS `<t:FirstDayOfWeek>`. Governs which day starts the week for an
+        /// `INTERVAL>=2` weekly rule, so it must reach the RRULE as `WKST=` or a
+        /// series that straddles the week boundary expands (and indexes) on the
+        /// wrong dates. Exchange defaults it per mailbox (Sunday for en-US);
+        /// absent → Monday (the RFC-5545 default).
+        first_day_of_week: EwsDay,
     },
     AbsoluteMonthly {
         interval: u32,
@@ -2725,6 +2740,7 @@ impl EwsRecurrence {
             EwsRecurrencePattern::Weekly {
                 interval,
                 days_of_week,
+                first_day_of_week,
             } => {
                 parts.push("FREQ=WEEKLY".into());
                 if *interval > 1 {
@@ -2737,6 +2753,13 @@ impl EwsRecurrence {
                         .collect::<Vec<_>>()
                         .join(",");
                     parts.push(format!("BYDAY={csv}"));
+                }
+                // WKST only changes expansion for INTERVAL>=2, but the RFC-5545
+                // default is Monday, so only emit it when it actually differs —
+                // keeps the common rule byte-identical to what the frontend
+                // builds and validates.
+                if *first_day_of_week != EwsDay::Monday {
+                    parts.push(format!("WKST={}", first_day_of_week.to_rrule()));
                 }
             }
             EwsRecurrencePattern::AbsoluteMonthly {
@@ -2980,6 +3003,8 @@ impl RecurrenceWalker {
                 self.pattern = Some(PatternBuilder::Weekly {
                     interval: 1,
                     days_of_week: Vec::new(),
+                    // RFC-5545 default until an explicit <t:FirstDayOfWeek> arrives.
+                    first_day_of_week: EwsDay::Monday,
                 });
             }
             b"absolutemonthlyrecurrence" => {
@@ -3017,6 +3042,7 @@ impl RecurrenceWalker {
             }
             b"interval" => self.text_target = Some("interval"),
             b"daysofweek" => self.text_target = Some("days_of_week"),
+            b"firstdayofweek" => self.text_target = Some("first_day_of_week"),
             b"dayofweekindex" => self.text_target = Some("day_of_week_index"),
             b"dayofmonth" => self.text_target = Some("day_of_month"),
             b"month" => self.text_target = Some("month"),
@@ -3058,6 +3084,17 @@ impl RecurrenceWalker {
                         days_of_week.extend(expanded);
                     }
                     _ => {}
+                }
+            }
+            Some("first_day_of_week") => {
+                if let (
+                    Some(PatternBuilder::Weekly {
+                        first_day_of_week, ..
+                    }),
+                    Some(day),
+                ) = (self.pattern.as_mut(), EwsDay::from_wire(s))
+                {
+                    *first_day_of_week = day;
                 }
             }
             Some("day_of_week_index") => {
@@ -3146,6 +3183,12 @@ enum PatternBuilder {
     Weekly {
         interval: u32,
         days_of_week: Vec<EwsDay>,
+        /// EWS `<t:FirstDayOfWeek>`. Governs which day starts the week for an
+        /// `INTERVAL>=2` weekly rule, so it must reach the RRULE as `WKST=` or a
+        /// series that straddles the week boundary expands (and indexes) on the
+        /// wrong dates. Exchange defaults it per mailbox (Sunday for en-US);
+        /// absent → Monday (the RFC-5545 default).
+        first_day_of_week: EwsDay,
     },
     AbsoluteMonthly {
         interval: u32,
@@ -3174,9 +3217,11 @@ impl PatternBuilder {
             Self::Weekly {
                 interval,
                 days_of_week,
+                first_day_of_week,
             } => Ok(EwsRecurrencePattern::Weekly {
                 interval,
                 days_of_week,
+                first_day_of_week,
             }),
             Self::AbsoluteMonthly {
                 interval,
@@ -4231,10 +4276,49 @@ mod tests {
             EwsRecurrencePattern::Weekly {
                 interval: 1,
                 days_of_week: vec![EwsDay::Monday, EwsDay::Wednesday, EwsDay::Friday],
+                first_day_of_week: EwsDay::Monday,
             },
         );
         assert_eq!(rec.range, EwsRecurrenceRange::Numbered { occurrences: 10 },);
         assert_rrule_equivalent(&rec.to_rrule(), "FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=10");
+    }
+
+    #[test]
+    fn weekly_first_day_of_week_round_trips_through_wkst() {
+        let start: DateTime<Utc> = "2026-07-05T09:00:00Z".parse().unwrap();
+
+        // WRITE: a WKST=SU rule pins the wire FirstDayOfWeek to Sunday.
+        let xml = rrule_to_ews_recurrence("FREQ=WEEKLY;INTERVAL=2;BYDAY=SU,MO,TU;WKST=SU", start)
+            .unwrap();
+        assert!(
+            xml.contains("<t:FirstDayOfWeek>Sunday</t:FirstDayOfWeek>"),
+            "expected Sunday first-day on the wire, got {xml}",
+        );
+
+        // READ back: the pattern carries Sunday, and to_rrule re-emits WKST=SU so
+        // the frontend expands the straddling series on the right week grid.
+        let rec = parse_ews_recurrence(&xml).unwrap();
+        assert!(matches!(
+            rec.pattern,
+            EwsRecurrencePattern::Weekly {
+                first_day_of_week: EwsDay::Sunday,
+                ..
+            }
+        ));
+        assert!(
+            rec.to_rrule().contains("WKST=SU"),
+            "expected WKST=SU, got {}",
+            rec.to_rrule(),
+        );
+
+        // A Monday-week rule: FirstDayOfWeek=Monday on the wire, but NO WKST in
+        // the RRULE (the RFC-5545 default — keeps the common rule byte-identical).
+        let mon = rrule_to_ews_recurrence("FREQ=WEEKLY;BYDAY=TH", start).unwrap();
+        assert!(mon.contains("<t:FirstDayOfWeek>Monday</t:FirstDayOfWeek>"));
+        assert!(!parse_ews_recurrence(&mon)
+            .unwrap()
+            .to_rrule()
+            .contains("WKST"));
     }
 
     #[test]
@@ -4675,6 +4759,7 @@ mod tests {
             EwsRecurrencePattern::Weekly {
                 interval: 1,
                 days_of_week: vec![EwsDay::Monday],
+                first_day_of_week: EwsDay::Monday,
             },
         );
         assert_eq!(rec.range, EwsRecurrenceRange::NoEnd);
@@ -4927,6 +5012,7 @@ mod tests {
             pattern: EwsRecurrencePattern::Weekly {
                 interval: 1,
                 days_of_week: vec![EwsDay::Monday],
+                first_day_of_week: EwsDay::Monday,
             },
             range: EwsRecurrenceRange::NoEnd,
         };
@@ -4947,6 +5033,7 @@ mod tests {
             pattern: EwsRecurrencePattern::Weekly {
                 interval: 2,
                 days_of_week: vec![EwsDay::Thursday],
+                first_day_of_week: EwsDay::Monday,
             },
             range: EwsRecurrenceRange::NoEnd,
         };
@@ -5097,6 +5184,7 @@ mod tests {
             EwsRecurrencePattern::Weekly {
                 interval: 1,
                 days_of_week: vec![EwsDay::Monday],
+                first_day_of_week: EwsDay::Monday,
             },
         );
         assert_eq!(weekly.deleted_occurrence_starts.len(), 1);
@@ -5381,6 +5469,7 @@ mod tests {
             EwsRecurrencePattern::Weekly {
                 interval: 1,
                 days_of_week: vec![EwsDay::Monday],
+                first_day_of_week: EwsDay::Monday,
             },
         );
     }
