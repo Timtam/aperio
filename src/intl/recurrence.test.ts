@@ -4,6 +4,7 @@ import {
   expandAll,
   isExpandedOccurrence,
   localTimeZone,
+  truncateRRuleBefore,
   withCreatedRecurrenceZone,
 } from './recurrence';
 import type { CalendarEvent } from '../api/types';
@@ -506,5 +507,63 @@ describe('withCreatedRecurrenceZone', () => {
 
   it('passes a non-recurring event (null) through', () => {
     expect(withCreatedRecurrenceZone(null, false)).toBeNull();
+  });
+});
+
+describe('truncateRRuleBefore', () => {
+  it('sets UNTIL one second before the cutoff, keeping earlier occurrences', () => {
+    const out = truncateRRuleBefore(
+      'FREQ=WEEKLY;INTERVAL=2;BYDAY=TH',
+      new Date('2026-08-06T12:00:00.000Z'),
+    );
+    expect(out).toBe('FREQ=WEEKLY;INTERVAL=2;BYDAY=TH;UNTIL=20260806T115959Z');
+  });
+
+  it('drops COUNT (a rule cannot carry both COUNT and UNTIL)', () => {
+    const out = truncateRRuleBefore(
+      'FREQ=DAILY;COUNT=10',
+      new Date('2026-05-25T09:00:00.000Z'),
+    );
+    expect(out).toBe('FREQ=DAILY;UNTIL=20260525T085959Z');
+  });
+
+  it('never extends a series: an earlier existing UNTIL wins', () => {
+    const out = truncateRRuleBefore(
+      'FREQ=DAILY;UNTIL=20260510T090000Z',
+      new Date('2026-08-06T12:00:00.000Z'),
+    );
+    expect(out).toBe('FREQ=DAILY;UNTIL=20260510T090000Z');
+  });
+
+  it('tolerates a leading RRULE: prefix', () => {
+    const out = truncateRRuleBefore(
+      'RRULE:FREQ=DAILY',
+      new Date('2026-05-25T09:00:00.000Z'),
+    );
+    expect(out).toBe('FREQ=DAILY;UNTIL=20260525T085959Z');
+  });
+
+  it('truncates a series so the cutoff occurrence and all after it fall away', () => {
+    const master = mkEvent({
+      start: '2026-07-06T09:00:00.000Z',
+      end: '2026-07-06T09:30:00.000Z',
+      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO', exceptions: [], tzid: null },
+    });
+    const cutoff = new Date('2026-07-20T09:00:00.000Z'); // the 3rd Monday
+    const truncated = {
+      ...master,
+      recurrence: {
+        ...master.recurrence!,
+        rrule: truncateRRuleBefore(master.recurrence!.rrule, cutoff),
+      },
+    };
+    const starts = expandEvent(truncated, {
+      start: new Date('2026-07-01T00:00:00.000Z'),
+      end: new Date('2026-09-01T00:00:00.000Z'),
+    }).map((o) => o.start);
+    expect(starts).toEqual([
+      '2026-07-06T09:00:00.000Z',
+      '2026-07-13T09:00:00.000Z',
+    ]);
   });
 });

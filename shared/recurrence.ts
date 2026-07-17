@@ -407,3 +407,51 @@ export function occurrenceIsoOf<E extends RecurringEventLike>(
 ): string | null {
   return isExpandedOccurrence(event) ? event.occurrence_start : null;
 }
+
+/** UTC "basic" RFC-5545 timestamp (`YYYYMMDDTHHMMSSZ`) — the form an RRULE
+ *  `UNTIL` takes when the series has a zoned DTSTART. */
+function formatRRuleUntilUtc(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}` +
+    `T${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}Z`
+  );
+}
+
+/**
+ * Truncate a recurrence RULE so it keeps only occurrences STRICTLY BEFORE
+ * `cutoff` — the "this and all following occurrences" split point.
+ *
+ * Sets `UNTIL` to one second before `cutoff` (RFC-5545 `UNTIL` is inclusive) and
+ * drops any `COUNT` (a rule can't carry both). An existing earlier `UNTIL` wins
+ * (we never EXTEND a series). `cutoff` is the target occurrence's UTC instant, so
+ * the comparison is zone-independent: the occurrence at `cutoff` and everything
+ * after it fall away, everything before stays.
+ *
+ * Returns the rule body without a leading `RRULE:` (matching how the app stores
+ * recurrence rules).
+ */
+export function truncateRRuleBefore(rrule: string, cutoff: Date): string {
+  const newUntil = formatRRuleUntilUtc(new Date(cutoff.getTime() - 1000));
+  const body = rrule.trim().replace(/^RRULE:/i, '');
+  const kept: string[] = [];
+  let existingUntil: string | null = null;
+  for (const part of body.split(';')) {
+    if (!part) continue;
+    const eq = part.indexOf('=');
+    const key = part.slice(0, eq).toUpperCase();
+    if (key === 'COUNT') continue;
+    if (key === 'UNTIL') {
+      existingUntil = part.slice(eq + 1);
+      continue;
+    }
+    kept.push(part);
+  }
+  // Both are `YYYYMMDDT…Z`, which sorts lexicographically = chronologically; a
+  // shorter date-only existing UNTIL still compares correctly against the same
+  // date prefix. Keep whichever ends the series sooner.
+  const finalUntil =
+    existingUntil && existingUntil < newUntil ? existingUntil : newUntil;
+  kept.push(`UNTIL=${finalUntil}`);
+  return kept.join(';');
+}

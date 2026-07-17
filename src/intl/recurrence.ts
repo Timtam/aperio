@@ -12,6 +12,7 @@ export {
   isExpandedOccurrence,
   seriesIdOf,
   occurrenceIsoOf,
+  truncateRRuleBefore,
   localTimeZone,
   withCreatedRecurrenceZone,
 } from '@aperio/shared';
