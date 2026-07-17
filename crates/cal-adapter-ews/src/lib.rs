@@ -734,8 +734,17 @@ fn emit_item_events(
             let mut override_ev = ev.clone();
             override_ev.id = format!("{}#override:{}", ev.id, ov.original_start.to_rfc3339());
             override_ev.recurrence = None;
-            override_ev.start = ov.start;
-            override_ev.end = ov.end;
+            // Anchor an all-day override to LOCAL midnight, exactly as `to_event`
+            // does for the master and its EXDATEs, so the override lands on the
+            // same calendar day the EXDATE vacated (no off-by-a-day duplicate on
+            // non-UTC devices).
+            if item.is_all_day {
+                override_ev.start = crate::mapping::all_day_local_anchor(ov.start);
+                override_ev.end = crate::mapping::all_day_local_anchor(ov.end);
+            } else {
+                override_ev.start = ov.start;
+                override_ev.end = ov.end;
+            }
             override_ev.etag = ov.change_key.clone();
             // A cancelled occurrence (organizer withdrew just this instance)
             // arrives as a cancelled exception item; its cancelled state is
