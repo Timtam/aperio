@@ -83,13 +83,25 @@ export interface CreateEventRequest extends NewEvent {
   calendar_id: string;
 }
 
-export const createEvent = (request: CreateEventRequest) =>
+export const createEvent = (
+  request: CreateEventRequest,
+  opts: { preserveRecurrenceZone?: boolean } = {},
+) =>
   invoke<CalendarEvent>('create_event', {
     // Stamp the host's local zone onto a brand-new timed recurring rule so it
     // expands DST-correctly (parity with zoned CalDAV series); no-op otherwise.
+    //
+    // `preserveRecurrenceZone` skips that defaulting: a series-SPLIT tail
+    // ("edit this and all following") is a CONTINUATION, not a fresh series, so
+    // it must keep the master's zone VERBATIM — including a floating (null) zone.
+    // The truncated head (updateEvent, never stamped) and this tail then expand
+    // identically, so untouched occurrences never drift an hour across a DST
+    // boundary; stamping only the tail would diverge the two halves.
     request: {
       ...request,
-      recurrence: withCreatedRecurrenceZone(request.recurrence, request.all_day),
+      recurrence: opts.preserveRecurrenceZone
+        ? request.recurrence
+        : withCreatedRecurrenceZone(request.recurrence, request.all_day),
     },
   });
 

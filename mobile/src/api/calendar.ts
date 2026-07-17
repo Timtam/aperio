@@ -160,17 +160,24 @@ export const getEventById = async (
  *  flattened — the desktop create_event payload shape. */
 export const createEvent = async (
   request: { calendar_id: string } & NewEvent,
+  opts: { preserveRecurrenceZone?: boolean } = {},
 ): Promise<CalendarEvent> => {
   // Stamp the device's local zone onto a brand-new timed recurring rule so it
   // expands DST-correctly (parity with zoned CalDAV series); no-op otherwise.
+  //
+  // `preserveRecurrenceZone` skips that defaulting: a series-SPLIT tail ("edit
+  // this and all following") is a CONTINUATION, not a fresh series, so it must
+  // keep the master's zone VERBATIM — including a floating (null) zone. The
+  // truncated head (updateEvent, never stamped) and this tail then expand
+  // identically, so untouched occurrences never drift an hour across a DST
+  // boundary; stamping only the tail would diverge the two halves.
   const created = JSON.parse(
     await CalFfi.createEventJson(
       JSON.stringify({
         ...request,
-        recurrence: withCreatedRecurrenceZone(
-          request.recurrence,
-          request.all_day,
-        ),
+        recurrence: opts.preserveRecurrenceZone
+          ? request.recurrence
+          : withCreatedRecurrenceZone(request.recurrence, request.all_day),
       }),
     ),
   ) as CalendarEvent;

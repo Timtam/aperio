@@ -384,25 +384,30 @@ export default function EventEditorModal({
         );
         let created;
         try {
-          created = await createEvent({
-            calendar_id: calId,
-            title: trimmedTitle,
-            description: description.trim() || null,
-            location: location.trim() || null,
-            start,
-            end,
-            all_day: allDay,
-            recurrence: {
-              rrule: newRule,
-              exceptions: tailExceptions,
-              tzid: original.recurrence.tzid ?? null,
+          created = await createEvent(
+            {
+              calendar_id: calId,
+              title: trimmedTitle,
+              description: description.trim() || null,
+              location: location.trim() || null,
+              start,
+              end,
+              all_day: allDay,
+              recurrence: {
+                rrule: newRule,
+                exceptions: tailExceptions,
+                tzid: original.recurrence.tzid ?? null,
+              },
+              color_label: colorToSend,
+              reminders,
+              sound: null,
+              attendees,
+              send_invitations: sendInvitations,
             },
-            color_label: colorToSend,
-            reminders,
-            sound: null,
-            attendees,
-            send_invitations: sendInvitations,
-          });
+            // Continuation of the master — keep its zone verbatim (incl.
+            // floating) so head and tail expand identically.
+            { preserveRecurrenceZone: true },
+          );
         } catch (createErr) {
           // The master was already truncated; restore it so the tail isn't
           // silently lost, then surface the original failure.

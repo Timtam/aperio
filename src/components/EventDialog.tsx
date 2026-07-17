@@ -535,25 +535,30 @@ export function EventDialog({
               );
               let created;
               try {
-                created = await apiCreateEvent({
-                  calendar_id: form.calendarId,
-                  title: trimmedTitle,
-                  description: form.description.trim() || null,
-                  location: form.location.trim() || null,
-                  start,
-                  end,
-                  all_day: form.allDay,
-                  recurrence: {
-                    rrule: newRule,
-                    exceptions: tailExceptions,
-                    tzid: master.recurrence.tzid ?? null,
+                created = await apiCreateEvent(
+                  {
+                    calendar_id: form.calendarId,
+                    title: trimmedTitle,
+                    description: form.description.trim() || null,
+                    location: form.location.trim() || null,
+                    start,
+                    end,
+                    all_day: form.allDay,
+                    recurrence: {
+                      rrule: newRule,
+                      exceptions: tailExceptions,
+                      tzid: master.recurrence.tzid ?? null,
+                    },
+                    color_label: form.colorLabel,
+                    reminders: remindersForWire,
+                    sound: null,
+                    attendees: form.attendees,
+                    send_invitations: sendInvitations,
                   },
-                  color_label: form.colorLabel,
-                  reminders: remindersForWire,
-                  sound: null,
-                  attendees: form.attendees,
-                  send_invitations: sendInvitations,
-                });
+                  // Continuation of the master — keep its zone verbatim (incl.
+                  // floating) so head and tail expand identically.
+                  { preserveRecurrenceZone: true },
+                );
               } catch (createErr) {
                 // The master was already truncated; restore it so the tail isn't
                 // silently lost, then surface the original failure.
