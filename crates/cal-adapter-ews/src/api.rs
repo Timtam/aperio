@@ -506,7 +506,7 @@ async fn enrich_item_details(client: &EwsClient, state: &mut SyncedFolderState) 
         }
     }
 
-    enrich_occurrence_cancellations(client, state, &to_enrich).await;
+    enrich_occurrence_cancellations(client, state, &to_enrich).await?;
 
     Ok(())
 }
@@ -521,15 +521,25 @@ async fn enrich_item_details(client: &EwsClient, state: &mut SyncedFolderState) 
 ///
 /// We fetch the exception items for the masters just enriched, resolve each
 /// one's cancelled state from its own `IsCancelled`/`AppointmentState`/subject,
-/// and stamp `ModifiedOccurrence.cancelled`. Best-effort: a deleted or
-/// inaccessible exception must never fail the surrounding refresh, so batch
-/// errors are logged and skipped (the override simply stays un-cancelled and is
-/// retried the next time its master re-enriches).
+/// and stamp `ModifiedOccurrence.cancelled`.
+///
+/// Two failure modes are handled deliberately, because the caller persists
+/// `detail_fetched=true` for these masters and an unchanged master never
+/// re-enriches — so a silently-skipped batch would leave the cancelled state
+/// permanently wrong until the series next changes:
+///   * A single deleted/inaccessible exception in a 100-id batch comes back as
+///     a per-item `ResponseClass="Error"`. We POST via [`post_soap_raw`] (NOT
+///     `post_soap`) so `check_for_fault` doesn't abort the whole batch on it —
+///     the failed id simply yields no `CalendarItem` and its override stays
+///     un-cancelled, while every other exception in the chunk is still stamped.
+///   * A genuine transport/parse failure IS propagated (`?`): the surrounding
+///     drain then fails without persisting, so the next drain re-runs from the
+///     same sync cookie and retries — rather than baking in a half-filled state.
 async fn enrich_occurrence_cancellations(
     client: &EwsClient,
     state: &mut SyncedFolderState,
     to_enrich: &[(String, Option<String>)],
-) {
+) -> EwsResult<()> {
     let enriched: std::collections::HashSet<&str> =
         to_enrich.iter().map(|(id, _)| id.as_str()).collect();
 
@@ -546,7 +556,7 @@ async fn enrich_occurrence_cancellations(
         .collect();
 
     if exception_refs.is_empty() {
-        return;
+        return Ok(());
     }
 
     tracing::info!(
@@ -559,34 +569,32 @@ async fn enrich_occurrence_cancellations(
         std::collections::HashMap::new();
     for batch in exception_refs.chunks(GET_ITEM_BATCH_SIZE) {
         let body = crate::soap::get_calendar_items_with_recurrence(batch);
-        let xml = match client.post_soap(body).await {
-            Ok(xml) => xml,
-            Err(err) => {
-                tracing::warn!(
-                    target: "cal_adapter_ews::sync",
-                    ?err,
-                    "occurrence-exception GetItem failed; leaving these overrides un-cancelled",
-                );
-                continue;
-            }
-        };
-        match crate::mapping::parse_get_calendar_items_response(&xml) {
-            Ok(parsed) => {
-                for exc in &parsed {
-                    cancelled_by_id
-                        .insert(exc.item_id.clone(), crate::mapping::resolve_cancelled(exc));
-                }
-            }
-            Err(err) => tracing::warn!(
+        // `post_soap_raw` skips the fault check so a per-item Error (a deleted or
+        // inaccessible exception) doesn't poison the whole batch; the successful
+        // rows still parse. Transport failures still surface as `Err` here.
+        let xml = client.post_soap_raw(body).await?;
+        let parsed = crate::mapping::parse_get_calendar_items_response(&xml)?;
+        for exc in &parsed {
+            let cancelled = crate::mapping::resolve_cancelled(exc);
+            // TEMP DIAG (revert with the emit-side probe): show how Exchange
+            // encodes a cancelled occurrence's exception item, so we can confirm
+            // whether IsCancelled/AppointmentState alone suffices (and drop the
+            // subject-prefix heuristic) or the localized prefix is load-bearing.
+            tracing::info!(
                 target: "cal_adapter_ews::sync",
-                ?err,
-                "occurrence-exception parse failed; leaving these overrides un-cancelled",
-            ),
+                id = %exc.item_id,
+                is_cancelled_raw = exc.cancelled,
+                appointment_state = ?exc.appointment_state,
+                resolved_cancelled = cancelled,
+                subject = %exc.subject,
+                "TEMP ews occurrence-exception cancelled-state",
+            );
+            cancelled_by_id.insert(exc.item_id.clone(), cancelled);
         }
     }
 
     if cancelled_by_id.is_empty() {
-        return;
+        return Ok(());
     }
     for it in state.items.values_mut() {
         if !enriched.contains(it.item_id.as_str()) {
@@ -598,6 +606,7 @@ async fn enrich_occurrence_cancellations(
             }
         }
     }
+    Ok(())
 }
 
 /// Create a new calendar item in `calendar_id`. Returns the

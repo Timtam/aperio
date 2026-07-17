@@ -5008,6 +5008,49 @@ mod tests {
     }
 
     #[test]
+    fn parse_get_items_response_tolerates_per_item_error() {
+        // The occurrence-exception fan-out POSTs via post_soap_raw (no fault
+        // check), so a batch can come back with a per-item ResponseClass="Error"
+        // (a deleted/inaccessible exception) alongside the successes. The parser
+        // must return the successful row and simply omit the errored id — never
+        // Err — so one bad exception can't poison cancelled-state for the rest.
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <soap:Body>
+    <m:GetItemResponse>
+      <m:ResponseMessages>
+        <m:GetItemResponseMessage ResponseClass="Error">
+          <m:MessageText>The specified object was not found in the store.</m:MessageText>
+          <m:ResponseCode>ErrorItemNotFound</m:ResponseCode>
+          <m:DescriptiveLinkKey>0</m:DescriptiveLinkKey>
+          <m:Items/>
+        </m:GetItemResponseMessage>
+        <m:GetItemResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:Items>
+            <t:CalendarItem>
+              <t:ItemId Id="OCC-OK" ChangeKey="CK-OK"/>
+              <t:Subject>Austausch Frank - Toni</t:Subject>
+              <t:Start>2026-08-20T12:00:00Z</t:Start>
+              <t:End>2026-08-20T12:30:00Z</t:End>
+              <t:IsCancelled>true</t:IsCancelled>
+              <t:CalendarItemType>Exception</t:CalendarItemType>
+            </t:CalendarItem>
+          </m:Items>
+        </m:GetItemResponseMessage>
+      </m:ResponseMessages>
+    </m:GetItemResponse>
+  </soap:Body>
+</soap:Envelope>"#;
+        let parsed = parse_get_calendar_items_response(xml).unwrap();
+        assert_eq!(parsed.len(), 1, "only the successful row survives");
+        assert_eq!(parsed[0].item_id, "OCC-OK");
+        assert!(parsed[0].cancelled);
+    }
+
+    #[test]
     fn parse_get_items_response_reads_organizer_and_attendees() {
         let xml = r#"<?xml version="1.0"?>
 <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
