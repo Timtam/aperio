@@ -964,19 +964,31 @@ impl CalendarFeature for EwsAdapter {
         None
     }
 
-    /// EWS doesn't model EXDATE as an editable property on the master
-    /// — instead, the server-side equivalent is `DeleteItem` against
-    /// the specific occurrence id, which removes that one date from
-    /// future expansions. The dedicated `api::add_event_exdate` takes
-    /// the raw decoded id (without master-resolution) so this stays
-    /// per-occurrence; the supplied `occurrence` datetime is
-    /// redundant because the ItemId already uniquely identifies the
-    /// row.
+    /// Skip a single occurrence of a recurring series.
+    ///
+    /// SAFETY GUARD: the Aperio read path surfaces an EWS recurring series as
+    /// its MASTER (id `M:...`), and the frontend expands it CLIENT-SIDE, so
+    /// "delete only this occurrence" sends the MASTER id here (its `series_id`).
+    /// `api::add_event_exdate` DeleteItems the id it receives — and DeleteItem on
+    /// a RecurringMaster removes the ENTIRE series. Per-occurrence targeting
+    /// (EWS OccurrenceItemId) isn't wired up yet, so we REFUSE a master id rather
+    /// than silently delete the whole series (a critical data-loss bug found by
+    /// adversarial review). A genuine Occurrence/Exception id still deletes the
+    /// one row it addresses.
     async fn add_event_exdate(
         &self,
         event_id: &str,
         _occurrence: chrono::DateTime<chrono::Utc>,
     ) -> CoreResult<()> {
+        let decoded = crate::mapping::decode_event_id(event_id);
+        if decoded.kind == crate::mapping::EventIdKind::RecurringMaster {
+            return Err(cal_core::Error::Unsupported(
+                "Deleting a single occurrence of an Exchange recurring meeting \
+                 isn't supported yet (it would remove the whole series). Delete \
+                 the whole series instead."
+                    .into(),
+            ));
+        }
         api::add_event_exdate(&self.client, event_id)
             .await
             .map_err(to_core_error)
