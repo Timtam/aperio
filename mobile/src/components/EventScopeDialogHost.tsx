@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useThemedStyles, type ThemeColors } from '../theme';
 import {
@@ -24,32 +24,63 @@ import { RadioGroup } from './RadioGroup';
 export function EventScopeDialogHost() {
   const styles = useThemedStyles(makeStyles);
   const [config, setConfig] = useState<EventScopeDialogConfig | null>(null);
+  // Split "mounted" (config) from "shown" (visible) so the dismiss animation can
+  // play and the chosen action runs only AFTER the modal is gone — see below.
+  const [visible, setVisible] = useState(false);
   // Notify default = on (the common intent when cancelling a meeting you own).
   const [notify, setNotify] = useState(true);
+  // The action to run once the dialog has fully dismissed. Deferring it is what
+  // avoids an iOS "present while a presentation is in progress" crash: an option
+  // often navigates (present another native modal) or goBack (dismiss the
+  // editor), which iOS refuses while THIS modal is still dismissing. The old
+  // Alert dismissed before firing its handler; we reproduce that ordering.
+  const pending = useRef<(() => void) | null>(null);
 
   useEffect(
     () =>
       registerEventScopeDialog((cfg) => {
+        pending.current = null;
         setNotify(true);
         setConfig(cfg);
+        setVisible(true);
       }),
     [],
   );
 
+  // Runs after the modal is gone: on iOS via the Modal's onDismiss; on Android
+  // (no onDismiss, and no present-while-dismissing constraint) right after the
+  // close is committed. Nulling `pending` first makes a double-fire a no-op.
+  const finish = () => {
+    const run = pending.current;
+    pending.current = null;
+    setConfig(null);
+    run?.();
+  };
+
   if (config == null) return null;
-  const close = () => setConfig(null);
+  const cfg = config;
+
+  const dismiss = () => {
+    setVisible(false);
+    if (Platform.OS !== 'ios') setTimeout(finish, 0);
+  };
+  const cancel = () => {
+    pending.current = null;
+    dismiss();
+  };
   const select = (opt: EventScopeOption) => {
-    close();
-    opt.run(config.notify != null ? notify : false);
+    pending.current = () => opt.run(cfg.notify != null ? notify : false);
+    dismiss();
   };
 
   return (
     <AppDialog
-      visible
+      visible={visible}
       title={config.title}
       message={config.message}
       cancelLabel={config.cancelLabel}
-      onCancel={close}
+      onCancel={cancel}
+      onDismiss={Platform.OS === 'ios' ? finish : undefined}
     >
       {config.notify != null && (
         <RadioGroup<'notify' | 'silent'>

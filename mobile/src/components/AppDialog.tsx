@@ -40,6 +40,7 @@ export function AppDialog({
   cancelLabel,
   onConfirm,
   onCancel,
+  onDismiss,
   confirmDisabled = false,
   destructive = false,
   busy = false,
@@ -55,6 +56,11 @@ export function AppDialog({
   cancelLabel: string;
   onConfirm?: () => void;
   onCancel: () => void;
+  /** iOS-only: fires AFTER the modal has fully dismissed (visible→false). Use it
+   *  to defer work that must not race the dismissal — e.g. presenting another
+   *  native modal / navigating, which iOS refuses while a dismissal is in
+   *  progress. Not called on Android (no such presentation constraint there). */
+  onDismiss?: () => void;
   /** Greys + disables Confirm until the caller's validity gate passes. */
   confirmDisabled?: boolean;
   /** Confirm uses danger styling (irreversible action). */
@@ -85,6 +91,7 @@ export function AppDialog({
       animationType="fade"
       onRequestClose={busy ? undefined : onCancel}
       onShow={focusInitial}
+      onDismiss={onDismiss}
     >
       <View style={styles.root}>
         {/* Dimmed scrim behind the card; tap-outside cancels (sighted users). */}
