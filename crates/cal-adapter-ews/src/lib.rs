@@ -964,20 +964,37 @@ impl CalendarFeature for EwsAdapter {
         None
     }
 
-    /// EWS doesn't model EXDATE as an editable property on the master
-    /// — instead, the server-side equivalent is `DeleteItem` against
-    /// the specific occurrence id, which removes that one date from
-    /// future expansions. The dedicated `api::add_event_exdate` takes
-    /// the raw decoded id (without master-resolution) so this stays
-    /// per-occurrence; the supplied `occurrence` datetime is
-    /// redundant because the ItemId already uniquely identifies the
-    /// row.
+    /// Skip / cancel a single occurrence of a recurring series.
+    ///
+    /// The read path surfaces a series as its MASTER (`M:…`); the frontend
+    /// expands it client-side, so this receives the MASTER id + the occurrence's
+    /// datetime. EWS `DeleteItem` on a master id deletes the WHOLE series, so for
+    /// a master we address the one occurrence by `OccurrenceItemId(master, index)`
+    /// via [`api::delete_series_occurrence`], which locates the index from the
+    /// server's own occurrence dates (the `occurrence` datetime is the target).
+    /// With `send_cancellations` the organizer notifies attendees that just this
+    /// occurrence was cancelled.
+    ///
+    /// A genuine Occurrence/Exception id (not produced by the live read path
+    /// today, but possible via other callers) still deletes the row it addresses.
     async fn add_event_exdate(
         &self,
         event_id: &str,
-        _occurrence: chrono::DateTime<chrono::Utc>,
+        occurrence: chrono::DateTime<chrono::Utc>,
         send_cancellations: bool,
     ) -> CoreResult<()> {
+        let decoded = crate::mapping::decode_event_id(event_id);
+        if decoded.kind == crate::mapping::EventIdKind::RecurringMaster {
+            return api::delete_series_occurrence(
+                &self.client,
+                &decoded.item_id,
+                decoded.change_key.as_deref(),
+                occurrence,
+                send_cancellations,
+            )
+            .await
+            .map_err(to_core_error);
+        }
         api::add_event_exdate(&self.client, event_id, send_cancellations)
             .await
             .map_err(to_core_error)

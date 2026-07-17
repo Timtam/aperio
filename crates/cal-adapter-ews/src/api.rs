@@ -29,9 +29,10 @@ use crate::mapping::{
     split_calendar_id, to_calendar, to_event, DecodedEventId, EventIdKind, ParsedItem, SyncChange,
 };
 use crate::soap::{
-    check_for_fault, create_calendar_item, delete_calendar_item, find_calendar_folders,
-    find_items_in_range, get_recurring_master, get_user_availability, respond_to_meeting,
-    sync_folder_items, sync_folder_items_idonly, update_calendar_item, update_folder_displayname,
+    check_for_fault, create_calendar_item, delete_calendar_item, delete_occurrence_item,
+    find_calendar_folders, find_items_in_range, get_occurrence_item, get_recurring_master,
+    get_user_availability, respond_to_meeting, sync_folder_items, sync_folder_items_idonly,
+    update_calendar_item, update_folder_displayname,
 };
 
 /// State carried by the adapter — endpoint + credentials + reqwest
@@ -729,6 +730,120 @@ pub async fn add_event_exdate(
         decoded.change_key.as_deref(),
         send_cancellations,
     );
+    client.post_soap(envelope).await?;
+    Ok(())
+}
+
+/// GetItem occurrence `index` (1-based) of a recurring master; `Ok(None)` when
+/// the index is past the end of the series (EWS returns a per-item
+/// `ResponseClass="Error"`, which parses to no CalendarItem). Uses
+/// `post_soap_raw` so that out-of-range Error doesn't abort via `check_for_fault`.
+async fn occurrence_start(
+    client: &EwsClient,
+    master_id: &str,
+    change_key: Option<&str>,
+    index: u32,
+) -> EwsResult<Option<DateTime<Utc>>> {
+    let xml = client
+        .post_soap_raw(get_occurrence_item(master_id, change_key, index))
+        .await?;
+    let items = crate::mapping::parse_get_calendar_items_response(&xml)?;
+    Ok(items.into_iter().find_map(|it| it.start))
+}
+
+/// Delete / cancel ONE occurrence of a recurring series addressed by its MASTER
+/// id (`M:…`) + the occurrence's UTC instant `target`.
+///
+/// Why this exists: the read path only ever surfaces the master (the frontend
+/// expands the series client-side), so "delete only this occurrence" hands us
+/// the master id. `DeleteItem` on a master deletes the WHOLE series — so instead
+/// we address the single occurrence by EWS `OccurrenceItemId(master, index)`.
+///
+/// The index is found by exponential-probe + binary-search over the SERVER's
+/// returned occurrence `Start` dates (monotonic in the index) — NOT by a local
+/// RRULE expansion, which would be timezone/DST-fragile and could target the
+/// wrong index. A final safety check requires the located occurrence's Start to
+/// be within a few hours of `target`; if nothing lines up we ABORT rather than
+/// delete the wrong occurrence. With `send_cancellations` the deleted occurrence
+/// emails a per-occurrence CANCEL to attendees.
+pub async fn delete_series_occurrence(
+    client: &EwsClient,
+    master_id: &str,
+    change_key: Option<&str>,
+    target: DateTime<Utc>,
+    send_cancellations: bool,
+) -> EwsResult<()> {
+    // A meeting series won't have more occurrences than this; the cap keeps a
+    // pathological/looping series from probing forever.
+    const MAX_INDEX: u32 = 4096;
+    // Frontend and server both expand the same series in the same zone, so their
+    // instants match to the second; allow a few hours for DST / minor zone drift
+    // while staying well under any real inter-occurrence gap (daily = 24h).
+    const TOLERANCE_SECS: i64 = 6 * 3600;
+
+    // A recurring master always has a first occurrence; if not, nothing to do.
+    if occurrence_start(client, master_id, change_key, 1)
+        .await?
+        .is_none()
+    {
+        return Ok(());
+    }
+
+    // Exponential probe: grow `hi` until its start is >= target or it's past the
+    // end of the series.
+    let mut hi = 1u32;
+    loop {
+        match occurrence_start(client, master_id, change_key, hi).await? {
+            None => break,
+            Some(s) if s >= target => break,
+            Some(_) => {
+                if hi >= MAX_INDEX {
+                    break;
+                }
+                hi = hi.saturating_mul(2).min(MAX_INDEX);
+            }
+        }
+    }
+    // Binary-search [lo, hi] for the smallest index whose start is >= target (or
+    // out of range). `lo = hi/2` is the last index known to be < target.
+    let mut lo = (hi / 2).max(1);
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        match occurrence_start(client, master_id, change_key, mid).await? {
+            Some(s) if s < target => lo = mid + 1,
+            _ => hi = mid,
+        }
+    }
+
+    // The intended occurrence is `lo` (start >= target) or `lo - 1` (start <
+    // target) — whichever is nearest. Fetch both and pick the closer.
+    let mut best: Option<(u32, i64)> = None;
+    for candidate in [lo.checked_sub(1).filter(|&c| c >= 1), Some(lo)]
+        .into_iter()
+        .flatten()
+    {
+        if let Some(s) = occurrence_start(client, master_id, change_key, candidate).await? {
+            let delta = (s - target).num_seconds().abs();
+            if best.map(|(_, bd)| delta < bd).unwrap_or(true) {
+                best = Some((candidate, delta));
+            }
+        }
+    }
+
+    let Some((index, delta)) = best else {
+        // No occurrence lines up (already deleted / out of range) — idempotent.
+        return Ok(());
+    };
+    if delta > TOLERANCE_SECS {
+        // The nearest occurrence isn't the one the user pointed at — refuse
+        // rather than risk deleting the wrong date.
+        return Err(EwsError::Protocol(format!(
+            "could not locate the occurrence at {target} in the recurring series \
+             (nearest was {delta}s away); not deleting to avoid removing the wrong date",
+        )));
+    }
+
+    let envelope = delete_occurrence_item(master_id, change_key, index, send_cancellations);
     client.post_soap(envelope).await?;
     Ok(())
 }
@@ -1700,6 +1815,130 @@ mod tests {
         add_event_exdate(&client_for(&server), "O:OCC-ID|OCK", true)
             .await
             .unwrap();
+    }
+
+    /// A `GetItemResponse` for one occurrence with the given `Start`.
+    fn occurrence_get_response(start_iso: &str) -> String {
+        format!(
+            r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="OCC" ChangeKey="OCK"/>
+        <t:Start>{start_iso}</t:Start>
+        <t:End>{start_iso}</t:End>
+        <t:CalendarItemType>Occurrence</t:CalendarItemType>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#
+        )
+    }
+
+    #[tokio::test]
+    async fn delete_series_occurrence_targets_the_matching_index() {
+        // Weekly series, occurrences at indices 1..=4 on consecutive Mondays.
+        // Target the 3rd (2026-07-20); the binary search over the server's dates
+        // must DeleteItem OccurrenceItemId InstanceIndex=3 — NOT the master, and
+        // NOT an adjacent occurrence.
+        let mut server = Server::new_async().await;
+        let dates = [
+            (1, "2026-07-06T09:00:00Z"),
+            (2, "2026-07-13T09:00:00Z"),
+            (3, "2026-07-20T09:00:00Z"),
+            (4, "2026-07-27T09:00:00Z"),
+        ];
+        let mut get_mocks = Vec::new();
+        for (idx, iso) in dates {
+            get_mocks.push(
+                server
+                    .mock("POST", "/")
+                    .match_body(mockito::Matcher::AllOf(vec![
+                        mockito::Matcher::Regex("m:GetItem".into()),
+                        mockito::Matcher::Regex(format!(r#"InstanceIndex="{idx}""#)),
+                    ]))
+                    .with_status(200)
+                    .with_body(occurrence_get_response(iso))
+                    .create_async()
+                    .await,
+            );
+        }
+        // The delete must hit index 3 with SendToNone (silent skip).
+        let del = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex("DeleteType".into()),
+                mockito::Matcher::Regex(r#"InstanceIndex="3""#.into()),
+                mockito::Matcher::Regex("SendToNone".into()),
+            ]))
+            .with_status(200)
+            .with_body(
+                r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <s:Body><m:DeleteItemResponse><m:ResponseMessages>
+    <m:DeleteItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+    </m:DeleteItemResponseMessage>
+  </m:ResponseMessages></m:DeleteItemResponse></s:Body>
+</s:Envelope>"#,
+            )
+            .expect(1)
+            .create_async()
+            .await;
+
+        let target = "2026-07-20T09:00:00Z".parse().unwrap();
+        delete_series_occurrence(&client_for(&server), "MASTER", Some("CK"), target, false)
+            .await
+            .unwrap();
+        del.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn delete_series_occurrence_aborts_when_no_occurrence_lines_up() {
+        // Every occurrence is far from the target (weeks away) → nothing within
+        // tolerance, so we must ERROR rather than delete the nearest occurrence.
+        // No DeleteItem mock: a stray delete would 501 and fail the test.
+        let mut server = Server::new_async().await;
+        for (idx, iso) in [
+            (1, "2026-07-06T09:00:00Z"),
+            (2, "2026-07-13T09:00:00Z"),
+            (4, "2026-07-27T09:00:00Z"),
+        ] {
+            let _m = server
+                .mock("POST", "/")
+                .match_body(mockito::Matcher::AllOf(vec![
+                    mockito::Matcher::Regex("m:GetItem".into()),
+                    mockito::Matcher::Regex(format!(r#"InstanceIndex="{idx}""#)),
+                ]))
+                .with_status(200)
+                .with_body(occurrence_get_response(iso))
+                .create_async()
+                .await;
+        }
+        // index 3 lookups return the 07-20 occurrence, but the target is 07-21
+        // (no occurrence there) — nearest (07-20) is >6h away → abort.
+        let _m3 = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex("m:GetItem".into()),
+                mockito::Matcher::Regex(r#"InstanceIndex="3""#.into()),
+            ]))
+            .with_status(200)
+            .with_body(occurrence_get_response("2026-07-20T09:00:00Z"))
+            .create_async()
+            .await;
+
+        let target = "2026-07-21T09:00:00Z".parse().unwrap();
+        let err =
+            delete_series_occurrence(&client_for(&server), "MASTER", Some("CK"), target, false)
+                .await
+                .unwrap_err();
+        assert!(matches!(err, EwsError::Protocol(_)));
     }
 
     #[tokio::test]
