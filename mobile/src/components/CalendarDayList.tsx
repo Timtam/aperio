@@ -861,6 +861,9 @@ export function CalendarDayList({
       if (span) {
         label += t('views.multiDaySuffix', { day: span.dayIndex, total: span.totalDays });
       }
+      if (ev.cancelled) {
+        label += t('views.eventCancelledSuffix');
+      }
       const colour = resolveEventColor(ev, calendarsById, labelsById);
       if (colour.labelName) {
         label += t('mobile.colorLabelSuffix', { name: colour.labelName });
@@ -936,6 +939,12 @@ export function CalendarDayList({
     // on tiny grid chips. SR users get the label NAME in eventLabel unchanged.
     const tint =
       hex != null ? { backgroundColor: `${hex}2E`, borderColor: `${hex}66` } : null;
+    // Cancelled events (shown when "show cancelled events" is on): dim the tile +
+    // strike the title, matching desktop. SR users get ", abgesagt" in the label.
+    const cancelledTile = ev.cancelled ? styles.cancelledTile : null;
+    const titleStyle = ev.cancelled
+      ? [styles.itemTitle, styles.cancelledTitle]
+      : styles.itemTitle;
     const badge = span
       ? ` ${t('views.multiDayCompact', { day: span.dayIndex, total: span.totalDays })}`
       : '';
@@ -954,7 +963,7 @@ export function CalendarDayList({
         >
           <View style={styles.rowText}>
             <Text
-              style={styles.itemTitle}
+              style={titleStyle}
               importantForAccessibility="no"
               numberOfLines={grid ? 1 : undefined}
             >
@@ -994,8 +1003,8 @@ export function CalendarDayList({
         onAccessibilityAction={(e) => runAction(e.nativeEvent.actionName)}
         style={
           grid
-            ? [styles.gridChip, slotStyle(slot, canvasPx), tint]
-            : [styles.row, extraStyle, tint]
+            ? [styles.gridChip, slotStyle(slot, canvasPx), tint, cancelledTile]
+            : [styles.row, extraStyle, tint, cancelledTile]
         }
       >
         <Pressable
@@ -1005,7 +1014,7 @@ export function CalendarDayList({
           style={styles.rowText}
         >
           <Text
-            style={styles.itemTitle}
+            style={titleStyle}
             importantForAccessibility="no"
             numberOfLines={grid ? 1 : undefined}
           >
@@ -1592,6 +1601,9 @@ const makeStyles = (c: ThemeColors) =>
       borderColor: c.borderOverlay,
     },
     itemTitle: { fontSize: 18, fontWeight: '600', color: c.textPrimary },
+    // Cancelled event: dim the tile + strike the title (matches desktop).
+    cancelledTile: { opacity: 0.6 },
+    cancelledTitle: { textDecorationLine: 'line-through' as const },
     itemTitleDone: { textDecorationLine: 'line-through', color: c.textSecondary },
     itemMeta: { fontSize: 14, color: c.textSecondary },
     // ── Single-day untimed-task band (dayLayout='grid') ──────────────────────

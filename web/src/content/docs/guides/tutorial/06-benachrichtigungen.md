@@ -50,7 +50,10 @@ default they fire no reminder; under **Settings → Calendars** (on the phone vi
 Cancelled events (for example a meeting series withdrawn by its organizer)
 **never** trigger reminders — regardless of any setting. By default they stay
 visible in the calendar (like Outlook); you can hide them under
-**Settings → General** via **Show cancelled events**.
+**Settings → General** via **Show cancelled events**. When shown, a cancelled
+event is dimmed with its title struck through, and screen readers announce it
+with a trailing “cancelled”. Deleting a single occurrence of a recurring event
+removes that occurrence entirely — it does not linger as a cancelled row.
 
 ## Notification sounds
 

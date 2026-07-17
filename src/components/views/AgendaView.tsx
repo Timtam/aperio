@@ -350,13 +350,15 @@ function renderOccurrences(
       time: timeLabel,
       calendar: cal?.name ?? '—',
     });
-    const aria = span
-      ? ariaBase +
-        ctx.t('views.multiDaySuffix', {
-          day: span.dayIndex,
-          total: span.totalDays,
-        })
-      : ariaBase;
+    const aria =
+      (span
+        ? ariaBase +
+          ctx.t('views.multiDaySuffix', {
+            day: span.dayIndex,
+            total: span.totalDays,
+          })
+        : ariaBase) +
+      (ev.cancelled ? ctx.t('views.eventCancelledSuffix') : '');
     const focused = i === focusIndex;
 
     out.push(
@@ -369,6 +371,7 @@ function renderOccurrences(
         className={
           'agenda-list__item' +
           (focused ? ' agenda-list__item--focused' : '') +
+          (ev.cancelled ? ' agenda-list__item--cancelled' : '') +
           (span ? ' agenda-list__item--multiday' : '')
         }
         style={

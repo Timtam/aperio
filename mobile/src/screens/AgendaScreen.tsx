@@ -331,6 +331,9 @@ export default function AgendaScreen({
       if (span) {
         label += t('views.multiDaySuffix', { day: span.dayIndex, total: span.totalDays });
       }
+      if (ev.cancelled) {
+        label += t('views.eventCancelledSuffix');
+      }
       const colour = resolveEventColor(ev, calendarsById, labelsById);
       if (colour.labelName) {
         label += t('mobile.colorLabelSuffix', { name: colour.labelName });
@@ -508,6 +511,12 @@ export default function AgendaScreen({
     // the CalendarDayList event rows; SR users get the label NAME in rowLabel.
     const tint =
       hex != null ? { backgroundColor: `${hex}2E`, borderColor: `${hex}66` } : null;
+    // Cancelled event: dim the tile + strike the title (matches desktop); SR users
+    // get ", abgesagt" in rowLabel.
+    const cancelledTile = ev.cancelled ? styles.cancelledTile : null;
+    const titleStyle = ev.cancelled
+      ? [styles.eventTitle, styles.cancelledTitle]
+      : styles.eventTitle;
     const badge = occ.span
       ? ` ${t('views.multiDayCompact', { day: occ.span.dayIndex, total: occ.span.totalDays })}`
       : '';
@@ -518,10 +527,10 @@ export default function AgendaScreen({
           accessible
           accessibilityRole="text"
           accessibilityLabel={rowLabel(ev, occ.day, occ.span)}
-          style={[styles.row, tint]}
+          style={[styles.row, tint, cancelledTile]}
         >
           <View style={styles.rowText}>
-            <Text style={styles.eventTitle} importantForAccessibility="no">
+            <Text style={titleStyle} importantForAccessibility="no">
               {ev.title}
               {badge}
             </Text>
@@ -562,7 +571,7 @@ export default function AgendaScreen({
           onLongPress={() => setMenu({ title: ev.title, actions, onAction: runAction })}
           style={styles.rowText}
         >
-          <Text style={styles.eventTitle} importantForAccessibility="no">
+          <Text style={titleStyle} importantForAccessibility="no">
             {ev.title}
             {badge}
           </Text>
@@ -637,6 +646,9 @@ const makeStyles = (c: ThemeColors) =>
     },
     rowText: { flex: 1, gap: 2 },
     eventTitle: { fontSize: 18, fontWeight: '600', color: c.textPrimary },
+    // Cancelled event: dim the tile + strike the title (matches desktop).
+    cancelledTile: { opacity: 0.6 },
+    cancelledTitle: { textDecorationLine: 'line-through' as const },
     eventTime: { fontSize: 14, color: c.textSecondary },
     pressed: { opacity: 0.7 },
     muted: { fontSize: 15, color: c.textSecondary, padding: 16 },

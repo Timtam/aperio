@@ -2504,6 +2504,21 @@ button[aria-disabled='true'] {
   text-decoration: line-through;
 }
 
+/* Cancelled EVENTS shown when "show cancelled events" is on: dim + strike so they
+ * read as cancelled at a glance, mirroring the cancelled-task treatment above. SR
+ * users hear a ", cancelled" suffix in the aria-label. A user-DELETED single
+ * occurrence is removed entirely (see `shared/recurrence.ts`), so this only styles
+ * whole cancelled events / meetings the user chose to keep visible. */
+.week-event--cancelled,
+.month-event--cancelled,
+.week-allday-bar--cancelled,
+.month-allday-bar--cancelled,
+.day-list__item--cancelled,
+.agenda-list__item--cancelled {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+
 .week-task--focused {
   outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;

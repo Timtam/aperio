@@ -52,7 +52,11 @@ Abgesagte Termine (z. B. eine von der Organisatorin zurückgezogene
 Besprechungsserie) lösen **nie** Erinnerungen aus – unabhängig von jeder
 Einstellung. Sichtbar bleiben sie standardmäßig im Kalender (wie in Outlook);
 unter **Einstellungen → Allgemein** kannst du sie über **Abgesagte Termine
-anzeigen** ausblenden.
+anzeigen** ausblenden. Wird ein abgesagter Termin angezeigt, ist er gedimmt und
+sein Titel durchgestrichen, und Screenreader kündigen ihn mit einem
+nachgestellten „abgesagt“ an. Löschst du eine einzelne Wiederholung eines
+Serientermins, verschwindet diese Wiederholung vollständig – sie bleibt nicht
+als abgesagte Zeile stehen.
 
 ## Benachrichtigungstöne
 

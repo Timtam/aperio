@@ -1844,6 +1844,7 @@
     "allDay": "Ganztags",
     "multiDayCompact": "({{day}}/{{total}})",
     "multiDaySuffix": ", Tag {{day}} von {{total}}",
+    "eventCancelledSuffix": ", abgesagt",
     "eventMovedToDay": "„{{title}}“ auf {{date}} verschoben.",
     "taskScheduledAtTime": "Aufgabe „{{title}}“ am {{date}} um {{time}} eingeplant.",
     "backlog": {

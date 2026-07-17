@@ -1218,6 +1218,7 @@ export function WeekView() {
                     className={
                       'week-allday-bar' +
                       (isBarFocused ? ' week-allday-bar--focused' : '') +
+                      (bar.event.cancelled ? ' week-allday-bar--cancelled' : '') +
                       (bar.continuesBefore
                         ? ' week-allday-bar--continues-before'
                         : '') +
@@ -1688,13 +1689,15 @@ export function WeekView() {
                         time: timeAria,
                         calendar: cal?.name ?? '—',
                       });
-                      const aria = span
-                        ? ariaBase +
-                          t('views.multiDaySuffix', {
-                            day: span.dayIndex,
-                            total: span.totalDays,
-                          })
-                        : ariaBase;
+                      const aria =
+                        (span
+                          ? ariaBase +
+                            t('views.multiDaySuffix', {
+                              day: span.dayIndex,
+                              total: span.totalDays,
+                            })
+                          : ariaBase) +
+                        (ev.cancelled ? t('views.eventCancelledSuffix') : '');
                       // All-day events are visualised by the lane above in BOTH
                       // modes; their per-day chip stays in the listbox as the
                       // aria-activedescendant target but is clipped out of the
@@ -1746,6 +1749,7 @@ export function WeekView() {
                               'week-event' +
                               (isFocusedItem ? ' week-event--focused' : '') +
                               (span ? ' week-event--multiday' : '') +
+                              (ev.cancelled ? ' week-event--cancelled' : '') +
                               // The `--in-lane` clip applies in BOTH modes: the
                               // all-day lane carries the visible bar in grid AND
                               // list mode (pre-grid behaviour), so an all-day

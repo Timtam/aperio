@@ -1085,13 +1085,15 @@ export function DayView() {
               end: endStr,
               calendar: cal?.name ?? '—',
             });
-            const aria = span
-              ? ariaBase +
-                t('views.multiDaySuffix', {
-                  day: span.dayIndex,
-                  total: span.totalDays,
-                })
-              : ariaBase;
+            const aria =
+              (span
+                ? ariaBase +
+                  t('views.multiDaySuffix', {
+                    day: span.dayIndex,
+                    total: span.totalDays,
+                  })
+                : ariaBase) +
+              (ev.cancelled ? t('views.eventCancelledSuffix') : '');
             // In LIST mode a timed event gets a STRICT duration-scaled height via
             // eventBlockFactor (so the height reads duration; a long title clips
             // rather than inflating a short event); an all-day event renders as a
@@ -1121,6 +1123,7 @@ export function DayView() {
                 className={
                   'day-list__item' +
                   (focused ? ' day-list__item--focused' : '') +
+                  (ev.cancelled ? ' day-list__item--cancelled' : '') +
                   (span ? ' day-list__item--multiday' : '') +
                   // Timed → absolute slot in the canvas. All-day in GRID mode →
                   // no slot, so clip the <li> (it stays a navigable option; the

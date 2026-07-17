@@ -707,6 +707,9 @@ export function MonthView() {
                             (isBarFocused
                               ? ' month-allday-bar--focused'
                               : '') +
+                            (bar.event.cancelled
+                              ? ' month-allday-bar--cancelled'
+                              : '') +
                             (bar.continuesBefore
                               ? ' month-allday-bar--continues-before'
                               : '') +
@@ -1023,13 +1026,15 @@ export function MonthView() {
                           time,
                           calendar: cal?.name ?? '—',
                         });
-                        const aria = span
-                          ? ariaBase +
-                            t('views.multiDaySuffix', {
-                              day: span.dayIndex,
-                              total: span.totalDays,
-                            })
-                          : ariaBase;
+                        const aria =
+                          (span
+                            ? ariaBase +
+                              t('views.multiDaySuffix', {
+                                day: span.dayIndex,
+                                total: span.totalDays,
+                              })
+                            : ariaBase) +
+                          (ev.cancelled ? t('views.eventCancelledSuffix') : '');
                         return (
                           <span
                             key={eventInstanceKey(ev)}
@@ -1039,6 +1044,7 @@ export function MonthView() {
                               (isFocusedItem
                                 ? ' month-event--focused'
                                 : '') +
+                              (ev.cancelled ? ' month-event--cancelled' : '') +
                               (hidden ? ' month-event--overflow' : '') +
                               (span ? ' month-event--multiday' : '') +
                               (ev.all_day ? ' month-event--in-lane' : '')
