@@ -13,6 +13,10 @@ export interface RecurringEventLike {
   /** RFC-3339 (UTC) start/end of the master event. */
   start: string;
   end: string;
+  /** Cancelled/tombstone flag. A cancelled RECURRENCE-ID override (its id carries
+   *  `::rid::`) is a pure deletion marker — `expandAll` uses it to suppress the
+   *  master's occurrence and then drops it, so a deleted occurrence vanishes. */
+  cancelled?: boolean;
   recurrence: {
     rrule: string;
     exceptions: string[];
@@ -352,6 +356,14 @@ export function expandAll<E extends RecurringEventLike>(
   }
 
   const out = events.flatMap((ev) => {
+    // A CANCELLED RECURRENCE-ID override is a deletion tombstone: it exists only to
+    // suppress the master's occurrence (already recorded in `overridden` above) and
+    // carries no content of its own, so never emit it as a visible event — the
+    // deleted occurrence must VANISH, not linger as an empty cancelled row. This is
+    // independent of the show-cancelled-events toggle, which governs whole cancelled
+    // events (those keep a normal id, no `::rid::`). A MODIFIED (non-cancelled)
+    // override still renders at its moved time.
+    if (ev.cancelled && overrideRecurrenceIso(ev) != null) return [];
     const occs = expandEvent(ev, range);
     const replaced = ev.recurrence?.rrule ? overridden?.get(ev.id) : undefined;
     if (!replaced || replaced.size === 0) return occs;

@@ -241,6 +241,34 @@ describe('expandAll', () => {
     expect(out.filter((o) => !o.cancelled).length).toBe(3);
   });
 
+  it('drops the cancelled override entirely so a deleted occurrence VANISHES', () => {
+    // Regression: a user-deleted Google occurrence comes back as a cancelled
+    // RECURRENCE-ID tombstone (empty, no title). With show-cancelled-events ON
+    // (the default) it must NOT render — the occurrence should disappear, not show
+    // as an empty cancelled row. expandAll drops it after using it to suppress.
+    const master = mkEvent({
+      id: 'series',
+      start: '2026-05-19T09:00:00.000Z',
+      end: '2026-05-19T09:30:00.000Z',
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=4', exceptions: [] },
+    });
+    const cancelledOverride = mkEvent({
+      id: 'series::rid::2026-05-20T09:00:00Z',
+      start: '2026-05-20T09:00:00.000Z',
+      end: '2026-05-20T09:00:00.000Z',
+      cancelled: true,
+    });
+    const out = expandAll([master, cancelledOverride], {
+      start: new Date('2026-05-19'),
+      end: new Date(Date.parse('2026-05-19') + 10 * ONE_DAY),
+    });
+    // Nothing at all remains on 05-20 — no live copy AND no cancelled tombstone.
+    expect(out.some((o) => o.start.startsWith('2026-05-20'))).toBe(false);
+    expect(out.some((o) => o.id.includes('::rid::'))).toBe(false);
+    // The three other daily occurrences are untouched.
+    expect(out.length).toBe(3);
+  });
+
   it('suppresses a cancelled override on a DST-summer occurrence of a zoned master', () => {
     // Reproduces Lea's Google series: a weekly Monday 12:30 Europe/Berlin master
     // whose DTSTART is in WINTER (CET, +1 → 11:30Z) and a single SUMMER occurrence
