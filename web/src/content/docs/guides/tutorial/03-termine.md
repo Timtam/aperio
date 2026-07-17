@@ -53,11 +53,18 @@ In the event dialog you can also set:
 > itself never sends email.
 >
 > When you delete a **meeting you organize** (with attendees, on an account
-> with server-side scheduling), Aperio asks: **Cancel & notify attendees** or
-> **remove without notifying**. A meeting you were only invited to, or an event
-> with no attendees, is deleted without asking. (On iCloud/CalDAV the server
-> decides whether a cancellation goes out, so "without notifying" isn't
-> guaranteed there.)
+> with server-side scheduling), Aperio asks in **one** dialog what should happen
+> for the attendees — no hidden second step, and every button states whether a
+> cancellation email goes out. For a **recurring** meeting all four choices are
+> shown as explicit buttons side by side: **cancel this occurrence and notify
+> attendees**, **remove this occurrence without notifying**, **cancel the whole
+> series and notify**, **remove the whole series without notifying**. So you can
+> cancel individual occurrences (attendees get a cancellation for exactly that
+> date) without touching the rest of the series. A single event has the two
+> matching choices. A meeting you were only invited to, or an event with no
+> attendees, is deleted without asking. (On iCloud/CalDAV the server decides
+> whether a cancellation goes out, so "without notifying" isn't guaranteed
+> there.)
 
 > **Check availability:** Below that toggle sits a **Check availability**
 > button. It looks up, for the currently entered time window, which
