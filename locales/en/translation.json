@@ -1163,7 +1163,12 @@
       "message": "\"{{title}}\" is part of a series. Delete just this occurrence, or the whole series?",
       "occurrence": "This occurrence only",
       "series": "Whole series",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "organizerMessage": "\"{{title}}\" is part of a series you organize. Choose what happens for the attendees:",
+      "occurrenceNotify": "Cancel this occurrence and notify attendees",
+      "occurrenceSilent": "Remove this occurrence (without notifying)",
+      "seriesNotify": "Cancel the whole series and notify attendees",
+      "seriesSilent": "Remove the whole series (without notifying)"
     },
     "moveScope": {
       "title": "Move recurring event",

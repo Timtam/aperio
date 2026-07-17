@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { CalendarEvent } from '../api/types';
@@ -10,13 +10,15 @@ import { Modal } from './Modal';
  * path in the calendar views (the editor does the same via its scope radios).
  *
  * When the event is a meeting the connected account ORGANIZES (attendees on a
- * scheduling-capable provider), picking a scope opens a second step: "cancel &
- * notify the attendees" vs "remove without notifying" — the same choice the
- * editor offers on delete. For everyone else (an attendee's copy, a non-meeting
- * event, a local calendar) the scope buttons remove silently in one step.
+ * scheduling-capable provider, via `useCancellationChoice`), ALL of the choices
+ * are shown as explicit buttons in ONE step — cancel-and-notify vs remove-
+ * silently, for this occurrence and for the whole series — so there is never a
+ * hidden second prompt: every button says exactly what it will do (whether an
+ * email goes out). For everyone else (an attendee's copy, a non-meeting event, a
+ * local calendar) it's the plain two-scope delete.
  *
- * Cancel takes initial focus on every step — mashing Enter never deletes or
- * emails anything by accident; the destructive choices come last.
+ * Cancel takes initial focus — mashing Enter never deletes or emails anything by
+ * accident; the destructive choices come after it in tab order.
  */
 export interface DeleteEventScopeDialogProps {
   isOpen: boolean;
@@ -45,117 +47,91 @@ export function DeleteEventScopeDialog({
   const { offersChoice } = useCancellationChoice(event);
   const cancelRef = useRef<HTMLButtonElement>(null);
 
-  // 'scope' = occurrence vs series; 'notify' = (organizer only) cancel+notify
-  // vs remove-silently for the chosen scope.
-  const [step, setStep] = useState<'scope' | 'notify'>('scope');
-  const [scope, setScope] = useState<'occurrence' | 'series'>('occurrence');
-
-  // Always reopen on the scope step, and take cancel-first focus on each step.
-  useEffect(() => {
-    if (!isOpen) return;
-    setStep('scope');
-  }, [isOpen]);
   useEffect(() => {
     if (!isOpen) return;
     queueMicrotask(() => cancelRef.current?.focus());
-  }, [isOpen, step]);
+  }, [isOpen]);
 
   const finish = (which: 'occurrence' | 'series', sendCancellations: boolean) => {
     (which === 'occurrence' ? onOccurrence : onSeries)(sendCancellations);
     onClose();
   };
 
-  const pickScope = (which: 'occurrence' | 'series') => {
-    // Organizer of a meeting with attendees → ask whether to notify; otherwise
-    // remove silently in one step.
-    if (offersChoice) {
-      setScope(which);
-      setStep('notify');
-    } else {
-      finish(which, false);
-    }
-  };
-
-  const notifyMessageKey =
-    scope === 'occurrence'
-      ? 'dialogs.event.cancelChoice.occurrenceMessage'
-      : 'dialogs.event.cancelChoice.message';
-  const notifyConfirmKey =
-    scope === 'occurrence'
-      ? 'dialogs.event.cancelChoice.cancelOccurrence'
-      : 'dialogs.event.cancelChoice.cancelMeeting';
-
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={
-        step === 'scope'
-          ? t('dialogs.deleteScope.title')
-          : t('dialogs.event.cancelChoice.title')
-      }
+      title={t('dialogs.deleteScope.title')}
       className="modal--confirm modal--confirm-wide"
       dismissOnBackdrop={false}
     >
-      {step === 'scope' ? (
-        <>
-          <p className="form__message">
-            {t('dialogs.deleteScope.message', { title })}
-          </p>
-          <div className="form__actions">
+      <p className="form__message">
+        {t(
+          offersChoice
+            ? 'dialogs.deleteScope.organizerMessage'
+            : 'dialogs.deleteScope.message',
+          { title },
+        )}
+      </p>
+      <div className="form__actions form__actions--stacked">
+        <button
+          ref={cancelRef}
+          type="button"
+          onClick={onClose}
+          className="form__action"
+        >
+          {t('dialogs.deleteScope.cancel')}
+        </button>
+        {offersChoice ? (
+          <>
             <button
-              ref={cancelRef}
               type="button"
-              onClick={onClose}
-              className="form__action"
+              onClick={() => finish('occurrence', true)}
+              className="form__action form__action--danger"
             >
-              {t('dialogs.deleteScope.cancel')}
+              {t('dialogs.deleteScope.occurrenceNotify')}
             </button>
             <button
               type="button"
-              onClick={() => pickScope('occurrence')}
+              onClick={() => finish('occurrence', false)}
+              className="form__action form__action--danger"
+            >
+              {t('dialogs.deleteScope.occurrenceSilent')}
+            </button>
+            <button
+              type="button"
+              onClick={() => finish('series', true)}
+              className="form__action form__action--danger"
+            >
+              {t('dialogs.deleteScope.seriesNotify')}
+            </button>
+            <button
+              type="button"
+              onClick={() => finish('series', false)}
+              className="form__action form__action--danger"
+            >
+              {t('dialogs.deleteScope.seriesSilent')}
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => finish('occurrence', false)}
               className="form__action form__action--danger"
             >
               {t('dialogs.deleteScope.occurrence')}
             </button>
             <button
               type="button"
-              onClick={() => pickScope('series')}
+              onClick={() => finish('series', false)}
               className="form__action form__action--danger"
             >
               {t('dialogs.deleteScope.series')}
             </button>
-          </div>
-        </>
-      ) : (
-        <>
-          <p className="form__message">{t(notifyMessageKey, { title })}</p>
-          <div className="form__actions">
-            <button
-              ref={cancelRef}
-              type="button"
-              onClick={onClose}
-              className="form__action"
-            >
-              {t('dialogs.deleteScope.cancel')}
-            </button>
-            <button
-              type="button"
-              onClick={() => finish(scope, false)}
-              className="form__action form__action--danger"
-            >
-              {t('dialogs.event.cancelChoice.removeSilently')}
-            </button>
-            <button
-              type="button"
-              onClick={() => finish(scope, true)}
-              className="form__action form__action--danger"
-            >
-              {t(notifyConfirmKey)}
-            </button>
-          </div>
-        </>
-      )}
+          </>
+        )}
+      </div>
     </Modal>
   );
 }

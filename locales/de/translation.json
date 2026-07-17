@@ -1160,7 +1160,12 @@
       "message": "„{{title}}\" ist Teil einer Serie. Nur diesen Termin oder die ganze Serie löschen?",
       "occurrence": "Nur diesen Termin",
       "series": "Ganze Serie",
-      "cancel": "Abbrechen"
+      "cancel": "Abbrechen",
+      "organizerMessage": "„{{title}}\" ist Teil einer Serie, die du organisierst. Wähle, was mit den Teilnehmern passiert:",
+      "occurrenceNotify": "Nur diesen Termin absagen und Teilnehmer benachrichtigen",
+      "occurrenceSilent": "Nur diesen Termin entfernen (ohne Benachrichtigung)",
+      "seriesNotify": "Ganze Serie absagen und Teilnehmer benachrichtigen",
+      "seriesSilent": "Ganze Serie entfernen (ohne Benachrichtigung)"
     },
     "moveScope": {
       "title": "Serientermin verschieben",

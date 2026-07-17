@@ -76,50 +76,59 @@ export function confirmDeleteEvent(
         : t('dialogs.event.occurrenceDeleted', { title: ev.title }),
     );
 
-  // Organizer chose "this occurrence" → notify attendees of the cancellation,
-  // or remove it silently. Mirrors the desktop cancel-choice for an occurrence.
-  const occurrenceNotifyChoice = () =>
-    Alert.alert(
-      t('dialogs.event.cancelChoice.title'),
-      t('dialogs.event.cancelChoice.occurrenceMessage', { title: ev.title }),
-      [
-        { text: t('mobile.cancel'), style: 'cancel' },
-        {
-          text: t('dialogs.event.cancelChoice.removeSilently'),
-          style: 'destructive',
-          onPress: () => removeOccurrence(false),
-        },
-        {
-          text: t('dialogs.event.cancelChoice.cancelOccurrence'),
-          style: 'destructive',
-          onPress: () => removeOccurrence(true),
-        },
-      ],
-    );
-
+  // Recurring-occurrence delete. For a meeting the account ORGANIZES, ALL four
+  // choices are explicit buttons in ONE prompt — cancel-and-notify vs remove-
+  // silently, for this occurrence and for the whole series — so there is never a
+  // hidden second step and every button spells out whether an email goes out.
+  // Everyone else gets the plain two-scope delete.
   const occurrenceAlert = (organizer: boolean) =>
-    Alert.alert(
-      t('dialogs.confirm.deleteEventTitle'),
-      t('dialogs.confirm.deleteEventMessage', { title: ev.title }),
-      [
-        { text: t('mobile.cancel'), style: 'cancel' },
-        {
-          text: t('dialogs.event.scope.occurrence'),
-          onPress: () =>
-            // The organizer gets the notify/silent choice for the occurrence;
-            // everyone else removes it silently.
-            organizer ? occurrenceNotifyChoice() : removeOccurrence(false),
-        },
-        {
-          // A whole-series delete can still email a cancellation; the adapters
-          // tolerate send-cancellations from a non-organizer (fall back to a
-          // plain delete), so `attendees > 0` is safe here.
-          text: t('dialogs.event.scope.series'),
-          style: 'destructive',
-          onPress: () => deleteWith(ev.attendees.length > 0),
-        },
-      ],
-    );
+    organizer
+      ? Alert.alert(
+          t('dialogs.deleteScope.title'),
+          t('dialogs.deleteScope.organizerMessage', { title: ev.title }),
+          [
+            { text: t('mobile.cancel'), style: 'cancel' },
+            {
+              text: t('dialogs.deleteScope.occurrenceNotify'),
+              style: 'destructive',
+              onPress: () => removeOccurrence(true),
+            },
+            {
+              text: t('dialogs.deleteScope.occurrenceSilent'),
+              style: 'destructive',
+              onPress: () => removeOccurrence(false),
+            },
+            {
+              text: t('dialogs.deleteScope.seriesNotify'),
+              style: 'destructive',
+              onPress: () => deleteWith(true),
+            },
+            {
+              text: t('dialogs.deleteScope.seriesSilent'),
+              style: 'destructive',
+              onPress: () => deleteWith(false),
+            },
+          ],
+        )
+      : Alert.alert(
+          t('dialogs.confirm.deleteEventTitle'),
+          t('dialogs.confirm.deleteEventMessage', { title: ev.title }),
+          [
+            { text: t('mobile.cancel'), style: 'cancel' },
+            {
+              text: t('dialogs.event.scope.occurrence'),
+              onPress: () => removeOccurrence(false),
+            },
+            {
+              // A whole-series delete can still email a cancellation; the
+              // adapters tolerate send-cancellations from a non-organizer (fall
+              // back to a plain delete), so `attendees > 0` is safe here.
+              text: t('dialogs.event.scope.series'),
+              style: 'destructive',
+              onPress: () => deleteWith(ev.attendees.length > 0),
+            },
+          ],
+        );
 
   const choiceAlert = () =>
     Alert.alert(
