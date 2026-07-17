@@ -1230,10 +1230,13 @@
       "meetingCancelled": "Besprechung „{{title}}\" abgesagt; Teilnehmer benachrichtigt.",
       "occurrenceUpdated": "Dieser Einzeltermin von „{{title}}\" wurde geändert.",
       "occurrenceDeleted": "Dieser Einzeltermin von „{{title}}\" wurde gelöscht.",
+      "occurrenceCancelled": "Dieser Einzeltermin von „{{title}}\" wurde abgesagt; Teilnehmer benachrichtigt.",
       "cancelChoice": {
         "title": "Besprechung absagen?",
         "message": "Du organisierst „{{title}}\". Absagen und die Teilnehmer benachrichtigen – oder nur aus deinem Kalender entfernen, ohne sie zu benachrichtigen?",
         "cancelMeeting": "Absagen & Teilnehmer benachrichtigen",
+        "occurrenceMessage": "Du organisierst „{{title}}\". Nur diesen Einzeltermin absagen und die Teilnehmer benachrichtigen – oder nur aus deinem Kalender entfernen, ohne sie zu benachrichtigen?",
+        "cancelOccurrence": "Diesen Einzeltermin absagen & Teilnehmer benachrichtigen",
         "removeSilently": "Ohne Benachrichtigung entfernen"
       },
       "birthdayTitle": "Geburtstag",

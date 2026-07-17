@@ -1230,10 +1230,13 @@
       "meetingCancelled": "Meeting \"{{title}}\" cancelled; attendees notified.",
       "occurrenceUpdated": "This occurrence of \"{{title}}\" was changed.",
       "occurrenceDeleted": "This occurrence of \"{{title}}\" was deleted.",
+      "occurrenceCancelled": "This occurrence of \"{{title}}\" was cancelled; attendees notified.",
       "cancelChoice": {
         "title": "Cancel meeting?",
         "message": "You organize \"{{title}}\". Cancel it and notify the attendees, or just remove it from your calendar without telling them?",
         "cancelMeeting": "Cancel & notify attendees",
+        "occurrenceMessage": "You organize \"{{title}}\". Cancel just this occurrence and notify the attendees, or just remove it from your calendar without telling them?",
+        "cancelOccurrence": "Cancel this occurrence & notify attendees",
         "removeSilently": "Remove without notifying"
       },
       "birthdayTitle": "Birthday",

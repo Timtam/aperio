@@ -570,9 +570,14 @@ export function EventDialog({
   );
 
   // A meeting you organize (with attendees) offers "cancel + notify" vs
-  // "remove silently"; everything else is a plain delete.
+  // "remove silently"; everything else is a plain delete. The same choice is
+  // offered for a whole meeting/series and for a single occurrence — `scope`
+  // routes the dialog's confirm to the right removal.
   const { offersChoice } = useCancellationChoice(event);
   const [cancelChoiceOpen, setCancelChoiceOpen] = useState(false);
+  const [cancelChoiceScope, setCancelChoiceScope] = useState<
+    'series' | 'occurrence'
+  >('series');
 
   // The actual removal, parameterised by whether the provider should email a
   // cancellation to the attendees. Used both by the plain-delete path and the
@@ -604,32 +609,58 @@ export function EventDialog({
     [event, announce, onClose, t],
   );
 
+  // Remove a single occurrence of a recurring series. When `sendCancellations`
+  // is true (organizer chose "cancel + notify") the provider emails attendees a
+  // cancellation for just this occurrence; otherwise it's a silent local skip.
+  const performOccurrenceDelete = useCallback(
+    async (sendCancellations: boolean) => {
+      if (!event) return;
+      const occIso = occurrenceIsoOf(event);
+      if (!occIso) return;
+      setError(null);
+      setSubmitting(true);
+      try {
+        await addEventExdate(
+          seriesIdOf(event),
+          occIso,
+          event.calendar_id,
+          sendCancellations,
+        );
+        announce(
+          sendCancellations
+            ? t('dialogs.event.occurrenceCancelled', { title: event.title })
+            : t('dialogs.event.occurrenceDeleted', { title: event.title }),
+        );
+        onClose();
+      } catch (err) {
+        setError(
+          isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
+        );
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [event, announce, onClose, t],
+  );
+
   const onDelete = useCallback(async () => {
     if (!event) return;
     if (submitting) return;
-    // Removing a single occurrence of a recurring event is a local EXDATE edit
-    // (no attendee notification) — keep that path unchanged.
+    // Removing a single occurrence of a recurring event.
     if (isOccurrence && editScope === 'occurrence' && event.recurrence) {
-      const occIso = occurrenceIsoOf(event);
-      if (occIso) {
-        setError(null);
-        setSubmitting(true);
-        try {
-          await addEventExdate(seriesIdOf(event), occIso, event.calendar_id);
-          announce(
-            t('dialogs.event.occurrenceDeleted', { title: event.title }),
-          );
-          onClose();
-        } catch (err) {
-          setError(isCommandError(err) ? `${err.code}: ${err.message}` : String(err));
-        } finally {
-          setSubmitting(false);
-        }
+      // Organizer with attendees → offer "cancel this occurrence + notify" vs
+      // silent local skip; otherwise a plain EXDATE (no attendee notification).
+      if (offersChoice) {
+        setCancelChoiceScope('occurrence');
+        setCancelChoiceOpen(true);
         return;
       }
+      await performOccurrenceDelete(false);
+      return;
     }
-    // Organizer removing a meeting with attendees → ask whether to notify.
+    // Organizer removing a whole meeting/series with attendees → ask whether to notify.
     if (offersChoice) {
+      setCancelChoiceScope('series');
       setCancelChoiceOpen(true);
       return;
     }
@@ -641,9 +672,7 @@ export function EventDialog({
     editScope,
     offersChoice,
     performDelete,
-    announce,
-    onClose,
-    t,
+    performOccurrenceDelete,
   ]);
 
   const title = isEdit ? t('dialogs.event.editTitle') : t('dialogs.event.newTitle');
@@ -1051,15 +1080,30 @@ export function EventDialog({
         isOpen={cancelChoiceOpen}
         onClose={() => setCancelChoiceOpen(false)}
         title={t('dialogs.event.cancelChoice.title')}
-        message={t('dialogs.event.cancelChoice.message', {
-          title: event.title,
-        })}
-        confirmLabel={t('dialogs.event.cancelChoice.cancelMeeting')}
-        onConfirm={() => void performDelete(true)}
+        message={
+          cancelChoiceScope === 'occurrence'
+            ? t('dialogs.event.cancelChoice.occurrenceMessage', {
+                title: event.title,
+              })
+            : t('dialogs.event.cancelChoice.message', { title: event.title })
+        }
+        confirmLabel={
+          cancelChoiceScope === 'occurrence'
+            ? t('dialogs.event.cancelChoice.cancelOccurrence')
+            : t('dialogs.event.cancelChoice.cancelMeeting')
+        }
+        onConfirm={() =>
+          cancelChoiceScope === 'occurrence'
+            ? void performOccurrenceDelete(true)
+            : void performDelete(true)
+        }
         extraActions={[
           {
             label: t('dialogs.event.cancelChoice.removeSilently'),
-            onClick: () => void performDelete(false),
+            onClick: () =>
+              cancelChoiceScope === 'occurrence'
+                ? void performOccurrenceDelete(false)
+                : void performDelete(false),
             danger: true,
           },
         ]}

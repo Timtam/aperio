@@ -91,13 +91,23 @@ pub trait CalendarFeature: Adapter {
     /// the expansion engine (and the source server) skips just that
     /// one date. The master row stays alive and every other
     /// occurrence keeps appearing — used by Aperio's "delete only
-    /// this occurrence" flow on a series. Default implementation
-    /// returns `Unsupported`; adapters that own the event data
-    /// (local SQLite, CalDAV, …) override it.
+    /// this occurrence" flow on a series.
+    ///
+    /// When `send_cancellations` is `true` AND the event is a meeting the
+    /// connected account organises, scheduling-capable providers notify
+    /// attendees that just this occurrence was cancelled (EWS
+    /// `SendToAllAndSaveCopy` on the occurrence, Google `sendUpdates=all` on the
+    /// instance cancel). CalDAV scheduling is server-driven (RFC 6638), so the
+    /// server decides regardless of the flag; adapters without server-side
+    /// scheduling ignore it and simply drop the occurrence locally.
+    ///
+    /// Default implementation returns `Unsupported`; adapters that own the event
+    /// data (local SQLite, CalDAV, …) override it.
     async fn add_event_exdate(
         &self,
         _event_id: &str,
         _occurrence: chrono::DateTime<chrono::Utc>,
+        _send_cancellations: bool,
     ) -> Result<()> {
         Err(Error::Unsupported(
             "add_event_exdate is not supported on this adapter".into(),

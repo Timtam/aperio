@@ -264,6 +264,7 @@ struct GetFreeBusyArgs<'a> {
 struct AddExdateArgs<'a> {
     event_id: &'a str,
     occurrence: chrono::DateTime<chrono::Utc>,
+    send_cancellations: bool,
 }
 
 #[derive(Serialize)]
@@ -357,11 +358,13 @@ impl CalendarFeature for FfiCalendarAdapter {
         &self,
         event_id: &str,
         occurrence: chrono::DateTime<chrono::Utc>,
+        send_cancellations: bool,
     ) -> Result<()> {
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         let args = AddExdateArgs {
             event_id,
             occurrence,
+            send_cancellations,
         };
         call_for_unit(self.vtable.add_event_exdate, self.handle_addr, &args).await
     }

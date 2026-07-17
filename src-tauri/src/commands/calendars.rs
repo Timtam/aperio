@@ -904,6 +904,7 @@ pub async fn add_event_exdate(
     id: String,
     occurrence: DateTime<Utc>,
     calendar_id: Option<String>,
+    send_cancellations: Option<bool>,
 ) -> CommandResult<()> {
     // `calendar_id` was added in Phase 6b.7 — older callers that
     // only pass `id` fall back to "assume local", which is still
@@ -914,7 +915,11 @@ pub async fn add_event_exdate(
         .and_then(|cid| registry.account_for_calendar(cid))
         .unwrap_or_else(|| LOCAL_ID.to_string());
     let is_local = account == LOCAL_ID;
+    // Only the organizer's cancel-this-occurrence choice passes `true`; the
+    // plain "delete only this occurrence" omits it → silent local skip.
+    let notify = send_cancellations.unwrap_or(false);
     if is_local {
+        // Local events have no attendees to notify; the flag is a no-op.
         adapter.add_event_exdate(&id, occurrence)?;
     } else {
         let Some(ext) = registry.calendar_adapter(&account) else {
@@ -923,7 +928,7 @@ pub async fn add_event_exdate(
                 message: format!("account '{account}' is not routable"),
             });
         };
-        ext.add_event_exdate(&id, occurrence).await?;
+        ext.add_event_exdate(&id, occurrence, notify).await?;
         if let Some(cid) = &calendar_id {
             let _ = cache.invalidate(&account, SyncScope::Events, cid);
         }

@@ -976,8 +976,9 @@ impl CalendarFeature for EwsAdapter {
         &self,
         event_id: &str,
         _occurrence: chrono::DateTime<chrono::Utc>,
+        send_cancellations: bool,
     ) -> CoreResult<()> {
-        api::add_event_exdate(&self.client, event_id)
+        api::add_event_exdate(&self.client, event_id, send_cancellations)
             .await
             .map_err(to_core_error)
     }

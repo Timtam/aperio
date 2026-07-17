@@ -3295,8 +3295,12 @@ impl Host {
                 }
             }
             Some(ext) => {
+                // Phase 3a: mobile keeps the silent "delete only this occurrence"
+                // behaviour (no attendee notification). Organizer cancel-with-
+                // notify on mobile lands in a follow-up (a new FFI entrypoint +
+                // regenerated bindings), so this internal call passes `false`.
                 self.runtime
-                    .block_on(async { ext.add_event_exdate(&id, occ).await })
+                    .block_on(async { ext.add_event_exdate(&id, occ, false).await })
                     .map_err(map_store_err)?;
             }
         }

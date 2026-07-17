@@ -714,11 +714,21 @@ pub async fn delete_event(
 /// events — but if they do, we delete the row regardless, which is
 /// the same result the user would get by clicking the regular
 /// delete button.
-pub async fn add_event_exdate(client: &EwsClient, event_id: &str) -> EwsResult<()> {
+pub async fn add_event_exdate(
+    client: &EwsClient,
+    event_id: &str,
+    send_cancellations: bool,
+) -> EwsResult<()> {
     let decoded = decode_event_id(event_id);
-    // Skipping a single occurrence is an EXDATE-equivalent, not a meeting
-    // cancellation — never notify attendees here.
-    let envelope = delete_calendar_item(&decoded.item_id, decoded.change_key.as_deref(), false);
+    // `DeleteItem` on the occurrence id removes just this date from the series.
+    // With `send_cancellations` the organizer notifies attendees that this one
+    // occurrence was cancelled (`SendToAllAndSaveCopy`); without it the drop is
+    // silent (`SendToNone`), the plain "delete only this occurrence" behaviour.
+    let envelope = delete_calendar_item(
+        &decoded.item_id,
+        decoded.change_key.as_deref(),
+        send_cancellations,
+    );
     client.post_soap(envelope).await?;
     Ok(())
 }
@@ -1644,13 +1654,50 @@ mod tests {
             // `DeleteType` only appears in DeleteItem envelopes —
             // if add_event_exdate accidentally resolved master and
             // sent a GetItem first, the mock wouldn't match and
-            // mockito would return the default 501.
-            .match_body(mockito::Matcher::Regex("DeleteType".into()))
+            // mockito would return the default 501. Silent skip →
+            // SendToNone (no attendee cancellation).
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex("DeleteType".into()),
+                mockito::Matcher::Regex("SendToNone".into()),
+            ]))
             .with_status(200)
             .with_body(body)
             .create_async()
             .await;
-        add_event_exdate(&client_for(&server), "O:OCC-ID|OCK")
+        add_event_exdate(&client_for(&server), "O:OCC-ID|OCK", false)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn add_event_exdate_with_cancellations_notifies_attendees() {
+        // Organizer cancelling just this occurrence → DeleteItem the occurrence
+        // id with SendToAllAndSaveCopy so attendees get a per-occurrence CANCEL.
+        let mut server = Server::new_async().await;
+        let body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <s:Body>
+    <m:DeleteItemResponse>
+      <m:ResponseMessages>
+        <m:DeleteItemResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+        </m:DeleteItemResponseMessage>
+      </m:ResponseMessages>
+    </m:DeleteItemResponse>
+  </s:Body>
+</s:Envelope>"#;
+        let _m = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex("DeleteType".into()),
+                mockito::Matcher::Regex("SendToAllAndSaveCopy".into()),
+            ]))
+            .with_status(200)
+            .with_body(body)
+            .create_async()
+            .await;
+        add_event_exdate(&client_for(&server), "O:OCC-ID|OCK", true)
             .await
             .unwrap();
     }

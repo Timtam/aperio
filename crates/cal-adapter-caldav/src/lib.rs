@@ -973,7 +973,15 @@ impl CalendarFeature for CaldavAdapter {
         &self,
         event_id: &str,
         occurrence: chrono::DateTime<chrono::Utc>,
+        _send_cancellations: bool,
     ) -> CoreResult<()> {
+        // `send_cancellations` is not honoured explicitly: CalDAV scheduling is
+        // SERVER-driven (RFC 6638 implicit scheduling). On a scheduling-aware
+        // collection (e.g. iCloud) adding the EXDATE to the organizer's event
+        // makes the server itself email a per-occurrence CANCEL to attendees;
+        // non-scheduling servers just store the EXDATE. Either way the write is
+        // the same, so we ignore the flag here.
+        //
         // Same walk-the-home-set workaround as delete_event below —
         // the trait signature loses the parent calendar id, so we
         // try every calendar in the home set until one accepts the
