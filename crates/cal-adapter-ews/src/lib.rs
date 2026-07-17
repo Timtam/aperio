@@ -744,7 +744,32 @@ fn emit_item_events(
     // log every in-range emitted event's RAW cancellation signals at INFO so a
     // normal (INFO-level) user log reveals exactly how Exchange represents a
     // cancelled meeting we're failing to flag — the `debug`-level probe was
-    // invisible because the app ships at INFO.
+    // invisible because the app ships at INFO. For recurring masters we also
+    // dump the RRULE + EXDATEs + moved-occurrence origins, so a cancelled
+    // occurrence (which the adapter logs at the master's anchor, not the
+    // occurrence date) can be traced to how the series encoded it.
+    let rrule = ev
+        .recurrence
+        .as_ref()
+        .map(|r| r.rrule.clone())
+        .unwrap_or_default();
+    let exdates = ev
+        .recurrence
+        .as_ref()
+        .map(|r| {
+            r.exceptions
+                .iter()
+                .map(|d| d.to_rfc3339())
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .unwrap_or_default();
+    let modified_origins = item
+        .modified_occurrences
+        .iter()
+        .map(|m| m.original_start.to_rfc3339())
+        .collect::<Vec<_>>()
+        .join(",");
     tracing::info!(
         target: "cal_adapter_ews::sync",
         id = %ev.id,
@@ -752,6 +777,9 @@ fn emit_item_events(
         is_cancelled_raw = item.cancelled,
         appointment_state = ?item.appointment_state,
         resolved_cancelled = ev.cancelled,
+        rrule = %rrule,
+        exdates = %exdates,
+        modified_origins = %modified_origins,
         subject = %item.subject,
         "TEMP ews emitted event cancelled-state",
     );
