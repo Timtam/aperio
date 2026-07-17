@@ -21,7 +21,7 @@ import { DialogStateContext } from './dialogStateContext';
 import type { SettingsTabId } from '../components/SettingsDialog';
 
 /** Which slice of a recurring series an edit applies to. */
-export type EventEditScope = 'series' | 'occurrence';
+export type EventEditScope = 'series' | 'occurrence' | 'this_and_future';
 
 /**
  * Which dialog (if any) is currently open.

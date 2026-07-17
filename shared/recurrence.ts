@@ -455,3 +455,37 @@ export function truncateRRuleBefore(rrule: string, cutoff: Date): string {
   kept.push(`UNTIL=${finalUntil}`);
   return kept.join(';');
 }
+
+/**
+ * Split a recurrence rule for "edit this and all following occurrences": the
+ * ORIGINAL series is truncated to end just before `cutoff`, and a NEW series
+ * takes over from `cutoff` (created with the edited fields by the caller).
+ *
+ * Returns `{ oldRule, newRule }` (rule bodies, no `RRULE:` prefix). The new
+ * series reuses the same pattern; only a COUNT-bounded series needs adjusting —
+ * its remaining count is `COUNT - occurrencesBeforeCutoff` (clamped to >= 1). An
+ * UNTIL/absolute-ended or open-ended series carries its end unchanged: the same
+ * UNTIL still bounds the new series from its later start, and an open series
+ * stays open.
+ */
+export function splitRRuleForEdit(
+  rrule: string,
+  cutoff: Date,
+  occurrencesBeforeCutoff: number,
+): { oldRule: string; newRule: string } {
+  const oldRule = truncateRRuleBefore(rrule, cutoff);
+  const body = rrule.trim().replace(/^RRULE:/i, '');
+  const parts = body.split(';').filter(Boolean);
+  const countIdx = parts.findIndex((p) => p.toUpperCase().startsWith('COUNT='));
+  if (countIdx === -1) {
+    return { oldRule, newRule: body };
+  }
+  const count = Number(parts[countIdx].slice('COUNT='.length));
+  const remaining = Number.isFinite(count)
+    ? Math.max(1, count - Math.max(0, occurrencesBeforeCutoff))
+    : count;
+  const newParts = parts.map((p, i) =>
+    i === countIdx ? `COUNT=${remaining}` : p,
+  );
+  return { oldRule, newRule: newParts.join(';') };
+}

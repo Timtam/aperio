@@ -49,6 +49,7 @@ export function DialogHost() {
           onClose={close}
           title={mode.event.title}
           onOccurrence={() => chooseEventEditScope('occurrence')}
+          onThisAndFuture={() => chooseEventEditScope('this_and_future')}
           onSeries={() => chooseEventEditScope('series')}
         />
       );

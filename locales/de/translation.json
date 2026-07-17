@@ -1180,8 +1180,9 @@
     },
     "editScope": {
       "title": "Serientermin bearbeiten",
-      "message": "„{{title}}\" ist Teil einer Serie. Nur diesen Termin oder die ganze Serie bearbeiten?",
+      "message": "„{{title}}\" ist Teil einer Serie. Nur diesen Termin, diesen und alle folgenden, oder die ganze Serie bearbeiten?",
       "occurrence": "Nur diesen Termin",
+      "thisAndFuture": "Diesen und alle folgenden",
       "series": "Ganze Serie",
       "cancel": "Abbrechen"
     },
@@ -1242,12 +1243,15 @@
       "occurrenceCancelled": "Dieser Einzeltermin von „{{title}}\" wurde abgesagt; Teilnehmer benachrichtigt.",
       "thisAndFutureDeleted": "„{{title}}\" wurde ab diesem Termin gelöscht; frühere Termine bleiben.",
       "thisAndFutureCancelled": "„{{title}}\" wurde ab diesem Termin abgesagt; Teilnehmer benachrichtigt, frühere Termine bleiben.",
+      "thisAndFutureUpdated": "„{{title}}\" wurde ab diesem Termin geändert; frühere Termine bleiben unverändert.",
       "cancelChoice": {
         "title": "Besprechung absagen?",
         "message": "Du organisierst „{{title}}\". Absagen und die Teilnehmer benachrichtigen – oder nur aus deinem Kalender entfernen, ohne sie zu benachrichtigen?",
         "cancelMeeting": "Absagen & Teilnehmer benachrichtigen",
         "occurrenceMessage": "Du organisierst „{{title}}\". Nur diesen Einzeltermin absagen und die Teilnehmer benachrichtigen – oder nur aus deinem Kalender entfernen, ohne sie zu benachrichtigen?",
         "cancelOccurrence": "Diesen Einzeltermin absagen & Teilnehmer benachrichtigen",
+        "thisAndFutureMessage": "Du organisierst „{{title}}\". Diesen und alle folgenden Termine absagen und die Teilnehmer benachrichtigen – oder nur aus deinem Kalender entfernen, ohne sie zu benachrichtigen?",
+        "cancelThisAndFuture": "Diesen und alle folgenden absagen & benachrichtigen",
         "removeSilently": "Ohne Benachrichtigung entfernen"
       },
       "birthdayTitle": "Geburtstag",
@@ -1257,6 +1261,7 @@
       "scope": {
         "label": "Anwenden auf",
         "occurrence": "Nur diesen Termin",
+        "thisAndFuture": "Diesen und alle folgenden",
         "series": "Ganze Serie"
       },
       "fields": {

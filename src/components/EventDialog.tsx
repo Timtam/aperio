@@ -17,6 +17,7 @@ import {
   addEventExdate,
   createEvent as apiCreateEvent,
   deleteEventById,
+  getEventById,
   isCommandError,
   queryFreeBusy,
   setEventColor,
@@ -24,11 +25,14 @@ import {
 } from '../api/client';
 import type { CalendarEvent, FreeBusy, FreeBusySlot } from '../api/types';
 import {
+  expandEvent,
   isExpandedOccurrence,
   occurrenceIsoOf,
   seriesIdOf,
+  splitRRuleForEdit,
 } from '../intl/recurrence';
 import { useCalendarStore } from '../state/calendarStoreContext';
+import { deleteThisAndFuture } from '../state/deleteSeriesFromOccurrence';
 import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
 import { useCancellationChoice } from '../state/useCancellationChoice';
 import { useViewState } from '../state/viewStateContext';
@@ -144,7 +148,7 @@ interface FormState {
  * the series' EXDATE list and either creates an override standalone
  * event (edit) or simply skips that date (delete).
  */
-type EditScope = 'series' | 'occurrence';
+type EditScope = 'series' | 'occurrence' | 'this_and_future';
 
 /** True when the id carries the synthetic `@ISO` suffix from `expandEvent`. */
 export function EventDialog({
@@ -476,6 +480,71 @@ export function EventDialog({
             }
           }
 
+          if (
+            isOccurrence &&
+            editScope === 'this_and_future' &&
+            event.recurrence
+          ) {
+            // Split the series at this occurrence: truncate the original to end
+            // just before it (keeping its own fields), then create a NEW series
+            // from here carrying the edits. The new series reuses the original
+            // PATTERN (with the remaining COUNT); changing the recurrence pattern
+            // itself for "this and following" isn't supported — edit the whole
+            // series for that.
+            const occIso = occurrenceIsoOf(event);
+            const master = await getEventById(seriesId);
+            if (occIso && master?.recurrence?.rrule) {
+              const cutoff = new Date(occIso);
+              const before = expandEvent(master, {
+                start: new Date(master.start),
+                end: cutoff,
+              }).length;
+              const { oldRule, newRule } = splitRRuleForEdit(
+                master.recurrence.rrule,
+                cutoff,
+                before,
+              );
+              await apiUpdateEvent(
+                {
+                  ...master,
+                  recurrence: { ...master.recurrence, rrule: oldRule },
+                },
+                master.calendar_id,
+              );
+              const created = await apiCreateEvent({
+                calendar_id: form.calendarId,
+                title: trimmedTitle,
+                description: form.description.trim() || null,
+                location: form.location.trim() || null,
+                start,
+                end,
+                all_day: form.allDay,
+                recurrence: {
+                  rrule: newRule,
+                  exceptions: [],
+                  tzid: master.recurrence.tzid ?? null,
+                },
+                color_label: form.colorLabel,
+                reminders: remindersForWire,
+                sound: null,
+                attendees: form.attendees,
+                send_invitations: sendInvitations,
+              });
+              if (!storesColorNatively) {
+                await setEventColor(
+                  created.id,
+                  created.calendar_id,
+                  form.colorLabel,
+                );
+              }
+              announce(
+                t('dialogs.event.thisAndFutureUpdated', { title: trimmedTitle }),
+              );
+              onClose();
+              return;
+            }
+          }
+
           const updated: CalendarEvent = {
             ...event,
             id: seriesId,
@@ -576,7 +645,7 @@ export function EventDialog({
   const { offersChoice } = useCancellationChoice(event);
   const [cancelChoiceOpen, setCancelChoiceOpen] = useState(false);
   const [cancelChoiceScope, setCancelChoiceScope] = useState<
-    'series' | 'occurrence'
+    'series' | 'occurrence' | 'this_and_future'
   >('series');
 
   // The actual removal, parameterised by whether the provider should email a
@@ -643,6 +712,34 @@ export function EventDialog({
     [event, announce, onClose, t],
   );
 
+  // "Delete this and all following": truncate the series to end before this
+  // occurrence. `sendCancellations` notifies attendees of the change.
+  const performThisAndFutureDelete = useCallback(
+    async (sendCancellations: boolean) => {
+      if (!event) return;
+      const occIso = occurrenceIsoOf(event);
+      if (!occIso) return;
+      setError(null);
+      setSubmitting(true);
+      try {
+        await deleteThisAndFuture(event, occIso, sendCancellations);
+        announce(
+          sendCancellations
+            ? t('dialogs.event.thisAndFutureCancelled', { title: event.title })
+            : t('dialogs.event.thisAndFutureDeleted', { title: event.title }),
+        );
+        onClose();
+      } catch (err) {
+        setError(
+          isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
+        );
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [event, announce, onClose, t],
+  );
+
   const onDelete = useCallback(async () => {
     if (!event) return;
     if (submitting) return;
@@ -656,6 +753,16 @@ export function EventDialog({
         return;
       }
       await performOccurrenceDelete(false);
+      return;
+    }
+    // Removing this occurrence and all following ones (truncate the series).
+    if (isOccurrence && editScope === 'this_and_future' && event.recurrence) {
+      if (offersChoice) {
+        setCancelChoiceScope('this_and_future');
+        setCancelChoiceOpen(true);
+        return;
+      }
+      await performThisAndFutureDelete(false);
       return;
     }
     // Organizer removing a whole meeting/series with attendees → ask whether to notify.
@@ -673,6 +780,7 @@ export function EventDialog({
     offersChoice,
     performDelete,
     performOccurrenceDelete,
+    performThisAndFutureDelete,
   ]);
 
   const title = isEdit ? t('dialogs.event.editTitle') : t('dialogs.event.newTitle');
@@ -1026,6 +1134,15 @@ export function EventDialog({
               <input
                 type="radio"
                 name="event-scope"
+                checked={editScope === 'this_and_future'}
+                onChange={() => setEditScope('this_and_future')}
+              />
+              <span>{t('dialogs.event.scope.thisAndFuture')}</span>
+            </label>
+            <label className="form__field form__field--inline">
+              <input
+                type="radio"
+                name="event-scope"
                 checked={editScope === 'series'}
                 onChange={() => setEditScope('series')}
               />
@@ -1080,30 +1197,42 @@ export function EventDialog({
         isOpen={cancelChoiceOpen}
         onClose={() => setCancelChoiceOpen(false)}
         title={t('dialogs.event.cancelChoice.title')}
-        message={
+        message={t(
           cancelChoiceScope === 'occurrence'
-            ? t('dialogs.event.cancelChoice.occurrenceMessage', {
-                title: event.title,
-              })
-            : t('dialogs.event.cancelChoice.message', { title: event.title })
-        }
-        confirmLabel={
+            ? 'dialogs.event.cancelChoice.occurrenceMessage'
+            : cancelChoiceScope === 'this_and_future'
+              ? 'dialogs.event.cancelChoice.thisAndFutureMessage'
+              : 'dialogs.event.cancelChoice.message',
+          { title: event.title },
+        )}
+        confirmLabel={t(
           cancelChoiceScope === 'occurrence'
-            ? t('dialogs.event.cancelChoice.cancelOccurrence')
-            : t('dialogs.event.cancelChoice.cancelMeeting')
-        }
-        onConfirm={() =>
-          cancelChoiceScope === 'occurrence'
-            ? void performOccurrenceDelete(true)
-            : void performDelete(true)
-        }
+            ? 'dialogs.event.cancelChoice.cancelOccurrence'
+            : cancelChoiceScope === 'this_and_future'
+              ? 'dialogs.event.cancelChoice.cancelThisAndFuture'
+              : 'dialogs.event.cancelChoice.cancelMeeting',
+        )}
+        onConfirm={() => {
+          if (cancelChoiceScope === 'occurrence') {
+            void performOccurrenceDelete(true);
+          } else if (cancelChoiceScope === 'this_and_future') {
+            void performThisAndFutureDelete(true);
+          } else {
+            void performDelete(true);
+          }
+        }}
         extraActions={[
           {
             label: t('dialogs.event.cancelChoice.removeSilently'),
-            onClick: () =>
-              cancelChoiceScope === 'occurrence'
-                ? void performOccurrenceDelete(false)
-                : void performDelete(false),
+            onClick: () => {
+              if (cancelChoiceScope === 'occurrence') {
+                void performOccurrenceDelete(false);
+              } else if (cancelChoiceScope === 'this_and_future') {
+                void performThisAndFutureDelete(false);
+              } else {
+                void performDelete(false);
+              }
+            },
             danger: true,
           },
         ]}

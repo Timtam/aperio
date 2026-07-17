@@ -5,6 +5,7 @@ import {
   isExpandedOccurrence,
   localTimeZone,
   truncateRRuleBefore,
+  splitRRuleForEdit,
   withCreatedRecurrenceZone,
 } from './recurrence';
 import type { CalendarEvent } from '../api/types';
@@ -565,5 +566,45 @@ describe('truncateRRuleBefore', () => {
       '2026-07-06T09:00:00.000Z',
       '2026-07-13T09:00:00.000Z',
     ]);
+  });
+});
+
+describe('splitRRuleForEdit', () => {
+  const cutoff = new Date('2026-08-06T12:00:00.000Z');
+
+  it('open-ended series: old truncated, new keeps the same open rule', () => {
+    const { oldRule, newRule } = splitRRuleForEdit(
+      'FREQ=WEEKLY;INTERVAL=2;BYDAY=TH',
+      cutoff,
+      3,
+    );
+    expect(oldRule).toBe('FREQ=WEEKLY;INTERVAL=2;BYDAY=TH;UNTIL=20260806T115959Z');
+    expect(newRule).toBe('FREQ=WEEKLY;INTERVAL=2;BYDAY=TH');
+  });
+
+  it('UNTIL series: the new series carries the same absolute UNTIL', () => {
+    const { newRule } = splitRRuleForEdit(
+      'FREQ=DAILY;UNTIL=20261231T235959Z',
+      cutoff,
+      5,
+    );
+    expect(newRule).toBe('FREQ=DAILY;UNTIL=20261231T235959Z');
+  });
+
+  it('COUNT series: the new series gets the REMAINING count', () => {
+    const { oldRule, newRule } = splitRRuleForEdit(
+      'FREQ=WEEKLY;BYDAY=TH;COUNT=10',
+      cutoff,
+      3, // three occurrences kept on the old series
+    );
+    // old series drops COUNT for a hard UNTIL cutoff…
+    expect(oldRule).toBe('FREQ=WEEKLY;BYDAY=TH;UNTIL=20260806T115959Z');
+    // …the new series continues for the remaining 7.
+    expect(newRule).toBe('FREQ=WEEKLY;BYDAY=TH;COUNT=7');
+  });
+
+  it('COUNT never drops below 1', () => {
+    const { newRule } = splitRRuleForEdit('FREQ=DAILY;COUNT=3', cutoff, 5);
+    expect(newRule).toBe('FREQ=DAILY;COUNT=1');
   });
 });

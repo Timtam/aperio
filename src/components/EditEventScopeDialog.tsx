@@ -21,6 +21,8 @@ export interface EditEventScopeDialogProps {
   title: string;
   /** Open the editor scoped to just this occurrence. */
   onOccurrence: () => void;
+  /** Open the editor scoped to this occurrence and all following ones. */
+  onThisAndFuture: () => void;
   /** Open the editor scoped to the whole series. */
   onSeries: () => void;
 }
@@ -30,6 +32,7 @@ export function EditEventScopeDialog({
   onClose,
   title,
   onOccurrence,
+  onThisAndFuture,
   onSeries,
 }: EditEventScopeDialogProps) {
   const { t } = useTranslation();
@@ -62,6 +65,13 @@ export function EditEventScopeDialog({
         </button>
         <button type="button" onClick={onOccurrence} className="form__action">
           {t('dialogs.editScope.occurrence')}
+        </button>
+        <button
+          type="button"
+          onClick={onThisAndFuture}
+          className="form__action"
+        >
+          {t('dialogs.editScope.thisAndFuture')}
         </button>
         <button
           type="button"

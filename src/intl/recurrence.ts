@@ -13,6 +13,7 @@ export {
   seriesIdOf,
   occurrenceIsoOf,
   truncateRRuleBefore,
+  splitRRuleForEdit,
   localTimeZone,
   withCreatedRecurrenceZone,
 } from '@aperio/shared';
