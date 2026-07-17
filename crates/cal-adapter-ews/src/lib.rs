@@ -463,6 +463,7 @@ impl EwsAdapter {
             }
         }
 
+        let cancelled_emitted = out.iter().filter(|e| e.cancelled).count();
         tracing::info!(
             target: "cal_adapter_ews::sync",
             calendar = %calendar_id,
@@ -470,6 +471,7 @@ impl EwsAdapter {
             singles_emitted,
             masters_emitted,
             overrides_emitted,
+            cancelled_emitted,
             filtered_out_of_range,
             skipped_occurrence,
             translate_failures,
@@ -735,6 +737,12 @@ fn emit_item_events(
             override_ev.start = ov.start;
             override_ev.end = ov.end;
             override_ev.etag = ov.change_key.clone();
+            // A cancelled occurrence (organizer withdrew just this instance)
+            // arrives as a cancelled exception item; its cancelled state is
+            // resolved by the per-override GetItem enrichment. Carry it (and
+            // the master's own cancelled state) onto the emitted override so a
+            // single cancelled occurrence is dimmed + announced.
+            override_ev.cancelled = ev.cancelled || ov.cancelled;
             out.push(override_ev);
         }
     }
@@ -1741,5 +1749,90 @@ mod tasks_contacts_delta_tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CoreError::Unsupported(_)));
+    }
+}
+
+#[cfg(test)]
+mod occurrence_cancellation_tests {
+    use super::*;
+    use crate::mapping::{
+        EwsRecurrence, EwsRecurrencePattern, EwsRecurrenceRange, ModifiedOccurrence, ParsedItem,
+    };
+    use cal_core::DateRange;
+    use chrono::{DateTime, Utc};
+
+    fn dt(s: &str) -> DateTime<Utc> {
+        s.parse().unwrap()
+    }
+
+    /// A recurring master (not itself cancelled) with two exception overrides:
+    /// one the organizer cancelled, one merely moved. The cancelled occurrence's
+    /// emitted override must carry `cancelled=true` (so it is dimmed + announced);
+    /// the moved one must stay `false`; the master stays a non-cancelled series.
+    #[test]
+    fn cancelled_occurrence_override_is_emitted_cancelled() {
+        let master = ParsedItem {
+            item_id: "M1".into(),
+            subject: "Austausch Frank - Toni".into(),
+            start: Some(dt("2026-07-23T12:00:00Z")),
+            end: Some(dt("2026-07-23T12:30:00Z")),
+            is_recurring: true,
+            recurrence: Some(EwsRecurrence {
+                pattern: EwsRecurrencePattern::Daily { interval: 14 },
+                range: EwsRecurrenceRange::NoEnd,
+            }),
+            modified_occurrences: vec![
+                ModifiedOccurrence {
+                    item_id: "OCC-CANCELLED".into(),
+                    change_key: None,
+                    start: dt("2026-08-06T12:00:00Z"),
+                    end: dt("2026-08-06T12:30:00Z"),
+                    original_start: dt("2026-08-06T12:00:00Z"),
+                    cancelled: true,
+                },
+                ModifiedOccurrence {
+                    item_id: "OCC-MOVED".into(),
+                    change_key: None,
+                    start: dt("2026-08-20T15:00:00Z"),
+                    end: dt("2026-08-20T15:30:00Z"),
+                    original_start: dt("2026-08-20T12:00:00Z"),
+                    cancelled: false,
+                },
+            ],
+            ..Default::default()
+        };
+        let range = DateRange {
+            start: dt("2026-08-01T00:00:00Z"),
+            end: dt("2026-09-01T00:00:00Z"),
+        };
+        let mut out = Vec::new();
+        emit_item_events(&master, "cal", range, &mut out).unwrap();
+
+        let aug6 = out
+            .iter()
+            .find(|e| e.start == dt("2026-08-06T12:00:00Z"))
+            .expect("cancelled occurrence emitted");
+        assert!(
+            aug6.cancelled,
+            "organizer-cancelled occurrence must be marked cancelled"
+        );
+
+        let aug20 = out
+            .iter()
+            .find(|e| e.start == dt("2026-08-20T15:00:00Z"))
+            .expect("moved occurrence emitted");
+        assert!(
+            !aug20.cancelled,
+            "a merely moved occurrence must stay not-cancelled"
+        );
+
+        let master_ev = out
+            .iter()
+            .find(|e| e.recurrence.is_some())
+            .expect("master emitted");
+        assert!(
+            !master_ev.cancelled,
+            "the series master stays not-cancelled"
+        );
     }
 }

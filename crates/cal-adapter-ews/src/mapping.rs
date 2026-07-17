@@ -37,7 +37,6 @@ use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::reader::Reader;
 use serde::{Deserialize, Serialize};
-use tracing::debug;
 
 use cal_core::{
     AttendeeResponse, AttendeeStatus, Calendar, Event, EventRecurrence, FreeBusy, FreeBusySlot,
@@ -328,6 +327,16 @@ pub struct ParsedItem {
     /// this field existed load as `false` without forcing a re-sync.
     #[serde(default)]
     pub cancelled: bool,
+    /// `<t:AppointmentState>` — a bitmask (asfMeeting=1, asfReceived=2,
+    /// asfCanceled=4). Some Exchange configs leave `IsCancelled=false` on an
+    /// attendee's copy of a cancelled meeting yet still flip the `asfCanceled`
+    /// bit here, so `to_event` ORs it into the cancelled flag as a fallback
+    /// signal. `None` when the server omits the property (older servers, or a
+    /// read shape that doesn't request it). `#[serde(default)]` so persisted
+    /// sync state written before this field existed loads as `None` without
+    /// forcing a re-sync.
+    #[serde(default)]
+    pub appointment_state: Option<i32>,
     pub reminder_is_set: bool,
     pub reminder_minutes_before_start: Option<i64>,
     pub created: Option<DateTime<Utc>>,
@@ -407,6 +416,15 @@ pub struct ModifiedOccurrence {
     /// this as the master's EXDATE so the expander skips the
     /// vacated slot.
     pub original_start: DateTime<Utc>,
+    /// Whether this override is a CANCELLED occurrence: the organizer
+    /// withdrew just this instance of the series. The inline
+    /// `<t:ModifiedOccurrences>` shape carries no cancelled flag — this
+    /// is filled by the per-override GetItem enrichment from the
+    /// exception item's own `IsCancelled`/`AppointmentState`/subject
+    /// (`resolve_cancelled`). `#[serde(default)]` so persisted state
+    /// written before this field existed loads as `false`.
+    #[serde(default)]
+    pub cancelled: bool,
 }
 
 /// One invitee from a CalendarItem's `RequiredAttendees` /
@@ -470,6 +488,7 @@ pub fn parse_find_item_response(xml: &str) -> EwsResult<Vec<ParsedItem>> {
                     b"isalldayevent" => text_target = Some("all_day"),
                     b"isrecurring" => text_target = Some("recurring"),
                     b"iscancelled" => text_target = Some("cancelled"),
+                    b"appointmentstate" => text_target = Some("appointment_state"),
                     b"reminderisset" => text_target = Some("reminder_on"),
                     b"reminderminutesbeforestart" => text_target = Some("reminder_mins"),
                     b"datetimecreated" => text_target = Some("created"),
@@ -518,6 +537,9 @@ pub fn parse_find_item_response(xml: &str) -> EwsResult<Vec<ParsedItem>> {
                     }
                     Some("cancelled") => {
                         current.cancelled = s.eq_ignore_ascii_case("true");
+                    }
+                    Some("appointment_state") => {
+                        current.appointment_state = s.parse::<i32>().ok();
                     }
                     Some("reminder_on") => {
                         current.reminder_is_set = s.eq_ignore_ascii_case("true");
@@ -752,6 +774,9 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                     b"iscancelled" if inside_item => {
                         text_target = Some("cancelled");
                     }
+                    b"appointmentstate" if inside_item => {
+                        text_target = Some("appointment_state");
+                    }
                     b"reminderisset" if inside_item => {
                         text_target = Some("reminder_on");
                     }
@@ -926,6 +951,9 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                     }
                     Some("cancelled") => {
                         current.cancelled = s.eq_ignore_ascii_case("true");
+                    }
+                    Some("appointment_state") => {
+                        current.appointment_state = s.parse::<i32>().ok();
                     }
                     Some("reminder_on") => {
                         current.reminder_is_set = s.eq_ignore_ascii_case("true");
@@ -1174,6 +1202,12 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                     b"start" if inside_item => text_target = Some("start"),
                     b"end" if inside_item => text_target = Some("end"),
                     b"isrecurring" if inside_item => text_target = Some("recurring"),
+                    b"iscancelled" if inside_item && !inside_modified_occurrence => {
+                        text_target = Some("cancelled");
+                    }
+                    b"appointmentstate" if inside_item && !inside_modified_occurrence => {
+                        text_target = Some("appointment_state");
+                    }
                     b"calendaritemtype" if inside_item => text_target = Some("item_type"),
                     // Organizer + attendee subtree. The `Mailbox`
                     // (EmailAddress/Name) is shared by both, so the
@@ -1335,6 +1369,12 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                     }
                     Some("recurring") => {
                         current.is_recurring = s.eq_ignore_ascii_case("true");
+                    }
+                    Some("cancelled") => {
+                        current.cancelled = s.eq_ignore_ascii_case("true");
+                    }
+                    Some("appointment_state") => {
+                        current.appointment_state = s.parse::<i32>().ok();
                     }
                     Some("item_type") => {
                         let acc = current.item_type.get_or_insert_with(String::new);
@@ -1525,6 +1565,11 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         (start, end)
     };
 
+    // Resolve cancelled up front, before `item`'s Vec/Option fields are moved
+    // out into the Event below (attendees/organizer takes leave `item` partially
+    // moved, which would block a later `&item` borrow).
+    let cancelled = resolve_cancelled(&item);
+
     // Prefix the id with the CalendarItemType so writes know how to
     // route — series-wide ops resolve the master from an Occurrence
     // id via a lazy GetItem; the EXDATE path stays on the raw row.
@@ -1611,34 +1656,6 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
     }
     let organizer = item.organizer.filter(|s| !s.trim().is_empty());
 
-    // Diagnostic for the cancelled-event indicator: Exchange normally sets
-    // `IsCancelled=true` on a cancelled meeting (which we map to `Event.cancelled`),
-    // but in some configs it leaves the calendar item unmarked and only prefixes the
-    // subject with a localized "Canceled:"/"Abgesagt:". Log any item that looks
-    // cancelled by EITHER signal so a user log reveals which one Exchange actually
-    // sends (drives whether the IsCancelled mapping is enough or we need a fallback).
-    let subject_hints_cancelled = {
-        let s = item.subject.trim_start().to_ascii_lowercase();
-        [
-            "canceled:",
-            "cancelled:",
-            "abgesagt:",
-            "storniert:",
-            "abgesagt",
-        ]
-        .iter()
-        .any(|p| s.starts_with(p))
-    };
-    if item.cancelled || subject_hints_cancelled {
-        debug!(
-            id = %id,
-            cancelled = item.cancelled,
-            subject_hints_cancelled,
-            subject = %item.subject,
-            "ews calendar item cancelled-state"
-        );
-    }
-
     Ok(Event {
         send_invitations: false,
         id,
@@ -1661,8 +1678,30 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         etag: item.change_key,
         organizer,
         attendee_responses,
-        cancelled: item.cancelled,
+        cancelled,
     })
+}
+
+/// Whether a parsed calendar item is cancelled, from the two authoritative EWS
+/// signals: the `IsCancelled` flag and the `asfCanceled` (0x4) bit in
+/// `AppointmentState`. Shared by `to_event` (whole meetings) and the
+/// occurrence-exception enrichment (a single cancelled occurrence of a recurring
+/// series — the organizer cancelled just that instance, which arrives as a
+/// cancelled exception item; the mailbox auto-processing that records the
+/// cancellation sets `IsCancelled` on that exception just as on a whole meeting).
+///
+/// We deliberately do NOT infer cancellation from a localized "Canceled:" /
+/// "Abgesagt:" subject prefix. Exchange's auto-processing that prepends that
+/// prefix is the same that flips `IsCancelled`, so the prefix never catches a
+/// cancellation the flags miss — it would only ever FALSE-positive on a
+/// user-authored title like "Abgesagt: Vertretung klären", wrongly dimming a
+/// live meeting and suppressing its reminders.
+pub(crate) fn resolve_cancelled(item: &ParsedItem) -> bool {
+    let state_cancelled = item
+        .appointment_state
+        .map(|s| s & 0x4 != 0)
+        .unwrap_or(false);
+    item.cancelled || state_cancelled
 }
 
 /// Map EWS `<t:ResponseType>` to the normalised RSVP enum. `Organizer`
@@ -3180,6 +3219,9 @@ impl ModifiedOccurrenceBuilder {
             start: self.start?,
             end: self.end?,
             original_start: self.original_start?,
+            // Filled later by the per-override GetItem enrichment; the inline
+            // ModifiedOccurrences shape carries no cancelled flag.
+            cancelled: false,
         })
     }
 }
@@ -3432,6 +3474,7 @@ mod tests {
                 <t:IsAllDayEvent>false</t:IsAllDayEvent>
                 <t:IsRecurring>false</t:IsRecurring>
                 <t:IsCancelled>true</t:IsCancelled>
+                <t:AppointmentState>7</t:AppointmentState>
               </t:CalendarItem>
             </t:Items>
           </m:RootFolder>
@@ -3451,6 +3494,7 @@ mod tests {
         assert!(!it.is_all_day);
         assert!(!it.is_recurring);
         assert!(it.cancelled);
+        assert_eq!(it.appointment_state, Some(7));
         assert!(it.reminder_is_set);
         assert_eq!(it.reminder_minutes_before_start, Some(10));
         assert_eq!(it.start.unwrap().to_rfc3339(), "2026-05-20T08:00:00+00:00");
@@ -3505,6 +3549,7 @@ mod tests {
             attendees: Vec::new(),
             detail_fetched: false,
             cancelled: false,
+            appointment_state: None,
         };
         let ev = to_event(item, "FID|CK").unwrap();
         // No `<t:CalendarItemType>` element → defaults to Single,
@@ -3534,6 +3579,61 @@ mod tests {
         };
         let ev = to_event(item, "FID|CK").unwrap();
         assert!(ev.cancelled);
+    }
+
+    #[test]
+    fn to_event_maps_cancelled_via_appointment_state() {
+        // Some Exchange configs leave IsCancelled=false on the attendee's copy
+        // but flip the asfCanceled (0x4) bit in AppointmentState. The 0x5 here
+        // = asfMeeting(1) | asfCanceled(4).
+        let item = ParsedItem {
+            item_id: "IID".into(),
+            subject: "Team Standup".into(),
+            start: Some("2026-05-20T12:00:00Z".parse().unwrap()),
+            end: Some("2026-05-20T12:30:00Z".parse().unwrap()),
+            cancelled: false,
+            appointment_state: Some(5),
+            ..Default::default()
+        };
+        let ev = to_event(item, "FID|CK").unwrap();
+        assert!(ev.cancelled);
+    }
+
+    #[test]
+    fn to_event_subject_prefix_alone_is_not_cancelled() {
+        // A localized "Abgesagt:" prefix WITHOUT IsCancelled or the asfCanceled
+        // bit must NOT be treated as cancelled: Exchange's auto-processing that
+        // prepends the prefix also sets IsCancelled, so a prefix-only subject is
+        // a user-authored title ("Abgesagt: Vertretung klären"), not a real
+        // cancellation. Flagging it would wrongly dim a live meeting and suppress
+        // its reminders.
+        let item = ParsedItem {
+            item_id: "IID".into(),
+            subject: "Abgesagt: Vertretung klären".into(),
+            start: Some("2026-05-20T12:00:00Z".parse().unwrap()),
+            end: Some("2026-05-20T12:30:00Z".parse().unwrap()),
+            cancelled: false,
+            appointment_state: Some(3), // asfMeeting|asfReceived, no cancel bit
+            ..Default::default()
+        };
+        let ev = to_event(item, "FID|CK").unwrap();
+        assert!(!ev.cancelled);
+    }
+
+    #[test]
+    fn to_event_not_cancelled_for_ordinary_meeting() {
+        // A normal received meeting: no cancel bit, ordinary subject.
+        let item = ParsedItem {
+            item_id: "IID".into(),
+            subject: "Termin abgesagt? bitte klären".into(),
+            start: Some("2026-05-20T12:00:00Z".parse().unwrap()),
+            end: Some("2026-05-20T12:30:00Z".parse().unwrap()),
+            cancelled: false,
+            appointment_state: Some(3),
+            ..Default::default()
+        };
+        let ev = to_event(item, "FID|CK").unwrap();
+        assert!(!ev.cancelled);
     }
 
     #[test]
@@ -3988,6 +4088,7 @@ mod tests {
             attendees: Vec::new(),
             detail_fetched: false,
             cancelled: false,
+            appointment_state: None,
         };
         assert_eq!(to_event(mk(Some("Single")), "FID").unwrap().id, "S:IID|ICK");
         assert_eq!(
@@ -4310,6 +4411,8 @@ mod tests {
                 <t:End>2026-05-20T09:00:00Z</t:End>
                 <t:IsAllDayEvent>false</t:IsAllDayEvent>
                 <t:IsRecurring>false</t:IsRecurring>
+                <t:IsCancelled>false</t:IsCancelled>
+                <t:AppointmentState>5</t:AppointmentState>
                 <t:CalendarItemType>Single</t:CalendarItemType>
               </t:CalendarItem>
             </t:Create>
@@ -4343,6 +4446,10 @@ mod tests {
                 assert_eq!(item.change_key.as_deref(), Some("CK-1"));
                 assert_eq!(item.subject, "Brand new");
                 assert_eq!(item.item_type.as_deref(), Some("Single"));
+                // AppointmentState is parsed off the SyncFolderItems shape
+                // (the asfCanceled 0x4 bit drives cancelled detection).
+                assert!(!item.cancelled);
+                assert_eq!(item.appointment_state, Some(5));
             }
             other => panic!("expected Create, got {other:?}"),
         }
@@ -4694,6 +4801,7 @@ mod tests {
             start: "2026-01-10T15:00:00Z".parse().unwrap(),
             end: "2026-01-10T15:30:00Z".parse().unwrap(),
             original_start: "2026-01-10T08:00:00Z".parse().unwrap(),
+            cancelled: false,
         }];
 
         let ev = to_event(item, "cal").unwrap();
@@ -4853,6 +4961,89 @@ mod tests {
         assert_eq!(ov.item_id, "OCC-MOVED");
         assert_eq!(ov.start.to_rfc3339(), "2026-06-03T14:00:00+00:00");
         assert_eq!(ov.original_start.to_rfc3339(), "2026-06-03T09:00:00+00:00");
+    }
+
+    #[test]
+    fn parse_get_items_response_reads_cancelled_exception() {
+        // The occurrence-exception fan-out GetItems the exception item behind a
+        // ModifiedOccurrence. When the organizer cancelled just that instance,
+        // the exception carries IsCancelled=true (and/or the asfCanceled bit).
+        // The GetItem parser must surface those so `resolve_cancelled` flags it.
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <soap:Body>
+    <m:GetItemResponse>
+      <m:ResponseMessages>
+        <m:GetItemResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:Items>
+            <t:CalendarItem>
+              <t:ItemId Id="OCC-CANCELLED" ChangeKey="CK-X"/>
+              <t:Subject>Austausch Frank - Toni</t:Subject>
+              <t:Start>2026-08-06T12:00:00Z</t:Start>
+              <t:End>2026-08-06T12:30:00Z</t:End>
+              <t:IsCancelled>true</t:IsCancelled>
+              <t:AppointmentState>7</t:AppointmentState>
+              <t:CalendarItemType>Exception</t:CalendarItemType>
+            </t:CalendarItem>
+          </m:Items>
+        </m:GetItemResponseMessage>
+      </m:ResponseMessages>
+    </m:GetItemResponse>
+  </soap:Body>
+</soap:Envelope>"#;
+        let parsed = parse_get_calendar_items_response(xml).unwrap();
+        assert_eq!(parsed.len(), 1);
+        let exc = &parsed[0];
+        assert_eq!(exc.item_id, "OCC-CANCELLED");
+        assert!(exc.cancelled);
+        assert_eq!(exc.appointment_state, Some(7));
+        assert!(resolve_cancelled(exc));
+    }
+
+    #[test]
+    fn parse_get_items_response_tolerates_per_item_error() {
+        // The occurrence-exception fan-out POSTs via post_soap_raw (no fault
+        // check), so a batch can come back with a per-item ResponseClass="Error"
+        // (a deleted/inaccessible exception) alongside the successes. The parser
+        // must return the successful row and simply omit the errored id — never
+        // Err — so one bad exception can't poison cancelled-state for the rest.
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <soap:Body>
+    <m:GetItemResponse>
+      <m:ResponseMessages>
+        <m:GetItemResponseMessage ResponseClass="Error">
+          <m:MessageText>The specified object was not found in the store.</m:MessageText>
+          <m:ResponseCode>ErrorItemNotFound</m:ResponseCode>
+          <m:DescriptiveLinkKey>0</m:DescriptiveLinkKey>
+          <m:Items/>
+        </m:GetItemResponseMessage>
+        <m:GetItemResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:Items>
+            <t:CalendarItem>
+              <t:ItemId Id="OCC-OK" ChangeKey="CK-OK"/>
+              <t:Subject>Austausch Frank - Toni</t:Subject>
+              <t:Start>2026-08-20T12:00:00Z</t:Start>
+              <t:End>2026-08-20T12:30:00Z</t:End>
+              <t:IsCancelled>true</t:IsCancelled>
+              <t:CalendarItemType>Exception</t:CalendarItemType>
+            </t:CalendarItem>
+          </m:Items>
+        </m:GetItemResponseMessage>
+      </m:ResponseMessages>
+    </m:GetItemResponse>
+  </soap:Body>
+</soap:Envelope>"#;
+        let parsed = parse_get_calendar_items_response(xml).unwrap();
+        assert_eq!(parsed.len(), 1, "only the successful row survives");
+        assert_eq!(parsed[0].item_id, "OCC-OK");
+        assert!(parsed[0].cancelled);
     }
 
     #[test]

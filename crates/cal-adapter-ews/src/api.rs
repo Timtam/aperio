@@ -506,6 +506,92 @@ async fn enrich_item_details(client: &EwsClient, state: &mut SyncedFolderState) 
         }
     }
 
+    enrich_occurrence_cancellations(client, state, &to_enrich).await?;
+
+    Ok(())
+}
+
+/// Second GetItem pass, run after the master enrichment: a recurring master's
+/// `ModifiedOccurrences` each point to a separate EXCEPTION item, and when the
+/// organizer cancels just one instance of a series it arrives as a *cancelled
+/// exception* — but the inline `<t:ModifiedOccurrences>` shape carries no
+/// cancelled flag (only ItemId / Start / End / OriginalStart). Without this the
+/// adapter emits a synthetic override for that slot inheriting the master's
+/// (un-cancelled) state, so a cancelled occurrence renders as a normal event.
+///
+/// We fetch the exception items for the masters just enriched, resolve each
+/// one's cancelled state from its own `IsCancelled`/`AppointmentState`/subject,
+/// and stamp `ModifiedOccurrence.cancelled`.
+///
+/// Two failure modes are handled deliberately, because the caller persists
+/// `detail_fetched=true` for these masters and an unchanged master never
+/// re-enriches — so a silently-skipped batch would leave the cancelled state
+/// permanently wrong until the series next changes:
+///   * A single deleted/inaccessible exception in a 100-id batch comes back as
+///     a per-item `ResponseClass="Error"`. We POST via [`post_soap_raw`] (NOT
+///     `post_soap`) so `check_for_fault` doesn't abort the whole batch on it —
+///     the failed id simply yields no `CalendarItem` and its override stays
+///     un-cancelled, while every other exception in the chunk is still stamped.
+///   * A genuine transport/parse failure IS propagated (`?`): the surrounding
+///     drain then fails without persisting, so the next drain re-runs from the
+///     same sync cookie and retries — rather than baking in a half-filled state.
+async fn enrich_occurrence_cancellations(
+    client: &EwsClient,
+    state: &mut SyncedFolderState,
+    to_enrich: &[(String, Option<String>)],
+) -> EwsResult<()> {
+    let enriched: std::collections::HashSet<&str> =
+        to_enrich.iter().map(|(id, _)| id.as_str()).collect();
+
+    // Exception refs from the masters we just enriched. De-dup by item id so a
+    // series with many overrides doesn't re-request the same exception twice.
+    let mut seen = std::collections::HashSet::new();
+    let exception_refs: Vec<(String, Option<String>)> = state
+        .items
+        .values()
+        .filter(|it| enriched.contains(it.item_id.as_str()))
+        .flat_map(|it| it.modified_occurrences.iter())
+        .filter(|ov| seen.insert(ov.item_id.clone()))
+        .map(|ov| (ov.item_id.clone(), ov.change_key.clone()))
+        .collect();
+
+    if exception_refs.is_empty() {
+        return Ok(());
+    }
+
+    tracing::info!(
+        target: "cal_adapter_ews::sync",
+        exceptions = exception_refs.len(),
+        "GetItem fan-out for occurrence-exception cancelled-state",
+    );
+
+    let mut cancelled_by_id: std::collections::HashMap<String, bool> =
+        std::collections::HashMap::new();
+    for batch in exception_refs.chunks(GET_ITEM_BATCH_SIZE) {
+        let body = crate::soap::get_calendar_items_with_recurrence(batch);
+        // `post_soap_raw` skips the fault check so a per-item Error (a deleted or
+        // inaccessible exception) doesn't poison the whole batch; the successful
+        // rows still parse. Transport failures still surface as `Err` here.
+        let xml = client.post_soap_raw(body).await?;
+        let parsed = crate::mapping::parse_get_calendar_items_response(&xml)?;
+        for exc in &parsed {
+            cancelled_by_id.insert(exc.item_id.clone(), crate::mapping::resolve_cancelled(exc));
+        }
+    }
+
+    if cancelled_by_id.is_empty() {
+        return Ok(());
+    }
+    for it in state.items.values_mut() {
+        if !enriched.contains(it.item_id.as_str()) {
+            continue;
+        }
+        for ov in it.modified_occurrences.iter_mut() {
+            if let Some(&cancelled) = cancelled_by_id.get(&ov.item_id) {
+                ov.cancelled = cancelled;
+            }
+        }
+    }
     Ok(())
 }
 
