@@ -1,7 +1,6 @@
-import { Alert } from 'react-native';
-
 import { occurrenceIsoOf, seriesIdOf } from '@aperio/shared';
 
+import { showEventScopeDialog } from './eventScopeDialog';
 import { CalendarEvent } from '../api/calendar';
 
 // Shared "edit this occurrence vs the whole series" prompt — the mobile analogue
@@ -45,20 +44,30 @@ export function editEventWithScope(
     return;
   }
 
-  Alert.alert(
-    t('dialogs.editScope.title'),
-    t('dialogs.editScope.message', { title: ev.title }),
-    [
-      { text: t('dialogs.editScope.cancel'), style: 'cancel' },
+  // In-app dialog (NOT Alert): three scope buttons don't fit a native Android
+  // Alert once Cancel is included (it keeps only the first three buttons), so
+  // "whole series" would be dropped. Editing isn't destructive, so no notify
+  // radio and no danger styling — mirrors the desktop EditEventScopeDialog.
+  showEventScopeDialog({
+    title: t('dialogs.editScope.title'),
+    message: t('dialogs.editScope.message', { title: ev.title }),
+    cancelLabel: t('dialogs.editScope.cancel'),
+    options: [
       {
-        text: t('dialogs.editScope.occurrence'),
-        onPress: () => open('occurrence'),
+        key: 'occurrence',
+        label: t('dialogs.editScope.occurrence'),
+        run: () => open('occurrence'),
       },
       {
-        text: t('dialogs.editScope.thisAndFuture'),
-        onPress: () => open('this_and_future'),
+        key: 'thisAndFuture',
+        label: t('dialogs.editScope.thisAndFuture'),
+        run: () => open('this_and_future'),
       },
-      { text: t('dialogs.editScope.series'), onPress: () => open('series') },
+      {
+        key: 'series',
+        label: t('dialogs.editScope.series'),
+        run: () => open('series'),
+      },
     ],
-  );
+  });
 }

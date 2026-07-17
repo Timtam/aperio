@@ -19,6 +19,16 @@ import { seriesIdOf, truncateRRuleBefore } from '../intl/recurrence';
  * "no recurrence" would silently wipe the earlier occurrences the user meant to
  * keep (and email a full cancellation), which is the exact opposite of the
  * intent. The caller surfaces the thrown message.
+ *
+ * KNOWN LIMITATION: only the master's own recurrence + EXDATEs are truncated.
+ * A cross-client single-occurrence modification synced in as a SEPARATE
+ * RECURRENCE-ID override event (CalDAV/iCloud + Google mint these as `::rid::`
+ * ids; EWS keeps modified occurrences inline, so it's unaffected) is NOT
+ * enumerated, so an override that falls AFTER the cutoff survives this truncation
+ * as a ghost. The same applies to the edit-split path (EventDialog). Handling it
+ * would need a bounded query of the tail range for override events + a delete/
+ * re-point of each — deferred; Aperio's own occurrence edits (standalone event +
+ * master EXDATE) are handled and are the common case.
  */
 export async function deleteThisAndFuture(
   ev: CalendarEvent,

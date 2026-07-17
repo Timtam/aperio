@@ -2,6 +2,7 @@ import { Alert } from 'react-native';
 
 import { occurrenceIsoOf, seriesIdOf } from '@aperio/shared';
 
+import { showEventScopeDialog } from './eventScopeDialog';
 import { addEventExdate, CalendarEvent, deleteEvent } from '../api/calendar';
 import { resolveCalendarUserEmail } from './currentUserEmail';
 import { deleteThisAndFuture } from './deleteSeriesFromOccurrence';
@@ -86,73 +87,72 @@ export function confirmDeleteEvent(
         : t('dialogs.event.thisAndFutureDeleted', { title: ev.title }),
     );
 
-  // Recurring-occurrence delete. For a meeting the account ORGANIZES, ALL four
-  // choices are explicit buttons in ONE prompt — cancel-and-notify vs remove-
-  // silently, for this occurrence and for the whole series — so there is never a
-  // hidden second step and every button spells out whether an email goes out.
-  // Everyone else gets the plain two-scope delete.
+  // Recurring-occurrence delete. Rendered as an in-app dialog (NOT Alert): the
+  // organizer form pairs a notify/silent radio (default: notify) with three scope
+  // buttons — this occurrence / this and all following / whole series — so the
+  // notify choice is made once and every scope applies it. Everyone else gets the
+  // three scope buttons alone (silent). A native Alert can't carry this many
+  // options — Android keeps only its first three buttons — so whole-series
+  // delete would be unreachable; the dialog renders them all, matching the
+  // desktop DeleteEventScopeDialog.
   const occurrenceAlert = (organizer: boolean) =>
     organizer
-      ? Alert.alert(
-          t('dialogs.deleteScope.title'),
-          t('dialogs.deleteScope.organizerMessage', { title: ev.title }),
-          [
-            { text: t('mobile.cancel'), style: 'cancel' },
+      ? showEventScopeDialog({
+          title: t('dialogs.deleteScope.title'),
+          message: t('dialogs.deleteScope.organizerMessage', { title: ev.title }),
+          cancelLabel: t('dialogs.deleteScope.cancel'),
+          notify: {
+            legend: t('dialogs.deleteScope.notifyLegend'),
+            notifyLabel: t('dialogs.deleteScope.notifyAttendees'),
+            silentLabel: t('dialogs.deleteScope.notifySilent'),
+          },
+          options: [
             {
-              text: t('dialogs.deleteScope.occurrenceNotify'),
-              style: 'destructive',
-              onPress: () => removeOccurrence(true),
+              key: 'occurrence',
+              label: t('dialogs.deleteScope.occurrence'),
+              destructive: true,
+              run: (send) => removeOccurrence(send),
             },
             {
-              text: t('dialogs.deleteScope.occurrenceSilent'),
-              style: 'destructive',
-              onPress: () => removeOccurrence(false),
+              key: 'thisAndFuture',
+              label: t('dialogs.deleteScope.thisAndFuture'),
+              destructive: true,
+              run: (send) => removeThisAndFuture(send),
             },
             {
-              text: t('dialogs.deleteScope.thisAndFutureNotify'),
-              style: 'destructive',
-              onPress: () => removeThisAndFuture(true),
-            },
-            {
-              text: t('dialogs.deleteScope.thisAndFutureSilent'),
-              style: 'destructive',
-              onPress: () => removeThisAndFuture(false),
-            },
-            {
-              text: t('dialogs.deleteScope.seriesNotify'),
-              style: 'destructive',
-              onPress: () => deleteWith(true),
-            },
-            {
-              text: t('dialogs.deleteScope.seriesSilent'),
-              style: 'destructive',
-              onPress: () => deleteWith(false),
+              key: 'series',
+              label: t('dialogs.deleteScope.series'),
+              destructive: true,
+              run: (send) => deleteWith(send),
             },
           ],
-        )
-      : Alert.alert(
-          t('dialogs.confirm.deleteEventTitle'),
-          t('dialogs.confirm.deleteEventMessage', { title: ev.title }),
-          [
-            { text: t('mobile.cancel'), style: 'cancel' },
+        })
+      : showEventScopeDialog({
+          title: t('dialogs.confirm.deleteEventTitle'),
+          message: t('dialogs.confirm.deleteEventMessage', { title: ev.title }),
+          cancelLabel: t('mobile.cancel'),
+          options: [
             {
-              text: t('dialogs.event.scope.occurrence'),
-              onPress: () => removeOccurrence(false),
+              key: 'occurrence',
+              label: t('dialogs.event.scope.occurrence'),
+              run: () => removeOccurrence(false),
             },
             {
-              text: t('dialogs.event.scope.thisAndFuture'),
-              onPress: () => removeThisAndFuture(false),
+              key: 'thisAndFuture',
+              label: t('dialogs.event.scope.thisAndFuture'),
+              run: () => removeThisAndFuture(false),
             },
             {
               // A whole-series delete can still email a cancellation; the
               // adapters tolerate send-cancellations from a non-organizer (fall
               // back to a plain delete), so `attendees > 0` is safe here.
-              text: t('dialogs.event.scope.series'),
-              style: 'destructive',
-              onPress: () => deleteWith(ev.attendees.length > 0),
+              key: 'series',
+              label: t('dialogs.event.scope.series'),
+              destructive: true,
+              run: () => deleteWith(ev.attendees.length > 0),
             },
           ],
-        );
+        });
 
   const choiceAlert = () =>
     Alert.alert(

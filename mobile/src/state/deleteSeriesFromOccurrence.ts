@@ -20,6 +20,12 @@ import {
  * we could NOT load (null) is a HARD ERROR: conflating "couldn't fetch" with "no
  * recurrence" would delete the WHOLE series (wiping the earlier occurrences the
  * user meant to keep, plus emailing a full cancellation) — the opposite of intent.
+ *
+ * KNOWN LIMITATION (same as desktop): a cross-client single-occurrence change
+ * synced in as a SEPARATE RECURRENCE-ID override event (CalDAV/iCloud + Google
+ * `::rid::` ids; EWS keeps them inline, unaffected) that falls AFTER the cutoff is
+ * not enumerated, so it survives this truncation. Aperio's own occurrence edits
+ * (standalone + EXDATE) are handled and are the common case.
  */
 export async function deleteThisAndFuture(
   ev: CalendarEvent,

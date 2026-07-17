@@ -505,14 +505,23 @@ export function EventDialog({
             }
             if (occIso && master?.recurrence?.rrule) {
               const cutoff = new Date(occIso);
-              // Count occurrences STRICTLY before the cutoff. expandEvent's range
-              // is inclusive of the end instant, and the cutoff IS an occurrence,
-              // so subtract 1ms to exclude it — otherwise a COUNT-bounded series
-              // loses its final occurrence (remaining COUNT one too small).
-              const before = expandEvent(master, {
-                start: new Date(master.start),
-                end: new Date(cutoff.getTime() - 1),
-              }).length;
+              // Count RRULE-generated occurrences STRICTLY before the cutoff.
+              // Two subtleties: (1) expandEvent's range is inclusive of the end
+              // instant and the cutoff IS an occurrence, so end at cutoff-1ms to
+              // exclude it; (2) RFC-5545 COUNT counts every rule slot INCLUDING
+              // exdated ones, so expand with exceptions cleared — otherwise an
+              // EXDATE before the cutoff undercounts, leaving the tail's remaining
+              // COUNT too large and appending a phantom occurrence past the end.
+              const before = expandEvent(
+                {
+                  ...master,
+                  recurrence: { ...master.recurrence, exceptions: [] },
+                },
+                {
+                  start: new Date(master.start),
+                  end: new Date(cutoff.getTime() - 1),
+                },
+              ).length;
               const { oldRule, newRule } = splitRRuleForEdit(
                 master.recurrence.rrule,
                 cutoff,
@@ -526,10 +535,15 @@ export function EventDialog({
               const tailExceptions = (master.recurrence.exceptions ?? []).filter(
                 (x) => new Date(x).getTime() >= cutoff.getTime(),
               );
+              // Notify on the truncate too (symmetric with delete-this-and-
+              // following): on notify-flag providers (EWS/Graph) attendees must be
+              // told the original series now ends before the cutoff, otherwise they
+              // keep the old occurrences AND get the new tail invite = duplicates.
               await apiUpdateEvent(
                 {
                   ...master,
                   recurrence: { ...master.recurrence, rrule: oldRule },
+                  send_invitations: sendInvitations,
                 },
                 master.calendar_id,
               );

@@ -639,4 +639,27 @@ describe('splitRRuleForEdit', () => {
     expect(oldRule).toBe('FREQ=WEEKLY;BYDAY=MO;UNTIL=20260614');
     expect(newRule).toBe('FREQ=WEEKLY;BYDAY=MO;COUNT=6');
   });
+
+  it('split count must ignore EXDATEs before the cutoff (RFC-5545 COUNT includes them)', () => {
+    // Master: 10 Mondays; the 3rd (2026-07-20) is already deleted (EXDATE).
+    const master = mkEvent({
+      start: '2026-07-06T09:00:00.000Z',
+      end: '2026-07-06T09:30:00.000Z',
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;BYDAY=MO;COUNT=10',
+        exceptions: ['2026-07-20T09:00:00.000Z'],
+        tzid: null,
+      },
+    });
+    const cut = new Date('2026-08-10T09:00:00.000Z'); // the 6th Monday
+    // The caller counts RRULE slots with exceptions CLEARED, else the exdated
+    // #3 undercounts and the tail gains a phantom 11th occurrence.
+    const before = expandEvent(
+      { ...master, recurrence: { ...master.recurrence!, exceptions: [] } },
+      { start: new Date(master.start), end: new Date(cut.getTime() - 1) },
+    ).length;
+    expect(before).toBe(5); // Mondays #1..#5, INCLUDING the exdated #3
+    const { newRule } = splitRRuleForEdit(master.recurrence!.rrule, cut, before);
+    expect(newRule).toBe('FREQ=WEEKLY;BYDAY=MO;COUNT=5'); // #6..#10, no phantom
+  });
 });
