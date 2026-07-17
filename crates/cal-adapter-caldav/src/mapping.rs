@@ -209,6 +209,7 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
 
     Ok(Event {
         send_invitations: false,
+        truncate_tail_overrides: false,
         id,
         calendar_id: calendar_id.to_string(),
         title: summary,
@@ -323,6 +324,18 @@ fn parse_compact_utc(s: &str) -> Option<DateTime<Utc>> {
     chrono::NaiveDateTime::parse_from_str(s, "%Y%m%dT%H%M%SZ")
         .ok()
         .map(|dt| Utc.from_utc_datetime(&dt))
+}
+
+/// The UTC instant an override id (`…::rid::<rfc3339>`) replaces, or `None` for a
+/// master / plain-event id. Reads the instant the mapper already resolved (via
+/// the provider's RECURRENCE-ID, zone-corrected), so it's exact even for a
+/// `TZID`-qualified or all-day RECURRENCE-ID.
+pub(crate) fn override_recurrence_id(event_id: &str) -> Option<DateTime<Utc>> {
+    let idx = event_id.find(RECURRENCE_ID_MARKER)?;
+    let iso = &event_id[idx + RECURRENCE_ID_MARKER.len()..];
+    DateTime::parse_from_rfc3339(iso)
+        .ok()
+        .map(|dt| dt.with_timezone(&Utc))
 }
 
 /// Parse an RFC 5545 ISO 8601 `DURATION` string into Aperio's

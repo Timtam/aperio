@@ -62,6 +62,7 @@ fn event(id: &str, start_h: u32, end_h: u32) -> Event {
         sound: None,
         attendees: Vec::new(),
         send_invitations: false,
+        truncate_tail_overrides: false,
         created_at: Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap(),
         updated_at: Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap(),
         etag: Some(format!("etag-{id}")),

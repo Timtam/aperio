@@ -11,7 +11,10 @@
 
 use std::sync::Arc;
 
-use cal_core::{AttendeeStatus, Calendar, DateRange, Event, FreeBusy, FreeBusySlot, NewEvent};
+use cal_core::{
+    rrule_until_instant, AttendeeStatus, Calendar, DateRange, Event, FreeBusy, FreeBusySlot,
+    NewEvent,
+};
 use chrono::{DateTime, Duration, Utc};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -607,8 +610,103 @@ pub async fn update_event(state: &ApiState, ev: &Event) -> GoogleResult<Event> {
     let path = format!("/calendars/{cal_enc}/events/{ev_enc}?sendUpdates={su}");
     let body = event_to_body(ev);
     let entry: EventEntry = state.patch_json(&path, &body).await?;
-    map_event(entry, &ev.calendar_id)?
-        .ok_or_else(|| GoogleError::Protocol("update returned cancelled event".into()))
+    let updated = map_event(entry, &ev.calendar_id)?
+        .ok_or_else(|| GoogleError::Protocol("update returned cancelled event".into()))?;
+
+    // "This and all following": the master's rule now ends earlier, but a
+    // provider-modified occurrence in the dropped tail is a SEPARATE stored event
+    // that survives the truncation as a ghost. Best-effort cleanup — a failure
+    // here must NOT fail the (already-committed) truncation, so a leftover ghost
+    // is no worse than before this feature.
+    if ev.truncate_tail_overrides {
+        if let Some(until) = ev
+            .recurrence
+            .as_ref()
+            .and_then(|r| rrule_until_instant(&r.rrule))
+        {
+            if let Err(e) =
+                drop_tail_modified_instances(state, &ev.calendar_id, &ev.id, until).await
+            {
+                warn!(
+                    master = %ev.id,
+                    error = %e,
+                    "update_event: tail-override cleanup failed (ghost tolerated)"
+                );
+            }
+        }
+    }
+    Ok(updated)
+}
+
+/// Cancel the SEPARATE modified-instance events of `master_id` that sit in the
+/// deleted tail (original slot after `until`). `singleEvents=false` returns only
+/// STORED events (the master + its finite modified instances), not the expanded
+/// occurrences, so the set is small and complete even after the master was
+/// truncated. Silent (`sendUpdates=none`): the master update already carried the
+/// attendee notification for the series change, so per-instance deletes are
+/// cleanup, not a second round of cancellation emails.
+async fn drop_tail_modified_instances(
+    state: &ApiState,
+    calendar_id: &str,
+    master_id: &str,
+    until: DateTime<Utc>,
+) -> GoogleResult<()> {
+    let cal_enc = urlencoding(calendar_id);
+    // Widen the lower bound so an instance MOVED slightly before its original
+    // slot still surfaces; the precise gate below is on the ORIGINAL start. The
+    // upper bound is generous — modified instances are finite and near-term.
+    let lo = until - Duration::days(1);
+    let hi = until + Duration::days(3660);
+    let path = format!(
+        "/calendars/{cal_enc}/events?singleEvents=false&showDeleted=false&maxResults=2500\
+         &timeMin={}&timeMax={}",
+        urlencoding(&lo.to_rfc3339()),
+        urlencoding(&hi.to_rfc3339()),
+    );
+    let resp: EventListResponse = state.get_json(&path).await?;
+    let ids = tail_override_instance_ids(&resp.items, master_id, until);
+    debug!(
+        master = master_id,
+        count = ids.len(),
+        "drop_tail_modified_instances"
+    );
+    for id in ids {
+        let inst_enc = urlencoding(&id);
+        let del_path = format!("/calendars/{cal_enc}/events/{inst_enc}?sendUpdates=none");
+        match state.delete_request(&del_path).await {
+            // Already gone → idempotent success.
+            Ok(())
+            | Err(GoogleError::Http {
+                status: 404 | 410, ..
+            }) => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
+/// The ids of `master_id`'s modified-instance events whose ORIGINAL slot is
+/// strictly after `until` (the deleted tail). Pure, for testing. Skips already-
+/// cancelled instances and any event that isn't a modified instance of `master_id`.
+fn tail_override_instance_ids(
+    items: &[EventEntry],
+    master_id: &str,
+    until: DateTime<Utc>,
+) -> Vec<String> {
+    items
+        .iter()
+        .filter_map(|it| {
+            if it.recurring_event_id.as_deref() != Some(master_id) {
+                return None;
+            }
+            if it.status.as_deref() == Some("cancelled") {
+                return None;
+            }
+            let src = it.original_start_time.as_ref().unwrap_or(&it.start);
+            let (orig, _) = src.resolve().ok()?;
+            (orig > until).then(|| it.id.clone())
+        })
+        .collect()
 }
 
 /// `DELETE /calendars/{id}/events/{eventId}` — delete an entire
@@ -944,6 +1042,37 @@ fn urlencoding(s: &str) -> String {
 mod tests {
     use super::*;
     use chrono::TimeZone;
+
+    #[test]
+    fn tail_override_instance_ids_picks_only_the_masters_tail() {
+        let items: Vec<EventEntry> = serde_json::from_value(serde_json::json!([
+            // Modified instance of "m" in the deleted tail → picked.
+            { "id": "m_20260817", "status": "confirmed", "recurringEventId": "m",
+              "start": { "dateTime": "2026-08-17T11:00:00Z" },
+              "originalStartTime": { "dateTime": "2026-08-17T09:00:00Z" } },
+            // Modified instance of "m" BEFORE the cutoff → kept (not picked).
+            { "id": "m_20260803", "status": "confirmed", "recurringEventId": "m",
+              "start": { "dateTime": "2026-08-03T11:00:00Z" },
+              "originalStartTime": { "dateTime": "2026-08-03T09:00:00Z" } },
+            // Already-cancelled tail instance → skipped.
+            { "id": "m_20260824", "status": "cancelled", "recurringEventId": "m",
+              "start": { "dateTime": "2026-08-24T09:00:00Z" },
+              "originalStartTime": { "dateTime": "2026-08-24T09:00:00Z" } },
+            // A modified instance of a DIFFERENT master → skipped.
+            { "id": "other_20260901", "status": "confirmed", "recurringEventId": "other",
+              "start": { "dateTime": "2026-09-01T09:00:00Z" },
+              "originalStartTime": { "dateTime": "2026-09-01T09:00:00Z" } },
+            // The master row itself (no recurringEventId) → skipped.
+            { "id": "m", "status": "confirmed",
+              "start": { "dateTime": "2026-08-03T09:00:00Z" } },
+        ]))
+        .unwrap();
+        let until = Utc.with_ymd_and_hms(2026, 8, 10, 8, 59, 59).unwrap();
+        assert_eq!(
+            tail_override_instance_ids(&items, "m", until),
+            vec!["m_20260817".to_string()],
+        );
+    }
 
     fn fixture_state(server_url: &str) -> ApiState {
         ApiState {

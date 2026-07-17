@@ -210,6 +210,7 @@ fn map_event(d: DeviceEvent) -> Result<Event> {
         sound: None,
         attendees: Vec::new(),
         send_invitations: false,
+        truncate_tail_overrides: false,
         created_at,
         updated_at,
         etag: None,

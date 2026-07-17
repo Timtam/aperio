@@ -184,6 +184,34 @@ fn parse_until(val: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(date_part, "%Y%m%d").ok()
 }
 
+/// The UTC instant of an RRULE `UNTIL`, or `None` when the rule carries no
+/// parseable `UNTIL`. Handles the DATE-TIME form (`UNTIL=YYYYMMDDTHHMMSSZ`) and
+/// the DATE form (`UNTIL=YYYYMMDD`, all-day series); the latter maps to that
+/// day's LAST instant since RFC-5545 `UNTIL` is inclusive of the whole date. Used
+/// by the "this and all following" split to bound the deleted tail when dropping
+/// provider-side override instances.
+pub fn rrule_until_instant(rrule: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    use chrono::{TimeZone, Utc};
+    let body = rrule.trim().strip_prefix("RRULE:").unwrap_or(rrule.trim());
+    for part in body.split(';') {
+        let mut kv = part.splitn(2, '=');
+        let key = kv.next().unwrap_or("");
+        if !key.eq_ignore_ascii_case("UNTIL") {
+            continue;
+        }
+        let val = kv.next().unwrap_or("").trim();
+        if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(val, "%Y%m%dT%H%M%SZ") {
+            return Some(Utc.from_utc_datetime(&dt));
+        }
+        if let Ok(d) = NaiveDate::parse_from_str(val, "%Y%m%d") {
+            return d
+                .and_hms_opt(23, 59, 59)
+                .map(|dt| Utc.from_utc_datetime(&dt));
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

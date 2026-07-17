@@ -20,15 +20,12 @@ import { seriesIdOf, truncateRRuleBefore } from '../intl/recurrence';
  * keep (and email a full cancellation), which is the exact opposite of the
  * intent. The caller surfaces the thrown message.
  *
- * KNOWN LIMITATION: only the master's own recurrence + EXDATEs are truncated.
  * A cross-client single-occurrence modification synced in as a SEPARATE
- * RECURRENCE-ID override event (CalDAV/iCloud + Google mint these as `::rid::`
- * ids; EWS keeps modified occurrences inline, so it's unaffected) is NOT
- * enumerated, so an override that falls AFTER the cutoff survives this truncation
- * as a ghost. The same applies to the edit-split path (EventDialog). Handling it
- * would need a bounded query of the tail range for override events + a delete/
- * re-point of each — deferred; Aperio's own occurrence edits (standalone event +
- * master EXDATE) are handled and are the common case.
+ * RECURRENCE-ID override (CalDAV/iCloud + Google) would otherwise survive the
+ * truncation as a ghost; the `truncate_tail_overrides` flag on the update asks
+ * the adapter to drop the overrides in the dropped tail (CalDAV re-writes the
+ * resource without them; Google cancels the tail instance events). EWS keeps
+ * modified occurrences inline, so its truncation drops them for free.
  */
 export async function deleteThisAndFuture(
   ev: CalendarEvent,
@@ -56,5 +53,8 @@ export async function deleteThisAndFuture(
     ...master,
     recurrence: { ...master.recurrence, rrule },
     send_invitations: sendCancellations,
+    // Ask the adapter to drop any provider-side override in the dropped tail
+    // (CalDAV/iCloud + Google) so it doesn't survive as a ghost occurrence.
+    truncate_tail_overrides: true,
   });
 }

@@ -393,6 +393,7 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Eve
 
     Ok(Some(Event {
         send_invitations: false,
+        truncate_tail_overrides: false,
         id: entry.id,
         calendar_id: calendar_id.to_string(),
         title: entry.subject.unwrap_or_default(),

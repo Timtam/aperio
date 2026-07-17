@@ -482,6 +482,7 @@ mod tests {
             sound: None,
             attendees: vec![],
             send_invitations: false,
+            truncate_tail_overrides: false,
             created_at: now,
             updated_at: now,
             etag: None,

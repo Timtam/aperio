@@ -78,6 +78,11 @@ export interface CalendarEvent {
   sound: SoundConfig | null;
   attendees: string[];
   send_invitations?: boolean;
+  /** Transient "this and all following" signal for the next update: when true on
+   *  a truncated recurring MASTER, CalDAV/iCloud + Google adapters drop any
+   *  RECURRENCE-ID override in the dropped tail so it doesn't ghost. Not
+   *  persisted; only the split's update sets it. */
+  truncate_tail_overrides?: boolean;
   created_at: string;
   updated_at: string;
   etag: string | null;

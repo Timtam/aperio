@@ -555,6 +555,7 @@ fn persist_new_event(
 
     Ok(Event {
         send_invitations: false,
+        truncate_tail_overrides: false,
         id: id.to_string(),
         calendar_id: calendar_id.to_string(),
         title: event.title,
@@ -607,6 +608,7 @@ pub(crate) fn row_to_event(row: &rusqlite::Row<'_>) -> cal_core::Result<Event> {
 
     Ok(Event {
         send_invitations: false,
+        truncate_tail_overrides: false,
         id,
         calendar_id,
         title,

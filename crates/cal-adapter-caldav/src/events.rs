@@ -12,7 +12,7 @@
 //! a different component name on the filter side and a different
 //! ID/etag tracking concern (completed_at vs start_utc).
 
-use cal_core::{AttendeeStatus, DateRange, Event, EventRecurrence, NewEvent};
+use cal_core::{rrule_until_instant, AttendeeStatus, DateRange, Event, EventRecurrence, NewEvent};
 use chrono::{DateTime, Utc};
 use reqwest::{
     header::{HeaderName, HeaderValue, ACCEPT, CONTENT_TYPE, ETAG, IF_MATCH, IF_NONE_MATCH},
@@ -26,7 +26,7 @@ use crate::config::Credentials;
 use crate::error::{CaldavError, CaldavResult};
 use crate::http::{is_transient_send_error, SendRetrying};
 use crate::mapping::{
-    decode_event_id, event_to_ical, new_event_to_ical, parse_calendar_data,
+    decode_event_id, event_to_ical, new_event_to_ical, override_recurrence_id, parse_calendar_data,
     parse_calendar_data_with_href,
 };
 use crate::xml::parse_multistatus;
@@ -172,6 +172,7 @@ pub async fn create_event(
 
     Ok(Event {
         send_invitations: false,
+        truncate_tail_overrides: false,
         id: uid,
         calendar_id: calendar_url.to_string(),
         title: event.title,
@@ -210,6 +211,39 @@ pub async fn update_event(
     credentials: &Credentials,
     organizer: Option<&str>,
 ) -> CaldavResult<Event> {
+    // "This and all following" truncation: the master's rule now ends earlier, so
+    // any RECURRENCE-ID override in the dropped tail must go too. The plain
+    // master-only PUT below leaves them (the server reattaches its other
+    // components), so a provider-modified occurrence past the cutoff would ghost.
+    // Take the GET-merge path only when the caller asked for it AND the rule
+    // carries an UNTIL to bound the tail; otherwise fall through unchanged.
+    if event.truncate_tail_overrides {
+        if let Some(until) = event
+            .recurrence
+            .as_ref()
+            .and_then(|r| rrule_until_instant(&r.rrule))
+        {
+            return update_event_dropping_tail_overrides(
+                client,
+                event,
+                until,
+                credentials,
+                organizer,
+            )
+            .await;
+        }
+    }
+    put_master_only(client, event, credentials, organizer).await
+}
+
+/// The plain update: serialise just the master and PUT it, letting the server
+/// keep the resource's other components (overrides) on the next round-trip.
+async fn put_master_only(
+    client: &Client,
+    event: Event,
+    credentials: &Credentials,
+    organizer: Option<&str>,
+) -> CaldavResult<Event> {
     let cal_url = Url::parse(&event.calendar_id)
         .map_err(|e| CaldavError::Config(format!("event.calendar_id is not a URL: {e}")))?;
     let resource = resource_url_for_event(&cal_url, &event.id)?;
@@ -239,6 +273,157 @@ pub async fn update_event(
         updated_at: Utc::now(),
         ..event
     })
+}
+
+/// "This and all following" write: GET the resource, replace the master with the
+/// truncated `event`, KEEP every RECURRENCE-ID override at/before `until` verbatim
+/// (so per-instance edits/VALARMs/X-props survive byte-for-byte), and DROP the
+/// overrides after `until` (the deleted tail). Falls back to the plain master-only
+/// PUT on any parse ambiguity, so it is never worse than today.
+async fn update_event_dropping_tail_overrides(
+    client: &Client,
+    event: Event,
+    until: DateTime<Utc>,
+    credentials: &Credentials,
+    organizer: Option<&str>,
+) -> CaldavResult<Event> {
+    let cal_url = Url::parse(&event.calendar_id)
+        .map_err(|e| CaldavError::Config(format!("event.calendar_id is not a URL: {e}")))?;
+    let resource = resource_url_for_event(&cal_url, &event.id)?;
+
+    // GET the current resource (raw body + ETag) to recover the override VEVENTs.
+    let mut get_headers = auth_header(credentials)?;
+    get_headers.insert(ACCEPT, HeaderValue::from_static("text/calendar"));
+    let get = client
+        .get(resource.clone())
+        .headers(get_headers)
+        .send_retrying()
+        .await?;
+    if !get.status().is_success() {
+        // Can't read it back — fall through to the plain PUT (no worse than today).
+        return put_master_only(client, event, credentials, organizer).await;
+    }
+    let server_etag = extract_etag(&get);
+    let body = get.text().await?;
+
+    // Master via event_to_ical (new RRULE/UNTIL + VTIMEZONE); merge keeps the
+    // in-range override blocks verbatim and drops the tail. A parse mismatch →
+    // bail to the plain PUT (never worse than today).
+    let master_vcal = event_to_ical(&event, organizer);
+    let new_body = match merge_dropping_tail_overrides(&body, &master_vcal, until, cal_url.as_str())
+    {
+        Some(b) => b,
+        None => return put_master_only(client, event, credentials, organizer).await,
+    };
+
+    let mut put_headers = auth_header(credentials)?;
+    put_headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/calendar; charset=utf-8"),
+    );
+    // If-Match against the FRESH server ETag (we just read the truth) so a
+    // concurrent edit surfaces as 412 rather than a silent clobber.
+    if let Some(tag) = &server_etag {
+        if let Ok(v) = HeaderValue::from_str(tag) {
+            put_headers.insert(IF_MATCH, v);
+        }
+    }
+    let put = client
+        .put(resource)
+        .headers(put_headers)
+        .body(new_body)
+        .send_retrying()
+        .await?;
+    expect_write_success(&put)?;
+    let new_etag = extract_etag(&put);
+
+    Ok(Event {
+        etag: new_etag.or(server_etag).or(event.etag.clone()),
+        updated_at: Utc::now(),
+        ..event
+    })
+}
+
+/// Rebuild the resource body for a "this and all following" truncation: the
+/// `master_vcal` (from `event_to_ical`, a full VCALENDAR holding just the new
+/// master) with the in-range RECURRENCE-ID overrides from `body` spliced back in
+/// and the tail overrides (RECURRENCE-ID after `until`) dropped.
+///
+/// Overrides are identified from the MAPPED events (so a `TZID`/all-day
+/// RECURRENCE-ID is zone-resolved correctly) but their raw VEVENT text is kept
+/// byte-for-byte, so per-instance edits / VALARMs / X-props survive intact.
+/// Returns `None` when the parsed events and raw blocks don't correspond 1:1 (an
+/// unmappable VEVENT, an odd shape) so the caller can fall back safely.
+fn merge_dropping_tail_overrides(
+    body: &str,
+    master_vcal: &str,
+    until: DateTime<Utc>,
+    calendar_id: &str,
+) -> Option<String> {
+    let parsed = parse_calendar_data(body, calendar_id).ok()?;
+    let blocks = split_vevent_blocks(body);
+    if parsed.len() != blocks.len() {
+        return None;
+    }
+    let kept: Vec<&str> = parsed
+        .iter()
+        .zip(blocks.iter())
+        .filter_map(|(ev, block)| match override_recurrence_id(&ev.id) {
+            // Master VEVENT → replaced by the truncated master in `master_vcal`.
+            None => None,
+            // In-range override → keep verbatim; tail override → drop.
+            Some(rid) if rid <= until => Some(block.as_str()),
+            Some(_) => None,
+        })
+        .collect();
+    Some(splice_overrides_before_end(master_vcal, &kept))
+}
+
+/// Split a raw VCALENDAR body into its top-level `VEVENT` blocks (each retaining
+/// its own line endings), in document order. VALARM / VTIMEZONE sub-components
+/// stay inside their VEVENT block (they don't start with `BEGIN:VEVENT`).
+fn split_vevent_blocks(body: &str) -> Vec<String> {
+    let mut blocks = Vec::new();
+    let mut current: Option<String> = None;
+    for line in body.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if trimmed == "BEGIN:VEVENT" {
+            current = Some(String::new());
+        }
+        if let Some(buf) = current.as_mut() {
+            buf.push_str(line);
+        }
+        if trimmed == "END:VEVENT" {
+            if let Some(buf) = current.take() {
+                blocks.push(buf);
+            }
+        }
+    }
+    blocks
+}
+
+/// Insert the `overrides` VEVENT blocks just before the final `END:VCALENDAR` of
+/// `vcal` (the master-only calendar from `event_to_ical`). Each block already
+/// ends with a newline; a missing one is added so the result stays well-formed.
+fn splice_overrides_before_end(vcal: &str, overrides: &[&str]) -> String {
+    if overrides.is_empty() {
+        return vcal.to_string();
+    }
+    let Some(pos) = vcal.rfind("END:VCALENDAR") else {
+        return vcal.to_string();
+    };
+    let line_start = vcal[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let mut out =
+        String::with_capacity(vcal.len() + overrides.iter().map(|o| o.len()).sum::<usize>());
+    out.push_str(&vcal[..line_start]);
+    for o in overrides {
+        out.push_str(o);
+        if !o.ends_with('\n') {
+            out.push_str("\r\n");
+        }
+    }
+    out.push_str(&vcal[line_start..]);
+    out
 }
 
 /// Outcome of a DELETE attempt. Distinguishes "we just removed
@@ -877,6 +1062,7 @@ END:VCALENDAR</c:calendar-data>
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            truncate_tail_overrides: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: Some("\"old-etag\"".into()),
@@ -920,6 +1106,7 @@ END:VCALENDAR</c:calendar-data>
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            truncate_tail_overrides: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: Some("\"stale-etag\"".into()),
@@ -987,6 +1174,109 @@ END:VCALENDAR</c:calendar-data>
         .await
         .unwrap();
         assert_eq!(outcome, DeleteOutcome::Deleted);
+    }
+
+    #[test]
+    fn rrule_until_instant_parses_datetime_and_date_only() {
+        assert_eq!(
+            rrule_until_instant("FREQ=WEEKLY;BYDAY=MO;UNTIL=20260810T085959Z"),
+            Some(Utc.with_ymd_and_hms(2026, 8, 10, 8, 59, 59).unwrap()),
+        );
+        // Date-only (all-day series) → that day's last instant (inclusive).
+        assert_eq!(
+            rrule_until_instant("FREQ=WEEKLY;BYDAY=MO;UNTIL=20260614"),
+            Some(Utc.with_ymd_and_hms(2026, 6, 14, 23, 59, 59).unwrap()),
+        );
+        assert_eq!(rrule_until_instant("FREQ=WEEKLY;BYDAY=MO"), None);
+    }
+
+    #[test]
+    fn override_recurrence_id_reads_the_rid_suffix() {
+        assert_eq!(
+            override_recurrence_id("href|uid::rid::2026-08-17T09:00:00Z"),
+            Some(Utc.with_ymd_and_hms(2026, 8, 17, 9, 0, 0).unwrap()),
+        );
+        // A master / plain id has no ::rid:: suffix.
+        assert_eq!(override_recurrence_id("href|uid"), None);
+    }
+
+    #[test]
+    fn merge_drops_tail_overrides_keeps_in_range_ones() {
+        // Master + two RECURRENCE-ID overrides: one before the cutoff (kept), one
+        // after (the deleted tail → dropped).
+        let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\n\
+BEGIN:VEVENT\r\nUID:series-1@aperio\r\nDTSTART:20260803T090000Z\r\nDTEND:20260803T093000Z\r\n\
+SUMMARY:Weekly sync\r\nRRULE:FREQ=WEEKLY;BYDAY=MO\r\nEND:VEVENT\r\n\
+BEGIN:VEVENT\r\nUID:series-1@aperio\r\nRECURRENCE-ID:20260803T090000Z\r\nDTSTART:20260803T100000Z\r\n\
+DTEND:20260803T103000Z\r\nSUMMARY:Moved head\r\nEND:VEVENT\r\n\
+BEGIN:VEVENT\r\nUID:series-1@aperio\r\nRECURRENCE-ID:20260817T090000Z\r\nDTSTART:20260817T100000Z\r\n\
+DTEND:20260817T103000Z\r\nSUMMARY:Moved tail\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+        // The truncated master, serialised the same way update_event would.
+        let master = Event {
+            id: "series-1@aperio".into(),
+            calendar_id: "https://example.com/cal/".into(),
+            title: "Weekly sync".into(),
+            description: None,
+            location: None,
+            start: Utc.with_ymd_and_hms(2026, 8, 3, 9, 0, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2026, 8, 3, 9, 30, 0).unwrap(),
+            all_day: false,
+            recurrence: Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY;BYDAY=MO;UNTIL=20260810T085959Z".into(),
+                exceptions: Vec::new(),
+                tzid: None,
+            }),
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+            truncate_tail_overrides: true,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            etag: None,
+            organizer: None,
+            attendee_responses: Vec::new(),
+            cancelled: false,
+        };
+        let master_vcal = event_to_ical(&master, None);
+        let until = rrule_until_instant(&master.recurrence.as_ref().unwrap().rrule).unwrap();
+
+        let merged =
+            merge_dropping_tail_overrides(body, &master_vcal, until, "https://example.com/cal/")
+                .expect("body parses cleanly");
+
+        // The in-range override is kept verbatim; the tail override is gone.
+        assert!(
+            merged.contains("SUMMARY:Moved head"),
+            "in-range override kept: {merged}"
+        );
+        assert!(
+            !merged.contains("Moved tail") && !merged.contains("20260817"),
+            "tail override dropped: {merged}"
+        );
+        // The master carries the new UNTIL, and there is exactly one kept override.
+        assert!(merged.contains("UNTIL=20260810T085959Z"));
+        assert_eq!(
+            merged.matches("RECURRENCE-ID").count(),
+            1,
+            "only the in-range override remains: {merged}"
+        );
+    }
+
+    #[test]
+    fn merge_bails_on_block_count_mismatch() {
+        // A VEVENT without a UID won't map, so parsed.len() != blocks.len() → None
+        // (caller falls back to the plain master-only PUT).
+        let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+BEGIN:VEVENT\r\nDTSTART:20260803T090000Z\r\nSUMMARY:No UID\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let until = Utc.with_ymd_and_hms(2026, 8, 10, 0, 0, 0).unwrap();
+        assert_eq!(
+            merge_dropping_tail_overrides(body, "MASTER", until, "https://example.com/cal/"),
+            None,
+        );
     }
 
     #[tokio::test]

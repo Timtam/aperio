@@ -434,6 +434,7 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
 
     Ok(Some(Event {
         send_invitations: false,
+        truncate_tail_overrides: false,
         id,
         calendar_id: calendar_id.to_string(),
         title: entry.summary.unwrap_or_default(),
@@ -961,6 +962,7 @@ mod tests {
             organizer: None,
             attendee_responses: vec![],
             send_invitations: false,
+            truncate_tail_overrides: false,
             cancelled: false,
         };
         let json = serde_json::to_value(event_to_body(&ev)).unwrap();
@@ -1146,6 +1148,7 @@ mod tests {
             sound: None,
             attendees: vec![],
             send_invitations: false,
+            truncate_tail_overrides: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: None,

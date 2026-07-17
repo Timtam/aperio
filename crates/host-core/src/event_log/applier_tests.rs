@@ -61,6 +61,7 @@ fn fixture_event(id: &str, calendar_id: &str) -> Event {
         sound: None,
         attendees: Vec::new(),
         send_invitations: false,
+        truncate_tail_overrides: false,
         created_at: Utc.with_ymd_and_hms(2026, 5, 12, 9, 0, 0).unwrap(),
         updated_at: Utc.with_ymd_and_hms(2026, 5, 12, 9, 0, 0).unwrap(),
         etag: None,

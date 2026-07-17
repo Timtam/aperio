@@ -21,11 +21,10 @@ import {
  * recurrence" would delete the WHOLE series (wiping the earlier occurrences the
  * user meant to keep, plus emailing a full cancellation) — the opposite of intent.
  *
- * KNOWN LIMITATION (same as desktop): a cross-client single-occurrence change
- * synced in as a SEPARATE RECURRENCE-ID override event (CalDAV/iCloud + Google
- * `::rid::` ids; EWS keeps them inline, unaffected) that falls AFTER the cutoff is
- * not enumerated, so it survives this truncation. Aperio's own occurrence edits
- * (standalone + EXDATE) are handled and are the common case.
+ * A cross-client single-occurrence change synced in as a SEPARATE RECURRENCE-ID
+ * override (CalDAV/iCloud + Google) is dropped by the adapter via the
+ * `truncate_tail_overrides` flag on the update, so it doesn't survive as a ghost.
+ * EWS keeps modified occurrences inline, so its truncation drops them for free.
  */
 export async function deleteThisAndFuture(
   ev: CalendarEvent,
@@ -53,5 +52,8 @@ export async function deleteThisAndFuture(
     ...master,
     recurrence: { ...master.recurrence, rrule },
     send_invitations: sendCancellations,
+    // Ask the adapter to drop any provider-side override in the dropped tail
+    // (CalDAV/iCloud + Google) so it doesn't survive as a ghost occurrence.
+    truncate_tail_overrides: true,
   });
 }

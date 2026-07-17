@@ -23,7 +23,7 @@ pub use extras::{
     apply_task_extras, decode_payload, encode_payload, extras_for_task, recurrence_needs_extras,
     AperioExtras,
 };
-pub use recurrence::{rrule_to_task_recurrence, task_recurrence_to_rrule};
+pub use recurrence::{rrule_to_task_recurrence, rrule_until_instant, task_recurrence_to_rrule};
 pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};
 pub use spawn::{advance, completion_record_for, next_recurrence_instance};
 pub use types::{

@@ -544,6 +544,9 @@ export function EventDialog({
                   ...master,
                   recurrence: { ...master.recurrence, rrule: oldRule },
                   send_invitations: sendInvitations,
+                  // Drop provider-side overrides in the dropped tail (they'd
+                  // otherwise ghost / duplicate against the new series).
+                  truncate_tail_overrides: true,
                 },
                 master.calendar_id,
               );

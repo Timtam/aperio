@@ -133,6 +133,7 @@ pub fn events_for_contacts(
             }
             out.push(Event {
                 send_invitations: false,
+                truncate_tail_overrides: false,
                 id: format!("aperio-birthday:{}:{}", contact.id, year),
                 calendar_id: calendar_id.to_string(),
                 title: contact.display_name.clone(),

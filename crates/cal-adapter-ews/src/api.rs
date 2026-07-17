@@ -1013,6 +1013,7 @@ fn build_event_from_new(
     let aperio_id = encode_event_id(kind, item_id, change_key.as_deref());
     Event {
         send_invitations: false,
+        truncate_tail_overrides: false,
         id: aperio_id,
         calendar_id: calendar_id.to_string(),
         title: new.title.clone(),
@@ -1528,6 +1529,7 @@ mod tests {
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            truncate_tail_overrides: false,
             created_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             updated_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             etag: Some("CK-V1".into()),
@@ -1732,6 +1734,7 @@ mod tests {
             sound: None,
             attendees: Vec::new(),
             send_invitations: false,
+            truncate_tail_overrides: false,
             created_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             updated_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             etag: Some("OCK".into()),

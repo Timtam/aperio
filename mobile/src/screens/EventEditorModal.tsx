@@ -393,6 +393,9 @@ export default function EventEditorModal({
             ...original,
             recurrence: { ...original.recurrence, rrule: oldRule },
             send_invitations: sendInvitations,
+            // Drop provider-side overrides in the dropped tail (they'd otherwise
+            // ghost / duplicate against the new series).
+            truncate_tail_overrides: true,
           },
           original.calendar_id,
         );
