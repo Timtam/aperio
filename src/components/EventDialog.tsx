@@ -575,8 +575,14 @@ export function EventDialog({
                 );
               } catch (createErr) {
                 // The master was already truncated; restore it so the tail isn't
-                // silently lost, then surface the original failure.
-                await apiUpdateEvent(master, master.calendar_id).catch(() => {});
+                // silently lost, then surface the original failure. Restore WITH
+                // the same notify flag as the truncate: if we told attendees the
+                // series ended early, we must tell them it's whole again, else
+                // their calendars stay diverged from the organizer's.
+                await apiUpdateEvent(
+                  { ...master, send_invitations: sendInvitations },
+                  master.calendar_id,
+                ).catch(() => {});
                 throw createErr;
               }
               if (!storesColorNatively) {
