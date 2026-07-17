@@ -78,6 +78,7 @@ import {
   deleteEventById,
   isCommandError,
 } from '../../api/client';
+import { deleteThisAndFuture } from '../../state/deleteSeriesFromOccurrence';
 import {
   EVENT_DND_TYPE,
   moveEventToDay,
@@ -302,7 +303,7 @@ export function MonthView() {
   const performDelete = useCallback(
     async (
       ev: CalendarEvent,
-      scope: 'occurrence' | 'series',
+      scope: 'occurrence' | 'this_and_future' | 'series',
       sendCancellations = false,
     ) => {
       try {
@@ -314,6 +315,16 @@ export function MonthView() {
               sendCancellations
                 ? 'dialogs.event.occurrenceCancelled'
                 : 'dialogs.event.occurrenceDeleted',
+              { title: ev.title },
+            ),
+          );
+        } else if (scope === 'this_and_future' && occIso) {
+          await deleteThisAndFuture(ev, occIso, sendCancellations);
+          announce(
+            t(
+              sendCancellations
+                ? 'dialogs.event.thisAndFutureCancelled'
+                : 'dialogs.event.thisAndFutureDeleted',
               { title: ev.title },
             ),
           );
@@ -1151,6 +1162,10 @@ export function MonthView() {
         event={scopeTarget}
         onOccurrence={(send) => {
           if (scopeTarget) void performDelete(scopeTarget, 'occurrence', send);
+        }}
+        onThisAndFuture={(send) => {
+          if (scopeTarget)
+            void performDelete(scopeTarget, 'this_and_future', send);
         }}
         onSeries={(send) => {
           if (scopeTarget) void performDelete(scopeTarget, 'series', send);

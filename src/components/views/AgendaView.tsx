@@ -32,6 +32,7 @@ import {
   deleteEventById,
   isCommandError,
 } from '../../api/client';
+import { deleteThisAndFuture } from '../../state/deleteSeriesFromOccurrence';
 
 /**
  * Agenda — flat, chronologically ordered listbox of events with visual
@@ -100,7 +101,7 @@ export function AgendaView() {
   const performDelete = useCallback(
     async (
       ev: CalendarEvent,
-      scope: 'occurrence' | 'series',
+      scope: 'occurrence' | 'this_and_future' | 'series',
       sendCancellations = false,
     ) => {
       try {
@@ -112,6 +113,16 @@ export function AgendaView() {
               sendCancellations
                 ? 'dialogs.event.occurrenceCancelled'
                 : 'dialogs.event.occurrenceDeleted',
+              { title: ev.title },
+            ),
+          );
+        } else if (scope === 'this_and_future' && occIso) {
+          await deleteThisAndFuture(ev, occIso, sendCancellations);
+          announce(
+            t(
+              sendCancellations
+                ? 'dialogs.event.thisAndFutureCancelled'
+                : 'dialogs.event.thisAndFutureDeleted',
               { title: ev.title },
             ),
           );
@@ -308,6 +319,10 @@ export function AgendaView() {
         event={scopeTarget}
         onOccurrence={(send) => {
           if (scopeTarget) void performDelete(scopeTarget, 'occurrence', send);
+        }}
+        onThisAndFuture={(send) => {
+          if (scopeTarget)
+            void performDelete(scopeTarget, 'this_and_future', send);
         }}
         onSeries={(send) => {
           if (scopeTarget) void performDelete(scopeTarget, 'series', send);
