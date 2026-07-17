@@ -618,7 +618,12 @@ pub async fn update_event(state: &ApiState, ev: &Event) -> GoogleResult<Event> {
     // that survives the truncation as a ghost. Best-effort cleanup — a failure
     // here must NOT fail the (already-committed) truncation, so a leftover ghost
     // is no worse than before this feature.
-    if ev.truncate_tail_overrides {
+    //
+    // TIMED series only: for an all-day series the DATE-only UNTIL (end-of-day
+    // UTC) and an instance's local-midnight-anchored original start use different
+    // anchorings, mis-classifying the cutoff-day instance off UTC. All-day
+    // truncations skip the cleanup (a rare gap, unchanged from before).
+    if ev.truncate_tail_overrides && !ev.all_day {
         if let Some(until) = ev
             .recurrence
             .as_ref()

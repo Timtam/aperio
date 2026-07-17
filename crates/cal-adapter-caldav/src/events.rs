@@ -217,7 +217,15 @@ pub async fn update_event(
     // components), so a provider-modified occurrence past the cutoff would ghost.
     // Take the GET-merge path only when the caller asked for it AND the rule
     // carries an UNTIL to bound the tail; otherwise fall through unchanged.
-    if event.truncate_tail_overrides {
+    //
+    // TIMED series only: both the UNTIL and an override's RECURRENCE-ID resolve to
+    // exact UTC instants, so the `rid <= until` cutoff is precise. An ALL-DAY
+    // series has a DATE-only UNTIL (end-of-day UTC) while an all-day RECURRENCE-ID
+    // anchors at local midnight — mixing those mis-classifies the cutoff-day
+    // override off UTC. Rather than drop/keep the wrong one, all-day truncations
+    // fall through to the plain PUT (their cross-client override cleanup is a rare
+    // gap, unchanged from before this feature).
+    if event.truncate_tail_overrides && !event.all_day {
         if let Some(until) = event
             .recurrence
             .as_ref()
@@ -386,14 +394,19 @@ fn split_vevent_blocks(body: &str) -> Vec<String> {
     let mut blocks = Vec::new();
     let mut current: Option<String> = None;
     for line in body.split_inclusive('\n') {
-        let trimmed = line.trim();
-        if trimmed == "BEGIN:VEVENT" {
+        // Match the PHYSICAL line, stripping only the trailing CR/LF — NOT leading
+        // whitespace. RFC-5545 folds long values onto continuation lines prefixed
+        // with a space/tab, so a real component boundary never has leading
+        // whitespace; `line.trim()` would misread a folded "…\r\n BEGIN:VEVENT"
+        // inside a DESCRIPTION as a boundary and corrupt the block.
+        let marker = line.trim_end_matches(['\r', '\n']);
+        if marker == "BEGIN:VEVENT" {
             current = Some(String::new());
         }
         if let Some(buf) = current.as_mut() {
             buf.push_str(line);
         }
-        if trimmed == "END:VEVENT" {
+        if marker == "END:VEVENT" {
             if let Some(buf) = current.take() {
                 blocks.push(buf);
             }
@@ -1263,6 +1276,30 @@ DTEND:20260817T103000Z\r\nSUMMARY:Moved tail\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
             merged.matches("RECURRENCE-ID").count(),
             1,
             "only the in-range override remains: {merged}"
+        );
+    }
+
+    #[test]
+    fn split_vevent_blocks_ignores_a_folded_begin_vevent_in_a_value() {
+        // A DESCRIPTION whose folded continuation line reads "BEGIN:VEVENT" must
+        // NOT be treated as a component boundary — folded lines carry a leading
+        // space, so the master block keeps its whole value and stays one block.
+        let body = "BEGIN:VCALENDAR\r\n\
+BEGIN:VEVENT\r\nUID:a\r\nDESCRIPTION:hello\r\n BEGIN:VEVENT\r\n world\r\nEND:VEVENT\r\n\
+BEGIN:VEVENT\r\nUID:a\r\nRECURRENCE-ID:20260803T090000Z\r\nEND:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let blocks = split_vevent_blocks(body);
+        assert_eq!(
+            blocks.len(),
+            2,
+            "the folded BEGIN:VEVENT is not a boundary: {blocks:?}"
+        );
+        assert!(
+            blocks[0].contains("DESCRIPTION:hello")
+                && blocks[0].contains(" world")
+                && blocks[0].contains(" BEGIN:VEVENT"),
+            "master block keeps its whole folded value: {:?}",
+            blocks[0]
         );
     }
 
