@@ -4,6 +4,7 @@ import { occurrenceIsoOf, seriesIdOf } from '@aperio/shared';
 
 import { addEventExdate, CalendarEvent, deleteEvent } from '../api/calendar';
 import { resolveCalendarUserEmail } from './currentUserEmail';
+import { deleteThisAndFuture } from './deleteSeriesFromOccurrence';
 
 /** Lower-case, `mailto:`-stripped form for comparing addresses. */
 function normalizeEmail(value: string | null | undefined): string {
@@ -76,6 +77,15 @@ export function confirmDeleteEvent(
         : t('dialogs.event.occurrenceDeleted', { title: ev.title }),
     );
 
+  // Remove this occurrence AND all following ones (truncate the series).
+  const removeThisAndFuture = (sendCancellations: boolean) =>
+    run(
+      () => deleteThisAndFuture(ev, occurrence!, sendCancellations),
+      sendCancellations
+        ? t('dialogs.event.thisAndFutureCancelled', { title: ev.title })
+        : t('dialogs.event.thisAndFutureDeleted', { title: ev.title }),
+    );
+
   // Recurring-occurrence delete. For a meeting the account ORGANIZES, ALL four
   // choices are explicit buttons in ONE prompt — cancel-and-notify vs remove-
   // silently, for this occurrence and for the whole series — so there is never a
@@ -99,6 +109,16 @@ export function confirmDeleteEvent(
               onPress: () => removeOccurrence(false),
             },
             {
+              text: t('dialogs.deleteScope.thisAndFutureNotify'),
+              style: 'destructive',
+              onPress: () => removeThisAndFuture(true),
+            },
+            {
+              text: t('dialogs.deleteScope.thisAndFutureSilent'),
+              style: 'destructive',
+              onPress: () => removeThisAndFuture(false),
+            },
+            {
               text: t('dialogs.deleteScope.seriesNotify'),
               style: 'destructive',
               onPress: () => deleteWith(true),
@@ -118,6 +138,10 @@ export function confirmDeleteEvent(
             {
               text: t('dialogs.event.scope.occurrence'),
               onPress: () => removeOccurrence(false),
+            },
+            {
+              text: t('dialogs.event.scope.thisAndFuture'),
+              onPress: () => removeThisAndFuture(false),
             },
             {
               // A whole-series delete can still email a cancellation; the

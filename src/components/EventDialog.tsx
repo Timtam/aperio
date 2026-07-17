@@ -492,17 +492,39 @@ export function EventDialog({
             // itself for "this and following" isn't supported — edit the whole
             // series for that.
             const occIso = occurrenceIsoOf(event);
-            const master = await getEventById(seriesId);
+            // Pass the owning calendar so an EXTERNAL master resolves via the SWR
+            // cache. A null master (cold cache) is a hard error, never a silent
+            // fall-through to a whole-series edit that would move every occurrence.
+            const master = await getEventById(seriesId, event.calendar_id);
+            if (occIso && master == null) {
+              throw new Error(
+                t('dialogs.event.thisAndFutureLoadFailed', {
+                  title: event.title,
+                }),
+              );
+            }
             if (occIso && master?.recurrence?.rrule) {
               const cutoff = new Date(occIso);
+              // Count occurrences STRICTLY before the cutoff. expandEvent's range
+              // is inclusive of the end instant, and the cutoff IS an occurrence,
+              // so subtract 1ms to exclude it — otherwise a COUNT-bounded series
+              // loses its final occurrence (remaining COUNT one too small).
               const before = expandEvent(master, {
                 start: new Date(master.start),
-                end: cutoff,
+                end: new Date(cutoff.getTime() - 1),
               }).length;
               const { oldRule, newRule } = splitRRuleForEdit(
                 master.recurrence.rrule,
                 cutoff,
                 before,
+                { allDay: master.all_day },
+              );
+              // Carry forward the master's EXDATEs that fall at/after the cutoff:
+              // they belong to the tail the new series now owns. Dropping them
+              // would resurrect an explicitly-deleted future occurrence, or double
+              // a moved instance (its suppressing EXDATE would be gone).
+              const tailExceptions = (master.recurrence.exceptions ?? []).filter(
+                (x) => new Date(x).getTime() >= cutoff.getTime(),
               );
               await apiUpdateEvent(
                 {
@@ -511,25 +533,33 @@ export function EventDialog({
                 },
                 master.calendar_id,
               );
-              const created = await apiCreateEvent({
-                calendar_id: form.calendarId,
-                title: trimmedTitle,
-                description: form.description.trim() || null,
-                location: form.location.trim() || null,
-                start,
-                end,
-                all_day: form.allDay,
-                recurrence: {
-                  rrule: newRule,
-                  exceptions: [],
-                  tzid: master.recurrence.tzid ?? null,
-                },
-                color_label: form.colorLabel,
-                reminders: remindersForWire,
-                sound: null,
-                attendees: form.attendees,
-                send_invitations: sendInvitations,
-              });
+              let created;
+              try {
+                created = await apiCreateEvent({
+                  calendar_id: form.calendarId,
+                  title: trimmedTitle,
+                  description: form.description.trim() || null,
+                  location: form.location.trim() || null,
+                  start,
+                  end,
+                  all_day: form.allDay,
+                  recurrence: {
+                    rrule: newRule,
+                    exceptions: tailExceptions,
+                    tzid: master.recurrence.tzid ?? null,
+                  },
+                  color_label: form.colorLabel,
+                  reminders: remindersForWire,
+                  sound: null,
+                  attendees: form.attendees,
+                  send_invitations: sendInvitations,
+                });
+              } catch (createErr) {
+                // The master was already truncated; restore it so the tail isn't
+                // silently lost, then surface the original failure.
+                await apiUpdateEvent(master, master.calendar_id).catch(() => {});
+                throw createErr;
+              }
               if (!storesColorNatively) {
                 await setEventColor(
                   created.id,

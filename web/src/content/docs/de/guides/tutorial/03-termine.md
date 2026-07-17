@@ -56,19 +56,20 @@ Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
 > Einladungen bzw. Aktualisierungen – Aperio selbst versendet keine E-Mails.
 >
 > Löschst du eine **Besprechung, die du organisierst** (mit Teilnehmern, auf
-> einem Konto mit Server-Terminplanung), fragt Aperio in **einem** Dialog nach,
-> was mit den Teilnehmern passieren soll – ohne versteckten zweiten Schritt,
-> jede Schaltfläche sagt genau, ob eine Absage-E-Mail rausgeht. Bei einem
-> **Serientermin** stehen alle vier Möglichkeiten ausgeschrieben nebeneinander:
-> **nur diesen Termin absagen und Teilnehmer benachrichtigen**, **nur diesen
-> Termin ohne Benachrichtigung entfernen**, **ganze Serie absagen und
-> benachrichtigen**, **ganze Serie ohne Benachrichtigung entfernen**. So kannst
-> du gezielt einzelne Wiederholungen absagen (die Teilnehmer bekommen genau für
-> dieses Datum eine Absage), ohne die restliche Serie anzutasten. Bei einem
-> Einzeltermin sind es entsprechend zwei Möglichkeiten. Bei einer Besprechung,
-> zu der du nur eingeladen bist, oder einem Termin ohne Teilnehmer wird ohne
-> Rückfrage gelöscht. (Auf iCloud/CalDAV entscheidet der Server über den
-> Absageversand – dort ist „ohne Benachrichtigung" nicht garantiert.)
+> einem Konto mit Server-Terminplanung), fragt Aperio in **einem** Dialog nach –
+> ohne versteckten zweiten Schritt. Bei einem **Serientermin** hat der Dialog
+> eine Auswahlgruppe **Teilnehmer benachrichtigen / Ohne Benachrichtigung
+> entfernen** (Standard: benachrichtigen) und darunter je eine Schaltfläche für
+> den Umfang: **nur diesen Termin**, **diesen und alle folgenden** sowie **die
+> ganze Serie**. So kannst du gezielt eine einzelne Wiederholung absagen (die
+> Teilnehmer bekommen genau für dieses Datum eine Absage), die Serie ab einem
+> Datum beenden (**diesen und alle folgenden** behält die früheren Termine und
+> entfernt diesen sowie jeden späteren) oder alles absagen – die Auswahlgruppe
+> entscheidet jeweils, ob eine E-Mail rausgeht. Bei einem Einzeltermin bleibt
+> nur die Benachrichtigen-Auswahl. Bei einer Besprechung, zu der du nur
+> eingeladen bist, oder einem Termin ohne Teilnehmer wird ohne Rückfrage
+> gelöscht. (Auf iCloud/CalDAV entscheidet der Server über den Absageversand –
+> dort ist „ohne Benachrichtigung" nicht garantiert.)
 
 > **Verfügbarkeit prüfen:** Unter demselben Schalter erscheint die
 > Schaltfläche **Verfügbarkeit prüfen**. Sie fragt für das aktuell
@@ -106,8 +107,12 @@ Im Termin-Dialog unter **Wiederholung** wählst du ein Muster:
 - ein **Ende** (nie, nach X Malen, bis zu einem Datum).
 
 Beim Bearbeiten oder Löschen eines wiederkehrenden Termins fragt Aperio vorab,
-ob sich die Änderung auf **nur diesen Termin** oder die **ganze Serie**
-beziehen soll.
+ob sich die Änderung auf **nur diesen Termin**, **diesen und alle folgenden**
+oder die **ganze Serie** beziehen soll – dieselben drei Umfänge wie bei anderen
+Kalendern (Google, Outlook). **Diesen und alle folgenden** teilt die Serie am
+gewählten Termin: Die früheren Termine bleiben unangetastet, dieser und jeder
+spätere werden geändert (beim Bearbeiten übernimmt ab hier eine neue Serie) oder
+entfernt (beim Löschen).
 
 > **Tipp:** Wiederkehrende Termine aus externen Kalendern (z. B. iCloud)
 > werden in allen Ansichten korrekt aufgeklappt – auch dann, wenn die erste

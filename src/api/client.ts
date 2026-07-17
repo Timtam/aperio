@@ -135,8 +135,15 @@ export const deleteEventById = (
     sendCancellations: sendCancellations ?? null,
   });
 
-export const getEventById = (id: string) =>
-  invoke<CalendarEvent | null>('get_event_by_id', { id });
+/** Fetch a single event by id. Pass the owning `calendarId` so an EXTERNAL
+ *  event resolves via the SWR snapshot cache (the local store has no row for it);
+ *  omitting it, or a local calendar, reads the stored row. `id` is the series
+ *  master id for a recurring event. */
+export const getEventById = (id: string, calendarId?: string) =>
+  invoke<CalendarEvent | null>('get_event_by_id', {
+    id,
+    calendarId: calendarId ?? null,
+  });
 
 /** Look up attendee availability through the account that owns `calendarId`.
  *  Best-effort: returns `[]` for local calendars or when the provider can't

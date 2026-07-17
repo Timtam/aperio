@@ -409,13 +409,41 @@ export function occurrenceIsoOf<E extends RecurringEventLike>(
 }
 
 /** UTC "basic" RFC-5545 timestamp (`YYYYMMDDTHHMMSSZ`) — the form an RRULE
- *  `UNTIL` takes when the series has a zoned DTSTART. */
+ *  `UNTIL` takes when the series has a zoned/timed DTSTART. */
 function formatRRuleUntilUtc(d: Date): string {
   const p = (n: number) => String(n).padStart(2, '0');
   return (
     `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}` +
     `T${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}Z`
   );
+}
+
+/** Date-only RFC-5545 value (`YYYYMMDD`) — the form an RRULE `UNTIL` MUST take
+ *  when the series has a DATE-valued (all-day) DTSTART. Per RFC-5545 §3.3.10 the
+ *  UNTIL value type must match DTSTART's, so a datetime UNTIL on an all-day
+ *  series is malformed and strict providers (iCloud CalDAV) may reject the write
+ *  or silently drop the RRULE. */
+function formatRRuleUntilDate(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}`;
+}
+
+/** Parse an RRULE `UNTIL` value (`YYYYMMDD` or `YYYYMMDDTHHMMSSZ`) to an epoch
+ *  instant in ms for chronological comparison. A date-only value is inclusive of
+ *  the whole day, so it maps to that day's last instant — this is what lets a
+ *  date-only and a datetime bound compare correctly (a naive lexicographic
+ *  compare mis-ranks same-date values because the date-only string is a prefix of
+ *  the datetime form). Returns NaN for an unparseable value. */
+function untilInstantMs(until: string): number {
+  const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})Z?)?$/.exec(
+    until.trim(),
+  );
+  if (!m) return Number.NaN;
+  const [, y, mo, d, hh, mm, ss] = m;
+  if (hh == null) {
+    return Date.UTC(+y, +mo - 1, +d, 23, 59, 59, 999);
+  }
+  return Date.UTC(+y, +mo - 1, +d, +hh, +mm, +ss);
 }
 
 /**
@@ -428,11 +456,20 @@ function formatRRuleUntilUtc(d: Date): string {
  * the comparison is zone-independent: the occurrence at `cutoff` and everything
  * after it fall away, everything before stays.
  *
+ * `opts.allDay` picks the emitted UNTIL value type: an all-day (DATE-valued)
+ * series gets a date-only `YYYYMMDD` UNTIL, a timed series the datetime
+ * `YYYYMMDDTHHMMSSZ` form — the value type MUST match DTSTART's or strict
+ * providers drop the rule.
+ *
  * Returns the rule body without a leading `RRULE:` (matching how the app stores
  * recurrence rules).
  */
-export function truncateRRuleBefore(rrule: string, cutoff: Date): string {
-  const newUntil = formatRRuleUntilUtc(new Date(cutoff.getTime() - 1000));
+export function truncateRRuleBefore(
+  rrule: string,
+  cutoff: Date,
+  opts: { allDay?: boolean } = {},
+): string {
+  const lastKept = new Date(cutoff.getTime() - 1000);
   const body = rrule.trim().replace(/^RRULE:/i, '');
   const kept: string[] = [];
   let existingUntil: string | null = null;
@@ -447,11 +484,19 @@ export function truncateRRuleBefore(rrule: string, cutoff: Date): string {
     }
     kept.push(part);
   }
-  // Both are `YYYYMMDDT…Z`, which sorts lexicographically = chronologically; a
-  // shorter date-only existing UNTIL still compares correctly against the same
-  // date prefix. Keep whichever ends the series sooner.
-  const finalUntil =
-    existingUntil && existingUntil < newUntil ? existingUntil : newUntil;
+  // Keep whichever ends the series sooner, comparing on normalized instants so a
+  // date-only existing UNTIL and the computed bound rank chronologically. Re-emit
+  // in the series' own value type (date-only for all-day) regardless of which
+  // bound won, so an all-day series never carries a datetime UNTIL.
+  let boundMs = lastKept.getTime();
+  if (existingUntil) {
+    const ex = untilInstantMs(existingUntil);
+    if (Number.isFinite(ex) && ex < boundMs) boundMs = ex;
+  }
+  const bound = new Date(boundMs);
+  const finalUntil = opts.allDay
+    ? formatRRuleUntilDate(bound)
+    : formatRRuleUntilUtc(bound);
   kept.push(`UNTIL=${finalUntil}`);
   return kept.join(';');
 }
@@ -472,8 +517,9 @@ export function splitRRuleForEdit(
   rrule: string,
   cutoff: Date,
   occurrencesBeforeCutoff: number,
+  opts: { allDay?: boolean } = {},
 ): { oldRule: string; newRule: string } {
-  const oldRule = truncateRRuleBefore(rrule, cutoff);
+  const oldRule = truncateRRuleBefore(rrule, cutoff, opts);
   const body = rrule.trim().replace(/^RRULE:/i, '');
   const parts = body.split(';').filter(Boolean);
   const countIdx = parts.findIndex((p) => p.toUpperCase().startsWith('COUNT='));

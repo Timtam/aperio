@@ -1168,6 +1168,8 @@
       "notifyLegend": "Attendees",
       "notifyAttendees": "Notify attendees",
       "notifySilent": "Remove without notifying",
+      "thisAndFutureNotify": "Cancel this and all following and notify",
+      "thisAndFutureSilent": "Remove this and all following (without notifying)",
       "organizerMessage": "\"{{title}}\" is part of a series you organize. Choose below whether attendees are notified, then the scope:",
       "occurrenceNotify": "Cancel this occurrence and notify attendees",
       "occurrenceSilent": "Remove this occurrence (without notifying)",
@@ -1244,6 +1246,7 @@
       "thisAndFutureDeleted": "\"{{title}}\" was deleted from this occurrence on; earlier ones stay.",
       "thisAndFutureCancelled": "\"{{title}}\" was cancelled from this occurrence on; attendees notified, earlier ones stay.",
       "thisAndFutureUpdated": "\"{{title}}\" was changed from this occurrence on; earlier ones are unchanged.",
+      "thisAndFutureLoadFailed": "Could not load the series \"{{title}}\" to split it; no changes were made.",
       "cancelChoice": {
         "title": "Cancel meeting?",
         "message": "You organize \"{{title}}\". Cancel it and notify the attendees, or just remove it from your calendar without telling them?",

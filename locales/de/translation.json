@@ -1165,6 +1165,8 @@
       "notifyLegend": "Teilnehmer",
       "notifyAttendees": "Teilnehmer benachrichtigen",
       "notifySilent": "Ohne Benachrichtigung entfernen",
+      "thisAndFutureNotify": "Diesen und alle folgenden absagen und benachrichtigen",
+      "thisAndFutureSilent": "Diesen und alle folgenden entfernen (ohne Benachrichtigung)",
       "organizerMessage": "„{{title}}\" ist Teil einer Serie, die du organisierst. Wähle unten, ob die Teilnehmer benachrichtigt werden, und dann den Umfang:",
       "occurrenceNotify": "Nur diesen Termin absagen und Teilnehmer benachrichtigen",
       "occurrenceSilent": "Nur diesen Termin entfernen (ohne Benachrichtigung)",
@@ -1244,6 +1246,7 @@
       "thisAndFutureDeleted": "„{{title}}\" wurde ab diesem Termin gelöscht; frühere Termine bleiben.",
       "thisAndFutureCancelled": "„{{title}}\" wurde ab diesem Termin abgesagt; Teilnehmer benachrichtigt, frühere Termine bleiben.",
       "thisAndFutureUpdated": "„{{title}}\" wurde ab diesem Termin geändert; frühere Termine bleiben unverändert.",
+      "thisAndFutureLoadFailed": "Die Serie „{{title}}\" konnte zum Aufteilen nicht geladen werden; es wurde nichts geändert.",
       "cancelChoice": {
         "title": "Besprechung absagen?",
         "message": "Du organisierst „{{title}}\". Absagen und die Teilnehmer benachrichtigen – oder nur aus deinem Kalender entfernen, ohne sie zu benachrichtigen?",

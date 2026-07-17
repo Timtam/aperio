@@ -19,7 +19,7 @@ export interface EditEventParams {
   calendarId: string;
   occurrence?: string | null;
   /** Scope the up-front prompt resolved to; seeds the editor's edit scope. */
-  initialScope?: 'occurrence' | 'series';
+  initialScope?: 'occurrence' | 'series' | 'this_and_future';
 }
 
 /** Open the event editor for `ev`. For a recurring OCCURRENCE, first pops the
@@ -32,7 +32,7 @@ export function editEventWithScope(
   navigate: (params: EditEventParams) => void,
 ): void {
   const occurrence = occurrenceIsoOf(ev);
-  const open = (initialScope?: 'occurrence' | 'series') =>
+  const open = (initialScope?: 'occurrence' | 'series' | 'this_and_future') =>
     navigate({
       eventId: seriesIdOf(ev),
       calendarId: ev.calendar_id,
@@ -53,6 +53,10 @@ export function editEventWithScope(
       {
         text: t('dialogs.editScope.occurrence'),
         onPress: () => open('occurrence'),
+      },
+      {
+        text: t('dialogs.editScope.thisAndFuture'),
+        onPress: () => open('this_and_future'),
       },
       { text: t('dialogs.editScope.series'), onPress: () => open('series') },
     ],

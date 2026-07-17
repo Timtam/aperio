@@ -544,6 +544,27 @@ describe('truncateRRuleBefore', () => {
     expect(out).toBe('FREQ=DAILY;UNTIL=20260525T085959Z');
   });
 
+  it('all-day series emits a date-only UNTIL (RFC-5545 value-type match)', () => {
+    const out = truncateRRuleBefore(
+      'FREQ=WEEKLY;BYDAY=MO',
+      new Date('2026-06-15T00:00:00.000Z'),
+      { allDay: true },
+    );
+    // A datetime UNTIL on a DATE-valued series is malformed and strict providers
+    // (iCloud) drop the rule; the day before the cutoff is kept.
+    expect(out).toBe('FREQ=WEEKLY;BYDAY=MO;UNTIL=20260614');
+  });
+
+  it('a same-date date-only existing UNTIL does not beat an earlier timed cutoff', () => {
+    // "20260615" is a lexicographic prefix of "20260615T085959Z"; a naive string
+    // compare would wrongly keep the whole-day bound. Compare on instants instead.
+    const out = truncateRRuleBefore(
+      'FREQ=DAILY;UNTIL=20260615',
+      new Date('2026-06-15T09:00:00.000Z'),
+    );
+    expect(out).toBe('FREQ=DAILY;UNTIL=20260615T085959Z');
+  });
+
   it('truncates a series so the cutoff occurrence and all after it fall away', () => {
     const master = mkEvent({
       start: '2026-07-06T09:00:00.000Z',
@@ -606,5 +627,16 @@ describe('splitRRuleForEdit', () => {
   it('COUNT never drops below 1', () => {
     const { newRule } = splitRRuleForEdit('FREQ=DAILY;COUNT=3', cutoff, 5);
     expect(newRule).toBe('FREQ=DAILY;COUNT=1');
+  });
+
+  it('all-day option: oldRule carries a date-only UNTIL, new keeps remaining COUNT', () => {
+    const { oldRule, newRule } = splitRRuleForEdit(
+      'FREQ=WEEKLY;BYDAY=MO;COUNT=8',
+      new Date('2026-06-15T00:00:00.000Z'),
+      2, // two occurrences kept on the old series
+      { allDay: true },
+    );
+    expect(oldRule).toBe('FREQ=WEEKLY;BYDAY=MO;UNTIL=20260614');
+    expect(newRule).toBe('FREQ=WEEKLY;BYDAY=MO;COUNT=6');
   });
 });

@@ -889,9 +889,52 @@ pub async fn respond_to_event(
 #[tauri::command]
 pub async fn get_event_by_id(
     adapter: State<'_, LocalAdapter>,
+    registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
+    db: State<'_, DbHandle>,
     id: String,
+    calendar_id: Option<String>,
 ) -> CommandResult<Option<Event>> {
-    Ok(adapter.get_event_by_id(&id)?)
+    // Route by the owning calendar when the caller knows it. A LOCAL calendar (or
+    // an absent/unknown calendar_id) reads the stored row directly. An EXTERNAL
+    // calendar has no by-id adapter fetch (CalendarFeature exposes none), so look
+    // the master up in the SWR snapshot cache — warm after the list read that
+    // necessarily preceded this edit/split. Mirrors the mobile cal-ffi
+    // `get_event_by_id_json`; without it the desktop lookup was local-only, so an
+    // external recurring master resolved to `null` and "delete this and following"
+    // fell through to a destructive WHOLE-series delete (+ attendee cancellations).
+    // `id` is the series master id (callers pass seriesIdOf), which is what the
+    // cache stores un-expanded.
+    let account = calendar_id
+        .as_deref()
+        .and_then(|cid| registry.account_for_calendar(cid))
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+    if account == LOCAL_ID {
+        return Ok(adapter.get_event_by_id(&id)?);
+    }
+    // No range on a by-id lookup → scan the whole cached window. The 4-digit-year
+    // bounds keep the cache's lexicographic RFC-3339 comparison valid.
+    let whole = DateRange::new(
+        "0001-01-01T00:00:00Z"
+            .parse()
+            .expect("valid lower wide-range bound"),
+        "9999-12-31T23:59:59Z"
+            .parse()
+            .expect("valid upper wide-range bound"),
+    );
+    let cid = calendar_id.as_deref().unwrap_or_default();
+    let mut events = cache.read_events(&account, cid, whole).unwrap_or_default();
+    // Resolve colour the same way the list read does (native color_hex → label,
+    // then host-local overrides) so the editor's colour picker seeds correctly.
+    for ev in events.iter_mut() {
+        if let Some(hex) = ev.color_hex.clone() {
+            if let Ok(Some(label)) = adapter.match_hex_to_label(&hex) {
+                ev.color_label = Some(ColorLabelId(label));
+            }
+        }
+    }
+    apply_color_to_events(&OverridesRepo::new(&db.shared()), &mut events);
+    Ok(events.into_iter().find(|e| e.id == id))
 }
 
 #[tauri::command]

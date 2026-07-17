@@ -83,7 +83,7 @@ export type RootStackParamList = {
     // The scope the up-front edit prompt resolved to (see eventEditScope). Seeds
     // the editor's edit scope; absent ⇒ 'occurrence'. When set, the editor
     // confirms the scope read-only instead of showing the segmented control.
-    initialScope?: 'occurrence' | 'series';
+    initialScope?: 'occurrence' | 'series' | 'this_and_future';
   };
   Calendars: undefined;
   CalendarEditor: { calendarId: string };

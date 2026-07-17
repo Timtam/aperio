@@ -11,7 +11,11 @@ import {
 } from 'react-native';
 
 import type { ColorLabel, ExpandedOccurrence, Reminder } from '@aperio/shared';
-import { selectableEventCalendars } from '@aperio/shared';
+import {
+  expandEvent,
+  selectableEventCalendars,
+  splitRRuleForEdit,
+} from '@aperio/shared';
 
 import { AttendeesEditor } from '../components/AttendeesEditor';
 import { AvailabilityChecker } from '../components/AvailabilityChecker';
@@ -131,9 +135,9 @@ export default function EventEditorModal({
   const isOccurrence = occurrence != null;
   // Seeded from the up-front "this occurrence vs whole series" prompt
   // (eventEditScope). When the prompt set it, the control below is read-only.
-  const [editScope, setEditScope] = useState<'occurrence' | 'series'>(
-    initialScope ?? 'occurrence',
-  );
+  const [editScope, setEditScope] = useState<
+    'occurrence' | 'series' | 'this_and_future'
+  >(initialScope ?? 'occurrence');
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -332,6 +336,84 @@ export default function EventEditorModal({
         }
         AccessibilityInfo.announceForAccessibility(
           t('dialogs.event.occurrenceUpdated', { title: trimmedTitle }),
+        );
+        navigation.goBack();
+        return;
+      }
+      if (
+        editing &&
+        original != null &&
+        isOccurrence &&
+        occurrence != null &&
+        editScope === 'this_and_future' &&
+        original.recurrence?.rrule
+      ) {
+        // "This and all following": split the series at this occurrence. Truncate
+        // the loaded master to end just before the cutoff (keeping its earlier
+        // occurrences and own fields), then create a NEW series from here carrying
+        // the edits, reusing the original PATTERN with the remaining COUNT. The
+        // loaded `original` IS the master (getEventById resolves the series), so
+        // its start anchors the occurrence count. Mirrors the desktop EventDialog.
+        const cutoff = new Date(occurrence);
+        // Count occurrences STRICTLY before the cutoff. expandEvent's range is
+        // inclusive of the end instant and the cutoff IS an occurrence, so
+        // subtract 1ms to exclude it — otherwise a COUNT-bounded series loses its
+        // final occurrence (remaining COUNT one too small).
+        const before = expandEvent(original, {
+          start: new Date(original.start),
+          end: new Date(cutoff.getTime() - 1),
+        }).length;
+        const { oldRule, newRule } = splitRRuleForEdit(
+          original.recurrence.rrule,
+          cutoff,
+          before,
+          { allDay: original.all_day },
+        );
+        // Carry forward the master's EXDATEs at/after the cutoff — they belong to
+        // the tail the new series owns. Dropping them would resurrect an
+        // explicitly-deleted future occurrence or double a moved instance.
+        const tailExceptions = (original.recurrence.exceptions ?? []).filter(
+          (x) => new Date(x).getTime() >= cutoff.getTime(),
+        );
+        await updateEvent(
+          {
+            ...original,
+            recurrence: { ...original.recurrence, rrule: oldRule },
+          },
+          original.calendar_id,
+        );
+        let created;
+        try {
+          created = await createEvent({
+            calendar_id: calId,
+            title: trimmedTitle,
+            description: description.trim() || null,
+            location: location.trim() || null,
+            start,
+            end,
+            all_day: allDay,
+            recurrence: {
+              rrule: newRule,
+              exceptions: tailExceptions,
+              tzid: original.recurrence.tzid ?? null,
+            },
+            color_label: colorToSend,
+            reminders,
+            sound: null,
+            attendees,
+            send_invitations: sendInvitations,
+          });
+        } catch (createErr) {
+          // The master was already truncated; restore it so the tail isn't
+          // silently lost, then surface the original failure.
+          await updateEvent(original, original.calendar_id).catch(() => {});
+          throw createErr;
+        }
+        if (!isLocalCal) {
+          await setEventColor(created.id, calId, colorCapable ? null : colorToSend);
+        }
+        AccessibilityInfo.announceForAccessibility(
+          t('dialogs.event.thisAndFutureUpdated', { title: trimmedTitle }),
         );
         navigation.goBack();
         return;
@@ -649,16 +731,22 @@ export default function EventEditorModal({
           {t(
             editScope === 'occurrence'
               ? 'dialogs.event.scope.occurrence'
-              : 'dialogs.event.scope.series',
+              : editScope === 'this_and_future'
+                ? 'dialogs.event.scope.thisAndFuture'
+                : 'dialogs.event.scope.series',
           )}
         </Text>
       )}
       {isOccurrence && original?.recurrence != null && initialScope == null && (
-        <RadioGroup<'occurrence' | 'series'>
+        <RadioGroup<'occurrence' | 'series' | 'this_and_future'>
           label={t('dialogs.event.scope.label')}
           value={editScope}
           options={[
             { value: 'occurrence', label: t('dialogs.event.scope.occurrence') },
+            {
+              value: 'this_and_future',
+              label: t('dialogs.event.scope.thisAndFuture'),
+            },
             { value: 'series', label: t('dialogs.event.scope.series') },
           ]}
           onChange={setEditScope}

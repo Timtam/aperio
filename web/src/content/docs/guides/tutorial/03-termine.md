@@ -54,14 +54,15 @@ In the event dialog you can also set:
 >
 > When you delete a **meeting you organize** (with attendees, on an account
 > with server-side scheduling), Aperio asks in **one** dialog what should happen
-> for the attendees — no hidden second step, and every button states whether a
-> cancellation email goes out. For a **recurring** meeting all four choices are
-> shown as explicit buttons side by side: **cancel this occurrence and notify
-> attendees**, **remove this occurrence without notifying**, **cancel the whole
-> series and notify**, **remove the whole series without notifying**. So you can
-> cancel individual occurrences (attendees get a cancellation for exactly that
-> date) without touching the rest of the series. A single event has the two
-> matching choices. A meeting you were only invited to, or an event with no
+> — no hidden second step. For a **recurring** meeting the dialog has a
+> **Notify attendees / Remove without notifying** radio group (default: notify)
+> and, below it, a button for each scope: **this occurrence**, **this and all
+> following**, and **the whole series**. So you can cancel a single occurrence
+> (attendees get a cancellation for exactly that date), end the series from a
+> chosen date onward (**this and all following** keeps the earlier occurrences
+> and drops this one plus every later one), or cancel all of it — and the radio
+> decides in each case whether an email goes out. A single event has just the
+> notify/silent choice. A meeting you were only invited to, or an event with no
 > attendees, is deleted without asking. (On iCloud/CalDAV the server decides
 > whether a cancellation goes out, so "without notifying" isn't guaranteed
 > there.)
@@ -100,7 +101,11 @@ Under **Recurrence** in the event dialog you choose a pattern:
 - an **end** (never, after X times, until a date).
 
 When editing or deleting a recurring event, Aperio asks up front whether the
-change should apply to **only this occurrence** or the **whole series**.
+change should apply to **only this occurrence**, **this and all following**, or
+the **whole series** — the same three scopes other calendars (Google, Outlook)
+offer. **This and all following** splits the series at the chosen occurrence:
+the earlier occurrences stay untouched, and this one plus every later one are
+changed (on edit, a new series takes over from here) or removed (on delete).
 
 > **Tip:** Recurring events from external calendars (e.g. iCloud) expand
 > correctly in every view – even when the first occurrence lies in the past.
