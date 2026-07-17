@@ -1614,9 +1614,23 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         let mut exceptions: Vec<DateTime<Utc>> = Vec::with_capacity(
             item.deleted_occurrence_starts.len() + item.modified_occurrences.len(),
         );
-        exceptions.extend_from_slice(&item.deleted_occurrence_starts);
+        // For an all-day master, `start`/`end` above are re-anchored to LOCAL
+        // midnight, but `deleted_occurrence_starts` / `original_start` arrive as
+        // raw "some-zone midnight" instants. The frontend expander anchors the
+        // series on the re-anchored `start` and matches EXDATEs by exact instant,
+        // so un-anchored exceptions miss on any non-UTC device → the vacated slot
+        // isn't suppressed and renders alongside its override (a duplicate row).
+        // Anchor the exceptions the same way so they line up with the grid.
+        let anchor = |dt: DateTime<Utc>| {
+            if item.is_all_day {
+                all_day_local_anchor(dt)
+            } else {
+                dt
+            }
+        };
+        exceptions.extend(item.deleted_occurrence_starts.iter().map(|d| anchor(*d)));
         for o in &item.modified_occurrences {
-            exceptions.push(o.original_start);
+            exceptions.push(anchor(o.original_start));
         }
         EventRecurrence {
             rrule: r.to_rrule(),
@@ -2010,7 +2024,7 @@ fn ews_all_day_boundary(when: DateTime<Utc>) -> DateTime<Utc> {
 /// inside the intended day in UTC for any zone offset in (−12h, +12h],
 /// so the sample's UTC date recovers the day without guessing the zone.
 /// DST edge: fall forward when the local zone skips midnight.
-fn all_day_local_anchor(when: DateTime<Utc>) -> DateTime<Utc> {
+pub(crate) fn all_day_local_anchor(when: DateTime<Utc>) -> DateTime<Utc> {
     let day = (when + chrono::Duration::hours(12)).date_naive();
     let midnight = day.and_hms_opt(0, 0, 0).unwrap();
     Local
@@ -4811,6 +4825,53 @@ mod tests {
         assert_eq!(rec.exceptions.len(), 2);
         assert_eq!(rec.exceptions[0].to_rfc3339(), "2026-01-05T08:00:00+00:00");
         assert_eq!(rec.exceptions[1].to_rfc3339(), "2026-01-10T08:00:00+00:00");
+    }
+
+    #[test]
+    fn to_event_anchors_allday_exdates_like_the_master_start() {
+        // For an all-day master, `start` is re-anchored to LOCAL midnight; the
+        // EXDATEs (deleted + displaced slots) must be anchored the SAME way, or
+        // the frontend expander — which anchors on `start` and matches EXDATEs by
+        // exact instant — won't suppress the vacated slot on a non-UTC device,
+        // rendering it as a duplicate. Zone-generic: asserts the exceptions equal
+        // `all_day_local_anchor` of the raw instants (identity under UTC, shifted
+        // under any other zone), matching whatever transform hit `start`.
+        let del: DateTime<Utc> = "2026-01-05T00:00:00Z".parse().unwrap();
+        let orig: DateTime<Utc> = "2026-01-10T00:00:00Z".parse().unwrap();
+        let mut item = ParsedItem {
+            item_id: "M".into(),
+            subject: "All-day standup".into(),
+            start: Some("2026-01-01T00:00:00Z".parse().unwrap()),
+            end: Some("2026-01-02T00:00:00Z".parse().unwrap()),
+            is_all_day: true,
+            is_recurring: true,
+            item_type: Some("RecurringMaster".into()),
+            ..ParsedItem::default()
+        };
+        item.recurrence = Some(EwsRecurrence {
+            pattern: EwsRecurrencePattern::Daily { interval: 1 },
+            range: EwsRecurrenceRange::Numbered { occurrences: 30 },
+        });
+        item.deleted_occurrence_starts = vec![del];
+        item.modified_occurrences = vec![ModifiedOccurrence {
+            item_id: "OCC".into(),
+            change_key: None,
+            start: "2026-01-10T00:00:00Z".parse().unwrap(),
+            end: "2026-01-11T00:00:00Z".parse().unwrap(),
+            original_start: orig,
+            cancelled: false,
+        }];
+
+        let ev = to_event(item, "cal").unwrap();
+        let rec = ev.recurrence.expect("master has recurrence");
+        assert_eq!(rec.exceptions.len(), 2);
+        assert_eq!(rec.exceptions[0], all_day_local_anchor(del));
+        assert_eq!(rec.exceptions[1], all_day_local_anchor(orig));
+        // The master start got the same transform, so grid + EXDATEs line up.
+        assert_eq!(
+            ev.start,
+            all_day_local_anchor("2026-01-01T00:00:00Z".parse().unwrap())
+        );
     }
 
     #[test]
