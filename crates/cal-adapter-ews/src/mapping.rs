@@ -1682,32 +1682,26 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
     })
 }
 
-/// Exchange's auto-processing prefixes a cancelled meeting's subject with a
-/// localized "Canceled: " / "Abgesagt: " (leaving the body intact) rather than
-/// deleting the item. Some server configs apply that prefix WITHOUT flipping
-/// `IsCancelled`/`AppointmentState` on the attendee's copy, so the prefix is a
-/// real secondary signal that the meeting was withdrawn. Matched case-insensitively
-/// against the confirmed English + German forms; the trailing colon keeps a
-/// user-authored title like "Abgesagt wegen Krankheit" from tripping it.
-fn subject_marks_cancelled(subject: &str) -> bool {
-    let s = subject.trim_start().to_ascii_lowercase();
-    ["canceled:", "cancelled:", "abgesagt:", "storniert:"]
-        .iter()
-        .any(|p| s.starts_with(p))
-}
-
-/// Whether a parsed calendar item is cancelled, from any of the three signals
-/// Exchange may use: the `IsCancelled` flag, the `asfCanceled` (0x4) bit in
-/// `AppointmentState`, or a localized "Canceled:"/"Abgesagt:" subject prefix.
-/// Shared by `to_event` (whole meetings) and the occurrence-exception enrichment
-/// (a single cancelled occurrence of a recurring series — the organizer
-/// cancelled just that instance, which arrives as a cancelled exception item).
+/// Whether a parsed calendar item is cancelled, from the two authoritative EWS
+/// signals: the `IsCancelled` flag and the `asfCanceled` (0x4) bit in
+/// `AppointmentState`. Shared by `to_event` (whole meetings) and the
+/// occurrence-exception enrichment (a single cancelled occurrence of a recurring
+/// series — the organizer cancelled just that instance, which arrives as a
+/// cancelled exception item; the mailbox auto-processing that records the
+/// cancellation sets `IsCancelled` on that exception just as on a whole meeting).
+///
+/// We deliberately do NOT infer cancellation from a localized "Canceled:" /
+/// "Abgesagt:" subject prefix. Exchange's auto-processing that prepends that
+/// prefix is the same that flips `IsCancelled`, so the prefix never catches a
+/// cancellation the flags miss — it would only ever FALSE-positive on a
+/// user-authored title like "Abgesagt: Vertretung klären", wrongly dimming a
+/// live meeting and suppressing its reminders.
 pub(crate) fn resolve_cancelled(item: &ParsedItem) -> bool {
     let state_cancelled = item
         .appointment_state
         .map(|s| s & 0x4 != 0)
         .unwrap_or(false);
-    item.cancelled || state_cancelled || subject_marks_cancelled(&item.subject)
+    item.cancelled || state_cancelled
 }
 
 /// Map EWS `<t:ResponseType>` to the normalised RSVP enum. `Organizer`
@@ -3606,12 +3600,16 @@ mod tests {
     }
 
     #[test]
-    fn to_event_maps_cancelled_via_subject_prefix() {
-        // Fallback: neither flag set, but the subject carries the localized
-        // "Abgesagt: " prefix Exchange's auto-processing prepends.
+    fn to_event_subject_prefix_alone_is_not_cancelled() {
+        // A localized "Abgesagt:" prefix WITHOUT IsCancelled or the asfCanceled
+        // bit must NOT be treated as cancelled: Exchange's auto-processing that
+        // prepends the prefix also sets IsCancelled, so a prefix-only subject is
+        // a user-authored title ("Abgesagt: Vertretung klären"), not a real
+        // cancellation. Flagging it would wrongly dim a live meeting and suppress
+        // its reminders.
         let item = ParsedItem {
             item_id: "IID".into(),
-            subject: "Abgesagt: Standup".into(),
+            subject: "Abgesagt: Vertretung klären".into(),
             start: Some("2026-05-20T12:00:00Z".parse().unwrap()),
             end: Some("2026-05-20T12:30:00Z".parse().unwrap()),
             cancelled: false,
@@ -3619,14 +3617,12 @@ mod tests {
             ..Default::default()
         };
         let ev = to_event(item, "FID|CK").unwrap();
-        assert!(ev.cancelled);
+        assert!(!ev.cancelled);
     }
 
     #[test]
     fn to_event_not_cancelled_for_ordinary_meeting() {
-        // A normal received meeting: no cancel bit, no cancel prefix. A user
-        // title that merely contains "abgesagt" without the colon prefix must
-        // NOT be treated as cancelled.
+        // A normal received meeting: no cancel bit, ordinary subject.
         let item = ParsedItem {
             item_id: "IID".into(),
             subject: "Termin abgesagt? bitte klären".into(),

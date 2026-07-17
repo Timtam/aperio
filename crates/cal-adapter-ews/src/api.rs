@@ -575,21 +575,7 @@ async fn enrich_occurrence_cancellations(
         let xml = client.post_soap_raw(body).await?;
         let parsed = crate::mapping::parse_get_calendar_items_response(&xml)?;
         for exc in &parsed {
-            let cancelled = crate::mapping::resolve_cancelled(exc);
-            // TEMP DIAG (revert with the emit-side probe): show how Exchange
-            // encodes a cancelled occurrence's exception item, so we can confirm
-            // whether IsCancelled/AppointmentState alone suffices (and drop the
-            // subject-prefix heuristic) or the localized prefix is load-bearing.
-            tracing::info!(
-                target: "cal_adapter_ews::sync",
-                id = %exc.item_id,
-                is_cancelled_raw = exc.cancelled,
-                appointment_state = ?exc.appointment_state,
-                resolved_cancelled = cancelled,
-                subject = %exc.subject,
-                "TEMP ews occurrence-exception cancelled-state",
-            );
-            cancelled_by_id.insert(exc.item_id.clone(), cancelled);
+            cancelled_by_id.insert(exc.item_id.clone(), crate::mapping::resolve_cancelled(exc));
         }
     }
 
