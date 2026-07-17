@@ -121,6 +121,7 @@ pub fn sync_folder_items(
           <t:FieldURI FieldURI="calendar:IsAllDayEvent"/>
           <t:FieldURI FieldURI="calendar:IsRecurring"/>
           <t:FieldURI FieldURI="calendar:IsCancelled"/>
+          <t:FieldURI FieldURI="calendar:AppointmentState"/>
           <t:FieldURI FieldURI="calendar:CalendarItemType"/>
           <t:FieldURI FieldURI="calendar:Recurrence"/>
           <t:FieldURI FieldURI="calendar:StartTimeZone"/>
@@ -226,6 +227,7 @@ pub fn find_items_in_range(
           <t:FieldURI FieldURI="calendar:IsAllDayEvent"/>
           <t:FieldURI FieldURI="calendar:IsRecurring"/>
           <t:FieldURI FieldURI="calendar:IsCancelled"/>
+          <t:FieldURI FieldURI="calendar:AppointmentState"/>
           <t:FieldURI FieldURI="calendar:CalendarItemType"/>
         </t:AdditionalProperties>
       </m:ItemShape>

@@ -463,6 +463,7 @@ impl EwsAdapter {
             }
         }
 
+        let cancelled_emitted = out.iter().filter(|e| e.cancelled).count();
         tracing::info!(
             target: "cal_adapter_ews::sync",
             calendar = %calendar_id,
@@ -470,6 +471,7 @@ impl EwsAdapter {
             singles_emitted,
             masters_emitted,
             overrides_emitted,
+            cancelled_emitted,
             filtered_out_of_range,
             skipped_occurrence,
             translate_failures,
@@ -738,6 +740,21 @@ fn emit_item_events(
             out.push(override_ev);
         }
     }
+    // TEMP DIAG (revert once Toni's un-flagged EWS cancellation is diagnosed):
+    // log every in-range emitted event's RAW cancellation signals at INFO so a
+    // normal (INFO-level) user log reveals exactly how Exchange represents a
+    // cancelled meeting we're failing to flag — the `debug`-level probe was
+    // invisible because the app ships at INFO.
+    tracing::info!(
+        target: "cal_adapter_ews::sync",
+        id = %ev.id,
+        start = %ev.start,
+        is_cancelled_raw = item.cancelled,
+        appointment_state = ?item.appointment_state,
+        resolved_cancelled = ev.cancelled,
+        subject = %item.subject,
+        "TEMP ews emitted event cancelled-state",
+    );
     let outcome = if ev.recurrence.is_some() {
         ItemEmit::Master
     } else {

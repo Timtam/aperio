@@ -37,7 +37,6 @@ use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::reader::Reader;
 use serde::{Deserialize, Serialize};
-use tracing::debug;
 
 use cal_core::{
     AttendeeResponse, AttendeeStatus, Calendar, Event, EventRecurrence, FreeBusy, FreeBusySlot,
@@ -328,6 +327,16 @@ pub struct ParsedItem {
     /// this field existed load as `false` without forcing a re-sync.
     #[serde(default)]
     pub cancelled: bool,
+    /// `<t:AppointmentState>` — a bitmask (asfMeeting=1, asfReceived=2,
+    /// asfCanceled=4). Some Exchange configs leave `IsCancelled=false` on an
+    /// attendee's copy of a cancelled meeting yet still flip the `asfCanceled`
+    /// bit here, so `to_event` ORs it into the cancelled flag as a fallback
+    /// signal. `None` when the server omits the property (older servers, or a
+    /// read shape that doesn't request it). `#[serde(default)]` so persisted
+    /// sync state written before this field existed loads as `None` without
+    /// forcing a re-sync.
+    #[serde(default)]
+    pub appointment_state: Option<i32>,
     pub reminder_is_set: bool,
     pub reminder_minutes_before_start: Option<i64>,
     pub created: Option<DateTime<Utc>>,
@@ -470,6 +479,7 @@ pub fn parse_find_item_response(xml: &str) -> EwsResult<Vec<ParsedItem>> {
                     b"isalldayevent" => text_target = Some("all_day"),
                     b"isrecurring" => text_target = Some("recurring"),
                     b"iscancelled" => text_target = Some("cancelled"),
+                    b"appointmentstate" => text_target = Some("appointment_state"),
                     b"reminderisset" => text_target = Some("reminder_on"),
                     b"reminderminutesbeforestart" => text_target = Some("reminder_mins"),
                     b"datetimecreated" => text_target = Some("created"),
@@ -518,6 +528,9 @@ pub fn parse_find_item_response(xml: &str) -> EwsResult<Vec<ParsedItem>> {
                     }
                     Some("cancelled") => {
                         current.cancelled = s.eq_ignore_ascii_case("true");
+                    }
+                    Some("appointment_state") => {
+                        current.appointment_state = s.parse::<i32>().ok();
                     }
                     Some("reminder_on") => {
                         current.reminder_is_set = s.eq_ignore_ascii_case("true");
@@ -752,6 +765,9 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                     b"iscancelled" if inside_item => {
                         text_target = Some("cancelled");
                     }
+                    b"appointmentstate" if inside_item => {
+                        text_target = Some("appointment_state");
+                    }
                     b"reminderisset" if inside_item => {
                         text_target = Some("reminder_on");
                     }
@@ -926,6 +942,9 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                     }
                     Some("cancelled") => {
                         current.cancelled = s.eq_ignore_ascii_case("true");
+                    }
+                    Some("appointment_state") => {
+                        current.appointment_state = s.parse::<i32>().ok();
                     }
                     Some("reminder_on") => {
                         current.reminder_is_set = s.eq_ignore_ascii_case("true");
@@ -1611,33 +1630,19 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
     }
     let organizer = item.organizer.filter(|s| !s.trim().is_empty());
 
-    // Diagnostic for the cancelled-event indicator: Exchange normally sets
-    // `IsCancelled=true` on a cancelled meeting (which we map to `Event.cancelled`),
-    // but in some configs it leaves the calendar item unmarked and only prefixes the
-    // subject with a localized "Canceled:"/"Abgesagt:". Log any item that looks
-    // cancelled by EITHER signal so a user log reveals which one Exchange actually
-    // sends (drives whether the IsCancelled mapping is enough or we need a fallback).
-    let subject_hints_cancelled = {
-        let s = item.subject.trim_start().to_ascii_lowercase();
-        [
-            "canceled:",
-            "cancelled:",
-            "abgesagt:",
-            "storniert:",
-            "abgesagt",
-        ]
-        .iter()
-        .any(|p| s.starts_with(p))
-    };
-    if item.cancelled || subject_hints_cancelled {
-        debug!(
-            id = %id,
-            cancelled = item.cancelled,
-            subject_hints_cancelled,
-            subject = %item.subject,
-            "ews calendar item cancelled-state"
-        );
-    }
+    // Cancelled-state resolution. Exchange normally flips `IsCancelled=true` on
+    // a cancelled meeting, but some configs (notably an attendee whose mailbox
+    // hasn't auto-processed the cancellation) leave that `false` and instead
+    // (a) flip the `asfCanceled` (0x4) bit in `AppointmentState`, and/or
+    // (b) prefix the subject with a localized "Canceled: " / "Abgesagt: ".
+    // We treat any of the three as authoritative so a withdrawn meeting is
+    // dimmed + announced regardless of which signal the server actually sends.
+    let state_cancelled = item
+        .appointment_state
+        .map(|s| s & 0x4 != 0)
+        .unwrap_or(false);
+    let subject_cancelled = subject_marks_cancelled(&item.subject);
+    let cancelled = item.cancelled || state_cancelled || subject_cancelled;
 
     Ok(Event {
         send_invitations: false,
@@ -1661,8 +1666,22 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         etag: item.change_key,
         organizer,
         attendee_responses,
-        cancelled: item.cancelled,
+        cancelled,
     })
+}
+
+/// Exchange's auto-processing prefixes a cancelled meeting's subject with a
+/// localized "Canceled: " / "Abgesagt: " (leaving the body intact) rather than
+/// deleting the item. Some server configs apply that prefix WITHOUT flipping
+/// `IsCancelled`/`AppointmentState` on the attendee's copy, so the prefix is a
+/// real secondary signal that the meeting was withdrawn. Matched case-insensitively
+/// against the confirmed English + German forms; the trailing colon keeps a
+/// user-authored title like "Abgesagt wegen Krankheit" from tripping it.
+fn subject_marks_cancelled(subject: &str) -> bool {
+    let s = subject.trim_start().to_ascii_lowercase();
+    ["canceled:", "cancelled:", "abgesagt:", "storniert:"]
+        .iter()
+        .any(|p| s.starts_with(p))
 }
 
 /// Map EWS `<t:ResponseType>` to the normalised RSVP enum. `Organizer`
@@ -3432,6 +3451,7 @@ mod tests {
                 <t:IsAllDayEvent>false</t:IsAllDayEvent>
                 <t:IsRecurring>false</t:IsRecurring>
                 <t:IsCancelled>true</t:IsCancelled>
+                <t:AppointmentState>7</t:AppointmentState>
               </t:CalendarItem>
             </t:Items>
           </m:RootFolder>
@@ -3451,6 +3471,7 @@ mod tests {
         assert!(!it.is_all_day);
         assert!(!it.is_recurring);
         assert!(it.cancelled);
+        assert_eq!(it.appointment_state, Some(7));
         assert!(it.reminder_is_set);
         assert_eq!(it.reminder_minutes_before_start, Some(10));
         assert_eq!(it.start.unwrap().to_rfc3339(), "2026-05-20T08:00:00+00:00");
@@ -3505,6 +3526,7 @@ mod tests {
             attendees: Vec::new(),
             detail_fetched: false,
             cancelled: false,
+            appointment_state: None,
         };
         let ev = to_event(item, "FID|CK").unwrap();
         // No `<t:CalendarItemType>` element → defaults to Single,
@@ -3534,6 +3556,59 @@ mod tests {
         };
         let ev = to_event(item, "FID|CK").unwrap();
         assert!(ev.cancelled);
+    }
+
+    #[test]
+    fn to_event_maps_cancelled_via_appointment_state() {
+        // Some Exchange configs leave IsCancelled=false on the attendee's copy
+        // but flip the asfCanceled (0x4) bit in AppointmentState. The 0x5 here
+        // = asfMeeting(1) | asfCanceled(4).
+        let item = ParsedItem {
+            item_id: "IID".into(),
+            subject: "Team Standup".into(),
+            start: Some("2026-05-20T12:00:00Z".parse().unwrap()),
+            end: Some("2026-05-20T12:30:00Z".parse().unwrap()),
+            cancelled: false,
+            appointment_state: Some(5),
+            ..Default::default()
+        };
+        let ev = to_event(item, "FID|CK").unwrap();
+        assert!(ev.cancelled);
+    }
+
+    #[test]
+    fn to_event_maps_cancelled_via_subject_prefix() {
+        // Fallback: neither flag set, but the subject carries the localized
+        // "Abgesagt: " prefix Exchange's auto-processing prepends.
+        let item = ParsedItem {
+            item_id: "IID".into(),
+            subject: "Abgesagt: Standup".into(),
+            start: Some("2026-05-20T12:00:00Z".parse().unwrap()),
+            end: Some("2026-05-20T12:30:00Z".parse().unwrap()),
+            cancelled: false,
+            appointment_state: Some(3), // asfMeeting|asfReceived, no cancel bit
+            ..Default::default()
+        };
+        let ev = to_event(item, "FID|CK").unwrap();
+        assert!(ev.cancelled);
+    }
+
+    #[test]
+    fn to_event_not_cancelled_for_ordinary_meeting() {
+        // A normal received meeting: no cancel bit, no cancel prefix. A user
+        // title that merely contains "abgesagt" without the colon prefix must
+        // NOT be treated as cancelled.
+        let item = ParsedItem {
+            item_id: "IID".into(),
+            subject: "Termin abgesagt? bitte klären".into(),
+            start: Some("2026-05-20T12:00:00Z".parse().unwrap()),
+            end: Some("2026-05-20T12:30:00Z".parse().unwrap()),
+            cancelled: false,
+            appointment_state: Some(3),
+            ..Default::default()
+        };
+        let ev = to_event(item, "FID|CK").unwrap();
+        assert!(!ev.cancelled);
     }
 
     #[test]
@@ -3988,6 +4063,7 @@ mod tests {
             attendees: Vec::new(),
             detail_fetched: false,
             cancelled: false,
+            appointment_state: None,
         };
         assert_eq!(to_event(mk(Some("Single")), "FID").unwrap().id, "S:IID|ICK");
         assert_eq!(
@@ -4310,6 +4386,8 @@ mod tests {
                 <t:End>2026-05-20T09:00:00Z</t:End>
                 <t:IsAllDayEvent>false</t:IsAllDayEvent>
                 <t:IsRecurring>false</t:IsRecurring>
+                <t:IsCancelled>false</t:IsCancelled>
+                <t:AppointmentState>5</t:AppointmentState>
                 <t:CalendarItemType>Single</t:CalendarItemType>
               </t:CalendarItem>
             </t:Create>
@@ -4343,6 +4421,10 @@ mod tests {
                 assert_eq!(item.change_key.as_deref(), Some("CK-1"));
                 assert_eq!(item.subject, "Brand new");
                 assert_eq!(item.item_type.as_deref(), Some("Single"));
+                // AppointmentState is parsed off the SyncFolderItems shape
+                // (the asfCanceled 0x4 bit drives cancelled detection).
+                assert!(!item.cancelled);
+                assert_eq!(item.appointment_state, Some(5));
             }
             other => panic!("expected Create, got {other:?}"),
         }

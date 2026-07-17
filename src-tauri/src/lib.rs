@@ -295,6 +295,57 @@ pub fn run() {
         }
     }
 
+    // One-time heal for cancelled-meeting detection: the SyncFolderItems shape
+    // now also requests `calendar:AppointmentState`, and `to_event` derives
+    // `cancelled` from that bit (and a "Canceled:"/"Abgesagt:" subject prefix)
+    // in addition to `IsCancelled`. Items already in the cache were parsed
+    // before those signals were read, so a meeting cancelled with only the
+    // fallback signal stays un-flagged until its folder is re-pulled. A cold
+    // re-sync re-parses every item with the new shape. Same best-effort +
+    // idempotent flag pattern as the heals above; a separate flag so
+    // already-healed accounts still get this backfill.
+    {
+        const HEAL_FLAG: &str = "cache.ewsCancelledSignalHealV1";
+        let shared = db.shared();
+        let prefs = crate::user_prefs::UserPrefsRepo::new(&shared);
+        let already_done = matches!(prefs.get(HEAL_FLAG).ok().flatten().as_deref(), Some("done"));
+        if !already_done {
+            match accounts::AccountsRepo::new(&shared).list() {
+                Ok(accts) => {
+                    let mut healed = 0usize;
+                    for acc in accts
+                        .iter()
+                        .filter(|a| a.adapter_kind == accounts::AdapterKind::Ews)
+                    {
+                        match cache_store.reset_event_sync(&acc.id) {
+                            Ok(n) => healed += n,
+                            Err(err) => tracing::warn!(
+                                account_id = %acc.id,
+                                ?err,
+                                "EWS cancelled-signal heal: reset_event_sync failed",
+                            ),
+                        }
+                    }
+                    match prefs.set(HEAL_FLAG, "done") {
+                        Ok(()) => tracing::info!(
+                            target: "aperio::cache",
+                            containers = healed,
+                            "EWS cancelled-signal heal: cleared event cursors so meetings re-parse with AppointmentState",
+                        ),
+                        Err(err) => tracing::warn!(
+                            ?err,
+                            "EWS cancelled-signal heal: couldn't persist completion flag; will retry next boot",
+                        ),
+                    }
+                }
+                Err(err) => tracing::warn!(
+                    ?err,
+                    "EWS cancelled-signal heal: couldn't list accounts; will retry next boot",
+                ),
+            }
+        }
+    }
+
     // One-time heal for CardDAV/contacts: an older CalDAV read fetched
     // a book's contacts via a non-standard inline-`address-data` PROPFIND
     // that iCloud / Synology Contacts silently ignore, so the bootstrap
