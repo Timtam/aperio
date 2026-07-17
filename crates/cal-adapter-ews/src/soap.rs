@@ -575,6 +575,8 @@ pub fn get_calendar_items_with_recurrence(ids: &[(String, Option<String>)]) -> S
           <t:FieldURI FieldURI="calendar:Start"/>
           <t:FieldURI FieldURI="calendar:End"/>
           <t:FieldURI FieldURI="calendar:IsRecurring"/>
+          <t:FieldURI FieldURI="calendar:IsCancelled"/>
+          <t:FieldURI FieldURI="calendar:AppointmentState"/>
           <t:FieldURI FieldURI="calendar:CalendarItemType"/>
           <t:FieldURI FieldURI="calendar:Recurrence"/>
           <t:FieldURI FieldURI="calendar:StartTimeZone"/>

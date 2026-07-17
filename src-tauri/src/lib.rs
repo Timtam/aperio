@@ -295,17 +295,18 @@ pub fn run() {
         }
     }
 
-    // One-time heal for cancelled-meeting detection: the SyncFolderItems shape
-    // now also requests `calendar:AppointmentState`, and `to_event` derives
-    // `cancelled` from that bit (and a "Canceled:"/"Abgesagt:" subject prefix)
-    // in addition to `IsCancelled`. Items already in the cache were parsed
-    // before those signals were read, so a meeting cancelled with only the
-    // fallback signal stays un-flagged until its folder is re-pulled. A cold
-    // re-sync re-parses every item with the new shape. Same best-effort +
-    // idempotent flag pattern as the heals above; a separate flag so
-    // already-healed accounts still get this backfill.
+    // One-time heal for cancelled-meeting detection: the read shapes now also
+    // request `calendar:AppointmentState`, and cancelled is derived from that
+    // bit + a "Canceled:"/"Abgesagt:" subject prefix + IsCancelled. V2 also
+    // resolves per-OCCURRENCE cancellations — a single instance of a series the
+    // organizer withdrew — which need the follow-up occurrence-exception GetItem
+    // enrichment. Items already in the cache were parsed/enriched before those
+    // signals existed, so they stay un-flagged until their folder is re-pulled.
+    // A cold re-sync re-parses + re-enriches every item with the new shapes.
+    // Same best-effort + idempotent flag pattern as the heals above; a bumped
+    // flag so accounts healed by V1 still pick up the occurrence-level backfill.
     {
-        const HEAL_FLAG: &str = "cache.ewsCancelledSignalHealV1";
+        const HEAL_FLAG: &str = "cache.ewsCancelledSignalHealV2";
         let shared = db.shared();
         let prefs = crate::user_prefs::UserPrefsRepo::new(&shared);
         let already_done = matches!(prefs.get(HEAL_FLAG).ok().flatten().as_deref(), Some("done"));
