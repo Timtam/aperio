@@ -3267,6 +3267,7 @@ impl Host {
         id: String,
         occurrence: String,
         calendar_id: Option<String>,
+        send_cancellations: bool,
     ) -> Result<(), StoreError> {
         let occ = chrono::DateTime::parse_from_rfc3339(occurrence.trim())
             .map_err(|e| StoreError::InvalidField {
@@ -3295,12 +3296,10 @@ impl Host {
                 }
             }
             Some(ext) => {
-                // Phase 3a: mobile keeps the silent "delete only this occurrence"
-                // behaviour (no attendee notification). Organizer cancel-with-
-                // notify on mobile lands in a follow-up (a new FFI entrypoint +
-                // regenerated bindings), so this internal call passes `false`.
+                // `send_cancellations` = the organizer chose "cancel this
+                // occurrence + notify attendees" (vs a silent local skip).
                 self.runtime
-                    .block_on(async { ext.add_event_exdate(&id, occ, false).await })
+                    .block_on(async { ext.add_event_exdate(&id, occ, send_cancellations).await })
                     .map_err(map_store_err)?;
             }
         }
@@ -7564,8 +7563,13 @@ mod tests {
             serde_json::from_str(&host.create_event_json(new_event.to_string()).unwrap()).unwrap();
         let id = created["id"].as_str().unwrap().to_string();
 
-        host.add_event_exdate_json(id.clone(), "2026-06-02T09:00:00Z".to_string(), Some(cal_id))
-            .unwrap();
+        host.add_event_exdate_json(
+            id.clone(),
+            "2026-06-02T09:00:00Z".to_string(),
+            Some(cal_id),
+            false,
+        )
+        .unwrap();
 
         let refreshed: serde_json::Value =
             serde_json::from_str(&host.get_event_by_id_json(id, None).unwrap()).unwrap();
@@ -7580,7 +7584,7 @@ mod tests {
 
         // A non-RFC-3339 occurrence is rejected.
         assert!(matches!(
-            host.add_event_exdate_json("x".to_string(), "nope".to_string(), None)
+            host.add_event_exdate_json("x".to_string(), "nope".to_string(), None, false)
                 .unwrap_err(),
             StoreError::InvalidField { ref field, .. } if field == "occurrence"
         ));

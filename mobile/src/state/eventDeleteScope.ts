@@ -65,7 +65,39 @@ export function confirmDeleteEvent(
         : t('dialogs.event.deleted', { title: ev.title }),
     );
 
-  const occurrenceAlert = () =>
+  // Remove just this occurrence: silent local skip, or (organizer) a per-
+  // occurrence cancellation that emails the attendees.
+  const removeOccurrence = (sendCancellations: boolean) =>
+    run(
+      () =>
+        addEventExdate(series, occurrence!, ev.calendar_id, sendCancellations),
+      sendCancellations
+        ? t('dialogs.event.occurrenceCancelled', { title: ev.title })
+        : t('dialogs.event.occurrenceDeleted', { title: ev.title }),
+    );
+
+  // Organizer chose "this occurrence" → notify attendees of the cancellation,
+  // or remove it silently. Mirrors the desktop cancel-choice for an occurrence.
+  const occurrenceNotifyChoice = () =>
+    Alert.alert(
+      t('dialogs.event.cancelChoice.title'),
+      t('dialogs.event.cancelChoice.occurrenceMessage', { title: ev.title }),
+      [
+        { text: t('mobile.cancel'), style: 'cancel' },
+        {
+          text: t('dialogs.event.cancelChoice.removeSilently'),
+          style: 'destructive',
+          onPress: () => removeOccurrence(false),
+        },
+        {
+          text: t('dialogs.event.cancelChoice.cancelOccurrence'),
+          style: 'destructive',
+          onPress: () => removeOccurrence(true),
+        },
+      ],
+    );
+
+  const occurrenceAlert = (organizer: boolean) =>
     Alert.alert(
       t('dialogs.confirm.deleteEventTitle'),
       t('dialogs.confirm.deleteEventMessage', { title: ev.title }),
@@ -74,10 +106,9 @@ export function confirmDeleteEvent(
         {
           text: t('dialogs.event.scope.occurrence'),
           onPress: () =>
-            run(
-              () => addEventExdate(series, occurrence!, ev.calendar_id),
-              t('dialogs.event.occurrenceDeleted', { title: ev.title }),
-            ),
+            // The organizer gets the notify/silent choice for the occurrence;
+            // everyone else removes it silently.
+            organizer ? occurrenceNotifyChoice() : removeOccurrence(false),
         },
         {
           // A whole-series delete can still email a cancellation; the adapters
@@ -123,13 +154,26 @@ export function confirmDeleteEvent(
       ],
     );
 
+  // Only a meeting we ORGANIZE on a scheduling provider offers the
+  // notify/silent choice (for the whole series OR a single occurrence).
+  // Resolve "who am I" lazily at delete time (a cheap host read).
+  const organizerGated = ev.attendees.length > 0 && opts.supportsScheduling;
+
   if (occurrence != null) {
-    occurrenceAlert();
+    if (organizerGated) {
+      void resolveCalendarUserEmail(ev.calendar_id)
+        .then((me) => {
+          const isOrganizer =
+            !!me && normalizeEmail(ev.organizer) === normalizeEmail(me);
+          occurrenceAlert(isOrganizer);
+        })
+        .catch(() => occurrenceAlert(false));
+      return;
+    }
+    occurrenceAlert(false);
     return;
   }
-  // Only a meeting we ORGANIZE on a scheduling provider gets the notify/silent
-  // choice. Resolve "who am I" lazily at delete time (a cheap host read).
-  if (ev.attendees.length > 0 && opts.supportsScheduling) {
+  if (organizerGated) {
     void resolveCalendarUserEmail(ev.calendar_id)
       .then((me) => {
         const isOrganizer =

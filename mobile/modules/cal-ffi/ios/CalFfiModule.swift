@@ -227,8 +227,8 @@ public class CalFfiModule: Module {
       try self.host.deleteEvent(id: id, calendarId: calendarId, sendCancellations: sendCancellations)
     }
 
-    AsyncFunction("addEventExdateJson") { (id: String, occurrence: String, calendarId: String?) in
-      try self.host.addEventExdateJson(id: id, occurrence: occurrence, calendarId: calendarId)
+    AsyncFunction("addEventExdateJson") { (id: String, occurrence: String, calendarId: String?, sendCancellations: Bool) in
+      try self.host.addEventExdateJson(id: id, occurrence: occurrence, calendarId: calendarId, sendCancellations: sendCancellations)
     }
 
     // ─── Sync ───
