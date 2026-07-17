@@ -300,17 +300,33 @@ export function MonthView() {
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
 
   const performDelete = useCallback(
-    async (ev: CalendarEvent, scope: 'occurrence' | 'series') => {
+    async (
+      ev: CalendarEvent,
+      scope: 'occurrence' | 'series',
+      sendCancellations = false,
+    ) => {
       try {
         const occIso = occurrenceIsoOf(ev);
         if (scope === 'occurrence' && occIso) {
-          await addEventExdate(seriesIdOf(ev), occIso, ev.calendar_id);
+          await addEventExdate(seriesIdOf(ev), occIso, ev.calendar_id, sendCancellations);
           announce(
-            t('dialogs.event.occurrenceDeleted', { title: ev.title }),
+            t(
+              sendCancellations
+                ? 'dialogs.event.occurrenceCancelled'
+                : 'dialogs.event.occurrenceDeleted',
+              { title: ev.title },
+            ),
           );
         } else {
-          await deleteEventById(seriesIdOf(ev), ev.calendar_id);
-          announce(t('dialogs.event.deleted', { title: ev.title }));
+          await deleteEventById(seriesIdOf(ev), ev.calendar_id, sendCancellations);
+          announce(
+            t(
+              sendCancellations
+                ? 'dialogs.event.meetingCancelled'
+                : 'dialogs.event.deleted',
+              { title: ev.title },
+            ),
+          );
         }
         // Local view-state dialogs don't go through DialogState.close(),
         // so the dataVersion bump has to be explicit here.
@@ -1132,11 +1148,12 @@ export function MonthView() {
         isOpen={scopeTarget !== null}
         onClose={() => setScopeTarget(null)}
         title={scopeTarget?.title ?? ''}
-        onOccurrence={() => {
-          if (scopeTarget) void performDelete(scopeTarget, 'occurrence');
+        event={scopeTarget}
+        onOccurrence={(send) => {
+          if (scopeTarget) void performDelete(scopeTarget, 'occurrence', send);
         }}
-        onSeries={() => {
-          if (scopeTarget) void performDelete(scopeTarget, 'series');
+        onSeries={(send) => {
+          if (scopeTarget) void performDelete(scopeTarget, 'series', send);
         }}
       />
       <MoveEventScopeDialog

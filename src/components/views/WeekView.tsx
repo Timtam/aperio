@@ -828,23 +828,39 @@ export function WeekView() {
   };
 
   const performDelete = useCallback(
-    async (ev: CalendarEvent, scope: 'occurrence' | 'series') => {
+    async (
+      ev: CalendarEvent,
+      scope: 'occurrence' | 'series',
+      sendCancellations = false,
+    ) => {
       try {
         if (scope === 'occurrence' && ev.id.includes('@')) {
           // Mark just this date with an EXDATE on the master so the
           // expansion engine skips it. The master row stays alive
           // and every other occurrence keeps appearing.
           const [seriesId, occIso] = ev.id.split('@');
-          await addEventExdate(seriesId, occIso, ev.calendar_id);
+          await addEventExdate(seriesId, occIso, ev.calendar_id, sendCancellations);
           announce(
-            t('dialogs.event.occurrenceDeleted', { title: ev.title }),
+            t(
+              sendCancellations
+                ? 'dialogs.event.occurrenceCancelled'
+                : 'dialogs.event.occurrenceDeleted',
+              { title: ev.title },
+            ),
           );
         } else {
           // Strip the synthetic occurrence suffix — series deletes
           // always target the master row.
           const id = ev.id.includes('@') ? ev.id.split('@')[0] : ev.id;
-          await deleteEventById(id, ev.calendar_id);
-          announce(t('dialogs.event.deleted', { title: ev.title }));
+          await deleteEventById(id, ev.calendar_id, sendCancellations);
+          announce(
+            t(
+              sendCancellations
+                ? 'dialogs.event.meetingCancelled'
+                : 'dialogs.event.deleted',
+              { title: ev.title },
+            ),
+          );
         }
         // Local view-state dialogs don't go through DialogState.close(),
         // so the dataVersion bump has to be explicit here.
@@ -1905,11 +1921,12 @@ export function WeekView() {
         isOpen={scopeTarget !== null}
         onClose={() => setScopeTarget(null)}
         title={scopeTarget?.title ?? ''}
-        onOccurrence={() => {
-          if (scopeTarget) void performDelete(scopeTarget, 'occurrence');
+        event={scopeTarget}
+        onOccurrence={(send) => {
+          if (scopeTarget) void performDelete(scopeTarget, 'occurrence', send);
         }}
-        onSeries={() => {
-          if (scopeTarget) void performDelete(scopeTarget, 'series');
+        onSeries={(send) => {
+          if (scopeTarget) void performDelete(scopeTarget, 'series', send);
         }}
       />
       <MoveEventScopeDialog
