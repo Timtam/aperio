@@ -1163,7 +1163,12 @@
       "message": "\"{{title}}\" is part of a series. Delete just this occurrence, or the whole series?",
       "occurrence": "This occurrence only",
       "series": "Whole series",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "organizerMessage": "\"{{title}}\" is part of a series you organize. Choose what happens for the attendees:",
+      "occurrenceNotify": "Cancel this occurrence and notify attendees",
+      "occurrenceSilent": "Remove this occurrence (without notifying)",
+      "seriesNotify": "Cancel the whole series and notify attendees",
+      "seriesSilent": "Remove the whole series (without notifying)"
     },
     "moveScope": {
       "title": "Move recurring event",
@@ -1230,10 +1235,13 @@
       "meetingCancelled": "Meeting \"{{title}}\" cancelled; attendees notified.",
       "occurrenceUpdated": "This occurrence of \"{{title}}\" was changed.",
       "occurrenceDeleted": "This occurrence of \"{{title}}\" was deleted.",
+      "occurrenceCancelled": "This occurrence of \"{{title}}\" was cancelled; attendees notified.",
       "cancelChoice": {
         "title": "Cancel meeting?",
         "message": "You organize \"{{title}}\". Cancel it and notify the attendees, or just remove it from your calendar without telling them?",
         "cancelMeeting": "Cancel & notify attendees",
+        "occurrenceMessage": "You organize \"{{title}}\". Cancel just this occurrence and notify the attendees, or just remove it from your calendar without telling them?",
+        "cancelOccurrence": "Cancel this occurrence & notify attendees",
         "removeSilently": "Remove without notifying"
       },
       "birthdayTitle": "Birthday",

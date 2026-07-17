@@ -1160,7 +1160,12 @@
       "message": "„{{title}}\" ist Teil einer Serie. Nur diesen Termin oder die ganze Serie löschen?",
       "occurrence": "Nur diesen Termin",
       "series": "Ganze Serie",
-      "cancel": "Abbrechen"
+      "cancel": "Abbrechen",
+      "organizerMessage": "„{{title}}\" ist Teil einer Serie, die du organisierst. Wähle, was mit den Teilnehmern passiert:",
+      "occurrenceNotify": "Nur diesen Termin absagen und Teilnehmer benachrichtigen",
+      "occurrenceSilent": "Nur diesen Termin entfernen (ohne Benachrichtigung)",
+      "seriesNotify": "Ganze Serie absagen und Teilnehmer benachrichtigen",
+      "seriesSilent": "Ganze Serie entfernen (ohne Benachrichtigung)"
     },
     "moveScope": {
       "title": "Serientermin verschieben",
@@ -1230,10 +1235,13 @@
       "meetingCancelled": "Besprechung „{{title}}\" abgesagt; Teilnehmer benachrichtigt.",
       "occurrenceUpdated": "Dieser Einzeltermin von „{{title}}\" wurde geändert.",
       "occurrenceDeleted": "Dieser Einzeltermin von „{{title}}\" wurde gelöscht.",
+      "occurrenceCancelled": "Dieser Einzeltermin von „{{title}}\" wurde abgesagt; Teilnehmer benachrichtigt.",
       "cancelChoice": {
         "title": "Besprechung absagen?",
         "message": "Du organisierst „{{title}}\". Absagen und die Teilnehmer benachrichtigen – oder nur aus deinem Kalender entfernen, ohne sie zu benachrichtigen?",
         "cancelMeeting": "Absagen & Teilnehmer benachrichtigen",
+        "occurrenceMessage": "Du organisierst „{{title}}\". Nur diesen Einzeltermin absagen und die Teilnehmer benachrichtigen – oder nur aus deinem Kalender entfernen, ohne sie zu benachrichtigen?",
+        "cancelOccurrence": "Diesen Einzeltermin absagen & Teilnehmer benachrichtigen",
         "removeSilently": "Ohne Benachrichtigung entfernen"
       },
       "birthdayTitle": "Geburtstag",

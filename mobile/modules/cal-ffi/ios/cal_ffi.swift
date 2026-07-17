@@ -1723,7 +1723,7 @@ public protocol HostProtocol: AnyObject, Sendable {
      * external event self-syncs via the provider. Mirrors the desktop
      * `add_event_exdate` (minus its cache-invalidate + scheduler bits).
      */
-    func addEventExdateJson(id: String, occurrence: String, calendarId: String?) throws 
+    func addEventExdateJson(id: String, occurrence: String, calendarId: String?, sendCancellations: Bool) throws 
     
     /**
      * "Start fresh" (§19.11) — overwrite the target's `meta.json` so it names
@@ -2836,12 +2836,13 @@ open func accountsJson()throws  -> String  {
      * external event self-syncs via the provider. Mirrors the desktop
      * `add_event_exdate` (minus its cache-invalidate + scheduler bits).
      */
-open func addEventExdateJson(id: String, occurrence: String, calendarId: String?)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+open func addEventExdateJson(id: String, occurrence: String, calendarId: String?, sendCancellations: Bool)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_add_event_exdate_json(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(id),
         FfiConverterString.lower(occurrence),
-        FfiConverterOptionString.lower(calendarId),$0
+        FfiConverterOptionString.lower(calendarId),
+        FfiConverterBool.lower(sendCancellations),$0
     )
 }
 }
@@ -8197,7 +8198,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_accounts_json() != 21992) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_add_event_exdate_json() != 10745) {
+    if (uniffi_cal_ffi_checksum_method_host_add_event_exdate_json() != 38156) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_adopt_local_dataset_json() != 28459) {

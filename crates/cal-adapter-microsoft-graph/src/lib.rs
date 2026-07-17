@@ -425,6 +425,7 @@ impl CalendarFeature for MicrosoftGraphAdapter {
         &self,
         _event_id: &str,
         _occurrence: chrono::DateTime<chrono::Utc>,
+        _send_cancellations: bool,
     ) -> CoreResult<()> {
         // Graph exposes per-occurrence cancellation through its
         // "event series exception" endpoint, which works against

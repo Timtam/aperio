@@ -218,8 +218,9 @@ export const addEventExdate = async (
   id: string,
   occurrence: string,
   calendarId: string | null = null,
+  sendCancellations = false,
 ): Promise<void> => {
-  await CalFfi.addEventExdateJson(id, occurrence, calendarId);
+  await CalFfi.addEventExdateJson(id, occurrence, calendarId, sendCancellations);
   scheduleBackgroundPush();
   notifyCalendarChanged();
 };

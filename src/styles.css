@@ -1643,6 +1643,14 @@ button[aria-disabled='true'] {
   margin-top: var(--space-2);
 }
 
+/* Stack the buttons vertically when there are several long, fully-spelled-out
+   choices (e.g. the organizer delete/cancel dialog) so each reads clearly on
+   its own row instead of being squeezed onto one line. */
+.form__actions--stacked {
+  flex-direction: column;
+  align-items: stretch;
+}
+
 .form__action--primary {
   background: var(--color-accent);
   color: var(--color-accent-fg);

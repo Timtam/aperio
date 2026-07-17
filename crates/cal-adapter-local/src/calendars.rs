@@ -407,9 +407,11 @@ impl CalendarFeature for LocalAdapter {
         &self,
         event_id: &str,
         occurrence: DateTime<Utc>,
+        _send_cancellations: bool,
     ) -> cal_core::Result<()> {
-        // Re-use the inherent method that already implements the
-        // read-modify-write for the JSON-stored exception list.
+        // Local events have no server-side scheduling, so `send_cancellations`
+        // is a no-op — this just drops the occurrence from the JSON-stored
+        // exception list. Re-use the inherent read-modify-write method.
         LocalAdapter::add_event_exdate(self, event_id, occurrence)
     }
 

@@ -425,6 +425,7 @@ impl CalendarFeature for GoogleAdapter {
         &self,
         event_id: &str,
         occurrence: chrono::DateTime<chrono::Utc>,
+        send_cancellations: bool,
     ) -> CoreResult<()> {
         // Same calendar-id-walking pattern as delete_event — the trait method
         // doesn't carry the calendar id. api::add_event_exdate tells us whether the
@@ -433,7 +434,15 @@ impl CalendarFeature for GoogleAdapter {
         // masking every failure as the misleading "not found in any calendar".
         let cals = self.list_calendars().await?;
         for cal in cals {
-            match api::add_event_exdate(&self.state, &cal.id, event_id, occurrence).await {
+            match api::add_event_exdate(
+                &self.state,
+                &cal.id,
+                event_id,
+                occurrence,
+                send_cancellations,
+            )
+            .await
+            {
                 Ok(api::ExdateOutcome::Cancelled) => return Ok(()),
                 Ok(api::ExdateOutcome::MasterNotHere) => continue,
                 Err(e) => return Err(to_core_error(e)),

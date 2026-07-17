@@ -65,30 +65,70 @@ export function confirmDeleteEvent(
         : t('dialogs.event.deleted', { title: ev.title }),
     );
 
-  const occurrenceAlert = () =>
-    Alert.alert(
-      t('dialogs.confirm.deleteEventTitle'),
-      t('dialogs.confirm.deleteEventMessage', { title: ev.title }),
-      [
-        { text: t('mobile.cancel'), style: 'cancel' },
-        {
-          text: t('dialogs.event.scope.occurrence'),
-          onPress: () =>
-            run(
-              () => addEventExdate(series, occurrence!, ev.calendar_id),
-              t('dialogs.event.occurrenceDeleted', { title: ev.title }),
-            ),
-        },
-        {
-          // A whole-series delete can still email a cancellation; the adapters
-          // tolerate send-cancellations from a non-organizer (fall back to a
-          // plain delete), so `attendees > 0` is safe here.
-          text: t('dialogs.event.scope.series'),
-          style: 'destructive',
-          onPress: () => deleteWith(ev.attendees.length > 0),
-        },
-      ],
+  // Remove just this occurrence: silent local skip, or (organizer) a per-
+  // occurrence cancellation that emails the attendees.
+  const removeOccurrence = (sendCancellations: boolean) =>
+    run(
+      () =>
+        addEventExdate(series, occurrence!, ev.calendar_id, sendCancellations),
+      sendCancellations
+        ? t('dialogs.event.occurrenceCancelled', { title: ev.title })
+        : t('dialogs.event.occurrenceDeleted', { title: ev.title }),
     );
+
+  // Recurring-occurrence delete. For a meeting the account ORGANIZES, ALL four
+  // choices are explicit buttons in ONE prompt — cancel-and-notify vs remove-
+  // silently, for this occurrence and for the whole series — so there is never a
+  // hidden second step and every button spells out whether an email goes out.
+  // Everyone else gets the plain two-scope delete.
+  const occurrenceAlert = (organizer: boolean) =>
+    organizer
+      ? Alert.alert(
+          t('dialogs.deleteScope.title'),
+          t('dialogs.deleteScope.organizerMessage', { title: ev.title }),
+          [
+            { text: t('mobile.cancel'), style: 'cancel' },
+            {
+              text: t('dialogs.deleteScope.occurrenceNotify'),
+              style: 'destructive',
+              onPress: () => removeOccurrence(true),
+            },
+            {
+              text: t('dialogs.deleteScope.occurrenceSilent'),
+              style: 'destructive',
+              onPress: () => removeOccurrence(false),
+            },
+            {
+              text: t('dialogs.deleteScope.seriesNotify'),
+              style: 'destructive',
+              onPress: () => deleteWith(true),
+            },
+            {
+              text: t('dialogs.deleteScope.seriesSilent'),
+              style: 'destructive',
+              onPress: () => deleteWith(false),
+            },
+          ],
+        )
+      : Alert.alert(
+          t('dialogs.confirm.deleteEventTitle'),
+          t('dialogs.confirm.deleteEventMessage', { title: ev.title }),
+          [
+            { text: t('mobile.cancel'), style: 'cancel' },
+            {
+              text: t('dialogs.event.scope.occurrence'),
+              onPress: () => removeOccurrence(false),
+            },
+            {
+              // A whole-series delete can still email a cancellation; the
+              // adapters tolerate send-cancellations from a non-organizer (fall
+              // back to a plain delete), so `attendees > 0` is safe here.
+              text: t('dialogs.event.scope.series'),
+              style: 'destructive',
+              onPress: () => deleteWith(ev.attendees.length > 0),
+            },
+          ],
+        );
 
   const choiceAlert = () =>
     Alert.alert(
@@ -123,13 +163,26 @@ export function confirmDeleteEvent(
       ],
     );
 
+  // Only a meeting we ORGANIZE on a scheduling provider offers the
+  // notify/silent choice (for the whole series OR a single occurrence).
+  // Resolve "who am I" lazily at delete time (a cheap host read).
+  const organizerGated = ev.attendees.length > 0 && opts.supportsScheduling;
+
   if (occurrence != null) {
-    occurrenceAlert();
+    if (organizerGated) {
+      void resolveCalendarUserEmail(ev.calendar_id)
+        .then((me) => {
+          const isOrganizer =
+            !!me && normalizeEmail(ev.organizer) === normalizeEmail(me);
+          occurrenceAlert(isOrganizer);
+        })
+        .catch(() => occurrenceAlert(false));
+      return;
+    }
+    occurrenceAlert(false);
     return;
   }
-  // Only a meeting we ORGANIZE on a scheduling provider gets the notify/silent
-  // choice. Resolve "who am I" lazily at delete time (a cheap host read).
-  if (ev.attendees.length > 0 && opts.supportsScheduling) {
+  if (organizerGated) {
     void resolveCalendarUserEmail(ev.calendar_id)
       .then((me) => {
         const isOrganizer =

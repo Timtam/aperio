@@ -726,6 +726,69 @@ pub fn delete_calendar_item(
     wrap(&body)
 }
 
+/// `GetItem` for ONE occurrence of a recurring series, addressed by
+/// `OccurrenceItemId(RecurringMasterId, InstanceIndex)` (1-based). Requests just
+/// the occurrence `Start` so the caller can binary-search the index space by the
+/// server's own dates. An index past the end of the series comes back as a
+/// per-item `ResponseClass="Error"` (parsed as "no item"), which is how the
+/// search finds the upper bound.
+pub fn get_occurrence_item(
+    master_id: &str,
+    change_key: Option<&str>,
+    instance_index: u32,
+) -> String {
+    let ck_attr = match change_key {
+        Some(ck) => format!(r#" ChangeKey="{}""#, escape_xml(ck)),
+        None => String::new(),
+    };
+    let body = format!(
+        r#"    <m:GetItem>
+      <m:ItemShape>
+        <t:BaseShape>IdOnly</t:BaseShape>
+        <t:AdditionalProperties>
+          <t:FieldURI FieldURI="calendar:Start"/>
+          <t:FieldURI FieldURI="calendar:End"/>
+          <t:FieldURI FieldURI="calendar:CalendarItemType"/>
+        </t:AdditionalProperties>
+      </m:ItemShape>
+      <m:ItemIds>
+        <t:OccurrenceItemId RecurringMasterId="{master}"{ck_attr} InstanceIndex="{instance_index}"/>
+      </m:ItemIds>
+    </m:GetItem>"#,
+        master = escape_xml(master_id),
+    );
+    wrap(&body)
+}
+
+/// `DeleteItem` for ONE occurrence of a recurring series, addressed by
+/// `OccurrenceItemId(RecurringMasterId, InstanceIndex)`. Removes just that date
+/// from the series (adds it to the master's DeletedOccurrences) — unlike
+/// [`delete_calendar_item`] on a RecurringMaster id, which deletes the WHOLE
+/// series. With `send_cancellations` the organizer notifies attendees that this
+/// single occurrence was cancelled (`SendToAllAndSaveCopy`).
+pub fn delete_occurrence_item(
+    master_id: &str,
+    change_key: Option<&str>,
+    instance_index: u32,
+    send_cancellations: bool,
+) -> String {
+    let ck_attr = match change_key {
+        Some(ck) => format!(r#" ChangeKey="{}""#, escape_xml(ck)),
+        None => String::new(),
+    };
+    let send = send_disposition(send_cancellations);
+    let body = format!(
+        r#"    <m:DeleteItem DeleteType="MoveToDeletedItems"
+                   SendMeetingCancellations="{send}">
+      <m:ItemIds>
+        <t:OccurrenceItemId RecurringMasterId="{master}"{ck_attr} InstanceIndex="{instance_index}"/>
+      </m:ItemIds>
+    </m:DeleteItem>"#,
+        master = escape_xml(master_id),
+    );
+    wrap(&body)
+}
+
 /// SOAP body for `DeleteItem` against a TASK. A task REQUIRES the
 /// `AffectedTaskOccurrences` attribute — EWS rejects a task delete that omits it
 /// with `ErrorAffectedTaskOccurrencesRequired` (a calendar item's

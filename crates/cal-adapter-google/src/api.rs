@@ -823,6 +823,7 @@ pub async fn add_event_exdate(
     calendar_id: &str,
     event_id: &str,
     occurrence: DateTime<Utc>,
+    send_cancellations: bool,
 ) -> GoogleResult<ExdateOutcome> {
     let cal_enc = urlencoding(calendar_id);
     let ev_enc = urlencoding(event_id);
@@ -884,8 +885,13 @@ pub async fn add_event_exdate(
     // "retrieve the instance then update it" path. The id is guaranteed valid, so no
     // 400; `map_event` reads the resulting cancelled instance back as a
     // `{master}::rid::{start}` override that suppresses the occurrence on next read.
+    // `sendUpdates=all` when the organizer opted to notify attendees that just
+    // this occurrence was cancelled; `none` for a silent local skip.
     let inst_enc = urlencoding(&instance.id);
-    let patch_path = format!("/calendars/{cal_enc}/events/{inst_enc}?sendUpdates=none");
+    let patch_path = format!(
+        "/calendars/{cal_enc}/events/{inst_enc}?sendUpdates={}",
+        send_updates_param(send_cancellations),
+    );
     match state
         .patch_json::<_, serde_json::Value>(
             &patch_path,
@@ -1520,7 +1526,7 @@ mod tests {
 
         let state = fixture_state(&server.url());
         let occ = chrono::Utc.with_ymd_and_hms(2026, 6, 1, 18, 0, 0).unwrap();
-        let outcome = add_event_exdate(&state, "primary", "master-1", occ)
+        let outcome = add_event_exdate(&state, "primary", "master-1", occ, false)
             .await
             .unwrap();
         assert!(matches!(outcome, ExdateOutcome::Cancelled));
@@ -1573,7 +1579,61 @@ mod tests {
             .with_ymd_and_hms(2026, 6, 1, 0, 0, 0)
             .unwrap()
             .with_timezone(&chrono::Utc);
-        let outcome = add_event_exdate(&state, "primary", "bday-1", occ)
+        let outcome = add_event_exdate(&state, "primary", "bday-1", occ, false)
+            .await
+            .unwrap();
+        assert!(matches!(outcome, ExdateOutcome::Cancelled));
+        patch.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn add_event_exdate_notifies_attendees_when_requested() {
+        // Organizer cancelling just this occurrence with notification →
+        // the instance PATCH carries sendUpdates=all (not none).
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/calendars/primary/events/master-1")
+            .with_status(200)
+            .with_body(
+                r##"{"id":"master-1","start":{"dateTime":"2026-05-25T18:00:00Z"},
+                     "end":{"dateTime":"2026-05-25T19:00:00Z"},
+                     "recurrence":["RRULE:FREQ=WEEKLY"]}"##,
+            )
+            .create_async()
+            .await;
+        server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(
+                    r"^/calendars/primary/events/master-1/instances\?.*".to_string(),
+                ),
+            )
+            .with_status(200)
+            .with_body(
+                r##"{"items":[
+                  {"id":"master-1_20260601T180000Z","status":"confirmed",
+                   "originalStartTime":{"dateTime":"2026-06-01T18:00:00Z"}}
+                ]}"##,
+            )
+            .create_async()
+            .await;
+        // The PATCH must hit sendUpdates=all — a mock without it would 501.
+        let patch = server
+            .mock(
+                "PATCH",
+                "/calendars/primary/events/master-1_20260601T180000Z?sendUpdates=all",
+            )
+            .match_body(mockito::Matcher::Regex(
+                r#""status":"cancelled""#.to_string(),
+            ))
+            .with_status(200)
+            .with_body(r#"{"id":"master-1_20260601T180000Z","status":"cancelled"}"#)
+            .create_async()
+            .await;
+
+        let state = fixture_state(&server.url());
+        let occ = chrono::Utc.with_ymd_and_hms(2026, 6, 1, 18, 0, 0).unwrap();
+        let outcome = add_event_exdate(&state, "primary", "master-1", occ, true)
             .await
             .unwrap();
         assert!(matches!(outcome, ExdateOutcome::Cancelled));
@@ -1615,7 +1675,7 @@ mod tests {
 
         let state = fixture_state(&server.url());
         let occ = chrono::Utc.with_ymd_and_hms(2026, 6, 1, 18, 0, 0).unwrap();
-        let outcome = add_event_exdate(&state, "primary", "master-2", occ)
+        let outcome = add_event_exdate(&state, "primary", "master-2", occ, false)
             .await
             .unwrap();
         assert!(matches!(outcome, ExdateOutcome::Cancelled));
@@ -1633,7 +1693,7 @@ mod tests {
             .await;
         let state = fixture_state(&server.url());
         let occ = chrono::Utc.with_ymd_and_hms(2026, 6, 1, 18, 0, 0).unwrap();
-        let outcome = add_event_exdate(&state, "other", "master-3", occ)
+        let outcome = add_event_exdate(&state, "other", "master-3", occ, false)
             .await
             .unwrap();
         assert!(matches!(outcome, ExdateOutcome::MasterNotHere));

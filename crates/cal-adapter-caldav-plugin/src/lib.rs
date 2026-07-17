@@ -238,6 +238,8 @@ unsafe extern "C" fn ffi_calendar_color(
 struct AddExdateArgs {
     event_id: String,
     occurrence: chrono::DateTime<chrono::Utc>,
+    #[serde(default)]
+    send_cancellations: bool,
 }
 
 unsafe extern "C" fn ffi_add_event_exdate(
@@ -250,7 +252,8 @@ unsafe extern "C" fn ffi_add_event_exdate(
         Err(r) => return r,
     };
     dispatch_unit(h, move |p| async move {
-        p.add_event_exdate(&args.event_id, args.occurrence).await
+        p.add_event_exdate(&args.event_id, args.occurrence, args.send_cancellations)
+            .await
     })
 }
 

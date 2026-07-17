@@ -1264,7 +1264,7 @@ external fun uniffi_cal_ffi_fn_method_host_accept_remote_dataset_json(`ptr`: Lon
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_accounts_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-external fun uniffi_cal_ffi_fn_method_host_add_event_exdate_json(`ptr`: Long,`id`: RustBuffer.ByValue,`occurrence`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_cal_ffi_fn_method_host_add_event_exdate_json(`ptr`: Long,`id`: RustBuffer.ByValue,`occurrence`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,`sendCancellations`: Byte,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_adopt_local_dataset_json(`ptr`: Long,`configJson`: RustBuffer.ByValue,`deviceName`: RustBuffer.ByValue,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1754,7 +1754,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_accounts_json() != 21992.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_add_event_exdate_json() != 10745.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_add_event_exdate_json() != 38156.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_adopt_local_dataset_json() != 28459.toShort()) {
@@ -4035,7 +4035,7 @@ public interface HostInterface {
      * external event self-syncs via the provider. Mirrors the desktop
      * `add_event_exdate` (minus its cache-invalidate + scheduler bits).
      */
-    fun `addEventExdateJson`(`id`: kotlin.String, `occurrence`: kotlin.String, `calendarId`: kotlin.String?)
+    fun `addEventExdateJson`(`id`: kotlin.String, `occurrence`: kotlin.String, `calendarId`: kotlin.String?, `sendCancellations`: kotlin.Boolean)
     
     /**
      * "Start fresh" (§19.11) — overwrite the target's `meta.json` so it names
@@ -5188,13 +5188,13 @@ open class Host: Disposable, AutoCloseable, HostInterface
      * external event self-syncs via the provider. Mirrors the desktop
      * `add_event_exdate` (minus its cache-invalidate + scheduler bits).
      */
-    @Throws(StoreException::class)override fun `addEventExdateJson`(`id`: kotlin.String, `occurrence`: kotlin.String, `calendarId`: kotlin.String?)
+    @Throws(StoreException::class)override fun `addEventExdateJson`(`id`: kotlin.String, `occurrence`: kotlin.String, `calendarId`: kotlin.String?, `sendCancellations`: kotlin.Boolean)
         = 
     callWithHandle {
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_method_host_add_event_exdate_json(
         it,
-        FfiConverterString.lower(`id`),FfiConverterString.lower(`occurrence`),FfiConverterOptionalString.lower(`calendarId`),_status)
+        FfiConverterString.lower(`id`),FfiConverterString.lower(`occurrence`),FfiConverterOptionalString.lower(`calendarId`),FfiConverterBoolean.lower(`sendCancellations`),_status)
 }
     }
     

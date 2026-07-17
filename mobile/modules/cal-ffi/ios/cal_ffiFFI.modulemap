@@ -1,0 +1,7 @@
+module cal_ffiFFI {
+    header "cal_ffiFFI.h"
+    export *
+    use "Darwin"
+    use "_Builtin_stdbool"
+    use "_Builtin_stdint"
+}

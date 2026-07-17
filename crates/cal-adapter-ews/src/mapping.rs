@@ -2803,6 +2803,49 @@ impl EwsRecurrence {
     }
 }
 
+/// The 1-based EWS `OccurrenceItemId` InstanceIndex of the occurrence of a
+/// recurring master (recurrence `rec`, anchored at `start`) that is nearest
+/// `target`.
+///
+/// Critically, this expands the NOMINAL pattern with NO EXDATEs: EWS
+/// InstanceIndex is the position in the ORIGINAL pattern and does NOT renumber
+/// when an occurrence is deleted (a deleted occurrence leaves an index "hole").
+/// So the ordinal here is stable regardless of prior per-occurrence deletions —
+/// which is exactly why a date-based search over live occurrences was wrong.
+///
+/// Expansion is in UTC to match the UTC `UNTIL` that [`EwsRecurrence::to_rrule`]
+/// emits (the `rrule` crate rejects a DTSTART/UNTIL timezone mismatch). A
+/// master in a non-UTC zone can therefore land the "nearest" occurrence one
+/// index off at a UTC day boundary — the caller GetItem-verifies index ± 1
+/// against the server, which recovers that and confirms the real date before
+/// deleting. Returns `None` if the rule can't be parsed/expanded.
+pub(crate) fn nominal_occurrence_index(
+    rec: &EwsRecurrence,
+    start: DateTime<Utc>,
+    target: DateTime<Utc>,
+) -> Option<u32> {
+    use rrule::{RRule, RRuleSet, Tz as RruleTz};
+    let body = rec.to_rrule();
+    let body = body.strip_prefix("RRULE:").unwrap_or(body.as_str());
+    let unvalidated: RRule<rrule::Unvalidated> = body.parse().ok()?;
+    let dt_start = start.with_timezone(&RruleTz::UTC);
+    let validated = unvalidated.validate(dt_start).ok()?;
+    // Bound the expansion just past the target so a long series doesn't
+    // over-expand; 2 days of slack absorbs any zone/DST skew at the boundary.
+    let bound = (target + chrono::Duration::days(2)).with_timezone(&RruleTz::UTC);
+    let set = RRuleSet::new(dt_start).rrule(validated).before(bound);
+    // The expansion is already date-bounded to just past the target, so this
+    // count cap only matters for an absurdly long series; 50k daily occurrences
+    // is ~136 years — well past any real meeting, while still bounding a
+    // pathological sub-daily rule.
+    let dates = set.all(50_000).dates;
+    let (pos, _) = dates
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, d)| (d.with_timezone(&Utc) - target).num_seconds().abs())?;
+    u32::try_from(pos + 1).ok()
+}
+
 /// Emit the BYDAY (+ optional BYSETPOS) parts for a relative
 /// monthly / yearly recurrence. Branches on the day-list size:
 ///
@@ -4871,6 +4914,61 @@ mod tests {
         assert_eq!(
             ev.start,
             all_day_local_anchor("2026-01-01T00:00:00Z".parse().unwrap())
+        );
+    }
+
+    #[test]
+    fn nominal_occurrence_index_maps_dates_to_ews_instance_index() {
+        let dt = |s: &str| s.parse::<DateTime<Utc>>().unwrap();
+
+        // Weekly Monday, no end, anchored 2026-07-06 → 07-06(1), 07-13(2),
+        // 07-20(3), 07-27(4).
+        let weekly = EwsRecurrence {
+            pattern: EwsRecurrencePattern::Weekly {
+                interval: 1,
+                days_of_week: vec![EwsDay::Monday],
+            },
+            range: EwsRecurrenceRange::NoEnd,
+        };
+        let start = dt("2026-07-06T09:00:00Z");
+        assert_eq!(
+            nominal_occurrence_index(&weekly, start, dt("2026-07-06T09:00:00Z")),
+            Some(1)
+        );
+        assert_eq!(
+            nominal_occurrence_index(&weekly, start, dt("2026-07-20T09:00:00Z")),
+            Some(3)
+        );
+
+        // Toni's actual series: biweekly Thursday, anchored 2026-07-23 →
+        // 07-23(1), 08-06(2), 08-20(3), 09-03(4). The InstanceIndex is the
+        // NOMINAL position — even if 08-06 were already deleted, 08-20 stays 3.
+        let biweekly = EwsRecurrence {
+            pattern: EwsRecurrencePattern::Weekly {
+                interval: 2,
+                days_of_week: vec![EwsDay::Thursday],
+            },
+            range: EwsRecurrenceRange::NoEnd,
+        };
+        let ts = dt("2026-07-23T12:00:00Z");
+        assert_eq!(
+            nominal_occurrence_index(&biweekly, ts, dt("2026-08-06T12:00:00Z")),
+            Some(2)
+        );
+        assert_eq!(
+            nominal_occurrence_index(&biweekly, ts, dt("2026-09-03T12:00:00Z")),
+            Some(4)
+        );
+
+        // Daily, interval 1, anchored 2026-07-01 → the Nth day is index N.
+        let daily = EwsRecurrence {
+            pattern: EwsRecurrencePattern::Daily { interval: 1 },
+            range: EwsRecurrenceRange::NoEnd,
+        };
+        let ds = dt("2026-07-01T08:00:00Z");
+        assert_eq!(
+            nominal_occurrence_index(&daily, ds, dt("2026-07-10T08:00:00Z")),
+            Some(10)
         );
     }
 

@@ -193,11 +193,15 @@ export const addEventExdate = (
   id: string,
   occurrence: string,
   calendarId?: string,
+  sendCancellations?: boolean,
 ) =>
   invoke<void>('add_event_exdate', {
     id,
     occurrence,
     calendarId: calendarId ?? null,
+    // Only the organizer's "cancel this occurrence + notify attendees" choice
+    // passes true; the plain "delete only this occurrence" omits it.
+    sendCancellations: sendCancellations ?? null,
   });
 
 // ── Task lists & tasks ─────────────────────────────────────────────────────

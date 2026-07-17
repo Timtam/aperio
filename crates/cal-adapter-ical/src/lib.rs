@@ -430,6 +430,7 @@ impl CalendarFeature for IcalAdapter {
         &self,
         _event_id: &str,
         _occurrence: chrono::DateTime<chrono::Utc>,
+        _send_cancellations: bool,
     ) -> Result<()> {
         Err(Error::Unsupported(
             "iCal feed accounts are read-only".into(),
