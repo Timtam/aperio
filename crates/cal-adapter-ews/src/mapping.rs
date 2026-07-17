@@ -37,6 +37,7 @@ use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::reader::Reader;
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 use cal_core::{
     AttendeeResponse, AttendeeStatus, Calendar, Event, EventRecurrence, FreeBusy, FreeBusySlot,
@@ -1609,6 +1610,34 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         });
     }
     let organizer = item.organizer.filter(|s| !s.trim().is_empty());
+
+    // Diagnostic for the cancelled-event indicator: Exchange normally sets
+    // `IsCancelled=true` on a cancelled meeting (which we map to `Event.cancelled`),
+    // but in some configs it leaves the calendar item unmarked and only prefixes the
+    // subject with a localized "Canceled:"/"Abgesagt:". Log any item that looks
+    // cancelled by EITHER signal so a user log reveals which one Exchange actually
+    // sends (drives whether the IsCancelled mapping is enough or we need a fallback).
+    let subject_hints_cancelled = {
+        let s = item.subject.trim_start().to_ascii_lowercase();
+        [
+            "canceled:",
+            "cancelled:",
+            "abgesagt:",
+            "storniert:",
+            "abgesagt",
+        ]
+        .iter()
+        .any(|p| s.starts_with(p))
+    };
+    if item.cancelled || subject_hints_cancelled {
+        debug!(
+            id = %id,
+            cancelled = item.cancelled,
+            subject_hints_cancelled,
+            subject = %item.subject,
+            "ews calendar item cancelled-state"
+        );
+    }
 
     Ok(Event {
         send_invitations: false,
