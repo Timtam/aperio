@@ -751,21 +751,36 @@ async fn occurrence_start(
     Ok(items.into_iter().find_map(|it| it.start))
 }
 
+/// The candidate InstanceIndexes to probe: the computed ordinal plus its
+/// neighbours, clamped to `>= 1`. The ±1 covers a UTC-vs-local off-by-one at a
+/// day boundary (see `nominal_occurrence_index`), which the server verify then
+/// resolves.
+fn candidate_indices(candidate: u32) -> Vec<u32> {
+    let mut v = vec![candidate];
+    if candidate > 1 {
+        v.push(candidate - 1);
+    }
+    v.push(candidate + 1);
+    v
+}
+
 /// Delete / cancel ONE occurrence of a recurring series addressed by its MASTER
 /// id (`M:…`) + the occurrence's UTC instant `target`.
 ///
-/// Why this exists: the read path only ever surfaces the master (the frontend
-/// expands the series client-side), so "delete only this occurrence" hands us
-/// the master id. `DeleteItem` on a master deletes the WHOLE series — so instead
-/// we address the single occurrence by EWS `OccurrenceItemId(master, index)`.
+/// The read path only ever surfaces the master (the frontend expands the series
+/// client-side), so "delete/cancel only this occurrence" hands us the master id.
+/// `DeleteItem` on a master deletes the WHOLE series — so instead we address the
+/// single occurrence by EWS `OccurrenceItemId(master, InstanceIndex)`.
 ///
-/// The index is found by exponential-probe + binary-search over the SERVER's
-/// returned occurrence `Start` dates (monotonic in the index) — NOT by a local
-/// RRULE expansion, which would be timezone/DST-fragile and could target the
-/// wrong index. A final safety check requires the located occurrence's Start to
-/// be within a few hours of `target`; if nothing lines up we ABORT rather than
-/// delete the wrong occurrence. With `send_cancellations` the deleted occurrence
-/// emails a per-occurrence CANCEL to attendees.
+/// InstanceIndex is the occurrence's position in the ORIGINAL recurrence pattern
+/// (deletions leave index holes and do NOT renumber), so we compute it by
+/// expanding the master's own recurrence rule (`nominal_occurrence_index`); a
+/// date-based search over live occurrences is defeated by those holes. We then
+/// GetItem-verify the candidate index — and its ±1 neighbours, to recover a
+/// UTC-vs-local off-by-one — against the SERVER: only if a probed occurrence's
+/// real Start lands within a few hours of `target` do we delete it, otherwise we
+/// ABORT rather than risk removing the wrong date. With `send_cancellations` the
+/// deleted occurrence emails a per-occurrence CANCEL to attendees.
 pub async fn delete_series_occurrence(
     client: &EwsClient,
     master_id: &str,
@@ -773,79 +788,66 @@ pub async fn delete_series_occurrence(
     target: DateTime<Utc>,
     send_cancellations: bool,
 ) -> EwsResult<()> {
-    // A meeting series won't have more occurrences than this; the cap keeps a
-    // pathological/looping series from probing forever.
-    const MAX_INDEX: u32 = 4096;
-    // Frontend and server both expand the same series in the same zone, so their
-    // instants match to the second; allow a few hours for DST / minor zone drift
-    // while staying well under any real inter-occurrence gap (daily = 24h).
+    // Frontend and server expand the same rule, so the occurrence's Start lands
+    // on `target`; allow a few hours for DST / zone skew while staying well under
+    // any real inter-occurrence gap (daily = 24h).
     const TOLERANCE_SECS: i64 = 6 * 3600;
 
-    // A recurring master always has a first occurrence; if not, nothing to do.
-    if occurrence_start(client, master_id, change_key, 1)
-        .await?
-        .is_none()
-    {
-        return Ok(());
-    }
-
-    // Exponential probe: grow `hi` until its start is >= target or it's past the
-    // end of the series.
-    let mut hi = 1u32;
-    loop {
-        match occurrence_start(client, master_id, change_key, hi).await? {
-            None => break,
-            Some(s) if s >= target => break,
-            Some(_) => {
-                if hi >= MAX_INDEX {
-                    break;
-                }
-                hi = hi.saturating_mul(2).min(MAX_INDEX);
-            }
-        }
-    }
-    // Binary-search [lo, hi] for the smallest index whose start is >= target (or
-    // out of range). `lo = hi/2` is the last index known to be < target.
-    let mut lo = (hi / 2).max(1);
-    while lo < hi {
-        let mid = lo + (hi - lo) / 2;
-        match occurrence_start(client, master_id, change_key, mid).await? {
-            Some(s) if s < target => lo = mid + 1,
-            _ => hi = mid,
-        }
-    }
-
-    // The intended occurrence is `lo` (start >= target) or `lo - 1` (start <
-    // target) — whichever is nearest. Fetch both and pick the closer.
-    let mut best: Option<(u32, i64)> = None;
-    for candidate in [lo.checked_sub(1).filter(|&c| c >= 1), Some(lo)]
+    // 1. Fetch the master's recurrence rule + anchor start.
+    let master_xml = client
+        .post_soap(crate::soap::get_calendar_items_with_recurrence(&[(
+            master_id.to_string(),
+            change_key.map(str::to_string),
+        )]))
+        .await?;
+    let master = crate::mapping::parse_get_calendar_items_response(&master_xml)?
         .into_iter()
-        .flatten()
-    {
-        if let Some(s) = occurrence_start(client, master_id, change_key, candidate).await? {
+        .next()
+        .ok_or_else(|| {
+            EwsError::Protocol("recurring master not found for occurrence delete".into())
+        })?;
+    let (Some(rec), Some(start)) = (master.recurrence.as_ref(), master.start) else {
+        return Err(EwsError::Protocol(
+            "recurring master carries no recurrence rule; cannot target an occurrence".into(),
+        ));
+    };
+
+    // 2. The occurrence's nominal 1-based InstanceIndex from the pattern.
+    let candidate =
+        crate::mapping::nominal_occurrence_index(rec, start, target).ok_or_else(|| {
+            EwsError::Protocol(format!(
+                "could not compute the InstanceIndex for the occurrence at {target}"
+            ))
+        })?;
+
+    // 3. Verify the candidate (and ±1) against the server; delete the occurrence
+    //    whose real Start matches `target`, else abort.
+    let mut best: Option<(u32, i64)> = None;
+    for index in candidate_indices(candidate) {
+        if let Some(s) = occurrence_start(client, master_id, change_key, index).await? {
             let delta = (s - target).num_seconds().abs();
             if best.map(|(_, bd)| delta < bd).unwrap_or(true) {
-                best = Some((candidate, delta));
+                best = Some((index, delta));
             }
         }
     }
-
-    let Some((index, delta)) = best else {
-        // No occurrence lines up (already deleted / out of range) — idempotent.
-        return Ok(());
-    };
-    if delta > TOLERANCE_SECS {
-        // The nearest occurrence isn't the one the user pointed at — refuse
-        // rather than risk deleting the wrong date.
-        return Err(EwsError::Protocol(format!(
-            "could not locate the occurrence at {target} in the recurring series \
-             (nearest was {delta}s away); not deleting to avoid removing the wrong date",
-        )));
+    match best {
+        Some((index, delta)) if delta <= TOLERANCE_SECS => {
+            client
+                .post_soap(delete_occurrence_item(
+                    master_id,
+                    change_key,
+                    index,
+                    send_cancellations,
+                ))
+                .await?;
+            Ok(())
+        }
+        _ => Err(EwsError::Protocol(format!(
+            "could not confirm the occurrence at {target} on the server \
+             (nearest computed index {candidate}); not deleting to avoid removing the wrong date",
+        ))),
     }
-
-    let envelope = delete_occurrence_item(master_id, change_key, index, send_cancellations);
-    client.post_soap(envelope).await?;
-    Ok(())
 }
 
 /// Resolve the (id, change_key) pair to use when writing against a
@@ -1839,15 +1841,62 @@ mod tests {
         )
     }
 
+    /// A `GetItemResponse` for the recurring MASTER "MASTER|CK": a weekly-Monday
+    /// series (no end) anchored 2026-07-06 → nominal occurrences 07-06 (idx 1),
+    /// 07-13 (2), 07-20 (3), 07-27 (4), …
+    fn master_weekly_response() -> String {
+        r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items><t:CalendarItem>
+        <t:ItemId Id="MASTER" ChangeKey="CK"/>
+        <t:Subject>Weekly</t:Subject>
+        <t:Start>2026-07-06T09:00:00Z</t:Start>
+        <t:End>2026-07-06T09:30:00Z</t:End>
+        <t:IsRecurring>true</t:IsRecurring>
+        <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
+        <t:Recurrence>
+          <t:WeeklyRecurrence>
+            <t:Interval>1</t:Interval>
+            <t:DaysOfWeek>Monday</t:DaysOfWeek>
+          </t:WeeklyRecurrence>
+          <t:NoEndRecurrence><t:StartDate>2026-07-06</t:StartDate></t:NoEndRecurrence>
+        </t:Recurrence>
+      </t:CalendarItem></m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#
+            .to_string()
+    }
+
+    /// Register the master-recurrence GetItem mock (matches the plain
+    /// `ItemId Id="MASTER"` request, distinct from the `OccurrenceItemId` probes).
+    async fn mock_master(server: &mut Server) -> mockito::Mock {
+        server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex("m:GetItem".into()),
+                mockito::Matcher::Regex(r#"ItemId Id="MASTER""#.into()),
+            ]))
+            .with_status(200)
+            .with_body(master_weekly_response())
+            .create_async()
+            .await
+    }
+
     #[tokio::test]
     async fn delete_series_occurrence_targets_the_matching_index() {
-        // Weekly series, occurrences at indices 1..=4 on consecutive Mondays.
-        // Target the 3rd (2026-07-20); the binary search over the server's dates
-        // must DeleteItem OccurrenceItemId InstanceIndex=3 — NOT the master, and
-        // NOT an adjacent occurrence.
+        // Weekly Monday series; target the 3rd occurrence (2026-07-20). The
+        // InstanceIndex is computed from the master's rule (nominal position 3),
+        // then verified against the server, and the DeleteItem must hit
+        // OccurrenceItemId InstanceIndex=3 — NOT the master, NOT a neighbour.
         let mut server = Server::new_async().await;
+        let _master = mock_master(&mut server).await;
         let dates = [
-            (1, "2026-07-06T09:00:00Z"),
             (2, "2026-07-13T09:00:00Z"),
             (3, "2026-07-20T09:00:00Z"),
             (4, "2026-07-27T09:00:00Z"),
@@ -1900,15 +1949,12 @@ mod tests {
 
     #[tokio::test]
     async fn delete_series_occurrence_aborts_when_no_occurrence_lines_up() {
-        // Every occurrence is far from the target (weeks away) → nothing within
-        // tolerance, so we must ERROR rather than delete the nearest occurrence.
-        // No DeleteItem mock: a stray delete would 501 and fail the test.
+        // Target 2026-07-21 — a date with NO occurrence (the series is Mondays).
+        // The nearest occurrence (07-20) is >6h away, so we must ERROR rather than
+        // delete it. No DeleteItem mock: a stray delete would 501 and fail.
         let mut server = Server::new_async().await;
-        for (idx, iso) in [
-            (1, "2026-07-06T09:00:00Z"),
-            (2, "2026-07-13T09:00:00Z"),
-            (4, "2026-07-27T09:00:00Z"),
-        ] {
+        let _master = mock_master(&mut server).await;
+        for (idx, iso) in [(2, "2026-07-13T09:00:00Z"), (4, "2026-07-27T09:00:00Z")] {
             let _m = server
                 .mock("POST", "/")
                 .match_body(mockito::Matcher::AllOf(vec![
