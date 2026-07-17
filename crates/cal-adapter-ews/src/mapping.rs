@@ -2834,7 +2834,11 @@ pub(crate) fn nominal_occurrence_index(
     // over-expand; 2 days of slack absorbs any zone/DST skew at the boundary.
     let bound = (target + chrono::Duration::days(2)).with_timezone(&RruleTz::UTC);
     let set = RRuleSet::new(dt_start).rrule(validated).before(bound);
-    let dates = set.all(4096).dates;
+    // The expansion is already date-bounded to just past the target, so this
+    // count cap only matters for an absurdly long series; 50k daily occurrences
+    // is ~136 years — well past any real meeting, while still bounding a
+    // pathological sub-daily rule.
+    let dates = set.all(50_000).dates;
     let (pos, _) = dates
         .iter()
         .enumerate()
