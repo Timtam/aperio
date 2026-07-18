@@ -62,7 +62,10 @@ export function confirmDeleteTask(
   task: Task,
   taskLists: TaskList[],
   t: Tr,
-  onSuccess: (message: string) => void,
+  // `outcome` lets a screen-reader-first list restore focus correctly: a
+  // 'removed' task focuses a surviving sibling / the empty state; a 'skipped'
+  // one still exists (moved to the next date) and is re-focused itself.
+  onSuccess: (message: string, outcome: 'removed' | 'skipped') => void,
   onError: (message: string) => void,
   onPlainDelete: () => void,
 ): void {
@@ -73,11 +76,15 @@ export function confirmDeleteTask(
       return;
     }
 
-    const run = (fn: () => Promise<void>, message: string) => {
+    const run = (
+      fn: () => Promise<void>,
+      message: string,
+      outcome: 'removed' | 'skipped',
+    ) => {
       void (async () => {
         try {
           await fn();
-          onSuccess(message);
+          onSuccess(message, outcome);
         } catch (err) {
           onError(err instanceof Error ? err.message : String(err));
         }
@@ -88,9 +95,15 @@ export function confirmDeleteTask(
       run(
         () => deleteTask(task.id, task.list_id),
         t('dialogs.taskDeleteScope.deleted', { title: task.title }),
+        'removed',
       );
 
-    // Precompute the next occurrence for the "only this" branch.
+    // Precompute the next occurrence for the "only this" branch. NOTE: only an
+    // UNTIL end bounds this — a COUNT-bounded rule reaches the frontend as
+    // "never-ending" (the count isn't tracked per device reminder), so "only
+    // this" on the FINAL turn of a COUNT series rolls the due date one step past
+    // the end instead of deleting. Harmless (a lingering reminder the user can
+    // delete manually), and the provider still owns the count.
     const rule = fromBackend(task.recurrence);
     const next =
       task.scheduled_date != null
@@ -114,6 +127,7 @@ export function confirmDeleteTask(
                 () =>
                   updateTask({ ...task, scheduled_date: next }).then(() => {}),
                 t('dialogs.taskDeleteScope.skipped', { title: task.title }),
+                'skipped',
               );
             }
           },

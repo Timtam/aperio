@@ -437,7 +437,20 @@ export default function TasksScreen({
         task,
         taskLists,
         t,
-        (message) => {
+        (message, outcome) => {
+          // Restore SR focus like the plain delete does: a removed task lands on
+          // a surviving sibling / the empty state; a skipped one still exists
+          // (moved to the next date) so re-focus it directly.
+          if (outcome === 'skipped') {
+            pendingFocusId.current = task.id;
+          } else {
+            const siblingId = focusTargetAfterRemoving(entries, task.id);
+            if (siblingId) {
+              pendingFocusId.current = siblingId;
+            } else {
+              pendingEmptyFocus.current = true;
+            }
+          }
           invalidateData();
           announce(message);
         },
