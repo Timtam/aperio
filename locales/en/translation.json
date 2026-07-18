@@ -327,7 +327,6 @@
       "finish": "Finish"
     },
     "contact": {
-      "birthdayClear": "Clear birthday",
       "birthdayCleared": "Birthday removed.",
       "viewTitle": "Contact details",
       "editTitle": "Edit contact",
@@ -345,7 +344,6 @@
       "photoTooLarge": "Image is larger than {{limit}}.",
       "photoUpdated": "Photo for {{name}} saved.",
       "photoRemoved": "Photo for {{name}} removed.",
-      "readOnlyHint": "This entry comes from a read-only directory (e.g. the Global Address List) and can't be edited here.",
       "readOnly": "read-only",
       "displayNameLabel": "Display name",
       "givenNameLabel": "First name",

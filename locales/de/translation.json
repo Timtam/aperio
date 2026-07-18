@@ -327,7 +327,6 @@
       "finish": "Fertig"
     },
     "contact": {
-      "birthdayClear": "Geburtstag entfernen",
       "birthdayCleared": "Geburtstag entfernt.",
       "viewTitle": "Kontakt-Details",
       "editTitle": "Kontakt bearbeiten",
@@ -345,7 +344,6 @@
       "photoTooLarge": "Bild ist größer als {{limit}}.",
       "photoUpdated": "Foto für {{name}} gespeichert.",
       "photoRemoved": "Foto für {{name}} entfernt.",
-      "readOnlyHint": "Dieser Eintrag stammt aus einem schreibgeschützten Verzeichnis (z. B. der Globalen Adressliste) und kann hier nicht bearbeitet werden.",
       "readOnly": "schreibgeschützt",
       "displayNameLabel": "Anzeigename",
       "givenNameLabel": "Vorname",
