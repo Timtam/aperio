@@ -9,48 +9,49 @@ import { useDialogState } from './dialogStateContext';
  * Pull tasks from every selected task list and return the aggregated list.
  *
  * Mirrors the shape of `useEvents` — same fan-out strategy, same
- * "partial result on per-list failure" policy. Sorting key: tasks with a
- * concrete scheduled date come first (ordered by date), tasks with only
- * a deadline next, undated tasks last.
+ * per-container retention policy. Sorting key: tasks with a concrete
+ * scheduled date come first (ordered by date), tasks with only a
+ * deadline next, undated tasks last.
  *
  * Stale-while-revalidate cache: see `useEvents` for the full rationale.
- * The model is identical — the only difference is that tasks aren't
- * range-scoped, so the cache key is just the sorted task-list ids.
+ * The aggregate entry is KEPT across `dataVersion` bumps and served
+ * stale while the refetch runs (the contract useEvents documents — an
+ * earlier version wiped the whole cache on every bump, which turned each
+ * of the many app-start bumps into a cold refetch and let a shrunken
+ * batch replace a fuller one). A per-list layer additionally retains
+ * each list's last successful batch, so a transiently failing list keeps
+ * its previous tasks on screen instead of shrinking the aggregate — and
+ * with it the day-entry count screen readers announce.
+ *
+ * The version guard is still monotonic: a refetch that resolves late,
+ * carrying a superseded `dataVersion`, is dropped so it can't overwrite
+ * post-mutation data with a pre-mutation snapshot.
  */
 
 type CacheKey = string;
 
 const tasksCache = new Map<CacheKey, Task[]>();
-let cachedDataVersion = -1;
+/** Last successful batch per task-list id (see `perCalendarCache`). */
+const perListCache = new Map<string, Task[]>();
+/** Highest dataVersion any effect run has seen — stale-write fence. */
+let latestVersion = -1;
 
-function ensureCacheVersion(version: number): void {
-  // Monotonic: only ever ADVANCE. dataVersion increments on every mutation, so
-  // a refetch that resolves late with a stale closure version must never rewind
-  // the cache — rewinding would clear the fresh batch and re-admit the stale
-  // one. (`!==` allowed exactly that backward step.)
-  if (version > cachedDataVersion) {
-    tasksCache.clear();
-    cachedDataVersion = version;
-  }
-}
-
-function cacheGet(key: CacheKey, version: number): Task[] | undefined {
-  ensureCacheVersion(version);
+function cacheGet(key: CacheKey): Task[] | undefined {
   return tasksCache.get(key);
 }
 
 function cacheSet(key: CacheKey, version: number, tasks: Task[]): void {
   // Drop a write from a superseded refetch: its batch predates a mutation that
   // already bumped the version, so it must not overwrite the current data.
-  if (version < cachedDataVersion) return;
-  ensureCacheVersion(version);
+  if (version < latestVersion) return;
   tasksCache.set(key, tasks);
 }
 
-/** Test-only escape hatch — wipes the cache so each test starts clean. */
+/** Test-only escape hatch — wipes the caches so each test starts clean. */
 export function __resetTasksCacheForTests(): void {
   tasksCache.clear();
-  cachedDataVersion = -1;
+  perListCache.clear();
+  latestVersion = -1;
 }
 
 export function useTasks() {
@@ -65,17 +66,16 @@ export function useTasks() {
 
   // Lazy init: read cache before the first paint so a remount with
   // a previously seen list selection comes back with data already.
-  const [tasks, setTasks] = useState<Task[]>(
-    () => cacheGet(idsKey, dataVersion) ?? [],
-  );
+  const [tasks, setTasks] = useState<Task[]>(() => cacheGet(idsKey) ?? []);
   const [loading, setLoading] = useState<boolean>(
-    () => cacheGet(idsKey, dataVersion) === undefined,
+    () => cacheGet(idsKey) === undefined,
   );
 
   useEffect(() => {
     let cancelled = false;
+    if (dataVersion > latestVersion) latestVersion = dataVersion;
 
-    const cached = cacheGet(idsKey, dataVersion);
+    const cached = cacheGet(idsKey);
     if (cached) {
       setTasks(cached);
       setLoading(false);
@@ -96,23 +96,36 @@ export function useTasks() {
       return;
     }
 
+    let failures = 0;
     Promise.all(
       ids.map((id) =>
-        getTasks(id).catch((err) => {
-          // eslint-disable-next-line no-console
-          console.warn('get_tasks failed for list', id, err);
-          return [] as Task[];
-        }),
+        getTasks(id).then(
+          (batch) => {
+            if (dataVersion >= latestVersion) perListCache.set(id, batch);
+            return batch;
+          },
+          (err) => {
+            // A transient per-list failure keeps the list's last known
+            // batch instead of shrinking the aggregate (same policy as
+            // useEvents' per-calendar retention).
+            // eslint-disable-next-line no-console
+            console.warn('get_tasks failed for list', id, err);
+            failures += 1;
+            return perListCache.get(id) ?? ([] as Task[]);
+          },
+        ),
       ),
     ).then((batches) => {
       // `cancelled` covers the effect re-running; the version check additionally
       // drops a fetch that a newer bump superseded mid-flight (the calendar
       // views churn dataVersion via background event refreshes, widening this
       // window) so a stale read can't replace the fresh task set.
-      if (cancelled || dataVersion < cachedDataVersion) return;
+      if (cancelled || dataVersion < latestVersion) return;
       const flat = batches.flat();
       flat.sort(taskOrder);
-      cacheSet(idsKey, dataVersion, flat);
+      // Only a failure-free run may become the authoritative cache entry
+      // (a failure-patched aggregate would later be served as fresh).
+      if (failures === 0) cacheSet(idsKey, dataVersion, flat);
       setTasks(flat);
       setLoading(false);
     });

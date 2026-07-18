@@ -11,6 +11,7 @@ import {
   type SyncStatusPayload,
   type SyncRoundReport,
 } from '../api/client';
+import { nudgeDataReload } from './dataReloadBus';
 import { useDialogState } from './dialogStateContext';
 import { notify } from './notify';
 
@@ -48,8 +49,7 @@ import { notify } from './notify';
  */
 export function useSync() {
   const { t } = useTranslation();
-  const { invalidateData, openSyncSchemaTooOld, openSyncStaleResume } =
-    useDialogState();
+  const { openSyncSchemaTooOld, openSyncStaleResume } = useDialogState();
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [lastReport, setLastReport] = useState<SyncRoundReport | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -105,10 +105,13 @@ export function useSync() {
       if (report) {
         setLastReport(report);
         // A completed sync round may have applied events that
-        // changed local SQLite. Bump the data version so views
-        // refetch.
+        // changed local SQLite. Nudge the views to refetch — through
+        // the CacheSyncListener coalescer, not a synchronous
+        // dataVersion bump, so a round landing during a cache warm
+        // pass can't bypass the reload-wave gating (the app-start
+        // oscillation).
         if (report.applied > 0) {
-          invalidateData();
+          nudgeDataReload();
         }
         // §19.9: fire an OS-level notification when the round
         // produced field-level conflicts. The status badge
@@ -157,7 +160,7 @@ export function useSync() {
     // `t` is part of the closure for the notification message;
     // include it so a locale switch re-attaches with the new
     // translator.
-  }, [invalidateData, t]);
+  }, [t]);
 
   // Phase Sl: when the backend latches `schema_too_old`, pop the
   // §19.13 update modal exactly once per session. The user can
@@ -251,7 +254,7 @@ export function useSync() {
       setLastReport(report);
       setLastError(null);
       if (report.applied > 0) {
-        invalidateData();
+        nudgeDataReload();
       }
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -272,7 +275,7 @@ export function useSync() {
       );
       setTriggering(false);
     }
-  }, [invalidateData]);
+  }, []);
 
   return {
     /** Latest snapshot or `null` while the initial fetch is in

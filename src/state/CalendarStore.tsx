@@ -7,6 +7,10 @@ import {
 } from 'react';
 
 import { CalendarStoreContext } from './calendarStoreContext';
+import {
+  reconcileSelectionTracked,
+  type SelectionSlice,
+} from './selectionReconcile';
 
 import {
   getSections,
@@ -76,16 +80,16 @@ interface PersistedSelection {
   knownCalendarIds?: string[];
   knownTaskListIds?: string[];
   knownContactListIds?: string[];
-}
-
-/** Per-container-type slice tracked together so the reconciler
- *  can atomically update both the user's selection and the set of
- *  ids it's seen before. `known === null` means "never reconciled
- *  yet" — either first run or a localStorage blob from before
- *  this field existed. */
-interface SelectionSlice {
-  selected: Set<string>;
-  known: Set<string> | null;
+  /** id → owning account, learned from every listing the id appeared
+   *  in. Lets the reconciler tell a GENUINE removal (the owning
+   *  account answered with content, this id is gone from it) apart
+   *  from a COLD/FAILED listing (the account is absent from the
+   *  listing entirely — snapshot not warmed yet, or a transient
+   *  backend failure emptied it). Absent on older blobs; ids without
+   *  an origin are treated conservatively (retained). */
+  calendarOrigins?: Record<string, string>;
+  taskListOrigins?: Record<string, string>;
+  contactListOrigins?: Record<string, string>;
 }
 
 export interface CalendarStoreState {
@@ -179,6 +183,7 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
       known: persisted.knownCalendarIds
         ? new Set(persisted.knownCalendarIds)
         : null,
+      origin: persisted.calendarOrigins ?? {},
     };
   });
   const [taskListSel, setTaskListSel] = useState<SelectionSlice>(() => {
@@ -188,6 +193,7 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
       known: persisted.knownTaskListIds
         ? new Set(persisted.knownTaskListIds)
         : null,
+      origin: persisted.taskListOrigins ?? {},
     };
   });
   const [contactListSel, setContactListSel] = useState<SelectionSlice>(() => {
@@ -197,6 +203,7 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
       known: persisted.knownContactListIds
         ? new Set(persisted.knownContactListIds)
         : null,
+      origin: persisted.contactListOrigins ?? {},
     };
   });
   // Per-source initial-load flags (see CalendarStoreState). Each flips
@@ -303,27 +310,30 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
       knownContactListIds: contactListSel.known
         ? [...contactListSel.known]
         : undefined,
+      calendarOrigins: calendarSel.origin,
+      taskListOrigins: taskListSel.origin,
+      contactListOrigins: contactListSel.origin,
     });
   }, [calendarSel, taskListSel, contactListSel]);
 
   const toggleCalendar = useCallback((id: string) => {
     setCalendarSel((prev) => ({
+      ...prev,
       selected: toggleSet(prev.selected, id),
-      known: prev.known,
     }));
   }, []);
 
   const toggleTaskList = useCallback((id: string) => {
     setTaskListSel((prev) => ({
+      ...prev,
       selected: toggleSet(prev.selected, id),
-      known: prev.known,
     }));
   }, []);
 
   const toggleContactList = useCallback((id: string) => {
     setContactListSel((prev) => ({
+      ...prev,
       selected: toggleSet(prev.selected, id),
-      known: prev.known,
     }));
   }, []);
 
@@ -424,89 +434,6 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
   );
 }
 
-
-/**
- * Selection reconciliation against the latest list — runs every time
- * the backing list refreshes. Three distinct cases:
- *
- *   1. **First-ever run** (`prev.selected` empty AND `prev.known` null):
- *      default to selecting every item that passes `autoSelectNew`
- *      (or all items if no filter given). This is the first-run UX
- *      where the user expects their freshly created calendar to be
- *      visible without ticking a box.
- *
- *   2. **Existing user upgrade** (`prev.selected` populated AND
- *      `prev.known` null): localStorage from before known-tracking
- *      existed. Freeze `known := selected ∪ list-ids` so we don't
- *      surprise-select calendars the user had silently unticked
- *      under the old "empty means select-everything" reconciler.
- *      Their current selection stays exactly as it was.
- *
- *   3. **Steady state** (`prev.known` non-null): keep selected ids
- *      that still exist; auto-select any id we have NEVER seen
- *      before (passing `autoSelectNew`); leave already-known-but-
- *      unselected ids alone — those are ones the user explicitly
- *      unticked at some point. This is the fix for the "added a
- *      new calendar, it stayed unchecked" bug: a truly new id
- *      isn't in `known`, so it goes into `selected` by default.
- *
- * `autoSelectNew` lets the caller veto the auto-select default per
- * item — used by the contact-list reconciler to keep heavy
- * read-only lists (the EWS GAL) opt-in.
- *
- * Returned `known` always covers exactly the current list (dropping
- * ids that disappeared, adding the freshly-arrived ones) so the
- * next reconcile has a clean baseline.
- */
-function reconcileSelectionTracked<T extends { id: string }>(
-  prev: SelectionSlice,
-  list: T[],
-  autoSelectNew?: (item: T) => boolean,
-): SelectionSlice {
-  const listIds = new Set(list.map((x) => x.id));
-  const isNewDefaultOn = (item: T) =>
-    autoSelectNew ? autoSelectNew(item) : true;
-
-  // Case 1: first-ever run.
-  if (prev.selected.size === 0 && prev.known === null) {
-    return {
-      selected: new Set(list.filter(isNewDefaultOn).map((x) => x.id)),
-      known: new Set(listIds),
-    };
-  }
-
-  // Case 2: upgrade from pre-known-tracking localStorage. Freeze
-  // known to "everything we know about right now" — both the
-  // currently-selected and the currently-visible. Subsequent
-  // reconciles will treat anything else as truly new.
-  if (prev.known === null) {
-    const selected = new Set<string>();
-    prev.selected.forEach((id) => {
-      if (listIds.has(id)) selected.add(id);
-    });
-    const known = new Set<string>(prev.selected);
-    listIds.forEach((id) => known.add(id));
-    return { selected, known };
-  }
-
-  // Case 3: steady state.
-  const selected = new Set<string>();
-  prev.selected.forEach((id) => {
-    if (listIds.has(id)) selected.add(id);
-  });
-  for (const item of list) {
-    if (!prev.known.has(item.id) && isNewDefaultOn(item)) {
-      selected.add(item.id);
-    }
-  }
-  // Trim known to current list + record any newly-seen ids.
-  const known = new Set<string>();
-  prev.known.forEach((id) => {
-    if (listIds.has(id)) known.add(id);
-  });
-  listIds.forEach((id) => known.add(id));
-  return { selected, known };
-}
 
 function toggleSet(prev: Set<string>, id: string): Set<string> {
   const next = new Set(prev);

@@ -48,10 +48,33 @@ import { useViewState } from './viewStateContext';
  *   contract and avoids that churn.)
  */
 
-/** Cache key: sorted calendar IDs joined with `,` + range ISO strings. */
+/** Cache key: sorted calendar IDs joined with ` ` + range ISO strings. */
 type CacheKey = string;
 
 const eventsCache = new Map<CacheKey, CalendarEvent[]>();
+
+/**
+ * Last successful raw batch per `(calendar, range)` — the monotonic
+ * per-container layer under the aggregate cache above. Every fan-out
+ * seeds from it and updates it per calendar, so
+ *
+ *   - a re-triggered or re-keyed run starts from the union of every
+ *     calendar's LAST KNOWN batch instead of from empty (the cold-start
+ *     progressive paint used to collapse the day to whichever calendar
+ *     answered first and re-grow it — the app-start count oscillation), and
+ *   - a calendar whose fetch FAILS keeps its previous batch on screen
+ *     instead of shrinking the aggregate to a partial set.
+ *
+ * Genuine removals still propagate: a deselected calendar simply isn't
+ * part of the fan-out (its slice is dropped from the run's map), and a
+ * successful fetch replaces the calendar's slice verbatim — including
+ * with an empty batch when the provider really has nothing.
+ */
+const perCalendarCache = new Map<string, CalendarEvent[]>();
+
+function perCalendarKey(id: string, startIso: string, endIso: string): string {
+  return `${id}|${startIso}|${endIso}`;
+}
 
 function cacheKey(idsKey: string, startIso: string, endIso: string): CacheKey {
   return `${idsKey}|${startIso}|${endIso}`;
@@ -65,9 +88,10 @@ function cacheSet(key: CacheKey, events: CalendarEvent[]): void {
   eventsCache.set(key, events);
 }
 
-/** Test-only escape hatch — wipes the cache so each test starts clean. */
+/** Test-only escape hatch — wipes the caches so each test starts clean. */
 export function __resetEventsCacheForTests(): void {
   eventsCache.clear();
+  perCalendarCache.clear();
 }
 
 export function useEvents(range: { start: Date; end: Date }) {
@@ -147,14 +171,22 @@ export function useEvents(range: { start: Date; end: Date }) {
     // that takes seconds — therefore no longer blocks the fast local /
     // iCal calendars from painting.
     //
-    // Progressive painting only happens on a COLD start (nothing
-    // cached). On a cache hit the cached batch stays on screen until
-    // the final authoritative swap below, so the view never briefly
-    // shrinks to a partial set while calendars trickle in.
+    // The run's map is SEEDED from the per-calendar cache, so a cold-key
+    // run (first paint, selection change, re-trigger mid-flight) starts
+    // from every calendar's last known batch and each arrival only
+    // replaces its own calendar's slice — the aggregate count can't
+    // collapse to the first responder and re-grow. On a cache hit the
+    // cached batch additionally stays on screen untouched until the
+    // final authoritative swap.
     const rangeStart = new Date(startIso);
     const rangeEnd = new Date(endIso);
     const perCalendar = new Map<string, CalendarEvent[]>();
+    ids.forEach((id) => {
+      const prev = perCalendarCache.get(perCalendarKey(id, startIso, endIso));
+      if (prev) perCalendar.set(id, prev);
+    });
     let remaining = ids.length;
+    let failures = 0;
 
     // Expand recurring masters into individual occurrences in-range.
     // The backend stores one master row per recurring event (+ its
@@ -168,15 +200,22 @@ export function useEvents(range: { start: Date; end: Date }) {
       });
 
     ids.forEach((id) => {
+      const ckey = perCalendarKey(id, startIso, endIso);
       getEvents({ calendar_id: id, start: startIso, end: endIso })
         .then(
-          (batch) => batch,
+          (batch) => {
+            perCalendarCache.set(ckey, batch);
+            return batch;
+          },
           (err) => {
-            // Keep the other calendars' data when one fails — better a
-            // partial view than a blank screen.
+            // A transient failure keeps the calendar's LAST KNOWN batch
+            // (seeded above) — one hiccuping backend must not shrink the
+            // visible day. Only a calendar that never answered in this
+            // session degrades to empty.
             // eslint-disable-next-line no-console
             console.warn('get_events failed for calendar', id, err);
-            return [] as CalendarEvent[];
+            failures += 1;
+            return perCalendarCache.get(ckey) ?? ([] as CalendarEvent[]);
           },
         )
         .then((batch) => {
@@ -184,13 +223,17 @@ export function useEvents(range: { start: Date; end: Date }) {
           perCalendar.set(id, batch);
           remaining -= 1;
           if (remaining === 0) {
-            // Last calendar in: authoritative swap + cache write.
+            // Last calendar in: authoritative swap. Only a run with NO
+            // failures may write the aggregate cache — an aggregate with
+            // failure-holes patched from stale batches must not become
+            // the authoritative entry that later runs serve as fresh.
             const expanded = aggregate();
-            cacheSet(key, expanded);
+            if (failures === 0) cacheSet(key, expanded);
             setEvents(expanded);
             setLoading(false);
           } else if (!hadCache) {
-            // Cold start: paint what we have so far.
+            // Cold key: paint what we have so far (last-known union with
+            // this calendar's slice refreshed).
             setEvents(aggregate());
           }
         })

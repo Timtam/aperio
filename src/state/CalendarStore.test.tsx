@@ -126,13 +126,30 @@ describe('CalendarStoreProvider', () => {
   });
 
   it('reconciles selection when a calendar disappears', async () => {
+    // Genuine removal: known + origin tracking present, and the owning
+    // account still answers with content — only then is a missing id
+    // dropped. (A missing id whose account is absent from the listing is
+    // retained — cold listings are not removals; see selectionReconcile
+    // unit tests.)
     localStorage.setItem(
       'aperio.selection.v1',
-      JSON.stringify({ calendars: ['a', 'gone'], taskLists: [] }),
+      JSON.stringify({
+        calendars: ['a', 'gone'],
+        taskLists: [],
+        knownCalendarIds: ['a', 'gone'],
+        calendarOrigins: { a: 'acc1', gone: 'acc1' },
+      }),
     );
     setupInvoke({
       list_calendars: [
-        { id: 'a', name: 'A', color: null, read_only: false, default_sound: null },
+        {
+          id: 'a',
+          name: 'A',
+          color: null,
+          read_only: false,
+          default_sound: null,
+          account_id: 'acc1',
+        },
       ],
     });
 

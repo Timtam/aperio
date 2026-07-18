@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 
 import { useCalendarStore } from './calendarStoreContext';
+import { registerDataReloadSink } from './dataReloadBus';
 import { useDialogState } from './dialogStateContext';
 
 /**
@@ -19,6 +20,21 @@ import { useDialogState } from './dialogStateContext';
  *   - listing scopes (`calendars` / `task_lists` / `contact_lists`) →
  *     re-run the matching CalendarStore refresh so the sidebar updates.
  *
+ * Reload-wave gating: a warm pass spreads its per-container emissions
+ * over seconds, which used to defeat a fixed trailing debounce and turn
+ * one pass into MANY full refetch waves (each re-exposing whatever
+ * intermediate cache state existed — the app-start day-count
+ * oscillation). The listener therefore tracks `cache-refresh-status`:
+ * while a pass is in flight, flushes are throttled to one per
+ * [`PASS_THROTTLE_MS`]; the pass-end status flushes immediately, so the
+ * settled state paints exactly once. A hung pass can't starve the UI —
+ * the throttle still flushes on its own cadence.
+ *
+ * Other data-changed producers (the sync scheduler's round-end) feed the
+ * SAME coalescer via `nudgeDataReload` (dataReloadBus.ts) instead of
+ * bumping `dataVersion` synchronously, so a sync round landing mid-pass
+ * no longer bypasses the gating.
+ *
  * Renders nothing.
  */
 interface CacheUpdatedPayload {
@@ -27,8 +43,15 @@ interface CacheUpdatedPayload {
   container_id: string;
 }
 
-/** Debounce window for coalescing a startup burst of cache-updated events. */
+interface CacheRefreshStatusPayload {
+  refreshing: boolean;
+}
+
+/** Coalesce window for a burst of cache-updated events (no pass running). */
 const COALESCE_MS = 250;
+
+/** Max flush cadence while a backend warm pass is in flight. */
+const PASS_THROTTLE_MS = 2500;
 
 export function CacheSyncListener(): null {
   const { invalidateData } = useDialogState();
@@ -51,14 +74,16 @@ export function CacheSyncListener(): null {
   };
 
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
+    const unlistens: Array<() => void> = [];
     let timer: ReturnType<typeof setTimeout> | undefined;
     let disposed = false;
+    let refreshing = false;
     // Pending scopes accumulated within the current coalesce window.
     const pending = new Set<string>();
 
     const flush = () => {
       timer = undefined;
+      if (pending.size === 0) return;
       const scopes = new Set(pending);
       pending.clear();
       const h = handlers.current;
@@ -86,23 +111,55 @@ export function CacheSyncListener(): null {
       }
     };
 
+    // Collect-then-flush: the FIRST event of a window arms the timer;
+    // later events just accumulate (no per-event reset, so latency is
+    // bounded and a drip of events can't postpone the flush forever).
+    const schedule = () => {
+      if (timer !== undefined) return;
+      timer = setTimeout(flush, refreshing ? PASS_THROTTLE_MS : COALESCE_MS);
+    };
+
+    registerDataReloadSink((scopes) => {
+      scopes.forEach((s) => pending.add(s));
+      schedule();
+    });
+
     listen<CacheUpdatedPayload>('cache-updated', (event) => {
       pending.add(event.payload.scope);
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(flush, COALESCE_MS);
+      schedule();
     })
       .then((fn) => {
         if (disposed) fn();
-        else unlisten = fn;
+        else unlistens.push(fn);
       })
       .catch((err) => {
         console.warn('cache-updated listen failed', err);
       });
 
+    listen<CacheRefreshStatusPayload>('cache-refresh-status', (event) => {
+      const was = refreshing;
+      refreshing = event.payload.refreshing;
+      if (was && !refreshing) {
+        // Pass end: paint the settled state NOW instead of waiting out a
+        // long throttle window armed mid-pass.
+        if (timer) clearTimeout(timer);
+        timer = undefined;
+        flush();
+      }
+    })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlistens.push(fn);
+      })
+      .catch((err) => {
+        console.warn('cache-refresh-status listen failed', err);
+      });
+
     return () => {
       disposed = true;
+      registerDataReloadSink(null);
       if (timer) clearTimeout(timer);
-      unlisten?.();
+      unlistens.forEach((fn) => fn());
     };
   }, []);
 
