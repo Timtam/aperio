@@ -83,21 +83,33 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   /// Enumerate an entity type's calendars, nudging a not-yet-loaded store
   /// once (see resolveCalendar): a transiently EMPTY catalog at cold launch
   /// would replace the cached listing with nothing — the device calendars
-  /// vanish from the sidebar until the next refresh. An empty result after
-  /// the nudge is served as-is (a device genuinely can have none).
-  private func loadedCalendars(for type: EKEntityType) -> [EKCalendar] {
+  /// vanish from the sidebar (and their events out of the day views) until
+  /// the next refresh. `refreshSourcesIfNecessary` is NOT documented as a
+  /// synchronous load barrier, so an empty catalog after the nudge is still
+  /// ambiguous — and a granted-access device virtually always has at least
+  /// one calendar / reminder list (iOS maintains defaults). Treat empty as
+  /// an ERROR: the host marks the listing errored and KEEPS the cached
+  /// catalog, and the next refresh retries. On the rare device with truly
+  /// zero lists the retry just keeps an already-empty cache empty (plus a
+  /// log line per pass) — the safe side of the trade.
+  private func loadedCalendars(for type: EKEntityType) throws -> [EKCalendar] {
     let calendars = store.calendars(for: type)
     if !calendars.isEmpty {
       return calendars
     }
     store.refreshSourcesIfNecessary()
-    return store.calendars(for: type)
+    let retried = store.calendars(for: type)
+    if retried.isEmpty {
+      throw DeviceCalError.Backend(
+        detail: "EventKit catalog empty (store may still be loading)")
+    }
+    return retried
   }
 
   // ── Calendar reads (P1) ──
 
   func listCalendars() throws -> String {
-    let payload: [[String: Any]] = loadedCalendars(for: .event).map { cal in
+    let payload: [[String: Any]] = try loadedCalendars(for: .event).map { cal in
       var dict: [String: Any] = [
         "id": cal.calendarIdentifier,
         "name": cal.title,
@@ -136,7 +148,7 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   // ── Reminders reads (P2) ──
 
   func listReminderLists() throws -> String {
-    let payload: [[String: Any]] = loadedCalendars(for: .reminder).map { list in
+    let payload: [[String: Any]] = try loadedCalendars(for: .reminder).map { list in
       var dict: [String: Any] = [
         "id": list.calendarIdentifier,
         "name": list.title,

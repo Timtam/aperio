@@ -52,17 +52,21 @@ export interface SelectionSlice {
  * The reconciler therefore treats an id as genuinely removed ONLY
  * when its owning account (learned into `origin` from every listing
  * the id appeared in) answered this listing WITH content and no
- * longer includes it. An id whose account is absent from the listing
- * — cold snapshot, failed refresh, or a deleted account — is retained
- * in `selected`/`known` untouched; its reads simply return empty
- * until the account warms (or forever, harmlessly, if the account is
- * gone; the sidebar only renders ids present in the listing either
- * way). Ids with no recorded origin (pre-upgrade blobs) are retained
- * conservatively too.
+ * longer includes it — or when `existingAccountIds` (the accounts
+ * table, which always contains the seeded "local" row) proves the
+ * account itself was DELETED. An id whose account exists but is
+ * absent from the listing — cold snapshot, failed refresh — is
+ * retained in `selected`/`known` untouched; its reads simply return
+ * empty until the account warms. Ids with no recorded origin
+ * (pre-upgrade blobs) are retained conservatively; the one immortal
+ * residue is an id whose account still exists but permanently lists
+ * ZERO containers (indistinguishable from cold) — harmless beyond a
+ * dead fetch per reload, and the sidebar only renders listed ids.
  *
  * `autoSelectNew` lets the caller veto the auto-select default per
  * item — used by the contact-list reconciler to keep heavy
- * read-only lists (the EWS GAL) opt-in.
+ * read-only lists (the EWS GAL) opt-in. `existingAccountIds` is
+ * optional (`null` = unknown → skip the account-deletion pruning).
  */
 export function reconcileSelectionTracked<
   T extends { id: string; account_id: string },
@@ -70,6 +74,7 @@ export function reconcileSelectionTracked<
   prev: SelectionSlice,
   list: T[],
   autoSelectNew?: (item: T) => boolean,
+  existingAccountIds?: ReadonlySet<string> | null,
 ): SelectionSlice {
   const listIds = new Set(list.map((x) => x.id));
   const isNewDefaultOn = (item: T) =>
@@ -109,13 +114,16 @@ export function reconcileSelectionTracked<
     };
   }
 
-  // Case 3: steady state. Accounts that answered with content — only
-  // their ids can be genuinely removed.
+  // Case 3: steady state. An id is genuinely removed when its account
+  // answered with content and no longer lists it, or when the account
+  // itself no longer exists.
   const accountsWithContent = new Set(list.map((x) => x.account_id));
   const genuinelyRemoved = (id: string): boolean => {
     if (listIds.has(id)) return false;
     const origin = prev.origin[id];
-    return origin !== undefined && accountsWithContent.has(origin);
+    if (origin === undefined) return false;
+    if (accountsWithContent.has(origin)) return true;
+    return existingAccountIds != null && !existingAccountIds.has(origin);
   };
 
   const selected = new Set<string>();

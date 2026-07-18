@@ -154,12 +154,29 @@ const RELOAD_DEBOUNCE_MS = 300;
 // of degrading to [] — one hiccuping backend must not shrink the aggregated
 // day (and with it the entry count screen readers announce). Successful reads
 // always replace the slice, so genuine deletions still propagate. Events are
-// additionally keyed by the fetched range so no cross-range rows can leak.
+// additionally keyed by the fetched range so no cross-range rows can leak —
+// which also means paging accumulates one entry per calendar per visited
+// range, so the events map is capped (oldest-inserted evicted; re-set keys
+// are refreshed to the tail so active ranges stay resident). The per-list
+// maps are naturally bounded by the list count.
+const EVENTS_RETENTION_MAX_ENTRIES = 200;
 const perCalendarEventsCache = new Map<string, CalendarEvent[]>();
 const perListTasksCache = new Map<string, Task[]>();
 const perListSectionsCache = new Map<string, Section[]>();
 let lastKnownColorLabels: ColorLabel[] = [];
 let lastKnownTaskLists: TaskList[] = [];
+
+function retainEvents(key: string, batch: CalendarEvent[]): void {
+  // Delete-then-set keeps Map insertion order ≈ recency, so eviction below
+  // drops the least recently WRITTEN range first.
+  perCalendarEventsCache.delete(key);
+  perCalendarEventsCache.set(key, batch);
+  while (perCalendarEventsCache.size > EVENTS_RETENTION_MAX_ENTRIES) {
+    const oldest = perCalendarEventsCache.keys().next().value;
+    if (oldest == null) break;
+    perCalendarEventsCache.delete(oldest);
+  }
+}
 
 // ── Single-day compact-list geometry (dayLayout='list') ──────────────────────
 // The lighter alternative to the hour-grid: a chronological list where a timed
@@ -583,14 +600,18 @@ export function CalendarDayList({
       // hiccuping backend can't shrink the aggregated day. A successful read
       // replaces the container's slice verbatim — including with an empty
       // batch when the provider really has nothing — so genuine deletions
-      // still propagate.
+      // still propagate. Retention writes are fenced on the run being
+      // current: a superseded run's slow response landing after a newer
+      // run's write would put pre-mutation data back into the cache (a
+      // later failure fallback would then resurrect e.g. a deleted event).
+      const isCurrent = () => reqToken.current === token;
       const [perCalendar, perList, perListSections] = await Promise.all([
         Promise.all(
           cals.map((c) => {
             const ckey = `${c.id}|${startIso}|${endIso}`;
             return getEvents({ calendar_id: c.id, start: startIso, end: endIso }).then(
               (batch) => {
-                perCalendarEventsCache.set(ckey, batch);
+                if (isCurrent()) retainEvents(ckey, batch);
                 return batch;
               },
               (err) => {
@@ -604,7 +625,7 @@ export function CalendarDayList({
           lists.map((l) =>
             getTasks(l.id).then(
               (batch) => {
-                perListTasksCache.set(l.id, batch);
+                if (isCurrent()) perListTasksCache.set(l.id, batch);
                 return batch;
               },
               (err) => {
@@ -618,7 +639,7 @@ export function CalendarDayList({
           lists.map((l) =>
             getSections(l.id).then(
               (batch) => {
-                perListSectionsCache.set(l.id, batch);
+                if (isCurrent()) perListSectionsCache.set(l.id, batch);
                 return batch;
               },
               (err) => {

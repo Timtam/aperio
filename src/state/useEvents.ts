@@ -186,7 +186,6 @@ export function useEvents(range: { start: Date; end: Date }) {
       if (prev) perCalendar.set(id, prev);
     });
     let remaining = ids.length;
-    let failures = 0;
 
     // Expand recurring masters into individual occurrences in-range.
     // The backend stores one master row per recurring event (+ its
@@ -204,7 +203,13 @@ export function useEvents(range: { start: Date; end: Date }) {
       getEvents({ calendar_id: id, start: startIso, end: endIso })
         .then(
           (batch) => {
-            perCalendarCache.set(ckey, batch);
+            // Fence the retention write on the run being current (the
+            // useTasks fence, same rationale): a superseded run's slow
+            // response landing AFTER the newer run's fresh write would
+            // put PRE-mutation data back into the cache — a later
+            // cold-key seed or failure fallback would then resurrect
+            // e.g. a just-deleted event.
+            if (!cancelled) perCalendarCache.set(ckey, batch);
             return batch;
           },
           (err) => {
@@ -214,7 +219,6 @@ export function useEvents(range: { start: Date; end: Date }) {
             // session degrades to empty.
             // eslint-disable-next-line no-console
             console.warn('get_events failed for calendar', id, err);
-            failures += 1;
             return perCalendarCache.get(ckey) ?? ([] as CalendarEvent[]);
           },
         )
@@ -223,12 +227,16 @@ export function useEvents(range: { start: Date; end: Date }) {
           perCalendar.set(id, batch);
           remaining -= 1;
           if (remaining === 0) {
-            // Last calendar in: authoritative swap. Only a run with NO
-            // failures may write the aggregate cache — an aggregate with
-            // failure-holes patched from stale batches must not become
-            // the authoritative entry that later runs serve as fresh.
+            // Last calendar in: authoritative swap. The aggregate is
+            // cached even when a container failed — it IS what is being
+            // displayed (failure-holes are patched from each container's
+            // last known batch), and it is strictly newer than whatever
+            // older entry the key held. Freezing the old entry instead
+            // made every later dataVersion bump repaint outdated data
+            // first (grow-shrink flicker) for as long as one container
+            // kept failing.
             const expanded = aggregate();
-            if (failures === 0) cacheSet(key, expanded);
+            cacheSet(key, expanded);
             setEvents(expanded);
             setLoading(false);
           } else if (!hadCache) {

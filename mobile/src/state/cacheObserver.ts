@@ -128,6 +128,14 @@ export function useCacheUpdates(): void {
   const { t } = useTranslation();
   // Last-seen warm-pass state, so we announce only the START and END of a pass.
   const refreshing = useRef(false);
+  // The translator rides a ref so the subscription effect can stay mounted
+  // ONCE ([] deps): re-running it on a language switch tore the coalescer
+  // down mid-window — an armed flush was dropped (pending categories sat
+  // until the next cache event, which in an idle session never comes) and
+  // `passRefreshing` was force-reset while `refreshing` kept its value, so
+  // the throttle stayed off for the rest of a running pass.
+  const tRef = useRef(t);
+  tRef.current = t;
 
   // Prime the device-local haptics pref once (default on).
   useEffect(() => {
@@ -135,6 +143,9 @@ export function useCacheUpdates(): void {
   }, []);
 
   useEffect(() => {
+    // (Re)subscribe keeps the module flag honest even if a previous mount
+    // was torn down mid-pass (e.g. fast refresh in dev).
+    passRefreshing = refreshing.current;
     // Per-container writes → live-reload the focused view (coalesced +
     // pass-throttled, see scheduleFlush). NO announcement here: a slow warm
     // pass touching many containers seconds apart spoke once per source — the
@@ -176,7 +187,7 @@ export function useCacheUpdates(): void {
         flushPending();
       }
       AccessibilityInfo.announceForAccessibility(
-        t(next ? 'cacheRefresh.refreshing' : 'cacheRefresh.done'),
+        tRef.current(next ? 'cacheRefresh.refreshing' : 'cacheRefresh.done'),
       );
       // Route through the shared loading coordinator so a refresh pass that
       // overlaps a view load (the common case: an external delete reloads the
@@ -187,13 +198,13 @@ export function useCacheUpdates(): void {
     return () => {
       subData.remove();
       subStatus.remove();
+      // True unmount (app teardown): flush whatever is pending so no
+      // subscriber is left stale, then disarm.
+      if (flushTimer != null) clearTimeout(flushTimer);
+      flushPending();
       passRefreshing = false;
-      if (flushTimer != null) {
-        clearTimeout(flushTimer);
-        flushTimer = null;
-      }
     };
-  }, [t]);
+  }, []);
 }
 
 /**

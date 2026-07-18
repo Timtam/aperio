@@ -118,4 +118,35 @@ describe('reconcileSelectionTracked', () => {
     const next = reconcileSelectionTracked(prev, [item('a')]);
     expect(sel(next)).toEqual(['a', 'legacy']);
   });
+
+  it('prunes ids of a DELETED account when the account set is known', () => {
+    const prev = slice(['a', 'orphan'], ['a', 'orphan'], {
+      a: 'acc1',
+      orphan: 'acc2',
+    });
+    // acc2 was deleted: absent from the listing AND from the accounts
+    // table — without this pruning its ids would be immortal.
+    const next = reconcileSelectionTracked(
+      prev,
+      [item('a')],
+      undefined,
+      new Set(['local', 'acc1']),
+    );
+    expect(sel(next)).toEqual(['a']);
+    expect(known(next)).toEqual(['a']);
+  });
+
+  it('keeps cold-account ids when the account still exists', () => {
+    const prev = slice(['a', 'cold'], ['a', 'cold'], {
+      a: 'acc1',
+      cold: 'acc2',
+    });
+    const next = reconcileSelectionTracked(
+      prev,
+      [item('a')],
+      undefined,
+      new Set(['local', 'acc1', 'acc2']),
+    );
+    expect(sel(next)).toEqual(['a', 'cold']);
+  });
 });

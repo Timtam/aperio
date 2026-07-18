@@ -214,20 +214,45 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
   const [contactListsLoading, setContactListsLoading] = useState(true);
   const loading = calendarsLoading || taskListsLoading || contactListsLoading;
 
-  const refreshCalendars = useCallback(async () => {
-    const list = await listCalendars();
-    setCalendars(list);
-    setCalendarSel((prev) => reconcileSelectionTracked(prev, list));
+  // The account-id set rides along into the reconciler so containers of a
+  // DELETED account are pruned from the persisted selection (a cold/failed
+  // listing alone can't distinguish "account gone" from "account not warmed
+  // yet"). Best-effort: on failure the reconciler just skips that pruning.
+  const accountIdSet = useCallback(async () => {
+    try {
+      return new Set((await listAccounts()).map((a) => a.id));
+    } catch {
+      return null;
+    }
   }, []);
+
+  const refreshCalendars = useCallback(async () => {
+    const [list, accountIds] = await Promise.all([
+      listCalendars(),
+      accountIdSet(),
+    ]);
+    setCalendars(list);
+    setCalendarSel((prev) =>
+      reconcileSelectionTracked(prev, list, undefined, accountIds),
+    );
+  }, [accountIdSet]);
 
   const refreshTaskLists = useCallback(async () => {
-    const list = await listTaskLists();
+    const [list, accountIds] = await Promise.all([
+      listTaskLists(),
+      accountIdSet(),
+    ]);
     setTaskLists(list);
-    setTaskListSel((prev) => reconcileSelectionTracked(prev, list));
-  }, []);
+    setTaskListSel((prev) =>
+      reconcileSelectionTracked(prev, list, undefined, accountIds),
+    );
+  }, [accountIdSet]);
 
   const refreshContactLists = useCallback(async () => {
-    const list = await listContactLists();
+    const [list, accountIds] = await Promise.all([
+      listContactLists(),
+      accountIdSet(),
+    ]);
     setContactLists(list);
     // Contact lists have a `read_only` flag; on first run AND for
     // newly-discovered lists the reconciler defaults to "writable
@@ -239,9 +264,9 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
     // read-only is opt-in: enabling it should be a deliberate
     // act, not a silent default.
     setContactListSel((prev) =>
-      reconcileSelectionTracked(prev, list, (l) => !l.read_only),
+      reconcileSelectionTracked(prev, list, (l) => !l.read_only, accountIds),
     );
-  }, []);
+  }, [accountIdSet]);
 
   const refreshColorLabels = useCallback(async () => {
     const labels = await listColorLabels();

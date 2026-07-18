@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 
+import { getCacheRefreshStatus } from '../api/client';
 import { useCalendarStore } from './calendarStoreContext';
 import { registerDataReloadSink } from './dataReloadBus';
 import { useDialogState } from './dialogStateContext';
@@ -80,6 +81,18 @@ export function CacheSyncListener(): null {
     let refreshing = false;
     // Pending scopes accumulated within the current coalesce window.
     const pending = new Set<string>();
+
+    // Seed the pass state: a listener mounting MID-pass (webview reload,
+    // renderer restart) would otherwise coalesce the pass's remaining
+    // emissions at the short window until the next status event happens to
+    // arrive — the multi-wave behavior the throttle exists to prevent.
+    getCacheRefreshStatus()
+      .then((s) => {
+        if (!disposed) refreshing = s.refreshing;
+      })
+      .catch((err) => {
+        console.warn('get_cache_refresh_status failed', err);
+      });
 
     const flush = () => {
       timer = undefined;

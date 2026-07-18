@@ -96,7 +96,6 @@ export function useTasks() {
       return;
     }
 
-    let failures = 0;
     Promise.all(
       ids.map((id) =>
         getTasks(id).then(
@@ -110,7 +109,6 @@ export function useTasks() {
             // useEvents' per-calendar retention).
             // eslint-disable-next-line no-console
             console.warn('get_tasks failed for list', id, err);
-            failures += 1;
             return perListCache.get(id) ?? ([] as Task[]);
           },
         ),
@@ -123,9 +121,11 @@ export function useTasks() {
       if (cancelled || dataVersion < latestVersion) return;
       const flat = batches.flat();
       flat.sort(taskOrder);
-      // Only a failure-free run may become the authoritative cache entry
-      // (a failure-patched aggregate would later be served as fresh).
-      if (failures === 0) cacheSet(idsKey, dataVersion, flat);
+      // Cache even a failure-patched aggregate — it IS what is displayed
+      // (holes are patched from each list's last known batch) and is
+      // strictly newer than the frozen entry; keeping the old entry made
+      // every later bump repaint outdated data first while a list failed.
+      cacheSet(idsKey, dataVersion, flat);
       setTasks(flat);
       setLoading(false);
     });
