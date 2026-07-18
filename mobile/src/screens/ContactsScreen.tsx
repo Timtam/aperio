@@ -4,6 +4,7 @@ import {
   AccessibilityInfo,
   Alert,
   Pressable,
+  RefreshControl,
   SectionList,
   type SectionListData,
   StyleSheet,
@@ -27,6 +28,7 @@ import { useTabBarInset } from '../hooks/useTabBarInset';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useCacheReload } from '../state/cacheObserver';
 import { useContactVisibility } from '../state/contactVisibility';
+import { usePullRefresh } from '../state/usePullRefresh';
 import { MagicTapView } from '../components/MagicTapView';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -62,6 +64,9 @@ export default function ContactsScreen({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  // Native pull-to-refresh — manual sync + external-cache warm; the list reloads
+  // via useCacheReload('contacts') below.
+  const { refreshing, onRefresh } = usePullRefresh();
   // Contact-sync status (for the browse-surface "Sync now" + last-synced line —
   // the desktop surfaces a manual refresh here, not only in Settings).
   const [syncStatus, setSyncStatus] = useState<ContactsSyncStatus | null>(null);
@@ -470,6 +475,9 @@ export default function ContactsScreen({
           keyExtractor={(c) => c.id}
           contentContainerStyle={[styles.list, { paddingBottom: tabBarInset }]}
           keyboardShouldPersistTaps="handled"
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
           stickySectionHeadersEnabled={false}
           initialNumToRender={20}
           windowSize={11}

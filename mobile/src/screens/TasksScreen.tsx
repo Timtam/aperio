@@ -7,6 +7,7 @@ import {
   FlatList,
   findNodeHandle,
   Pressable,
+  RefreshControl,
   StyleSheet,
   Text,
   View,
@@ -37,6 +38,7 @@ import {
 import { ActionsMenu, type MenuAction } from '../components/ActionsMenu';
 import { deleteTask, duplicateTask } from '../api/client';
 import { confirmDeleteTask } from '../state/taskDeleteScope';
+import { usePullRefresh } from '../state/usePullRefresh';
 import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
 import { useTabBarInset } from '../hooks/useTabBarInset';
 import { describeDue } from '../intl/describeDue';
@@ -85,6 +87,9 @@ export default function TasksScreen({
     colorLabels,
     invalidateData,
   } = useTaskStore();
+  // Native pull-to-refresh — manual sync + external-cache warm; the list reloads
+  // off the resulting cache-update / dataVersion bump.
+  const { refreshing, onRefresh } = usePullRefresh();
   // A cross-device sync round applies a peer's task changes to the local store;
   // reload (bump dataVersion) when the sync layer signals a data change, so joined
   // / synced tasks appear without an app restart. Other screens reload via their
@@ -836,6 +841,9 @@ export default function TasksScreen({
           }
           contentContainerStyle={[styles.list, { paddingBottom: tabBarInset }]}
           keyboardShouldPersistTaps="handled"
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
           // Virtualization budget mirrors the contacts SectionList: keep the
           // mounted window small so the screen-reader tree stays light even with
           // a few thousand rows; the focus-restoration targets (the adjacent

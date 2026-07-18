@@ -6,6 +6,7 @@ import {
   Alert,
   PixelRatio,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -76,6 +77,7 @@ import { useCalendarVisibility } from '../state/calendarVisibility';
 import { useCurrentUserByList } from '../state/currentUser';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
 import { confirmDeleteTask } from '../state/taskDeleteScope';
+import { usePullRefresh } from '../state/usePullRefresh';
 import { editEventWithScope } from '../state/eventEditScope';
 import { readTaskBehaviour } from '../state/taskBehaviour';
 import { applyTaskToggle, statusAnnounce } from '../state/taskToggle';
@@ -485,6 +487,9 @@ export function CalendarDayList({
   // visual: it touches no accessibilityLabel/role/action/tap handler, and only
   // the GRID path calls it — list/linear modes stack from the top already.
   const scrollRef = useRef<ScrollView>(null);
+  // Native pull-to-refresh — kicks a manual sync + external-cache warm; the list
+  // reloads off the resulting cache-update. iOS + Android both back RefreshControl.
+  const { refreshing, onRefresh } = usePullRefresh();
   // Measured y of the grid's day section and of its hour-grid row within that
   // section, captured via onLayout. Both are needed to locate the canvas top in
   // the scroll content. `null` until measured — if either is unmeasured we do
@@ -1470,6 +1475,9 @@ export function CalendarDayList({
           style={styles.scroll}
           contentContainerStyle={[styles.list, { paddingBottom: tabBarInset }]}
           keyboardShouldPersistTaps="handled"
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
         >
           {buckets.map((b) => {
             // Single-day paths. Gated on the explicit `dayLayout` prop, which
