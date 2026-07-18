@@ -379,7 +379,17 @@ impl CacheStore {
                 params![account, calendar],
                 &incoming,
             )?;
-            if !unchanged {
+            // Even when the content is byte-identical, REWRITE the rows if
+            // this container has no recorded freshness — that is the state a
+            // cache-generation reset (or "Re-sync from scratch") leaves
+            // behind, and those resets exist precisely to recompute what
+            // insert_event derives from the payload (start_utc/end_utc via
+            // the recurrence-reach logic). Skipping the write there would
+            // freeze the OLD derived columns forever for rows whose payload
+            // the provider still serves unchanged. The `unchanged` VALUE
+            // (what the UI is told) still reflects content equality.
+            let force_rewrite = unchanged && !has_freshness(tx, account, "events", calendar)?;
+            if !unchanged || force_rewrite {
                 tx.execute(
                     "DELETE FROM cache_events WHERE account_id = ?1 AND calendar_id = ?2",
                     params![account, calendar],
@@ -388,6 +398,87 @@ impl CacheStore {
                     insert_event(tx, account, calendar, ev, &now)?;
                 }
             }
+            tx.execute(
+                "INSERT INTO cache_sync_state
+                   (account_id, scope, container_id, window_start, window_end, last_refreshed_at, last_error)
+                 VALUES (?1, 'events', ?2, ?3, ?4, ?5, NULL)
+                 ON CONFLICT(account_id, scope, container_id) DO UPDATE SET
+                   window_start = excluded.window_start,
+                   window_end = excluded.window_end,
+                   last_refreshed_at = excluded.last_refreshed_at,
+                   last_error = NULL",
+                params![account, calendar, ws, we, now],
+            )?;
+            Ok(!unchanged)
+        })
+    }
+
+    /// Range-scoped refresh write for adapters WITHOUT delta support
+    /// (device EventKit, iCal): replace only the cached rows overlapping
+    /// `range` with `events`, leaving rows outside untouched, and record
+    /// the window as the UNION of the existing window and `range` when
+    /// they overlap or touch (a disjoint fetch records just `range` — a
+    /// union across a gap would claim coverage of dates never fetched).
+    ///
+    /// This is what lets a view-sized refresh on a no-delta adapter stay
+    /// view-sized: a full replace would clobber the warm −3…+12-month
+    /// cache down to the view, and always fetching wide instead costs a
+    /// 15-month provider expansion on every stale read. Out-of-range
+    /// provider-side deletions are reconciled by the warm pass's wide
+    /// fetch. Returns whether cached content changed (see
+    /// [`Self::replace_calendar_events`]).
+    pub fn replace_calendar_events_in_range(
+        &self,
+        account: &str,
+        calendar: &str,
+        range: DateRange,
+        events: &[Event],
+    ) -> DbResult<bool> {
+        let now = now_ts();
+        let (rs, re) = (ts(&range.start), ts(&range.end));
+        let mut incoming = HashMap::with_capacity(events.len());
+        for ev in events {
+            incoming.insert(ev.id.as_str(), to_json(ev, "cache_events")?);
+        }
+        self.db.with_tx(|tx| {
+            // Compare against the rows the same half-open overlap query the
+            // reader uses would return for `range`.
+            let unchanged = rows_match(
+                tx,
+                "SELECT id, payload FROM cache_events
+                 WHERE account_id = ?1 AND calendar_id = ?2
+                   AND start_utc < ?3 AND end_utc > ?4",
+                params![account, calendar, re, rs],
+                &incoming,
+            )?;
+            let force_rewrite = unchanged && !has_freshness(tx, account, "events", calendar)?;
+            if !unchanged || force_rewrite {
+                tx.execute(
+                    "DELETE FROM cache_events
+                     WHERE account_id = ?1 AND calendar_id = ?2
+                       AND start_utc < ?3 AND end_utc > ?4",
+                    params![account, calendar, re, rs],
+                )?;
+                for ev in events {
+                    insert_event(tx, account, calendar, ev, &now)?;
+                }
+            }
+            // Window union (or plain `range` when there is no existing /
+            // an entirely disjoint window).
+            let existing: Option<(Option<String>, Option<String>)> = tx
+                .query_row(
+                    "SELECT window_start, window_end FROM cache_sync_state
+                     WHERE account_id = ?1 AND scope = 'events' AND container_id = ?2",
+                    params![account, calendar],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            let (ws, we) = match existing {
+                Some((Some(ews), Some(ewe))) if ews <= re && ewe >= rs => {
+                    (ews.min(rs.clone()), ewe.max(re.clone()))
+                }
+                _ => (rs.clone(), re.clone()),
+            };
             tx.execute(
                 "INSERT INTO cache_sync_state
                    (account_id, scope, container_id, window_start, window_end, last_refreshed_at, last_error)
@@ -586,6 +677,7 @@ impl CacheStore {
             account,
             calendars,
             |c| c.id.as_str(),
+            &[("cache_events", "calendar_id")],
         )
     }
 
@@ -600,6 +692,7 @@ impl CacheStore {
             account,
             lists,
             |l| l.id.as_str(),
+            &[("cache_tasks", "list_id"), ("cache_sections", "list_id")],
         )
     }
 
@@ -614,6 +707,7 @@ impl CacheStore {
             account,
             lists,
             |l| l.id.as_str(),
+            &[("cache_contacts", "list_id")],
         )
     }
 
@@ -1056,6 +1150,12 @@ impl CacheStore {
         })
     }
 
+    /// `children` = the per-container item tables hanging off this listing
+    /// (`(table, container-fk-column)`). A container DROPPED from a
+    /// successfully fetched listing is an authoritative removal, so its
+    /// item rows (and sync-state rows) are pruned in the same transaction —
+    /// otherwise a deleted calendar's cached events would keep being served
+    /// to any code still holding the id (e.g. a persisted selection).
     fn replace_listing<T: Serialize>(
         &self,
         table: &str,
@@ -1063,9 +1163,11 @@ impl CacheStore {
         account: &str,
         items: &[T],
         id_of: impl Fn(&T) -> &str,
+        children: &[(&str, &str)],
     ) -> DbResult<bool> {
         let now = now_ts();
         let sel = format!("SELECT id, payload FROM {table} WHERE account_id = ?1");
+        let sel_ids = format!("SELECT id FROM {table} WHERE account_id = ?1");
         let del = format!("DELETE FROM {table} WHERE account_id = ?1");
         let ins = format!(
             "INSERT INTO {table} (account_id, id, payload, cached_at) VALUES (?1, ?2, ?3, ?4)"
@@ -1077,10 +1179,30 @@ impl CacheStore {
         self.db.with_tx(|tx| {
             let unchanged = rows_match(tx, &sel, params![account], &incoming)?;
             if !unchanged {
+                let dropped: Vec<String> = {
+                    let mut stmt = tx.prepare(&sel_ids)?;
+                    let rows = stmt.query_map(params![account], |r| r.get::<_, String>(0))?;
+                    rows.filter_map(|r| r.ok())
+                        .filter(|id| !incoming.contains_key(id.as_str()))
+                        .collect()
+                };
                 tx.execute(&del, params![account])?;
                 for item in items {
                     let json = to_json(item, table)?;
                     tx.execute(&ins, params![account, id_of(item), json, now])?;
+                }
+                for id in &dropped {
+                    for (child, fk) in children {
+                        tx.execute(
+                            &format!("DELETE FROM {child} WHERE account_id = ?1 AND {fk} = ?2"),
+                            params![account, id],
+                        )?;
+                    }
+                    tx.execute(
+                        "DELETE FROM cache_sync_state
+                         WHERE account_id = ?1 AND container_id = ?2",
+                        params![account, id],
+                    )?;
                 }
             }
             mark_refreshed(tx, account, scope, "", &now)?;
@@ -1319,6 +1441,24 @@ fn native_id(id: &str) -> &str {
         Some((native, _)) => native,
         None => stripped,
     }
+}
+
+/// Whether a container has a recorded freshness stamp. `false` right
+/// after a cache-generation reset / "Re-sync from scratch" (those NULL
+/// the whole sync-state row) — the replace writes use this to force a
+/// row rewrite even for byte-identical content, so payload-derived
+/// columns are recomputed with current code (see
+/// [`CacheStore::replace_calendar_events`]).
+fn has_freshness(tx: &Connection, account: &str, scope: &str, container: &str) -> DbResult<bool> {
+    let stamp: Option<Option<String>> = tx
+        .query_row(
+            "SELECT last_refreshed_at FROM cache_sync_state
+             WHERE account_id = ?1 AND scope = ?2 AND container_id = ?3",
+            params![account, scope, container],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(matches!(stamp, Some(Some(_))))
 }
 
 /// Whether a container's cached rows are exactly the incoming

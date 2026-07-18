@@ -1698,3 +1698,161 @@ fn read_events_by_native_matches_the_native_column() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].id, "hrefA|uid-a");
 }
+
+// ── Range-scoped replace (no-delta adapters) ─────────────────────────
+
+#[test]
+fn in_range_replace_keeps_rows_outside_the_fetched_range() {
+    let store = setup();
+    // Warm cache: morning + afternoon events over the whole day.
+    store
+        .replace_calendar_events(ACC, CAL, wide(), &[event("m", 8, 9), event("a", 14, 15)])
+        .unwrap();
+
+    // A view-sized refresh over the morning half replaces only that swath.
+    let mut renamed = event("m", 8, 10);
+    renamed.title = "Extended".into();
+    let changed = store
+        .replace_calendar_events_in_range(ACC, CAL, range(6, 12), &[renamed])
+        .unwrap();
+    assert!(changed);
+
+    let events = store.read_events(ACC, CAL, wide()).unwrap();
+    let mut ids: Vec<&str> = events.iter().map(|e| e.id.as_str()).collect();
+    ids.sort_unstable();
+    assert_eq!(
+        ids,
+        vec!["a", "m"],
+        "afternoon row survives the morning refresh"
+    );
+    // Window is the union (the fetched range touches/overlaps the wide one).
+    let (ws, we) = store.event_window(ACC, CAL).unwrap().unwrap();
+    assert_eq!(ws, wide().start);
+    assert_eq!(we, wide().end);
+}
+
+#[test]
+fn in_range_replace_reports_unchanged_for_identical_rows() {
+    let store = setup();
+    store
+        .replace_calendar_events(ACC, CAL, wide(), &[event("m", 8, 9), event("a", 14, 15)])
+        .unwrap();
+    assert!(!store
+        .replace_calendar_events_in_range(ACC, CAL, range(6, 12), &[event("m", 8, 9)])
+        .unwrap());
+}
+
+#[test]
+fn in_range_replace_disjoint_window_records_only_the_fetched_range() {
+    let store = setup();
+    // Existing window: morning only.
+    store
+        .replace_calendar_events(ACC, CAL, range(6, 8), &[])
+        .unwrap();
+    // Disjoint fetch (afternoon) — union across the gap would fabricate
+    // coverage of the 8–14h hole, so only the fetched range is recorded.
+    store
+        .replace_calendar_events_in_range(ACC, CAL, range(14, 18), &[event("a", 14, 15)])
+        .unwrap();
+    let (ws, we) = store.event_window(ACC, CAL).unwrap().unwrap();
+    assert_eq!(ws, range(14, 18).start);
+    assert_eq!(we, range(14, 18).end);
+}
+
+// ── Listing prune ────────────────────────────────────────────────────
+
+#[test]
+fn dropping_a_calendar_from_the_listing_prunes_its_cached_events() {
+    let store = setup();
+    store
+        .replace_calendars(ACC, &[calendar(CAL), calendar("other")])
+        .unwrap();
+    store
+        .replace_calendar_events(ACC, CAL, wide(), &[event("e1", 8, 9)])
+        .unwrap();
+    store
+        .replace_calendar_events(ACC, "other", wide(), &[event("o1", 10, 11)])
+        .unwrap();
+
+    // The provider no longer lists CAL — an authoritative removal.
+    store.replace_calendars(ACC, &[calendar("other")]).unwrap();
+
+    assert!(
+        store.read_events(ACC, CAL, wide()).unwrap().is_empty(),
+        "dropped calendar's event rows pruned"
+    );
+    assert!(
+        store
+            .get_sync_state(ACC, SyncScope::Events, CAL)
+            .unwrap()
+            .is_none(),
+        "dropped calendar's sync state pruned"
+    );
+    assert_eq!(
+        store.read_events(ACC, "other", wide()).unwrap().len(),
+        1,
+        "surviving calendar untouched"
+    );
+}
+
+#[test]
+fn dropping_a_task_list_prunes_tasks_and_sections() {
+    let store = setup();
+    store.replace_task_lists(ACC, &[task_list(LIST)]).unwrap();
+    store.replace_list_tasks(ACC, LIST, &[task("t1")]).unwrap();
+    store
+        .replace_sections(ACC, LIST, &[section("s1", 0)])
+        .unwrap();
+
+    store.replace_task_lists(ACC, &[]).unwrap();
+
+    assert!(store.read_tasks(ACC, LIST).unwrap().is_empty());
+    assert!(store.read_sections(ACC, LIST).unwrap().is_empty());
+}
+
+// ── Forced rewrite after a sync-state reset ──────────────────────────
+
+#[test]
+fn identical_replace_after_reset_rewrites_rows() {
+    let store = setup();
+    let events = [event("e1", 8, 9)];
+    store
+        .replace_calendar_events(ACC, CAL, wide(), &events)
+        .unwrap();
+    let stamp_before: String = store
+        .db
+        .with_conn(|c| {
+            c.query_row(
+                "SELECT cached_at FROM cache_events WHERE id = 'e1'",
+                [],
+                |r| r.get(0),
+            )
+        })
+        .unwrap();
+
+    // A generation reset / re-sync-from-scratch NULLs the freshness; the
+    // next full fetch must REWRITE even byte-identical rows so payload-
+    // derived columns are recomputed with current code…
+    store.reset_account_sync(ACC).unwrap();
+    // cached_at is millisecond-precision — make sure the rewrite lands on a
+    // distinct stamp even on a fast machine.
+    std::thread::sleep(std::time::Duration::from_millis(3));
+    let changed = store
+        .replace_calendar_events(ACC, CAL, wide(), &events)
+        .unwrap();
+    assert!(
+        !changed,
+        "…while still reporting unchanged content to the UI"
+    );
+    let stamp_after: String = store
+        .db
+        .with_conn(|c| {
+            c.query_row(
+                "SELECT cached_at FROM cache_events WHERE id = 'e1'",
+                [],
+                |r| r.get(0),
+            )
+        })
+        .unwrap();
+    assert_ne!(stamp_before, stamp_after, "row was physically rewritten");
+}

@@ -591,8 +591,12 @@ export function CalendarDayList({
           return lastKnownTaskLists;
         }),
       ]);
-      lastKnownColorLabels = labels;
-      lastKnownTaskLists = lists;
+      // Fence like the retention writes below: a superseded load's slower
+      // catalog response must not overwrite the newer load's.
+      if (reqToken.current === token) {
+        lastKnownColorLabels = labels;
+        lastKnownTaskLists = lists;
+      }
       const startIso = range.start.toISOString();
       const endIso = range.end.toISOString();
       // Per-container retention (mirror of the desktop useEvents fix): a

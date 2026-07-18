@@ -133,8 +133,15 @@ export function CacheSyncListener(): null {
     };
 
     registerDataReloadSink((scopes) => {
+      // Programmatic nudges (sync round-end, manual "Sync now") flush
+      // IMMEDIATELY: the user just triggered or was notified of applied
+      // changes, so making them wait out a pass throttle reads as "sync
+      // said done but the list is stale". Routing through the shared
+      // flush still clears `pending`, so the pass's own emissions aren't
+      // replayed on top.
       scopes.forEach((s) => pending.add(s));
-      schedule();
+      if (timer) clearTimeout(timer);
+      flush();
     });
 
     listen<CacheUpdatedPayload>('cache-updated', (event) => {

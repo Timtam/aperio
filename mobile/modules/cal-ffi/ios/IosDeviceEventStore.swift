@@ -131,8 +131,8 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
       throw DeviceCalError.Backend(
         detail: "calendar \(calendarId) not resolvable (store may still be loading)")
     }
-    guard let startDate = Self.iso.date(from: start),
-      let endDate = Self.iso.date(from: end)
+    guard let startDate = Self.parseDate(start),
+      let endDate = Self.parseDate(end)
     else {
       throw DeviceCalError.Backend(detail: "invalid event range: \(start)…\(end)")
     }
@@ -431,6 +431,23 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
     formatter.formatOptions = [.withInternetDateTime]
     return formatter
   }()
+
+  /// RFC-3339 with fractional seconds. `iso` above rejects them (an
+  /// ISO8601DateFormatter only parses the exact shape its options
+  /// describe), but the Rust host derives range endpoints from
+  /// `Utc::now()`-precision timestamps in places — the whole-second and
+  /// fractional variants must BOTH parse or a refresh window silently
+  /// becomes "invalid event range".
+  private static let isoFractional: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter
+  }()
+
+  /// Parse an RFC-3339 timestamp with or without fractional seconds.
+  private static func parseDate(_ value: String) -> Date? {
+    iso.date(from: value) ?? isoFractional.date(from: value)
+  }
 
   /// EventKit reuses `eventIdentifier` across a recurring series' occurrences, so
   /// suffix the occurrence start to give each expanded instance a distinct

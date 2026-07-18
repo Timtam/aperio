@@ -6,7 +6,7 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use chrono::{DateTime, Datelike, Duration, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Duration, TimeZone, Timelike, Utc};
 
 use cal_core::{CalendarFeature, ContactsFeature, DateRange, TasksFeature};
 
@@ -232,20 +232,25 @@ pub async fn refresh_events(
         Some((Some(ws), Some(we))) if ws <= range.start && we >= range.end
     );
     let effective_token = if covered { token.as_deref() } else { None };
-    // A token-less fetch ends in `replace_calendar_events`, which clobbers
-    // the calendar's ENTIRE cached set and records only the fetched window.
+    // A full resync ends in `replace_calendar_events`, which clobbers the
+    // calendar's ENTIRE cached set and records only the fetched window.
     // Fetching just the view range would shrink a warm −3…+12-month cache
     // down to the month on screen (visible as the day's entries collapsing
-    // and re-growing when the next wide warm pass restores them). Widen the
-    // rebuild to the warm-pass window instead, so a full resync always
-    // rebuilds at least as much as the warm pass maintains. Folder-complete
-    // adapters ignore the range; delta adapters bake it into the new token,
-    // which is exactly what the warm pass would have done anyway.
-    let fetch_range = if effective_token.is_none() {
-        full_resync_range(range, Utc::now())
-    } else {
-        range
-    };
+    // and re-growing when the next wide warm pass restores them). The DELTA
+    // call therefore always carries the wide window — computed ONCE, so the
+    // recorded window below is exactly what was fetched:
+    //   - token-less bootstrap: the full set is fetched (and, on
+    //     range-scoped adapters, tokenised) over the wide window;
+    //   - token present: range-scoped adapters ignore the range on the
+    //     token path (Google forbids timeMin with syncToken; Graph's
+    //     deltaLink carries its own window; sync-collection/EWS never look
+    //     at it) — EXCEPT when the provider answers with an unexpected
+    //     full resync (Google 410 re-sync, CalDAV ctag change re-list): the
+    //     response then spans the range we sent, and because we sent the
+    //     wide one it can be written directly. (An earlier revision sent
+    //     the narrow view range and RE-FETCHED wide on that answer — which
+    //     doubled every ctag-detected change on ctag-only CalDAV servers.)
+    let fetch_range = full_resync_range(range, Utc::now());
     // Snapshot the generation before the fetch (see refresh_tasks): drop a stale
     // write if a local mutation invalidates this calendar mid-fetch.
     let gen = cache.refresh_generation(account, SyncScope::Events, calendar);
@@ -254,26 +259,10 @@ pub async fn refresh_events(
         .await
     {
         Ok(cs) => {
-            let mut forced_full = false;
-            let cs = if cs.full_resync && !cs.complete && effective_token.is_some() {
-                // Surprise full resync (provider invalidated the token
-                // mid-stream, e.g. Google 410) on a range-scoped adapter:
-                // the response only spans the NARROW range we sent with the
-                // token, so writing it would clobber the wide cache. Re-run
-                // once token-less over the wide window — the rare-path cost
-                // of one extra fetch beats rebuilding a shrunken cache. The
-                // retry is a full set regardless of what its `full_resync`
-                // flag says, so force the replace branch below.
-                forced_full = true;
-                ext.get_events_delta(calendar, full_resync_range(range, Utc::now()), None)
-                    .await?
-            } else {
-                cs
-            };
             if cache.refresh_generation(account, SyncScope::Events, calendar) != gen {
                 return Ok(false);
             }
-            if cs.full_resync || effective_token.is_none() || forced_full {
+            if cs.full_resync || effective_token.is_none() {
                 // Folder-complete adapters (EWS/CalDAV) return the WHOLE
                 // collection, so the snapshot now covers any range —
                 // record an unbounded window. Range-scoped adapters
@@ -283,7 +272,7 @@ pub async fn refresh_events(
                 let window = if cs.complete {
                     unbounded_window()
                 } else {
-                    full_resync_range(range, Utc::now())
+                    fetch_range
                 };
                 // Resources the adapter enumerated but could not FETCH
                 // (`unfetched`, e.g. CalDAV multiget skips) are absent
@@ -332,16 +321,21 @@ pub async fn refresh_events(
             }
         }
         Err(cal_core::Error::Unsupported(_)) => {
-            // No delta support: every refresh is a full fetch + replace.
-            // Fetch the wide window here too — a view-sized replace would
-            // clobber the warm cache exactly like the token-less case above.
-            let full_range = full_resync_range(range, Utc::now());
-            let events = ext.get_events(calendar, full_range).await?;
+            // No delta support (device EventKit, iCal): EVERY refresh is a
+            // full fetch, so fetching the wide window here would repeat a
+            // 15-month expansion on each stale view read. Fetch only the
+            // (month-snapped) view range and write it through the
+            // RANGE-SCOPED replace, which touches just the overlapping rows
+            // and unions the recorded window — no clobber of the warm
+            // cache, no per-read wide fetch. The warm pass still passes the
+            // wide window explicitly, which keeps the whole swath fresh
+            // (and reconciles out-of-range deletions) on its own cadence.
+            let events = ext.get_events(calendar, range).await?;
             if cache.refresh_generation(account, SyncScope::Events, calendar) != gen {
                 return Ok(false);
             }
             Ok(cache
-                .replace_calendar_events(account, calendar, full_range, &events)
+                .replace_calendar_events_in_range(account, calendar, range, &events)
                 .unwrap_or(true))
         }
         Err(err) => Err(err),
@@ -353,12 +347,26 @@ pub async fn refresh_events(
 /// `now`) united with the requested view range, so a navigation outside
 /// the rolling window is still covered. A full resync replaces the
 /// calendar's ENTIRE cached set and records only the fetched window — a
-/// narrower fetch would clobber whatever wider window the warm pass had
+/// narrower fetch would shrink whatever wider window the warm pass had
 /// built (visible as day counts collapsing until the next wide pass).
+///
+/// Endpoints are truncated to WHOLE SECONDS: the range crosses the mobile
+/// FFI as RFC-3339 strings, and the iOS EventKit bridge's ISO-8601 parser
+/// rejects fractional seconds — a `Utc::now()`-precision endpoint made
+/// every device-calendar refresh throw "invalid event range".
 fn full_resync_range(view: DateRange, now: DateTime<Utc>) -> DateRange {
+    let now = now.with_nanosecond(0).unwrap_or(now);
     let wide_start = now - Duration::days(super::refresh::WINDOW_PAST_DAYS);
     let wide_end = now + Duration::days(super::refresh::WINDOW_FUTURE_DAYS);
-    DateRange::new(view.start.min(wide_start), view.end.max(wide_end))
+    DateRange::new(
+        truncate_subsec(view.start.min(wide_start)),
+        truncate_subsec(view.end.max(wide_end)),
+    )
+}
+
+/// Drop sub-second precision (see [`full_resync_range`]).
+fn truncate_subsec(dt: DateTime<Utc>) -> DateTime<Utc> {
+    dt.with_nanosecond(0).unwrap_or(dt)
 }
 
 /// Expand a view-sized range to whole-month UTC boundaries so a range-scoped
@@ -625,6 +633,20 @@ mod tests {
         let wide = full_resync_range(view, now);
         assert_eq!(wide.start, now - Duration::days(92));
         assert_eq!(wide.end, now + Duration::days(366));
+    }
+
+    #[test]
+    fn full_resync_range_truncates_subseconds() {
+        // The endpoints cross the mobile FFI as RFC-3339 strings and the iOS
+        // bridge's ISO-8601 parser rejects fractional seconds — a raw
+        // Utc::now() endpoint broke every device-calendar refresh.
+        let now = at(2026, 6, 15) + Duration::nanoseconds(123_456_789);
+        let view = DateRange::new(at(2026, 6, 1), at(2026, 7, 1));
+        let wide = full_resync_range(view, now);
+        assert_eq!(wide.start.timestamp_subsec_nanos(), 0);
+        assert_eq!(wide.end.timestamp_subsec_nanos(), 0);
+        assert_eq!(wide.start, at(2026, 6, 15) - Duration::days(92));
+        assert_eq!(wide.end, at(2026, 6, 15) + Duration::days(366));
     }
 
     #[test]

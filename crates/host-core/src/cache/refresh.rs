@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration as StdDuration;
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, Timelike, Utc};
 use tokio::sync::{Notify, Semaphore};
 use tokio::task::JoinSet;
 use tracing::{debug, info};
@@ -233,7 +233,11 @@ impl CacheRefresher {
         // enumeration below completes.
         self.emit_status(true, last.clone(), None, None);
 
-        let now = Utc::now();
+        // Whole-second endpoints: the window crosses the mobile FFI as
+        // RFC-3339 strings and the iOS EventKit bridge's ISO-8601 parser
+        // rejects fractional seconds (a raw Utc::now() endpoint made every
+        // device-calendar warm fetch throw "invalid event range").
+        let now = Utc::now().with_nanosecond(0).unwrap_or_else(Utc::now);
         let window = DateRange::new(
             now - Duration::days(WINDOW_PAST_DAYS),
             now + Duration::days(WINDOW_FUTURE_DAYS),

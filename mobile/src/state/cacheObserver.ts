@@ -116,7 +116,13 @@ export function notifyDataReload(): void {
   pendingCategories.add('calendar');
   pendingCategories.add('tasks');
   pendingCategories.add('contacts');
-  scheduleFlush();
+  // Immediate flush: the sync UI just reported applied changes (or the user
+  // pulled to refresh) — waiting out a pass throttle here reads as "sync
+  // done but the screen is stale". Going through the shared flush still
+  // clears `pendingCategories`, so a running pass's own emissions aren't
+  // replayed on top.
+  if (flushTimer != null) clearTimeout(flushTimer);
+  flushPending();
 }
 
 /**
