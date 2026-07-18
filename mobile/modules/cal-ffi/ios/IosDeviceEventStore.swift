@@ -59,10 +59,45 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
 
   func supportsReminders() -> Bool { true }
 
+  /// Resolve a calendar/list identifier, giving the store ONE chance to
+  /// finish loading its sources first. At cold launch
+  /// `calendar(withIdentifier:)` can transiently return `nil` before the
+  /// EKEventStore has loaded — treating that as "no such calendar → no
+  /// items" poisoned the host's snapshot cache: the empty result replaced
+  /// the warm rows and was stamped fresh, so the visible count collapsed
+  /// until a later refresh repopulated it. `refreshSourcesIfNecessary()`
+  /// nudges the load; a calendar that is STILL unresolvable afterwards is
+  /// reported to the caller as an ERROR (the host then marks the container
+  /// errored and keeps serving the cached rows) rather than as an empty
+  /// collection. A genuinely removed calendar keeps erroring until the next
+  /// listing refresh drops it from the catalog — after which nothing reads
+  /// it anymore.
+  private func resolveCalendar(_ identifier: String) -> EKCalendar? {
+    if let calendar = store.calendar(withIdentifier: identifier) {
+      return calendar
+    }
+    store.refreshSourcesIfNecessary()
+    return store.calendar(withIdentifier: identifier)
+  }
+
+  /// Enumerate an entity type's calendars, nudging a not-yet-loaded store
+  /// once (see resolveCalendar): a transiently EMPTY catalog at cold launch
+  /// would replace the cached listing with nothing — the device calendars
+  /// vanish from the sidebar until the next refresh. An empty result after
+  /// the nudge is served as-is (a device genuinely can have none).
+  private func loadedCalendars(for type: EKEntityType) -> [EKCalendar] {
+    let calendars = store.calendars(for: type)
+    if !calendars.isEmpty {
+      return calendars
+    }
+    store.refreshSourcesIfNecessary()
+    return store.calendars(for: type)
+  }
+
   // ── Calendar reads (P1) ──
 
   func listCalendars() throws -> String {
-    let payload: [[String: Any]] = store.calendars(for: .event).map { cal in
+    let payload: [[String: Any]] = loadedCalendars(for: .event).map { cal in
       var dict: [String: Any] = [
         "id": cal.calendarIdentifier,
         "name": cal.title,
@@ -77,9 +112,12 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   }
 
   func getEvents(calendarId: String, start: String, end: String) throws -> String {
-    guard let calendar = store.calendar(withIdentifier: calendarId) else {
-      // Unknown / removed calendar — no events, not an error.
-      return "[]"
+    guard let calendar = resolveCalendar(calendarId) else {
+      // NOT "no events": an unresolvable identifier is an error, so the
+      // host keeps its cached snapshot instead of replacing it with empty
+      // (see resolveCalendar).
+      throw DeviceCalError.Backend(
+        detail: "calendar \(calendarId) not resolvable (store may still be loading)")
     }
     guard let startDate = Self.iso.date(from: start),
       let endDate = Self.iso.date(from: end)
@@ -98,7 +136,7 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   // ── Reminders reads (P2) ──
 
   func listReminderLists() throws -> String {
-    let payload: [[String: Any]] = store.calendars(for: .reminder).map { list in
+    let payload: [[String: Any]] = loadedCalendars(for: .reminder).map { list in
       var dict: [String: Any] = [
         "id": list.calendarIdentifier,
         "name": list.title,
@@ -113,8 +151,11 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
   }
 
   func getReminders(listId: String) throws -> String {
-    guard let list = store.calendar(withIdentifier: listId) else {
-      return "[]"
+    guard let list = resolveCalendar(listId) else {
+      // See getEvents: an unresolvable identifier must not read as an
+      // empty list — that would clobber the cached snapshot.
+      throw DeviceCalError.Backend(
+        detail: "reminder list \(listId) not resolvable (store may still be loading)")
     }
     // fetchReminders is completion-based — block on a semaphore across the sync
     // FFI boundary (as for the permission request).

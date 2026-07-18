@@ -148,6 +148,19 @@ const GRID_SCROLL_PAD_PX = 12;
  *  every step (which delayed the announcement and blocked the next swipe). */
 const RELOAD_DEBOUNCE_MS = 300;
 
+// ── Per-container retention (mirror of the desktop useEvents fix) ────────────
+// Last successful batch per container, module-level so it survives remounts.
+// A container whose read FAILS during a reload reuses its last batch instead
+// of degrading to [] — one hiccuping backend must not shrink the aggregated
+// day (and with it the entry count screen readers announce). Successful reads
+// always replace the slice, so genuine deletions still propagate. Events are
+// additionally keyed by the fetched range so no cross-range rows can leak.
+const perCalendarEventsCache = new Map<string, CalendarEvent[]>();
+const perListTasksCache = new Map<string, Task[]>();
+const perListSectionsCache = new Map<string, Section[]>();
+let lastKnownColorLabels: ColorLabel[] = [];
+let lastKnownTaskLists: TaskList[] = [];
+
 // ── Single-day compact-list geometry (dayLayout='list') ──────────────────────
 // The lighter alternative to the hour-grid: a chronological list where a timed
 // EVENT block's STRICT height reflects its DURATION (via the shared, platform-
@@ -545,23 +558,76 @@ export function CalendarDayList({
     hapticLoadBegin();
     try {
       // listCalendars also primes the Host's route map (getEvents routes by
-      // calendar id), so it must resolve before the per-calendar fetch. Palette,
-      // lists are best-effort — a failure just drops the colour/task overlay.
+      // calendar id), so it must resolve before the per-calendar fetch.
+      // Palette + lists are best-effort — but a transient failure REUSES the
+      // last successful result instead of degrading to empty: replacing the
+      // task lists with [] wiped every task (and with it part of the day's
+      // announced entry count) until the next reload.
       const [cals, labels, lists] = await Promise.all([
         listCalendars(),
-        listColorLabels().catch(() => [] as ColorLabel[]),
-        listTaskLists().catch(() => [] as TaskList[]),
+        listColorLabels().catch((err) => {
+          console.warn('listColorLabels failed; reusing last known', err);
+          return lastKnownColorLabels;
+        }),
+        listTaskLists().catch((err) => {
+          console.warn('listTaskLists failed; reusing last known', err);
+          return lastKnownTaskLists;
+        }),
       ]);
+      lastKnownColorLabels = labels;
+      lastKnownTaskLists = lists;
       const startIso = range.start.toISOString();
       const endIso = range.end.toISOString();
+      // Per-container retention (mirror of the desktop useEvents fix): a
+      // container whose read FAILS keeps its last successful batch, so one
+      // hiccuping backend can't shrink the aggregated day. A successful read
+      // replaces the container's slice verbatim — including with an empty
+      // batch when the provider really has nothing — so genuine deletions
+      // still propagate.
       const [perCalendar, perList, perListSections] = await Promise.all([
         Promise.all(
-          cals.map((c) =>
-            getEvents({ calendar_id: c.id, start: startIso, end: endIso }).catch(() => []),
+          cals.map((c) => {
+            const ckey = `${c.id}|${startIso}|${endIso}`;
+            return getEvents({ calendar_id: c.id, start: startIso, end: endIso }).then(
+              (batch) => {
+                perCalendarEventsCache.set(ckey, batch);
+                return batch;
+              },
+              (err) => {
+                console.warn('getEvents failed for calendar', c.id, err);
+                return perCalendarEventsCache.get(ckey) ?? [];
+              },
+            );
+          }),
+        ),
+        Promise.all(
+          lists.map((l) =>
+            getTasks(l.id).then(
+              (batch) => {
+                perListTasksCache.set(l.id, batch);
+                return batch;
+              },
+              (err) => {
+                console.warn('getTasks failed for list', l.id, err);
+                return perListTasksCache.get(l.id) ?? ([] as Task[]);
+              },
+            ),
           ),
         ),
-        Promise.all(lists.map((l) => getTasks(l.id).catch(() => [] as Task[]))),
-        Promise.all(lists.map((l) => getSections(l.id).catch(() => [] as Section[]))),
+        Promise.all(
+          lists.map((l) =>
+            getSections(l.id).then(
+              (batch) => {
+                perListSectionsCache.set(l.id, batch);
+                return batch;
+              },
+              (err) => {
+                console.warn('getSections failed for list', l.id, err);
+                return perListSectionsCache.get(l.id) ?? ([] as Section[]);
+              },
+            ),
+          ),
+        ),
       ]);
       // A newer load superseded this one — drop these stale results.
       if (reqToken.current !== token) return;

@@ -61,30 +61,63 @@ function subscribeBus(cb: BusListener): () => void {
   };
 }
 
-/**
- * Fan an immediate reload to every screen subscribed via `useCacheReload`, across
- * ALL categories. Use after a CROSS-DEVICE sync round (or onboarding) applies a
- * peer's data: that path writes straight to the local store and never goes
- * through the Host's external `onCacheUpdated` push, so without this the open
- * screens stay stale until the app restarts. Silent — it's a data reload, not the
- * external-refresh cue.
- */
-export function notifyDataReload(): void {
-  const categories: CacheCategory[] = ['calendar', 'tasks', 'contacts'];
-  for (const cat of categories) {
-    busListeners.forEach((l) => l(cat));
-  }
-  // Peer data just landed (a sync round applied changes) — the scheduled OS
-  // notifications may now be stale (a task synced in from the desktop can add/
-  // remove reminders or change the day-start counts). Debounced re-plan; the
-  // background-sync task does the same after ITS round, this covers the
-  // foreground rounds (launch / resume / periodic / manual Sync now).
+/** Coalesce window: a burst of per-container events (no warm pass running)
+ *  waits this long after the FIRST event before reloading once per category. */
+const COALESCE_MS = 700;
+
+/** Max flush cadence while a backend warm pass is in flight. A pass spreads
+ *  its per-container emissions over seconds, which used to defeat the short
+ *  coalesce window and turn one pass into many full reload waves — each
+ *  re-exposing whatever intermediate cache state existed at that moment (the
+ *  app-start entry-count oscillation). The pass-end status flushes
+ *  immediately, so the settled state paints exactly once; a hung pass can't
+ *  starve the UI because the throttle keeps its own cadence. */
+const PASS_THROTTLE_MS = 2500;
+
+// Module-level coalescer state, shared by the native listeners (below) and
+// notifyDataReload so EVERY reload producer rides the same gating.
+const pendingCategories = new Set<CacheCategory>();
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+let passRefreshing = false;
+
+function flushPending(): void {
+  flushTimer = null;
+  if (pendingCategories.size === 0) return;
+  const categories = Array.from(pendingCategories);
+  pendingCategories.clear();
+  for (const cat of categories) busListeners.forEach((l) => l(cat));
+  // Fresh data can change reminder-relevant state (provider-side edits,
+  // peer-synced tasks) — re-plan the scheduled OS notifications. Coalesced
+  // here + debounced in the scheduler, so a warm pass costs one reschedule.
   remindersRefreshHook?.();
 }
 
-/** Coalesce window: a warm pass emits one event per container in a burst; wait
- *  this long after the last before announcing + reloading once per category. */
-const COALESCE_MS = 700;
+// Collect-then-flush: the FIRST category of a window arms the timer; later
+// ones just accumulate (no per-event reset, so a drip of events can't
+// postpone the flush forever and latency stays bounded).
+function scheduleFlush(): void {
+  if (flushTimer != null) return;
+  flushTimer = setTimeout(
+    flushPending,
+    passRefreshing ? PASS_THROTTLE_MS : COALESCE_MS,
+  );
+}
+
+/**
+ * Ask every screen subscribed via `useCacheReload` to reload, across ALL
+ * categories. Use after a CROSS-DEVICE sync round (or onboarding) applies a
+ * peer's data: that path writes straight to the local store and never goes
+ * through the Host's external `onCacheUpdated` push, so without this the open
+ * screens stay stale until the app restarts. Silent — it's a data reload, not
+ * the external-refresh cue. Routed through the SAME coalescer as the native
+ * push, so a sync round landing mid-warm-pass can't bypass the reload gating.
+ */
+export function notifyDataReload(): void {
+  pendingCategories.add('calendar');
+  pendingCategories.add('tasks');
+  pendingCategories.add('contacts');
+  scheduleFlush();
+}
 
 /**
  * Mount ONCE near the app root. Subscribes to the native external-cache push,
@@ -93,8 +126,6 @@ const COALESCE_MS = 700;
  */
 export function useCacheUpdates(): void {
   const { t } = useTranslation();
-  const pending = useRef<Set<CacheCategory>>(new Set());
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Last-seen warm-pass state, so we announce only the START and END of a pass.
   const refreshing = useRef(false);
 
@@ -104,11 +135,11 @@ export function useCacheUpdates(): void {
   }, []);
 
   useEffect(() => {
-    // Per-container writes → live-reload the focused view (coalesced). NO
-    // announcement here: a slow warm pass touching many containers seconds apart
-    // defeats the coalesce window and spoke once per source — the chatter the
-    // user hit with 8+ calendars. The spoken cue now brackets the whole pass
-    // (see the refresh-status listener below).
+    // Per-container writes → live-reload the focused view (coalesced +
+    // pass-throttled, see scheduleFlush). NO announcement here: a slow warm
+    // pass touching many containers seconds apart spoke once per source — the
+    // chatter the user hit with 8+ calendars. The spoken cue brackets the
+    // whole pass (see the refresh-status listener below).
     const subData = CalFfi.addListener('onCacheUpdated', ({ payload }) => {
       let scope = '';
       try {
@@ -118,19 +149,8 @@ export function useCacheUpdates(): void {
       }
       const category = categoryForScope(scope);
       if (category == null) return;
-      pending.current.add(category);
-      if (timer.current != null) clearTimeout(timer.current);
-      timer.current = setTimeout(() => {
-        timer.current = null;
-        const categories = Array.from(pending.current);
-        pending.current.clear();
-        for (const cat of categories) busListeners.forEach((l) => l(cat));
-        // An external-cache refresh can change reminder-relevant data too
-        // (provider-side edits to events/tasks) — re-plan the scheduled OS
-        // notifications. Coalesced here + debounced in the scheduler, so a
-        // warm pass touching many containers costs one reschedule.
-        remindersRefreshHook?.();
-      }, COALESCE_MS);
+      pendingCategories.add(category);
+      scheduleFlush();
     });
 
     // ONE polite cue at the start of an external refresh pass + ONE at the end
@@ -148,6 +168,13 @@ export function useCacheUpdates(): void {
       const next = status.refreshing;
       if (next === refreshing.current) return;
       refreshing.current = next;
+      passRefreshing = next;
+      if (!next) {
+        // Pass end: paint the settled state NOW instead of waiting out a long
+        // throttle window armed mid-pass.
+        if (flushTimer != null) clearTimeout(flushTimer);
+        flushPending();
+      }
       AccessibilityInfo.announceForAccessibility(
         t(next ? 'cacheRefresh.refreshing' : 'cacheRefresh.done'),
       );
@@ -160,7 +187,11 @@ export function useCacheUpdates(): void {
     return () => {
       subData.remove();
       subStatus.remove();
-      if (timer.current != null) clearTimeout(timer.current);
+      passRefreshing = false;
+      if (flushTimer != null) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
+      }
     };
   }, [t]);
 }
