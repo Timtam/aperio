@@ -55,6 +55,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use chrono::Utc;
 use rusqlite::params;
@@ -126,6 +127,10 @@ pub async fn sync_assets(
                 };
                 match adapter.push_sound_asset(&hash, &extension, &bytes).await {
                     Ok(()) => {
+                        // The hash exists remotely now — lift any
+                        // missing-on-remote back-off so peers' fetch halves
+                        // (and ours, should the local file vanish) see it.
+                        clear_missing(&hash);
                         if let Err(err) = mark_hash_pushed(db, &hash, &extension) {
                             warn!(
                                 hash = %hash,
@@ -167,6 +172,14 @@ pub async fn sync_assets(
     };
     for hash in referenced {
         if local_hash_present(sounds_dir, &hash).is_some() {
+            continue;
+        }
+        // Negative cache: a hash that probed missing recently is skipped —
+        // without this, one dangling sound reference cost the FULL
+        // extension-probe fan-out (6 sequential 404 GETs) on EVERY round,
+        // often seconds of pure waste per round on a slow server.
+        if missing_recently(&hash) {
+            report.missing_on_remote += 1;
             continue;
         }
         // Probe each candidate extension; accept the first hit.
@@ -219,10 +232,49 @@ pub async fn sync_assets(
                 "referenced sound not found on remote under any candidate extension",
             );
             report.missing_on_remote += 1;
+            mark_missing(&hash);
         }
     }
 
     Ok(report)
+}
+
+/// In-memory negative cache for remote-missing sound hashes: hash →
+/// when the last full probe came up empty. Process-wide and NOT
+/// persisted, so a restart re-probes once; a peer uploading the sound
+/// during the back-off appears after [`MISSING_RETRY_AFTER`] (or the
+/// next restart), which is acceptable for notification sounds. A local
+/// push of the hash clears its entry immediately.
+fn missing_cache() -> &'static std::sync::Mutex<std::collections::HashMap<String, Instant>> {
+    static CACHE: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, Instant>>,
+    > = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Back-off before a remote-missing hash is probed again.
+const MISSING_RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+fn missing_recently(hash: &str) -> bool {
+    missing_cache()
+        .lock()
+        .expect("missing-sound cache poisoned")
+        .get(hash)
+        .is_some_and(|at| at.elapsed() < MISSING_RETRY_AFTER)
+}
+
+fn mark_missing(hash: &str) {
+    missing_cache()
+        .lock()
+        .expect("missing-sound cache poisoned")
+        .insert(hash.to_string(), Instant::now());
+}
+
+fn clear_missing(hash: &str) {
+    missing_cache()
+        .lock()
+        .expect("missing-sound cache poisoned")
+        .remove(hash);
 }
 
 /// Walk `sounds_dir` and return `(hash, extension)` for every

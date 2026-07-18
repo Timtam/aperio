@@ -12,6 +12,7 @@ description = "Aperio sync adapter targeting a WebDAV-compatible server (Nextclo
 async-trait.workspace = true
 base64 = "0.22"
 chrono.workspace = true
+futures.workspace = true
 quick-xml.workspace = true
 reqwest.workspace = true
 serde.workspace = true

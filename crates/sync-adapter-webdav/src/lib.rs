@@ -168,7 +168,9 @@ impl WebDavSyncAdapter {
             // Apache's 5 s default KeepAliveTimeout (and long before the next
             // round), so a stale socket is never handed out, while the
             // sub-second within-round gaps still reuse the live connection.
-            .pool_max_idle_per_host(2)
+            // Matches the log-fetch concurrency so the parallel GETs
+            // reuse keep-alive connections instead of re-handshaking.
+            .pool_max_idle_per_host(4)
             .pool_idle_timeout(std::time::Duration::from_secs(3))
             .build()
             .map_err(|err| SyncError::internal(format!("build reqwest client: {err}")))?;
@@ -431,22 +433,41 @@ impl SyncAdapter for WebDavSyncAdapter {
                 wanted.push(parsed);
             }
         }
-        // 3. GET each matching file.
-        let mut out = Vec::with_capacity(wanted.len());
-        for name in wanted {
-            let relative = format!("log/{}", name.to_filename());
-            match self.get_bytes(&relative).await? {
-                Some(bytes) => out.push(LogFile { name, bytes }),
-                None => {
-                    // Listed but missing: probably deleted by the
-                    // compactor in the gap between PROPFIND and GET.
-                    // Skip silently — the next round picks up an
-                    // updated listing.
-                    debug!(
-                        path = %relative,
-                        "log listed by PROPFIND but no longer present on GET",
-                    );
+        // 3. GET the matching files with bounded concurrency: a
+        //    multi-file backlog (onboarding, post-offline catch-up,
+        //    multi-device bursts) used to pay one serial round-trip per
+        //    file. The bound stays modest so shy servers (per-connection
+        //    caps, rate limits) aren't hammered; the reqwest client's
+        //    keep-alive pool is sized to match. Error semantics as
+        //    before: any failed GET fails the whole fetch (the caller
+        //    serves stale and retries next round).
+        use futures::stream::{self, StreamExt};
+        const LOG_FETCH_CONCURRENCY: usize = 4;
+        let results: Vec<SyncResult<Option<LogFile>>> = stream::iter(wanted)
+            .map(|name| async move {
+                let relative = format!("log/{}", name.to_filename());
+                match self.get_bytes(&relative).await? {
+                    Some(bytes) => Ok(Some(LogFile { name, bytes })),
+                    None => {
+                        // Listed but missing: probably deleted by the
+                        // compactor in the gap between PROPFIND and GET.
+                        // Skip silently — the next round picks up an
+                        // updated listing.
+                        debug!(
+                            path = %relative,
+                            "log listed by PROPFIND but no longer present on GET",
+                        );
+                        Ok(None)
+                    }
                 }
+            })
+            .buffer_unordered(LOG_FETCH_CONCURRENCY)
+            .collect()
+            .await;
+        let mut out = Vec::with_capacity(results.len());
+        for result in results {
+            if let Some(log) = result? {
+                out.push(log);
             }
         }
         Ok(out)

@@ -6608,6 +6608,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "chrono",
+ "futures",
  "mockito",
  "quick-xml 0.36.2",
  "reqwest 0.12.28",
