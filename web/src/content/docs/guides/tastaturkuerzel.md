@@ -13,6 +13,7 @@ always authoritative.
 |---|---|
 | Open settings | `Ctrl+,` |
 | Open search | `Ctrl+F` |
+| Open reminders overview | `Ctrl+Shift+R` |
 | Switch between areas | `Tab` / `Shift+Tab` |
 | Select / open / edit | `Enter` |
 | Close dialog or menu | `Esc` |

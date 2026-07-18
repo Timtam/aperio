@@ -18,6 +18,7 @@ important shortcuts and adjust them if needed. A complete list is in the
 | Check off task | `Space` |
 | Delete entry | `Delete` |
 | Open search | `Ctrl+F` |
+| Open reminders overview | `Ctrl+Shift+R` |
 | Show today | `T` |
 | Previous / next period | `Page Up` / `Page Down` |
 | Switch between areas | `Tab` / `Shift+Tab` |

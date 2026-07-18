@@ -13,6 +13,7 @@ Tastaturkürzel**, wo du jedes Kürzel ändern kannst.
 |---|---|
 | Einstellungen öffnen | `Strg+,` |
 | Suche öffnen | `Strg+F` |
+| Erinnerungs-Übersicht öffnen | `Strg+Umschalt+R` |
 | Zwischen Bereichen wechseln | `Tab` / `Umschalt+Tab` |
 | Auswählen / öffnen / bearbeiten | `Eingabe` |
 | Dialog oder Menü schließen | `Esc` |

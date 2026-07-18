@@ -19,6 +19,7 @@ vollständige Liste findest du in der
 | Aufgabe abhaken | `Leertaste` |
 | Eintrag löschen | `Entf` |
 | Suche öffnen | `Strg+F` |
+| Erinnerungs-Übersicht öffnen | `Strg+Umschalt+R` |
 | Heute anzeigen | `T` |
 | Voriger / nächster Zeitraum | `Bild auf` / `Bild ab` |
 | Zwischen Bereichen wechseln | `Tab` / `Umschalt+Tab` |

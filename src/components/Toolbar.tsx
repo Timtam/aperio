@@ -38,7 +38,8 @@ export function Toolbar() {
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { view, setView, anchor, jumpToToday, goPrev, goNext } = useViewState();
-  const { openQuickAdd, openQuickAddTask, openSearch } = useDialogState();
+  const { openQuickAdd, openQuickAddTask, openSearch, openReminders } =
+    useDialogState();
   const { dayViewMode, setDayViewMode } = useTaskCascadeEnabled();
 
   // The grid↔list layout toggle is only meaningful on the day + week
@@ -158,6 +159,14 @@ export function Toolbar() {
           title={t('toolbar.search') + ' (Ctrl+F)'}
         >
           🔎
+        </button>
+        <button
+          type="button"
+          onClick={() => openReminders()}
+          aria-label={t('toolbar.reminders')}
+          title={t('toolbar.reminders') + ' (Ctrl+Shift+R)'}
+        >
+          🔔
         </button>
         {/* One create button per kind. Each opens the quick-add (the "schnell
             anlegen" editor), which expands to the full editor via "weitere
