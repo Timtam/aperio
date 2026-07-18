@@ -196,7 +196,11 @@ impl SyncAdapter for LocalFsSyncAdapter {
                     continue;
                 }
             };
-            if !since.wants(&parsed) {
+            // Size-aware filter: the fs metadata length feeds the growth
+            // check, so a peer's live session file with appended events is
+            // re-fetched even though its timestamp sits at/below the cursor.
+            let listed_len = entry.metadata().await.ok().map(|m| m.len());
+            if !since.wants_sized(&parsed, &name_str, listed_len) {
                 continue;
             }
             let bytes = match fs::read(entry.path()).await {
@@ -367,6 +371,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn grown_file_at_the_cursor_is_refetched() {
+        // The append-miss fix: a peer's live session file gains events
+        // AFTER we applied it; its timestamp sits at the cursor, but the
+        // recorded applied length is smaller than the on-disk file, so it
+        // must be fetched again.
+        let tmp = TempDir::new().unwrap();
+        let adapter = LocalFsSyncAdapter::new(tmp.path());
+        let device = DeviceId::from_string("dev-a".into());
+        let log = fixture_log_file(
+            device.clone(),
+            1_000,
+            vec![fixture_envelope(
+                device.clone(),
+                1_000,
+                SyncEvent::EventDeleted(IdPayload { id: "x".into() }),
+            )],
+        );
+        adapter.push_log(&log).await.unwrap();
+
+        let cursor_at = |known_len: u64| DeviceCursor {
+            last_seen_log: Utc.timestamp_opt(1_000, 0).unwrap(),
+            exclude_device: None,
+            known_lengths: vec![sync_core::KnownLogLength {
+                name: log.name.to_filename(),
+                len: known_len,
+            }],
+        };
+
+        // Applied length smaller than the file → grown → refetched.
+        let fetched = adapter
+            .fetch_new_logs(&cursor_at(log.bytes.len() as u64 - 1))
+            .await
+            .unwrap();
+        assert_eq!(fetched.len(), 1, "grown file re-fetched");
+
+        // Applied length equals the file → unchanged → skipped.
+        let fetched = adapter
+            .fetch_new_logs(&cursor_at(log.bytes.len() as u64))
+            .await
+            .unwrap();
+        assert!(fetched.is_empty(), "unchanged file skipped");
+    }
+
+    #[tokio::test]
     async fn cursor_filters_already_seen_logs() {
         let tmp = TempDir::new().unwrap();
         let adapter = LocalFsSyncAdapter::new(tmp.path());
@@ -382,6 +430,7 @@ mod tests {
         let cursor = DeviceCursor {
             last_seen_log: Utc.timestamp_opt(1_500, 0).unwrap(),
             exclude_device: None,
+            known_lengths: Vec::new(),
         };
         let fetched = adapter.fetch_new_logs(&cursor).await.unwrap();
         assert_eq!(fetched.len(), 1);

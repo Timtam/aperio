@@ -71,6 +71,27 @@ pub struct DeviceCursor {
     /// `serde(default)` keeps the plugin-ABI encoding compatible.
     #[serde(default)]
     pub exclude_device: Option<crate::device::DeviceId>,
+    /// Byte lengths of already-APPLIED log files, keyed by filename.
+    /// The growth-refetch signal: a peer keeps appending to its live
+    /// session file after we first fetched it, but the file's name (and
+    /// so its timestamp) never changes — the plain cursor filter would
+    /// hide the appended events until the peer rotates its session.
+    /// An adapter whose listing carries sizes re-fetches a file that is
+    /// AT/BELOW the cursor when its listed size exceeds the recorded
+    /// applied length (per-event idempotency makes the re-apply safe).
+    /// Adapters without listing sizes ignore this (append-miss persists
+    /// there until rotation). `serde(default)` keeps the wire compatible.
+    #[serde(default)]
+    pub known_lengths: Vec<KnownLogLength>,
+}
+
+/// One applied-length record for [`DeviceCursor::known_lengths`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct KnownLogLength {
+    /// The log's exact filename (`LogFileName::to_filename`).
+    pub name: String,
+    /// Bytes of that file this device has fetched AND applied.
+    pub len: u64,
 }
 
 impl DeviceCursor {
@@ -81,6 +102,7 @@ impl DeviceCursor {
         Self {
             last_seen_log: DateTime::<Utc>::MIN_UTC,
             exclude_device: None,
+            known_lengths: Vec::new(),
         }
     }
 
@@ -90,6 +112,34 @@ impl DeviceCursor {
     /// so the exclusion semantics can't drift between backends.
     pub fn wants(&self, name: &crate::log::LogFileName) -> bool {
         name.timestamp > self.last_seen_log && self.exclude_device.as_ref() != Some(&name.device_id)
+    }
+
+    /// Size-aware variant of [`Self::wants`] for adapters whose listing
+    /// reports byte sizes: additionally re-fetches a file at/below the
+    /// cursor whose listed size GREW past the recorded applied length
+    /// (a peer's live session file gaining appended events). A file with
+    /// no recorded length is never growth-refetched — it was applied
+    /// before length tracking existed, and treating "unknown" as grown
+    /// would re-download the whole history once per upgrade.
+    pub fn wants_sized(
+        &self,
+        name: &crate::log::LogFileName,
+        filename: &str,
+        listed_len: Option<u64>,
+    ) -> bool {
+        if self.exclude_device.as_ref() == Some(&name.device_id) {
+            return false;
+        }
+        if name.timestamp > self.last_seen_log {
+            return true;
+        }
+        match listed_len {
+            Some(listed) => self
+                .known_lengths
+                .iter()
+                .any(|k| k.name == filename && listed > k.len),
+            None => false,
+        }
     }
 }
 
@@ -192,6 +242,7 @@ mod tests {
         let cursor = DeviceCursor {
             last_seen_log: Utc.timestamp_opt(1_000, 0).unwrap(),
             exclude_device: Some(DeviceId::from_string("me".into())),
+            known_lengths: Vec::new(),
         };
         // Newer + foreign → fetch.
         assert!(cursor.wants(&name(2_000, "peer")));
@@ -203,5 +254,40 @@ mod tests {
         // No exclusion (compactor GC scan) → own files still fetched.
         let epoch = DeviceCursor::epoch();
         assert!(epoch.wants(&name(2_000, "me")));
+    }
+
+    #[test]
+    fn wants_sized_refetches_grown_files_only() {
+        let file = name(1_000, "peer");
+        let filename = "the-file.jsonl";
+        let cursor = DeviceCursor {
+            // Cursor AT the file's timestamp — the plain filter skips it.
+            last_seen_log: Utc.timestamp_opt(1_000, 0).unwrap(),
+            exclude_device: Some(DeviceId::from_string("me".into())),
+            known_lengths: vec![KnownLogLength {
+                name: filename.into(),
+                len: 100,
+            }],
+        };
+        // Listed size grew past the applied length → refetch.
+        assert!(cursor.wants_sized(&file, filename, Some(150)));
+        // Unchanged → skip.
+        assert!(!cursor.wants_sized(&file, filename, Some(100)));
+        // No listed size (server omits it) → skip, plain semantics.
+        assert!(!cursor.wants_sized(&file, filename, None));
+        // Unknown filename (applied before tracking) → never refetched.
+        assert!(!cursor.wants_sized(&file, "other.jsonl", Some(9_999)));
+        // Own file → excluded even when grown.
+        let own = name(1_000, "me");
+        let own_cursor = DeviceCursor {
+            known_lengths: vec![KnownLogLength {
+                name: "own.jsonl".into(),
+                len: 10,
+            }],
+            ..cursor.clone()
+        };
+        assert!(!own_cursor.wants_sized(&own, "own.jsonl", Some(20)));
+        // Above the cursor → fetched regardless of sizes.
+        assert!(cursor.wants_sized(&name(2_000, "peer"), "new.jsonl", None));
     }
 }

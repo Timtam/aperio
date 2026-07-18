@@ -400,9 +400,12 @@ impl SyncAdapter for WebDavSyncAdapter {
     async fn fetch_new_logs(&self, since: &DeviceCursor) -> SyncResult<Vec<LogFile>> {
         // 1. List the log directory via PROPFIND.
         let entries = self.propfind("log/").await?;
-        // 2. Filter to *.jsonl files newer than the cursor; the
-        //    filename embeds the timestamp so we don't need
-        //    getlastmodified for the cursor comparison.
+        // 2. Filter to *.jsonl files the cursor wants. The filename embeds
+        //    the timestamp for the horizon check, and the PROPFIND's
+        //    getcontentlength feeds the GROWTH check: a peer's live
+        //    session file that gained appended events since we last
+        //    applied it is re-fetched even though its timestamp sits
+        //    at/below the cursor (`wants_sized`).
         let mut wanted: Vec<LogFileName> = Vec::new();
         for entry in entries {
             // Skip the collection itself; the leaf's href ends with
@@ -424,7 +427,7 @@ impl SyncAdapter for WebDavSyncAdapter {
                     continue;
                 }
             };
-            if since.wants(&parsed) {
+            if since.wants_sized(&parsed, &decoded, entry.content_length) {
                 wanted.push(parsed);
             }
         }

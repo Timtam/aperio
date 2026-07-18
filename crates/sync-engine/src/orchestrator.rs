@@ -88,6 +88,22 @@ pub const SYNC_LAST_ROUND_PREF_KEY: &str = "sync.lastSuccessfulRound";
 /// dataset isn't mistaken for one that fell behind the snapshot.
 pub const SYNC_OWN_NEWEST_LOG_PREF_KEY: &str = "sync.cursor.ownNewestLog";
 
+/// JSON map (filename → applied byte length) of FOREIGN log files this
+/// device has fetched and applied — the growth-refetch signal
+/// ([`DeviceCursor::known_lengths`]): a peer's live session file that
+/// gained appended events is re-fetched when its listed size exceeds the
+/// recorded applied length, instead of those events staying invisible
+/// until the peer rotates its session. Persisted (not in-memory) so
+/// appends that landed while this device was OFFLINE are detected on the
+/// next launch. Capped to the newest [`APPLIED_LOG_LENGTHS_CAP`] files.
+pub const SYNC_APPLIED_LOG_LENGTHS_PREF_KEY: &str = "sync.cursor.appliedLogLengths";
+
+/// Cap for [`SYNC_APPLIED_LOG_LENGTHS_PREF_KEY`]: live session files are
+/// few (one per device until compaction sweeps), so the newest N entries
+/// by embedded filename timestamp comfortably cover every file that can
+/// still grow while keeping the pref bounded.
+const APPLIED_LOG_LENGTHS_CAP: usize = 64;
+
 /// `SyncRoundReport` (what one round did) and `SyncStatus` (the read-only
 /// state snapshot) are defined in the crate root so the desktop app and
 /// the engine share one definition; this module owns the orchestration
@@ -193,6 +209,13 @@ pub struct SyncOrchestrator {
     /// `Option<String>` carrying the required version so the
     /// status indicator can name it.
     schema_too_old: Mutex<Option<String>>,
+    /// Byte length last successfully PUSHED per pending filename, so a
+    /// round skips re-uploading a session file that hasn't grown since
+    /// (the writer only appends, so length equality means content
+    /// equality). Deliberately IN-MEMORY: every file is re-pushed at
+    /// least once per app session, which self-heals a remote copy that
+    /// was manually deleted or truncated behind our back.
+    pushed_lengths: Mutex<std::collections::HashMap<String, u64>>,
     /// §19.10: latched stale-device state. Set when a sync
     /// round notices our `meta.devices[me].stale == true`;
     /// cleared by `resume_from_stale` after the snapshot
@@ -279,6 +302,7 @@ impl SyncOrchestrator {
             schema_too_old: Mutex::new(None),
             stale_device_since: Mutex::new(None),
             in_flight: Mutex::new(false),
+            pushed_lengths: Mutex::new(std::collections::HashMap::new()),
             boot_at,
         }
     }
@@ -305,6 +329,13 @@ impl SyncOrchestrator {
     pub fn configure(&self, adapter: Arc<dyn SyncAdapter>) {
         let mut guard = self.adapter.lock().expect("adapter mutex poison");
         *guard = Some(adapter);
+        // A (re)configured backend may point at a DIFFERENT remote that
+        // doesn't hold our files — forget the per-session pushed lengths
+        // so the next round re-pushes everything once.
+        self.pushed_lengths
+            .lock()
+            .expect("pushed_lengths mutex poison")
+            .clear();
     }
 
     /// Tear down the adapter (user picked "Disconnect" in
@@ -564,9 +595,17 @@ impl SyncOrchestrator {
                     }
                 }
 
+                // Record each successfully applied file's byte length —
+                // the growth-refetch signal for the next round. A failed
+                // apply records nothing, so the file is re-fetched.
+                let mut applied_lengths: Vec<(String, u64)> = Vec::new();
                 for log in foreign {
+                    let byte_len = log.bytes.len() as u64;
                     match self.applier.apply_log_file(&log) {
-                        Ok(apply_report) => report.merge_apply(apply_report),
+                        Ok(apply_report) => {
+                            report.merge_apply(apply_report);
+                            applied_lengths.push((log.name.to_filename(), byte_len));
+                        }
                         Err(err) => {
                             warn!(
                                 log = %log.name.to_filename(),
@@ -577,6 +616,7 @@ impl SyncOrchestrator {
                         }
                     }
                 }
+                self.record_applied_lengths(&applied_lengths);
 
                 // 3. Advance cursor. Persist as RFC 3339 to keep
                 // the user_prefs value human-readable.
@@ -782,6 +822,26 @@ impl SyncOrchestrator {
                 continue;
             }
             let byte_count = bytes.len();
+            // Skip a file whose byte length matches what this SESSION
+            // already pushed — the writer only appends, so equal length
+            // means identical content, and re-uploading the whole (all-day
+            // growing) session file every round was often the slowest
+            // request of the round. The map is in-memory by design: a
+            // fresh app session re-pushes everything once, which
+            // self-heals a remote copy deleted/truncated behind our back.
+            let already_pushed = self
+                .pushed_lengths
+                .lock()
+                .expect("pushed_lengths mutex poison")
+                .get(name)
+                .is_some_and(|len| *len == byte_count as u64);
+            if already_pushed {
+                debug!(
+                    name = name,
+                    "pending log unchanged since last push; skipping"
+                );
+                continue;
+            }
             let log = LogFile {
                 name: parsed,
                 bytes,
@@ -789,6 +849,10 @@ impl SyncOrchestrator {
             match adapter.push_log(&log).await {
                 Ok(()) => {
                     pushed += 1;
+                    self.pushed_lengths
+                        .lock()
+                        .expect("pushed_lengths mutex poison")
+                        .insert(name.to_string(), byte_count as u64);
                     // Bump the compactor's "logs since snapshot"
                     // counters so its threshold check picks up the
                     // new push without an extra round-trip.
@@ -846,15 +910,66 @@ impl SyncOrchestrator {
         // its own epoch cursor WITHOUT the exclusion — it genuinely
         // needs own files for coverage decisions.
         let exclude_device = Some(self.local_device_id.clone());
+        // Applied byte lengths → the adapter's growth-refetch signal
+        // (a peer's live session file gaining appended events).
+        let known_lengths = self
+            .read_applied_lengths()
+            .into_iter()
+            .map(|(name, len)| sync_core::KnownLogLength { name, len })
+            .collect();
         match raw.and_then(|s| DateTime::parse_from_rfc3339(&s).ok()) {
             Some(ts) => DeviceCursor {
                 last_seen_log: ts.with_timezone(&Utc),
                 exclude_device,
+                known_lengths,
             },
             None => DeviceCursor {
                 exclude_device,
+                known_lengths,
                 ..DeviceCursor::epoch()
             },
+        }
+    }
+
+    /// The persisted (filename → applied byte length) map backing
+    /// [`SYNC_APPLIED_LOG_LENGTHS_PREF_KEY`]. Unreadable/corrupt prefs
+    /// degrade to empty — the only cost is a one-time re-fetch.
+    fn read_applied_lengths(&self) -> std::collections::HashMap<String, u64> {
+        self.store
+            .get_pref(SYNC_APPLIED_LOG_LENGTHS_PREF_KEY)
+            .ok()
+            .flatten()
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default()
+    }
+
+    /// Record the applied byte lengths of freshly fetched foreign logs,
+    /// keeping only the newest [`APPLIED_LOG_LENGTHS_CAP`] filenames
+    /// (filenames sort chronologically — the timestamp prefix is
+    /// fixed-width — so a plain string sort ages out swept files).
+    fn record_applied_lengths(&self, fetched: &[(String, u64)]) {
+        if fetched.is_empty() {
+            return;
+        }
+        let mut map = self.read_applied_lengths();
+        for (name, len) in fetched {
+            map.insert(name.clone(), *len);
+        }
+        if map.len() > APPLIED_LOG_LENGTHS_CAP {
+            let mut names: Vec<String> = map.keys().cloned().collect();
+            names.sort_unstable();
+            let drop_count = names.len() - APPLIED_LOG_LENGTHS_CAP;
+            for name in names.into_iter().take(drop_count) {
+                map.remove(&name);
+            }
+        }
+        match serde_json::to_string(&map) {
+            Ok(raw) => {
+                if let Err(err) = self.store.set_pref(SYNC_APPLIED_LOG_LENGTHS_PREF_KEY, &raw) {
+                    warn!(?err, "couldn't persist applied-log-length map");
+                }
+            }
+            Err(err) => warn!(?err, "couldn't serialize applied-log-length map"),
         }
     }
 

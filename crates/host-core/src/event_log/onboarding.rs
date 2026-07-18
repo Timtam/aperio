@@ -333,6 +333,9 @@ impl OnboardingService {
                 // Own files are discarded by the filter below anyway —
                 // let the adapter skip fetching their bytes.
                 exclude_device: Some(self.local_device_id.clone()),
+                // Onboarding/resume fetch from scratch — no applied
+                // lengths recorded yet, growth-refetch not relevant.
+                known_lengths: Vec::new(),
             })
             .await?;
         let foreign: Vec<_> = logs
@@ -488,6 +491,9 @@ impl OnboardingService {
                 // Own files are discarded by the filter below anyway —
                 // let the adapter skip fetching their bytes.
                 exclude_device: Some(self.local_device_id.clone()),
+                // Onboarding/resume fetch from scratch — no applied
+                // lengths recorded yet, growth-refetch not relevant.
+                known_lengths: Vec::new(),
             })
             .await?;
         let foreign: Vec<_> = logs

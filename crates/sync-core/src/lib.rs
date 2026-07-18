@@ -48,7 +48,7 @@ pub mod meta;
 pub mod snapshot;
 pub mod version;
 
-pub use adapter::{DeviceCursor, SyncAdapter};
+pub use adapter::{DeviceCursor, KnownLogLength, SyncAdapter};
 pub use crypto::{
     decrypt, derive_key, encrypt, fresh_data_key, resolve_data_key, unwrap_key, wrap_key,
     EncryptionParams, KEY_LEN, NONCE_LEN, SALT_LEN,
