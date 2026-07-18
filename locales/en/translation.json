@@ -1747,7 +1747,9 @@
       "kindTask": "Task",
       "eventRow": "{{when}}: event \"{{title}}\"",
       "taskRow": "{{when}}: task \"{{title}}\"",
-      "openHint": "Opens the linked item"
+      "openHint": "Opens the linked item",
+      "allDay": "All day",
+      "allDayRange": "All day · {{from}} to {{to}}"
     },
     "search": {
       "title": "Search",

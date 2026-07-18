@@ -1,3 +1,4 @@
+import { allDayReminderDays } from '@aperio/shared';
 import * as Notifications from 'expo-notifications';
 import { useEffect } from 'react';
 import { AppState, Platform } from 'react-native';
@@ -9,6 +10,29 @@ import { customSoundPath } from '../api/sounds';
 import { getHiddenCalendars } from '../state/calendarVisibility';
 import { setRemindersRefreshHook } from '../state/cacheObserver';
 import { upcomingDayStartNotifications } from './dayStartSchedule';
+
+const DAY_MS = 86_400_000;
+
+/** The notification body for a trigger. An all-day event reads as "Ganztägig"
+ *  (single day) or "Ganztägig · 24. Juni bis 26. Juni" (multi-day) — spelled-out,
+ *  localized — instead of the bare "00:00" a midnight start would format to.
+ *  Timed events and tasks keep the Rust-built body (the time). */
+function notificationBody(r: UpcomingReminder): string {
+  if (r.item_kind !== 'event' || !r.all_day) return r.body;
+  const days = allDayReminderDays(r.start, r.end);
+  if (days <= 1) return i18n.t('dialogs.reminders.allDay');
+  // `end` is exclusive (the next midnight), so step back one day for the
+  // inclusive last day the user sees.
+  const lastDay = new Date(new Date(r.end).getTime() - DAY_MS);
+  const fmt = new Intl.DateTimeFormat(i18n.language, {
+    day: 'numeric',
+    month: 'long',
+  });
+  return i18n.t('dialogs.reminders.allDayRange', {
+    from: fmt.format(new Date(r.start)),
+    to: fmt.format(lastDay),
+  });
+}
 
 // Mobile reminder delivery. The desktop fires reminders from a live tokio
 // worker that sleeps until the next trigger; iOS suspends background JS, so
@@ -175,7 +199,7 @@ export async function rescheduleReminders(): Promise<void> {
       await Notifications.scheduleNotificationAsync({
         content: {
           title: r.title,
-          body: r.body,
+          body: notificationBody(r),
           sound,
           // Carried so a tap can route to the item (wired in App).
           data: { itemId: r.item_id, itemKind: r.item_kind },

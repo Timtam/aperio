@@ -1747,7 +1747,9 @@
       "kindTask": "Aufgabe",
       "eventRow": "{{when}}: Termin „{{title}}\"",
       "taskRow": "{{when}}: Aufgabe „{{title}}\"",
-      "openHint": "Öffnet das zugehörige Element"
+      "openHint": "Öffnet das zugehörige Element",
+      "allDay": "Ganztägig",
+      "allDayRange": "Ganztägig · {{from}} bis {{to}}"
     },
     "search": {
       "title": "Suche",

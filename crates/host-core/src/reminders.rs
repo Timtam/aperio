@@ -50,6 +50,14 @@ pub struct Trigger {
     pub body: String,
     pub trigger_at: DateTime<Utc>,
     pub relevant_until: DateTime<Utc>,
+    /// The occurrence's own start instant (NOT `trigger_at`, which for an all-day
+    /// item is the day-carryover fire time). With `relevant_until` (= occurrence
+    /// end) and `all_day`, lets a notification say "Ganztägig · 24. Juni bis 26.
+    /// Juni" instead of a meaningless "00:00".
+    pub start: DateTime<Utc>,
+    /// The item is an all-day event (its reminders anchor to the day-carryover
+    /// time). Tasks and timed events are `false`.
+    pub all_day: bool,
     /// Effective notification sound, already resolved through the §14.4
     /// hierarchy (reminder → item → container → global → System).
     pub sound: SoundConfig,
@@ -457,6 +465,7 @@ pub fn enumerate_app_start_triggers(db: &SharedConn) -> Vec<Trigger> {
                 let start_str: String = row.get(2).unwrap_or_default();
                 let reminders_json: Option<String> = row.get(4).unwrap_or(None);
                 let calendar_id: String = row.get(7).unwrap_or_default();
+                let all_day: bool = row.get(8).unwrap_or(false);
                 let Some(reminders) = parse_reminders(reminders_json.as_deref()) else {
                     continue;
                 };
@@ -473,6 +482,8 @@ pub fn enumerate_app_start_triggers(db: &SharedConn) -> Vec<Trigger> {
                             body: format_event_body(&start),
                             trigger_at: now,
                             relevant_until: start,
+                            start,
+                            all_day,
                             sound: sound_prefs.resolve(
                                 r.sound.as_ref(),
                                 &id,
@@ -519,6 +530,8 @@ pub fn enumerate_app_start_triggers(db: &SharedConn) -> Vec<Trigger> {
                             body: format_task_body(&due),
                             trigger_at: now,
                             relevant_until: due,
+                            start: due,
+                            all_day: false,
                             sound: sound_prefs.resolve(
                                 r.sound.as_ref(),
                                 &id,
@@ -680,6 +693,8 @@ fn occurrence_triggers(
                 body: format_event_body(&occ_start),
                 trigger_at: at,
                 relevant_until,
+                start: occ_start,
+                all_day: all_day_anchor.is_some(),
                 // §14.4: per-reminder override wins, else fall through
                 // item → container → global → System.
                 sound: sound_prefs.resolve(r.sound.as_ref(), item_id, container_kind, container_id),
@@ -1832,6 +1847,8 @@ mod tests {
             body: String::new(),
             trigger_at: now + ChronoDuration::minutes(at_offset_min),
             relevant_until: now + ChronoDuration::minutes(relevant_offset_min),
+            start: now + ChronoDuration::minutes(at_offset_min),
+            all_day: false,
             sound: SoundConfig::default(),
         }
     }

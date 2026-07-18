@@ -5625,6 +5625,12 @@ impl Host {
                     "title": t.title,
                     "body": t.body,
                     "trigger_at": t.trigger_at.to_rfc3339(),
+                    // Occurrence start/end + all-day flag so the scheduler can build
+                    // a localized all-day body ("Ganztägig · 24. Juni bis 26. Juni")
+                    // instead of the meaningless "00:00" a midnight start formats to.
+                    "start": t.start.to_rfc3339(),
+                    "end": t.relevant_until.to_rfc3339(),
+                    "all_day": t.all_day,
                     // The §14.4 effective sound (reminder→item→container→global),
                     // already resolved on the Trigger — the mobile scheduler maps
                     // it to the OS notification sound (System vs Silent).

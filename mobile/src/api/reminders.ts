@@ -33,6 +33,13 @@ export interface UpcomingReminder {
   body: string;
   /** RFC-3339 UTC instant the notification should fire at. */
   trigger_at: string;
+  /** Occurrence start / end (RFC-3339) + all-day flag — let the scheduler build a
+   *  localized all-day body ("Ganztägig · 24. Juni bis 26. Juni") instead of the
+   *  "00:00" a midnight start would format to. `end` is exclusive (next midnight
+   *  for an all-day event). */
+  start: string;
+  end: string;
+  all_day: boolean;
   /** The effective notification sound for this trigger. */
   sound: SoundConfig;
 }

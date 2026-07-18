@@ -11,6 +11,7 @@ export * from './taskRecurrence';
 export * from './expandTaskOccurrences';
 export * from './recurrence';
 export * from './rrule';
+export * from './reminderNotification';
 export * from './dateKey';
 export * from './multiDay';
 export * from './birthdays';
