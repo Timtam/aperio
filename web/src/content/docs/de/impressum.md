@@ -4,24 +4,18 @@ description: Anbieterkennzeichnung nach § 5 DDG.
 lastUpdated: false
 ---
 
-:::caution[Entwurf / Platzhalter]
-Eine in Deutschland betriebene öffentliche Website benötigt rechtlich ein
-**Impressum** (§ 5 DDG). Dies ist eine Vorlage — bitte mit echten Angaben
-füllen.
-:::
-
 ## Angaben gemäß § 5 DDG
 
-> [PLATZHALTER: Name]
-> [PLATZHALTER: Straße und Hausnummer]
-> [PLATZHALTER: PLZ und Ort]
-> [PLATZHALTER: Land]
+> Toni Barth
+> Robert-Koch-Str. 44
+> 06110 Halle (Saale)
+> Deutschland
 
 **Kontakt**
 
-> E-Mail: [PLATZHALTER: E-Mail]
-> [PLATZHALTER: Telefon, optional]
+> E-Mail: contact@toni-barth.online
+> Telefon: +49 179 2687381
 
 **Verantwortlich für den Inhalt nach § 18 Abs. 2 MStV**
 
-> [PLATZHALTER: Name und Anschrift]
+> Toni Barth, Robert-Koch-Str. 44, 06110 Halle (Saale)
