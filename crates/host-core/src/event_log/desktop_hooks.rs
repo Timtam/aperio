@@ -48,8 +48,11 @@ impl SyncRoundHooks for DesktopSyncRoundHooks {
         &self,
         adapter: &dyn SyncAdapter,
         last_seen_log: DateTime<Utc>,
+        round_meta: Option<&sync_core::MetaJson>,
     ) -> SyncResult<()> {
-        self.onboarding.heartbeat_meta(adapter, last_seen_log).await
+        self.onboarding
+            .heartbeat_meta(adapter, last_seen_log, round_meta)
+            .await
     }
 
     async fn resume_from_stale(&self, adapter: &dyn SyncAdapter) -> SyncResult<()> {

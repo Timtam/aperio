@@ -115,10 +115,16 @@ pub trait SyncRoundHooks: Send + Sync {
     fn app_version(&self) -> String;
     /// Refresh this device's heartbeat in `meta.json` after a round so
     /// other devices + the compactor see a current `last_seen_log`.
+    /// `round_meta` is the meta the round already fetched for its gates
+    /// (None when the remote had none, or when the round invalidated its
+    /// copy) — implementations use it instead of re-fetching, and may skip
+    /// the push entirely when this device's record is already current.
+    /// §19.5's last-write-wins tolerates the copy being seconds old.
     async fn heartbeat(
         &self,
         adapter: &dyn SyncAdapter,
         last_seen_log: DateTime<Utc>,
+        round_meta: Option<&sync_core::MetaJson>,
     ) -> SyncResult<()>;
     /// Sync out-of-band sound assets (push local-only files, fetch
     /// referenced-but-missing ones). Best-effort; default no-op.
@@ -398,8 +404,11 @@ impl SyncOrchestrator {
             }
         };
 
-        // Phase Sl + §19.10: read `meta.json` once and run both
-        // gating checks against it.
+        // Phase Sl + §19.10: read `meta.json` ONCE for the whole round.
+        // The gates below consume it, and the same copy is threaded into
+        // the heartbeat + compaction-threshold steps at the end — those
+        // used to each re-fetch it, making meta.json 3 GETs of a no-change
+        // round's ~5 serial requests (§ the WebDAV round-trip audit).
         //
         // - Schema gate: refuse the round if our running build
         //   is older than `min_app_version`. Sending logs in an
@@ -411,10 +420,16 @@ impl SyncOrchestrator {
         //   files we'd otherwise need to catch up incrementally;
         //   the user has to confirm a snapshot re-pull via the
         //   resume command before normal rounds can resume.
-        if let Some(meta) = adapter.fetch_meta().await? {
+        let mut round_meta = adapter.fetch_meta().await?;
+        // Set when the §19.10 auto-resume ran: it pushes an UPDATED meta
+        // (stale flag cleared), so the round's cached copy is invalid from
+        // then on — the heartbeat must re-fetch or it would push the old
+        // copy back, re-flagging this device as stale.
+        let mut resumed = false;
+        if let Some(meta) = &round_meta {
             // Returns `Err(SchemaTooOld)` when the running version
             // is older than meta.min_app_version.
-            match sync_core::ensure_compatible(&meta, &self.hooks.app_version()) {
+            match sync_core::ensure_compatible(meta, &self.hooks.app_version()) {
                 Ok(_) => {
                     // Clear any prior latched state — the user
                     // presumably updated since the last failed
@@ -434,7 +449,7 @@ impl SyncOrchestrator {
             // local device_names table so the Settings → Plugins panel can
             // render "Used on: <Name>" without a separate round-trip. A
             // platform hook owns the table; best-effort, errors swallowed.
-            self.hooks.cache_device_names(&meta);
+            self.hooks.cache_device_names(meta);
 
             // §19.10 stale detection + AUTO-RESUME. A device is stale when
             // either the compactor flagged its `meta.devices[me].stale`, OR our
@@ -464,7 +479,7 @@ impl SyncOrchestrator {
                 .devices
                 .get(self.local_device_id.as_str())
                 .is_some_and(|entry| entry.stale);
-            if flagged_stale || snapshot_backstop_trips(self.held_horizon(), &meta) {
+            if flagged_stale || snapshot_backstop_trips(self.held_horizon(), meta) {
                 match self.hooks.resume_from_stale(adapter.as_ref()).await {
                     Ok(()) => {
                         info!("§19.10: device was stale; auto-resumed via snapshot re-pull");
@@ -473,6 +488,7 @@ impl SyncOrchestrator {
                         // updated meta, so the rest of the round proceeds as a
                         // caught-up device.
                         self.clear_stale_device();
+                        resumed = true;
                     }
                     Err(err) => {
                         warn!(
@@ -506,6 +522,9 @@ impl SyncOrchestrator {
             if meta.e2e_enabled && !self.store.e2e_enabled() {
                 return Err(sync_core::SyncError::EncryptionRequired);
             }
+        }
+        if resumed {
+            round_meta = None;
         }
 
         let mut report = SyncRoundReport::default();
@@ -590,7 +609,7 @@ impl SyncOrchestrator {
         // someone else's UI until then.
         if let Err(err) = self
             .hooks
-            .heartbeat(adapter.as_ref(), self.held_horizon())
+            .heartbeat(adapter.as_ref(), self.held_horizon(), round_meta.as_ref())
             .await
         {
             warn!(?err, "meta.json heartbeat failed");
@@ -618,7 +637,11 @@ impl SyncOrchestrator {
         // directly via `SyncLogRepo` since the orchestrator
         // doesn't hold a scheduler reference (the relationship
         // goes the other way).
-        match self.compactor.should_compact(adapter.as_ref()).await {
+        match self
+            .compactor
+            .should_compact(adapter.as_ref(), round_meta.as_ref())
+            .await
+        {
             Ok(true) => {
                 info!("compaction thresholds breached; running inline");
                 let started = std::time::Instant::now();

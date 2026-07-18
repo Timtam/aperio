@@ -184,11 +184,23 @@ impl Compactor {
     /// from `user_prefs` (with defaults) and compares against
     /// either `meta.snapshot_timestamp` (age check) or the local
     /// since-snapshot counters (log count + byte size).
-    pub async fn should_compact(&self, adapter: &dyn SyncAdapter) -> SyncResult<bool> {
+    ///
+    /// `round_meta` is the meta the sync round already fetched — reused
+    /// so the threshold check costs no extra GET. A caller without one
+    /// (the manual compact path) passes `None` and we fetch. The age
+    /// anchor being seconds old is irrelevant at day-granularity.
+    pub async fn should_compact(
+        &self,
+        adapter: &dyn SyncAdapter,
+        round_meta: Option<&sync_core::MetaJson>,
+    ) -> SyncResult<bool> {
         // Age threshold uses meta.snapshot_timestamp as the
         // anchor. If meta is missing, treat the dataset as
         // brand-new — no compaction needed yet.
-        let meta = adapter.fetch_meta().await?;
+        let meta = match round_meta {
+            Some(m) => Some(m.clone()),
+            None => adapter.fetch_meta().await?,
+        };
         if let Some(meta) = &meta {
             // Only an existing REAL snapshot has a meaningful age. A
             // never-compacted dataset carries the `MIN_UTC` sentinel, whose
@@ -1108,7 +1120,7 @@ mod tests {
         let adapter = FakeAdapter::new();
         // No meta yet → age check returns false; log threshold
         // does the trigger.
-        assert!(compactor.should_compact(&adapter).await.unwrap());
+        assert!(compactor.should_compact(&adapter, None).await.unwrap());
     }
 
     #[tokio::test]

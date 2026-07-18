@@ -732,29 +732,55 @@ impl OnboardingService {
     /// sync round so other devices see a heartbeat and the
     /// compaction algorithm (Phase Sg) has accurate cursors.
     ///
-    /// Last-write-wins on the file (§19.5): two devices syncing at
-    /// the same instant can lose one update; the next round of
-    /// either re-writes its own entry and recovers. The local-FS
-    /// adapter doesn't offer etag locking, so we accept this.
+    /// `round_meta` is the copy the round already fetched for its gates —
+    /// reused here instead of a second GET. It is a few seconds old by
+    /// now, which last-write-wins on the file (§19.5) already tolerates:
+    /// two devices syncing at the same instant can lose one update; the
+    /// next round of either re-writes its own entry and recovers. (The
+    /// local-FS adapter doesn't offer etag locking, so we accept this.)
+    ///
+    /// When our device record is ALREADY current — same held horizon, name
+    /// and app version, not flagged stale — the push is skipped entirely:
+    /// `last_seen_log` means "the point up to which I hold every event",
+    /// which a no-change round doesn't move, so re-writing the identical
+    /// record was one wasted PUT per round. (Round liveness for the UI
+    /// rides `SYNC_LAST_ROUND_PREF_KEY`, not this file.)
     pub async fn heartbeat_meta(
         &self,
         adapter: &dyn SyncAdapter,
         last_seen_log: DateTime<Utc>,
+        round_meta: Option<&MetaJson>,
     ) -> SyncResult<()> {
-        let mut meta = match adapter.fetch_meta().await? {
-            Some(m) => m,
-            None => {
-                // The remote has lost its meta.json since onboarding
-                // (someone deleted it, or onboarding was incomplete).
-                // Mint a fresh one with us as the only known device.
-                debug!("heartbeat_meta found no remote meta; reseeding with this device",);
-                MetaJson::fresh(&self.app_version)
-            }
+        let mut meta = match round_meta {
+            Some(m) => m.clone(),
+            None => match adapter.fetch_meta().await? {
+                Some(m) => m,
+                None => {
+                    // The remote has lost its meta.json since onboarding
+                    // (someone deleted it, or onboarding was incomplete).
+                    // Mint a fresh one with us as the only known device.
+                    debug!("heartbeat_meta found no remote meta; reseeding with this device",);
+                    MetaJson::fresh(&self.app_version)
+                }
+            },
         };
         let name = UserPrefsRepo::new(&self.db)
             .get(PREF_DEVICE_NAME)
             .ok()
             .flatten();
+        let current = meta
+            .devices
+            .get(self.local_device_id.as_str())
+            .is_some_and(|d| {
+                d.last_seen_log == last_seen_log
+                    && d.name == name
+                    && d.app_version == self.app_version
+                    && !d.stale
+            });
+        if current {
+            debug!("heartbeat_meta: device record already current; skipping push");
+            return Ok(());
+        }
         meta.upsert_device(
             &self.local_device_id,
             DeviceRecord {
@@ -1121,12 +1147,88 @@ mod tests {
         let svc = build_service(db.shared());
         let adapter = FakeAdapter::new();
         let now = Utc::now();
-        svc.heartbeat_meta(&adapter, now).await.unwrap();
+        svc.heartbeat_meta(&adapter, now, None).await.unwrap();
         let updated = adapter.fetch_meta().await.unwrap().unwrap();
         let rec = updated
             .device(&DeviceId::from_string("dev-this".into()))
             .expect("self entry");
         assert_eq!(rec.app_version, "1.0.0-test");
+    }
+
+    #[tokio::test]
+    async fn heartbeat_skips_the_push_when_our_record_is_current() {
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+        let now = Utc::now();
+        // Round-cached meta: our record already carries exactly the horizon
+        // we are about to stamp.
+        let mut cached = MetaJson::fresh("1.0.0-test");
+        cached.upsert_device(
+            &DeviceId::from_string("dev-this".into()),
+            DeviceRecord {
+                name: None,
+                last_seen_log: now,
+                app_version: "1.0.0-test".into(),
+                stale: false,
+            },
+        );
+        // The REMOTE meanwhile gained a marker device (a concurrent peer's
+        // heartbeat). If we pushed our cached copy anyway, last-write-wins
+        // would clobber the marker — the skip must leave the remote alone.
+        let mut remote = cached.clone();
+        remote.upsert_device(
+            &DeviceId::from_string("dev-marker".into()),
+            DeviceRecord {
+                name: Some("Marker".into()),
+                last_seen_log: now,
+                app_version: "1.0.0-test".into(),
+                stale: false,
+            },
+        );
+        adapter.install_meta(remote);
+
+        svc.heartbeat_meta(&adapter, now, Some(&cached))
+            .await
+            .unwrap();
+
+        let after = adapter.fetch_meta().await.unwrap().unwrap();
+        assert!(
+            after
+                .device(&DeviceId::from_string("dev-marker".into()))
+                .is_some(),
+            "record was current -> no push -> the peer's marker survived"
+        );
+    }
+
+    #[tokio::test]
+    async fn heartbeat_pushes_when_the_horizon_moved() {
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+        let old = Utc::now() - chrono::Duration::minutes(10);
+        let now = Utc::now();
+        let mut cached = MetaJson::fresh("1.0.0-test");
+        cached.upsert_device(
+            &DeviceId::from_string("dev-this".into()),
+            DeviceRecord {
+                name: None,
+                last_seen_log: old,
+                app_version: "1.0.0-test".into(),
+                stale: false,
+            },
+        );
+        adapter.install_meta(cached.clone());
+
+        svc.heartbeat_meta(&adapter, now, Some(&cached))
+            .await
+            .unwrap();
+
+        let after = adapter.fetch_meta().await.unwrap().unwrap();
+        let rec = after
+            .device(&DeviceId::from_string("dev-this".into()))
+            .expect("self entry");
+        assert_eq!(rec.last_seen_log, now, "moved horizon was pushed");
     }
 
     #[tokio::test]
