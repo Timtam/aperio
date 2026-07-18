@@ -225,7 +225,11 @@ async fn external_calendars_swr(
         // instead of blocking first paint. `is_stale` is true for a cold
         // snapshot (`last_refreshed_at` is None), so the first run refreshes
         // exactly once.
-        let cached = cache.read_calendars(&account).unwrap_or_default();
+        let cached = cache_swr::rows_or_logged_empty(
+            cache.read_calendars(&account),
+            "calendars listing",
+            &account,
+        );
         for c in &cached {
             registry.note_calendar_route(&c.id, &account);
         }
@@ -419,9 +423,11 @@ pub async fn get_events(
         Some((Some(ws), Some(we))) if ws <= range.start && we >= range.end
     );
     let stale = cache_swr::is_stale(&state, cache_swr::SWR_TTL_SECS);
-    let mut cached = cache
-        .read_events(&account, &request.calendar_id, range)
-        .unwrap_or_default();
+    let mut cached = cache_swr::rows_or_logged_empty(
+        cache.read_events(&account, &request.calendar_id, range),
+        "events",
+        &request.calendar_id,
+    );
     // Native per-event colors first: a color-capable provider (RFC 7986
     // COLOR) carries `color_hex` on the event — map it back to a color label.
     map_color_hex_to_labels(&adapter, &mut cached);
@@ -923,7 +929,8 @@ pub async fn get_event_by_id(
             .expect("valid upper wide-range bound"),
     );
     let cid = calendar_id.as_deref().unwrap_or_default();
-    let mut events = cache.read_events(&account, cid, whole).unwrap_or_default();
+    let mut events =
+        cache_swr::rows_or_logged_empty(cache.read_events(&account, cid, whole), "events", cid);
     // Resolve colour the same way the list read does (native color_hex → label,
     // then host-local overrides) so the editor's colour picker seeds correctly.
     for ev in events.iter_mut() {

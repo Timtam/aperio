@@ -212,6 +212,29 @@ pub struct ChangeSet<T> {
     /// a full-resync write; ignored on incremental merges.
     #[serde(default)]
     pub complete: bool,
+    /// Native ids of resources the adapter KNOWS exist but could not
+    /// fetch in this FULL RESYNC — e.g. CalDAV multiget resources the
+    /// server refused to serve. `changes` is the full set MINUS these,
+    /// so a wholesale replace would silently drop their previously
+    /// cached rows; the host preserves those rows instead (and the
+    /// adapter withholds `new_token` so a later refresh retries them).
+    /// Empty on incremental merges and healthy full fetches.
+    #[serde(default)]
+    pub unfetched: Vec<String>,
+}
+
+/// Manual impl (a derive would bound `T: Default` needlessly).
+impl<T> Default for ChangeSet<T> {
+    fn default() -> Self {
+        Self {
+            changes: Vec::new(),
+            deletions: Vec::new(),
+            new_token: None,
+            full_resync: false,
+            complete: false,
+            unfetched: Vec::new(),
+        }
+    }
 }
 
 /// Implemented by adapters that declare `Capability::Tasks`.

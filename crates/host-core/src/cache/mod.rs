@@ -320,6 +320,35 @@ impl CacheStore {
         Ok(events)
     }
 
+    /// Cached rows for `calendar` whose provider-native id is in
+    /// `natives` — used by the full-resync path to PRESERVE resources
+    /// the adapter reported as `unfetched` (enumerated but unservable,
+    /// e.g. CalDAV multiget skips): their rows would otherwise be
+    /// dropped by the wholesale replace even though nothing suggests
+    /// they were deleted.
+    pub fn read_events_by_native(
+        &self,
+        account: &str,
+        calendar: &str,
+        natives: &[String],
+    ) -> DbResult<Vec<Event>> {
+        let mut out = Vec::new();
+        self.db.with_read_conn(|c| {
+            let mut stmt = c.prepare(
+                "SELECT payload FROM cache_events
+                 WHERE account_id = ?1 AND calendar_id = ?2 AND native_id = ?3",
+            )?;
+            for native in natives {
+                let rows = stmt.query_map(params![account, calendar, native], |r| {
+                    r.get::<_, String>(0)
+                })?;
+                out.extend(rows_to_structs::<Event, _>(rows, "cache_events")?);
+            }
+            Ok::<(), DbError>(())
+        })?;
+        Ok(out)
+    }
+
     /// Full-refresh write: replace the entire cached set for `calendar`
     /// with `events` and record `range` as the covered window. Keeps any
     /// existing delta token (a full fetch doesn't invalidate it).
@@ -1347,10 +1376,22 @@ where
     let mut out = Vec::new();
     for row in rows {
         let json = row?;
-        let item: T = serde_json::from_str(&json).map_err(|e| {
-            DbError::Invariant(format!("cache {table} payload not deserialisable: {e}"))
-        })?;
-        out.push(item);
+        match serde_json::from_str::<T>(&json) {
+            Ok(item) => out.push(item),
+            // One undeserialisable payload (schema drift, corruption) must
+            // not blank the WHOLE container — failing the vector here made a
+            // single bad row render its calendar/list as empty on every read
+            // until a background refresh happened to rewrite it. Skip the row
+            // loudly; the rest of the container stays served.
+            Err(e) => {
+                tracing::warn!(
+                    target: "aperio::cache",
+                    table,
+                    error = %e,
+                    "skipping undeserialisable cache payload row",
+                );
+            }
+        }
     }
     Ok(out)
 }

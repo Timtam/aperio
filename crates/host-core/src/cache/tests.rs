@@ -1138,6 +1138,7 @@ fn change_set_wire_defaults_and_roundtrip() {
         // Non-default so the round-trip also proves `complete` survives
         // the serde boundary the FFI shim ships ChangeSets across.
         complete: true,
+        unfetched: Vec::new(),
     };
     let encoded = serde_json::to_string(&full).unwrap();
     let back: ChangeSet<i32> = serde_json::from_str(&encoded).unwrap();
@@ -1558,4 +1559,142 @@ fn empty_tasks_delta_reports_unchanged() {
             },
         )
         .unwrap());
+}
+
+// ── Full-resync preservation of unfetched resources ──────────────────
+
+/// A fake calendar adapter whose delta reports a FULL RESYNC that could
+/// not fetch some enumerated resources (`unfetched`) — the CalDAV
+/// partial-multiget shape. The host must preserve those resources'
+/// previously cached rows instead of dropping them with the replace.
+struct PartialBootstrapAdapter {
+    changes: Vec<Event>,
+    unfetched: Vec<String>,
+}
+
+#[async_trait]
+impl Adapter for PartialBootstrapAdapter {
+    async fn authenticate(&self, _c: Credentials) -> cal_core::Result<AuthToken> {
+        Err(cal_core::Error::Unsupported("test fake".into()))
+    }
+    fn capabilities(&self) -> &[Capability] {
+        &[]
+    }
+}
+
+#[async_trait]
+impl cal_core::CalendarFeature for PartialBootstrapAdapter {
+    async fn list_calendars(&self) -> cal_core::Result<Vec<Calendar>> {
+        Ok(vec![])
+    }
+    async fn get_events(
+        &self,
+        _calendar_id: &str,
+        _range: DateRange,
+    ) -> cal_core::Result<Vec<Event>> {
+        unreachable!("delta path is used")
+    }
+    async fn get_events_delta(
+        &self,
+        _calendar_id: &str,
+        _range: DateRange,
+        _since_token: Option<&str>,
+    ) -> cal_core::Result<cal_core::ChangeSet<Event>> {
+        Ok(cal_core::ChangeSet {
+            changes: self.changes.clone(),
+            full_resync: true,
+            complete: true,
+            unfetched: self.unfetched.clone(),
+            ..Default::default()
+        })
+    }
+    async fn create_event(
+        &self,
+        _calendar_id: &str,
+        _event: cal_core::NewEvent,
+    ) -> cal_core::Result<Event> {
+        unreachable!()
+    }
+    async fn update_event(&self, _event: Event) -> cal_core::Result<Event> {
+        unreachable!()
+    }
+    async fn delete_event(
+        &self,
+        _event_id: &str,
+        _send_cancellations: bool,
+    ) -> cal_core::Result<()> {
+        unreachable!()
+    }
+    async fn get_free_busy(
+        &self,
+        _emails: &[&str],
+        _range: DateRange,
+    ) -> cal_core::Result<Vec<cal_core::FreeBusy>> {
+        unreachable!()
+    }
+    fn calendar_color(&self, _calendar_id: &str) -> Option<cal_core::ContainerColor> {
+        None
+    }
+    async fn add_event_exdate(
+        &self,
+        _event_id: &str,
+        _date: chrono::DateTime<chrono::Utc>,
+        _send_cancellations: bool,
+    ) -> cal_core::Result<()> {
+        unreachable!()
+    }
+}
+
+#[tokio::test]
+async fn full_resync_preserves_unfetched_resources() {
+    let store = setup();
+    // Warm snapshot: two resources (CalDAV-style `href|uid` ids, so the
+    // native id is the href).
+    let kept = event("hrefA|uid-a", 8, 9);
+    let refreshed = event("hrefB|uid-b", 10, 11);
+    store
+        .replace_calendar_events(ACC, CAL, wide(), &[kept.clone(), refreshed.clone()])
+        .unwrap();
+
+    // Re-bootstrap: the server refused hrefA this time; the full set only
+    // carries an UPDATED hrefB.
+    let mut updated = event("hrefB|uid-b", 10, 12);
+    updated.title = "Updated".into();
+    let adapter = PartialBootstrapAdapter {
+        changes: vec![updated.clone()],
+        unfetched: vec!["hrefA".into()],
+    };
+    let changed = super::swr::refresh_events(&store, &adapter, ACC, CAL, wide())
+        .await
+        .unwrap();
+    assert!(changed, "the update to hrefB is a real change");
+
+    let events = store.read_events(ACC, CAL, wide()).unwrap();
+    let mut ids: Vec<&str> = events.iter().map(|e| e.id.as_str()).collect();
+    ids.sort_unstable();
+    assert_eq!(
+        ids,
+        vec!["hrefA|uid-a", "hrefB|uid-b"],
+        "the unfetched resource's cached row survives the full replace"
+    );
+    let b = events.iter().find(|e| e.id == "hrefB|uid-b").unwrap();
+    assert_eq!(b.title, "Updated");
+}
+
+#[test]
+fn read_events_by_native_matches_the_native_column() {
+    let store = setup();
+    store
+        .replace_calendar_events(
+            ACC,
+            CAL,
+            wide(),
+            &[event("hrefA|uid-a", 8, 9), event("hrefB|uid-b", 10, 11)],
+        )
+        .unwrap();
+    let rows = store
+        .read_events_by_native(ACC, CAL, &["hrefA".into()])
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "hrefA|uid-a");
 }

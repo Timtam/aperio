@@ -104,7 +104,11 @@ async fn external_contact_lists_swr(
         // deduplicated background refresh when missing or stale; the
         // resulting `cache-updated` re-runs this listing and re-fetches
         // contacts once it lands.
-        let cached = cache.read_contact_lists(&account).unwrap_or_default();
+        let cached = cache_swr::rows_or_logged_empty(
+            cache.read_contact_lists(&account),
+            "contact-lists listing",
+            &account,
+        );
         for l in &cached {
             registry.note_contact_list_route(&l.id, &account);
         }
@@ -163,7 +167,11 @@ pub async fn get_contacts(
         .ok()
         .flatten();
     if cache_swr::has_snapshot(&state) {
-        let cached = cache.read_contacts(&account, &list_id).unwrap_or_default();
+        let cached = cache_swr::rows_or_logged_empty(
+            cache.read_contacts(&account, &list_id),
+            "contacts",
+            &list_id,
+        );
         if cache_swr::is_stale(&state, cache_swr::SWR_TTL_SECS) {
             let ext_bg = Arc::clone(&ext);
             let cache_bg = Arc::clone(&cache);
@@ -189,7 +197,11 @@ pub async fn get_contacts(
     // Cold path: no snapshot yet. Don't block the first paint on the
     // network — serve whatever rows exist now and refresh in the
     // background; `cache-updated` fills the list in when the fetch lands.
-    let snapshot = cache.read_contacts(&account, &list_id).unwrap_or_default();
+    let snapshot = cache_swr::rows_or_logged_empty(
+        cache.read_contacts(&account, &list_id),
+        "contacts",
+        &list_id,
+    );
     let ext_bg = Arc::clone(&ext);
     let cache_bg = Arc::clone(&cache);
     let acc = account.clone();

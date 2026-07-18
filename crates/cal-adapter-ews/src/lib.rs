@@ -584,6 +584,7 @@ impl EwsAdapter {
                 // and we emit it unfiltered above — the host may treat
                 // this snapshot as covering any range (unbounded window).
                 complete: true,
+                unfetched: Vec::new(),
             }
         } else {
             let mut changes = Vec::new();
@@ -601,6 +602,7 @@ impl EwsAdapter {
                 // the whole folder from the prior full sync and this merge
                 // keeps it current.
                 complete: true,
+                unfetched: Vec::new(),
             }
         };
 
@@ -1046,6 +1048,7 @@ impl TasksFeature for EwsAdapter {
                 new_token: Some(cookie),
                 full_resync: true,
                 complete: false,
+                unfetched: Vec::new(),
             })
         } else {
             Ok(ChangeSet {
@@ -1054,6 +1057,7 @@ impl TasksFeature for EwsAdapter {
                 new_token: Some(cookie),
                 full_resync: false,
                 complete: false,
+                unfetched: Vec::new(),
             })
         }
     }
@@ -1156,6 +1160,7 @@ impl ContactsFeature for EwsAdapter {
                 new_token: Some(cookie),
                 full_resync: true,
                 complete: false,
+                unfetched: Vec::new(),
             })
         } else {
             Ok(ChangeSet {
@@ -1164,6 +1169,7 @@ impl ContactsFeature for EwsAdapter {
                 new_token: Some(cookie),
                 full_resync: false,
                 complete: false,
+                unfetched: Vec::new(),
             })
         }
     }

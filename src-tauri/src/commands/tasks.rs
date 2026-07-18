@@ -338,7 +338,11 @@ async fn external_task_lists_swr(
         // snapshot (empty on first run) and spawn a deduplicated background
         // refresh when missing or stale; `cache-updated` re-runs this listing
         // and re-fetches items once it lands.
-        let cached = cache.read_task_lists(&account).unwrap_or_default();
+        let cached = cache_swr::rows_or_logged_empty(
+            cache.read_task_lists(&account),
+            "task-lists listing",
+            &account,
+        );
         for l in &cached {
             registry.note_task_list_route(&l.id, &account);
         }
@@ -559,7 +563,11 @@ pub async fn get_tasks(
         .ok()
         .flatten();
     if cache_swr::has_snapshot(&state) {
-        let cached = cache.read_tasks(&account, &list_id).unwrap_or_default();
+        let cached = cache_swr::rows_or_logged_empty(
+            cache.read_tasks(&account, &list_id),
+            "tasks",
+            &list_id,
+        );
         if cache_swr::is_stale(&state, cache_swr::SWR_TTL_SECS) {
             let ext_bg = Arc::clone(&ext);
             let cache_bg = Arc::clone(&cache);
@@ -586,7 +594,8 @@ pub async fn get_tasks(
     // network — serve whatever rows exist now (usually none on a genuine
     // cold start) and refresh in the background; `cache-updated` fills the
     // list in when the fetch lands.
-    let snapshot = cache.read_tasks(&account, &list_id).unwrap_or_default();
+    let snapshot =
+        cache_swr::rows_or_logged_empty(cache.read_tasks(&account, &list_id), "tasks", &list_id);
     let ext_bg = Arc::clone(&ext);
     let cache_bg = Arc::clone(&cache);
     let acc = account.clone();

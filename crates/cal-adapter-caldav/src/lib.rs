@@ -273,7 +273,12 @@ impl CaldavAdapter {
                 // next refresh re-bootstraps and retries them. Persisting it here
                 // would advance past the gap and hide those events for good (deltas
                 // only carry future CHANGES, never the resources we skipped).
-                let new_token = if skipped == 0 {
+                // The skipped hrefs ride along as `unfetched` (an event's native
+                // id IS its href), so the host preserves their previously cached
+                // rows instead of dropping them with the wholesale replace —
+                // otherwise every retry bootstrap with a different skip set
+                // jittered the visible event count until one clean pass.
+                let new_token = if skipped.is_empty() {
                     self.bootstrap_token(cal_url).await
                 } else {
                     None
@@ -284,6 +289,7 @@ impl CaldavAdapter {
                     new_token,
                     full_resync: true,
                     complete: true,
+                    unfetched: skipped,
                 })
             }
             Err(err) => {
@@ -311,6 +317,7 @@ impl CaldavAdapter {
                     new_token,
                     full_resync: true,
                     complete: false,
+                    unfetched: Vec::new(),
                 })
             }
         }
@@ -332,7 +339,7 @@ impl CaldavAdapter {
         cal_url: &Url,
         hrefs: &[String],
         range: DateRange,
-    ) -> CoreResult<(Vec<Event>, usize)> {
+    ) -> CoreResult<(Vec<Event>, Vec<String>)> {
         // 50 resources per REPORT: small enough that even a body-heavy
         // batch lands well inside the 30s client timeout, large enough to
         // keep the round-trip count sane on big calendars.
@@ -385,8 +392,9 @@ impl CaldavAdapter {
         }
         // Some resources came back but the server wouldn't serve others — their
         // events are NOT in this snapshot. Surface it (the desktop dlopen plugin
-        // now forwards its tracing to the host log) and report the count so the
-        // caller leaves the sync-token un-advanced.
+        // now forwards its tracing to the host log) and return the hrefs so the
+        // caller leaves the sync-token un-advanced (and, on a bootstrap, reports
+        // them as `unfetched` for the host's row preservation).
         if !skipped.is_empty() {
             tracing::warn!(
                 target: "aperio::caldav",
@@ -414,7 +422,7 @@ impl CaldavAdapter {
             skipped = skipped.len(),
             "CalDAV multiget complete",
         );
-        Ok((changes, skipped.len()))
+        Ok((changes, skipped))
     }
 
     /// One `calendar-multiget` REPORT for `hrefs`. Returns the in-window
@@ -468,6 +476,7 @@ impl CaldavAdapter {
             new_token,
             full_resync: true,
             complete: false,
+            unfetched: Vec::new(),
         })
     }
 
@@ -488,6 +497,7 @@ impl CaldavAdapter {
                     new_token: Some(format!("ctag:{current}")),
                     full_resync: false,
                     complete: false,
+                    unfetched: Vec::new(),
                 });
             }
         }
@@ -500,6 +510,7 @@ impl CaldavAdapter {
             new_token: ctag.map(|c| format!("ctag:{c}")),
             full_resync: true,
             complete: false,
+            unfetched: Vec::new(),
         })
     }
 
@@ -554,6 +565,7 @@ impl CaldavAdapter {
             new_token: Some(format!("sync:{next_token}")),
             full_resync: false,
             complete: false,
+            unfetched: Vec::new(),
         })
     }
 
@@ -569,6 +581,7 @@ impl CaldavAdapter {
             new_token,
             full_resync: true,
             complete: false,
+            unfetched: Vec::new(),
         })
     }
 
@@ -589,6 +602,7 @@ impl CaldavAdapter {
                     new_token: Some(format!("ctag:{current}")),
                     full_resync: false,
                     complete: false,
+                    unfetched: Vec::new(),
                 });
             }
         }
@@ -601,6 +615,7 @@ impl CaldavAdapter {
             new_token: ctag.map(|c| format!("ctag:{c}")),
             full_resync: true,
             complete: false,
+            unfetched: Vec::new(),
         })
     }
 
@@ -638,6 +653,7 @@ impl CaldavAdapter {
             new_token: Some(format!("sync:{next_token}")),
             full_resync: false,
             complete: false,
+            unfetched: Vec::new(),
         })
     }
 
@@ -660,6 +676,7 @@ impl CaldavAdapter {
                     new_token: Some(format!("ctag:{current}")),
                     full_resync: false,
                     complete: false,
+                    unfetched: Vec::new(),
                 });
             }
         }
@@ -672,6 +689,7 @@ impl CaldavAdapter {
             new_token: ctag.map(|c| format!("ctag:{c}")),
             full_resync: true,
             complete: false,
+            unfetched: Vec::new(),
         })
     }
 
@@ -706,8 +724,10 @@ impl CaldavAdapter {
             .await?;
         // If a changed resource couldn't be fetched, keep the OLD sync-token so the
         // next delta re-runs from here and retries it — advancing past it would drop
-        // that change permanently (the next delta would never report it again).
-        let token: &str = if skipped == 0 {
+        // that change permanently (the next delta would never report it again). No
+        // `unfetched` reporting here: this is an incremental MERGE, so a skipped
+        // resource's cached rows simply stay untouched.
+        let token: &str = if skipped.is_empty() {
             &next_token
         } else {
             sync_token
@@ -725,6 +745,7 @@ impl CaldavAdapter {
             new_token: Some(format!("sync:{token}")),
             full_resync: false,
             complete: true,
+            unfetched: Vec::new(),
         })
     }
 

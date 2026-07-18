@@ -18,6 +18,31 @@ pub use crate::cache::{
     refresh_tasks, spawn_item_refresh, spawn_refresh, SWR_TTL_SECS,
 };
 
+/// Unwrap a snapshot-cache read to its rows, LOGGING a failure instead of
+/// silently swallowing it. A failed read degrades one whole container to
+/// empty for that response — exactly the silent shrink the startup
+/// count-oscillation hunt traced — so it must at least be diagnosable in
+/// the host log.
+pub fn rows_or_logged_empty<T>(
+    result: host_core::DbResult<Vec<T>>,
+    what: &'static str,
+    container: &str,
+) -> Vec<T> {
+    match result {
+        Ok(rows) => rows,
+        Err(err) => {
+            tracing::warn!(
+                target: "aperio::cache",
+                what,
+                container,
+                ?err,
+                "cache read failed; serving this container as EMPTY",
+            );
+            Vec::new()
+        }
+    }
+}
+
 /// Desktop [`CacheObserver`]: forwards cache-refresh notifications to the
 /// Tauri `cache-updated` / `cache-refresh-status` events the frontend
 /// listens on (`CacheSyncListener.tsx` / `useCacheRefresh.ts`).

@@ -230,6 +230,7 @@ impl MicrosoftGraphAdapter {
             new_token: delta.new_token,
             full_resync: true,
             complete: false,
+            unfetched: Vec::new(),
         })
     }
 
@@ -246,6 +247,7 @@ impl MicrosoftGraphAdapter {
             new_token: delta.new_token,
             full_resync: true,
             complete: false,
+            unfetched: Vec::new(),
         })
     }
 
@@ -262,6 +264,7 @@ impl MicrosoftGraphAdapter {
             new_token: delta.new_token,
             full_resync: true,
             complete: false,
+            unfetched: Vec::new(),
         })
     }
 }
@@ -323,6 +326,7 @@ impl CalendarFeature for MicrosoftGraphAdapter {
                 new_token: delta.new_token,
                 full_resync: false,
                 complete: false,
+                unfetched: Vec::new(),
             }),
             // Delta link expired / invalidated by Graph — re-bootstrap.
             Err(GraphError::Http { status: 410, .. }) => {
@@ -483,6 +487,7 @@ impl TasksFeature for MicrosoftGraphAdapter {
                 new_token: delta.new_token,
                 full_resync: false,
                 complete: false,
+                unfetched: Vec::new(),
             }),
             Err(GraphError::Http { status: 410, .. }) => {
                 tracing::warn!(
@@ -593,6 +598,7 @@ impl ContactsFeature for MicrosoftGraphAdapter {
                 new_token: delta.new_token,
                 full_resync: false,
                 complete: false,
+                unfetched: Vec::new(),
             }),
             Err(GraphError::Http { status: 410, .. }) => {
                 tracing::warn!(

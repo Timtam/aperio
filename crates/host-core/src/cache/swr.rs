@@ -285,8 +285,30 @@ pub async fn refresh_events(
                 } else {
                     full_resync_range(range, Utc::now())
                 };
+                // Resources the adapter enumerated but could not FETCH
+                // (`unfetched`, e.g. CalDAV multiget skips) are absent
+                // from `changes` without having been deleted — carry
+                // their previously cached rows into the replace so a
+                // partially-failing bootstrap can only ever GROW the
+                // snapshot toward the true set, instead of jittering the
+                // visible count with each retry's different skip set.
+                let mut changes = cs.changes;
+                if !cs.unfetched.is_empty() {
+                    let preserved = cache
+                        .read_events_by_native(account, calendar, &cs.unfetched)
+                        .unwrap_or_default();
+                    let kept: Vec<_> = {
+                        let fetched_ids: std::collections::HashSet<&str> =
+                            changes.iter().map(|e| e.id.as_str()).collect();
+                        preserved
+                            .into_iter()
+                            .filter(|e| !fetched_ids.contains(e.id.as_str()))
+                            .collect()
+                    };
+                    changes.extend(kept);
+                }
                 let changed = cache
-                    .replace_calendar_events(account, calendar, window, &cs.changes)
+                    .replace_calendar_events(account, calendar, window, &changes)
                     .unwrap_or(true);
                 let _ = cache.set_token(
                     account,
