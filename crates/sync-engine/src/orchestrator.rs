@@ -839,11 +839,22 @@ impl SyncOrchestrator {
 
     fn cursor_for_fetch(&self) -> DeviceCursor {
         let raw = self.read_cursor();
+        // Exclude our own device's files at the LISTING stage: they sit
+        // above the cursor (it only advances on foreign logs) and were
+        // re-downloaded in full every round just for the post-fetch
+        // filter below to discard them. The compactor's GC scan builds
+        // its own epoch cursor WITHOUT the exclusion — it genuinely
+        // needs own files for coverage decisions.
+        let exclude_device = Some(self.local_device_id.clone());
         match raw.and_then(|s| DateTime::parse_from_rfc3339(&s).ok()) {
             Some(ts) => DeviceCursor {
                 last_seen_log: ts.with_timezone(&Utc),
+                exclude_device,
             },
-            None => DeviceCursor::epoch(),
+            None => DeviceCursor {
+                exclude_device,
+                ..DeviceCursor::epoch()
+            },
         }
     }
 

@@ -196,7 +196,7 @@ impl SyncAdapter for LocalFsSyncAdapter {
                     continue;
                 }
             };
-            if parsed.timestamp <= since.last_seen_log {
+            if !since.wants(&parsed) {
                 continue;
             }
             let bytes = match fs::read(entry.path()).await {
@@ -381,6 +381,7 @@ mod tests {
         // Cursor at t=1500 should surface only the late one.
         let cursor = DeviceCursor {
             last_seen_log: Utc.timestamp_opt(1_500, 0).unwrap(),
+            exclude_device: None,
         };
         let fetched = adapter.fetch_new_logs(&cursor).await.unwrap();
         assert_eq!(fetched.len(), 1);

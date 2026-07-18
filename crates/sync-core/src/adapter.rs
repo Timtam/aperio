@@ -61,6 +61,16 @@ pub struct DeviceCursor {
     /// `fetch_new_logs(since)` returns every log whose
     /// `LogFileName.timestamp > since.last_seen_log`.
     pub last_seen_log: DateTime<Utc>,
+    /// Device whose log files the adapter should SKIP before even
+    /// fetching their bytes. The sync round sets this to the local
+    /// device id: its own session files sit above the cursor (the
+    /// cursor only advances on FOREIGN logs) and used to be fully
+    /// re-downloaded every round just for the orchestrator to discard
+    /// them post-fetch. `None` = no exclusion — the compactor's GC
+    /// coverage scan and onboarding genuinely want every file.
+    /// `serde(default)` keeps the plugin-ABI encoding compatible.
+    #[serde(default)]
+    pub exclude_device: Option<crate::device::DeviceId>,
 }
 
 impl DeviceCursor {
@@ -70,7 +80,16 @@ impl DeviceCursor {
     pub fn epoch() -> Self {
         Self {
             last_seen_log: DateTime::<Utc>::MIN_UTC,
+            exclude_device: None,
         }
+    }
+
+    /// Whether a listed log file should be fetched under this cursor:
+    /// strictly newer than the horizon and not from the excluded
+    /// device. The single filter every adapter's listing loop applies,
+    /// so the exclusion semantics can't drift between backends.
+    pub fn wants(&self, name: &crate::log::LogFileName) -> bool {
+        name.timestamp > self.last_seen_log && self.exclude_device.as_ref() != Some(&name.device_id)
     }
 }
 
@@ -152,4 +171,37 @@ pub trait SyncAdapter: Send + Sync {
     /// callers fall back to silence for that particular sound
     /// reference without erroring the whole sync.
     async fn fetch_sound_asset(&self, hash: &str, extension: &str) -> SyncResult<Option<Vec<u8>>>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::device::DeviceId;
+    use crate::log::LogFileName;
+    use chrono::TimeZone;
+
+    fn name(ts_secs: i64, device: &str) -> LogFileName {
+        LogFileName {
+            timestamp: Utc.timestamp_opt(ts_secs, 0).unwrap(),
+            device_id: DeviceId::from_string(device.into()),
+        }
+    }
+
+    #[test]
+    fn wants_applies_cursor_and_exclusion() {
+        let cursor = DeviceCursor {
+            last_seen_log: Utc.timestamp_opt(1_000, 0).unwrap(),
+            exclude_device: Some(DeviceId::from_string("me".into())),
+        };
+        // Newer + foreign → fetch.
+        assert!(cursor.wants(&name(2_000, "peer")));
+        // Newer but OWN → skipped at the listing stage (the round used to
+        // download these in full just to discard them post-fetch).
+        assert!(!cursor.wants(&name(2_000, "me")));
+        // Older foreign → skipped by the horizon.
+        assert!(!cursor.wants(&name(500, "peer")));
+        // No exclusion (compactor GC scan) → own files still fetched.
+        let epoch = DeviceCursor::epoch();
+        assert!(epoch.wants(&name(2_000, "me")));
+    }
 }

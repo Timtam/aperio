@@ -305,7 +305,7 @@ impl SyncAdapter for DriveSyncAdapter {
                     continue;
                 }
             };
-            if parsed.timestamp > since.last_seen_log {
+            if since.wants(&parsed) {
                 wanted.push(parsed);
             }
         }

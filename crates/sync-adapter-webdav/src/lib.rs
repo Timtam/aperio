@@ -424,7 +424,7 @@ impl SyncAdapter for WebDavSyncAdapter {
                     continue;
                 }
             };
-            if parsed.timestamp > since.last_seen_log {
+            if since.wants(&parsed) {
                 wanted.push(parsed);
             }
         }

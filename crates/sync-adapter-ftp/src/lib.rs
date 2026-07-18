@@ -398,7 +398,7 @@ impl SyncAdapter for FtpsSyncAdapter {
 
     async fn fetch_new_logs(&self, since: &DeviceCursor) -> SyncResult<Vec<LogFile>> {
         let log_dir = self.remote_path("log");
-        let cursor_ts = since.last_seen_log;
+        let cursor = since.clone();
         self.with_session(move |stream| {
             // NLST returns one filename per line. Some servers
             // include the directory prefix; some don't. Strip the
@@ -422,7 +422,7 @@ impl SyncAdapter for FtpsSyncAdapter {
                         continue;
                     }
                 };
-                if parsed.timestamp > cursor_ts {
+                if cursor.wants(&parsed) {
                     wanted.push(parsed);
                 }
             }
