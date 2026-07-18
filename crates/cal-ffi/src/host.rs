@@ -3889,13 +3889,22 @@ impl Host {
                         .registry
                         .account_for_task_list(&completed.list_id)
                         .unwrap_or_else(|| LOCAL_ID.to_string());
-                    host_core::tasks::record_external_recurrence_completion(
-                        ext.as_ref(),
-                        &self.cache,
-                        &account,
-                        &completed,
-                    )
-                    .await;
+                    // A DEVICE reminder (iOS/Android) owns its own recurrence
+                    // lifecycle: the OS spawns the next turn and keeps the
+                    // completed history itself. Recording Aperio's terminal
+                    // completion snapshot back via ext.create_task would write a
+                    // DUPLICATE reminder into the device store, so skip the
+                    // external-recurrence reconciliation for device accounts
+                    // (mirrors the device-account skip in the reminder enumerator).
+                    if !self.is_device_account(&account) {
+                        host_core::tasks::record_external_recurrence_completion(
+                            ext.as_ref(),
+                            &self.cache,
+                            &account,
+                            &completed,
+                        )
+                        .await;
+                    }
                     Ok::<_, StoreError>(updated)
                 })?;
                 // Write-through: the retained snapshot must reflect the edit
@@ -3905,6 +3914,18 @@ impl Host {
                 to_json(&updated)
             }
         }
+    }
+
+    /// Whether `account_id` belongs to a device-calendar/-reminder account (the
+    /// phone's own EventKit / CalendarProvider store). Used to skip Aperio-side
+    /// recurrence reconciliation the OS already owns.
+    fn is_device_account(&self, account_id: &str) -> bool {
+        let shared = self.db.shared();
+        AccountsRepo::new(&shared)
+            .list()
+            .unwrap_or_default()
+            .into_iter()
+            .any(|a| a.id == account_id && a.adapter_kind == AdapterKind::DeviceCalendar)
     }
 
     /// Delete a task, routed by the optional `list_id` (the desktop `delete_task`

@@ -75,6 +75,7 @@ import { hapticLoadBegin, hapticLoadEnd } from '../state/haptics';
 import { useCalendarVisibility } from '../state/calendarVisibility';
 import { useCurrentUserByList } from '../state/currentUser';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
+import { confirmDeleteTask } from '../state/taskDeleteScope';
 import { editEventWithScope } from '../state/eventEditScope';
 import { readTaskBehaviour } from '../state/taskBehaviour';
 import { applyTaskToggle, statusAnnounce } from '../state/taskToggle';
@@ -820,30 +821,45 @@ export function CalendarDayList({
 
   const removeTask = useCallback(
     (task: Task) => {
-      Alert.alert(
-        t('dialogs.confirm.deleteTaskTitle'),
-        t('dialogs.confirm.deleteTaskMessage', { title: task.title }),
-        [
-          { text: t('dialogs.confirm.cancel'), style: 'cancel' },
-          {
-            text: t('mobile.delete'),
-            style: 'destructive',
-            onPress: () => {
-              void (async () => {
-                try {
-                  await apiDeleteTask(task.id, task.list_id);
-                  announce(t('mobile.deleted', { title: task.title }));
-                  await load();
-                } catch (err) {
-                  announce(t('mobile.error', { message: errorMessage(err) }));
-                }
-              })();
+      const plainConfirm = () =>
+        Alert.alert(
+          t('dialogs.confirm.deleteTaskTitle'),
+          t('dialogs.confirm.deleteTaskMessage', { title: task.title }),
+          [
+            { text: t('dialogs.confirm.cancel'), style: 'cancel' },
+            {
+              text: t('mobile.delete'),
+              style: 'destructive',
+              onPress: () => {
+                void (async () => {
+                  try {
+                    await apiDeleteTask(task.id, task.list_id);
+                    announce(t('mobile.deleted', { title: task.title }));
+                    await load();
+                  } catch (err) {
+                    announce(t('mobile.error', { message: errorMessage(err) }));
+                  }
+                })();
+              },
             },
-          },
-        ],
+          ],
+        );
+      // A recurring DEVICE reminder gets the "only this / this and all following"
+      // scope choice (iOS-Reminders parity); everything else takes the plain
+      // confirm above.
+      confirmDeleteTask(
+        task,
+        taskLists,
+        t,
+        (message) => {
+          announce(message);
+          void load();
+        },
+        (message) => announce(t('mobile.error', { message })),
+        plainConfirm,
       );
     },
-    [announce, load, t],
+    [announce, load, t, taskLists],
   );
 
   // ── Accessible labels ──────────────────────────────────────────────────────

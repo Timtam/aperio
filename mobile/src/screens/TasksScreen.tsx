@@ -36,6 +36,7 @@ import {
 } from '../a11y/roles';
 import { ActionsMenu, type MenuAction } from '../components/ActionsMenu';
 import { deleteTask, duplicateTask } from '../api/client';
+import { confirmDeleteTask } from '../state/taskDeleteScope';
 import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
 import { useTabBarInset } from '../hooks/useTabBarInset';
 import { describeDue } from '../intl/describeDue';
@@ -416,20 +417,35 @@ export default function TasksScreen({
       };
       // Confirm the irreversible delete — matches the desktop ConfirmDialog.
       // Alert is screen-reader-accessible and moves focus to itself.
-      Alert.alert(
-        t('dialogs.confirm.deleteTaskTitle'),
-        t('dialogs.confirm.deleteTaskMessage', { title: task.title }),
-        [
-          { text: t('dialogs.confirm.cancel'), style: 'cancel' },
-          {
-            text: t('mobile.delete'),
-            style: 'destructive',
-            onPress: () => void performDelete(),
-          },
-        ],
+      const plainConfirm = () =>
+        Alert.alert(
+          t('dialogs.confirm.deleteTaskTitle'),
+          t('dialogs.confirm.deleteTaskMessage', { title: task.title }),
+          [
+            { text: t('dialogs.confirm.cancel'), style: 'cancel' },
+            {
+              text: t('mobile.delete'),
+              style: 'destructive',
+              onPress: () => void performDelete(),
+            },
+          ],
+        );
+      // A recurring DEVICE reminder gets the "only this / this and all following"
+      // scope choice (iOS-Reminders parity); everything else takes the plain
+      // confirm above.
+      confirmDeleteTask(
+        task,
+        taskLists,
+        t,
+        (message) => {
+          invalidateData();
+          announce(message);
+        },
+        (message) => announce(t('mobile.error', { message })),
+        plainConfirm,
       );
     },
-    [announce, entries, invalidateData, t, tasks],
+    [announce, entries, invalidateData, t, tasks, taskLists],
   );
 
   // Duplicate a task (flat copy in the same list); land SR focus on the copy

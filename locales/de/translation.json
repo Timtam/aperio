@@ -1188,6 +1188,14 @@
       "series": "Ganze Serie",
       "cancel": "Abbrechen"
     },
+    "taskDeleteScope": {
+      "title": "Wiederkehrende Erinnerung löschen",
+      "message": "„{{title}}\" wiederholt sich. Nur diese Erinnerung löschen oder diese und alle folgenden? Erledigte Erinnerungen bleiben in beiden Fällen erhalten.",
+      "occurrence": "Nur diese Erinnerung",
+      "series": "Diese und alle folgenden",
+      "skipped": "Diese Erinnerung von „{{title}}\" wurde übersprungen.",
+      "deleted": "„{{title}}\" wurde ab dieser Erinnerung gelöscht."
+    },
     "save": "Speichern",
     "create": "Anlegen",
     "close": "Schließen",

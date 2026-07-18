@@ -22,9 +22,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cal_core::{
-    Adapter, AdapterSource, AuthToken, Calendar, CalendarFeature, Capability, ContainerColor,
-    Credentials, DateRange, Error, Event, FreeBusy, NewEvent, NewTask, Result, Task, TaskList,
-    TaskPriority, TaskStatus, TasksFeature,
+    rrule_to_task_recurrence, Adapter, AdapterSource, AuthToken, Calendar, CalendarFeature,
+    Capability, ContainerColor, Credentials, DateRange, Error, Event, FreeBusy, NewEvent, NewTask,
+    Result, Task, TaskList, TaskPriority, TaskStatus, TasksFeature,
 };
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -262,6 +262,11 @@ struct DeviceReminder {
     created_at: Option<String>,
     #[serde(default)]
     updated_at: Option<String>,
+    /// The reminder's RFC-5545 RRULE body (no `RRULE:` prefix), when EventKit
+    /// reports a recurrence rule. Parsed to a structured `TaskRecurrence` so
+    /// Aperio can offer a scoped delete; `None` for a one-off reminder.
+    #[serde(default)]
+    recurrence: Option<String>,
 }
 
 fn parse_date(s: &str) -> Result<NaiveDate> {
@@ -339,7 +344,11 @@ fn map_reminder(d: DeviceReminder) -> Result<Task> {
         deadline_time: None,
         // Device calendars have no per-task deadline-countdown override.
         deadline_reminder_days: None,
-        recurrence: None,
+        // EventKit's recurrence rule, mapped to the structured (lossy) model.
+        // Lets Aperio recognise a repeating reminder and offer a scoped delete;
+        // the OS still owns the recurrence lifecycle (see the device-account skip
+        // in host update_task_json / the reminder enumerator).
+        recurrence: d.recurrence.as_deref().and_then(rrule_to_task_recurrence),
         resurface_date: None,
         series_id: None,
         parent_id: None,
@@ -679,7 +688,24 @@ mod tests {
             completed_at: None,
             created_at: Some("2026-06-20T08:00:00Z".into()),
             updated_at: None,
+            recurrence: None,
         }
+    }
+
+    #[test]
+    fn maps_recurring_reminder_recurrence() {
+        let mut r = reminder(false);
+        r.due_date = Some("2026-06-25".into());
+        r.recurrence = Some("FREQ=WEEKLY;BYDAY=MO,WE".into());
+        let task = map_reminder(r).unwrap();
+        let rec = task
+            .recurrence
+            .expect("recurrence populated from the rrule");
+        assert_eq!(rec.frequency, cal_core::RecurrenceFrequency::Weekly);
+        // A garbage / FREQ-less rule degrades cleanly to no recurrence.
+        let mut bad = reminder(false);
+        bad.recurrence = Some("not-a-rule".into());
+        assert!(map_reminder(bad).unwrap().recurrence.is_none());
     }
 
     #[test]

@@ -235,6 +235,25 @@ export function expandScheduledRecurringTasks<T extends Task>(
   return out;
 }
 
+/** The next scheduled occurrence key (`YYYY-MM-DD`) strictly after `scheduledKey`
+ *  for a repeating task, or `null` when the rule has no next step or the series
+ *  has run past its `UNTIL` end. Reuses the same `advance`/`ended` walk the
+ *  projector uses. Used by "skip only this occurrence" on a device reminder,
+ *  where the current due date is rolled forward one step instead of deleting the
+ *  series (COUNT-bounded rules aren't tracked here — the provider still owns the
+ *  count). */
+export function nextTaskOccurrence(
+  scheduledKey: string,
+  rule: TaskRecurrenceValue,
+): string | null {
+  const next = nextTrigger(parseKey(scheduledKey), rule);
+  if (next === null) return null;
+  const key = fmtKey(next);
+  if (key === scheduledKey) return null; // non-advancing rule guard
+  if (ended(rule, key)) return null;
+  return key;
+}
+
 /** The parsed rule IF this task's recurrence is deterministic + dated +
  *  scheduled (so it can be projected); otherwise `null`. */
 function expandableRule(task: Task): TaskRecurrenceValue | null {

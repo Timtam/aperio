@@ -1191,6 +1191,14 @@
       "series": "Whole series",
       "cancel": "Cancel"
     },
+    "taskDeleteScope": {
+      "title": "Delete recurring reminder",
+      "message": "\"{{title}}\" repeats. Delete only this occurrence, or this and all following? Completed reminders are kept either way.",
+      "occurrence": "Only this occurrence",
+      "series": "This and all following",
+      "skipped": "This occurrence of \"{{title}}\" was skipped.",
+      "deleted": "\"{{title}}\" was deleted from this occurrence on."
+    },
     "colorPicker": {
       "title": "Custom color",
       "intro": "Enter a color as a hex value (#rrggbb) or pick it with the swatch.",

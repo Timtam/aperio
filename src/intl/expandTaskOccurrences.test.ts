@@ -5,6 +5,7 @@ import {
   expandScheduledRecurringTasks,
   isRecurringProjection,
   makeOccurrenceId,
+  nextTaskOccurrence,
   recurringSeriesTaskId,
   toBackend,
   type TaskRecurrenceValue,
@@ -348,5 +349,31 @@ describe('expandScheduledRecurringTasks — pass-through (no expansion)', () => 
       'rec occ 2026-05-03',
       'plain',
     ]);
+  });
+});
+
+describe('nextTaskOccurrence', () => {
+  const val = (patch: Partial<TaskRecurrenceValue>): TaskRecurrenceValue => ({
+    ...TASK_RECURRENCE_DEFAULT,
+    ...patch,
+  });
+
+  it('advances a daily rule by its interval', () => {
+    expect(nextTaskOccurrence('2026-06-25', val({ freq: 'DAILY', interval: 2 }))).toBe(
+      '2026-06-27',
+    );
+  });
+
+  it('advances a plain weekly rule by seven days', () => {
+    expect(nextTaskOccurrence('2026-06-25', val({ freq: 'WEEKLY' }))).toBe('2026-07-02');
+  });
+
+  it('returns null once the next step is past an UNTIL end', () => {
+    expect(
+      nextTaskOccurrence(
+        '2026-06-25',
+        val({ freq: 'DAILY', endMode: 'UNTIL', until: '2026-06-25' }),
+      ),
+    ).toBeNull();
   });
 });

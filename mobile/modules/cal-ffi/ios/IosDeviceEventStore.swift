@@ -303,7 +303,72 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
     dict["created_at"] = iso.string(from: reminder.creationDate ?? Date())
     dict["updated_at"] = iso.string(
       from: reminder.lastModifiedDate ?? reminder.creationDate ?? Date())
+    // iOS Reminders carry at most one rule; expose it as an RRULE body so
+    // cal_core can recognise the repeat and Aperio can offer a scoped delete.
+    if let rule = reminder.recurrenceRules?.first {
+      dict["recurrence"] = Self.rrule(from: rule)
+    }
     return dict
+  }
+
+  /// Compact UTC formatter for an RRULE `UNTIL` (`yyyyMMddTHHmmssZ`). MUST NOT be
+  /// the `iso` formatter: cal_core parses the date part with `%Y%m%d` after
+  /// splitting on `T`, and the ISO-8601 dashed form (`2026-06-25`) fails that
+  /// parse, silently dropping the end bound and making the series read endless.
+  private static let rruleUntil: DateFormatter = {
+    let f = DateFormatter()
+    f.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
+    f.timeZone = TimeZone(identifier: "UTC")
+    f.locale = Locale(identifier: "en_US_POSIX")
+    return f
+  }()
+
+  private static func rruleDay(_ weekday: EKWeekday) -> String {
+    switch weekday {
+    case .sunday: return "SU"
+    case .monday: return "MO"
+    case .tuesday: return "TU"
+    case .wednesday: return "WE"
+    case .thursday: return "TH"
+    case .friday: return "FR"
+    case .saturday: return "SA"
+    @unknown default: return "MO"
+    }
+  }
+
+  /// Serialize an EventKit recurrence rule to an RFC-5545 RRULE body (no
+  /// `RRULE:` prefix). Only the parts cal_core models are emitted — FREQ,
+  /// INTERVAL, BYDAY, BYMONTHDAY, and COUNT or UNTIL; richer EventKit parts
+  /// (e.g. relative "2nd Monday", BYMONTH, setpos) are dropped, matching the
+  /// structured model's documented lossiness.
+  static func rrule(from rule: EKRecurrenceRule) -> String {
+    var parts: [String] = []
+    switch rule.frequency {
+    case .daily: parts.append("FREQ=DAILY")
+    case .weekly: parts.append("FREQ=WEEKLY")
+    case .monthly: parts.append("FREQ=MONTHLY")
+    case .yearly: parts.append("FREQ=YEARLY")
+    @unknown default: parts.append("FREQ=DAILY")
+    }
+    if rule.interval > 1 {
+      parts.append("INTERVAL=\(rule.interval)")
+    }
+    if let days = rule.daysOfTheWeek, !days.isEmpty {
+      let byday = days.map { Self.rruleDay($0.dayOfTheWeek) }.joined(separator: ",")
+      parts.append("BYDAY=\(byday)")
+    }
+    if let monthDays = rule.daysOfTheMonth, !monthDays.isEmpty {
+      let byMonthDay = monthDays.map { "\($0.intValue)" }.joined(separator: ",")
+      parts.append("BYMONTHDAY=\(byMonthDay)")
+    }
+    if let end = rule.recurrenceEnd {
+      if end.occurrenceCount > 0 {
+        parts.append("COUNT=\(end.occurrenceCount)")
+      } else if let endDate = end.endDate {
+        parts.append("UNTIL=\(Self.rruleUntil.string(from: endDate))")
+      }
+    }
+    return parts.joined(separator: ";")
   }
 
   // ── Encoding / decoding helpers ──
