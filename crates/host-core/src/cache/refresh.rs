@@ -45,8 +45,11 @@ use crate::registry::AdapterRegistry;
 use crate::user_prefs::UserPrefsRepo;
 
 /// Rolling event window the warm pass preloads, relative to "now".
-const WINDOW_PAST_DAYS: i64 = 92; // ~3 months back
-const WINDOW_FUTURE_DAYS: i64 = 366; // ~12 months ahead
+/// `pub(crate)` because the SWR full-resync path widens its fetch to this
+/// same window (see [`swr::refresh_events`]) so a view-sized full fetch
+/// can't clobber the warm cache down to a month.
+pub(crate) const WINDOW_PAST_DAYS: i64 = 92; // ~3 months back
+pub(crate) const WINDOW_FUTURE_DAYS: i64 = 366; // ~12 months ahead
 
 /// Let the UI settle before the first (network-heavy, write-heavy) warm
 /// pass. The first view already serves from the persisted cache, so there
@@ -296,8 +299,15 @@ impl CacheRefresher {
                     for c in &cals {
                         self.registry.note_calendar_route(&c.id, &account);
                     }
-                    let _ = self.cache.replace_calendars(&account, &cals);
-                    self.emit_updated(SyncScope::Calendars, &account, "");
+                    // Only notify when the listing actually changed — a
+                    // no-op warm pass must not trigger frontend reloads.
+                    if self
+                        .cache
+                        .replace_calendars(&account, &cals)
+                        .unwrap_or(true)
+                    {
+                        self.emit_updated(SyncScope::Calendars, &account, "");
+                    }
                     for cal in cals {
                         out.push(RefreshTarget::Events {
                             account: account.clone(),
@@ -322,8 +332,13 @@ impl CacheRefresher {
                     for l in &lists {
                         self.registry.note_task_list_route(&l.id, &account);
                     }
-                    let _ = self.cache.replace_task_lists(&account, &lists);
-                    self.emit_updated(SyncScope::TaskLists, &account, "");
+                    if self
+                        .cache
+                        .replace_task_lists(&account, &lists)
+                        .unwrap_or(true)
+                    {
+                        self.emit_updated(SyncScope::TaskLists, &account, "");
+                    }
                     for list in lists {
                         // Warm the list's tasks AND its sections — both ride the
                         // same TasksFeature adapter, so a section warm costs one
@@ -356,8 +371,13 @@ impl CacheRefresher {
                     for l in &lists {
                         self.registry.note_contact_list_route(&l.id, &account);
                     }
-                    let _ = self.cache.replace_contact_lists(&account, &lists);
-                    self.emit_updated(SyncScope::ContactLists, &account, "");
+                    if self
+                        .cache
+                        .replace_contact_lists(&account, &lists)
+                        .unwrap_or(true)
+                    {
+                        self.emit_updated(SyncScope::ContactLists, &account, "");
+                    }
                     for list in lists {
                         out.push(RefreshTarget::Contacts {
                             account: account.clone(),
@@ -395,7 +415,13 @@ impl CacheRefresher {
                 match swr::refresh_events(&self.cache, adapter.as_ref(), &account, &cal_id, window)
                     .await
                 {
-                    Ok(()) => self.emit_updated(SyncScope::Events, &account, &cal_id),
+                    // `false` = content identical — skip the notification so a
+                    // no-op warm pass stays UI-silent.
+                    Ok(changed) => {
+                        if changed {
+                            self.emit_updated(SyncScope::Events, &account, &cal_id);
+                        }
+                    }
                     Err(err) => {
                         let _ = self.cache.mark_error(
                             &account,
@@ -417,7 +443,11 @@ impl CacheRefresher {
                     return;
                 }
                 match swr::refresh_tasks(&self.cache, adapter.as_ref(), &account, &list_id).await {
-                    Ok(()) => self.emit_updated(SyncScope::Tasks, &account, &list_id),
+                    Ok(changed) => {
+                        if changed {
+                            self.emit_updated(SyncScope::Tasks, &account, &list_id);
+                        }
+                    }
                     Err(err) => {
                         let _ = self.cache.mark_error(
                             &account,
@@ -440,7 +470,11 @@ impl CacheRefresher {
                 }
                 match swr::refresh_sections(&self.cache, adapter.as_ref(), &account, &list_id).await
                 {
-                    Ok(()) => self.emit_updated(SyncScope::Sections, &account, &list_id),
+                    Ok(changed) => {
+                        if changed {
+                            self.emit_updated(SyncScope::Sections, &account, &list_id);
+                        }
+                    }
                     Err(err) => {
                         let _ = self.cache.mark_error(
                             &account,
@@ -463,7 +497,11 @@ impl CacheRefresher {
                 }
                 match swr::refresh_contacts(&self.cache, adapter.as_ref(), &account, &list_id).await
                 {
-                    Ok(()) => self.emit_updated(SyncScope::Contacts, &account, &list_id),
+                    Ok(changed) => {
+                        if changed {
+                            self.emit_updated(SyncScope::Contacts, &account, &list_id);
+                        }
+                    }
                     Err(err) => {
                         let _ = self.cache.mark_error(
                             &account,

@@ -78,10 +78,12 @@ pub fn event_self_warm_needed(state: &Option<SyncState>, range: DateRange) -> bo
 
 /// Spawn a deduplicated, fire-and-forget background refresh: `fetch`
 /// pulls fresh data from the adapter, `write` persists it into the
-/// snapshot cache, then the observer is notified. On a fetch
-/// failure the error is recorded via `mark_error` and the stale snapshot
-/// is left in place. Deduplicated through the [`RefreshCoordinator`] so
-/// concurrent reads of the same container don't stack refreshes.
+/// snapshot cache, then the observer is notified — but ONLY when the
+/// write reports that cached content actually changed, so no-op refreshes
+/// don't trigger frontend reload waves. On a fetch failure the error is
+/// recorded via `mark_error` and the stale snapshot is left in place.
+/// Deduplicated through the [`RefreshCoordinator`] so concurrent reads of
+/// the same container don't stack refreshes.
 pub fn spawn_refresh<T, Fut, Fetch, Write>(
     rt: &tokio::runtime::Handle,
     observer: Arc<dyn CacheObserver>,
@@ -96,7 +98,7 @@ pub fn spawn_refresh<T, Fut, Fetch, Write>(
     T: Send + 'static,
     Fut: Future<Output = cal_core::Result<Vec<T>>> + Send + 'static,
     Fetch: FnOnce() -> Fut + Send + 'static,
-    Write: FnOnce(&CacheStore, &[T]) -> crate::db::DbResult<()> + Send + 'static,
+    Write: FnOnce(&CacheStore, &[T]) -> crate::db::DbResult<bool> + Send + 'static,
 {
     let key = format!("{}:{}:{}", scope.as_str(), account, container);
     if !coord.try_claim(&key) {
@@ -105,11 +107,12 @@ pub fn spawn_refresh<T, Fut, Fetch, Write>(
     rt.spawn(async move {
         match fetch().await {
             Ok(items) => match write(&cache, &items) {
-                Ok(()) => observer.cache_updated(&CacheUpdatedPayload {
+                Ok(true) => observer.cache_updated(&CacheUpdatedPayload {
                     scope: scope.as_str().to_string(),
                     account_id: account.clone(),
                     container_id: container.clone(),
                 }),
+                Ok(false) => {} // content identical — nothing for the UI to reload
                 Err(err) => {
                     tracing::warn!(target: "aperio::cache", ?err, "background refresh: cache write failed")
                 }
@@ -131,8 +134,10 @@ pub fn spawn_refresh<T, Fut, Fetch, Write>(
 }
 
 /// Spawn a deduplicated background refresh whose body already writes the
-/// cache (the delta-aware `refresh_*` helpers below). On success notifies
-/// the observer; on a genuine provider failure records `mark_error`.
+/// cache (the delta-aware `refresh_*` helpers below). Notifies the
+/// observer only when the refresh reports changed content (no-op
+/// refreshes stay UI-silent); on a genuine provider failure records
+/// `mark_error`.
 pub fn spawn_item_refresh<F, Fut>(
     rt: &tokio::runtime::Handle,
     observer: Arc<dyn CacheObserver>,
@@ -144,7 +149,7 @@ pub fn spawn_item_refresh<F, Fut>(
     refresh: F,
 ) where
     F: FnOnce() -> Fut + Send + 'static,
-    Fut: Future<Output = cal_core::Result<()>> + Send + 'static,
+    Fut: Future<Output = cal_core::Result<bool>> + Send + 'static,
 {
     let key = format!("{}:{}:{}", scope.as_str(), account, container);
     if !coord.try_claim(&key) {
@@ -152,11 +157,12 @@ pub fn spawn_item_refresh<F, Fut>(
     }
     rt.spawn(async move {
         match refresh().await {
-            Ok(()) => observer.cache_updated(&CacheUpdatedPayload {
+            Ok(true) => observer.cache_updated(&CacheUpdatedPayload {
                 scope: scope.as_str().to_string(),
                 account_id: account.clone(),
                 container_id: container.clone(),
             }),
+            Ok(false) => {} // content identical — nothing for the UI to reload
             Err(err) => {
                 let _ = cache.mark_error(&account, scope, &container, &err.to_string());
                 tracing::warn!(
@@ -183,13 +189,19 @@ pub fn spawn_item_refresh<F, Fut>(
 // serve a stale snapshot.
 
 /// Refresh one external calendar's events into the snapshot cache.
+///
+/// Returns whether the cached content actually CHANGED (`false` for a
+/// no-op delta, a byte-identical full re-fetch, or a write dropped by the
+/// generation guard), so callers can skip the `cache-updated`
+/// notification — the frontend must not reload on refreshes that changed
+/// nothing.
 pub async fn refresh_events(
     cache: &CacheStore,
     ext: &dyn CalendarFeature,
     account: &str,
     calendar: &str,
     range: DateRange,
-) -> cal_core::Result<()> {
+) -> cal_core::Result<bool> {
     // Widen the requested view range to whole months before fetching. A
     // range-scoped adapter (Google/Graph) bakes `timeMin`/`timeMax` into its delta
     // token, so the token only ever covers what THIS fetch asked for. Fetching the
@@ -220,56 +232,111 @@ pub async fn refresh_events(
         Some((Some(ws), Some(we))) if ws <= range.start && we >= range.end
     );
     let effective_token = if covered { token.as_deref() } else { None };
+    // A token-less fetch ends in `replace_calendar_events`, which clobbers
+    // the calendar's ENTIRE cached set and records only the fetched window.
+    // Fetching just the view range would shrink a warm −3…+12-month cache
+    // down to the month on screen (visible as the day's entries collapsing
+    // and re-growing when the next wide warm pass restores them). Widen the
+    // rebuild to the warm-pass window instead, so a full resync always
+    // rebuilds at least as much as the warm pass maintains. Folder-complete
+    // adapters ignore the range; delta adapters bake it into the new token,
+    // which is exactly what the warm pass would have done anyway.
+    let fetch_range = if effective_token.is_none() {
+        full_resync_range(range, Utc::now())
+    } else {
+        range
+    };
     // Snapshot the generation before the fetch (see refresh_tasks): drop a stale
     // write if a local mutation invalidates this calendar mid-fetch.
     let gen = cache.refresh_generation(account, SyncScope::Events, calendar);
-    match ext.get_events_delta(calendar, range, effective_token).await {
+    match ext
+        .get_events_delta(calendar, fetch_range, effective_token)
+        .await
+    {
         Ok(cs) => {
+            let mut forced_full = false;
+            let cs = if cs.full_resync && !cs.complete && effective_token.is_some() {
+                // Surprise full resync (provider invalidated the token
+                // mid-stream, e.g. Google 410) on a range-scoped adapter:
+                // the response only spans the NARROW range we sent with the
+                // token, so writing it would clobber the wide cache. Re-run
+                // once token-less over the wide window — the rare-path cost
+                // of one extra fetch beats rebuilding a shrunken cache. The
+                // retry is a full set regardless of what its `full_resync`
+                // flag says, so force the replace branch below.
+                forced_full = true;
+                ext.get_events_delta(calendar, full_resync_range(range, Utc::now()), None)
+                    .await?
+            } else {
+                cs
+            };
             if cache.refresh_generation(account, SyncScope::Events, calendar) != gen {
-                return Ok(());
+                return Ok(false);
             }
-            if cs.full_resync || effective_token.is_none() {
+            if cs.full_resync || effective_token.is_none() || forced_full {
                 // Folder-complete adapters (EWS/CalDAV) return the WHOLE
                 // collection, so the snapshot now covers any range —
                 // record an unbounded window. Range-scoped adapters
-                // (Google/Graph) only fetched `range`, so the window must
-                // stay bounded to that range or we'd serve empty for the
-                // months we never fetched.
+                // (Google/Graph) only fetched `fetch_range`, so the window
+                // must stay bounded to that range or we'd serve empty for
+                // the months we never fetched.
                 let window = if cs.complete {
                     unbounded_window()
                 } else {
-                    range
+                    full_resync_range(range, Utc::now())
                 };
-                let _ = cache.replace_calendar_events(account, calendar, window, &cs.changes);
+                let changed = cache
+                    .replace_calendar_events(account, calendar, window, &cs.changes)
+                    .unwrap_or(true);
                 let _ = cache.set_token(
                     account,
                     SyncScope::Events,
                     calendar,
                     cs.new_token.as_deref(),
                 );
+                Ok(changed)
             } else {
-                let _ = cache.apply_events_delta(
-                    account,
-                    calendar,
-                    &Delta {
-                        changes: cs.changes,
-                        deletions: cs.deletions,
-                        new_token: cs.new_token,
-                    },
-                );
+                Ok(cache
+                    .apply_events_delta(
+                        account,
+                        calendar,
+                        &Delta {
+                            changes: cs.changes,
+                            deletions: cs.deletions,
+                            new_token: cs.new_token,
+                        },
+                    )
+                    .unwrap_or(true))
             }
-            Ok(())
         }
         Err(cal_core::Error::Unsupported(_)) => {
-            let events = ext.get_events(calendar, range).await?;
+            // No delta support: every refresh is a full fetch + replace.
+            // Fetch the wide window here too — a view-sized replace would
+            // clobber the warm cache exactly like the token-less case above.
+            let full_range = full_resync_range(range, Utc::now());
+            let events = ext.get_events(calendar, full_range).await?;
             if cache.refresh_generation(account, SyncScope::Events, calendar) != gen {
-                return Ok(());
+                return Ok(false);
             }
-            let _ = cache.replace_calendar_events(account, calendar, range, &events);
-            Ok(())
+            Ok(cache
+                .replace_calendar_events(account, calendar, full_range, &events)
+                .unwrap_or(true))
         }
         Err(err) => Err(err),
     }
+}
+
+/// The window a FULL resync rebuilds: the warm pass's rolling window
+/// (−[`refresh::WINDOW_PAST_DAYS`]…+[`refresh::WINDOW_FUTURE_DAYS`] around
+/// `now`) united with the requested view range, so a navigation outside
+/// the rolling window is still covered. A full resync replaces the
+/// calendar's ENTIRE cached set and records only the fetched window — a
+/// narrower fetch would clobber whatever wider window the warm pass had
+/// built (visible as day counts collapsing until the next wide pass).
+fn full_resync_range(view: DateRange, now: DateTime<Utc>) -> DateRange {
+    let wide_start = now - Duration::days(super::refresh::WINDOW_PAST_DAYS);
+    let wide_end = now + Duration::days(super::refresh::WINDOW_FUTURE_DAYS);
+    DateRange::new(view.start.min(wide_start), view.end.max(wide_end))
 }
 
 /// Expand a view-sized range to whole-month UTC boundaries so a range-scoped
@@ -315,13 +382,14 @@ fn month_ceil(dt: DateTime<Utc>) -> DateTime<Utc> {
         .unwrap_or(dt)
 }
 
-/// Refresh one external task list into the snapshot cache.
+/// Refresh one external task list into the snapshot cache. Returns whether
+/// cached content changed (see [`refresh_events`]).
 pub async fn refresh_tasks(
     cache: &CacheStore,
     ext: &dyn TasksFeature,
     account: &str,
     list: &str,
-) -> cal_core::Result<()> {
+) -> cal_core::Result<bool> {
     // Snapshot the generation BEFORE the (slow) fetch. If a local mutation
     // invalidates this list while we fetch (e.g. a task completed in the
     // day-start review), the generation changes and we drop our now-stale write
@@ -335,31 +403,36 @@ pub async fn refresh_tasks(
     match ext.get_tasks_delta(list, token.as_deref()).await {
         Ok(cs) => {
             if cache.refresh_generation(account, SyncScope::Tasks, list) != gen {
-                return Ok(());
+                return Ok(false);
             }
             if cs.full_resync || token.is_none() {
-                let _ = cache.replace_list_tasks(account, list, &cs.changes);
+                let changed = cache
+                    .replace_list_tasks(account, list, &cs.changes)
+                    .unwrap_or(true);
                 let _ = cache.set_token(account, SyncScope::Tasks, list, cs.new_token.as_deref());
+                Ok(changed)
             } else {
-                let _ = cache.apply_tasks_delta(
-                    account,
-                    list,
-                    &Delta {
-                        changes: cs.changes,
-                        deletions: cs.deletions,
-                        new_token: cs.new_token,
-                    },
-                );
+                Ok(cache
+                    .apply_tasks_delta(
+                        account,
+                        list,
+                        &Delta {
+                            changes: cs.changes,
+                            deletions: cs.deletions,
+                            new_token: cs.new_token,
+                        },
+                    )
+                    .unwrap_or(true))
             }
-            Ok(())
         }
         Err(cal_core::Error::Unsupported(_)) => {
             let tasks = ext.get_tasks(list).await?;
             if cache.refresh_generation(account, SyncScope::Tasks, list) != gen {
-                return Ok(());
+                return Ok(false);
             }
-            let _ = cache.replace_list_tasks(account, list, &tasks);
-            Ok(())
+            Ok(cache
+                .replace_list_tasks(account, list, &tasks)
+                .unwrap_or(true))
         }
         Err(err) => Err(err),
     }
@@ -379,23 +452,25 @@ pub async fn refresh_sections(
     ext: &dyn TasksFeature,
     account: &str,
     list: &str,
-) -> cal_core::Result<()> {
+) -> cal_core::Result<bool> {
     let gen = cache.refresh_generation(account, SyncScope::Sections, list);
     let sections = ext.list_sections(list).await?;
     if cache.refresh_generation(account, SyncScope::Sections, list) != gen {
-        return Ok(());
+        return Ok(false);
     }
-    let _ = cache.replace_sections(account, list, &sections);
-    Ok(())
+    Ok(cache
+        .replace_sections(account, list, &sections)
+        .unwrap_or(true))
 }
 
-/// Refresh one external contact list into the snapshot cache.
+/// Refresh one external contact list into the snapshot cache. Returns
+/// whether cached content changed (see [`refresh_events`]).
 pub async fn refresh_contacts(
     cache: &CacheStore,
     ext: &dyn ContactsFeature,
     account: &str,
     list: &str,
-) -> cal_core::Result<()> {
+) -> cal_core::Result<bool> {
     // Snapshot the generation before the fetch (see refresh_tasks): drop a stale
     // write if a local mutation invalidates this list mid-fetch.
     let gen = cache.refresh_generation(account, SyncScope::Contacts, list);
@@ -407,32 +482,37 @@ pub async fn refresh_contacts(
     match ext.get_contacts_delta(list, token.as_deref()).await {
         Ok(cs) => {
             if cache.refresh_generation(account, SyncScope::Contacts, list) != gen {
-                return Ok(());
+                return Ok(false);
             }
             if cs.full_resync || token.is_none() {
-                let _ = cache.replace_list_contacts(account, list, &cs.changes);
+                let changed = cache
+                    .replace_list_contacts(account, list, &cs.changes)
+                    .unwrap_or(true);
                 let _ =
                     cache.set_token(account, SyncScope::Contacts, list, cs.new_token.as_deref());
+                Ok(changed)
             } else {
-                let _ = cache.apply_contacts_delta(
-                    account,
-                    list,
-                    &Delta {
-                        changes: cs.changes,
-                        deletions: cs.deletions,
-                        new_token: cs.new_token,
-                    },
-                );
+                Ok(cache
+                    .apply_contacts_delta(
+                        account,
+                        list,
+                        &Delta {
+                            changes: cs.changes,
+                            deletions: cs.deletions,
+                            new_token: cs.new_token,
+                        },
+                    )
+                    .unwrap_or(true))
             }
-            Ok(())
         }
         Err(cal_core::Error::Unsupported(_)) => {
             let contacts = ext.get_contacts(list).await?;
             if cache.refresh_generation(account, SyncScope::Contacts, list) != gen {
-                return Ok(());
+                return Ok(false);
             }
-            let _ = cache.replace_list_contacts(account, list, &contacts);
-            Ok(())
+            Ok(cache
+                .replace_list_contacts(account, list, &contacts)
+                .unwrap_or(true))
         }
         Err(err) => Err(err),
     }
@@ -511,6 +591,28 @@ mod tests {
         let snapped = snap_to_month_window(huge);
         assert_eq!(snapped.start, huge.start);
         assert_eq!(snapped.end, huge.end);
+    }
+
+    #[test]
+    fn full_resync_range_covers_the_warm_window() {
+        // A view inside the rolling window → the full warm-pass window, so
+        // a token-less rebuild can't shrink the cache below what the warm
+        // pass maintains.
+        let now = at(2026, 6, 15);
+        let view = DateRange::new(at(2026, 6, 1), at(2026, 7, 1));
+        let wide = full_resync_range(view, now);
+        assert_eq!(wide.start, now - Duration::days(92));
+        assert_eq!(wide.end, now + Duration::days(366));
+    }
+
+    #[test]
+    fn full_resync_range_extends_to_an_out_of_window_view() {
+        // Navigating years ahead: the rebuild must still cover the view.
+        let now = at(2026, 6, 15);
+        let view = DateRange::new(at(2030, 1, 1), at(2030, 2, 1));
+        let wide = full_resync_range(view, now);
+        assert_eq!(wide.start, now - Duration::days(92));
+        assert_eq!(wide.end, at(2030, 2, 1));
     }
 
     #[test]

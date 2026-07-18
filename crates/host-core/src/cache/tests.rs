@@ -1360,3 +1360,202 @@ fn reconcile_cache_generation_resets_external_accounts_once() {
         0,
     );
 }
+
+// ── Change detection (no-op refreshes stay UI-silent) ────────────────
+//
+// The replace_*/apply_*_delta writes report whether cached CONTENT
+// changed so the refresh paths can skip `cache-updated` notifications.
+// A warm pass that re-fetches identical data must not trigger frontend
+// reload waves (the app-start entry-count oscillation).
+
+#[test]
+fn replace_identical_events_reports_unchanged() {
+    let store = setup();
+    let events = [event("e1", 8, 9), event("e2", 10, 11)];
+    assert!(
+        store
+            .replace_calendar_events(ACC, CAL, wide(), &events)
+            .unwrap(),
+        "first write populates → changed"
+    );
+    assert!(
+        !store
+            .replace_calendar_events(ACC, CAL, wide(), &events)
+            .unwrap(),
+        "byte-identical re-fetch → unchanged"
+    );
+    // Freshness is still stamped on the unchanged path.
+    let state = store
+        .get_sync_state(ACC, SyncScope::Events, CAL)
+        .unwrap()
+        .unwrap();
+    assert!(state.last_refreshed_at.is_some());
+}
+
+#[test]
+fn replace_detects_edits_additions_and_removals() {
+    let store = setup();
+    store
+        .replace_calendar_events(ACC, CAL, wide(), &[event("e1", 8, 9), event("e2", 10, 11)])
+        .unwrap();
+
+    // Same ids, one edited payload → changed.
+    let mut edited = event("e1", 8, 9);
+    edited.title = "Renamed".into();
+    assert!(store
+        .replace_calendar_events(ACC, CAL, wide(), &[edited.clone(), event("e2", 10, 11)])
+        .unwrap());
+
+    // Removal (subset) → changed.
+    assert!(store
+        .replace_calendar_events(ACC, CAL, wide(), &[edited.clone()])
+        .unwrap());
+
+    // Addition → changed.
+    assert!(store
+        .replace_calendar_events(ACC, CAL, wide(), &[edited, event("e3", 12, 13)])
+        .unwrap());
+}
+
+#[test]
+fn replace_identical_content_still_updates_the_window() {
+    // A wide warm pass after a narrow fetch of the SAME rows must record
+    // the wider window (coverage bookkeeping) even though content — and
+    // thus the UI notification — is unchanged.
+    let store = setup();
+    let events = [event("e1", 8, 9)];
+    store
+        .replace_calendar_events(ACC, CAL, range(8, 18), &events)
+        .unwrap();
+    let changed = store
+        .replace_calendar_events(ACC, CAL, wide(), &events)
+        .unwrap();
+    assert!(!changed, "identical rows → unchanged");
+    let (ws, we) = store.event_window(ACC, CAL).unwrap().unwrap();
+    assert_eq!(ws, wide().start);
+    assert_eq!(we, wide().end);
+}
+
+#[test]
+fn empty_events_delta_reports_unchanged_but_persists_the_token() {
+    let store = setup();
+    store
+        .replace_calendar_events(ACC, CAL, wide(), &[event("e1", 8, 9)])
+        .unwrap();
+    let changed = store
+        .apply_events_delta(
+            ACC,
+            CAL,
+            &Delta {
+                changes: Vec::new(),
+                deletions: Vec::new(),
+                new_token: Some("cursor-2".into()),
+            },
+        )
+        .unwrap();
+    assert!(!changed, "token-only delta → unchanged");
+    let state = store
+        .get_sync_state(ACC, SyncScope::Events, CAL)
+        .unwrap()
+        .unwrap();
+    assert_eq!(state.sync_token.as_deref(), Some("cursor-2"));
+}
+
+#[test]
+fn delta_deleting_a_phantom_row_reports_unchanged() {
+    let store = setup();
+    store
+        .replace_calendar_events(ACC, CAL, wide(), &[event("e1", 8, 9)])
+        .unwrap();
+    let changed = store
+        .apply_events_delta(
+            ACC,
+            CAL,
+            &Delta {
+                changes: Vec::new(),
+                deletions: vec!["never-cached".into()],
+                new_token: None,
+            },
+        )
+        .unwrap();
+    assert!(!changed, "deletion that matched no row → unchanged");
+}
+
+#[test]
+fn delta_with_a_real_change_or_deletion_reports_changed() {
+    let store = setup();
+    store
+        .replace_calendar_events(ACC, CAL, wide(), &[event("e1", 8, 9)])
+        .unwrap();
+    assert!(store
+        .apply_events_delta(
+            ACC,
+            CAL,
+            &Delta {
+                changes: vec![event("e2", 10, 11)],
+                deletions: Vec::new(),
+                new_token: None,
+            },
+        )
+        .unwrap());
+    assert!(store
+        .apply_events_delta(
+            ACC,
+            CAL,
+            &Delta {
+                changes: Vec::new(),
+                deletions: vec!["e1".into()],
+                new_token: None,
+            },
+        )
+        .unwrap());
+}
+
+#[test]
+fn replace_identical_tasks_and_sections_report_unchanged() {
+    let store = setup();
+    let tasks = [task("t1"), task("t2")];
+    assert!(store.replace_list_tasks(ACC, LIST, &tasks).unwrap());
+    assert!(!store.replace_list_tasks(ACC, LIST, &tasks).unwrap());
+
+    let sections = [section("s1", 0)];
+    assert!(store.replace_sections(ACC, LIST, &sections).unwrap());
+    assert!(!store.replace_sections(ACC, LIST, &sections).unwrap());
+}
+
+#[test]
+fn replace_identical_listings_report_unchanged() {
+    let store = setup();
+    let cals = [calendar("a"), calendar("b")];
+    assert!(store.replace_calendars(ACC, &cals).unwrap());
+    assert!(!store.replace_calendars(ACC, &cals).unwrap());
+    // Reordering the slice is NOT a change — comparison is by id.
+    assert!(!store
+        .replace_calendars(ACC, &[calendar("b"), calendar("a")])
+        .unwrap());
+
+    let lists = [task_list("x")];
+    assert!(store.replace_task_lists(ACC, &lists).unwrap());
+    assert!(!store.replace_task_lists(ACC, &lists).unwrap());
+
+    let books = [contact_list("z")];
+    assert!(store.replace_contact_lists(ACC, &books).unwrap());
+    assert!(!store.replace_contact_lists(ACC, &books).unwrap());
+}
+
+#[test]
+fn empty_tasks_delta_reports_unchanged() {
+    let store = setup();
+    store.replace_list_tasks(ACC, LIST, &[task("t1")]).unwrap();
+    assert!(!store
+        .apply_tasks_delta(
+            ACC,
+            LIST,
+            &Delta {
+                changes: Vec::new(),
+                deletions: Vec::new(),
+                new_token: Some("cursor-9".into()),
+            },
+        )
+        .unwrap());
+}

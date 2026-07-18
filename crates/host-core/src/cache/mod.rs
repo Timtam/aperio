@@ -20,6 +20,8 @@
 //! CACHE-0 ships the store + primitives only; wiring into the command
 //! read path is CACHE-1.
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, NaiveDate, NaiveDateTime, SecondsFormat, TimeZone, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::de::DeserializeOwned;
@@ -321,22 +323,41 @@ impl CacheStore {
     /// Full-refresh write: replace the entire cached set for `calendar`
     /// with `events` and record `range` as the covered window. Keeps any
     /// existing delta token (a full fetch doesn't invalidate it).
+    ///
+    /// Returns whether the cached CONTENT actually changed. A refresh that
+    /// re-fetches the identical set skips the row churn entirely (only the
+    /// window/freshness bookkeeping is stamped) and reports `false`, so
+    /// callers can suppress the `cache-updated` notification — a no-op
+    /// warm pass must not trigger frontend reload waves.
     pub fn replace_calendar_events(
         &self,
         account: &str,
         calendar: &str,
         range: DateRange,
         events: &[Event],
-    ) -> DbResult<()> {
+    ) -> DbResult<bool> {
         let now = now_ts();
         let (ws, we) = (ts(&range.start), ts(&range.end));
+        let mut incoming = HashMap::with_capacity(events.len());
+        for ev in events {
+            incoming.insert(ev.id.as_str(), to_json(ev, "cache_events")?);
+        }
         self.db.with_tx(|tx| {
-            tx.execute(
-                "DELETE FROM cache_events WHERE account_id = ?1 AND calendar_id = ?2",
+            let unchanged = rows_match(
+                tx,
+                "SELECT id, payload FROM cache_events
+                 WHERE account_id = ?1 AND calendar_id = ?2",
                 params![account, calendar],
+                &incoming,
             )?;
-            for ev in events {
-                insert_event(tx, account, calendar, ev, &now)?;
+            if !unchanged {
+                tx.execute(
+                    "DELETE FROM cache_events WHERE account_id = ?1 AND calendar_id = ?2",
+                    params![account, calendar],
+                )?;
+                for ev in events {
+                    insert_event(tx, account, calendar, ev, &now)?;
+                }
             }
             tx.execute(
                 "INSERT INTO cache_sync_state
@@ -349,20 +370,26 @@ impl CacheStore {
                    last_error = NULL",
                 params![account, calendar, ws, we, now],
             )?;
-            Ok(())
+            Ok(!unchanged)
         })
     }
 
     /// Incremental write: upsert `delta.changes`, remove
     /// `delta.deletions`, persist the new token. Window is untouched.
+    ///
+    /// Returns whether cached content changed: `false` for the routine
+    /// empty delta (token advanced, nothing else — the dominant no-op a
+    /// steady-state warm pass produces) and for deletions that matched no
+    /// cached row; the token/freshness bookkeeping is stamped either way.
     pub fn apply_events_delta(
         &self,
         account: &str,
         calendar: &str,
         delta: &Delta<Event>,
-    ) -> DbResult<()> {
+    ) -> DbResult<bool> {
         let now = now_ts();
         self.db.with_tx(|tx| {
+            let mut changed = !delta.changes.is_empty();
             // Clear the native group of every incoming change BEFORE
             // upserting. An updated provider resource keeps its native id
             // but can mint a different composite cal-core id — EWS rotates
@@ -393,11 +420,12 @@ impl CacheStore {
                 // also fans out correctly when several cached rows share
                 // one native resource (e.g. a recurring master's
                 // occurrences).
-                tx.execute(
+                let deleted = tx.execute(
                     "DELETE FROM cache_events
                      WHERE account_id = ?1 AND calendar_id = ?2 AND native_id = ?3",
                     params![account, calendar, native],
                 )?;
+                changed |= deleted > 0;
             }
             tx.execute(
                 "INSERT INTO cache_sync_state
@@ -409,7 +437,7 @@ impl CacheStore {
                    last_error = NULL",
                 params![account, calendar, delta.new_token, now],
             )?;
-            Ok(())
+            Ok(changed)
         })
     }
 
@@ -436,7 +464,7 @@ impl CacheStore {
         self.read_by_list("cache_tasks", account, list)
     }
 
-    pub fn replace_list_tasks(&self, account: &str, list: &str, tasks: &[Task]) -> DbResult<()> {
+    pub fn replace_list_tasks(&self, account: &str, list: &str, tasks: &[Task]) -> DbResult<bool> {
         self.replace_by_list("cache_tasks", SyncScope::Tasks, account, list, tasks, |t| {
             t.id.as_str()
         })
@@ -447,7 +475,7 @@ impl CacheStore {
         account: &str,
         list: &str,
         delta: &Delta<Task>,
-    ) -> DbResult<()> {
+    ) -> DbResult<bool> {
         self.apply_by_list_delta("cache_tasks", SyncScope::Tasks, account, list, delta, |t| {
             t.id.as_str()
         })
@@ -467,7 +495,7 @@ impl CacheStore {
         account: &str,
         list: &str,
         sections: &[Section],
-    ) -> DbResult<()> {
+    ) -> DbResult<bool> {
         self.replace_by_list(
             "cache_sections",
             SyncScope::Sections,
@@ -489,7 +517,7 @@ impl CacheStore {
         account: &str,
         list: &str,
         contacts: &[Contact],
-    ) -> DbResult<()> {
+    ) -> DbResult<bool> {
         self.replace_by_list(
             "cache_contacts",
             SyncScope::Contacts,
@@ -505,7 +533,7 @@ impl CacheStore {
         account: &str,
         list: &str,
         delta: &Delta<Contact>,
-    ) -> DbResult<()> {
+    ) -> DbResult<bool> {
         self.apply_by_list_delta(
             "cache_contacts",
             SyncScope::Contacts,
@@ -522,7 +550,7 @@ impl CacheStore {
         self.read_listing("cache_calendars", account)
     }
 
-    pub fn replace_calendars(&self, account: &str, calendars: &[Calendar]) -> DbResult<()> {
+    pub fn replace_calendars(&self, account: &str, calendars: &[Calendar]) -> DbResult<bool> {
         self.replace_listing(
             "cache_calendars",
             SyncScope::Calendars,
@@ -536,7 +564,7 @@ impl CacheStore {
         self.read_listing("cache_task_lists", account)
     }
 
-    pub fn replace_task_lists(&self, account: &str, lists: &[TaskList]) -> DbResult<()> {
+    pub fn replace_task_lists(&self, account: &str, lists: &[TaskList]) -> DbResult<bool> {
         self.replace_listing(
             "cache_task_lists",
             SyncScope::TaskLists,
@@ -550,7 +578,7 @@ impl CacheStore {
         self.read_listing("cache_contact_lists", account)
     }
 
-    pub fn replace_contact_lists(&self, account: &str, lists: &[ContactList]) -> DbResult<()> {
+    pub fn replace_contact_lists(&self, account: &str, lists: &[ContactList]) -> DbResult<bool> {
         self.replace_listing(
             "cache_contact_lists",
             SyncScope::ContactLists,
@@ -1006,20 +1034,28 @@ impl CacheStore {
         account: &str,
         items: &[T],
         id_of: impl Fn(&T) -> &str,
-    ) -> DbResult<()> {
+    ) -> DbResult<bool> {
         let now = now_ts();
+        let sel = format!("SELECT id, payload FROM {table} WHERE account_id = ?1");
         let del = format!("DELETE FROM {table} WHERE account_id = ?1");
         let ins = format!(
             "INSERT INTO {table} (account_id, id, payload, cached_at) VALUES (?1, ?2, ?3, ?4)"
         );
+        let mut incoming = HashMap::with_capacity(items.len());
+        for item in items {
+            incoming.insert(id_of(item), to_json(item, table)?);
+        }
         self.db.with_tx(|tx| {
-            tx.execute(&del, params![account])?;
-            for item in items {
-                let json = to_json(item, table)?;
-                tx.execute(&ins, params![account, id_of(item), json, now])?;
+            let unchanged = rows_match(tx, &sel, params![account], &incoming)?;
+            if !unchanged {
+                tx.execute(&del, params![account])?;
+                for item in items {
+                    let json = to_json(item, table)?;
+                    tx.execute(&ins, params![account, id_of(item), json, now])?;
+                }
             }
             mark_refreshed(tx, account, scope, "", &now)?;
-            Ok(())
+            Ok(!unchanged)
         })
     }
 
@@ -1047,22 +1083,30 @@ impl CacheStore {
         list: &str,
         items: &[T],
         id_of: impl Fn(&T) -> &str,
-    ) -> DbResult<()> {
+    ) -> DbResult<bool> {
         let now = now_ts();
+        let sel = format!("SELECT id, payload FROM {table} WHERE account_id = ?1 AND list_id = ?2");
         let del = format!("DELETE FROM {table} WHERE account_id = ?1 AND list_id = ?2");
         let ins = format!(
             "INSERT INTO {table} (account_id, list_id, id, native_id, payload, cached_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
         );
+        let mut incoming = HashMap::with_capacity(items.len());
+        for item in items {
+            incoming.insert(id_of(item), to_json(item, table)?);
+        }
         self.db.with_tx(|tx| {
-            tx.execute(&del, params![account, list])?;
-            for item in items {
-                let id = id_of(item);
-                let json = to_json(item, table)?;
-                tx.execute(&ins, params![account, list, id, native_id(id), json, now])?;
+            let unchanged = rows_match(tx, &sel, params![account, list], &incoming)?;
+            if !unchanged {
+                tx.execute(&del, params![account, list])?;
+                for item in items {
+                    let id = id_of(item);
+                    let json = to_json(item, table)?;
+                    tx.execute(&ins, params![account, list, id, native_id(id), json, now])?;
+                }
             }
             mark_refreshed(tx, account, scope, list, &now)?;
-            Ok(())
+            Ok(!unchanged)
         })
     }
 
@@ -1074,7 +1118,7 @@ impl CacheStore {
         list: &str,
         delta: &Delta<T>,
         id_of: impl Fn(&T) -> &str,
-    ) -> DbResult<()> {
+    ) -> DbResult<bool> {
         let now = now_ts();
         let upsert = format!(
             "INSERT INTO {table} (account_id, list_id, id, native_id, payload, cached_at)
@@ -1095,6 +1139,7 @@ impl CacheStore {
              WHERE account_id = ?1 AND list_id = ?2 AND (native_id = ?3 OR id = ?3)"
         );
         self.db.with_tx(|tx| {
+            let mut changed = !delta.changes.is_empty();
             for item in &delta.changes {
                 let id = id_of(item);
                 let json = to_json(item, table)?;
@@ -1104,7 +1149,8 @@ impl CacheStore {
                 )?;
             }
             for native in &delta.deletions {
-                tx.execute(&del, params![account, list, native])?;
+                let deleted = tx.execute(&del, params![account, list, native])?;
+                changed |= deleted > 0;
             }
             tx.execute(
                 "INSERT INTO cache_sync_state
@@ -1116,7 +1162,7 @@ impl CacheStore {
                    last_error = NULL",
                 params![account, scope.as_str(), list, delta.new_token, now],
             )?;
-            Ok(())
+            Ok(changed)
         })
     }
 }
@@ -1244,6 +1290,32 @@ fn native_id(id: &str) -> &str {
         Some((native, _)) => native,
         None => stripped,
     }
+}
+
+/// Whether a container's cached rows are exactly the incoming
+/// (id → payload) set — the change-detection behind the `replace_*`
+/// writes. Compares the serialized payload byte-for-byte: identical
+/// content produced by the same serializer matches, anything else
+/// (including a payload written by an older schema) conservatively
+/// counts as changed and gets rewritten.
+fn rows_match(
+    tx: &Connection,
+    select: &str,
+    scope_params: &[&dyn rusqlite::ToSql],
+    incoming: &HashMap<&str, String>,
+) -> DbResult<bool> {
+    let mut stmt = tx.prepare(select)?;
+    let mut rows = stmt.query(scope_params)?;
+    let mut matched = 0usize;
+    while let Some(row) = rows.next()? {
+        let id: String = row.get(0)?;
+        let payload: String = row.get(1)?;
+        match incoming.get(id.as_str()) {
+            Some(want) if *want == payload => matched += 1,
+            _ => return Ok(false),
+        }
+    }
+    Ok(matched == incoming.len())
 }
 
 /// Stamp last_refreshed + clear last_error for a listing/by-list scope
