@@ -270,7 +270,7 @@ export default function TaskEditorModal({
     let cancelled = false;
     void (async () => {
       try {
-        const task = await getTaskById(taskId);
+        const task = await getTaskById(taskId, listId);
         if (cancelled) return;
         if (task == null) {
           setError(t('mobile.taskMissing'));

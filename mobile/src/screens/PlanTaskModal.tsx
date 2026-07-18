@@ -44,7 +44,7 @@ function dateInvalid(date: string): boolean {
 type Choice = { kind: 'date'; iso: string } | { kind: 'backlog' };
 
 export default function PlanTaskModal({ route, navigation }: RootStackScreenProps<'PlanTask'>) {
-  const { taskId } = route.params;
+  const { taskId, listId } = route.params;
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const { invalidateData } = useTaskStore();
@@ -63,7 +63,7 @@ export default function PlanTaskModal({ route, navigation }: RootStackScreenProp
   // frequently-used action (desktop auto-focuses it).
   useEffect(() => {
     let cancelled = false;
-    void getTaskById(taskId).then((loaded) => {
+    void getTaskById(taskId, listId).then((loaded) => {
       if (cancelled) return;
       if (!loaded) {
         setError(t('mobile.taskMissing'));
@@ -80,7 +80,7 @@ export default function PlanTaskModal({ route, navigation }: RootStackScreenProp
     return () => {
       cancelled = true;
     };
-  }, [taskId, t]);
+  }, [taskId, listId, t]);
 
   // Any dismissal refetches the tasks (the desktop DialogState.close behaviour).
   useEffect(() => () => invalidateData(), [invalidateData]);

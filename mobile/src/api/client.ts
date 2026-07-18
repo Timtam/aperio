@@ -103,12 +103,29 @@ export const getTasks = async (list_id: string): Promise<Task[]> =>
   JSON.parse(await CalFfi.tasksJson(list_id)) as Task[];
 
 /** The bridge REJECTS (not found) for an unknown id; translate to `null` to
- *  mirror the desktop's `Task | null`. */
-export const getTaskById = async (id: string): Promise<Task | null> => {
+ *  mirror the desktop's `Task | null`.
+ *
+ *  `taskJson` resolves LOCAL rows only, so an EXTERNAL task (a device reminder,
+ *  Vikunja, Todoist, CalDAV/Graph) rejects — which used to surface as a false
+ *  "this task no longer exists" when planning / moving / editing it. Pass the
+ *  owning `listId` so the miss falls back to the list read, which routes an
+ *  external list through the SWR cache (warm from the list render that opened
+ *  this). Omit `listId` only where routing is impossible (e.g. a conflict-row
+ *  name lookup), where `null` stays the right degradation. */
+export const getTaskById = async (
+  id: string,
+  listId: string | null = null,
+): Promise<Task | null> => {
   try {
     return JSON.parse(await CalFfi.taskJson(id)) as Task;
   } catch {
-    return null;
+    if (listId == null) return null;
+    try {
+      const tasks = JSON.parse(await CalFfi.tasksJson(listId)) as Task[];
+      return tasks.find((task) => task.id === id) ?? null;
+    } catch {
+      return null;
+    }
   }
 };
 

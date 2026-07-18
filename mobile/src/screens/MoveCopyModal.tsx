@@ -81,7 +81,7 @@ export default function MoveCopyModal({
       try {
         if (params.kind === 'task') {
           const [loaded, siblings] = await Promise.all([
-            getTaskById(params.taskId),
+            getTaskById(params.taskId, params.listId),
             getTasks(params.listId),
           ]);
           if (cancelled) return;
