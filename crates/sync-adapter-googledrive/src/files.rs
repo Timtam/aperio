@@ -98,22 +98,39 @@ pub async fn find_child(
     Ok(parsed.files.into_iter().next().map(|f| f.id))
 }
 
-/// List the basename of every file (not folder) under
-/// `parent_id`. Walks pagination internally via `nextPageToken`.
+/// One entry from a [`list_children`] listing: everything the
+/// log-fetch path needs so it never has to re-query per file —
+/// `id` feeds the direct `?alt=media` download and `size` feeds
+/// the cursor's growth-refetch check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DriveEntry {
+    pub id: String,
+    pub name: String,
+    /// Raw stored byte count. Drive serialises this as a decimal
+    /// STRING in JSON (int64 doesn't fit in a JS number); Docs-native
+    /// files omit it entirely. Under E2E these are ciphertext bytes —
+    /// exactly the domain the encrypting layer translates the
+    /// cursor's known_lengths into, so the value is passed through
+    /// raw, never adjusted.
+    pub size: Option<u64>,
+}
+
+/// List every file (not folder) under `parent_id` with its id +
+/// size. Walks pagination internally via `nextPageToken`.
 /// `Ok(empty)` when the folder exists but is empty;
 /// `Err(NotFound)` when the folder doesn't exist.
 pub async fn list_children(
     http: &Client,
     access_token: &str,
     parent_id: &str,
-) -> GoogleDriveResult<Vec<String>> {
+) -> GoogleDriveResult<Vec<DriveEntry>> {
     let mut out = Vec::new();
     let mut page_token: Option<String> = None;
     let q = format!("'{parent_id}' in parents and trashed = false and mimeType != '{FOLDER_MIME}'");
     loop {
         let mut params: Vec<(&str, &str)> = vec![
             ("q", q.as_str()),
-            ("fields", "files(id,name),nextPageToken"),
+            ("fields", "files(id,name,size),nextPageToken"),
             ("pageSize", "1000"),
             ("spaces", "drive"),
         ];
@@ -137,28 +154,69 @@ pub async fn list_children(
         if !status.is_success() {
             return Err(classify_response_text(status.as_u16(), &text));
         }
-        #[derive(Deserialize)]
-        struct ListResponse {
-            files: Vec<FileEntry>,
-            #[serde(default)]
-            #[serde(rename = "nextPageToken")]
-            next_page_token: Option<String>,
-        }
-        #[derive(Deserialize)]
-        struct FileEntry {
-            name: String,
-        }
-        let parsed: ListResponse = serde_json::from_str(&text)
-            .map_err(|e| GoogleDriveError::Protocol(format!("decode list: {e}")))?;
-        for entry in parsed.files {
-            out.push(entry.name);
-        }
-        match parsed.next_page_token {
+        let (entries, next_page_token) = parse_list_page(&text)?;
+        out.extend(entries);
+        match next_page_token {
             Some(t) if !t.is_empty() => page_token = Some(t),
             _ => break,
         }
     }
     Ok(out)
+}
+
+/// Decode one `files.list` response page into entries + the
+/// pagination token. Split out of the HTTP loop so the `size`
+/// handling is unit-testable without a server.
+fn parse_list_page(text: &str) -> GoogleDriveResult<(Vec<DriveEntry>, Option<String>)> {
+    #[derive(Deserialize)]
+    struct ListResponse {
+        files: Vec<FileEntry>,
+        #[serde(default)]
+        #[serde(rename = "nextPageToken")]
+        next_page_token: Option<String>,
+    }
+    #[derive(Deserialize)]
+    struct FileEntry {
+        id: String,
+        name: String,
+        #[serde(default, deserialize_with = "de_size")]
+        size: Option<u64>,
+    }
+    let parsed: ListResponse = serde_json::from_str(text)
+        .map_err(|e| GoogleDriveError::Protocol(format!("decode list: {e}")))?;
+    let entries = parsed
+        .files
+        .into_iter()
+        .map(|f| DriveEntry {
+            id: f.id,
+            name: f.name,
+            size: f.size,
+        })
+        .collect();
+    Ok((entries, parsed.next_page_token))
+}
+
+/// Drive serialises `size` as a decimal string (`"size": "123"`).
+/// Accept a bare number too (defensive — other Google APIs differ)
+/// and fold anything unparseable into `None`: the growth-refetch
+/// check treats a missing size as "no growth signal", which is safe
+/// — the file is still fetched once it rises above the cursor, the
+/// refetch is merely deferred to session rotation. Deserialising
+/// via `serde_json::Value` keeps the fold TOTAL: a float, a
+/// negative, or any other odd shape degrades to `None` instead of
+/// failing the whole listing page (fail-fast would serve stale
+/// indefinitely over a field we can safely do without).
+fn de_size<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(
+        match Option::<serde_json::Value>::deserialize(deserializer)? {
+            Some(serde_json::Value::Number(n)) => n.as_u64(),
+            Some(serde_json::Value::String(s)) => s.parse().ok(),
+            _ => None,
+        },
+    )
 }
 
 /// Create or update a file. If `existing_id` is `Some`, PATCH
@@ -396,5 +454,55 @@ mod tests {
     fn classify_500_picks_http() {
         let err = classify_response_text(500, "<html>Internal Server Error</html>");
         assert!(matches!(err, GoogleDriveError::Http { status: 500, .. }));
+    }
+
+    #[test]
+    fn list_page_parses_drive_string_sizes() {
+        // Drive's actual wire shape: size is a decimal STRING.
+        let (entries, next) = parse_list_page(
+            r#"{"files":[{"id":"a1","name":"x.jsonl","size":"12345"}],"nextPageToken":"tok"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            entries,
+            vec![DriveEntry {
+                id: "a1".into(),
+                name: "x.jsonl".into(),
+                size: Some(12_345),
+            }]
+        );
+        assert_eq!(next.as_deref(), Some("tok"));
+    }
+
+    #[test]
+    fn list_page_tolerates_numeric_missing_and_junk_sizes() {
+        let (entries, next) = parse_list_page(
+            r#"{"files":[
+                {"id":"a","name":"n.jsonl","size":77},
+                {"id":"b","name":"sizeless"},
+                {"id":"c","name":"weird.jsonl","size":"not-a-number"},
+                {"id":"d","name":"floaty.jsonl","size":123.0},
+                {"id":"e","name":"negative.jsonl","size":-5},
+                {"id":"f","name":"bool.jsonl","size":true}
+            ]}"#,
+        )
+        .unwrap();
+        assert_eq!(entries.len(), 6);
+        assert_eq!(entries[0].size, Some(77));
+        assert_eq!(entries[1].size, None);
+        assert_eq!(entries[2].size, None);
+        // Numeric-but-not-u64 (and outright junk) shapes degrade to
+        // None — timestamp-only semantics — instead of failing the
+        // whole listing page.
+        assert_eq!(entries[3].size, None);
+        assert_eq!(entries[4].size, None);
+        assert_eq!(entries[5].size, None);
+        assert!(next.is_none());
+    }
+
+    #[test]
+    fn list_page_decode_failure_is_protocol_error() {
+        let err = parse_list_page("<html>gateway timeout</html>").unwrap_err();
+        assert!(matches!(err, GoogleDriveError::Protocol(_)));
     }
 }

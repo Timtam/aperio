@@ -682,7 +682,7 @@ impl SyncOrchestrator {
             }
             Err(err) => {
                 warn!(?err, "fetch phase of sync round failed");
-                report.push_failures += 1;
+                report.fetch_failures += 1;
             }
         }
 

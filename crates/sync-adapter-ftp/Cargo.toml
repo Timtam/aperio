@@ -18,8 +18,9 @@ thiserror.workspace = true
 # which is how we adapt suppaftp's sync API into our async
 # SyncAdapter trait — suppaftp's async surface only supports
 # async-std, so we keep the sync API and offload it to tokio's
-# blocking pool. Per-operation connects are ~150-300 ms each,
-# acceptable on the 5-minute default sync interval.
+# blocking pool. Opening a control connection costs ~150-300 ms;
+# the short-TTL reuse layer in lib.rs parks one connection so a
+# sync round pays that preamble once, not per trait call.
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "io-util", "macros"] }
 tracing.workspace = true
 

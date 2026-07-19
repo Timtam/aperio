@@ -140,6 +140,7 @@ export interface SyncRoundReport {
   skipped_unsupported: number;
   apply_failures: number;
   push_failures: number;
+  fetch_failures: number;
   conflicts: number;
 }
 

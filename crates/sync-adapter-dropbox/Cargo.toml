@@ -11,6 +11,7 @@ description = "Aperio sync adapter targeting Dropbox API v2 over OAuth 2.0 PKCE.
 [dependencies]
 async-trait.workspace = true
 chrono.workspace = true
+futures.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json = "1"

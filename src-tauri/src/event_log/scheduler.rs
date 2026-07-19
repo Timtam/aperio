@@ -113,8 +113,9 @@ pub struct SyncStatusPayload {
     /// follows a `sync_now`. `None` on the "round started" emit.
     pub report: Option<SyncRoundReport>,
     /// Set when the round failed at the orchestrator level (no
-    /// adapter, network error). Per-file failures don't land here —
-    /// they're counted in `report.apply_failures` / `push_failures`.
+    /// adapter, network error). Tolerated per-phase failures don't land
+    /// here — they're counted in `report.apply_failures` /
+    /// `push_failures` / `fetch_failures`.
     pub error: Option<String>,
 }
 
