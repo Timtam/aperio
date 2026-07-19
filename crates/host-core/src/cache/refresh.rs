@@ -25,7 +25,7 @@
 //! manual-only refresh (mobile) can build the refresher without ever
 //! starting the background loop.
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration as StdDuration;
 
@@ -81,6 +81,12 @@ pub struct CacheRefresher {
     notify: Arc<Notify>,
     /// `true` while a pass runs; concurrent triggers no-op.
     in_flight: Arc<Mutex<bool>>,
+    /// Whether the CURRENT pass was user-forced (manual refresh). Set at
+    /// the top of `warm_all`; read by the enumerate/refresh failure paths
+    /// so a forced failure surfaces at once (see `CacheStore::mark_error`).
+    /// Single-flight makes this stable for a pass's duration; the
+    /// concurrent per-read SWR path never touches it.
+    pass_forced: Arc<AtomicBool>,
     /// Last successful pass, kept in memory + mirrored to prefs.
     last_refreshed: Arc<Mutex<Option<DateTime<Utc>>>>,
 }
@@ -144,6 +150,7 @@ impl CacheRefresher {
             observer,
             notify: Arc::new(Notify::new()),
             in_flight: Arc::new(Mutex::new(false)),
+            pass_forced: Arc::new(AtomicBool::new(false)),
             last_refreshed: Arc::new(Mutex::new(initial_last)),
         })
     }
@@ -164,7 +171,10 @@ impl CacheRefresher {
                 _ = worker.notify.notified() => {}
             }
             info!(target: "aperio::cache", "running app-start cache warm pass");
-            worker.warm_all().await;
+            // App-start pass is NOT forced: it is the one most prone to a
+            // network-not-ready blip, so its failures must be confirmed by
+            // a second attempt before they surface.
+            worker.warm_all(false).await;
 
             loop {
                 let minutes = worker.read_interval_minutes();
@@ -172,11 +182,13 @@ impl CacheRefresher {
                 tokio::select! {
                     _ = tokio::time::sleep(dur) => {
                         debug!(target: "aperio::cache", ?dur, "periodic cache warm tick");
-                        worker.warm_all().await;
+                        worker.warm_all(false).await;
                     }
                     _ = worker.notify.notified() => {
                         debug!(target: "aperio::cache", "manual cache warm trigger");
-                        worker.warm_all().await;
+                        // Explicitly triggered (manual refresh, account
+                        // change) — surface its failures immediately.
+                        worker.warm_all(true).await;
                     }
                 }
             }
@@ -218,7 +230,12 @@ impl CacheRefresher {
     /// then refresh their items with bounded concurrency so a slow provider can't
     /// gate the rest. Dedup-guarded; runs on the background runtime so it never
     /// blocks a command.
-    pub async fn warm_all(self: &Arc<Self>) {
+    /// `forced` = the pass was requested by an explicit user action
+    /// (manual refresh, post-account-change trigger) rather than the
+    /// app-start / periodic schedule. A forced pass's failures surface on
+    /// the error screen at once instead of waiting for a confirming second
+    /// attempt (see `CacheStore::mark_error`).
+    pub async fn warm_all(self: &Arc<Self>, forced: bool) {
         // Single-flight: a periodic tick that lands while a manual pass
         // is still running just bails.
         {
@@ -228,6 +245,10 @@ impl CacheRefresher {
             }
             *guard = true;
         }
+        // Record the pass's forced-ness for the failure paths. Safe under
+        // single-flight: only this pass writes it, and the concurrent SWR
+        // path passes its own (false) flag to mark_error directly.
+        self.pass_forced.store(forced, Ordering::Relaxed);
         let last = self.status().last_refreshed_at;
         // Spinner on immediately; the target total isn't known until the cheap
         // enumeration below completes.
@@ -321,9 +342,13 @@ impl CacheRefresher {
                     }
                 }
                 Err(err) => {
-                    let _ =
-                        self.cache
-                            .mark_error(&account, SyncScope::Calendars, "", &err.to_string());
+                    let _ = self.cache.mark_error(
+                        &account,
+                        SyncScope::Calendars,
+                        "",
+                        &err.to_string(),
+                        self.pass_forced.load(Ordering::Relaxed),
+                    );
                 }
             }
         }
@@ -360,9 +385,13 @@ impl CacheRefresher {
                     }
                 }
                 Err(err) => {
-                    let _ =
-                        self.cache
-                            .mark_error(&account, SyncScope::TaskLists, "", &err.to_string());
+                    let _ = self.cache.mark_error(
+                        &account,
+                        SyncScope::TaskLists,
+                        "",
+                        &err.to_string(),
+                        self.pass_forced.load(Ordering::Relaxed),
+                    );
                 }
             }
         }
@@ -396,6 +425,7 @@ impl CacheRefresher {
                         SyncScope::ContactLists,
                         "",
                         &err.to_string(),
+                        self.pass_forced.load(Ordering::Relaxed),
                     );
                 }
             }
@@ -432,6 +462,7 @@ impl CacheRefresher {
                             SyncScope::Events,
                             &cal_id,
                             &err.to_string(),
+                            self.pass_forced.load(Ordering::Relaxed),
                         );
                     }
                 }
@@ -458,6 +489,7 @@ impl CacheRefresher {
                             SyncScope::Tasks,
                             &list_id,
                             &err.to_string(),
+                            self.pass_forced.load(Ordering::Relaxed),
                         );
                     }
                 }
@@ -485,6 +517,7 @@ impl CacheRefresher {
                             SyncScope::Sections,
                             &list_id,
                             &err.to_string(),
+                            self.pass_forced.load(Ordering::Relaxed),
                         );
                     }
                 }
@@ -512,6 +545,7 @@ impl CacheRefresher {
                             SyncScope::Contacts,
                             &list_id,
                             &err.to_string(),
+                            self.pass_forced.load(Ordering::Relaxed),
                         );
                     }
                 }

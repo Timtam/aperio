@@ -5204,7 +5204,9 @@ impl Host {
     pub fn refresh_external_cache(&self) {
         let refresher = Arc::clone(&self.cache_refresher);
         self.runtime.handle().spawn(async move {
-            refresher.warm_all().await;
+            // Mobile's manual/foreground refresh is an explicit user
+            // action — surface any failure at once (see warm_all/forced).
+            refresher.warm_all(true).await;
         });
     }
 

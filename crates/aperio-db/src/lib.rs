@@ -16,7 +16,7 @@ use thiserror::Error;
 
 /// The schema version the current code expects. [`run`] applies every
 /// migration up to and including this one.
-pub const CURRENT_SCHEMA_VERSION: u32 = 32;
+pub const CURRENT_SCHEMA_VERSION: u32 = 33;
 
 #[derive(Debug, Error)]
 pub enum MigrationError {
@@ -159,6 +159,10 @@ const MIGRATIONS: &[Migration] = &[
     Migration {
         target: 32,
         sql: include_str!("sql/0032_cache_sections.sql"),
+    },
+    Migration {
+        target: 33,
+        sql: include_str!("sql/0033_cache_refresh_failure_count.sql"),
     },
 ];
 

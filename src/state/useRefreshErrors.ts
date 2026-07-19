@@ -27,17 +27,13 @@ import { applyStoredLanguage } from '../intl/language';
  * mid-refresh value — the warning shows within SETTLE_MS of the refresh
  * finishing (no arbitrary time threshold, no minutes-long wait).
  *
- * ANNOUNCE TIMING — the spoken alarm is stricter than the visible cue,
- * because a launch-time connectivity blip must never falsely interrupt a
- * blind user. Cold start is a SINGLE warm pass; if the network is not up
- * yet it fails, and the error only heals later via an out-of-band SWR
- * read (which emits no refresh-status signal), so the settle gate alone
- * cannot tell that blip from a real outage. So: auth-shaped failures
- * (revoked password — never self-heals) announce on the first settled
- * publish; NON-auth (network) failures announce only after they have
- * PERSISTED past NON_AUTH_ANNOUNCE_AFTER_MS, re-evaluated by the poll.
- * The VISIBLE surface is unaffected by this window; only the utterance
- * waits.
+ * BLIP-FREE BY CONFIRMATION — the set returned by the backend is already
+ * blip-filtered: a NON-auth (network) failure is only reported once it
+ * has failed on two consecutive attempts (a cold-start blip's next
+ * attempt succeeds and resets the count), auth-shaped failures report at
+ * the first attempt, and a user-forced (manual refresh) failure reports
+ * at once. So the frontend shows exactly what it is given — visible and
+ * spoken are the SAME set, with no wall-clock window anywhere.
  *
  * Consumers: the sidebar (per-account warning on the tree row, and — via
  * `announceOnGrowth` — the ONE announce-on-growth instance) and the
@@ -45,37 +41,30 @@ import { applyStoredLanguage } from '../intl/language';
  * hint).
  */
 
-/** How long `refreshing` must stay false before the error set is trusted
- *  and published to the VISIBLE surface. */
+/** How long `refreshing` must stay false before the (already
+ *  blip-filtered) error set is published — coalesces a settling round and
+ *  lets a mounting consumer read the last settled snapshot. */
 const SETTLE_MS = 5_000;
-/** How long a NON-auth failure must persist before it is ANNOUNCED — a
- *  launch/connectivity blip clears well within this and must never
- *  interrupt the user. Auth-shaped failures announce immediately. */
-const NON_AUTH_ANNOUNCE_AFTER_MS = 90_000;
 const POLL_MS = 60_000;
 
 interface Publish {
   errors: AccountRefreshErrors[];
-  /** This settled publish has a newly-failing account that is due to be
-   *  ANNOUNCED now (auth-shaped, or non-auth past its persistence
-   *  window) — so the ONE announcer should speak. */
-  announce: boolean;
-  /** Wording flag: is the announcement driven by an auth-shaped failure?
-   *  A long-known auth failure must not make an unrelated outage announce
+  /** This settled publish introduced a not-previously-known failing
+   *  account — so the ONE announcer should speak. The set is already
+   *  blip-filtered by the backend, so any new account is a real failure. */
+  grew: boolean;
+  /** Wording flag: are the NEWLY failing accounts auth-shaped? A
+   *  long-known auth failure must not make an unrelated outage announce
    *  as a password problem, so this is computed from the new ones only. */
   auth: boolean;
 }
 
 let current: AccountRefreshErrors[] = [];
 /** Accounts already announced this session; shrinks when one clears so a
- *  re-appearing failure announces again. Updated on every settled
- *  publish regardless of whether anyone is listening, so the announce
- *  decision is app-wide-once. A non-auth account is NOT added here until
- *  it out-persists the window, so it stays eligible to announce later. */
+ *  re-appearing failure announces again. Updated on every settled publish
+ *  regardless of whether anyone is listening, so "grew" is an
+ *  app-wide-once decision. */
 let knownAffectedAccounts = new Set<string>();
-/** Non-auth failures waiting out the announce window: account id → first
- *  seen (ms epoch). Dropped the moment the account clears. */
-let pendingNonAuthSince = new Map<string, number>();
 let started = false;
 let refreshing = false;
 let settleTimer: number | null = null;
@@ -84,7 +73,6 @@ const subscribers = new Set<(p: Publish) => void>();
 /** Test-only: reset the module-level singleton between tests. */
 export function resetAnnouncedAccountsForTest(): void {
   knownAffectedAccounts = new Set();
-  pendingNonAuthSince = new Map();
   current = [];
   refreshing = false;
   if (settleTimer != null) {
@@ -112,37 +100,17 @@ function publishSettled(): void {
   getRefreshErrors()
     .then((rows) => {
       current = rows;
-      // ANNOUNCE decision: auth-shaped newly-failing accounts speak now;
-      // non-auth only once they out-persist the window (the poll
-      // re-evaluates). An account still pending is NOT yet "known", so it
-      // stays eligible. The VISIBLE surface (publish.errors) is always
-      // the settled snapshot, independent of this window.
-      const now = Date.now();
-      const nowAffected = new Set(rows.map((r) => r.account_id));
-      let announceAuth = false;
-      let announceNonAuth = false;
-      const nextPending = new Map<string, number>();
-      for (const r of rows) {
-        if (knownAffectedAccounts.has(r.account_id)) continue;
-        if (r.auth_suspected) {
-          announceAuth = true;
-        } else {
-          const since = pendingNonAuthSince.get(r.account_id) ?? now;
-          if (now - since >= NON_AUTH_ANNOUNCE_AFTER_MS) {
-            announceNonAuth = true;
-          } else {
-            nextPending.set(r.account_id, since);
-          }
-        }
-      }
-      knownAffectedAccounts = new Set(
-        [...nowAffected].filter((id) => !nextPending.has(id)),
+      // The set is already blip-filtered by the backend, so any account
+      // not previously known is a real, confirmed (or auth-shaped)
+      // failure — announce on growth, wording from the new ones only.
+      const newly = rows.filter(
+        (r) => !knownAffectedAccounts.has(r.account_id),
       );
-      pendingNonAuthSince = nextPending;
+      knownAffectedAccounts = new Set(rows.map((r) => r.account_id));
       const publish: Publish = {
         errors: current,
-        announce: announceAuth || announceNonAuth,
-        auth: announceAuth,
+        grew: newly.length > 0,
+        auth: newly.some((r) => r.auth_suspected),
       };
       subscribers.forEach((cb) => cb(publish));
     })
@@ -222,7 +190,7 @@ export function useRefreshErrors(options?: {
     setErrors(current);
     const cb = (p: Publish) => {
       setErrors(p.errors);
-      if (announceOnGrowth && p.announce) {
+      if (announceOnGrowth && p.grew) {
         // Defer the utterance (not the decision) until the stored
         // language is live, so the one deduped announcement comes out in
         // the user's language.
