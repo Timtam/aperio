@@ -126,8 +126,10 @@ impl SyncAdapter for EncryptingAdapter {
         // growth-refetch check compared plaintext lengths against
         // ciphertext sizes — always "grown" — and re-downloaded every
         // remembered file every round on an E2E dataset. (Lengths recorded
-        // BEFORE E2E was enabled are off by the overhead once; the
-        // resulting one-time re-fetch is idempotent and self-corrects.)
+        // BEFORE E2E was enabled translate to plaintext+28, which is
+        // exactly the unchanged file's encrypted size — so such files are
+        // correctly SKIPPED until they genuinely grow, at which point the
+        // encrypted size exceeds plaintext+28 and the re-fetch fires.)
         let translated = DeviceCursor {
             known_lengths: since
                 .known_lengths

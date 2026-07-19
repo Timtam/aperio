@@ -327,6 +327,9 @@ impl OnboardingService {
         // there was no snapshot). The applier's idempotency table
         // guarantees re-applying old logs is a no-op anyway, but
         // skipping them saves the disk + serde cost.
+        // Joining a (possibly different) dataset invalidates every
+        // remote-missing sound verdict from the previous backend.
+        crate::sound_assets::reset_missing_cache();
         let logs = adapter
             .fetch_new_logs(&DeviceCursor {
                 last_seen_log: starting_cursor,
@@ -338,10 +341,16 @@ impl OnboardingService {
                 known_lengths: Vec::new(),
             })
             .await?;
-        let foreign: Vec<_> = logs
+        let mut foreign: Vec<_> = logs
             .into_iter()
             .filter(|log| log.name.device_id != self.local_device_id)
             .collect();
+        // Apply chronologically regardless of adapter return order (the
+        // WebDAV adapter's concurrent GETs yield in completion order) —
+        // same rationale as the sync round: a rotated-away CREATE applied
+        // after its later DELETE would resurrect the item, and the
+        // applier's idempotency table would make that permanent.
+        sort_logs_chronologically(&mut foreign);
         let fetched_logs = foreign.len();
         info!(
             count = fetched_logs,
@@ -509,10 +518,12 @@ impl OnboardingService {
                 known_lengths: Vec::new(),
             })
             .await?;
-        let foreign: Vec<_> = logs
+        let mut foreign: Vec<_> = logs
             .into_iter()
             .filter(|log| log.name.device_id != self.local_device_id)
             .collect();
+        // Chronological apply order — see accept_remote.
+        sort_logs_chronologically(&mut foreign);
         let fetched_logs = foreign.len();
         info!(
             count = fetched_logs,
@@ -724,6 +735,9 @@ impl OnboardingService {
         e2e_params: Option<sync_core::EncryptionParams>,
     ) -> SyncResult<OnboardingReport> {
         adapter.test_connection().await?;
+        // Pointing at a (possibly different) remote invalidates every
+        // remote-missing sound verdict from the previous backend.
+        crate::sound_assets::reset_missing_cache();
 
         // Best-effort peek so we can log what was there before. A
         // missing meta means the remote was already empty and the
@@ -877,6 +891,16 @@ impl OnboardingService {
     /// growth-refetch map (same pref + semantics as the sync round —
     /// `sync_engine::merge_applied_log_lengths`). Best-effort: a failed
     /// write only costs a re-fetch.
+    ///
+    /// The get-merge-set here is NOT serialized against a concurrently
+    /// running round (only the round's own auto-resume sits inside the
+    /// orchestrator's in-flight guard; the manual resume command and a
+    /// re-onboard don't). A lost update would drop a filename's entry —
+    /// meaning that one file isn't growth-refetched until its peer
+    /// rotates — through a window that requires a round and a
+    /// user-triggered onboarding to interleave their final writes.
+    /// Accepted: rare, self-healing, and strictly no worse than before
+    /// this recording existed.
     fn record_applied_lengths(&self, applied: &[(String, u64)]) {
         let prefs = UserPrefsRepo::new(&self.db);
         let existing = prefs
@@ -925,6 +949,24 @@ fn snapshot_ts_if_real(meta: &MetaJson) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Order fetched log files chronologically (session-start timestamp,
+/// device-id tiebreak — together the unique filename), matching the sync
+/// round's pre-apply sort. File-level ordering is an approximation:
+/// DIFFERENT devices' live sessions overlap, so an envelope written late
+/// into an earlier-started session can still apply before a
+/// later-started session's earlier envelope — the same residual exposure
+/// the round (and main's listing-order apply) always had. Session files
+/// of ONE device never overlap, which is the case that matters for
+/// rotated-away create/delete pairs.
+fn sort_logs_chronologically(logs: &mut [LogFile]) {
+    logs.sort_by(|a, b| {
+        a.name
+            .timestamp
+            .cmp(&b.name.timestamp)
+            .then_with(|| a.name.device_id.as_str().cmp(b.name.device_id.as_str()))
+    });
 }
 
 #[cfg(test)]
