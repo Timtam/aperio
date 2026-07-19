@@ -19,6 +19,7 @@ import { listAccounts } from '../api/accounts';
 import { createTaskList } from '../api/client';
 import { useCacheReload } from '../state/cacheObserver';
 import { useTaskStore } from '../state/taskStoreContext';
+import { useRefreshErrors } from '../state/useRefreshErrors';
 import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
 // Task-list catalog: read the lists, toggle which are shown (the selection Set +
@@ -33,6 +34,8 @@ import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
 export default function ListsScreen() {
   const { t } = useTranslation();
+  // Per-account refresh-error surface (silent-staleness warning banner).
+  const { errorsByAccount } = useRefreshErrors();
   const navigation = useNavigation();
   const { taskLists, selectedTaskListIds, toggleTaskList, refreshTaskLists, colorLabels } =
     useTaskStore();
@@ -133,6 +136,15 @@ export default function ListsScreen() {
         </Pressable>
       </View>
 
+      {errorsByAccount.size > 0 && (
+        <Text style={styles.refreshWarning} accessibilityRole="text">
+          {t(
+            [...errorsByAccount.values()].some((a) => a.auth_suspected)
+              ? 'refreshErrors.bannerAuth'
+              : 'refreshErrors.banner',
+          )}
+        </Text>
+      )}
       {error != null && (
         <Text style={styles.error} accessibilityRole="text">
           {error}
@@ -294,4 +306,11 @@ const makeStyles = (c: ThemeColors) =>
     listAccount: { fontSize: 13, color: c.textSecondary, marginTop: 2 },
     muted: { fontSize: 15, color: c.textSecondary, padding: 16 },
     error: { fontSize: 15, fontWeight: '600', color: c.danger, paddingHorizontal: 16 },
+    refreshWarning: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: c.danger,
+      paddingHorizontal: 16,
+      paddingBottom: 6,
+    },
   });

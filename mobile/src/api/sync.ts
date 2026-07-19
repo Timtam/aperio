@@ -275,6 +275,29 @@ export const refreshExternalCache = (): Promise<void> =>
 export const cacheRefreshStatus = async (): Promise<CacheRefreshStatus> =>
   JSON.parse(await CalFfi.getCacheRefreshStatusJson()) as CacheRefreshStatus;
 
+/** One container whose most recent background refresh FAILED — the raw
+ *  material of the per-account error surface (silent staleness, e.g. a
+ *  revoked iCloud app password). Mirrors the desktop wire shape. */
+export interface ContainerRefreshError {
+  scope: string;
+  container_id: string;
+  container_name: string | null;
+  error: string;
+  last_success_at: string | null;
+}
+
+/** Every failing container of one account + the auth heuristic that
+ *  drives the "re-enter password" hint. */
+export interface AccountRefreshErrors {
+  account_id: string;
+  auth_suspected: boolean;
+  errors: ContainerRefreshError[];
+}
+
+/** Every account's currently-failing containers. Empty = all healthy. */
+export const refreshErrors = async (): Promise<AccountRefreshErrors[]> =>
+  JSON.parse(await CalFfi.refreshErrorsJson()) as AccountRefreshErrors[];
+
 /** Warm the external cache on app-foreground (the mobile stand-in for the
  *  desktop periodic warm loop). Fire-and-forget. */
 export const warmCacheOnForeground = (): Promise<void> =>

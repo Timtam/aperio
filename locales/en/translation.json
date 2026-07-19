@@ -233,6 +233,26 @@
     "never": "External data not refreshed yet",
     "refreshNow": "Refresh external data"
   },
+  "refreshErrors": {
+    "announce": "Warning: updating one or more accounts is failing. Details are on the Sync screen.",
+    "announceAuth": "Warning: updating one or more accounts is failing, likely an authentication problem. Details are on the Sync screen.",
+    "banner": "Some accounts are not updating. Details are on the Sync screen.",
+    "bannerAuth": "Some accounts are not updating — possibly a password problem. Details are on the Sync screen.",
+    "heading": "Update problems for {{name}}",
+    "authHint": "The errors look like an authentication problem — please re-enter the password for this account.",
+    "entry": "{{container}}: {{error}}",
+    "lastSuccess": "Last successful update: {{time}}.",
+    "neverSucceeded": "Never updated successfully.",
+    "scope": {
+      "calendars": "Calendar list",
+      "task_lists": "Task-list catalog",
+      "contact_lists": "Address-book catalog",
+      "events": "Calendar",
+      "tasks": "Task list",
+      "sections": "Sections",
+      "contacts": "Address book"
+    }
+  },
   "syncStatus": {
     "label": "Sync status",
     "synced": "Synced",

@@ -39,6 +39,7 @@ import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
 import { SyncTargetConfigForm } from '../components/sync/SyncTargetConfigForm';
 import { formatLongDateTime } from '../intl/dateFormat';
+import { useRefreshErrors } from '../state/useRefreshErrors';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import CalFfi from '../../modules/cal-ffi';
 
@@ -70,6 +71,12 @@ export default function SyncScreen() {
   const [adapterSummary, setAdapterSummary] = useState<SyncAdapterSummary | null>(null);
   const [cacheStatus, setCacheStatus] = useState<CacheRefreshStatus | null>(null);
   const [hasExternalAccounts, setHasExternalAccounts] = useState(false);
+  // Account display names for the refresh-error rows (id → name).
+  const [accountNameById, setAccountNameById] = useState<Map<string, string>>(
+    new Map(),
+  );
+  // Per-account refresh-error surface (silent-staleness warning).
+  const { errorsByAccount } = useRefreshErrors();
   // §19.7 E2E management drafts (only meaningful once a target is configured).
   const [e2ePassphrase, setE2ePassphrase] = useState(''); // enable-E2E passphrase
   const [changeOldPp, setChangeOldPp] = useState(''); // rotate: current passphrase
@@ -127,9 +134,9 @@ export default function SyncScreen() {
       setConflictCount(await syncConflictCount().catch(() => 0));
       setSyncLog(await listSyncLog(100).catch(() => []));
       setCacheStatus(await cacheRefreshStatus().catch(() => null));
-      setHasExternalAccounts(
-        (await listAccounts().catch(() => [])).some((a) => a.adapter_kind !== 'local'),
-      );
+      const accounts = await listAccounts().catch(() => []);
+      setHasExternalAccounts(accounts.some((a) => a.adapter_kind !== 'local'));
+      setAccountNameById(new Map(accounts.map((a) => [a.id, a.display_name])));
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -798,6 +805,48 @@ export default function SyncScreen() {
           >
             <Text style={styles.ghostButtonText}>{t('cacheRefresh.refreshNow')}</Text>
           </Pressable>
+          {/* Refresh-error surface: which accounts are failing to update,
+              per-container details + how stale the visible data is, and a
+              re-enter-password hint for auth-shaped errors. Linear rows —
+              a screen reader walks them naturally. Silent when healthy. */}
+          {[...errorsByAccount.values()].map((acc) => (
+            <View key={acc.account_id} style={styles.refreshErrorBox}>
+              <Text style={styles.refreshErrorTitle} accessibilityRole="header">
+                {t('refreshErrors.heading', {
+                  name: accountNameById.get(acc.account_id) ?? acc.account_id,
+                })}
+              </Text>
+              {acc.auth_suspected && (
+                <Text style={styles.refreshErrorAuth} accessibilityRole="text">
+                  {t('refreshErrors.authHint')}
+                </Text>
+              )}
+              {acc.errors.map((err) => (
+                <Text
+                  key={`${err.scope}:${err.container_id}`}
+                  style={styles.refreshErrorEntry}
+                  accessibilityRole="text"
+                >
+                  {t('refreshErrors.entry', {
+                    container:
+                      err.container_name ??
+                      t(`refreshErrors.scope.${err.scope}`, {
+                        defaultValue: err.scope,
+                      }),
+                    error: err.error,
+                  })}{' '}
+                  {err.last_success_at
+                    ? t('refreshErrors.lastSuccess', {
+                        time: formatLongDateTime(
+                          new Date(err.last_success_at),
+                          i18n.language,
+                        ),
+                      })
+                    : t('refreshErrors.neverSucceeded')}
+                </Text>
+              ))}
+            </View>
+          ))}
         </View>
       )}
 
@@ -946,6 +995,18 @@ const makeStyles = (c: ThemeColors) =>
       alignItems: 'center',
     },
     ghostButtonText: { fontSize: 16, fontWeight: '600', color: c.link },
+    refreshErrorBox: {
+      marginTop: 10,
+      padding: 12,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.danger,
+      backgroundColor: c.surfaceAlt,
+      gap: 6,
+    },
+    refreshErrorTitle: { fontSize: 15, fontWeight: '700', color: c.danger },
+    refreshErrorAuth: { fontSize: 14, fontWeight: '600', color: c.textPrimary },
+    refreshErrorEntry: { fontSize: 14, color: c.textSecondary },
     pressed: { opacity: 0.7 },
     error: { fontSize: 15, fontWeight: '600', color: c.danger },
     warning: {
