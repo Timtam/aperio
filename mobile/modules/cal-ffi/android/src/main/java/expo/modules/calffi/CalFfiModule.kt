@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
 import android.os.Build
+import android.util.Log
 import androidx.core.content.FileProvider
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -16,6 +17,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import uniffi.cal_ffi.Host
 import uniffi.cal_ffi.parseAttendee as uniffiParseAttendee
 
@@ -103,6 +105,21 @@ class CalFfiModule : Module() {
     // { payload: "<CacheUpdatedPayload JSON>" }; onCacheRefreshStatus carries
     // { status: "<CacheRefreshStatus JSON>" }.
     Events("onCacheUpdated", "onCacheRefreshStatus", "onContactsSynced")
+
+    // Eager engine open: the expensive Host construction (DB open +
+    // migrations + plugin registrations + tokio runtime + orchestrator
+    // build) used to hide inside the FIRST bridge call via `by lazy` —
+    // every later call on the shared AsyncFunction dispatcher waited
+    // behind it. Kick it on the slow scope while the JS bundle is still
+    // loading; `by lazy` is synchronized, so a racing first call simply
+    // waits for the remainder. Mirrors the iOS module's OnCreate.
+    OnCreate {
+      slowScope.launch {
+        runCatching { host }.onFailure {
+          Log.w("CalFfi", "eager host open failed; first call will retry", it)
+        }
+      }
+    }
 
     // Release the slow-ops thread when the module is torn down (dev reload /
     // React-host restart) — expo-modules cancels only its own queues.

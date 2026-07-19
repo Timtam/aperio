@@ -44,10 +44,33 @@ public class CalFfiModule: Module {
   private let slowQueue = DispatchQueue(label: "expo.modules.calffi.slow", qos: .userInitiated)
 
   // The full on-device engine: accounts + the statically-embedded adapter
-  // registry, opened lazily at the app-sandbox database path. Credentials
-  // route through IosKeychain (Security-framework Keychain). Mirrors the
-  // Android module's `host`.
-  private lazy var host: Host = {
+  // registry, opened at the app-sandbox database path. Credentials route
+  // through IosKeychain (Security-framework Keychain). Mirrors the Android
+  // module's `host`.
+  //
+  // Opening is EXPENSIVE (DB open + migrations + read pool + 17 static
+  // plugin registrations + tokio runtime + orchestrator build + cache
+  // reconcile) and used to hide inside a `lazy var` — i.e. inside whatever
+  // innocuous FIRST bridge call the JS side happened to make, on the
+  // default serial AsyncFunction queue, with every later call waiting
+  // behind it. `OnCreate` below kicks the open on the slow queue while
+  // the JS bundle is still loading, so the first read pays (at most) the
+  // REMAINDER of the open, not all of it. A `lazy var` is not
+  // thread-safe, hence the explicit lock-guarded once-init.
+  private let hostLock = NSLock()
+  private var hostStorage: Host?
+  private var host: Host {
+    hostLock.lock()
+    defer { hostLock.unlock() }
+    if let opened = hostStorage {
+      return opened
+    }
+    let opened = openHost()
+    hostStorage = opened
+    return opened
+  }
+
+  private func openHost() -> Host {
     let dir = try! FileManager.default.url(
       for: .applicationSupportDirectory,
       in: .userDomainMask,
@@ -66,7 +89,7 @@ public class CalFfiModule: Module {
     // the device kind is iOS-only. Mirrors the keychain/observer injection above.
     opened.setDeviceEventStore(bridge: IosDeviceEventStore())
     return opened
-  }()
+  }
 
   public func definition() -> ModuleDefinition {
     Name("CalFfi")
@@ -76,6 +99,14 @@ public class CalFfiModule: Module {
     // { payload: "<CacheUpdatedPayload JSON>" }; onCacheRefreshStatus carries
     // { status: "<CacheRefreshStatus JSON>" }.
     Events("onCacheUpdated", "onCacheRefreshStatus", "onContactsSynced")
+
+    // Eager engine open (see `host`): start the expensive Host construction
+    // off the critical path, while the JS bundle is still loading. The slow
+    // queue keeps it clear of the default AsyncFunction queue; the lock in
+    // the accessor makes a racing first call simply wait for the remainder.
+    OnCreate {
+      self.slowQueue.async { _ = self.host }
+    }
 
     Function("parseAttendee") { (entry: String) -> [String: Any?] in
       let parsed = parseAttendee(entry: entry)
