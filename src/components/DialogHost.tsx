@@ -164,6 +164,7 @@ export function DialogHost() {
           isOpen
           onClose={close}
           accounts={mode.accounts}
+          reason={mode.reason}
         />
       );
     case 'firstLaunchWizard':

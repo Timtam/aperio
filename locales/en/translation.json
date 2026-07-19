@@ -300,7 +300,9 @@
   "syncAccountsConnect": {
     "title": "Reconnect accounts",
     "body": "We pulled in your accounts from the sync store, but the passwords and tokens are stored only on each device. Please re-attach the credentials for the following accounts so this device can reach them too.",
+    "bodyRepair": "The provider no longer accepts the stored credentials for the following accounts — every update attempt is rejected. Re-enter the current password (for Google or Microsoft: sign in again) so updates work again.",
     "hint": "You can also dismiss this dialog and reconnect later from Settings → Accounts. Until then, calendars and tasks from these accounts will be unavailable on this device.",
+    "hintRepair": "You can also close this dialog and repair the connection later from Settings → Accounts. Until then, the affected calendars and tasks keep showing the last successfully fetched data.",
     "empty": "All accounts are reconnected.",
     "secretLabelPassword": "Password",
     "secretLabelToken": "API token",

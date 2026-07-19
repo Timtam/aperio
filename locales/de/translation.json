@@ -300,7 +300,9 @@
   "syncAccountsConnect": {
     "title": "Konten verbinden",
     "body": "Deine Konten wurden aus dem Sync-Speicher übernommen, aber Passwörter und Tokens werden ausschließlich pro Gerät gespeichert. Bitte hinterlege die Zugangsdaten für die folgenden Konten erneut, damit dieses Gerät sie verwenden kann.",
+    "bodyRepair": "Der Anbieter akzeptiert die gespeicherten Zugangsdaten der folgenden Konten nicht mehr — jeder Aktualisierungsversuch wird abgelehnt. Bitte gib das aktuelle Passwort neu ein (bei Google oder Microsoft: erneut anmelden), damit die Aktualisierung wieder funktioniert.",
     "hint": "Du kannst diesen Dialog auch schließen und die Konten später unter Einstellungen → Konten verbinden. Bis dahin sind Kalender und Aufgaben dieser Konten auf diesem Gerät nicht verfügbar.",
+    "hintRepair": "Du kannst diesen Dialog auch schließen und die Verbindung später unter Einstellungen → Konten reparieren. Bis dahin zeigen die betroffenen Kalender und Aufgaben weiterhin den zuletzt erfolgreich geladenen Stand.",
     "empty": "Alle Konten sind wieder verbunden.",
     "secretLabelPassword": "Passwort",
     "secretLabelToken": "API-Token",

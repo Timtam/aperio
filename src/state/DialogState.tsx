@@ -107,7 +107,14 @@ export type DialogMode =
   | { kind: 'syncConflicts' }
   | { kind: 'syncSchemaTooOld'; required: string; running: string }
   | { kind: 'syncStaleResume'; snapshotAt: string }
-  | { kind: 'syncAccountsConnect'; accounts: Account[] }
+  | {
+      kind: 'syncAccountsConnect';
+      accounts: Account[];
+      /** Which story the wizard tells: 'restore' = §19.11 credentials
+       *  missing after a sync restore (default); 'repair' = credentials
+       *  present but rejected (refresh-error surface). */
+      reason?: 'restore' | 'repair';
+    }
   | { kind: 'firstLaunchWizard' };
 
 /**
@@ -232,7 +239,10 @@ export interface DialogStateValue {
    *  when the snapshot brought in account rows that don't yet
    *  have their secrets on this device. The dialog walks the
    *  user through re-attaching credentials per account. */
-  openSyncAccountsConnect: (accounts: Account[]) => void;
+  openSyncAccountsConnect: (
+    accounts: Account[],
+    reason?: 'restore' | 'repair',
+  ) => void;
   /** §19.11 first-launch wizard. Opened by `FirstLaunchWizardChecker` on a
    *  fresh instance: language → sync (restore / create / skip) → first
    *  account. */
@@ -468,7 +478,8 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     [push],
   );
   const openSyncAccountsConnect = useCallback(
-    (accounts: Account[]) => push({ kind: 'syncAccountsConnect', accounts }),
+    (accounts: Account[], reason?: 'restore' | 'repair') =>
+      push({ kind: 'syncAccountsConnect', accounts, reason }),
     [push],
   );
   const openFirstLaunchWizard = useCallback(

@@ -45,6 +45,12 @@ import { Modal } from './Modal';
 export interface SyncAccountsConnectDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Which story the intro tells. 'restore' (default): §19.11 —
+   *  accounts came from the sync store and their credentials are
+   *  missing on this device. 'repair': the credentials exist but the
+   *  provider rejects them (refresh-error surface) — the restore copy
+   *  would be factually wrong for that user. */
+  reason?: 'restore' | 'repair';
   /** Pre-fetched list of accounts the dialog should walk. The
    *  caller (SyncPanel) reads this from
    *  `listAccountsMissingCredentials` so the wizard only opens
@@ -68,6 +74,7 @@ export function SyncAccountsConnectDialog({
   isOpen,
   onClose,
   accounts: initialAccounts,
+  reason = 'restore',
 }: SyncAccountsConnectDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
@@ -229,10 +236,18 @@ export function SyncAccountsConnectDialog({
       dismissOnBackdrop={false}
     >
       <FocusableNote className="sync-accounts-connect__body">
-        {t('syncAccountsConnect.body')}
+        {t(
+          reason === 'repair'
+            ? 'syncAccountsConnect.bodyRepair'
+            : 'syncAccountsConnect.body',
+        )}
       </FocusableNote>
       <FocusableNote className="sync-accounts-connect__hint">
-        {t('syncAccountsConnect.hint')}
+        {t(
+          reason === 'repair'
+            ? 'syncAccountsConnect.hintRepair'
+            : 'syncAccountsConnect.hint',
+        )}
       </FocusableNote>
       {pending.length === 0 ? (
         <FocusableNote className="sync-accounts-connect__empty">

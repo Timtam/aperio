@@ -1243,7 +1243,7 @@ export function AccountsPanel() {
                     type="button"
                     className="form__action accounts-refresh-errors__reconnect"
                     onClick={() =>
-                      openSyncAccountsConnect([accounts[focusIndex]])
+                      openSyncAccountsConnect([accounts[focusIndex]], 'repair')
                     }
                   >
                     {t(
