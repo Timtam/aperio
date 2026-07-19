@@ -645,7 +645,7 @@ fn sync_state_set_get_and_mark_error() {
 
     // mark_error stamps the error without clobbering token/window.
     store
-        .mark_error(ACC, SyncScope::Events, CAL, "timeout")
+        .mark_error(ACC, SyncScope::Events, CAL, "timeout", false)
         .unwrap();
     let after = store
         .get_sync_state(ACC, SyncScope::Events, CAL)
@@ -1865,7 +1865,7 @@ fn refresh_errors_groups_per_account_and_resolves_names() {
     // A listed calendar whose events refresh failed → named entry.
     store.replace_calendars(ACC, &[calendar(CAL)]).unwrap();
     store
-        .mark_error(ACC, SyncScope::Events, CAL, "HTTP 401 Unauthorized")
+        .mark_error(ACC, SyncScope::Events, CAL, "HTTP 401 Unauthorized", false)
         .unwrap();
     // A task list the listing does NOT know → unnamed entry, non-auth.
     store
@@ -1874,6 +1874,7 @@ fn refresh_errors_groups_per_account_and_resolves_names() {
             SyncScope::Tasks,
             "list-unknown",
             "connection timed out",
+            true,
         )
         .unwrap();
 
@@ -1890,7 +1891,7 @@ fn refresh_errors_groups_per_account_and_resolves_names() {
         })
         .unwrap();
     store
-        .mark_error("acc-2", SyncScope::Contacts, "", "connection reset")
+        .mark_error("acc-2", SyncScope::Contacts, "", "connection reset", true)
         .unwrap();
 
     let errors = store.refresh_errors().unwrap();
@@ -1925,7 +1926,7 @@ fn refresh_errors_prefer_the_rename_override() {
         })
         .unwrap();
     store
-        .mark_error(ACC, SyncScope::Events, CAL, "HTTP 401 Unauthorized")
+        .mark_error(ACC, SyncScope::Events, CAL, "HTTP 401 Unauthorized", false)
         .unwrap();
 
     let errors = store.refresh_errors().unwrap();
@@ -1946,7 +1947,13 @@ fn refresh_errors_skip_containers_dropped_from_the_listing() {
     // orphan filter this would be a permanent unnamed warning.
     store.replace_calendars(ACC, &[calendar(CAL)]).unwrap();
     store
-        .mark_error(ACC, SyncScope::Events, "cal-gone", "HTTP 404 Not Found")
+        .mark_error(
+            ACC,
+            SyncScope::Events,
+            "cal-gone",
+            "HTTP 404 Not Found",
+            true,
+        )
         .unwrap();
     assert!(
         store.refresh_errors().unwrap().is_empty(),
@@ -1956,7 +1963,13 @@ fn refresh_errors_skip_containers_dropped_from_the_listing() {
     // But with a COLD (empty) listing the same row must surface — the
     // listing has no authority yet (it may itself be what is failing).
     store
-        .mark_error(ACC, SyncScope::Tasks, "list-cold", "connection timed out")
+        .mark_error(
+            ACC,
+            SyncScope::Tasks,
+            "list-cold",
+            "connection timed out",
+            true,
+        )
         .unwrap();
     let errors = store.refresh_errors().unwrap();
     assert_eq!(errors.len(), 1);
@@ -1974,7 +1987,7 @@ fn refresh_errors_skip_containers_after_the_listing_emptied() {
     store.replace_calendars(ACC, &[calendar(CAL)]).unwrap();
     store.replace_calendars(ACC, &[]).unwrap();
     store
-        .mark_error(ACC, SyncScope::Events, CAL, "HTTP 404 Not Found")
+        .mark_error(ACC, SyncScope::Events, CAL, "HTTP 404 Not Found", true)
         .unwrap();
     assert!(
         store.refresh_errors().unwrap().is_empty(),
@@ -1986,12 +1999,112 @@ fn refresh_errors_skip_containers_after_the_listing_emptied() {
 fn refresh_errors_clear_after_a_successful_write() {
     let store = setup();
     store
-        .mark_error(ACC, SyncScope::Tasks, LIST, "boom")
+        .mark_error(ACC, SyncScope::Tasks, LIST, "boom", true)
         .unwrap();
     assert_eq!(store.refresh_errors().unwrap().len(), 1);
     // Any successful replace clears last_error for the container.
     store.replace_list_tasks(ACC, LIST, &[task("t1")]).unwrap();
     assert!(store.refresh_errors().unwrap().is_empty());
+}
+
+#[test]
+fn refresh_errors_confirm_non_auth_over_two_attempts() {
+    let store = setup();
+    // One non-auth (network) failure is UNCONFIRMED — a cold-start blip
+    // heals on its next attempt, so it must not surface yet.
+    store
+        .mark_error(ACC, SyncScope::Tasks, LIST, "connection timed out", false)
+        .unwrap();
+    assert!(
+        store.refresh_errors().unwrap().is_empty(),
+        "a single non-auth failure is an unconfirmed blip"
+    );
+    // A second consecutive failure confirms the outage.
+    store
+        .mark_error(ACC, SyncScope::Tasks, LIST, "connection timed out", false)
+        .unwrap();
+    assert_eq!(
+        store.refresh_errors().unwrap().len(),
+        1,
+        "a second consecutive failure confirms the error"
+    );
+}
+
+#[test]
+fn refresh_errors_surface_auth_on_the_first_attempt() {
+    let store = setup();
+    // Auth-shaped failures never self-heal, so they surface at once —
+    // no confirming second attempt.
+    store
+        .mark_error(ACC, SyncScope::Tasks, LIST, "HTTP 401 Unauthorized", false)
+        .unwrap();
+    let errors = store.refresh_errors().unwrap();
+    assert_eq!(
+        errors.len(),
+        1,
+        "an auth failure surfaces on the first attempt"
+    );
+    assert!(errors[0].auth_suspected);
+}
+
+#[test]
+fn refresh_errors_forced_floors_an_existing_reset_row() {
+    let store = setup();
+    // A container that failed, was healed (counter reset to 0 on the
+    // existing row), then a FORCED (manual) failure lands: the ON-CONFLICT
+    // floor must lift it straight to the threshold so the manual refresh's
+    // result shows at once — not sit at 1 waiting for another attempt.
+    store
+        .mark_error(ACC, SyncScope::Tasks, LIST, "boom", false)
+        .unwrap();
+    store.replace_list_tasks(ACC, LIST, &[task("t1")]).unwrap();
+    assert!(store.refresh_errors().unwrap().is_empty());
+    store
+        .mark_error(ACC, SyncScope::Tasks, LIST, "boom", true)
+        .unwrap();
+    assert_eq!(
+        store.refresh_errors().unwrap().len(),
+        1,
+        "a forced failure on a reset row surfaces immediately (ON-CONFLICT floor)"
+    );
+}
+
+#[test]
+fn refresh_errors_surface_forced_on_the_first_attempt() {
+    let store = setup();
+    // A user-forced pass (manual refresh) floors the counter at the
+    // threshold, so its result shows immediately.
+    store
+        .mark_error(ACC, SyncScope::Tasks, LIST, "connection timed out", true)
+        .unwrap();
+    assert_eq!(
+        store.refresh_errors().unwrap().len(),
+        1,
+        "a forced (manual-refresh) failure surfaces immediately"
+    );
+}
+
+#[test]
+fn refresh_errors_success_resets_the_confirmation() {
+    let store = setup();
+    // Confirm an error (two consecutive failures), then heal it.
+    for _ in 0..2 {
+        store
+            .mark_error(ACC, SyncScope::Tasks, LIST, "boom", false)
+            .unwrap();
+    }
+    assert_eq!(store.refresh_errors().unwrap().len(), 1);
+    store.replace_list_tasks(ACC, LIST, &[task("t1")]).unwrap();
+    assert!(store.refresh_errors().unwrap().is_empty());
+    // The reset must ZERO the counter, not leave it at 2: a single fresh
+    // failure is again unconfirmed and must not surface.
+    store
+        .mark_error(ACC, SyncScope::Tasks, LIST, "boom", false)
+        .unwrap();
+    assert!(
+        store.refresh_errors().unwrap().is_empty(),
+        "a success must reset the failure count, forcing re-confirmation"
+    );
 }
 
 #[test]

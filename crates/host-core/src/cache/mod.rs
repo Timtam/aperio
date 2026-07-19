@@ -221,6 +221,14 @@ pub struct AccountRefreshErrors {
     pub errors: Vec<ContainerRefreshError>,
 }
 
+/// Consecutive failed refresh attempts a NON-auth (network) error must
+/// reach before the error surface shows it. Confirms a real outage vs. a
+/// one-off cold-start blip (whose next attempt succeeds and resets the
+/// count) without any wall-clock window. Auth-shaped failures bypass this
+/// (they never self-heal); a user-forced pass floors the count here so a
+/// manual refresh's result shows at once.
+const CONFIRM_THRESHOLD: i64 = 2;
+
 /// Heuristic: does a provider error text look like an AUTH failure (as
 /// opposed to a network blip)? Substring match over the usual suspects —
 /// conservative on purpose: a false "auth" only makes the UI suggest
@@ -419,10 +427,12 @@ impl CacheStore {
             container: String,
             error: String,
             last_success: Option<String>,
+            failures: i64,
         }
         let rows: Vec<Row> = self.db.with_read_conn(|c| {
             let mut stmt = c.prepare(
-                "SELECT account_id, scope, container_id, last_error, last_refreshed_at
+                "SELECT account_id, scope, container_id, last_error, last_refreshed_at,
+                        consecutive_failures
                  FROM cache_sync_state
                  WHERE last_error IS NOT NULL
                  ORDER BY account_id, scope, container_id",
@@ -434,10 +444,23 @@ impl CacheStore {
                     container: r.get(2)?,
                     error: r.get(3)?,
                     last_success: r.get(4)?,
+                    failures: r.get(5)?,
                 })
             })?;
             mapped.collect::<rusqlite::Result<Vec<_>>>()
         })?;
+        // CONFIRM the failure before surfacing it. A non-auth (network)
+        // failure shows only once it has recurred (>= CONFIRM_THRESHOLD
+        // consecutive attempts) — a cold-start blip's next attempt clears
+        // it, so it is never shown or announced. Auth-shaped failures
+        // never self-heal, so they surface at the first attempt regardless
+        // of the count. A user-forced pass floors the count at the
+        // threshold (see `mark_error`), so a manual refresh's result shows
+        // immediately.
+        let rows: Vec<Row> = rows
+            .into_iter()
+            .filter(|r| r.failures >= CONFIRM_THRESHOLD || is_auth_shaped(&r.error))
+            .collect();
 
         // Resolve container identity from the cached listings. `None`
         // means the row is ORPHANED: the listing authoritatively does
@@ -606,7 +629,8 @@ impl CacheStore {
                    window_start = excluded.window_start,
                    window_end = excluded.window_end,
                    last_refreshed_at = excluded.last_refreshed_at,
-                   last_error = NULL",
+                   last_error = NULL,
+                   consecutive_failures = 0",
                 params![account, calendar, ws, we, now],
             )?;
             Ok(!unchanged)
@@ -687,7 +711,8 @@ impl CacheStore {
                    window_start = excluded.window_start,
                    window_end = excluded.window_end,
                    last_refreshed_at = excluded.last_refreshed_at,
-                   last_error = NULL",
+                   last_error = NULL,
+                   consecutive_failures = 0",
                 params![account, calendar, ws, we, now],
             )?;
             Ok(!unchanged)
@@ -754,7 +779,8 @@ impl CacheStore {
                  ON CONFLICT(account_id, scope, container_id) DO UPDATE SET
                    sync_token = excluded.sync_token,
                    last_refreshed_at = excluded.last_refreshed_at,
-                   last_error = NULL",
+                   last_error = NULL,
+                   consecutive_failures = 0",
                 params![account, calendar, delta.new_token, now],
             )?;
             Ok(changed)
@@ -1180,7 +1206,8 @@ impl CacheStore {
                  ON CONFLICT(account_id, scope, container_id) DO UPDATE SET
                    sync_token = excluded.sync_token,
                    last_refreshed_at = excluded.last_refreshed_at,
-                   last_error = NULL",
+                   last_error = NULL,
+                   consecutive_failures = 0",
                 params![account, scope.as_str(), container, token, now],
             )?;
             Ok(())
@@ -1280,21 +1307,35 @@ impl CacheStore {
 
     /// Record a failed refresh: stamp `last_error`, leave the rest
     /// (including the still-valid cached data + window) intact.
+    /// Record a failed refresh of one container. Bumps the
+    /// consecutive-failure counter (reset to 0 by any success), which the
+    /// error surface uses to CONFIRM a non-auth failure before showing it
+    /// — a one-off blip's next attempt succeeds and resets the count, so
+    /// it never surfaces. `forced` = the failure came from a user-driven
+    /// pass (manual refresh); bump straight to [`CONFIRM_THRESHOLD`] so
+    /// the result of an explicit action shows at once instead of waiting
+    /// for a second attempt.
     pub fn mark_error(
         &self,
         account: &str,
         scope: SyncScope,
         container: &str,
         message: &str,
+        forced: bool,
     ) -> DbResult<()> {
+        // Floor the counter for a forced failure so it crosses the confirm
+        // threshold on the first try; automatic failures just increment.
+        let floor: i64 = if forced { CONFIRM_THRESHOLD } else { 0 };
+        let initial: i64 = floor.max(1);
         self.db.with_conn(|c| {
             c.execute(
                 "INSERT INTO cache_sync_state
-                   (account_id, scope, container_id, last_error)
-                 VALUES (?1, ?2, ?3, ?4)
+                   (account_id, scope, container_id, last_error, consecutive_failures)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
                  ON CONFLICT(account_id, scope, container_id) DO UPDATE SET
-                   last_error = excluded.last_error",
-                params![account, scope.as_str(), container, message],
+                   last_error = excluded.last_error,
+                   consecutive_failures = max(consecutive_failures + 1, ?6)",
+                params![account, scope.as_str(), container, message, initial, floor],
             )?;
             Ok(())
         })
@@ -1510,7 +1551,8 @@ impl CacheStore {
                  ON CONFLICT(account_id, scope, container_id) DO UPDATE SET
                    sync_token = excluded.sync_token,
                    last_refreshed_at = excluded.last_refreshed_at,
-                   last_error = NULL",
+                   last_error = NULL,
+                   consecutive_failures = 0",
                 params![account, scope.as_str(), list, delta.new_token, now],
             )?;
             Ok(changed)
@@ -1702,7 +1744,8 @@ fn mark_refreshed(
          VALUES (?1, ?2, ?3, ?4, NULL)
          ON CONFLICT(account_id, scope, container_id) DO UPDATE SET
            last_refreshed_at = excluded.last_refreshed_at,
-           last_error = NULL",
+           last_error = NULL,
+           consecutive_failures = 0",
         params![account, scope.as_str(), container, now],
     )?;
     Ok(())

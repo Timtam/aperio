@@ -1,0 +1,23 @@
+-- Consecutive-failure confirmation for the refresh-error surface.
+--
+-- A container's background refresh can fail transiently (network not
+-- ready at cold start), and the failure heals out-of-band via a later
+-- SWR read that emits no refresh-status signal — so the frontend cannot
+-- tell a one-off blip from a real outage at the moment a warm pass ends.
+-- Rather than guess with a wall-clock window, confirm by ATTEMPT: count
+-- consecutive failed refresh attempts per container (reset to 0 on any
+-- success). The error surface then shows a NON-auth failure only once it
+-- has failed at least twice in a row (a blip's next attempt succeeds and
+-- resets the count); auth-shaped failures never self-heal and surface at
+-- the first failure regardless. A user-forced pass (manual "refresh")
+-- bumps the count straight to the confirm threshold so its result shows
+-- at once.
+--
+-- Backfill 0 (clean slate): existing rows start with zero recorded
+-- failures, exactly like a never-failed container. A pre-existing NON-auth
+-- error therefore stops surfacing at upgrade and re-confirms only after two
+-- consecutive failures on the automatic cadence (a forced/manual pass
+-- confirms in one); a pre-existing auth-shaped error keeps surfacing at
+-- once via the is_auth_shaped bypass.
+ALTER TABLE cache_sync_state
+    ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0;

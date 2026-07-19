@@ -54,7 +54,12 @@ last data it has and warns you instead of failing silently:
   screen, and the affected account on the accounts screen gets a
   **Reconnect** button to re-enter the password or redo the provider sign-in.
 
-The warning clears by itself as soon as an update succeeds again.
+A brief, one-off connection hiccup does not raise the warning: a network
+failure is only shown once it recurs, so a cold start on a not-yet-ready
+network never flashes a false alarm. A login problem — which never fixes
+itself — shows straight away, and a manual refresh always reports its
+result at once. The warning clears by itself as soon as an update
+succeeds again.
 
 ## Reporting a bug
 

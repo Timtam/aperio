@@ -60,8 +60,12 @@ weiter die zuletzt bekannten Daten und warnt dich, statt still zu scheitern:
   Konten-Bildschirm eine Schaltfläche **Neu verbinden**, um das Passwort neu
   einzugeben bzw. die Anbieter-Anmeldung zu wiederholen.
 
-Die Warnung verschwindet von selbst, sobald eine Aktualisierung wieder
-gelingt.
+Ein kurzer, einmaliger Verbindungsaussetzer löst die Warnung nicht aus:
+Ein Netzwerkfehler wird erst gezeigt, wenn er erneut auftritt — ein
+Kaltstart mit noch nicht bereitem Netz erzeugt so keinen Fehlalarm. Ein
+Anmeldeproblem, das sich nie von selbst behebt, erscheint sofort, und eine
+manuelle Aktualisierung meldet ihr Ergebnis immer unmittelbar. Die Warnung
+verschwindet von selbst, sobald eine Aktualisierung wieder gelingt.
 
 ## Einen Fehler melden
 

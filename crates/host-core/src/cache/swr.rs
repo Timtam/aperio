@@ -118,7 +118,7 @@ pub fn spawn_refresh<T, Fut, Fetch, Write>(
                 }
             },
             Err(err) => {
-                let _ = cache.mark_error(&account, scope, &container, &err.to_string());
+                let _ = cache.mark_error(&account, scope, &container, &err.to_string(), false);
                 tracing::warn!(
                     target: "aperio::cache",
                     scope = scope.as_str(),
@@ -164,7 +164,7 @@ pub fn spawn_item_refresh<F, Fut>(
             }),
             Ok(false) => {} // content identical — nothing for the UI to reload
             Err(err) => {
-                let _ = cache.mark_error(&account, scope, &container, &err.to_string());
+                let _ = cache.mark_error(&account, scope, &container, &err.to_string(), false);
                 tracing::warn!(
                     target: "aperio::cache",
                     scope = scope.as_str(),

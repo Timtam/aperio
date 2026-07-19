@@ -5204,7 +5204,11 @@ impl Host {
     pub fn refresh_external_cache(&self) {
         let refresher = Arc::clone(&self.cache_refresher);
         self.runtime.handle().spawn(async move {
-            refresher.warm_all().await;
+            // The genuine manual "refresh now" is an explicit user action —
+            // surface any failure at once (forced; see warm_all). The
+            // automatic on-foreground warm uses warm_cache_on_foreground,
+            // which runs UN-forced.
+            refresher.warm_all(true).await;
         });
     }
 
@@ -5230,9 +5234,16 @@ impl Host {
 
     /// Warm the cache when the app foregrounds — the mobile stand-in for a tick
     /// of the desktop periodic warm loop (which mobile can't run while
-    /// backgrounded). Same fire-and-forget warm pass as the manual refresh.
+    /// backgrounded). This is AUTOMATIC (not a user action), so it runs the
+    /// pass UN-forced, exactly like the desktop app-start/periodic pass: a
+    /// cold-start/resume network blip must be confirmed by a second attempt
+    /// before it surfaces, instead of alarming on the first failure. Only the
+    /// genuine manual `refresh_external_cache` is forced.
     pub fn warm_cache_on_foreground(&self) {
-        self.refresh_external_cache();
+        let refresher = Arc::clone(&self.cache_refresher);
+        self.runtime.handle().spawn(async move {
+            refresher.warm_all(false).await;
+        });
     }
 
     /// Force a FULL cold re-sync of one external account: clear its delta tokens

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useTranslation } from 'react-i18next';
 
@@ -12,41 +12,75 @@ import { applyStoredLanguage } from '../intl/language';
  * container whose background refresh keeps failing (revoked iCloud
  * app-password, dead server) used to keep serving its cached rows with
  * no cue anywhere. The backend records every failed refresh in
- * `cache_sync_state.last_error` (cleared by any successful write); this
- * hook reads the aggregate and re-reads whenever a warm pass ENDS (the
- * moment errors appear or clear) plus once on mount, plus a slow poll —
- * per-read SWR refreshes record/clear errors without a pass-end event,
- * so without the poll a just-fixed password would keep the warning (and
- * a fresh failure stay invisible) until the next scheduled pass.
+ * `cache_sync_state.last_error` (cleared by any successful write).
  *
- * Consumers: the sidebar (per-account warning on the tree row, and the
- * ONE announce-on-growth instance) and the accounts panel (full
- * per-container details + the re-enter-password hint).
+ * ONE app-wide watcher (started lazily on first use, kept for the app
+ * lifetime) owns the state; the sidebar and accounts panel subscribe and
+ * read the last published snapshot, so a newly-mounted consumer never
+ * kicks a fresh fetch that could show a mid-refresh value.
+ *
+ * VISIBLE TIMING — publish the error set once the refresh has SETTLED,
+ * not on every pass end. A pass end arms a short settle timer, a new
+ * pass cancels it, and we publish only after `refreshing` has stayed
+ * false for SETTLE_MS. This coalesces a settling round and lets a
+ * newly-mounted consumer read the last settled snapshot instead of a
+ * mid-refresh value — the warning shows within SETTLE_MS of the refresh
+ * finishing (no arbitrary time threshold, no minutes-long wait).
+ *
+ * BLIP-FREE BY CONFIRMATION — the set returned by the backend is already
+ * blip-filtered: a NON-auth (network) failure is only reported once it
+ * has failed on two consecutive attempts (a cold-start blip's next
+ * attempt succeeds and resets the count), auth-shaped failures report at
+ * the first attempt, and a user-forced (manual refresh) failure reports
+ * at once. So the frontend shows exactly what it is given — visible and
+ * spoken are the SAME set, with no wall-clock window anywhere.
+ *
+ * Consumers: the sidebar (per-account warning on the tree row, and — via
+ * `announceOnGrowth` — the ONE announce-on-growth instance) and the
+ * accounts panel (full per-container details + the re-enter-password
+ * hint).
  */
 
-/**
- * App-wide announce dedup, deliberately at module scope: several hook
- * instances may be live (sidebar + accounts panel), and each remount
- * starts a fresh effect — but a pre-existing error must be announced
- * exactly once per session, not once per instance or per mount.
- * Shrinks when an account clears, so a re-appearing failure announces
- * again.
- */
+/** How long `refreshing` must stay false before the (already
+ *  blip-filtered) error set is published — coalesces a settling round and
+ *  lets a mounting consumer read the last settled snapshot. */
+const SETTLE_MS = 5_000;
+const POLL_MS = 60_000;
+
+interface Publish {
+  errors: AccountRefreshErrors[];
+  /** This settled publish introduced a not-previously-known failing
+   *  account — so the ONE announcer should speak. The set is already
+   *  blip-filtered by the backend, so any new account is a real failure. */
+  grew: boolean;
+  /** Wording flag: are the NEWLY failing accounts auth-shaped? A
+   *  long-known auth failure must not make an unrelated outage announce
+   *  as a password problem, so this is computed from the new ones only. */
+  auth: boolean;
+}
+
+let current: AccountRefreshErrors[] = [];
+/** Accounts already announced this session; shrinks when one clears so a
+ *  re-appearing failure announces again. Updated on every settled publish
+ *  regardless of whether anyone is listening, so "grew" is an
+ *  app-wide-once decision. */
 let knownAffectedAccounts = new Set<string>();
-/** Non-auth failures waiting out the announce hysteresis: account id →
- *  first seen (ms epoch). Dropped the moment the account clears. */
-let pendingNonAuthSince = new Map<string, number>();
+let started = false;
+let refreshing = false;
+let settleTimer: number | null = null;
+const subscribers = new Set<(p: Publish) => void>();
 
-/** How long a NON-auth failure must persist before it is announced —
- *  connectivity blips (sleep/wake, Wi-Fi drop) clear well within this
- *  and must never interrupt the user. Auth-shaped failures announce
- *  immediately: a revoked password does not heal itself. */
-const NON_AUTH_ANNOUNCE_AFTER_MS = 90_000;
-
-/** Test-only: reset the module-level announce dedup between tests. */
+/** Test-only: reset the module-level singleton between tests. */
 export function resetAnnouncedAccountsForTest(): void {
   knownAffectedAccounts = new Set();
-  pendingNonAuthSince = new Map();
+  current = [];
+  refreshing = false;
+  if (settleTimer != null) {
+    clearTimeout(settleTimer);
+    settleTimer = null;
+  }
+  started = false;
+  subscribers.clear();
 }
 
 /**
@@ -62,7 +96,68 @@ export function clampErrorText(raw: string): string {
   return `${[...collapsed].slice(0, 159).join('')}…`;
 }
 
-const POLL_MS = 60_000;
+function publishSettled(): void {
+  getRefreshErrors()
+    .then((rows) => {
+      current = rows;
+      // The set is already blip-filtered by the backend, so any account
+      // not previously known is a real, confirmed (or auth-shaped)
+      // failure — announce on growth, wording from the new ones only.
+      const newly = rows.filter(
+        (r) => !knownAffectedAccounts.has(r.account_id),
+      );
+      knownAffectedAccounts = new Set(rows.map((r) => r.account_id));
+      const publish: Publish = {
+        errors: current,
+        grew: newly.length > 0,
+        auth: newly.some((r) => r.auth_suspected),
+      };
+      subscribers.forEach((cb) => cb(publish));
+    })
+    .catch((err) => {
+      console.warn('get_refresh_errors failed', err);
+    });
+}
+
+function armSettle(): void {
+  if (settleTimer != null) window.clearTimeout(settleTimer);
+  settleTimer = window.setTimeout(() => {
+    settleTimer = null;
+    publishSettled();
+  }, SETTLE_MS);
+}
+
+function startWatcher(): void {
+  if (started) return;
+  started = true;
+  void listen<{ refreshing: boolean }>('cache-refresh-status', (event) => {
+    refreshing = event.payload.refreshing;
+    if (refreshing) {
+      // A pass is running — hold off; wait for the burst to finish so we
+      // never publish a mid-storm value the next pass will heal.
+      if (settleTimer != null) {
+        window.clearTimeout(settleTimer);
+        settleTimer = null;
+      }
+    } else {
+      // A pass ended — arm the settle window; a new pass cancels it.
+      armSettle();
+    }
+  }).catch((err) => {
+    console.warn('cache-refresh-status listen failed', err);
+  });
+  // No synchronous "is a pass running now?" read; assume idle and arm an
+  // initial settle so a persistent error from last session surfaces. If
+  // a pass is actually in flight, its first event cancels this and
+  // re-arms on completion.
+  armSettle();
+  // Safety net for the pass-less paths (per-read SWR refreshes record or
+  // clear errors without a pass-end event): when idle and not already
+  // waiting to settle, re-read on a slow cadence.
+  window.setInterval(() => {
+    if (!refreshing && settleTimer == null) publishSettled();
+  }, POLL_MS);
+}
 
 export function useRefreshErrors(options?: {
   /**
@@ -79,93 +174,44 @@ export function useRefreshErrors(options?: {
   const announceOnGrowth = options?.announceOnGrowth === true;
   const { t } = useTranslation();
   const announce = useAnnouncer();
-  const [errors, setErrors] = useState<AccountRefreshErrors[]>([]);
+  const [errors, setErrors] = useState<AccountRefreshErrors[]>(current);
+
+  // Keep the latest announce/t reachable from the long-lived subscription
+  // without resubscribing on every render.
+  const announceRef = useRef(announce);
+  announceRef.current = announce;
+  const tRef = useRef(t);
+  tRef.current = t;
 
   useEffect(() => {
-    let cancelled = false;
-    let unlisten: (() => void) | undefined;
-
-    const refetch = () => {
-      getRefreshErrors()
-        .then((rows) => {
-          if (cancelled) return;
-          setErrors(rows);
-          const nowAffected = new Set(rows.map((r) => r.account_id));
-          if (announceOnGrowth) {
-            // Classify the accounts that are failing but not yet
-            // announced. Wording comes from the NEWLY failing accounts
-            // only — a long-known auth failure must not make an
-            // unrelated outage announce as a password problem. Auth →
-            // announce now; non-auth only after the hysteresis window,
-            // so connectivity blips stay silent.
-            const now = Date.now();
-            let announceAuth = false;
-            let announceNonAuth = false;
-            const nextPending = new Map<string, number>();
-            for (const r of rows) {
-              if (knownAffectedAccounts.has(r.account_id)) continue;
-              if (r.auth_suspected) {
-                announceAuth = true;
-              } else {
-                const since = pendingNonAuthSince.get(r.account_id) ?? now;
-                if (now - since >= NON_AUTH_ANNOUNCE_AFTER_MS) {
-                  announceNonAuth = true;
-                } else {
-                  nextPending.set(r.account_id, since);
-                }
-              }
-            }
-            if (announceAuth || announceNonAuth) {
-              // Defer the utterance (not the decision) until the stored
-              // language choice is live — the one deduped announcement
-              // must come out in the user's language, and the first
-              // fetch can win the race against useStoredLanguage.
-              void applyStoredLanguage()
-                .catch(() => undefined)
-                .then(() => {
-                  announce(
-                    t(
-                      announceAuth
-                        ? 'dialogs.accounts.refreshErrors.announceAuth'
-                        : 'dialogs.accounts.refreshErrors.announce',
-                    ),
-                  );
-                });
-            }
-            knownAffectedAccounts = new Set(
-              [...nowAffected].filter((id) => !nextPending.has(id)),
+    startWatcher();
+    // Read the last settled snapshot immediately — no fresh fetch, so a
+    // mount can never surface a mid-refresh value.
+    setErrors(current);
+    const cb = (p: Publish) => {
+      setErrors(p.errors);
+      if (announceOnGrowth && p.grew) {
+        // Defer the utterance (not the decision) until the stored
+        // language is live, so the one deduped announcement comes out in
+        // the user's language.
+        void applyStoredLanguage()
+          .catch(() => undefined)
+          .then(() => {
+            announceRef.current(
+              tRef.current(
+                p.auth
+                  ? 'dialogs.accounts.refreshErrors.announceAuth'
+                  : 'dialogs.accounts.refreshErrors.announce',
+              ),
             );
-            pendingNonAuthSince = nextPending;
-          }
-        })
-        .catch((err) => {
-          console.warn('get_refresh_errors failed', err);
-        });
+          });
+      }
     };
-
-    refetch();
-    listen<{ refreshing: boolean }>('cache-refresh-status', (event) => {
-      // Pass END is when the error set can have changed (a pass either
-      // recorded new failures or a success cleared old ones).
-      if (!event.payload.refreshing) refetch();
-    })
-      .then((fn) => {
-        if (cancelled) fn();
-        else unlisten = fn;
-      })
-      .catch((err) => {
-        console.warn('cache-refresh-status listen failed', err);
-      });
-    // Bounded staleness for the pass-less paths (per-read SWR refresh
-    // failures/clears): cheap indexed query, once a minute.
-    const poll = window.setInterval(refetch, POLL_MS);
-
+    subscribers.add(cb);
     return () => {
-      cancelled = true;
-      unlisten?.();
-      window.clearInterval(poll);
+      subscribers.delete(cb);
     };
-  }, [announceOnGrowth, announce, t]);
+  }, [announceOnGrowth]);
 
   const errorsByAccount = useMemo(() => {
     const map = new Map<string, AccountRefreshErrors>();
