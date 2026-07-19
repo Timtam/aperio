@@ -216,6 +216,17 @@ impl DbHandle {
     }
 }
 
+/// Lets the local adapter's pure-read paths run on the WAL read pool
+/// (concurrent with the writer) instead of waiting out whatever
+/// transaction currently holds the writer mutex — at app start that is
+/// the launch sync's apply writes, which used to stall the first paint's
+/// local event/task reads.
+impl cal_adapter_local::ReadConnProvider for DbHandle {
+    fn with_read(&self, f: &mut dyn FnMut(&rusqlite::Connection)) {
+        self.with_read_conn(|c| f(c));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

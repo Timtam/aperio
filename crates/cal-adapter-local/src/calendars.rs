@@ -129,24 +129,25 @@ impl LocalAdapter {
     /// item the user picks from the list — the overview only stores
     /// item ids, not full payloads.
     pub fn get_event_by_id(&self, id: &str) -> cal_core::Result<Option<Event>> {
-        let conn = self.db().lock().expect("db mutex poisoned");
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, calendar_id, title, description, location,
-                        start_utc, end_utc, all_day, rrule, rrule_exceptions,
-                        color_label_id, reminders, sound, attendees,
-                        created_at, updated_at, etag, rrule_tzid
-                   FROM events WHERE id = ?",
-            )
-            .map_err(map_sql_err)?;
-        let row = stmt
-            .query_row(params![id], |r| Ok(row_to_event(r)))
-            .optional()
-            .map_err(map_sql_err)?;
-        match row {
-            None => Ok(None),
-            Some(res) => res.map(Some),
-        }
+        self.read(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, calendar_id, title, description, location,
+                            start_utc, end_utc, all_day, rrule, rrule_exceptions,
+                            color_label_id, reminders, sound, attendees,
+                            created_at, updated_at, etag, rrule_tzid
+                       FROM events WHERE id = ?",
+                )
+                .map_err(map_sql_err)?;
+            let row = stmt
+                .query_row(params![id], |r| Ok(row_to_event(r)))
+                .optional()
+                .map_err(map_sql_err)?;
+            match row {
+                None => Ok(None),
+                Some(res) => res.map(Some),
+            }
+        })
     }
 
     /// Read one calendar row by id, returning `None` if it doesn't
@@ -250,43 +251,44 @@ impl LocalAdapter {
 #[async_trait]
 impl CalendarFeature for LocalAdapter {
     async fn list_calendars(&self) -> cal_core::Result<Vec<Calendar>> {
-        let conn = self.db().lock().expect("db mutex poisoned");
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, name, color_hex, color_source, read_only, default_sound,
-                        color_label_id
-                   FROM calendars
-                  ORDER BY name COLLATE NOCASE",
-            )
-            .map_err(map_sql_err)?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok((
-                    req_text(row, 0),
-                    req_text(row, 1),
-                    read_container_color(row, 2, 3),
-                    read_bool(row, 4),
-                    read_sound(row, 5),
-                    opt_text(row, 6),
-                ))
-            })
-            .map_err(map_sql_err)?;
+        self.read(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, name, color_hex, color_source, read_only, default_sound,
+                            color_label_id
+                       FROM calendars
+                      ORDER BY name COLLATE NOCASE",
+                )
+                .map_err(map_sql_err)?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((
+                        req_text(row, 0),
+                        req_text(row, 1),
+                        read_container_color(row, 2, 3),
+                        read_bool(row, 4),
+                        read_sound(row, 5),
+                        opt_text(row, 6),
+                    ))
+                })
+                .map_err(map_sql_err)?;
 
-        let mut out = Vec::new();
-        for r in rows {
-            let (id, name, color, read_only, sound, color_label) = r.map_err(map_sql_err)?;
-            out.push(Calendar {
-                supports_scheduling: false,
-                supports_event_color: true,
-                id: id?,
-                name: name?,
-                color: color?,
-                color_label: color_label?.map(ColorLabelId),
-                read_only: read_only?,
-                default_sound: sound?,
-            });
-        }
-        Ok(out)
+            let mut out = Vec::new();
+            for r in rows {
+                let (id, name, color, read_only, sound, color_label) = r.map_err(map_sql_err)?;
+                out.push(Calendar {
+                    supports_scheduling: false,
+                    supports_event_color: true,
+                    id: id?,
+                    name: name?,
+                    color: color?,
+                    color_label: color_label?.map(ColorLabelId),
+                    read_only: read_only?,
+                    default_sound: sound?,
+                });
+            }
+            Ok(out)
+        })
     }
 
     async fn get_events(
@@ -294,27 +296,28 @@ impl CalendarFeature for LocalAdapter {
         calendar_id: &str,
         range: DateRange,
     ) -> cal_core::Result<Vec<Event>> {
-        let conn = self.db().lock().expect("db mutex poisoned");
-        // Phase 1: simple temporal filter. Recurrence expansion (RRULE)
-        // happens in Phase 4 once we wire up an evaluator — for now we
-        // return rows whose stored start/end intersect the requested range.
-        let mut stmt = conn.prepare(EVENT_SELECT_PREFIX).map_err(map_sql_err)?;
+        self.read(|conn| {
+            // Phase 1: simple temporal filter. Recurrence expansion (RRULE)
+            // happens in Phase 4 once we wire up an evaluator — for now we
+            // return rows whose stored start/end intersect the requested range.
+            let mut stmt = conn.prepare(EVENT_SELECT_PREFIX).map_err(map_sql_err)?;
 
-        let start_s = fmt_utc(&range.start);
-        let end_s = fmt_utc(&range.end);
-        let rows = stmt
-            .query_map(
-                // calendar_id, range.end, range.start, range.end — the
-                // trailing end feeds the recurring-master clause.
-                params![calendar_id, end_s, start_s, end_s],
-                row_to_event_result,
-            )
-            .map_err(map_sql_err)?;
-        let mut out = Vec::new();
-        for r in rows {
-            out.push(r.map_err(map_sql_err)??);
-        }
-        Ok(out)
+            let start_s = fmt_utc(&range.start);
+            let end_s = fmt_utc(&range.end);
+            let rows = stmt
+                .query_map(
+                    // calendar_id, range.end, range.start, range.end — the
+                    // trailing end feeds the recurring-master clause.
+                    params![calendar_id, end_s, start_s, end_s],
+                    row_to_event_result,
+                )
+                .map_err(map_sql_err)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r.map_err(map_sql_err)??);
+            }
+            Ok(out)
+        })
     }
 
     async fn create_event(&self, calendar_id: &str, event: NewEvent) -> cal_core::Result<Event> {

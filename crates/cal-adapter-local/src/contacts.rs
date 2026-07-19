@@ -109,52 +109,54 @@ impl LocalAdapter {
 #[async_trait]
 impl ContactsFeature for LocalAdapter {
     async fn list_contact_lists(&self) -> CoreResult<Vec<ContactList>> {
-        let conn = self.db().lock().expect("db mutex poisoned");
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, name, color_hex, color_source, read_only, color_label_id
-                 FROM contact_lists
-                 WHERE source = 'local'
-                 ORDER BY name COLLATE NOCASE",
-            )
-            .map_err(map_sql_err)?;
-        let rows = stmt
-            .query_map([], row_to_contact_list)
-            .map_err(map_sql_err)?;
-        let mut out = Vec::new();
-        for r in rows {
-            out.push(r.map_err(map_sql_err)??);
-        }
-        Ok(out)
+        self.read(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, name, color_hex, color_source, read_only, color_label_id
+                     FROM contact_lists
+                     WHERE source = 'local'
+                     ORDER BY name COLLATE NOCASE",
+                )
+                .map_err(map_sql_err)?;
+            let rows = stmt
+                .query_map([], row_to_contact_list)
+                .map_err(map_sql_err)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r.map_err(map_sql_err)??);
+            }
+            Ok(out)
+        })
     }
 
     async fn get_contacts(&self, list_id: &str) -> CoreResult<Vec<Contact>> {
-        let conn = self.db().lock().expect("db mutex poisoned");
-        // `photo_data IS NOT NULL` projects the has_photo flag
-        // without materialising the BLOB — SQLite skips reading
-        // the bytes off disk when we don't reference the column
-        // directly, so the listing query stays cheap even for
-        // contacts with megabyte-sized avatars.
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, list_id, display_name, given_name, family_name,
-                        organization, emails, phone_numbers, birthday, notes,
-                        etag, created_at, updated_at, members,
-                        (photo_data IS NOT NULL) AS has_photo,
-                        addresses
-                 FROM contacts
-                 WHERE list_id = ?
-                 ORDER BY display_name COLLATE NOCASE",
-            )
-            .map_err(map_sql_err)?;
-        let rows = stmt
-            .query_map(params![list_id], row_to_contact)
-            .map_err(map_sql_err)?;
-        let mut out = Vec::new();
-        for r in rows {
-            out.push(r.map_err(map_sql_err)??);
-        }
-        Ok(out)
+        self.read(|conn| {
+            // `photo_data IS NOT NULL` projects the has_photo flag
+            // without materialising the BLOB — SQLite skips reading
+            // the bytes off disk when we don't reference the column
+            // directly, so the listing query stays cheap even for
+            // contacts with megabyte-sized avatars.
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, list_id, display_name, given_name, family_name,
+                            organization, emails, phone_numbers, birthday, notes,
+                            etag, created_at, updated_at, members,
+                            (photo_data IS NOT NULL) AS has_photo,
+                            addresses
+                     FROM contacts
+                     WHERE list_id = ?
+                     ORDER BY display_name COLLATE NOCASE",
+                )
+                .map_err(map_sql_err)?;
+            let rows = stmt
+                .query_map(params![list_id], row_to_contact)
+                .map_err(map_sql_err)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r.map_err(map_sql_err)??);
+            }
+            Ok(out)
+        })
     }
 
     async fn search_contacts(&self, query: &str) -> CoreResult<Vec<Contact>> {

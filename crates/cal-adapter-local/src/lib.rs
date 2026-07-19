@@ -45,9 +45,23 @@ pub const SOURCE_ID: &str = "local";
 /// connection under a mutex is the simplest correct choice.
 pub type SharedConn = Arc<Mutex<Connection>>;
 
+/// Provider of read-only connections that can run CONCURRENTLY with the
+/// writer (the host's WAL read pool). Installed by the host after
+/// construction; without one, reads fall back to the writer mutex (the
+/// in-memory test databases have no pool). The provider MUST invoke the
+/// closure exactly once.
+pub trait ReadConnProvider: Send + Sync {
+    fn with_read(&self, f: &mut dyn FnMut(&Connection));
+}
+
 /// Local-only calendar and task adapter.
 pub struct LocalAdapter {
     db: SharedConn,
+    /// WAL read pool for the pure-read paths — without it, a read issued
+    /// while a sync-apply / warm-pass transaction holds the writer mutex
+    /// waits the whole transaction out (visible as the first paint
+    /// stalling behind the launch sync).
+    read_pool: Option<Arc<dyn ReadConnProvider>>,
     source: AdapterSource,
     capabilities: Vec<Capability>,
 }
@@ -57,6 +71,7 @@ impl LocalAdapter {
     pub fn new(db: SharedConn) -> Self {
         Self {
             db,
+            read_pool: None,
             source: AdapterSource::new(SOURCE_ID),
             capabilities: vec![
                 Capability::Calendar,
@@ -66,6 +81,12 @@ impl LocalAdapter {
         }
     }
 
+    /// Install the host's WAL read pool (see [`ReadConnProvider`]).
+    pub fn with_read_pool(mut self, pool: Arc<dyn ReadConnProvider>) -> Self {
+        self.read_pool = Some(pool);
+        self
+    }
+
     /// The source identifier used for every row this adapter owns.
     pub fn source(&self) -> &AdapterSource {
         &self.source
@@ -73,6 +94,26 @@ impl LocalAdapter {
 
     pub(crate) fn db(&self) -> &SharedConn {
         &self.db
+    }
+
+    /// Run a PURE READ on the pool when one is installed (concurrent with
+    /// the writer under WAL), else on the writer mutex. Only for
+    /// SELECT-only closures — anything that writes must keep using
+    /// [`Self::db`].
+    pub(crate) fn read<R>(&self, f: impl FnOnce(&Connection) -> R) -> R {
+        match &self.read_pool {
+            Some(pool) => {
+                let mut run = Some(f);
+                let mut out: Option<R> = None;
+                pool.with_read(&mut |conn| {
+                    if let Some(f) = run.take() {
+                        out = Some(f(conn));
+                    }
+                });
+                out.expect("ReadConnProvider must invoke the closure")
+            }
+            None => f(&self.db.lock().expect("db mutex poisoned")),
+        }
     }
 }
 

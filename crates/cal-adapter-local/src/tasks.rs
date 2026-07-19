@@ -308,16 +308,17 @@ impl LocalAdapter {
     /// [`TasksFeature::get_tasks`] and the FFI store. See
     /// [`LocalAdapter::create_task_sync`] for why the work is sync.
     pub fn get_tasks_sync(&self, list_id: &str) -> cal_core::Result<Vec<Task>> {
-        let conn = self.db().lock().expect("db mutex poisoned");
-        let mut stmt = conn.prepare(TASK_SELECT).map_err(map_sql_err)?;
-        let rows = stmt
-            .query_map(params![list_id], |row| Ok(row_to_task(row)))
-            .map_err(map_sql_err)?;
-        let mut out = Vec::new();
-        for r in rows {
-            out.push(r.map_err(map_sql_err)??);
-        }
-        Ok(dedupe_open_series(out))
+        self.read(|conn| {
+            let mut stmt = conn.prepare(TASK_SELECT).map_err(map_sql_err)?;
+            let rows = stmt
+                .query_map(params![list_id], |row| Ok(row_to_task(row)))
+                .map_err(map_sql_err)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r.map_err(map_sql_err)??);
+            }
+            Ok(dedupe_open_series(out))
+        })
     }
 
     /// Synchronous task update — the implementation behind the async
@@ -442,46 +443,47 @@ impl LocalAdapter {
     /// Synchronous task-list listing — the implementation behind the async
     /// [`TasksFeature::list_task_lists`] and the FFI store.
     pub fn list_task_lists_sync(&self) -> cal_core::Result<Vec<TaskList>> {
-        let conn = self.db().lock().expect("db mutex poisoned");
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, name, color_hex, color_source, default_sound,
-                        embedded_in_calendar, read_only, parent_id, color_label_id
-                   FROM task_lists
-                  ORDER BY name COLLATE NOCASE",
-            )
-            .map_err(map_sql_err)?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok((
-                    req_text(row, 0),
-                    req_text(row, 1),
-                    read_container_color(row, 2, 3),
-                    read_sound(row, 4),
-                    opt_text(row, 5),
-                    read_bool(row, 6),
-                    opt_text(row, 7),
-                    opt_text(row, 8),
-                ))
-            })
-            .map_err(map_sql_err)?;
+        self.read(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, name, color_hex, color_source, default_sound,
+                            embedded_in_calendar, read_only, parent_id, color_label_id
+                       FROM task_lists
+                      ORDER BY name COLLATE NOCASE",
+                )
+                .map_err(map_sql_err)?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((
+                        req_text(row, 0),
+                        req_text(row, 1),
+                        read_container_color(row, 2, 3),
+                        read_sound(row, 4),
+                        opt_text(row, 5),
+                        read_bool(row, 6),
+                        opt_text(row, 7),
+                        opt_text(row, 8),
+                    ))
+                })
+                .map_err(map_sql_err)?;
 
-        let mut out = Vec::new();
-        for r in rows {
-            let (id, name, color, sound, embedded, read_only, parent_id, color_label) =
-                r.map_err(map_sql_err)?;
-            out.push(TaskList {
-                color_label: color_label?.map(ColorLabelId),
-                id: id?,
-                name: name?,
-                color: color?,
-                default_sound: sound?,
-                embedded_in_calendar: embedded?,
-                parent_id: parent_id?,
-                read_only: read_only?,
-            });
-        }
-        Ok(out)
+            let mut out = Vec::new();
+            for r in rows {
+                let (id, name, color, sound, embedded, read_only, parent_id, color_label) =
+                    r.map_err(map_sql_err)?;
+                out.push(TaskList {
+                    color_label: color_label?.map(ColorLabelId),
+                    id: id?,
+                    name: name?,
+                    color: color?,
+                    default_sound: sound?,
+                    embedded_in_calendar: embedded?,
+                    parent_id: parent_id?,
+                    read_only: read_only?,
+                });
+            }
+            Ok(out)
+        })
     }
 
     /// Synchronous task-list rename — the implementation behind the async
@@ -703,23 +705,24 @@ impl LocalAdapter {
     /// Synchronous section listing — the implementation behind the async
     /// [`TasksFeature::list_sections`] and the FFI store.
     pub fn list_sections_sync(&self, list_id: &str) -> cal_core::Result<Vec<Section>> {
-        let conn = self.db().lock().expect("db mutex poisoned");
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, list_id, name, position, color_label_id
-                   FROM sections
-                  WHERE list_id = ?
-                  ORDER BY position, name COLLATE NOCASE",
-            )
-            .map_err(map_sql_err)?;
-        let rows = stmt
-            .query_map(params![list_id], |row| Ok(row_to_section(row)))
-            .map_err(map_sql_err)?;
-        let mut out = Vec::new();
-        for r in rows {
-            out.push(r.map_err(map_sql_err)??);
-        }
-        Ok(out)
+        self.read(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, list_id, name, position, color_label_id
+                       FROM sections
+                      WHERE list_id = ?
+                      ORDER BY position, name COLLATE NOCASE",
+                )
+                .map_err(map_sql_err)?;
+            let rows = stmt
+                .query_map(params![list_id], |row| Ok(row_to_section(row)))
+                .map_err(map_sql_err)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r.map_err(map_sql_err)??);
+            }
+            Ok(out)
+        })
     }
 }
 

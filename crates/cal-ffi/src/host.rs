@@ -2123,7 +2123,7 @@ impl Host {
         // The local adapter shares the single writer connection with the
         // registry's external adapters — the same topology as the desktop
         // backend (one DbHandle, many Arc clones of its mutex).
-        let adapter = LocalAdapter::new(db.shared());
+        let adapter = LocalAdapter::new(db.shared()).with_read_pool(Arc::new(db.clone()));
 
         // Multi-thread runtime: `block_on` drives the CalendarFeature methods +
         // sync rounds, while the event-log writer's drain task + the SWR warm

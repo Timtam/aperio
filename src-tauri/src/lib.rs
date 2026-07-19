@@ -82,7 +82,8 @@ pub fn run() {
 
     // The Tauri backend owns the connection. Subsystems (calendar adapter,
     // sync engine, plugin manager) take an `Arc` clone of the same mutex.
-    let local_adapter = LocalAdapter::new(db.shared());
+    let local_adapter =
+        LocalAdapter::new(db.shared()).with_read_pool(std::sync::Arc::new(db.clone()));
     let db_for_scheduler = db.shared();
 
     // Build the adapter registry up-front and let it walk the
