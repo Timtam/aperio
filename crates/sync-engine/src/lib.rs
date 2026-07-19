@@ -31,6 +31,11 @@ use thiserror::Error;
 
 mod applier;
 mod compactor;
+// Cross-component round-trip tests (two orchestrator stacks over one
+// shared local-FS remote) — test-only, so a plain `mod tests` inside a
+// single component file can't host them.
+#[cfg(test)]
+mod growth_refetch_tests;
 mod orchestrator;
 mod snapshot;
 mod writer;

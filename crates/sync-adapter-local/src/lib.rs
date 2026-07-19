@@ -41,6 +41,8 @@
 //! construction impossible.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use sync_core::{
@@ -48,7 +50,7 @@ use sync_core::{
 };
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// SyncAdapter targeting an OS filesystem directory.
 ///
@@ -59,6 +61,15 @@ use tracing::{debug, warn};
 #[derive(Debug, Clone)]
 pub struct LocalFsSyncAdapter {
     remote_root: PathBuf,
+    /// Layout directories already created this adapter lifetime.
+    /// Directories persist on disk, so once ensured every later
+    /// push can skip the `create_dir_all` triplet — on the
+    /// documented SMB/NAS mount use case each call is a network
+    /// metadata round trip. Shared across clones so the cache
+    /// survives `.clone()`; cleared when a push IO error hints
+    /// the tree vanished underneath us (USB remount, deleted
+    /// folder), so the next attempt re-ensures.
+    dirs_ensured: Arc<AtomicBool>,
 }
 
 impl LocalFsSyncAdapter {
@@ -68,6 +79,7 @@ impl LocalFsSyncAdapter {
     pub fn new(remote_root: impl Into<PathBuf>) -> Self {
         Self {
             remote_root: remote_root.into(),
+            dirs_ensured: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -97,11 +109,32 @@ impl LocalFsSyncAdapter {
         self.sound_dir().join(format!("{hash}.{extension}"))
     }
 
+    /// Create the layout directories, at most once per adapter
+    /// lifetime (mirrors WebDAV's once-per-session MKCOL cache).
     async fn ensure_dirs(&self) -> SyncResult<()> {
+        if self.dirs_ensured.load(Ordering::Relaxed) {
+            return Ok(());
+        }
         fs::create_dir_all(&self.remote_root).await?;
         fs::create_dir_all(self.log_dir()).await?;
         fs::create_dir_all(self.sound_dir()).await?;
+        // Relaxed suffices for a cache hint: a concurrent first
+        // touch racing here at worst runs a second harmless
+        // `create_dir_all` triplet.
+        self.dirs_ensured.store(true, Ordering::Relaxed);
         Ok(())
+    }
+
+    /// Pass a push result through, dropping the ensured-dirs
+    /// cache on failure: an IO error mid-push may mean the layout
+    /// vanished underneath us (USB stick remounted, folder
+    /// deleted on the NAS), so the next attempt must re-run
+    /// `ensure_dirs` instead of trusting the stale flag.
+    fn invalidate_ensured_dirs_on_err<T>(&self, result: SyncResult<T>) -> SyncResult<T> {
+        if result.is_err() {
+            self.dirs_ensured.store(false, Ordering::Relaxed);
+        }
+        result
     }
 
     /// Atomic write of `bytes` to `path`. Write to a sibling
@@ -135,6 +168,11 @@ impl SyncAdapter for LocalFsSyncAdapter {
     /// catches read-only mounts, permission misconfigurations,
     /// and missing parent directories all in one go.
     async fn test_connection(&self) -> SyncResult<()> {
+        // An explicit health check must not trust the ensured-dirs
+        // cache — its whole job is verifying the layout really is
+        // there (the user may have just replugged the USB stick).
+        // The forced `ensure_dirs` re-seeds the cache on success.
+        self.dirs_ensured.store(false, Ordering::Relaxed);
         self.ensure_dirs().await?;
         let probe = self.remote_root.join(".aperio-write-probe");
         match fs::write(&probe, b"ok").await {
@@ -161,7 +199,7 @@ impl SyncAdapter for LocalFsSyncAdapter {
     async fn push_meta(&self, meta: &MetaJson) -> SyncResult<()> {
         self.ensure_dirs().await?;
         let bytes = meta.to_bytes()?;
-        Self::atomic_write(&self.meta_path(), &bytes).await
+        self.invalidate_ensured_dirs_on_err(Self::atomic_write(&self.meta_path(), &bytes).await)
     }
 
     async fn fetch_new_logs(&self, since: &DeviceCursor) -> SyncResult<Vec<LogFile>> {
@@ -205,13 +243,26 @@ impl SyncAdapter for LocalFsSyncAdapter {
             }
             let bytes = match fs::read(entry.path()).await {
                 Ok(b) => b,
-                Err(err) => {
-                    warn!(
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                    // Listed but gone: the compactor deleted it in
+                    // the gap between the readdir and this read.
+                    // Safe to skip silently — the file was folded
+                    // into the snapshot and won't reappear.
+                    debug!(
                         name = %name_str,
-                        ?err,
-                        "couldn't read log file; skipping",
+                        "log listed but no longer present; skipping",
                     );
                     continue;
+                }
+                Err(err) => {
+                    // Any other failure (NAS/SMB hiccup, antivirus
+                    // lock, permission error) must fail the WHOLE
+                    // fetch: the orchestrator advances the cursor
+                    // past every RETURNED file, so silently
+                    // skipping this one would strand its events
+                    // below the cursor forever. Failing leaves the
+                    // cursor untouched; the next round retries.
+                    return Err(SyncError::io(format!("reading log {name_str}: {err}")));
                 }
             };
             out.push(LogFile {
@@ -240,16 +291,20 @@ impl SyncAdapter for LocalFsSyncAdapter {
         // file's contents are append-only and longer overwrites
         // a shorter version. The applier's idempotency table
         // dedupes any envelopes the receiver already saw.
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&path)
-            .await?;
-        file.write_all(&log.bytes).await?;
-        file.flush().await?;
-        file.sync_data().await.ok();
-        Ok(())
+        let result: SyncResult<()> = async {
+            let mut file = fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&path)
+                .await?;
+            file.write_all(&log.bytes).await?;
+            file.flush().await?;
+            file.sync_data().await.ok();
+            Ok(())
+        }
+        .await;
+        self.invalidate_ensured_dirs_on_err(result)
     }
 
     async fn fetch_snapshot(&self) -> SyncResult<Option<Snapshot>> {
@@ -264,7 +319,7 @@ impl SyncAdapter for LocalFsSyncAdapter {
     async fn push_snapshot(&self, snapshot: &Snapshot) -> SyncResult<()> {
         self.ensure_dirs().await?;
         let bytes = snapshot.to_bytes()?;
-        Self::atomic_write(&self.snapshot_path(), &bytes).await
+        self.invalidate_ensured_dirs_on_err(Self::atomic_write(&self.snapshot_path(), &bytes).await)
     }
 
     async fn delete_log(&self, name: &LogFileName) -> SyncResult<()> {
@@ -285,7 +340,7 @@ impl SyncAdapter for LocalFsSyncAdapter {
         if fs::metadata(&path).await.is_ok() {
             return Ok(());
         }
-        Self::atomic_write(&path, bytes).await
+        self.invalidate_ensured_dirs_on_err(Self::atomic_write(&path, bytes).await)
     }
 
     async fn fetch_sound_asset(&self, hash: &str, extension: &str) -> SyncResult<Option<Vec<u8>>> {
@@ -412,6 +467,93 @@ mod tests {
             .await
             .unwrap();
         assert!(fetched.is_empty(), "unchanged file skipped");
+    }
+
+    #[tokio::test]
+    async fn unreadable_log_file_fails_the_whole_fetch() {
+        // A per-file read error must NOT be silently skipped: the
+        // orchestrator advances the cursor to the newest RETURNED
+        // file, so a skipped older file would fall below the
+        // cursor with no applied-length record and its events
+        // would be lost on this device forever. The whole fetch
+        // fails instead (cursor untouched, next round retries) —
+        // the same contract as the WebDAV reference. A directory
+        // squatting on the log's filename yields a deterministic
+        // non-NotFound read error on both Unix (EISDIR) and
+        // Windows (access denied).
+        let tmp = TempDir::new().unwrap();
+        let adapter = LocalFsSyncAdapter::new(tmp.path());
+        let device = DeviceId::from_string("dev-a".into());
+
+        let newer = fixture_log_file(
+            device.clone(),
+            2_000,
+            vec![fixture_envelope(
+                device.clone(),
+                2_000,
+                SyncEvent::EventDeleted(IdPayload { id: "x".into() }),
+            )],
+        );
+        adapter.push_log(&newer).await.unwrap();
+
+        // An older, validly-named entry that cannot be read.
+        let broken = fixture_log_file(device.clone(), 1_000, vec![]);
+        fs::create_dir_all(adapter.log_dir().join(broken.name.to_filename()))
+            .await
+            .unwrap();
+
+        let result = adapter.fetch_new_logs(&DeviceCursor::epoch()).await;
+        assert!(
+            result.is_err(),
+            "a failed log read must fail the whole fetch, not skip the file",
+        );
+    }
+
+    #[tokio::test]
+    async fn ensure_dirs_flag_survives_clones_and_clears_on_push_failure() {
+        let tmp = TempDir::new().unwrap();
+        let adapter = LocalFsSyncAdapter::new(tmp.path().join("sync"));
+        let device = DeviceId::from_string("dev-a".into());
+        let log = fixture_log_file(device.clone(), 1_000, vec![]);
+
+        adapter.push_log(&log).await.unwrap();
+        assert!(
+            adapter.dirs_ensured.load(Ordering::Relaxed),
+            "first push seeds the ensured-dirs cache",
+        );
+        // Clones share the cache (the orchestrator clones the
+        // adapter into scheduler tasks).
+        assert!(adapter.clone().dirs_ensured.load(Ordering::Relaxed));
+
+        // The USB-remount case: the whole tree vanishes while the
+        // flag still says "ensured" — the push fails (no silent
+        // partial state) and drops the cache …
+        fs::remove_dir_all(adapter.remote_root()).await.unwrap();
+        assert!(adapter.push_log(&log).await.is_err());
+        assert!(
+            !adapter.dirs_ensured.load(Ordering::Relaxed),
+            "push failure clears the ensured-dirs cache",
+        );
+
+        // … so the next push re-creates the layout and succeeds.
+        adapter.push_log(&log).await.unwrap();
+        assert!(adapter.log_dir().join(log.name.to_filename()).is_file());
+    }
+
+    #[tokio::test]
+    async fn test_connection_reensures_even_when_the_cache_says_ensured() {
+        // test_connection is the explicit health check — it must
+        // bypass the ensured-dirs cache and rebuild a vanished
+        // tree immediately, exactly like it does today.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("sync");
+        let adapter = LocalFsSyncAdapter::new(&root);
+        adapter.test_connection().await.unwrap();
+
+        fs::remove_dir_all(&root).await.unwrap();
+        adapter.test_connection().await.unwrap();
+        assert!(root.join("log").is_dir());
+        assert!(root.join("assets").join("sounds").is_dir());
     }
 
     #[tokio::test]
