@@ -16,6 +16,7 @@ import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
 import { appBadgeEnabled, loadAppBadgePref, subscribeAppBadge } from './appBadge';
 import { useCacheReload } from './cacheObserver';
 import { subscribeCalendarChanged } from './calendarMutations';
+import { whenStartupSettled } from './startupGate';
 import { useTaskStore } from './taskStoreContext';
 
 // The app-icon badge: how much is on the plate TODAY = open tasks due today +
@@ -136,14 +137,19 @@ export function useAppBadge(): void {
   const { dataVersion } = useTaskStore();
   const dayKey = useCurrentDayKey();
 
+  // Every trigger routes through the startup gate: during the launch
+  // window the (many) mount + cache-flush triggers collapse into ONE
+  // deferred compute, so the badge's full-catalog fan-out doesn't queue
+  // ahead of the visible screen's first read on the serial native queue.
+  // Once the gate is open this is a plain pass-through.
   const recompute = useCallback(() => {
-    void runBadge();
+    whenStartupSettled('appBadge', () => void runBadge());
   }, []);
 
   // Load the stored toggle on mount, then recompute; and recompute whenever the
   // toggle flips in Settings (subscribeAppBadge fires on persist).
   useEffect(() => {
-    void loadAppBadgePref().then(() => runBadge());
+    void loadAppBadgePref().then(() => recompute());
     return subscribeAppBadge(recompute);
   }, [recompute]);
 

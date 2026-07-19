@@ -21,6 +21,7 @@ import { EventScopeDialogHost } from './components/EventScopeDialogHost';
 import { FirstLaunchWizardGate } from './components/FirstLaunchWizardGate';
 import { SyncStatusButton } from './components/SyncStatusButton';
 import { useCacheUpdates } from './state/cacheObserver';
+import { armStartupGate } from './state/startupGate';
 import { SyncStatusContext } from './state/syncStatusContext';
 import { ThemeProvider, useTheme, navigationThemeFor } from './theme';
 import { loadThemeModePref } from './theme/themeMode';
@@ -473,6 +474,14 @@ function AppContent() {
   const [initialNavState, setInitialNavState] = useState<
     PartialState<NavigationState> | undefined
   >(undefined);
+  // Once the navigation tree is about to paint, arm the startup gate that
+  // holds back the app-global scans (badge, day-start, reminder replan)
+  // until the first paint has settled — they otherwise queue their fan-outs
+  // ahead of the visible screen's first read on the serial native queue.
+  useEffect(() => {
+    if (!navReady) return;
+    return armStartupGate();
+  }, [navReady]);
   useEffect(() => {
     let cancelled = false;
     // Load the device-local theme choice alongside the nav state: both gate

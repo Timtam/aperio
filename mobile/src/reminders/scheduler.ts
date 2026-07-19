@@ -9,6 +9,7 @@ import { UpcomingReminder, upcomingReminders } from '../api/reminders';
 import { customSoundPath } from '../api/sounds';
 import { getHiddenCalendars } from '../state/calendarVisibility';
 import { setRemindersRefreshHook } from '../state/cacheObserver';
+import { whenStartupSettled } from '../state/startupGate';
 import { upcomingDayStartNotifications } from './dayStartSchedule';
 
 const DAY_MS = 86_400_000;
@@ -239,10 +240,16 @@ export function refreshRemindersSoon(): void {
 setRemindersRefreshHook(refreshRemindersSoon);
 
 /** Mount once near the app root: reschedule on launch + every foreground-resume
- *  (the latter catches reminders synced in from a peer while we were away). */
+ *  (the latter catches reminders synced in from a peer while we were away).
+ *  The LAUNCH run is startup-gated: `upcomingRemindersJson` is a heavy
+ *  trigger-enumeration pass on the serial native queue, and the OS
+ *  notifications it plans sit days ahead — running it ~1.5s after first
+ *  paint changes nothing for the user but keeps the queue clear for the
+ *  visible screen's first read. Foreground resumes pass straight through
+ *  (the gate is open by then). */
 export function useReminderTriggers(): void {
   useEffect(() => {
-    void rescheduleReminders();
+    whenStartupSettled('reminders', () => void rescheduleReminders());
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') void rescheduleReminders();
     });

@@ -20,6 +20,7 @@ import { notify } from './notify';
 import { currentUserForList } from './currentUser';
 import { readFiredDayKey, writeFiredDayKey } from './dayStartFired';
 import { isDayStartReviewSnoozed } from './dayStartSnooze';
+import { whenStartupSettled } from './startupGate';
 import { effectiveForList, readTaskBehaviour, type TaskBehaviour } from './taskBehaviour';
 import { useTaskStore } from './taskStoreContext';
 
@@ -290,22 +291,32 @@ export function useDayStartChecks(): { reviewOpen: boolean; closeReview: () => v
   const openReview = useCallback(() => setReviewOpen(true), []);
   const closeReview = useCallback(() => setReviewOpen(false), []);
 
-  const run = useCallback(async () => {
-    if (inFlight) return;
-    inFlight = true;
-    try {
-      await runDeadlinePin(invalidateData);
-      // The review reads the SELECTED lists, so it must wait for the store to
-      // hydrate (an empty pre-hydration selection would mark the day fired with
-      // nothing to review). The catalog-ready effect below re-runs us then.
-      if (!loadingRef.current) {
-        await runDayStartReview([...selectionRef.current], invalidateData, openReview);
-      }
-    } catch {
-      // Best-effort — a bridge hiccup must never crash launch/foreground.
-    } finally {
-      inFlight = false;
-    }
+  const run = useCallback(() => {
+    // Startup-gated: the deadline-pin + review passes fan out over every
+    // list, and at launch that queued ahead of the visible screen's first
+    // read on the serial native queue. Pre-gate triggers coalesce into one
+    // deferred run (the fire-markers make repeats no-ops anyway); once the
+    // gate is open this is a plain pass-through (foreground resumes).
+    whenStartupSettled('dayStart', () => {
+      void (async () => {
+        if (inFlight) return;
+        inFlight = true;
+        try {
+          await runDeadlinePin(invalidateData);
+          // The review reads the SELECTED lists, so it must wait for the
+          // store to hydrate (an empty pre-hydration selection would mark
+          // the day fired with nothing to review). The catalog-ready
+          // effect below re-runs us then.
+          if (!loadingRef.current) {
+            await runDayStartReview([...selectionRef.current], invalidateData, openReview);
+          }
+        } catch {
+          // Best-effort — a bridge hiccup must never crash launch/foreground.
+        } finally {
+          inFlight = false;
+        }
+      })();
+    });
   }, [invalidateData, openReview]);
 
   // Launch + catalog-ready: fire once the task-list catalog + selection have
@@ -313,13 +324,13 @@ export function useDayStartChecks(): { reviewOpen: boolean; closeReview: () => v
   // inFlight guard + the fire-marker make repeat runs no-ops.
   useEffect(() => {
     if (taskListsLoading) return;
-    void run();
+    run();
   }, [taskListsLoading, run]);
 
   // Foreground-resume: catches a date rollover (or a snooze expiry) while away.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void run();
+      if (state === 'active') run();
     });
     return () => sub.remove();
   }, [run]);
