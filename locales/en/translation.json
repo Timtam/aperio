@@ -1596,6 +1596,23 @@
       "rowLabelMissing": "{{name}} ({{kind}}). Credentials missing on this device. Press Enter or Delete to remove.",
       "rowLabelMissingPlugin": "{{name}} ({{kind}}). Plugin not installed on this device — open Settings → Plugins to install it.",
       "missingBadge": "needs credentials",
+      "refreshErrors": {
+        "badge": "update failing",
+        "heading": "Update problems for {{name}}",
+        "authHint": "The errors look like an authentication problem — please re-enter the password for this account (Connect accounts).",
+        "entry": "{{container}}: {{error}}",
+        "lastSuccess": "Last successful update: {{time}}.",
+        "neverSucceeded": "Never updated successfully.",
+        "scope": {
+          "calendars": "Calendar list",
+          "task_lists": "Task-list catalog",
+          "contact_lists": "Address-book catalog",
+          "events": "Calendar",
+          "tasks": "Task list",
+          "sections": "Sections",
+          "contacts": "Address book"
+        }
+      },
       "missingPluginBadge": "plugin missing",
       "missingCredentials_one": "1 account needs credentials on this device.",
       "missingCredentials_other": "{{count}} accounts need credentials on this device.",
@@ -1782,6 +1799,8 @@
     "treeLabel": "Accounts, calendars and task lists",
     "tree": {
       "accountLabel": "{{name}} ({{kind}})",
+      "refreshError": "Warning: updating this account is failing; shown data may be outdated.",
+      "refreshErrorAuth": "Warning: updating this account is failing — please check the password in the account settings.",
       "sectionLabel": "{{name}}",
       "empty": "No calendars or task lists yet — open this account in \"Manage accounts\" to check the connection.",
       "contextMenuHint": "Use arrow keys to navigate, Space to toggle visibility, Shift+F10 or the Menu key for actions."

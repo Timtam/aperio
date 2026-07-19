@@ -33,6 +33,7 @@ import {
 import type { Account, AdapterKind } from '../api/types';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
+import { useRefreshErrors } from '../state/useRefreshErrors';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ContactsPrivacyNoticeModal } from './ContactsPrivacyNoticeModal';
 
@@ -167,6 +168,9 @@ const EMPTY_TODOIST: TodoistFields = {
 export function AccountsPanel() {
   const { t } = useTranslation();
   const announce = useAnnouncer();
+  // Per-account refresh-error surface: failing containers per account
+  // (silent-staleness warning + the re-enter-password hint).
+  const { errorsByAccount } = useRefreshErrors();
   // The store owns the calendar / task-list catalog the sidebar
   // renders from. We have to nudge it manually after creating or
   // deleting an account — otherwise the new account's calendars
@@ -1051,10 +1055,20 @@ export function AccountsPanel() {
                     // into the list, listHasFocus flips and the right
                     // row gets aria-selected back.
                     aria-selected={listHasFocus ? focused : undefined}
-                    aria-label={t(rowLabelKey, {
-                      name: acc.display_name,
-                      kind: t(`dialogs.accounts.kindName.${acc.adapter_kind}`),
-                    })}
+                    aria-label={
+                      t(rowLabelKey, {
+                        name: acc.display_name,
+                        kind: t(`dialogs.accounts.kindName.${acc.adapter_kind}`),
+                      }) +
+                      (errorsByAccount.has(acc.id)
+                        ? ' ' +
+                          t(
+                            errorsByAccount.get(acc.id)?.auth_suspected
+                              ? 'sidebar.tree.refreshErrorAuth'
+                              : 'sidebar.tree.refreshError',
+                          )
+                        : '')
+                    }
                     className={
                       'accounts-list__item' +
                       (focused ? ' accounts-list__item--focused' : '') +
@@ -1116,11 +1130,71 @@ export function AccountsPanel() {
                         {t('dialogs.accounts.missingBadge')}
                       </span>
                     )}
+                    {errorsByAccount.has(acc.id) && (
+                      <span
+                        className="accounts-list__badge accounts-list__badge--refresh-error"
+                        aria-hidden="true"
+                      >
+                        ⚠️ {t('dialogs.accounts.refreshErrors.badge')}
+                      </span>
+                    )}
                   </li>
                 );
               })}
             </ul>
           )}
+          {/* Refresh-error DETAILS for the focused account: which containers
+              are failing, the provider's error text, and how stale the data
+              the user currently sees is (last successful refresh). For
+              auth-shaped errors the hint points at re-entering the password —
+              the connect flow lives right here in this panel. Plain
+              linearized markup (heading + list) so a screen reader walks it
+              naturally. */}
+          {accounts[focusIndex] &&
+            errorsByAccount.has(accounts[focusIndex].id) && (
+              <section
+                className="accounts-refresh-errors"
+                aria-label={t('dialogs.accounts.refreshErrors.heading', {
+                  name: accounts[focusIndex].display_name,
+                })}
+              >
+                <h4>
+                  {t('dialogs.accounts.refreshErrors.heading', {
+                    name: accounts[focusIndex].display_name,
+                  })}
+                </h4>
+                {errorsByAccount.get(accounts[focusIndex].id)
+                  ?.auth_suspected && (
+                  <p className="accounts-refresh-errors__auth-hint">
+                    {t('dialogs.accounts.refreshErrors.authHint')}
+                  </p>
+                )}
+                <ul>
+                  {errorsByAccount
+                    .get(accounts[focusIndex].id)
+                    ?.errors.map((err) => (
+                      <li key={`${err.scope}:${err.container_id}`}>
+                        {t('dialogs.accounts.refreshErrors.entry', {
+                          container:
+                            err.container_name ??
+                            t(
+                              `dialogs.accounts.refreshErrors.scope.${err.scope}`,
+                              { defaultValue: err.scope },
+                            ),
+                          error: err.error,
+                        })}{' '}
+                        {err.last_success_at
+                          ? t('dialogs.accounts.refreshErrors.lastSuccess', {
+                              time: new Date(
+                                err.last_success_at,
+                              ).toLocaleString(),
+                            })
+                          : t('dialogs.accounts.refreshErrors.neverSucceeded')}
+                      </li>
+                    ))}
+                </ul>
+              </section>
+            )}
           {/* Per-account recovery: force a full cold re-sync of the FOCUSED
               external account. Clears its delta tokens + cached window so the
               next refresh re-bootstraps the whole collection from the provider —

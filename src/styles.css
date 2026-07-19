@@ -1285,6 +1285,45 @@ button[aria-disabled='true'] {
   color: var(--color-danger, #dc322f);
 }
 
+/* Refresh-error surface: the "update failing" badge on an account row
+ * plus the per-container details section under the list. The badge
+ * reuses the danger tokens (this is a "your data may be stale" state);
+ * the sidebar's ⚠️ glyph carries no colour of its own. */
+.accounts-list__badge--refresh-error {
+  background: var(--color-danger-bg, rgba(220, 50, 47, 0.08));
+  border-color: var(--color-danger, #dc322f);
+  color: var(--color-danger, #dc322f);
+}
+
+.accounts-refresh-errors {
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-danger, #dc322f);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-danger-bg, rgba(220, 50, 47, 0.06));
+}
+
+.accounts-refresh-errors h4 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+.accounts-refresh-errors ul {
+  margin: 0;
+  padding-left: 1.2em;
+  font-size: var(--font-size-sm);
+}
+
+.accounts-refresh-errors__auth-hint {
+  margin: 0 0 var(--space-2);
+  font-weight: 600;
+  font-size: var(--font-size-sm);
+}
+
+.sidebar__refresh-error {
+  margin-left: var(--space-1);
+}
+
 .accounts-add-section {
   margin-top: var(--space-3);
 }

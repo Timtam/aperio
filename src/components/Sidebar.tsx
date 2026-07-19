@@ -63,6 +63,8 @@ import {
 import { useSidebarExpansion } from '../state/useSidebarExpansion';
 import { useTaskListShowCompleted } from '../state/useTaskListShowCompleted';
 import { useViewState } from '../state/viewStateContext';
+import { useRefreshErrors } from '../state/useRefreshErrors';
+import type { AccountRefreshErrors } from '../api/types';
 
 /** Pointer drag-and-drop reparent state, threaded to the task-list
  *  leaf rows. Keyboard users get the same outcome via the
@@ -132,6 +134,8 @@ export function Sidebar({
 }) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
+  // Per-account refresh-error surface (silent-staleness warning).
+  const { errorsByAccount } = useRefreshErrors();
   const {
     accounts,
     refreshAccounts,
@@ -1321,6 +1325,7 @@ export function Sidebar({
           <AccountSubtree
             key={account.key}
             account={account}
+            refreshError={errorsByAccount.get(account.accountId)}
             expansion={expansion}
             focusedKey={focusedKey}
             onFocusKey={setFocusedKey}
@@ -1602,10 +1607,14 @@ interface AccountSubtreeProps {
   onToggleAccount: (account: AccountNode) => void;
   focusedContainerId: string | null;
   reparentDrag: ReparentDrag;
+  /** Present when this account has failing container refreshes — drives
+   *  the warning glyph + the appended screen-reader description. */
+  refreshError?: AccountRefreshErrors;
 }
 
 function AccountSubtree({
   account,
+  refreshError,
   expansion,
   focusedKey,
   onFocusKey,
@@ -1644,10 +1653,20 @@ function AccountSubtree({
         onToggleExpand={() =>
           expansion.setExpanded(account.key, !isOpen)
         }
-        ariaLabel={t('sidebar.tree.accountLabel', {
-          name: account.displayName,
-          kind: t(`dialogs.accounts.kindName.${account.adapterKind}`),
-        })}
+        ariaLabel={
+          t('sidebar.tree.accountLabel', {
+            name: account.displayName,
+            kind: t(`dialogs.accounts.kindName.${account.adapterKind}`),
+          }) +
+          (refreshError
+            ? ' ' +
+              t(
+                refreshError.auth_suspected
+                  ? 'sidebar.tree.refreshErrorAuth'
+                  : 'sidebar.tree.refreshError',
+              )
+            : '')
+        }
         className="sidebar__row sidebar__row--account"
       >
         {isEditing ? (
@@ -1668,6 +1687,19 @@ function AccountSubtree({
               {account.children.length === 0 ? '·' : isOpen ? '▾' : '▸'}
             </span>
             <span className="sidebar__name">{account.displayName}</span>
+            {refreshError && (
+              <span
+                className="sidebar__refresh-error"
+                aria-hidden="true"
+                title={t(
+                  refreshError.auth_suspected
+                    ? 'sidebar.tree.refreshErrorAuth'
+                    : 'sidebar.tree.refreshError',
+                )}
+              >
+                ⚠️
+              </span>
+            )}
             <span className="sidebar__account-kind" aria-hidden="true">
               {t(`dialogs.accounts.kindName.${account.adapterKind}`)}
             </span>

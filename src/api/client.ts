@@ -32,6 +32,7 @@ import type {
   TaskList,
   TaskListShare,
   TaskUser,
+  AccountRefreshErrors,
 } from './types';
 
 /** Type guard — a backend error always carries `code` and `message`. */
@@ -1017,6 +1018,11 @@ export const refreshExternalCache = () =>
 /** Current refresher status — seeds the toolbar indicator on mount. */
 export const getCacheRefreshStatus = () =>
   invoke<CacheRefreshStatus>('get_cache_refresh_status');
+
+/** Every account's currently-failing containers (the silent-staleness
+ *  warning surface). Empty when all refreshes are healthy. */
+export const getRefreshErrors = () =>
+  invoke<AccountRefreshErrors[]>('get_refresh_errors');
 
 /** Force a FULL cold re-sync of one external account: clear its delta tokens +
  *  cached window across every container, then kick a warm pass so each

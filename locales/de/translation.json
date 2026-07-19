@@ -1596,6 +1596,23 @@
       "rowLabelMissing": "{{name}} ({{kind}}). Zugangsdaten auf diesem Gerät fehlen. Enter oder Entf zum Entfernen.",
       "rowLabelMissingPlugin": "{{name}} ({{kind}}). Plugin auf diesem Gerät nicht installiert — öffne Einstellungen → Plugins, um es zu installieren.",
       "missingBadge": "Zugangsdaten fehlen",
+      "refreshErrors": {
+        "badge": "Aktualisierung fehlgeschlagen",
+        "heading": "Aktualisierungsprobleme bei {{name}}",
+        "authHint": "Die Fehler deuten auf ein Anmeldeproblem hin — bitte das Passwort für dieses Konto neu eingeben (Konten verbinden).",
+        "entry": "{{container}}: {{error}}",
+        "lastSuccess": "Letzte erfolgreiche Aktualisierung: {{time}}.",
+        "neverSucceeded": "Noch nie erfolgreich aktualisiert.",
+        "scope": {
+          "calendars": "Kalenderliste",
+          "task_lists": "Aufgabenlisten-Katalog",
+          "contact_lists": "Adressbuch-Katalog",
+          "events": "Kalender",
+          "tasks": "Aufgabenliste",
+          "sections": "Abschnitte",
+          "contacts": "Adressbuch"
+        }
+      },
       "missingPluginBadge": "Plugin fehlt",
       "missingCredentials_one": "1 Konto benötigt auf diesem Gerät Zugangsdaten.",
       "missingCredentials_other": "{{count}} Konten benötigen auf diesem Gerät Zugangsdaten.",
@@ -1782,6 +1799,8 @@
     "treeLabel": "Konten, Kalender und Aufgabenlisten",
     "tree": {
       "accountLabel": "{{name}} ({{kind}})",
+      "refreshError": "Achtung: Die Aktualisierung dieses Kontos schlägt fehl; angezeigte Daten sind möglicherweise veraltet.",
+      "refreshErrorAuth": "Achtung: Die Aktualisierung dieses Kontos schlägt fehl — bitte das Passwort in den Konto-Einstellungen prüfen.",
       "sectionLabel": "{{name}}",
       "empty": "Noch keine Kalender oder Aufgabenlisten — über „Konten verwalten\" die Verbindung prüfen.",
       "contextMenuHint": "Mit den Pfeiltasten navigieren, Leertaste zum Ein-/Ausblenden, Umschalt+F10 oder Menü-Taste für Aktionen."
