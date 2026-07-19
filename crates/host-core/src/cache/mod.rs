@@ -440,43 +440,67 @@ impl CacheStore {
         })?;
 
         // Resolve container identity from the cached listings. `None`
-        // means the row is ORPHANED: the account's listing has content
-        // and authoritatively does not contain this container (deleted
-        // server-side; the sync-state row was re-created by a refresh
-        // against a stale persisted selection) — surfacing it would be a
-        // permanent unnamed warning the user can never clear. A cold /
-        // empty listing keeps the row (best-effort, name unknown). The
-        // name prefers the user's rename override — the name every other
-        // surface shows — over the raw listing payload.
-        let resolve = |scope: &str,
-                       account: &str,
-                       container: &str|
-         -> DbResult<Option<Option<String>>> {
+        // means the row is ORPHANED: the listing authoritatively does
+        // not contain this container (deleted server-side; the
+        // sync-state row was re-created by a refresh against a stale
+        // persisted selection) — surfacing it would be a permanent
+        // unnamed warning the user can never clear. Authority means
+        // either the listing has OTHER containers, or it is empty but
+        // has succeeded at least once (last_refreshed_at set — its last
+        // success returned the empty set). A cold listing keeps the row.
+        // The name prefers the user's rename override — the name every
+        // other surface shows — over the raw listing payload. Every
+        // lookup degrades FAIL-OPEN (keep the row, name unknown): a
+        // transient read error must dim the surface, never blank it,
+        // and orphaning needs positive confirmation.
+        let resolve = |scope: &str, account: &str, container: &str| -> Option<Option<String>> {
             if container.is_empty() {
-                return Ok(Some(None));
+                return Some(None);
             }
-            let (table, kind) = match scope {
-                "events" => ("cache_calendars", "calendar"),
-                "tasks" | "sections" => ("cache_task_lists", "task_list"),
-                "contacts" => ("cache_contact_lists", "contact_list"),
-                _ => return Ok(Some(None)),
+            let (table, kind, listing_scope) = match scope {
+                "events" => ("cache_calendars", "calendar", "calendars"),
+                "tasks" | "sections" => ("cache_task_lists", "task_list", "task_lists"),
+                "contacts" => ("cache_contact_lists", "contact_list", "contact_lists"),
+                _ => return Some(None),
             };
             self.db.with_read_conn(|c| {
-                let payload: Option<String> = c
+                let payload: Option<String> = match c
                     .query_row(
                         &format!("SELECT payload FROM {table} WHERE account_id = ?1 AND id = ?2"),
                         params![account, container],
                         |r| r.get(0),
                     )
-                    .optional()?;
+                    .optional()
+                {
+                    Ok(p) => p,
+                    Err(_) => return Some(None),
+                };
                 if payload.is_none() {
-                    let listed: i64 = c.query_row(
+                    let listed: i64 = match c.query_row(
                         &format!("SELECT COUNT(*) FROM {table} WHERE account_id = ?1"),
                         params![account],
                         |r| r.get(0),
-                    )?;
+                    ) {
+                        Ok(n) => n,
+                        Err(_) => return Some(None),
+                    };
                     if listed > 0 {
-                        return Ok(None);
+                        return None;
+                    }
+                    let listing_succeeded = c
+                        .query_row(
+                            "SELECT 1 FROM cache_sync_state
+                             WHERE account_id = ?1 AND scope = ?2 AND container_id = ''
+                               AND last_refreshed_at IS NOT NULL",
+                            params![account, listing_scope],
+                            |r| r.get::<_, i64>(0),
+                        )
+                        .optional()
+                        .ok()
+                        .flatten()
+                        .is_some();
+                    if listing_succeeded {
+                        return None;
                     }
                 }
                 let override_name: Option<String> = c
@@ -486,19 +510,21 @@ impl CacheStore {
                         params![container, kind],
                         |r| r.get(0),
                     )
-                    .optional()?;
+                    .optional()
+                    .ok()
+                    .flatten();
                 let name = override_name.or_else(|| {
                     payload
                         .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
                         .and_then(|v| v.get("name").and_then(|n| n.as_str().map(str::to_string)))
                 });
-                Ok(Some(name))
+                Some(name)
             })
         };
 
         let mut out: Vec<AccountRefreshErrors> = Vec::new();
         for row in rows {
-            let Some(container_name) = resolve(&row.scope, &row.account, &row.container)? else {
+            let Some(container_name) = resolve(&row.scope, &row.account, &row.container) else {
                 continue;
             };
             let entry = ContainerRefreshError {

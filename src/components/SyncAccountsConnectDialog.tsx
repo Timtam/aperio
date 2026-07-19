@@ -7,6 +7,7 @@ import {
   isCommandError,
   reconnectGoogleAccount,
   reconnectMicrosoftAccount,
+  refreshExternalCache,
   setAccountSecret,
 } from '../api/client';
 import type { Account, AdapterKind } from '../api/types';
@@ -166,6 +167,11 @@ export function SyncAccountsConnectDialog({
           }),
         );
         removeRow(account.id);
+        // Retry the failing containers right away: storing the secret alone
+        // never contacts the provider, so without this kick the refresh-error
+        // warning would outlive a successful repair until the next scheduled
+        // pass — and a still-wrong password would look identical to success.
+        void refreshExternalCache().catch(() => undefined);
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('set_account_secret failed', err);
@@ -195,6 +201,9 @@ export function SyncAccountsConnectDialog({
           }),
         );
         removeRow(account.id);
+        // Same rationale as the password path: retry now so the error
+        // surface reflects the repair (or its failure) promptly.
+        void refreshExternalCache().catch(() => undefined);
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('reconnect_oauth_account failed', err);

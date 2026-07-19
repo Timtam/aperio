@@ -1964,6 +1964,25 @@ fn refresh_errors_skip_containers_dropped_from_the_listing() {
 }
 
 #[test]
+fn refresh_errors_skip_containers_after_the_listing_emptied() {
+    let store = setup();
+    // The account's ONLY calendar is deleted server-side: a successful
+    // listing pass replaces the listing with the EMPTY set. A refresh
+    // against a stale persisted selection then 404s and re-creates the
+    // sync-state row. Empty + succeeded-at-least-once = authoritative,
+    // so the orphan must not surface (it could never clear).
+    store.replace_calendars(ACC, &[calendar(CAL)]).unwrap();
+    store.replace_calendars(ACC, &[]).unwrap();
+    store
+        .mark_error(ACC, SyncScope::Events, CAL, "HTTP 404 Not Found")
+        .unwrap();
+    assert!(
+        store.refresh_errors().unwrap().is_empty(),
+        "authoritatively-empty listing must orphan the row"
+    );
+}
+
+#[test]
 fn refresh_errors_clear_after_a_successful_write() {
     let store = setup();
     store

@@ -533,6 +533,10 @@ export default function AccountsScreen() {
         announce(
           t('dialogs.accounts.credentialUpdated', { name: account.display_name }),
         );
+        // Retry the failing containers right away — storing the grant alone
+        // never contacts the provider, so the refresh-error warning would
+        // otherwise outlive the repair until the next scheduled pass.
+        void refreshExternalCache().catch(() => undefined);
       } catch (err) {
         const message = errorMessage(err);
         setError(message);
@@ -582,6 +586,9 @@ export default function AccountsScreen() {
         announce(
           t('dialogs.accounts.credentialUpdated', { name: account.display_name }),
         );
+        // Same rationale as reconnectOauth: retry now so the error surface
+        // reflects the repair (or a still-wrong password) promptly.
+        void refreshExternalCache().catch(() => undefined);
       } catch (err) {
         // The secret stays in place on a registration failure — let the user
         // retry without re-typing (the field is still open).

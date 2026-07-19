@@ -771,6 +771,20 @@ export function AccountsPanel() {
   // and gives sighted keyboard users a clear visual landing point.
   const errorRef = useRef<HTMLParagraphElement>(null);
   const [focusIndex, setFocusIndex] = useState(0);
+  // The refresh-error details are focus stops that a background refetch
+  // (60s poll / pass end) can UNMOUNT while they hold keyboard focus —
+  // the errors just cleared. Focus would fall to <body>, outside the
+  // application role, dropping NVDA out of focus mode with the dialog's
+  // key handlers dead (the stranded-focus class of a3746ada). Catch the
+  // drop after each error-set change and put focus back on the list.
+  useEffect(() => {
+    if (
+      document.activeElement === document.body ||
+      document.activeElement === null
+    ) {
+      listRef.current?.focus({ preventScroll: true });
+    }
+  }, [errorsByAccount]);
   // Track whether the listbox currently owns DOM focus. Used to gate
   // `aria-activedescendant` so it only points at an option while the
   // listbox is actually focused. With the attribute set unconditionally
@@ -1177,7 +1191,12 @@ export function AccountsPanel() {
                 {errorsByAccount.get(accounts[focusIndex].id)
                   ?.auth_suspected && (
                   <FocusableNote className="accounts-refresh-errors__auth-hint">
-                    {t('dialogs.accounts.refreshErrors.authHint')}
+                    {t(
+                      accounts[focusIndex].adapter_kind === 'google' ||
+                        accounts[focusIndex].adapter_kind === 'microsoft_graph'
+                        ? 'dialogs.accounts.refreshErrors.authHintOauth'
+                        : 'dialogs.accounts.refreshErrors.authHint',
+                    )}
                   </FocusableNote>
                 )}
                 <ul>
@@ -1227,7 +1246,12 @@ export function AccountsPanel() {
                       openSyncAccountsConnect([accounts[focusIndex]])
                     }
                   >
-                    {t('dialogs.accounts.refreshErrors.reenterPassword')}
+                    {t(
+                      accounts[focusIndex].adapter_kind === 'google' ||
+                        accounts[focusIndex].adapter_kind === 'microsoft_graph'
+                        ? 'dialogs.accounts.refreshErrors.signInAgain'
+                        : 'dialogs.accounts.refreshErrors.reenterPassword',
+                    )}
                   </button>
                 )}
               </section>

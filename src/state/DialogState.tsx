@@ -175,6 +175,10 @@ export interface DialogStateValue {
    * working without rewriting every call site.
    */
   openSettings: (initialTab?: SettingsTabId) => void;
+  /** Persist the Settings dialog's current tab into its stack frame so a
+   *  stacked-dialog round trip (e.g. the reconnect wizard) remounts
+   *  Settings on the SAME tab instead of resetting to General. */
+  recordSettingsTab: (tab: SettingsTabId) => void;
   /** Convenience: open Settings on the Color-labels tab. */
   openColorLabels: () => void;
   /** Convenience: open Settings on the Accounts tab. */
@@ -390,6 +394,21 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     (initialTab?: SettingsTabId) => push({ kind: 'settings', initialTab }),
     [push],
   );
+  // Record the Settings dialog's CURRENT tab in its stack frame. Only the
+  // top of the stack renders, so pushing another dialog on top (reconnect
+  // wizard, OAuth guide) unmounts Settings; on return it remounts from the
+  // frame and would otherwise reset to the General tab mid-task.
+  const recordSettingsTab = useCallback(
+    (tab: SettingsTabId) =>
+      setStack((s) =>
+        s.some((f) => f.kind === 'settings' && f.initialTab !== tab)
+          ? s.map((f) =>
+              f.kind === 'settings' ? { ...f, initialTab: tab } : f,
+            )
+          : s,
+      ),
+    [],
+  );
   const openColorLabels = useCallback(
     () => openSettings('colorLabels'),
     [openSettings],
@@ -511,6 +530,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openQuickAddTask,
       openCreateChooser,
       openSettings,
+      recordSettingsTab,
       openColorLabels,
       openAccounts,
       openSearch,
@@ -539,6 +559,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openQuickAddTask,
       openCreateChooser,
       openSettings,
+      recordSettingsTab,
       openColorLabels,
       openAccounts,
       openSearch,

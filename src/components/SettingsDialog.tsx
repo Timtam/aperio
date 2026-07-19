@@ -9,6 +9,8 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { useDialogState } from '../state/dialogStateContext';
+
 import { AccountsPanel } from './AccountsPanel';
 import { CalendarsPanel } from './CalendarsPanel';
 import { ColorLabelsPanel } from './ColorLabelsPanel';
@@ -77,6 +79,7 @@ export function SettingsDialog({
   initialTab,
 }: SettingsDialogProps) {
   const { t } = useTranslation();
+  const { recordSettingsTab } = useDialogState();
   const [activeTab, setActiveTab] = useState<SettingsTabId>(
     initialTab ?? TAB_ORDER[0],
   );
@@ -85,6 +88,14 @@ export function SettingsDialog({
   useEffect(() => {
     if (isOpen && initialTab) setActiveTab(initialTab);
   }, [isOpen, initialTab]);
+
+  // Mirror the current tab into the dialog-stack frame: pushing another
+  // dialog on top (reconnect wizard, OAuth guide) unmounts Settings, and
+  // the return trip remounts it from the frame — without this the user
+  // would land back on the General tab mid-task.
+  useEffect(() => {
+    if (isOpen) recordSettingsTab(activeTab);
+  }, [isOpen, activeTab, recordSettingsTab]);
 
   const idPrefix = useId();
   const tabId = useCallback(

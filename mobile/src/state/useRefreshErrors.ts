@@ -3,6 +3,10 @@ import { AccessibilityInfo } from 'react-native';
 
 import i18n from '../../i18n';
 import { refreshErrors, type AccountRefreshErrors } from '../api/sync';
+import {
+  applyLanguageChoice,
+  readLanguageChoice,
+} from '../settings/language';
 import { subscribeCacheRefreshProgress } from './cacheRefreshProgress';
 
 /**
@@ -26,9 +30,25 @@ import { subscribeCacheRefreshProgress } from './cacheRefreshProgress';
  */
 
 const POLL_MS = 60_000;
+/** How long a NON-auth failure must persist before it is announced —
+ *  transient connectivity blips (tunnel, elevator) clear well within
+ *  this and must never interrupt the user. Auth-shaped failures are
+ *  announced immediately: a revoked password does not heal itself. */
+const NON_AUTH_ANNOUNCE_AFTER_MS = 90_000;
 
 let current: AccountRefreshErrors[] = [];
+/** Accounts whose failure has been announced (or predates the session
+ *  announce). Shrinks when an account clears, so a re-appearing failure
+ *  announces again. */
 let knownAffectedAccounts = new Set<string>();
+/** Non-auth failures waiting out the hysteresis: account id → first
+ *  seen (ms epoch). Dropped the moment the account clears. */
+let pendingNonAuthSince = new Map<string, number>();
+/** Resolves once the stored language choice has been applied — the
+ *  launch announcement must not race it and come out in the device
+ *  language when the user chose another (it is deduped, so it would
+ *  never repeat correctly). */
+let languageSettled: Promise<unknown> = Promise.resolve();
 let started = false;
 const listeners = new Set<(rows: AccountRefreshErrors[]) => void>();
 
@@ -39,27 +59,59 @@ const listeners = new Set<(rows: AccountRefreshErrors[]) => void>();
  */
 export function clampErrorText(raw: string): string {
   const collapsed = raw.replace(/\s+/g, ' ').trim();
-  return collapsed.length > 160 ? `${collapsed.slice(0, 159)}…` : collapsed;
+  if (collapsed.length <= 160) return collapsed;
+  // Cut on code points, not UTF-16 units — a split surrogate pair would
+  // render (and be spoken) as a replacement character.
+  return `${[...collapsed].slice(0, 159).join('')}…`;
 }
 
 function refetch(): void {
   refreshErrors()
     .then((rows) => {
       current = rows;
+      const now = Date.now();
       const nowAffected = new Set(rows.map((r) => r.account_id));
-      const grew = [...nowAffected].some(
-        (id) => !knownAffectedAccounts.has(id),
-      );
-      if (grew) {
-        AccessibilityInfo.announceForAccessibility(
-          i18n.t(
-            rows.some((r) => r.auth_suspected)
-              ? 'refreshErrors.announceAuth'
-              : 'refreshErrors.announce',
-          ),
-        );
+      // Classify the accounts that are failing but not yet announced.
+      // Auth-shaped → announce now (wording from these rows ONLY — a
+      // long-known auth failure must not colour an unrelated outage).
+      // Non-auth → announce only once it has persisted past the
+      // hysteresis window, so connectivity blips stay silent.
+      let announceAuth = false;
+      let announceNonAuth = false;
+      const nextPending = new Map<string, number>();
+      for (const r of rows) {
+        if (knownAffectedAccounts.has(r.account_id)) continue;
+        if (r.auth_suspected) {
+          announceAuth = true;
+        } else {
+          const since = pendingNonAuthSince.get(r.account_id) ?? now;
+          if (now - since >= NON_AUTH_ANNOUNCE_AFTER_MS) {
+            announceNonAuth = true;
+          } else {
+            nextPending.set(r.account_id, since);
+          }
+        }
       }
-      knownAffectedAccounts = nowAffected;
+      if (announceAuth || announceNonAuth) {
+        // Defer the utterance (not the decision) until the stored
+        // language choice is live, so the one deduped announcement
+        // comes out in the user's language.
+        void languageSettled.then(() => {
+          AccessibilityInfo.announceForAccessibility(
+            i18n.t(
+              announceAuth
+                ? 'refreshErrors.announceAuth'
+                : 'refreshErrors.announce',
+            ),
+          );
+        });
+      }
+      // Known = affected minus still-pending; clearing shrinks it so a
+      // re-appearing failure announces again.
+      knownAffectedAccounts = new Set(
+        [...nowAffected].filter((id) => !nextPending.has(id)),
+      );
+      pendingNonAuthSince = nextPending;
       listeners.forEach((l) => l(current));
     })
     .catch((err) => {
@@ -75,6 +127,11 @@ function refetch(): void {
 export function startRefreshErrorsWatcher(): void {
   if (started) return;
   started = true;
+  // Idempotent re-apply of the stored language: useStoredLanguage does
+  // the same on mount, but the first fetch below can win that race.
+  languageSettled = readLanguageChoice()
+    .then(applyLanguageChoice)
+    .catch(() => undefined);
   refetch();
   subscribeCacheRefreshProgress((p) => {
     if (!p.refreshing) refetch();
