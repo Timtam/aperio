@@ -9,6 +9,10 @@ import {
 } from '../state/cacheRefreshProgress';
 import { isSyncing, subscribeSyncActivity } from '../state/syncActivity';
 import { useSyncStatusInfo } from '../state/syncStatusContext';
+import {
+  getRefreshErrorsSnapshot,
+  subscribeRefreshErrors,
+} from '../state/useRefreshErrors';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Header sync indicator — the desktop's status pill, surfaced on each main
@@ -29,12 +33,18 @@ export function SyncStatusButton() {
   useEffect(() => subscribeSyncActivity(setSyncing), []);
   const [progress, setProgress] = useState(getCacheRefreshProgress());
   useEffect(() => subscribeCacheRefreshProgress(setProgress), []);
+  // Per-account refresh errors: this header button sits on every landing
+  // screen, so it is the persistent visible+focusable cue that some account
+  // is silently serving stale data (the detail rows live on the Sync screen).
+  const [refreshErrs, setRefreshErrs] = useState(getRefreshErrorsSnapshot());
+  useEffect(() => subscribeRefreshErrors(setRefreshErrs), []);
   if (info == null) return null;
 
   const attention =
     info.tone === 'error' || info.tone === 'conflict' || info.tone === 'schema_too_old';
   // A conflict/error/schema badge outranks a transient upload (matching the
   // desktop tone priority), so only override the otherwise-benign synced/off state.
+  const refreshErrorAttention = refreshErrs.length > 0 && !attention;
   const externalRefreshing = progress.refreshing && !attention;
   const showSyncing = syncing && !attention;
   // While a warm pass runs, the external-refresh progress (fetched X of N) takes
@@ -48,9 +58,18 @@ export function SyncStatusButton() {
       : externalRefreshing
         ? t('cacheRefresh.refreshing')
         : null;
-  const label = attention
+  const baseLabel = attention
     ? info.label
     : (externalLabel ?? (showSyncing ? t('syncStatus.uploading') : info.label));
+  // Refresh errors ride along as a label suffix (they describe a persistent
+  // state, so they must not displace the live progress/engine label).
+  const label = refreshErrorAttention
+    ? `${baseLabel}. ${t(
+        refreshErrs.some((r) => r.auth_suspected)
+          ? 'refreshErrors.bannerAuth'
+          : 'refreshErrors.banner',
+      )}`
+    : baseLabel;
 
   const onPress = () => {
     AccessibilityInfo.announceForAccessibility(t('cacheRefresh.refreshing'));
@@ -70,7 +89,7 @@ export function SyncStatusButton() {
       <Text
         style={[
           styles.glyph,
-          attention
+          attention || refreshErrorAttention
             ? styles.attention
             : showSyncing || externalRefreshing
               ? styles.syncing

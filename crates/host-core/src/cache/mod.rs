@@ -224,7 +224,10 @@ pub struct AccountRefreshErrors {
 /// Heuristic: does a provider error text look like an AUTH failure (as
 /// opposed to a network blip)? Substring match over the usual suspects —
 /// conservative on purpose: a false "auth" only makes the UI suggest
-/// re-checking the password.
+/// re-checking the password. The OAuth needles matter because a revoked
+/// Google/Graph grant surfaces as the TOKEN endpoint's HTTP 400 body
+/// (`{"error":"invalid_grant",...}`) embedded in a protocol error, not
+/// as a 401 — exactly the case where re-authenticating is the fix.
 pub fn is_auth_shaped(error: &str) -> bool {
     let lower = error.to_lowercase();
     [
@@ -236,6 +239,9 @@ pub fn is_auth_shaped(error: &str) -> bool {
         "authentication",
         "invalid credentials",
         "password",
+        "invalid_grant",
+        "invalid_client",
+        "expired or revoked",
     ]
     .iter()
     .any(|needle| lower.contains(needle))
@@ -433,40 +439,70 @@ impl CacheStore {
             mapped.collect::<rusqlite::Result<Vec<_>>>()
         })?;
 
-        // Resolve container names from the cached listing payloads. The
-        // listing may not know the container (cold cache, or the listing
-        // itself is what failed) — the name is best-effort.
-        let name_of = |scope: &str, account: &str, container: &str| -> Option<String> {
+        // Resolve container identity from the cached listings. `None`
+        // means the row is ORPHANED: the account's listing has content
+        // and authoritatively does not contain this container (deleted
+        // server-side; the sync-state row was re-created by a refresh
+        // against a stale persisted selection) — surfacing it would be a
+        // permanent unnamed warning the user can never clear. A cold /
+        // empty listing keeps the row (best-effort, name unknown). The
+        // name prefers the user's rename override — the name every other
+        // surface shows — over the raw listing payload.
+        let resolve = |scope: &str,
+                       account: &str,
+                       container: &str|
+         -> DbResult<Option<Option<String>>> {
             if container.is_empty() {
-                return None;
+                return Ok(Some(None));
             }
-            let table = match scope {
-                "events" => "cache_calendars",
-                "tasks" | "sections" => "cache_task_lists",
-                "contacts" => "cache_contact_lists",
-                _ => return None,
+            let (table, kind) = match scope {
+                "events" => ("cache_calendars", "calendar"),
+                "tasks" | "sections" => ("cache_task_lists", "task_list"),
+                "contacts" => ("cache_contact_lists", "contact_list"),
+                _ => return Ok(Some(None)),
             };
-            let payload: Option<String> = self
-                .db
-                .with_read_conn(|c| {
-                    c.query_row(
+            self.db.with_read_conn(|c| {
+                let payload: Option<String> = c
+                    .query_row(
                         &format!("SELECT payload FROM {table} WHERE account_id = ?1 AND id = ?2"),
                         params![account, container],
                         |r| r.get(0),
                     )
-                    .optional()
-                })
-                .ok()
-                .flatten();
-            payload
-                .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-                .and_then(|v| v.get("name").and_then(|n| n.as_str().map(str::to_string)))
+                    .optional()?;
+                if payload.is_none() {
+                    let listed: i64 = c.query_row(
+                        &format!("SELECT COUNT(*) FROM {table} WHERE account_id = ?1"),
+                        params![account],
+                        |r| r.get(0),
+                    )?;
+                    if listed > 0 {
+                        return Ok(None);
+                    }
+                }
+                let override_name: Option<String> = c
+                    .query_row(
+                        "SELECT name FROM container_name_overrides
+                         WHERE container_id = ?1 AND kind = ?2",
+                        params![container, kind],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                let name = override_name.or_else(|| {
+                    payload
+                        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                        .and_then(|v| v.get("name").and_then(|n| n.as_str().map(str::to_string)))
+                });
+                Ok(Some(name))
+            })
         };
 
         let mut out: Vec<AccountRefreshErrors> = Vec::new();
         for row in rows {
+            let Some(container_name) = resolve(&row.scope, &row.account, &row.container)? else {
+                continue;
+            };
             let entry = ContainerRefreshError {
-                container_name: name_of(&row.scope, &row.account, &row.container),
+                container_name,
                 scope: row.scope,
                 container_id: row.container,
                 error: row.error,

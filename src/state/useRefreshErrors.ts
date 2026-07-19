@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { useTranslation } from 'react-i18next';
 
 import { getRefreshErrors } from '../api/client';
 import type { AccountRefreshErrors } from '../api/types';
+import { useAnnouncer } from '../a11y/announcerContext';
 
 /**
  * Per-account refresh-error surface — the fix for SILENT staleness: a
@@ -11,16 +13,56 @@ import type { AccountRefreshErrors } from '../api/types';
  * no cue anywhere. The backend records every failed refresh in
  * `cache_sync_state.last_error` (cleared by any successful write); this
  * hook reads the aggregate and re-reads whenever a warm pass ENDS (the
- * moment errors appear or clear) plus once on mount.
+ * moment errors appear or clear) plus once on mount, plus a slow poll —
+ * per-read SWR refreshes record/clear errors without a pass-end event,
+ * so without the poll a just-fixed password would keep the warning (and
+ * a fresh failure stay invisible) until the next scheduled pass.
  *
- * Consumers: the sidebar (per-account warning on the tree row) and the
- * accounts panel (full per-container details + the re-enter-password
- * hint for auth-shaped errors).
+ * Consumers: the sidebar (per-account warning on the tree row, and the
+ * ONE announce-on-growth instance) and the accounts panel (full
+ * per-container details + the re-enter-password hint).
  */
-export function useRefreshErrors(): {
+
+/**
+ * App-wide announce dedup, deliberately at module scope: several hook
+ * instances may be live (sidebar + accounts panel), and each remount
+ * starts a fresh effect — but a pre-existing error must be announced
+ * exactly once per session, not once per instance or per mount.
+ */
+let knownAffectedAccounts = new Set<string>();
+
+/** Test-only: reset the module-level announce dedup between tests. */
+export function resetAnnouncedAccountsForTest(): void {
+  knownAffectedAccounts = new Set();
+}
+
+/**
+ * Provider error text is unbounded and can embed whole HTML bodies or
+ * URLs — a wall NVDA would read for half a minute. Collapse whitespace
+ * and clamp for display; the full text stays in the log/backend.
+ */
+export function clampErrorText(raw: string): string {
+  const collapsed = raw.replace(/\s+/g, ' ').trim();
+  return collapsed.length > 160 ? `${collapsed.slice(0, 159)}…` : collapsed;
+}
+
+const POLL_MS = 60_000;
+
+export function useRefreshErrors(options?: {
+  /**
+   * Announce (politely) when a NEW account starts failing. Pass `true`
+   * from exactly ONE always-mounted consumer (the sidebar) so a blind
+   * user learns about the failure without having to stumble onto the
+   * account row; every other consumer stays silent.
+   */
+  announceOnGrowth?: boolean;
+}): {
   /** account_id → its failing containers. Empty map = all healthy. */
   errorsByAccount: Map<string, AccountRefreshErrors>;
 } {
+  const announceOnGrowth = options?.announceOnGrowth === true;
+  const { t } = useTranslation();
+  const announce = useAnnouncer();
   const [errors, setErrors] = useState<AccountRefreshErrors[]>([]);
 
   useEffect(() => {
@@ -30,7 +72,24 @@ export function useRefreshErrors(): {
     const refetch = () => {
       getRefreshErrors()
         .then((rows) => {
-          if (!cancelled) setErrors(rows);
+          if (cancelled) return;
+          setErrors(rows);
+          const nowAffected = new Set(rows.map((r) => r.account_id));
+          if (announceOnGrowth) {
+            const grew = [...nowAffected].some(
+              (id) => !knownAffectedAccounts.has(id),
+            );
+            if (grew) {
+              announce(
+                t(
+                  rows.some((r) => r.auth_suspected)
+                    ? 'dialogs.accounts.refreshErrors.announceAuth'
+                    : 'dialogs.accounts.refreshErrors.announce',
+                ),
+              );
+            }
+            knownAffectedAccounts = nowAffected;
+          }
         })
         .catch((err) => {
           console.warn('get_refresh_errors failed', err);
@@ -50,12 +109,16 @@ export function useRefreshErrors(): {
       .catch((err) => {
         console.warn('cache-refresh-status listen failed', err);
       });
+    // Bounded staleness for the pass-less paths (per-read SWR refresh
+    // failures/clears): cheap indexed query, once a minute.
+    const poll = window.setInterval(refetch, POLL_MS);
 
     return () => {
       cancelled = true;
       unlisten?.();
+      window.clearInterval(poll);
     };
-  }, []);
+  }, [announceOnGrowth, announce, t]);
 
   const errorsByAccount = useMemo(() => {
     const map = new Map<string, AccountRefreshErrors>();

@@ -239,7 +239,7 @@
     "banner": "Some accounts are not updating. Details are on the Sync screen.",
     "bannerAuth": "Some accounts are not updating — possibly a password problem. Details are on the Sync screen.",
     "heading": "Update problems for {{name}}",
-    "authHint": "The errors look like an authentication problem — please re-enter the password for this account.",
+    "authHint": "The errors look like an authentication problem — re-enter the password via \"Reconnect\" on the accounts screen.",
     "entry": "{{container}}: {{error}}",
     "lastSuccess": "Last successful update: {{time}}.",
     "neverSucceeded": "Never updated successfully.",
@@ -1618,8 +1618,11 @@
       "missingBadge": "needs credentials",
       "refreshErrors": {
         "badge": "update failing",
+        "announce": "Warning: updating one or more accounts is failing. Details: Settings, Accounts.",
+        "announceAuth": "Warning: updating one or more accounts is failing, likely an authentication problem. Details: Settings, Accounts.",
         "heading": "Update problems for {{name}}",
-        "authHint": "The errors look like an authentication problem — please re-enter the password for this account (Connect accounts).",
+        "authHint": "The errors look like an authentication problem — re-enter the password for this account using the button below.",
+        "reenterPassword": "Re-enter password…",
         "entry": "{{container}}: {{error}}",
         "lastSuccess": "Last successful update: {{time}}.",
         "neverSucceeded": "Never updated successfully.",
@@ -1820,7 +1823,7 @@
     "tree": {
       "accountLabel": "{{name}} ({{kind}})",
       "refreshError": "Warning: updating this account is failing; shown data may be outdated.",
-      "refreshErrorAuth": "Warning: updating this account is failing — please check the password in the account settings.",
+      "refreshErrorAuth": "Warning: updating this account is failing — re-enter the password under Settings, Accounts.",
       "sectionLabel": "{{name}}",
       "empty": "No calendars or task lists yet — open this account in \"Manage accounts\" to check the connection.",
       "contextMenuHint": "Use arrow keys to navigate, Space to toggle visibility, Shift+F10 or the Menu key for actions."

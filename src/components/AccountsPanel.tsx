@@ -33,7 +33,10 @@ import {
 import type { Account, AdapterKind } from '../api/types';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
-import { useRefreshErrors } from '../state/useRefreshErrors';
+import {
+  clampErrorText,
+  useRefreshErrors,
+} from '../state/useRefreshErrors';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ContactsPrivacyNoticeModal } from './ContactsPrivacyNoticeModal';
 
@@ -166,7 +169,7 @@ const EMPTY_TODOIST: TodoistFields = {
 };
 
 export function AccountsPanel() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const announce = useAnnouncer();
   // Per-account refresh-error surface: failing containers per account
   // (silent-staleness warning + the re-enter-password hint).
@@ -1145,11 +1148,14 @@ export function AccountsPanel() {
           )}
           {/* Refresh-error DETAILS for the focused account: which containers
               are failing, the provider's error text, and how stale the data
-              the user currently sees is (last successful refresh). For
-              auth-shaped errors the hint points at re-entering the password —
-              the connect flow lives right here in this panel. Plain
-              linearized markup (heading + list) so a screen reader walks it
-              naturally. */}
+              the user currently sees is (last successful refresh). This panel
+              lives inside the Settings Modal whose body is role="application"
+              (NVDA stays in focus mode), so every line must be a FOCUS STOP —
+              static markup would be invisible to NVDA here (see
+              FocusableNote.tsx). Auth-shaped errors additionally get a real
+              re-enter-password button: the reconnect wizard accepts any
+              account, but its banner entry point only appears for MISSING
+              credentials, so a present-but-wrong password needs this path. */}
           {accounts[focusIndex] &&
             errorsByAccount.has(accounts[focusIndex].id) && (
               <section
@@ -1158,41 +1164,72 @@ export function AccountsPanel() {
                   name: accounts[focusIndex].display_name,
                 })}
               >
-                <h4>
+                <h4
+                  tabIndex={0}
+                  aria-label={t('dialogs.accounts.refreshErrors.heading', {
+                    name: accounts[focusIndex].display_name,
+                  })}
+                >
                   {t('dialogs.accounts.refreshErrors.heading', {
                     name: accounts[focusIndex].display_name,
                   })}
                 </h4>
                 {errorsByAccount.get(accounts[focusIndex].id)
                   ?.auth_suspected && (
-                  <p className="accounts-refresh-errors__auth-hint">
+                  <FocusableNote className="accounts-refresh-errors__auth-hint">
                     {t('dialogs.accounts.refreshErrors.authHint')}
-                  </p>
+                  </FocusableNote>
                 )}
                 <ul>
                   {errorsByAccount
                     .get(accounts[focusIndex].id)
-                    ?.errors.map((err) => (
-                      <li key={`${err.scope}:${err.container_id}`}>
-                        {t('dialogs.accounts.refreshErrors.entry', {
+                    ?.errors.map((err) => {
+                      const line = `${t(
+                        'dialogs.accounts.refreshErrors.entry',
+                        {
                           container:
                             err.container_name ??
                             t(
                               `dialogs.accounts.refreshErrors.scope.${err.scope}`,
                               { defaultValue: err.scope },
                             ),
-                          error: err.error,
-                        })}{' '}
-                        {err.last_success_at
+                          error: clampErrorText(err.error),
+                        },
+                      )} ${
+                        err.last_success_at
                           ? t('dialogs.accounts.refreshErrors.lastSuccess', {
                               time: new Date(
                                 err.last_success_at,
-                              ).toLocaleString(),
+                              ).toLocaleString(i18n.language, {
+                                dateStyle: 'long',
+                                timeStyle: 'short',
+                              }),
                             })
-                          : t('dialogs.accounts.refreshErrors.neverSucceeded')}
-                      </li>
-                    ))}
+                          : t('dialogs.accounts.refreshErrors.neverSucceeded')
+                      }`;
+                      return (
+                        <li
+                          key={`${err.scope}:${err.container_id}`}
+                          tabIndex={0}
+                          aria-label={line}
+                        >
+                          {line}
+                        </li>
+                      );
+                    })}
                 </ul>
+                {errorsByAccount.get(accounts[focusIndex].id)
+                  ?.auth_suspected && (
+                  <button
+                    type="button"
+                    className="form__action accounts-refresh-errors__reconnect"
+                    onClick={() =>
+                      openSyncAccountsConnect([accounts[focusIndex]])
+                    }
+                  >
+                    {t('dialogs.accounts.refreshErrors.reenterPassword')}
+                  </button>
+                )}
               </section>
             )}
           {/* Per-account recovery: force a full cold re-sync of the FOCUSED

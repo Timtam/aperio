@@ -239,7 +239,7 @@
     "banner": "Einige Konten werden nicht aktualisiert. Details im Bereich Synchronisierung.",
     "bannerAuth": "Einige Konten werden nicht aktualisiert – möglicherweise ein Passwortproblem. Details im Bereich Synchronisierung.",
     "heading": "Aktualisierungsprobleme bei {{name}}",
-    "authHint": "Die Fehler deuten auf ein Anmeldeproblem hin – bitte das Passwort für dieses Konto neu eingeben.",
+    "authHint": "Die Fehler deuten auf ein Anmeldeproblem hin — bitte das Passwort über „Neu verbinden\" auf dem Konten-Bildschirm neu eingeben.",
     "entry": "{{container}}: {{error}}",
     "lastSuccess": "Letzte erfolgreiche Aktualisierung: {{time}}.",
     "neverSucceeded": "Noch nie erfolgreich aktualisiert.",
@@ -1618,8 +1618,11 @@
       "missingBadge": "Zugangsdaten fehlen",
       "refreshErrors": {
         "badge": "Aktualisierung fehlgeschlagen",
+        "announce": "Achtung: Die Aktualisierung mindestens eines Kontos schlägt fehl. Details unter Einstellungen, Konten.",
+        "announceAuth": "Achtung: Die Aktualisierung mindestens eines Kontos schlägt fehl, vermutlich ein Anmeldeproblem. Details unter Einstellungen, Konten.",
         "heading": "Aktualisierungsprobleme bei {{name}}",
-        "authHint": "Die Fehler deuten auf ein Anmeldeproblem hin — bitte das Passwort für dieses Konto neu eingeben (Konten verbinden).",
+        "authHint": "Die Fehler deuten auf ein Anmeldeproblem hin — bitte das Passwort für dieses Konto über die Schaltfläche unten neu eingeben.",
+        "reenterPassword": "Passwort neu eingeben…",
         "entry": "{{container}}: {{error}}",
         "lastSuccess": "Letzte erfolgreiche Aktualisierung: {{time}}.",
         "neverSucceeded": "Noch nie erfolgreich aktualisiert.",
@@ -1820,7 +1823,7 @@
     "tree": {
       "accountLabel": "{{name}} ({{kind}})",
       "refreshError": "Achtung: Die Aktualisierung dieses Kontos schlägt fehl; angezeigte Daten sind möglicherweise veraltet.",
-      "refreshErrorAuth": "Achtung: Die Aktualisierung dieses Kontos schlägt fehl — bitte das Passwort in den Konto-Einstellungen prüfen.",
+      "refreshErrorAuth": "Achtung: Die Aktualisierung dieses Kontos schlägt fehl — bitte das Passwort unter Einstellungen, Konten neu eingeben.",
       "sectionLabel": "{{name}}",
       "empty": "Noch keine Kalender oder Aufgabenlisten — über „Konten verwalten\" die Verbindung prüfen.",
       "contextMenuHint": "Mit den Pfeiltasten navigieren, Leertaste zum Ein-/Ausblenden, Umschalt+F10 oder Menü-Taste für Aktionen."

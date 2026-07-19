@@ -1320,6 +1320,10 @@ button[aria-disabled='true'] {
   font-size: var(--font-size-sm);
 }
 
+.accounts-refresh-errors__reconnect {
+  margin-top: var(--space-2);
+}
+
 .sidebar__refresh-error {
   margin-left: var(--space-1);
 }

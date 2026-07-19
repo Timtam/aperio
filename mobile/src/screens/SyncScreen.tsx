@@ -39,7 +39,7 @@ import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
 import { SyncTargetConfigForm } from '../components/sync/SyncTargetConfigForm';
 import { formatLongDateTime } from '../intl/dateFormat';
-import { useRefreshErrors } from '../state/useRefreshErrors';
+import { clampErrorText, useRefreshErrors } from '../state/useRefreshErrors';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import CalFfi from '../../modules/cal-ffi';
 
@@ -833,7 +833,7 @@ export default function SyncScreen() {
                       t(`refreshErrors.scope.${err.scope}`, {
                         defaultValue: err.scope,
                       }),
-                    error: err.error,
+                    error: clampErrorText(err.error),
                   })}{' '}
                   {err.last_success_at
                     ? t('refreshErrors.lastSuccess', {
@@ -1000,8 +1000,8 @@ const makeStyles = (c: ThemeColors) =>
       padding: 12,
       borderRadius: 10,
       borderWidth: 1,
-      borderColor: c.danger,
-      backgroundColor: c.surfaceAlt,
+      borderColor: c.dangerBorder,
+      backgroundColor: c.dangerBg,
       gap: 6,
     },
     refreshErrorTitle: { fontSize: 15, fontWeight: '700', color: c.danger },

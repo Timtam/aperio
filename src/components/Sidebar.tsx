@@ -134,8 +134,10 @@ export function Sidebar({
 }) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
-  // Per-account refresh-error surface (silent-staleness warning).
-  const { errorsByAccount } = useRefreshErrors();
+  // Per-account refresh-error surface (silent-staleness warning). The
+  // sidebar is the app's one always-mounted consumer, so it owns the
+  // announce-on-growth duty (polite, once per newly failing account).
+  const { errorsByAccount } = useRefreshErrors({ announceOnGrowth: true });
   const {
     accounts,
     refreshAccounts,
