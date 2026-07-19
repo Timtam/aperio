@@ -11,6 +11,7 @@ description = "Aperio sync adapter targeting SFTP over SSH (pure-Rust, mobile-ta
 [dependencies]
 async-trait.workspace = true
 chrono.workspace = true
+futures.workspace = true
 serde.workspace = true
 sync-core.workspace = true
 thiserror.workspace = true
