@@ -13,7 +13,11 @@
 -- bumps the count straight to the confirm threshold so its result shows
 -- at once.
 --
--- Backfill 0: existing error rows are treated as a single (unconfirmed)
--- failure; the next attempt confirms or clears them.
+-- Backfill 0 (clean slate): existing rows start with zero recorded
+-- failures, exactly like a never-failed container. A pre-existing NON-auth
+-- error therefore stops surfacing at upgrade and re-confirms only after two
+-- consecutive failures on the automatic cadence (a forced/manual pass
+-- confirms in one); a pre-existing auth-shaped error keeps surfacing at
+-- once via the is_auth_shaped bypass.
 ALTER TABLE cache_sync_state
     ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0;

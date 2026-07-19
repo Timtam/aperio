@@ -2048,6 +2048,28 @@ fn refresh_errors_surface_auth_on_the_first_attempt() {
 }
 
 #[test]
+fn refresh_errors_forced_floors_an_existing_reset_row() {
+    let store = setup();
+    // A container that failed, was healed (counter reset to 0 on the
+    // existing row), then a FORCED (manual) failure lands: the ON-CONFLICT
+    // floor must lift it straight to the threshold so the manual refresh's
+    // result shows at once — not sit at 1 waiting for another attempt.
+    store
+        .mark_error(ACC, SyncScope::Tasks, LIST, "boom", false)
+        .unwrap();
+    store.replace_list_tasks(ACC, LIST, &[task("t1")]).unwrap();
+    assert!(store.refresh_errors().unwrap().is_empty());
+    store
+        .mark_error(ACC, SyncScope::Tasks, LIST, "boom", true)
+        .unwrap();
+    assert_eq!(
+        store.refresh_errors().unwrap().len(),
+        1,
+        "a forced failure on a reset row surfaces immediately (ON-CONFLICT floor)"
+    );
+}
+
+#[test]
 fn refresh_errors_surface_forced_on_the_first_attempt() {
     let store = setup();
     // A user-forced pass (manual refresh) floors the counter at the
