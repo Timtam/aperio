@@ -201,22 +201,22 @@ fn parse_list_page(text: &str) -> GoogleDriveResult<(Vec<DriveEntry>, Option<Str
 /// and fold anything unparseable into `None`: the growth-refetch
 /// check treats a missing size as "no growth signal", which is safe
 /// — the file is still fetched once it rises above the cursor, the
-/// refetch is merely deferred to session rotation.
+/// refetch is merely deferred to session rotation. Deserialising
+/// via `serde_json::Value` keeps the fold TOTAL: a float, a
+/// negative, or any other odd shape degrades to `None` instead of
+/// failing the whole listing page (fail-fast would serve stale
+/// indefinitely over a field we can safely do without).
 fn de_size<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum SizeRepr {
-        Num(u64),
-        Str(String),
-    }
-    Ok(match Option::<SizeRepr>::deserialize(deserializer)? {
-        None => None,
-        Some(SizeRepr::Num(n)) => Some(n),
-        Some(SizeRepr::Str(s)) => s.parse().ok(),
-    })
+    Ok(
+        match Option::<serde_json::Value>::deserialize(deserializer)? {
+            Some(serde_json::Value::Number(n)) => n.as_u64(),
+            Some(serde_json::Value::String(s)) => s.parse().ok(),
+            _ => None,
+        },
+    )
 }
 
 /// Create or update a file. If `existing_id` is `Some`, PATCH
@@ -480,14 +480,23 @@ mod tests {
             r#"{"files":[
                 {"id":"a","name":"n.jsonl","size":77},
                 {"id":"b","name":"sizeless"},
-                {"id":"c","name":"weird.jsonl","size":"not-a-number"}
+                {"id":"c","name":"weird.jsonl","size":"not-a-number"},
+                {"id":"d","name":"floaty.jsonl","size":123.0},
+                {"id":"e","name":"negative.jsonl","size":-5},
+                {"id":"f","name":"bool.jsonl","size":true}
             ]}"#,
         )
         .unwrap();
-        assert_eq!(entries.len(), 3);
+        assert_eq!(entries.len(), 6);
         assert_eq!(entries[0].size, Some(77));
         assert_eq!(entries[1].size, None);
         assert_eq!(entries[2].size, None);
+        // Numeric-but-not-u64 (and outright junk) shapes degrade to
+        // None — timestamp-only semantics — instead of failing the
+        // whole listing page.
+        assert_eq!(entries[3].size, None);
+        assert_eq!(entries[4].size, None);
+        assert_eq!(entries[5].size, None);
         assert!(next.is_none());
     }
 

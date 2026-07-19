@@ -206,11 +206,23 @@ impl DropboxSyncAdapter {
     }
 
     /// Force a fresh token round-trip — used by the trait
-    /// methods on a 401 retry path. Drops the cache then calls
-    /// [`Self::access_token`] which refreshes unconditionally.
-    async fn force_refresh(&self) -> SyncResult<String> {
+    /// methods on a 401 retry path. `stale` is the token the
+    /// caller just saw fail: when the cache already holds a
+    /// DIFFERENT token, a concurrent retry refreshed it moments
+    /// ago (the download batch runs several files at once, so one
+    /// mid-batch expiry can 401 on all of them), and that fresh
+    /// token is returned as-is instead of being discarded for yet
+    /// another token round-trip. Only when the cache still holds
+    /// the failed token is it dropped and re-minted via
+    /// [`Self::access_token`].
+    async fn force_refresh(&self, stale: &str) -> SyncResult<String> {
         {
             let mut guard = self.tokens.lock().await;
+            if let Some(tok) = guard.as_ref() {
+                if tok.access_token != stale {
+                    return Ok(tok.access_token.clone());
+                }
+            }
             *guard = None;
         }
         self.access_token().await
@@ -292,7 +304,7 @@ impl SyncAdapter for DropboxSyncAdapter {
             Ok(e) => e,
             // Auth retry: one shot, then surface.
             Err(err) if err.is_auth() => {
-                let token = self.force_refresh().await?;
+                let token = self.force_refresh(&token).await?;
                 files::list_folder(&self.http, &token, &log_dir)
                     .await
                     .map_err(dropbox_to_sync)?
@@ -385,24 +397,17 @@ impl SyncAdapter for DropboxSyncAdapter {
         match result {
             Ok(()) => Ok(()),
             Err(err) if err.is_auth() => {
-                let token = self.force_refresh().await?;
-                files::delete(&self.http, &token, &path)
-                    .await
-                    .map_err(|e| {
-                        if e.is_not_found() {
-                            return SyncError::network(format!(
-                                // Map not_found to Network so the
-                                // command layer doesn't accidentally
-                                // promote the absence to a hard
-                                // failure — but log it so the user
-                                // sees "already gone" in the
-                                // protocol.
-                                "delete (already gone): {e}"
-                            ));
-                        }
-                        dropbox_to_sync(e)
-                    })?;
-                Ok(())
+                let token = self.force_refresh(&token).await?;
+                match files::delete(&self.http, &token, &path).await {
+                    Ok(()) => Ok(()),
+                    // Not-found = goal already met — the retry arm
+                    // must honour the same idempotent-delete
+                    // contract as the primary arm below, or a
+                    // token expiry would turn "already gone" into
+                    // a spurious hard failure.
+                    Err(err) if err.is_not_found() => Ok(()),
+                    Err(err) => Err(dropbox_to_sync(err)),
+                }
             }
             // Not-found = goal already met (file is gone); same
             // semantics as the SFTP / FTPS adapters.
@@ -438,7 +443,7 @@ impl DropboxSyncAdapter {
         match files::upload(&self.http, &token, path, &bytes).await {
             Ok(()) => Ok(()),
             Err(err) if err.is_auth() => {
-                let token = self.force_refresh().await?;
+                let token = self.force_refresh(&token).await?;
                 files::upload(&self.http, &token, path, &bytes)
                     .await
                     .map_err(dropbox_to_sync)
@@ -457,7 +462,7 @@ impl DropboxSyncAdapter {
             Ok(Some(bytes)) => Ok(Some(bytes)),
             Ok(None) => Ok(None),
             Err(err) if err.is_auth() => {
-                let token = self.force_refresh().await?;
+                let token = self.force_refresh(&token).await?;
                 files::download(&self.http, &token, path)
                     .await
                     .map_err(dropbox_to_sync)
@@ -652,6 +657,38 @@ mod tests {
         let clone = adapter.clone();
         adapter.ensured.lock().unwrap().insert("/aperio/log".into());
         assert!(clone.ensured.lock().unwrap().contains("/aperio/log"));
+    }
+
+    #[tokio::test]
+    async fn force_refresh_reuses_token_installed_by_a_concurrent_retry() {
+        // buffer_unordered lets one mid-batch expiry 401 several
+        // downloads at once. Each retry calls force_refresh; only
+        // the first may pay a token round-trip — the rest must see
+        // that the cache already holds a DIFFERENT token and reuse
+        // it. Were the compare missing, this test would null the
+        // cache and attempt a real network refresh (and fail).
+        let adapter = DropboxSyncAdapter::new(
+            DropboxAccountConfig {
+                client_id: "cid".into(),
+                client_secret: String::new(),
+                base_path: "/aperio".into(),
+            },
+            "refresh-token",
+        )
+        .unwrap();
+        *adapter.tokens.lock().await = Some(TokenSet {
+            access_token: "fresh".into(),
+            refresh_token: None,
+            expires_at: Utc::now() + chrono::Duration::hours(1),
+        });
+        let got = adapter.force_refresh("stale").await.unwrap();
+        assert_eq!(got, "fresh");
+        // And the freshly-installed token stays cached — the
+        // short-circuit must not disturb the cache.
+        assert_eq!(
+            adapter.tokens.lock().await.as_ref().unwrap().access_token,
+            "fresh",
+        );
     }
 
     #[test]

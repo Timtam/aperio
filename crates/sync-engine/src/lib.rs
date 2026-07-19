@@ -95,6 +95,10 @@ pub struct SyncRoundReport {
     pub apply_failures: usize,
     /// Push failures logged but tolerated (one bad file shouldn't sink a round).
     pub push_failures: usize,
+    /// Fetch-phase failures logged but tolerated (the round still surfaces
+    /// what its push phase managed). Counted apart from `push_failures` so
+    /// a pull outage can't masquerade as a push problem in diagnostics.
+    pub fetch_failures: usize,
     /// Field-level conflicts recorded this round (DESIGN.md §19.3).
     pub conflicts: usize,
 }

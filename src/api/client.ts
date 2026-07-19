@@ -1187,6 +1187,7 @@ export interface SyncRoundReport {
   skipped_unsupported: number;
   apply_failures: number;
   push_failures: number;
+  fetch_failures: number;
   /** Field-level conflicts the applier recorded during this
    *  round (DESIGN.md §19.3). When > 0, the frontend fires a
    *  system notification and refreshes the unresolved-conflict

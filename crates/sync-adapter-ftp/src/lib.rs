@@ -125,9 +125,8 @@ use serde::{Deserialize, Serialize};
 use sync_core::{
     DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter, SyncError, SyncResult,
 };
-use tracing::debug;
+use tracing::{debug, warn};
 
-use suppaftp::list::File as MlsxFile;
 use suppaftp::types::Features;
 use suppaftp::types::FileType;
 use suppaftp::FtpError;
@@ -514,11 +513,29 @@ impl SyncAdapter for FtpsSyncAdapter {
             // cursor expects — never adjust them here.
             let entries: Vec<(String, Option<u64>)> = if mlsd_advertised(stream, &mlsd_cache) {
                 match stream.mlsd(Some(&log_dir)) {
-                    Ok(lines) => lines
-                        .iter()
-                        .map(String::as_str)
-                        .filter_map(parse_mlsx_entry)
-                        .collect(),
+                    Ok(lines) => {
+                        let entries: Vec<_> = lines
+                            .iter()
+                            .map(String::as_str)
+                            .filter_map(parse_mlsx_entry)
+                            .collect();
+                        // Belt-and-braces against server dialects
+                        // the parser doesn't understand: a listing
+                        // with lines but zero file entries is
+                        // either a legitimately empty directory
+                        // (cdir/pdir rows only) or every line
+                        // failing to parse — and the latter would
+                        // otherwise present as a silent, permanent
+                        // "no peer logs". Make it diagnosable.
+                        if !lines.is_empty() && entries.is_empty() {
+                            warn!(
+                                dir = %log_dir,
+                                raw_lines = lines.len(),
+                                "MLSD returned lines but no file entries parsed",
+                            );
+                        }
+                        entries
+                    }
                     Err(err) if is_not_found(&err) => return Ok(Vec::new()),
                     Err(err) => {
                         return Err(SyncError::network(format!("MLSD log/: {err}")));
@@ -578,19 +595,24 @@ impl SyncAdapter for FtpsSyncAdapter {
                         name: parsed,
                         bytes: buf.into_inner(),
                     }),
-                    Err(err) => match retr_error_disposition(&err) {
-                        RetrDisposition::SkipMissing => {
-                            // Compactor raced us between the listing
-                            // and the RETR; skip silently.
-                            debug!(
-                                path = %path,
-                                "log file listed but no longer present",
-                            );
+                    Err(err) => {
+                        match retr_error_disposition(&err, || stream.size(&path)) {
+                            RetrDisposition::SkipMissing => {
+                                // Compactor raced us between the
+                                // listing and the RETR — absence
+                                // confirmed by the SIZE probe. Warn
+                                // (not debug) so a recurring skip is
+                                // diagnosable in the field.
+                                warn!(
+                                    path = %path,
+                                    "log file listed but confirmed gone; skipping",
+                                );
+                            }
+                            RetrDisposition::FailBatch => {
+                                return Err(SyncError::network(format!("RETR {path}: {err}")));
+                            }
                         }
-                        RetrDisposition::FailBatch => {
-                            return Err(SyncError::network(format!("RETR {path}: {err}")));
-                        }
-                    },
+                    }
                 }
             }
             Ok(out)
@@ -887,22 +909,42 @@ fn atomic_write(stream: &mut SessionStream, path: &str, bytes: &[u8]) -> SyncRes
 }
 
 /// Probe (once) whether the server supports RFC 3659 `MLSD`,
-/// caching the verdict on the adapter. A server that answers
-/// FEAT but doesn't do it (502/500 reply) is a definitive "no"
-/// and cached as such; a connection-level failure is NOT cached
-/// — the verdict was never delivered, and the listing that
-/// follows will surface the real error.
+/// caching the verdict on the adapter. Only a delivered verdict
+/// is cached — see [`mlsd_feat_verdict`]; anything else falls
+/// back to NLST for THIS round only, so the next round re-probes
+/// (the adapter instance is long-lived, and a transient 421
+/// permanently downgrading it to NLST+SIZE would cost every
+/// future round extra round trips).
 fn mlsd_advertised(stream: &mut SessionStream, cache: &Mutex<Option<bool>>) -> bool {
     if let Some(known) = *cache.lock().expect("mlsd cache mutex poison") {
         return known;
     }
-    let verdict = match stream.feat() {
-        Ok(features) => features_advertise_mlsd(&features),
-        Err(FtpError::UnexpectedResponse(_) | FtpError::BadResponse) => false,
-        Err(_) => return false,
-    };
-    *cache.lock().expect("mlsd cache mutex poison") = Some(verdict);
-    verdict
+    match mlsd_feat_verdict(&stream.feat()) {
+        Some(verdict) => {
+            *cache.lock().expect("mlsd cache mutex poison") = Some(verdict);
+            verdict
+        }
+        None => false,
+    }
+}
+
+/// The cacheable half of [`mlsd_advertised`]: `Some(verdict)`
+/// when the server actually delivered one — a FEAT listing, or
+/// the definitive command-unknown replies (500 `BadCommand` /
+/// 502 `NotImplemented`, meaning the server answered FEAT and
+/// doesn't know it). `None` for everything else (421 shutdown,
+/// transient 4xx, garbled reply, transport failure): the verdict
+/// was never delivered, so it must not be cached.
+fn mlsd_feat_verdict(feat: &FtpResult<Features>) -> Option<bool> {
+    match feat {
+        Ok(features) => Some(features_advertise_mlsd(features)),
+        Err(FtpError::UnexpectedResponse(response))
+            if matches!(response.status, Status::BadCommand | Status::NotImplemented) =>
+        {
+            Some(false)
+        }
+        Err(_) => None,
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -912,9 +954,9 @@ fn mlsd_advertised(stream: &mut SessionStream, cache: &Mutex<Option<bool>>) -> b
 /// How a failed per-file `RETR` in `fetch_new_logs` is handled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RetrDisposition {
-    /// 550 not-found: the compactor deleted the file between the
-    /// listing and the RETR. Skip silently; next round's listing
-    /// no longer carries it.
+    /// 550 with absence CONFIRMED by a follow-up `SIZE` probe:
+    /// the compactor deleted the file between the listing and
+    /// the RETR. Skip; next round's listing no longer carries it.
     SkipMissing,
     /// Anything else fails the WHOLE fetch. The orchestrator
     /// advances the cursor to the newest RETURNED log, so a
@@ -926,11 +968,32 @@ enum RetrDisposition {
 }
 
 /// Classify a per-file `RETR` failure — see [`RetrDisposition`].
-fn retr_error_disposition(err: &FtpError) -> RetrDisposition {
-    if is_not_found(err) {
-        RetrDisposition::SkipMissing
-    } else {
-        RetrDisposition::FailBatch
+///
+/// RFC 959's 550 is a catch-all ("requested action not taken;
+/// file unavailable") that real servers use for permission
+/// denials and locked files as much as for not-found — vsftpd
+/// answers the literal same "550 Failed to open file." for both
+/// — so a bare 550 must never be trusted as absence. `size_probe`
+/// runs a same-session `SIZE` on the identical path, only in
+/// this rare error branch: a probe that itself reports not-found
+/// confirms the file is gone (the compactor race); a probe that
+/// succeeds (file still listed and present) or fails any other
+/// way (absence unknowable, incl. 502 SIZE-unsupported) fails
+/// the batch. The bias is deliberate: misclassifying a genuine
+/// race as FailBatch costs one round and self-heals (the next
+/// listing no longer carries the file), while misclassifying a
+/// withheld file as missing loses its events permanently. This
+/// mirrors SFTP (NoSuchFile-only) and WebDAV (404-only).
+fn retr_error_disposition(
+    err: &FtpError,
+    size_probe: impl FnOnce() -> FtpResult<usize>,
+) -> RetrDisposition {
+    if !is_not_found(err) {
+        return RetrDisposition::FailBatch;
+    }
+    match size_probe() {
+        Err(probe_err) if is_not_found(&probe_err) => RetrDisposition::SkipMissing,
+        _ => RetrDisposition::FailBatch,
     }
 }
 
@@ -975,31 +1038,52 @@ fn needs_size_probe(cursor: &DeviceCursor, parsed: &LogFileName, filename: &str)
 }
 
 /// Parse one `MLSD` fact line into `(basename, listed size)`.
-/// Returns `None` for directories, `cdir`/`pdir` rows and
-/// unparseable lines — the selection step never sees them. The
-/// size is `None` when the server omitted the `size` fact; the
-/// growth check then degrades to the plain cursor filter, same
-/// as an adapter whose listing carries no sizes at all.
+///
+/// Deliberately a local, tolerant parser rather than suppaftp's
+/// `MlsxFile::from_mlsx_line`: suppaftp rejects the ENTIRE line
+/// when any single fact fails its strict parse, and real servers
+/// trip that constantly — ProFTPD emits four-digit octal
+/// `UNIX.mode=0755` on every entry, RFC 3659 permits fractional
+/// `modify` seconds, and `type=OS.unix=slink:…` values exist in
+/// the wild. A line-fatal parse here would silently empty the
+/// log listing and read as "no peer data" forever. Only the
+/// `type` and `size` facts matter for selection, so extract
+/// exactly those and ignore everything else — an unparseable
+/// fact must never reject the line.
+///
+/// Returns `None` for directories, `cdir`/`pdir` rows and lines
+/// without a pathname — the selection step never sees them. The
+/// size is `None` when the server omitted the `size` fact (or
+/// its value didn't parse); the growth check then degrades to
+/// the plain cursor filter, same as an adapter whose listing
+/// carries no sizes at all.
 fn parse_mlsx_entry(line: &str) -> Option<(String, Option<u64>)> {
-    let file = MlsxFile::from_mlsx_line(line).ok()?;
-    if !file.is_file() {
-        return None;
-    }
-    let name = basename(file.name());
+    // RFC 3659: `entry = [ facts ] SP pathname`, every fact ends
+    // with ";" — so the pathname follows the first "; ". Fall
+    // back to the first bare space for servers that drop the
+    // final semicolon.
+    let (facts, raw_name) = line.split_once("; ").or_else(|| line.split_once(' '))?;
+    let name = basename(raw_name);
     if name.is_empty() {
         return None;
     }
-    // `File::size()` defaults to 0 when the fact is absent —
-    // check the raw line so "no size fact" doesn't masquerade as
-    // an empty file.
-    let has_size_fact = line
-        .split(';')
-        .any(|fact| fact.trim().to_ascii_lowercase().starts_with("size="));
-    let size = if has_size_fact {
-        Some(file.size() as u64)
-    } else {
-        None
-    };
+    let mut size: Option<u64> = None;
+    for fact in facts.split(';') {
+        // A fact without '=' is malformed — skip it, never fail
+        // the line over it.
+        let Some((key, value)) = fact.split_once('=') else {
+            continue;
+        };
+        match key.trim().to_ascii_lowercase().as_str() {
+            // An absent `type` fact means "file" (suppaftp reads
+            // it the same way); any explicit non-file value —
+            // dir/cdir/pdir/link/OS.unix=… — is not a log
+            // candidate.
+            "type" if !value.eq_ignore_ascii_case("file") => return None,
+            "size" => size = value.parse::<u64>().ok(),
+            _ => {}
+        }
+    }
     Some((name.to_string(), size))
 }
 
@@ -1323,6 +1407,45 @@ mod tests {
         assert_eq!(parse_mlsx_entry(""), None);
     }
 
+    /// Real-world server dialects that suppaftp's line-fatal
+    /// parser rejects wholesale (any one strict-parse failure
+    /// dropped the ENTIRE line, silently emptying the listing on
+    /// ProFTPD-class servers). The tolerant parser must ignore
+    /// the facts it doesn't need.
+    #[test]
+    fn parse_mlsx_entry_tolerates_real_world_fact_dialects() {
+        // ProFTPD mod_facts: four-digit octal UNIX.mode on every
+        // entry, plus UNIX.owner/group facts.
+        let proftpd = "modify=20080820052905;perm=adfr;size=8192;type=file;\
+                       unique=800U246EB03;UNIX.group=500;UNIX.mode=0644;\
+                       UNIX.owner=500; 2026-01-01T00-00-00Z_dev-a.jsonl";
+        assert_eq!(
+            parse_mlsx_entry(proftpd),
+            Some(("2026-01-01T00-00-00Z_dev-a.jsonl".to_string(), Some(8192))),
+        );
+        // The matching cdir row (ProFTPD's documented shape) is
+        // still recognised as a directory despite UNIX.mode=0755.
+        let proftpd_cdir = "modify=20080820052905;perm=fle;type=cdir;\
+                            unique=800U246EB03;UNIX.group=500;UNIX.mode=0755; .";
+        assert_eq!(parse_mlsx_entry(proftpd_cdir), None);
+        // RFC 3659 permits fractional seconds in `modify`.
+        let fractional = "type=file;size=42;modify=20260101000000.123; a.jsonl";
+        assert_eq!(
+            parse_mlsx_entry(fractional),
+            Some(("a.jsonl".to_string(), Some(42)))
+        );
+        // RFC 3659 OS-specific types: a symlink is not a log file.
+        let slink = "type=OS.unix=slink:/target;size=4;modify=20260101000000; link.jsonl";
+        assert_eq!(parse_mlsx_entry(slink), None);
+        // An unparseable size value degrades to "size unknown"
+        // instead of dropping the line.
+        let bad_size = "type=file;size=oops;modify=20260101000000; b.jsonl";
+        assert_eq!(
+            parse_mlsx_entry(bad_size),
+            Some(("b.jsonl".to_string(), None))
+        );
+    }
+
     #[test]
     fn features_advertise_mlsd_matches_either_label_case_insensitively() {
         let mut features = Features::new();
@@ -1341,6 +1464,39 @@ mod tests {
     }
 
     #[test]
+    fn mlsd_verdict_caches_only_delivered_answers() {
+        // A FEAT listing is a delivered verdict either way.
+        let mut features = Features::new();
+        features.insert("MLST".to_string(), None);
+        assert_eq!(mlsd_feat_verdict(&Ok(features)), Some(true));
+        assert_eq!(mlsd_feat_verdict(&Ok(Features::new())), Some(false));
+        // 500/502: the server answered FEAT and doesn't know it —
+        // a definitive "no", safe to cache.
+        assert_eq!(
+            mlsd_feat_verdict(&Err(response_err(Status::BadCommand))),
+            Some(false),
+        );
+        assert_eq!(
+            mlsd_feat_verdict(&Err(response_err(Status::NotImplemented))),
+            Some(false),
+        );
+        // 421 shutdown / transport failure: no verdict was ever
+        // delivered — caching "no MLSD" here would downgrade a
+        // capable server to NLST+SIZE for the adapter's lifetime.
+        assert_eq!(
+            mlsd_feat_verdict(&Err(response_err(Status::NotAvailable))),
+            None,
+        );
+        assert_eq!(
+            mlsd_feat_verdict(&Err(FtpError::ConnectionError(std::io::Error::other(
+                "connection reset",
+            )))),
+            None,
+        );
+        assert_eq!(mlsd_feat_verdict(&Err(FtpError::BadResponse)), None);
+    }
+
+    #[test]
     fn basename_strips_optional_directory_prefixes() {
         assert_eq!(basename("a.jsonl"), "a.jsonl");
         assert_eq!(basename("/aperio/log/a.jsonl"), "a.jsonl");
@@ -1350,20 +1506,52 @@ mod tests {
     // ── Error dispositions ───────────────────────────────────────
 
     #[test]
-    fn retr_not_found_skips_everything_else_fails_the_batch() {
-        // Compactor race: listed but deleted before the RETR.
+    fn retr_550_skips_only_when_the_size_probe_confirms_absence() {
+        // Probe-confirmed compactor race: listed, deleted before
+        // the RETR, and SIZE agrees the file is gone.
         assert_eq!(
-            retr_error_disposition(&response_err(Status::FileUnavailable)),
+            retr_error_disposition(&response_err(Status::FileUnavailable), || Err(
+                response_err(Status::FileUnavailable)
+            )),
             RetrDisposition::SkipMissing,
         );
-        // Any other refusal fails the whole fetch so the cursor
-        // never advances past a withheld file.
+        // SIZE succeeds → the file still exists, so the 550 was a
+        // permission/lock refusal (RFC 959's 550 is a catch-all).
+        // Skipping would advance the cursor past live events.
         assert_eq!(
-            retr_error_disposition(&response_err(Status::NotLoggedIn)),
+            retr_error_disposition(&response_err(Status::FileUnavailable), || Ok(8192)),
+            RetrDisposition::FailBatch,
+        );
+        // SIZE fails any other way → absence unknowable → fail.
+        assert_eq!(
+            retr_error_disposition(&response_err(Status::FileUnavailable), || Err(
+                response_err(Status::NotImplemented)
+            )),
+            RetrDisposition::FailBatch,
+        );
+        assert_eq!(
+            retr_error_disposition(&response_err(Status::FileUnavailable), || Err(
+                FtpError::ConnectionError(std::io::Error::other("connection reset"))
+            )),
+            RetrDisposition::FailBatch,
+        );
+    }
+
+    #[test]
+    fn retr_non_550_fails_the_batch_without_probing() {
+        // Any non-550 refusal fails the whole fetch so the cursor
+        // never advances past a withheld file — and the SIZE
+        // probe must not even run.
+        let no_probe = || -> FtpResult<usize> { panic!("probe must not run for non-550") };
+        assert_eq!(
+            retr_error_disposition(&response_err(Status::NotLoggedIn), no_probe),
             RetrDisposition::FailBatch,
         );
         let io_err = FtpError::ConnectionError(std::io::Error::other("connection reset"));
-        assert_eq!(retr_error_disposition(&io_err), RetrDisposition::FailBatch);
+        assert_eq!(
+            retr_error_disposition(&io_err, no_probe),
+            RetrDisposition::FailBatch
+        );
     }
 
     #[test]

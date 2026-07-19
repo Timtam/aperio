@@ -37,11 +37,18 @@
 //! A round that never touches sounds never pays the sounds
 //! chain's find_childs.
 //!
-//! Log + sound-asset file IDs are NOT cached: log downloads
-//! reuse the ID the listing already returned (Drive doesn't
-//! reuse IDs across deletes, so a stale cache would only 404),
-//! and the remaining per-op `find_child` cases (delete_log,
-//! sound assets) are cold paths where an ID cache buys nothing.
+//! Log downloads reuse the ID the listing already returned
+//! (Drive doesn't reuse IDs across deletes, so a stale cache
+//! would only 404). Log PUSHES cache filename → file id after a
+//! successful upload: the orchestrator re-pushes the SAME name
+//! whenever the live session file grows, and the cached id turns
+//! that routine re-push into a single in-place PATCH. A push
+//! WITHOUT a cached id always probes first — Drive stores
+//! duplicate names happily, and a create whose response was lost
+//! (or that predates an app restart, which wipes the in-memory
+//! cache) is only detectable by asking the server. The remaining
+//! per-op `find_child` cases (delete_log, sound assets) are cold
+//! paths where an ID cache buys nothing.
 //!
 //! ## Atomic writes
 //!
@@ -55,7 +62,7 @@ pub mod error;
 pub mod files;
 pub mod oauth;
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use async_trait::async_trait;
@@ -143,14 +150,16 @@ pub struct DriveSyncAdapter {
     http: Arc<Client>,
     tokens: Arc<Mutex<Option<TokenSet>>>,
     ids: Arc<Mutex<RemoteIds>>,
-    /// Filenames of log pushes that FAILED this session. A fresh
-    /// log push skips the PATCH-vs-create existence probe (the name
-    /// is unique per push, the probe always misses); only a retry of
-    /// one of these must probe, because the failed attempt may have
-    /// created the file server-side before the response was lost and
-    /// Drive allows duplicate names. std Mutex — never held across
-    /// an await.
-    failed_log_pushes: Arc<StdMutex<HashSet<String>>>,
+    /// File ids of log files successfully pushed this session,
+    /// keyed by filename. The orchestrator re-pushes the SAME
+    /// filename whenever the live session file grows (and once
+    /// more per app launch), so a cached id turns that routine
+    /// re-push into one duplicate-proof in-place PATCH. Without a
+    /// cached id, push_log always probes: Drive allows duplicate
+    /// names, so a create whose response was lost — or one from
+    /// before a restart wiped this map — can only be detected by
+    /// asking the server. std Mutex — never held across an await.
+    log_file_ids: Arc<StdMutex<HashMap<String, String>>>,
 }
 
 impl DriveSyncAdapter {
@@ -180,7 +189,7 @@ impl DriveSyncAdapter {
             http: Arc::new(Client::new()),
             tokens: Arc::new(Mutex::new(None)),
             ids: Arc::new(Mutex::new(RemoteIds::default())),
-            failed_log_pushes: Arc::new(StdMutex::new(HashSet::new())),
+            log_file_ids: Arc::new(StdMutex::new(HashMap::new())),
         })
     }
 
@@ -490,32 +499,34 @@ impl SyncAdapter for DriveSyncAdapter {
         let ids = self.folders_for(FolderNeed::Log).await?;
         let log_id = ids.log.unwrap();
         let filename = log.name.to_filename();
-        // Fresh pushes go straight to multipart create (1 request);
-        // only a retry of a previously failed push pays the existence
-        // probe — see the `failed_log_pushes` field docs for why.
-        let must_probe = self.failed_log_pushes.lock().unwrap().contains(&filename);
-        let result = if must_probe {
-            self.upload_to_parent(&log_id, &filename, log.bytes.clone())
-                .await
-        } else {
-            self.create_in_parent(&log_id, &filename, log.bytes.clone())
-                .await
-        };
-        // A folder-resolution failure returned via `?` above and
-        // cannot have created anything server-side; any failure of
-        // the upload attempt itself conservatively marks the name
-        // (a spurious probe on retry costs one request, missing a
-        // needed probe would duplicate the file).
-        let mut failed = self.failed_log_pushes.lock().unwrap();
-        match &result {
-            Ok(()) => {
-                failed.remove(&filename);
+        // Growth re-push fast path: a file we already pushed this
+        // session PATCHes in place under its cached id — one
+        // request, and an in-place overwrite by construction. A
+        // stale id (the compactor deleted the file behind us) is
+        // evicted and falls through to the probing path below,
+        // mirroring push_singleton_inner's stale-id handling.
+        let cached_id = self.log_file_ids.lock().unwrap().get(&filename).cloned();
+        if let Some(id) = cached_id {
+            if self
+                .patch_in_place(&log_id, &filename, &log.bytes, &id)
+                .await?
+            {
+                return Ok(());
             }
-            Err(_) => {
-                failed.insert(filename);
-            }
+            self.log_file_ids.lock().unwrap().remove(&filename);
         }
-        result
+        // No usable cached id → probe-then-upload. Probing by
+        // default is what keeps this idempotent across restarts: an
+        // earlier create may have landed server-side even though its
+        // response was lost (and Drive allows duplicate names), so
+        // only the probe can tell create apart from overwrite. The
+        // returned id is cached so the next growth re-push of this
+        // file costs a single PATCH.
+        let id = self
+            .upload_to_parent(&log_id, &filename, log.bytes.clone())
+            .await?;
+        self.log_file_ids.lock().unwrap().insert(filename, id);
+        Ok(())
     }
 
     async fn fetch_snapshot(&self) -> SyncResult<Option<Snapshot>> {
@@ -540,6 +551,11 @@ impl SyncAdapter for DriveSyncAdapter {
         let log_id = ids.log.unwrap();
         let token = self.access_token().await?;
         let filename = name.to_filename();
+        // The push-path id cache must not outlive the file: a
+        // retired log deleted here would leave a stale id behind
+        // (harmless — a PATCH on it 404s into the probe path — but
+        // eviction keeps the cache honest).
+        self.log_file_ids.lock().unwrap().remove(&filename);
         let id = match files::find_child(&self.http, &token, &log_id, &filename).await {
             Ok(Some(id)) => id,
             // "Already gone" is the goal of delete; honour
@@ -570,9 +586,11 @@ impl SyncAdapter for DriveSyncAdapter {
         // content-addressed and Drive allows duplicate names, so a
         // probe-less re-push of an already-present asset would
         // create a duplicate instead of being the no-op the trait
-        // requires.
+        // requires. The returned id is dropped — assets are
+        // immutable, so there is no re-push to PATCH.
         self.upload_to_parent(&sounds_id, &name, bytes.to_vec())
             .await
+            .map(|_| ())
     }
 
     async fn fetch_sound_asset(&self, hash: &str, extension: &str) -> SyncResult<Option<Vec<u8>>> {
@@ -603,17 +621,18 @@ impl SyncAdapter for DriveSyncAdapter {
 impl DriveSyncAdapter {
     /// Upload `bytes` as a file named `name` under `parent_id`.
     /// If a file with that name already exists, PATCH its
-    /// content; otherwise multipart-create it. One-shot 401
+    /// content; otherwise multipart-create it. Returns the
+    /// resulting file id so callers can cache it. One-shot 401
     /// retry on auth failure.
     async fn upload_to_parent(
         &self,
         parent_id: &str,
         name: &str,
         bytes: Vec<u8>,
-    ) -> SyncResult<()> {
+    ) -> SyncResult<String> {
         let token = self.access_token().await?;
         match self.upload_inner(&token, parent_id, name, &bytes).await {
-            Ok(()) => Ok(()),
+            Ok(id) => Ok(id),
             Err(SyncError::Auth(_)) => {
                 let token = self.force_refresh().await?;
                 self.upload_inner(&token, parent_id, name, &bytes).await
@@ -628,13 +647,13 @@ impl DriveSyncAdapter {
         parent_id: &str,
         name: &str,
         bytes: &[u8],
-    ) -> SyncResult<()> {
+    ) -> SyncResult<String> {
         // Find any existing file with this name to decide
         // between PATCH (update) and POST multipart (create).
         let existing = files::find_child(&self.http, token, parent_id, name)
             .await
             .map_err(drive_to_sync)?;
-        let _new_id = files::upload(
+        files::upload(
             &self.http,
             token,
             parent_id,
@@ -643,31 +662,33 @@ impl DriveSyncAdapter {
             existing.as_deref(),
         )
         .await
-        .map_err(drive_to_sync)?;
-        Ok(())
+        .map_err(drive_to_sync)
     }
 
-    /// Create a file under `parent_id` WITHOUT the existence probe
-    /// — the fresh-push fast path for log files, whose names are
-    /// unique per push. One-shot 401 retry like the other write
-    /// paths (a 401 means the server executed nothing, so the
-    /// retried create cannot duplicate).
-    async fn create_in_parent(
+    /// PATCH content under a known `file_id` with the usual
+    /// one-shot 401 retry. `Ok(true)` = patched in place;
+    /// `Ok(false)` = the id no longer exists (the compactor
+    /// deleted the file behind us) — the caller should drop its
+    /// cached id and fall back to the probing path.
+    async fn patch_in_place(
         &self,
         parent_id: &str,
         name: &str,
-        bytes: Vec<u8>,
-    ) -> SyncResult<()> {
+        bytes: &[u8],
+        file_id: &str,
+    ) -> SyncResult<bool> {
         let token = self.access_token().await?;
-        match files::upload(&self.http, &token, parent_id, name, &bytes, None).await {
-            Ok(_) => Ok(()),
-            Err(err) if err.is_auth() => {
-                let token = self.force_refresh().await?;
-                files::upload(&self.http, &token, parent_id, name, &bytes, None)
-                    .await
-                    .map(|_| ())
-                    .map_err(drive_to_sync)
-            }
+        let result =
+            match files::upload(&self.http, &token, parent_id, name, bytes, Some(file_id)).await {
+                Err(err) if err.is_auth() => {
+                    let token = self.force_refresh().await?;
+                    files::upload(&self.http, &token, parent_id, name, bytes, Some(file_id)).await
+                }
+                other => other,
+            };
+        match result {
+            Ok(_) => Ok(true),
+            Err(err) if err.is_not_found() => Ok(false),
             Err(err) => Err(drive_to_sync(err)),
         }
     }
@@ -868,6 +889,33 @@ mod tests {
             }),
         )
         .is_err());
+    }
+
+    #[test]
+    fn log_file_id_cache_is_shared_across_clones() {
+        // The duplicate-proofing depends on ONE id cache per
+        // adapter: the host hands out clones, and a per-clone map
+        // would silently regress the growth re-push to a probe per
+        // clone — or worse, let two clones race probe-and-create.
+        let adapter = DriveSyncAdapter::new(
+            GoogleDriveAccountConfig {
+                client_id: "x".into(),
+                client_secret: "y".into(),
+                folder_name: "Aperio".into(),
+            },
+            "refresh-token",
+        )
+        .unwrap();
+        let clone = adapter.clone();
+        adapter
+            .log_file_ids
+            .lock()
+            .unwrap()
+            .insert("f.jsonl".into(), "id-1".into());
+        assert_eq!(
+            clone.log_file_ids.lock().unwrap().get("f.jsonl"),
+            Some(&"id-1".to_string())
+        );
     }
 
     #[test]
