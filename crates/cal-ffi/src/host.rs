@@ -2633,22 +2633,11 @@ impl Host {
                     .flatten();
                 let warm = has_snapshot(&state);
                 let stale = is_stale(&state, SWR_TTL_SECS);
-                let cals = if warm {
-                    self.cache.read_calendars(&account).unwrap_or_default()
-                } else {
-                    // COLD: serve the RETAINED catalogue when there is one (a
-                    // sync-state reset — cache-generation reconcile, listing
-                    // invalidate after a rename — keeps the rows); the spawned
-                    // refresh below swaps in the truth. Only a never-listed
-                    // account fetches live. Keeps a cold app start from doing
-                    // a per-account network listing before the first paint.
-                    let retained = self.cache.read_calendars(&account).unwrap_or_default();
-                    if retained.is_empty() {
-                        adapter.list_calendars().await.unwrap_or_default()
-                    } else {
-                        retained
-                    }
-                };
+                // Cache-only serve — a never-listed account contributes
+                // NOTHING until the spawned refresh below lands (its
+                // cache-updated push re-lists); the old live per-account
+                // listing gated the whole first paint on one cold provider.
+                let cals = self.cache.read_calendars(&account).unwrap_or_default();
                 for c in &cals {
                     self.registry.note_calendar_route(&c.id, &account);
                 }
@@ -2826,14 +2815,16 @@ impl Host {
             // write) deliberately keeps them as the fallback, so the post-save
             // reload paints instantly with the pre-write rows and the
             // background refresh swaps in the truth via the cache-updated push
-            // (desktop parity; also keeps the seconds-long live read off the
-            // native module's shared read queue). Only a NEVER-warmed container
-            // (no rows at all — first open) does a LIVE read so the first paint
-            // is never blank, warming the cache in the background for next
-            // time. Whether to self-warm (stale, OR a coverage miss outside the
-            // brief cooldown that prevents the cold-cache refresh -> re-read
-            // feedback loop) is the SHARED `event_self_warm_needed`, identical
-            // to the desktop get_events.
+            // (desktop parity). A NEVER-warmed container (no rows at all —
+            // fresh install / newly added account) serves EMPTY and lets the
+            // spawned self-warm below fill the view via that same push: the
+            // old blocking LIVE read here ran a seconds-long provider fetch
+            // on the serial native queue, stalling EVERY other read behind
+            // one cold calendar at exactly the moment the whole app is
+            // trying to first-paint. Whether to self-warm (stale, OR a
+            // coverage miss outside the brief cooldown that prevents the
+            // cold-cache refresh -> re-read feedback loop) is the SHARED
+            // `event_self_warm_needed`, identical to the desktop get_events.
             Some(ext) => {
                 let account = self
                     .registry
@@ -2844,24 +2835,10 @@ impl Host {
                     .get_sync_state(&account, SyncScope::Events, &req.calendar_id)
                     .ok()
                     .flatten();
-                let warm = has_snapshot(&state);
-                let mut events = if warm {
-                    self.cache
-                        .read_events(&account, &req.calendar_id, range)
-                        .unwrap_or_default()
-                } else {
-                    let retained = self
-                        .cache
-                        .read_events(&account, &req.calendar_id, range)
-                        .unwrap_or_default();
-                    if retained.is_empty() {
-                        self.runtime
-                            .block_on(async { ext.get_events(&req.calendar_id, range).await })
-                            .map_err(map_store_err)?
-                    } else {
-                        retained
-                    }
-                };
+                let mut events = self
+                    .cache
+                    .read_events(&account, &req.calendar_id, range)
+                    .unwrap_or_default();
                 // Colour: map a colour-capable provider's native color_hex back
                 // to a label FIRST, then stamp host-local overrides (which skip
                 // native-coloured events) — the desktop ordering, so a provider
@@ -3368,22 +3345,12 @@ impl Host {
                     .flatten();
                 let warm = has_snapshot(&state);
                 let stale = is_stale(&state, SWR_TTL_SECS);
-                let lists = if warm {
-                    self.cache.read_task_lists(&account).unwrap_or_default()
-                } else {
-                    // COLD: serve the RETAINED catalogue when there is one —
-                    // the tasks tab gates its FIRST load on this listing, so a
-                    // live per-account fetch here is exactly the app-start
-                    // "Laden…" stall. The spawned refresh below swaps in the
-                    // truth; only a never-listed account fetches live. Mirrors
-                    // list_calendars_json.
-                    let retained = self.cache.read_task_lists(&account).unwrap_or_default();
-                    if retained.is_empty() {
-                        adapter.list_task_lists().await.unwrap_or_default()
-                    } else {
-                        retained
-                    }
-                };
+                // Cache-only serve — a never-listed account contributes
+                // NOTHING until the spawned refresh below lands (the tasks
+                // tab gates its FIRST load on this listing, so the old live
+                // per-account fetch here was exactly the app-start "Laden…"
+                // stall). Mirrors list_calendars_json.
+                let lists = self.cache.read_task_lists(&account).unwrap_or_default();
                 for l in &lists {
                     self.registry.note_task_list_route(&l.id, &account);
                 }
@@ -3571,9 +3538,12 @@ impl Host {
             // exists) serves the cached rows instantly + queues a background
             // refresh when stale; a COLD one serves the RETAINED rows when it
             // has any (an invalidate keeps them as the fallback; the refresh
-            // swaps in the truth), and only a never-warmed list does a LIVE
-            // read so the first paint is never blank. The refresh is gated on
-            // stale|cold (not coverage). Mirrors the desktop tasks read.
+            // swaps in the truth), and a never-warmed list serves EMPTY — the
+            // spawned refresh fills the view via the cache-updated push. The
+            // old blocking LIVE read here stalled the whole serial native
+            // queue behind one cold provider fetch at first-paint time (see
+            // get_events_json). The refresh is gated on stale|cold (not
+            // coverage). Mirrors the desktop tasks read.
             Some(ext) => {
                 let account = self
                     .registry
@@ -3586,28 +3556,10 @@ impl Host {
                     .flatten();
                 let warm = has_snapshot(&state);
                 let stale = is_stale(&state, SWR_TTL_SECS);
-                let tasks = if warm {
-                    self.cache
-                        .read_tasks(&account, &list_id)
-                        .unwrap_or_default()
-                } else {
-                    // COLD: serve the RETAINED rows when there are any (an
-                    // invalidate after a write keeps them as the fallback) —
-                    // the background refresh below swaps in the truth; only a
-                    // never-warmed list live-reads (first paint never blank).
-                    // Mirrors get_events_json.
-                    let retained = self
-                        .cache
-                        .read_tasks(&account, &list_id)
-                        .unwrap_or_default();
-                    if retained.is_empty() {
-                        self.runtime
-                            .block_on(async { ext.get_tasks(&list_id).await })
-                            .map_err(map_store_err)?
-                    } else {
-                        retained
-                    }
-                };
+                let tasks = self
+                    .cache
+                    .read_tasks(&account, &list_id)
+                    .unwrap_or_default();
                 if !warm || stale {
                     let cache_bg = Arc::clone(&self.cache);
                     let ext_bg = Arc::clone(&ext);
@@ -3990,27 +3942,14 @@ impl Host {
                     .flatten();
                 let warm = has_snapshot(&state);
                 let stale = is_stale(&state, SWR_TTL_SECS);
-                let mut sections = if warm {
-                    self.cache
-                        .read_sections(&account, &list_id)
-                        .unwrap_or_default()
-                } else {
-                    // COLD: serve the RETAINED rows when there are any (an
-                    // invalidate after a section edit keeps them) — the
-                    // background refresh below swaps in the truth; only a
-                    // never-warmed list live-reads. Mirrors get_events_json.
-                    let retained = self
-                        .cache
-                        .read_sections(&account, &list_id)
-                        .unwrap_or_default();
-                    if retained.is_empty() {
-                        self.runtime
-                            .block_on(async { ext.list_sections(&list_id).await })
-                            .map_err(map_store_err)?
-                    } else {
-                        retained
-                    }
-                };
+                // Cache-only serve — a never-warmed list serves EMPTY and the
+                // spawned refresh fills the view via the cache-updated push
+                // (see get_events_json; the old live read stalled the serial
+                // native queue at first-paint time).
+                let mut sections = self
+                    .cache
+                    .read_sections(&account, &list_id)
+                    .unwrap_or_default();
                 if !warm || stale {
                     let cache_bg = Arc::clone(&self.cache);
                     let ext_bg = Arc::clone(&ext);
@@ -6363,20 +6302,10 @@ impl Host {
                     .flatten();
                 let warm = has_snapshot(&state);
                 let stale = is_stale(&state, SWR_TTL_SECS);
-                let lists = if warm {
-                    self.cache.read_contact_lists(&account).unwrap_or_default()
-                } else {
-                    // COLD: serve the RETAINED catalogue when there is one (the
-                    // spawned refresh below swaps in the truth); only a
-                    // never-listed account fetches live. Mirrors
-                    // list_calendars_json.
-                    let retained = self.cache.read_contact_lists(&account).unwrap_or_default();
-                    if retained.is_empty() {
-                        adapter.list_contact_lists().await.unwrap_or_default()
-                    } else {
-                        retained
-                    }
-                };
+                // Cache-only serve — a never-listed account contributes
+                // NOTHING until the spawned refresh below lands. Mirrors
+                // list_calendars_json.
+                let lists = self.cache.read_contact_lists(&account).unwrap_or_default();
                 for l in &lists {
                     self.registry.note_contact_list_route(&l.id, &account);
                 }
@@ -6451,13 +6380,13 @@ impl Host {
                     .map_err(map_store_err)?;
                 to_json(&contacts)
             }
-            // EXTERNAL: stale-while-revalidate with a mobile cold-fallback — see
-            // get_events_json for the full rationale. A WARM book (a snapshot
-            // exists) serves the cached rows instantly + queues a background
-            // refresh when stale; a COLD one (no snapshot yet, or one just
-            // invalidated by a write) does a LIVE read so the first paint is
-            // never blank, and warms the cache in the background. Mirrors the
-            // desktop contacts read.
+            // EXTERNAL: stale-while-revalidate — see get_events_json for the
+            // full rationale. A WARM book (a snapshot exists) serves the
+            // cached rows instantly + queues a background refresh when
+            // stale; a COLD one serves whatever rows are retained (empty on
+            // a never-warmed book) and lets the spawned refresh fill the
+            // view via the cache-updated push. Mirrors the desktop contacts
+            // read.
             Some(ext) => {
                 let account = self
                     .registry
@@ -6470,15 +6399,14 @@ impl Host {
                     .flatten();
                 let warm = has_snapshot(&state);
                 let stale = is_stale(&state, SWR_TTL_SECS);
-                let contacts = if warm {
-                    self.cache
-                        .read_contacts(&account, &list_id)
-                        .unwrap_or_default()
-                } else {
-                    self.runtime
-                        .block_on(async { ext.get_contacts(&list_id).await })
-                        .map_err(map_store_err)?
-                };
+                // Cache-only serve — a never-warmed book serves EMPTY and the
+                // spawned refresh fills the view via the cache-updated push
+                // (see get_events_json; the old blocking live read stalled
+                // the serial native queue at first-paint time).
+                let contacts = self
+                    .cache
+                    .read_contacts(&account, &list_id)
+                    .unwrap_or_default();
                 if !warm || stale {
                     let cache_bg = Arc::clone(&self.cache);
                     let ext_bg = Arc::clone(&ext);
