@@ -101,10 +101,25 @@ impl ReadPool {
         })
     }
 
+    /// Run `f` on a pool connection. Prefers a FREE connection (try_lock
+    /// scan) so one slow read can't head-of-line-block later reads that
+    /// happen to round-robin onto its connection while others sit idle;
+    /// only when every connection is busy does it block on the
+    /// round-robin pick.
+    ///
+    /// NOT re-entrant: a nested `with` from inside `f` can land on the
+    /// connection the thread already holds and deadlock (std Mutex).
+    /// Callers — including `LocalAdapter::read` bodies — must never call
+    /// back into the pool.
     fn with<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&Connection) -> R,
     {
+        for conn in &self.conns {
+            if let Ok(guard) = conn.try_lock() {
+                return f(&guard);
+            }
+        }
         let idx = self.next.fetch_add(1, Ordering::Relaxed) % self.conns.len();
         let guard = self.conns[idx].lock().expect("read conn poisoned");
         f(&guard)

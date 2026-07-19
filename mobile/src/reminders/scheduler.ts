@@ -237,7 +237,11 @@ export function refreshRemindersSoon(): void {
 // change the day-start counts) or an external-cache refresh finished.
 // Registered as a callback because cacheObserver importing this module
 // directly would close a module cycle through the api layer.
-setRemindersRefreshHook(refreshRemindersSoon);
+// Through the startup gate: a launch warm pass can flush a cache update
+// while the gate is still closed (it rides toward its 5s cap on a busy
+// bridge) — the replan then parks and runs once at gate-open instead of
+// competing with the first paint. Post-open: plain pass-through.
+setRemindersRefreshHook(() => whenStartupSettled('reminders', refreshRemindersSoon));
 
 /** Mount once near the app root: reschedule on launch + every foreground-resume
  *  (the latter catches reminders synced in from a peer while we were away).
@@ -251,7 +255,13 @@ export function useReminderTriggers(): void {
   useEffect(() => {
     whenStartupSettled('reminders', () => void rescheduleReminders());
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void rescheduleReminders();
+      // Also through the gate: the listener registers before the gate is
+      // even armed, so an inactive→active flip DURING the launch window
+      // (notification shade, app-switcher peek) would otherwise run the
+      // heavy enumeration un-gated. Post-open this is a pass-through.
+      if (state === 'active') {
+        whenStartupSettled('reminders', () => void rescheduleReminders());
+      }
     });
     return () => sub.remove();
   }, []);

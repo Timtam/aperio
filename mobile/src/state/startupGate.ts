@@ -29,13 +29,23 @@ export function whenStartupSettled(key: string, run: () => void): void {
   parked.set(key, run);
 }
 
-/** Idempotent; flushes every parked run on first call. */
+/** Gap between the parked runs at gate-open: each is a full-catalog
+ *  fan-out on the SERIAL native queue, so flushing them back-to-back
+ *  would recreate a (shorter) version of the mount-time burst the gate
+ *  exists to prevent. Staggering lets the visible screen's reads slot in
+ *  between the scans. */
+const FLUSH_STAGGER_MS = 600;
+
+/** Idempotent; flushes the parked runs on first call, staggered. */
 function openGate(): void {
   if (ready) return;
   ready = true;
   const runs = Array.from(parked.values());
   parked.clear();
-  for (const run of runs) run();
+  runs.forEach((run, i) => {
+    if (i === 0) run();
+    else setTimeout(run, i * FLUSH_STAGGER_MS);
+  });
 }
 
 /** Delay past the settled first paint before the scans start. */

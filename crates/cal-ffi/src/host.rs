@@ -2767,8 +2767,8 @@ impl Host {
     /// events are synthesised from the underlying contact list's birthdays,
     /// local in-process + external from the snapshot cache). A LOCAL calendar is
     /// a direct read; an EXTERNAL one is stale-while-revalidate (serve the cached
-    /// snapshot + background-refresh, with a cold-fallback live read), mirroring
-    /// the desktop `get_events`.
+    /// snapshot — empty on a never-warmed calendar — and background-refresh),
+    /// mirroring the desktop `get_events`.
     ///
     /// The local adapter currently returns rows whose stored start/end
     /// intersect the range (RRULE occurrence expansion is its own later phase),

@@ -19,6 +19,10 @@ import { dayStartPreschedulesOsNotification } from '../reminders/dayStartSchedul
 import { notify } from './notify';
 import { currentUserForList } from './currentUser';
 import { readFiredDayKey, writeFiredDayKey } from './dayStartFired';
+import {
+  getCacheRefreshProgress,
+  subscribeCacheRefreshProgress,
+} from './cacheRefreshProgress';
 import { isDayStartReviewSnoozed } from './dayStartSnooze';
 import { whenStartupSettled } from './startupGate';
 import { effectiveForList, readTaskBehaviour, type TaskBehaviour } from './taskBehaviour';
@@ -268,6 +272,42 @@ async function runDayStartReview(
 // One run at a time across launch + the foreground listener.
 let inFlight = false;
 
+/** Cap on waiting for the external warm pass before the day-start checks
+ *  run anyway. Offline (no pass, or a failing one) must not block the
+ *  checks forever — and offline, the pre-branch blocking live reads
+ *  degraded to empty too, so running local-only there is parity. */
+const CACHE_SETTLE_CAP_MS = 60_000;
+
+/**
+ * Run `run` once no external cache warm pass is in flight. The day-start
+ * checks burn once-a-day fire-markers; with the launch read path now
+ * cache-only, running them while the launch warm pass is still filling a
+ * cold external catalog would burn the markers against EMPTY data —
+ * silently dropping the day's deadline-pin, carry-over, review and
+ * spoken reminders for every external task. The launch warm is kicked at
+ * mount (well before the 1.5s startup gate opens), so the common cold
+ * start sees `refreshing` already true here and simply waits it out.
+ */
+function runWhenCacheSettled(run: () => void): void {
+  if (!getCacheRefreshProgress().refreshing) {
+    run();
+    return;
+  }
+  let done = false;
+  let unsub: () => void = () => {};
+  const finish = () => {
+    if (done) return;
+    done = true;
+    unsub();
+    clearTimeout(cap);
+    run();
+  };
+  const cap = setTimeout(finish, CACHE_SETTLE_CAP_MS);
+  unsub = subscribeCacheRefreshProgress((p) => {
+    if (!p.refreshing) finish();
+  });
+}
+
 /**
  * Mount once inside the TaskStore provider: run the day-start checks on launch
  * (once the catalog + selection have hydrated) + every foreground-resume (the
@@ -291,33 +331,42 @@ export function useDayStartChecks(): { reviewOpen: boolean; closeReview: () => v
   const openReview = useCallback(() => setReviewOpen(true), []);
   const closeReview = useCallback(() => setReviewOpen(false), []);
 
+  const runInner = useCallback(() => {
+    void (async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        await runDeadlinePin(invalidateData);
+        // The review reads the SELECTED lists, so it must wait for the
+        // store to hydrate (an empty pre-hydration selection would mark
+        // the day fired with nothing to review). The catalog-ready
+        // effect below re-runs us then.
+        if (!loadingRef.current) {
+          await runDayStartReview([...selectionRef.current], invalidateData, openReview);
+        }
+      } catch {
+        // Best-effort — a bridge hiccup must never crash launch/foreground.
+      } finally {
+        inFlight = false;
+      }
+    })();
+  }, [invalidateData, openReview]);
+
   const run = useCallback(() => {
     // Startup-gated: the deadline-pin + review passes fan out over every
     // list, and at launch that queued ahead of the visible screen's first
     // read on the serial native queue. Pre-gate triggers coalesce into one
     // deferred run (the fire-markers make repeats no-ops anyway); once the
     // gate is open this is a plain pass-through (foreground resumes).
+    // Each run ADDITIONALLY waits out a running external warm pass (see
+    // runWhenCacheSettled): these checks burn once-a-day fire-markers, and
+    // with the launch read path now cache-only, running them against a
+    // still-warming (possibly empty) external catalog would silently drop
+    // the day's deadline-pin/carry-over/review for every external task.
     whenStartupSettled('dayStart', () => {
-      void (async () => {
-        if (inFlight) return;
-        inFlight = true;
-        try {
-          await runDeadlinePin(invalidateData);
-          // The review reads the SELECTED lists, so it must wait for the
-          // store to hydrate (an empty pre-hydration selection would mark
-          // the day fired with nothing to review). The catalog-ready
-          // effect below re-runs us then.
-          if (!loadingRef.current) {
-            await runDayStartReview([...selectionRef.current], invalidateData, openReview);
-          }
-        } catch {
-          // Best-effort — a bridge hiccup must never crash launch/foreground.
-        } finally {
-          inFlight = false;
-        }
-      })();
+      runWhenCacheSettled(runInner);
     });
-  }, [invalidateData, openReview]);
+  }, [runInner]);
 
   // Launch + catalog-ready: fire once the task-list catalog + selection have
   // hydrated (taskListsLoading flips false). Re-firing here is harmless — the

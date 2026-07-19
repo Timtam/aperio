@@ -80,6 +80,10 @@ pub fn build_orchestrator(
     // The applier/snapshot/compactor reach local storage through two seams: the
     // SQLite-backed SyncStore (via its own LocalAdapter on the same SharedConn)
     // and the injected SecretStore. One store, cloned across all three.
+    // DELIBERATELY without the WAL read pool: the applier's reads are
+    // write-adjacent (read-then-write inside apply flows), and a pooled
+    // reader only sees COMMITTED state — it must not miss rows the apply
+    // wrote moments (or a transaction) earlier on the writer connection.
     let applier_adapter = Arc::new(LocalAdapter::new(db.clone()));
     let sync_store: Arc<dyn SyncStore> = Arc::new(DesktopSyncStore::new(
         db.clone(),
