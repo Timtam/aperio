@@ -252,8 +252,22 @@ fn missing_cache() -> &'static std::sync::Mutex<std::collections::HashMap<String
     CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 
-/// Back-off before a remote-missing hash is probed again.
-const MISSING_RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+/// Back-off before a remote-missing hash is probed again. One hour: long
+/// enough to stop a permanently-dangling reference from costing the full
+/// extension fan-out on every ~5-minute round, short enough that a sound
+/// a PEER uploads shortly after we probed appears within the hour (there
+/// is no cross-device invalidation signal).
+const MISSING_RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+/// Forget every remote-missing verdict. Call when the sync backend is
+/// (re)configured — the verdicts were about a DIFFERENT remote (mirrors
+/// the orchestrator clearing its per-session pushed-length map).
+pub fn reset_missing_cache() {
+    missing_cache()
+        .lock()
+        .expect("missing-sound cache poisoned")
+        .clear();
+}
 
 fn missing_recently(hash: &str) -> bool {
     missing_cache()

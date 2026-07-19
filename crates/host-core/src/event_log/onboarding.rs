@@ -361,12 +361,16 @@ impl OnboardingService {
         };
         report.fetched_logs = fetched_logs;
 
+        let mut applied_lengths: Vec<(String, u64)> = Vec::new();
         for log in &foreign {
             if log.name.timestamp > newest {
                 newest = log.name.timestamp;
             }
             match self.applier.apply_log_file(log) {
-                Ok(apply_report) => report.merge_apply(apply_report),
+                Ok(apply_report) => {
+                    report.merge_apply(apply_report);
+                    applied_lengths.push((log.name.to_filename(), log.bytes.len() as u64));
+                }
                 Err(err) => {
                     warn!(
                         log = %log.name.to_filename(),
@@ -374,9 +378,18 @@ impl OnboardingService {
                         "applier failed during onboarding",
                     );
                     report.apply_failures += 1;
+                    // Length 0 → any listed size counts as grown, so the
+                    // next round retries the file (matches the round's
+                    // failed-apply policy).
+                    applied_lengths.push((log.name.to_filename(), 0));
                 }
             }
         }
+        // Seed the growth-refetch records for what we just applied —
+        // typically including the peers' LIVE session files, whose later
+        // appends would otherwise stay invisible until those peers rotate
+        // (the cursor lands exactly on their timestamps).
+        self.record_applied_lengths(&applied_lengths);
 
         // Persist the cursor so the next scheduler round doesn't
         // re-pull the same backlog. The snapshot path bumps
@@ -512,12 +525,16 @@ impl OnboardingService {
         };
         report.fetched_logs = fetched_logs;
 
+        let mut applied_lengths: Vec<(String, u64)> = Vec::new();
         for log in &foreign {
             if log.name.timestamp > starting_cursor {
                 starting_cursor = log.name.timestamp;
             }
             match self.applier.apply_log_file(log) {
-                Ok(apply_report) => report.merge_apply(apply_report),
+                Ok(apply_report) => {
+                    report.merge_apply(apply_report);
+                    applied_lengths.push((log.name.to_filename(), log.bytes.len() as u64));
+                }
                 Err(err) => {
                     warn!(
                         log = %log.name.to_filename(),
@@ -525,9 +542,14 @@ impl OnboardingService {
                         "applier failed during stale resume",
                     );
                     report.apply_failures += 1;
+                    applied_lengths.push((log.name.to_filename(), 0));
                 }
             }
         }
+        // Seed growth-refetch records (see accept_remote): the peers'
+        // live session files just applied would otherwise never be
+        // re-fetched when they grow.
+        self.record_applied_lengths(&applied_lengths);
 
         // §19.10 v1.1: replay our own pending logs through the
         // applier's force-own path. The snapshot apply above
@@ -744,53 +766,62 @@ impl OnboardingService {
     /// sync round so other devices see a heartbeat and the
     /// compaction algorithm (Phase Sg) has accurate cursors.
     ///
-    /// `round_meta` is the copy the round already fetched for its gates —
-    /// reused here instead of a second GET. It is a few seconds old by
-    /// now, which last-write-wins on the file (§19.5) already tolerates:
-    /// two devices syncing at the same instant can lose one update; the
-    /// next round of either re-writes its own entry and recovers. (The
-    /// local-FS adapter doesn't offer etag locking, so we accept this.)
-    ///
-    /// When our device record is ALREADY current — same held horizon, name
-    /// and app version, not flagged stale — the push is skipped entirely:
+    /// `round_meta` — the copy the round fetched at its START — is used
+    /// ONLY to decide whether a push is needed at all. When our device
+    /// record is already current (same held horizon, name and app
+    /// version, not flagged stale) the push is skipped entirely:
     /// `last_seen_log` means "the point up to which I hold every event",
     /// which a no-change round doesn't move, so re-writing the identical
-    /// record was one wasted PUT per round. (Round liveness for the UI
-    /// rides `SYNC_LAST_ROUND_PREF_KEY`, not this file.)
+    /// record was one wasted GET+PUT per round. (Round liveness for the
+    /// UI rides `SYNC_LAST_ROUND_PREF_KEY`, not this file.)
+    ///
+    /// When a push IS needed, the base copy is RE-FETCHED fresh — never
+    /// the round-start copy. The PUT rewrites the whole file, and a peer
+    /// can have compacted DURING our round (raising the monotonic
+    /// `gc_horizon`, stamping `snapshot_timestamp`, flagging behind
+    /// devices stale); pushing a copy as old as the entire round would
+    /// silently revert all of that, un-flagging a stale device that
+    /// would then skip GC'd logs forever. Re-fetching narrows the
+    /// lost-update window back to the single GET→PUT gap §19.5's
+    /// last-write-wins already tolerates for the device registry.
     pub async fn heartbeat_meta(
         &self,
         adapter: &dyn SyncAdapter,
         last_seen_log: DateTime<Utc>,
         round_meta: Option<&MetaJson>,
     ) -> SyncResult<()> {
-        let mut meta = match round_meta {
-            Some(m) => m.clone(),
-            None => match adapter.fetch_meta().await? {
-                Some(m) => m,
-                None => {
-                    // The remote has lost its meta.json since onboarding
-                    // (someone deleted it, or onboarding was incomplete).
-                    // Mint a fresh one with us as the only known device.
-                    debug!("heartbeat_meta found no remote meta; reseeding with this device",);
-                    MetaJson::fresh(&self.app_version)
-                }
-            },
-        };
         let name = UserPrefsRepo::new(&self.db)
             .get(PREF_DEVICE_NAME)
             .ok()
             .flatten();
-        let current = meta
-            .devices
-            .get(self.local_device_id.as_str())
-            .is_some_and(|d| {
-                d.last_seen_log == last_seen_log
-                    && d.name == name
-                    && d.app_version == self.app_version
-                    && !d.stale
-            });
-        if current {
+        let is_current = |meta: &MetaJson| {
+            meta.devices
+                .get(self.local_device_id.as_str())
+                .is_some_and(|d| {
+                    d.last_seen_log == last_seen_log
+                        && d.name == name
+                        && d.app_version == self.app_version
+                        && !d.stale
+                })
+        };
+        if round_meta.is_some_and(&is_current) {
             debug!("heartbeat_meta: device record already current; skipping push");
+            return Ok(());
+        }
+        let mut meta = match adapter.fetch_meta().await? {
+            Some(m) => m,
+            None => {
+                // The remote has lost its meta.json since onboarding
+                // (someone deleted it, or onboarding was incomplete).
+                // Mint a fresh one with us as the only known device.
+                debug!("heartbeat_meta found no remote meta; reseeding with this device",);
+                MetaJson::fresh(&self.app_version)
+            }
+        };
+        // The fresh copy can already carry the update (a fast concurrent
+        // round of our own, or the round-start copy was merely stale) —
+        // re-check before writing.
+        if is_current(&meta) {
             return Ok(());
         }
         meta.upsert_device(
@@ -840,6 +871,23 @@ impl OnboardingService {
             .set(SYNC_CURSOR_PREF_KEY, &ts.to_rfc3339())
             .map_err(|err| SyncError::internal(format!("save cursor: {err}")))?;
         Ok(())
+    }
+
+    /// Merge freshly applied log byte lengths into the shared
+    /// growth-refetch map (same pref + semantics as the sync round —
+    /// `sync_engine::merge_applied_log_lengths`). Best-effort: a failed
+    /// write only costs a re-fetch.
+    fn record_applied_lengths(&self, applied: &[(String, u64)]) {
+        let prefs = UserPrefsRepo::new(&self.db);
+        let existing = prefs
+            .get(sync_engine::SYNC_APPLIED_LOG_LENGTHS_PREF_KEY)
+            .ok()
+            .flatten();
+        if let Some(raw) = sync_engine::merge_applied_log_lengths(existing.as_deref(), applied) {
+            if let Err(err) = prefs.set(sync_engine::SYNC_APPLIED_LOG_LENGTHS_PREF_KEY, &raw) {
+                warn!(?err, "couldn't persist applied-log-length map");
+            }
+        }
     }
 
     /// Read the persisted fetch cursor, or the `MIN_UTC` "fetch
@@ -1211,6 +1259,59 @@ mod tests {
                 .is_some(),
             "record was current -> no push -> the peer's marker survived"
         );
+    }
+
+    #[tokio::test]
+    async fn heartbeat_push_bases_on_a_fresh_fetch_not_the_round_copy() {
+        // A peer wrote meta DURING our round (here: a marker device — in
+        // production a compactor raising gc_horizon / flagging devices
+        // stale). The push must base on a FRESH fetch, not the round-start
+        // copy, or the whole-file PUT would silently revert the peer's
+        // write.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+        let old = Utc::now() - chrono::Duration::minutes(10);
+        let now = Utc::now();
+        // Round-start copy: our record at the OLD horizon, no marker.
+        let mut cached = MetaJson::fresh("1.0.0-test");
+        cached.upsert_device(
+            &DeviceId::from_string("dev-this".into()),
+            DeviceRecord {
+                name: None,
+                last_seen_log: old,
+                app_version: "1.0.0-test".into(),
+                stale: false,
+            },
+        );
+        // Remote meanwhile: the peer's write landed.
+        let mut remote = cached.clone();
+        remote.upsert_device(
+            &DeviceId::from_string("dev-marker".into()),
+            DeviceRecord {
+                name: Some("Marker".into()),
+                last_seen_log: now,
+                app_version: "1.0.0-test".into(),
+                stale: false,
+            },
+        );
+        adapter.install_meta(remote);
+
+        svc.heartbeat_meta(&adapter, now, Some(&cached))
+            .await
+            .unwrap();
+
+        let after = adapter.fetch_meta().await.unwrap().unwrap();
+        assert!(
+            after
+                .device(&DeviceId::from_string("dev-marker".into()))
+                .is_some(),
+            "push based on the fresh copy - the peer's write survived"
+        );
+        let rec = after
+            .device(&DeviceId::from_string("dev-this".into()))
+            .expect("self entry");
+        assert_eq!(rec.last_seen_log, now, "our update landed too");
     }
 
     #[tokio::test]

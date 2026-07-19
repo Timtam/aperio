@@ -102,7 +102,41 @@ pub const SYNC_APPLIED_LOG_LENGTHS_PREF_KEY: &str = "sync.cursor.appliedLogLengt
 /// few (one per device until compaction sweeps), so the newest N entries
 /// by embedded filename timestamp comfortably cover every file that can
 /// still grow while keeping the pref bounded.
-const APPLIED_LOG_LENGTHS_CAP: usize = 64;
+pub const APPLIED_LOG_LENGTHS_CAP: usize = 64;
+
+/// Merge freshly applied `(filename, byte length)` records into the
+/// serialized map [`SYNC_APPLIED_LOG_LENGTHS_PREF_KEY`] holds, applying
+/// the cap (filenames sort chronologically — the timestamp prefix is
+/// fixed-width — so a plain string sort ages out swept files). Returns
+/// the new serialized map, or `None` when there is nothing to record.
+/// Pure, so the onboarding/stale-resume paths — which fetch + apply logs
+/// OUTSIDE the round — share the exact recording semantics; without
+/// that, a peer's live session file applied during onboarding had no
+/// length entry and its later appends stayed invisible until rotation
+/// (the append-miss this mechanism exists to fix).
+pub fn merge_applied_log_lengths(
+    existing_raw: Option<&str>,
+    fetched: &[(String, u64)],
+) -> Option<String> {
+    if fetched.is_empty() {
+        return None;
+    }
+    let mut map: std::collections::HashMap<String, u64> = existing_raw
+        .and_then(|raw| serde_json::from_str(raw).ok())
+        .unwrap_or_default();
+    for (name, len) in fetched {
+        map.insert(name.clone(), *len);
+    }
+    if map.len() > APPLIED_LOG_LENGTHS_CAP {
+        let mut names: Vec<String> = map.keys().cloned().collect();
+        names.sort_unstable();
+        let drop_count = names.len() - APPLIED_LOG_LENGTHS_CAP;
+        for name in names.into_iter().take(drop_count) {
+            map.remove(&name);
+        }
+    }
+    serde_json::to_string(&map).ok()
+}
 
 /// `SyncRoundReport` (what one round did) and `SyncStatus` (the read-only
 /// state snapshot) are defined in the crate root so the desktop app and
@@ -579,10 +613,24 @@ impl SyncOrchestrator {
                 // re-applying our own emissions is wasted work
                 // — the applier would just count them as
                 // `skipped_own` anyway.
-                let foreign: Vec<LogFile> = logs
+                let mut foreign: Vec<LogFile> = logs
                     .into_iter()
                     .filter(|log| log.name.device_id != self.local_device_id)
                     .collect();
+                // Apply in CHRONOLOGICAL order regardless of what order
+                // the adapter returned (the trait explicitly allows
+                // unordered results, and the WebDAV adapter's concurrent
+                // GETs yield in completion order). The applier only
+                // orders envelopes WITHIN one file; across files,
+                // creates are unconditional upserts and deletes are
+                // point lookups — applying a rotated-away CREATE after
+                // its later DELETE would resurrect the item.
+                foreign.sort_by(|a, b| {
+                    a.name
+                        .timestamp
+                        .cmp(&b.name.timestamp)
+                        .then_with(|| a.name.device_id.as_str().cmp(b.name.device_id.as_str()))
+                });
                 report.fetched_logs = foreign.len();
 
                 // Track the newest timestamp we actually saw so
@@ -595,9 +643,14 @@ impl SyncOrchestrator {
                     }
                 }
 
-                // Record each successfully applied file's byte length —
-                // the growth-refetch signal for the next round. A failed
-                // apply records nothing, so the file is re-fetched.
+                // Record each applied file's byte length — the
+                // growth-refetch signal for the next round. A FAILED
+                // apply (e.g. a torn read of a live file's last line
+                // fails the whole file) records length 0: the cursor
+                // still advances past the file, so without a record it
+                // would never be looked at again — with 0, any listed
+                // size counts as grown and a size-reporting adapter
+                // retries it next round.
                 let mut applied_lengths: Vec<(String, u64)> = Vec::new();
                 for log in foreign {
                     let byte_len = log.bytes.len() as u64;
@@ -613,6 +666,7 @@ impl SyncOrchestrator {
                                 "apply phase failed for log file",
                             );
                             report.apply_failures += 1;
+                            applied_lengths.push((log.name.to_filename(), 0));
                         }
                     }
                 }
@@ -943,33 +997,18 @@ impl SyncOrchestrator {
             .unwrap_or_default()
     }
 
-    /// Record the applied byte lengths of freshly fetched foreign logs,
-    /// keeping only the newest [`APPLIED_LOG_LENGTHS_CAP`] filenames
-    /// (filenames sort chronologically — the timestamp prefix is
-    /// fixed-width — so a plain string sort ages out swept files).
+    /// Record the applied byte lengths of freshly fetched foreign logs
+    /// (see [`merge_applied_log_lengths`]).
     fn record_applied_lengths(&self, fetched: &[(String, u64)]) {
-        if fetched.is_empty() {
-            return;
-        }
-        let mut map = self.read_applied_lengths();
-        for (name, len) in fetched {
-            map.insert(name.clone(), *len);
-        }
-        if map.len() > APPLIED_LOG_LENGTHS_CAP {
-            let mut names: Vec<String> = map.keys().cloned().collect();
-            names.sort_unstable();
-            let drop_count = names.len() - APPLIED_LOG_LENGTHS_CAP;
-            for name in names.into_iter().take(drop_count) {
-                map.remove(&name);
+        let existing = self
+            .store
+            .get_pref(SYNC_APPLIED_LOG_LENGTHS_PREF_KEY)
+            .ok()
+            .flatten();
+        if let Some(raw) = merge_applied_log_lengths(existing.as_deref(), fetched) {
+            if let Err(err) = self.store.set_pref(SYNC_APPLIED_LOG_LENGTHS_PREF_KEY, &raw) {
+                warn!(?err, "couldn't persist applied-log-length map");
             }
-        }
-        match serde_json::to_string(&map) {
-            Ok(raw) => {
-                if let Err(err) = self.store.set_pref(SYNC_APPLIED_LOG_LENGTHS_PREF_KEY, &raw) {
-                    warn!(?err, "couldn't persist applied-log-length map");
-                }
-            }
-            Err(err) => warn!(?err, "couldn't serialize applied-log-length map"),
         }
     }
 

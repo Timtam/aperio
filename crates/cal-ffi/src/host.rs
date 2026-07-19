@@ -4956,6 +4956,9 @@ impl Host {
     /// [`Self::accept_remote_dataset_json`].
     pub fn configure_sync_adapter_json(&self, config_json: String) -> Result<(), StoreError> {
         let req: ConfigureSyncRequest = from_json("sync config", &config_json)?;
+        // A different backend invalidates every remote-missing sound verdict
+        // (mirrors the orchestrator clearing its per-session pushed lengths).
+        host_core::sound_assets::reset_missing_cache();
         let adapter = self.build_plain_sync_adapter(&req)?;
         // Probe before keeping it active so a bad path/creds/URL fails here
         // rather than on the first silent sync round.

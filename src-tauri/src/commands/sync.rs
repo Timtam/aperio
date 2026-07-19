@@ -957,6 +957,9 @@ pub async fn configure_sync_adapter(
 ) -> CommandResult<()> {
     let shared = db.shared();
     let prefs = UserPrefsRepo::new(&shared);
+    // A different backend invalidates every remote-missing sound verdict
+    // (mirrors the orchestrator clearing its per-session pushed lengths).
+    host_core::sound_assets::reset_missing_cache();
     match &config {
         SyncAdapterConfig::Local { .. }
         | SyncAdapterConfig::Webdav { .. }

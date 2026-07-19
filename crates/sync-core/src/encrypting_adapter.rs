@@ -48,8 +48,15 @@ use base64::Engine;
 use serde_json::{json, Value};
 
 use crate::adapter::{DeviceCursor, SyncAdapter};
-use crate::crypto::{decrypt, encrypt, KEY_LEN};
+use crate::crypto::{decrypt, encrypt, KEY_LEN, NONCE_LEN};
 use crate::error::{SyncError, SyncResult};
+
+/// Constant size delta between a log file's plaintext and its encrypted
+/// remote form: the prepended nonce plus AES-GCM's 16-byte auth tag (GCM
+/// is a stream mode — no padding). Used to translate the cursor's
+/// plaintext-domain applied lengths into the ciphertext domain the inner
+/// adapter's listing reports.
+const CIPHERTEXT_OVERHEAD: u64 = NONCE_LEN as u64 + 16;
 use crate::log::{LogFile, LogFileName};
 use crate::meta::MetaJson;
 use crate::snapshot::Snapshot;
@@ -111,7 +118,28 @@ impl SyncAdapter for EncryptingAdapter {
     }
 
     async fn fetch_new_logs(&self, since: &DeviceCursor) -> SyncResult<Vec<LogFile>> {
-        let raw = self.inner.fetch_new_logs(since).await?;
+        // Translate the cursor's applied lengths from the PLAINTEXT domain
+        // (what the engine sees and records — this wrapper decrypts below)
+        // into the CIPHERTEXT domain the inner adapter's listing reports.
+        // AES-GCM adds a constant overhead (12-byte nonce + 16-byte tag,
+        // no padding), so the translation is exact. Without it the
+        // growth-refetch check compared plaintext lengths against
+        // ciphertext sizes — always "grown" — and re-downloaded every
+        // remembered file every round on an E2E dataset. (Lengths recorded
+        // BEFORE E2E was enabled are off by the overhead once; the
+        // resulting one-time re-fetch is idempotent and self-corrects.)
+        let translated = DeviceCursor {
+            known_lengths: since
+                .known_lengths
+                .iter()
+                .map(|k| crate::KnownLogLength {
+                    name: k.name.clone(),
+                    len: k.len + CIPHERTEXT_OVERHEAD,
+                })
+                .collect(),
+            ..since.clone()
+        };
+        let raw = self.inner.fetch_new_logs(&translated).await?;
         let mut out = Vec::with_capacity(raw.len());
         for log in raw {
             let plaintext = decrypt(&self.key, &log.bytes)?;
