@@ -2155,8 +2155,8 @@ public protocol HostProtocol: AnyObject, Sendable {
      * events are synthesised from the underlying contact list's birthdays,
      * local in-process + external from the snapshot cache). A LOCAL calendar is
      * a direct read; an EXTERNAL one is stale-while-revalidate (serve the cached
-     * snapshot + background-refresh, with a cold-fallback live read), mirroring
-     * the desktop `get_events`.
+     * snapshot — empty on a never-warmed calendar — and background-refresh),
+     * mirroring the desktop `get_events`.
      *
      * The local adapter currently returns rows whose stored start/end
      * intersect the range (RRULE occurrence expansion is its own later phase),
@@ -2202,6 +2202,13 @@ public protocol HostProtocol: AnyObject, Sendable {
      * immediate preview). Validates format + size via the shared importer.
      */
     func importSoundJson(path: String) throws  -> String
+    
+    /**
+     * Whether `account_id` belongs to a device-calendar/-reminder account (the
+     * phone's own EventKit / CalendarProvider store). Used to skip Aperio-side
+     * recurrence reconciliation the OS already owns.
+     */
+    func isDeviceAccount(accountId: String)  -> Bool
     
     /**
      * External accounts whose required keychain secret is absent — the data
@@ -2300,6 +2307,14 @@ public protocol HostProtocol: AnyObject, Sendable {
      * "free/unknown" rather than an error. Mirrors the desktop `query_free_busy`.
      */
     func queryFreeBusyJson(requestJson: String) throws  -> String
+    
+    /**
+     * Every account's currently-failing containers as a JSON
+     * `AccountRefreshErrors[]` — the per-account error surface, so a
+     * revoked/wrong provider password shows up as a warning instead of
+     * silent staleness. Mirrors the desktop `get_refresh_errors`.
+     */
+    func refreshErrorsJson() throws  -> String
     
     /**
      * Kick an immediate warm pass over every external account's containers +
@@ -3601,8 +3616,8 @@ open func getEventByIdJson(id: String, calendarId: String?)throws  -> String  {
      * events are synthesised from the underlying contact list's birthdays,
      * local in-process + external from the snapshot cache). A LOCAL calendar is
      * a direct read; an EXTERNAL one is stale-while-revalidate (serve the cached
-     * snapshot + background-refresh, with a cold-fallback live read), mirroring
-     * the desktop `get_events`.
+     * snapshot — empty on a never-warmed calendar — and background-refresh),
+     * mirroring the desktop `get_events`.
      *
      * The local adapter currently returns rows whose stored start/end
      * intersect the range (RRULE occurrence expansion is its own later phase),
@@ -3692,6 +3707,20 @@ open func importSoundJson(path: String)throws  -> String  {
     uniffi_cal_ffi_fn_method_host_import_sound_json(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(path),$0
+    )
+})
+}
+    
+    /**
+     * Whether `account_id` belongs to a device-calendar/-reminder account (the
+     * phone's own EventKit / CalendarProvider store). Used to skip Aperio-side
+     * recurrence reconciliation the OS already owns.
+     */
+open func isDeviceAccount(accountId: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_cal_ffi_fn_method_host_is_device_account(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(accountId),$0
     )
 })
 }
@@ -3868,6 +3897,20 @@ open func queryFreeBusyJson(requestJson: String)throws  -> String  {
     uniffi_cal_ffi_fn_method_host_query_free_busy_json(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(requestJson),$0
+    )
+})
+}
+    
+    /**
+     * Every account's currently-failing containers as a JSON
+     * `AccountRefreshErrors[]` — the per-account error surface, so a
+     * revoked/wrong provider password shows up as a warning instead of
+     * silent staleness. Mirrors the desktop `get_refresh_errors`.
+     */
+open func refreshErrorsJson()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_refresh_errors_json(
+            self.uniffiCloneHandle(),$0
     )
 })
 }
@@ -8342,7 +8385,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_get_event_by_id_json() != 41217) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_get_events_json() != 18958) {
+    if (uniffi_cal_ffi_checksum_method_host_get_events_json() != 32309) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_get_log_level() != 43590) {
@@ -8361,6 +8404,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_import_sound_json() != 40673) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_is_device_account() != 47677) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_list_accounts_missing_credentials_json() != 60783) {
@@ -8397,6 +8443,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_query_free_busy_json() != 44096) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_refresh_errors_json() != 55989) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_refresh_external_cache() != 5904) {

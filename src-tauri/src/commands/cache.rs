@@ -27,6 +27,20 @@ pub fn get_cache_refresh_status(
     Ok(refresher.status())
 }
 
+/// Every account's currently-failing containers (latest refresh attempt
+/// recorded an error) — the data behind the per-account error surface,
+/// so a wrong iCloud password shows up as a warning instead of silent
+/// staleness. Refreshed by the frontend after each cache-refresh pass.
+#[tauri::command]
+pub fn get_refresh_errors(
+    cache: State<'_, Arc<CacheStore>>,
+) -> CommandResult<Vec<host_core::cache::AccountRefreshErrors>> {
+    cache.refresh_errors().map_err(|e| CommandError {
+        code: "cache_error",
+        message: e.to_string(),
+    })
+}
+
 /// Force a FULL cold re-sync of one external account: clear the delta tokens,
 /// covered windows and freshness markers across all of its containers, then
 /// kick a warm pass so each re-bootstraps from the provider. The cached rows

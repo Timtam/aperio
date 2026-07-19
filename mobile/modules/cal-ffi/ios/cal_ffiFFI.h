@@ -967,6 +967,11 @@ RustBuffer uniffi_cal_ffi_fn_method_host_get_user_pref(uint64_t ptr, RustBuffer 
 RustBuffer uniffi_cal_ffi_fn_method_host_import_sound_json(uint64_t ptr, RustBuffer path, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_IS_DEVICE_ACCOUNT
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_IS_DEVICE_ACCOUNT
+int8_t uniffi_cal_ffi_fn_method_host_is_device_account(uint64_t ptr, RustBuffer account_id, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_LIST_ACCOUNTS_MISSING_CREDENTIALS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_LIST_ACCOUNTS_MISSING_CREDENTIALS_JSON
 RustBuffer uniffi_cal_ffi_fn_method_host_list_accounts_missing_credentials_json(uint64_t ptr, RustCallStatus *_Nonnull out_status
@@ -1025,6 +1030,11 @@ uint32_t uniffi_cal_ffi_fn_method_host_push_now(uint64_t ptr, RustBuffer trigger
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_QUERY_FREE_BUSY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_QUERY_FREE_BUSY_JSON
 RustBuffer uniffi_cal_ffi_fn_method_host_query_free_busy_json(uint64_t ptr, RustBuffer request_json, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_REFRESH_ERRORS_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_REFRESH_ERRORS_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_refresh_errors_json(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_REFRESH_EXTERNAL_CACHE
@@ -2148,6 +2158,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_import_sound_json(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_IS_DEVICE_ACCOUNT
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_IS_DEVICE_ACCOUNT
+uint16_t uniffi_cal_ffi_checksum_method_host_is_device_account(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_LIST_ACCOUNTS_MISSING_CREDENTIALS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_LIST_ACCOUNTS_MISSING_CREDENTIALS_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_list_accounts_missing_credentials_json(void
@@ -2217,6 +2233,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_push_now(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_QUERY_FREE_BUSY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_QUERY_FREE_BUSY_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_query_free_busy_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_REFRESH_ERRORS_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_REFRESH_ERRORS_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_refresh_errors_json(void
     
 );
 #endif

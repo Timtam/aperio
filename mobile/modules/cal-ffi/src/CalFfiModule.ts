@@ -206,6 +206,10 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   refreshExternalCache(): Promise<void>;
   /** The external-cache warm-pass status as JSON `{refreshing, last_refreshed_at}`. */
   getCacheRefreshStatusJson(): Promise<string>;
+  /** Per-account refresh-error surface as JSON `AccountRefreshErrors[]` —
+   *  every account whose latest container refresh recorded an error (the
+   *  silent-staleness warning, e.g. a revoked provider password). */
+  refreshErrorsJson(): Promise<string>;
   /** Warm the external cache on app-foreground (the mobile stand-in for the
    *  desktop periodic warm loop). Fire-and-forget. */
   warmCacheOnForeground(): Promise<void>;

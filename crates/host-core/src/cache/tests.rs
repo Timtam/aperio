@@ -1856,3 +1856,56 @@ fn identical_replace_after_reset_rewrites_rows() {
         .unwrap();
     assert_ne!(stamp_before, stamp_after, "row was physically rewritten");
 }
+
+// ── Per-account refresh-error surface ────────────────────────────────
+
+#[test]
+fn refresh_errors_groups_per_account_and_resolves_names() {
+    let store = setup();
+    // A listed calendar whose events refresh failed → named entry.
+    store.replace_calendars(ACC, &[calendar(CAL)]).unwrap();
+    store
+        .mark_error(ACC, SyncScope::Events, CAL, "HTTP 401 Unauthorized")
+        .unwrap();
+    // A task list the listing does NOT know → unnamed entry, non-auth.
+    store
+        .mark_error(
+            ACC,
+            SyncScope::Tasks,
+            "list-unknown",
+            "connection timed out",
+        )
+        .unwrap();
+
+    let errors = store.refresh_errors().unwrap();
+    assert_eq!(errors.len(), 1, "one failing account");
+    let acc = &errors[0];
+    assert_eq!(acc.account_id, ACC);
+    assert!(acc.auth_suspected, "401 counts as auth-shaped");
+    assert_eq!(acc.errors.len(), 2);
+    let events_err = acc.errors.iter().find(|e| e.scope == "events").unwrap();
+    assert_eq!(events_err.container_name.as_deref(), Some("Cal cal-1"));
+    let tasks_err = acc.errors.iter().find(|e| e.scope == "tasks").unwrap();
+    assert!(tasks_err.container_name.is_none());
+}
+
+#[test]
+fn refresh_errors_clear_after_a_successful_write() {
+    let store = setup();
+    store
+        .mark_error(ACC, SyncScope::Tasks, LIST, "boom")
+        .unwrap();
+    assert_eq!(store.refresh_errors().unwrap().len(), 1);
+    // Any successful replace clears last_error for the container.
+    store.replace_list_tasks(ACC, LIST, &[task("t1")]).unwrap();
+    assert!(store.refresh_errors().unwrap().is_empty());
+}
+
+#[test]
+fn auth_shaped_heuristic() {
+    assert!(super::is_auth_shaped("HTTP 401 Unauthorized"));
+    assert!(super::is_auth_shaped("server said: invalid credentials"));
+    assert!(super::is_auth_shaped("403 Forbidden"));
+    assert!(!super::is_auth_shaped("connection reset by peer"));
+    assert!(!super::is_auth_shaped("timeout after 30s"));
+}

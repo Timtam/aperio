@@ -5214,6 +5214,20 @@ impl Host {
         to_json(&self.cache_refresher.status())
     }
 
+    /// Every account's currently-failing containers as a JSON
+    /// `AccountRefreshErrors[]` — the per-account error surface, so a
+    /// revoked/wrong provider password shows up as a warning instead of
+    /// silent staleness. Mirrors the desktop `get_refresh_errors`.
+    pub fn refresh_errors_json(&self) -> Result<String, StoreError> {
+        let errors = self
+            .cache
+            .refresh_errors()
+            .map_err(|e| StoreError::Storage {
+                detail: e.to_string(),
+            })?;
+        to_json(&errors)
+    }
+
     /// Warm the cache when the app foregrounds — the mobile stand-in for a tick
     /// of the desktop periodic warm loop (which mobile can't run while
     /// backgrounded). Same fire-and-forget warm pass as the manual refresh.

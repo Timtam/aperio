@@ -346,6 +346,11 @@ class CalFfiModule : Module() {
       host.getCacheRefreshStatusJson()
     }
 
+    // Per-account refresh-error surface (silent-staleness warning).
+    AsyncFunction("refreshErrorsJson") {
+      host.refreshErrorsJson()
+    }
+
     AsyncFunction("warmCacheOnForeground") {
       host.warmCacheOnForeground()
     }
