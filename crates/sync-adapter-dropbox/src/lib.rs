@@ -50,7 +50,8 @@
 //!
 //! - **Cursor-based incremental sync.** Each `fetch_new_logs`
 //!   round walks the whole `log/` folder via list_folder and
-//!   filters client-side by timestamp. Dropbox offers
+//!   filters client-side by timestamp + listed size (the size
+//!   feeds the growth-refetch check). Dropbox offers
 //!   `list_folder/continue` for delta sync; v1 doesn't use it
 //!   because the log folder typically holds < 1000 entries
 //!   (compaction keeps it small).
@@ -65,17 +66,19 @@ pub mod error;
 pub mod files;
 pub mod oauth;
 
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use async_trait::async_trait;
 use chrono::Utc;
+use futures::stream::{self, StreamExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sync_core::{
     DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter, SyncError, SyncResult,
 };
 use tokio::sync::Mutex;
-use tracing::{debug, warn};
+use tracing::debug;
 
 pub use error::{DropboxError, DropboxResult};
 pub use oauth::{TokenSet, DROPBOX_AUTH_URL, DROPBOX_TOKEN_URL};
@@ -115,6 +118,12 @@ pub struct DropboxSyncAdapter {
     base_path: String,
     http: Arc<Client>,
     tokens: Arc<Mutex<Option<TokenSet>>>,
+    /// Remote folders (`log`, `assets/sounds`, …) already ensured
+    /// via `create_folder_v2` this session. Dropbox folders persist
+    /// server-side, so once one is ensured we skip the redundant
+    /// RPC every later push would otherwise pay. Shared across
+    /// clones so the cache survives `.clone()`.
+    ensured: Arc<StdMutex<HashSet<String>>>,
 }
 
 impl DropboxSyncAdapter {
@@ -139,6 +148,7 @@ impl DropboxSyncAdapter {
             base_path: normalise_base(&config.base_path),
             http: Arc::new(Client::new()),
             tokens: Arc::new(Mutex::new(None)),
+            ensured: Arc::new(StdMutex::new(HashSet::new())),
         })
     }
 
@@ -205,6 +215,36 @@ impl DropboxSyncAdapter {
         }
         self.access_token().await
     }
+
+    /// Create a remote folder at most once per adapter session.
+    ///
+    /// Dropbox folders persist server-side, so re-issuing
+    /// `create_folder_v2` before every push just burned one RPC
+    /// per pushed file. `files::create_folder` folds the
+    /// "already exists" conflict into Ok, so any Ok — freshly
+    /// created or conflicting — proves the folder is there and
+    /// caches it. Errors are NOT cached: the next push retries
+    /// the ensure. A concurrent first-touch racing past the
+    /// cache check at worst issues a second harmless
+    /// `create_folder_v2`.
+    async fn ensure_folder(&self, token: &str, path: &str) -> SyncResult<()> {
+        if self
+            .ensured
+            .lock()
+            .expect("ensured mutex poison")
+            .contains(path)
+        {
+            return Ok(());
+        }
+        files::create_folder(&self.http, token, path)
+            .await
+            .map_err(dropbox_to_sync)?;
+        self.ensured
+            .lock()
+            .expect("ensured mutex poison")
+            .insert(path.to_string());
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -216,21 +256,17 @@ impl SyncAdapter for DropboxSyncAdapter {
             .map_err(dropbox_to_sync)?;
         // Lazy-create the dataset folders so first push works.
         // `create_folder_v2` is idempotent in our wrapper: a
-        // path/conflict response is folded into Ok.
+        // path/conflict response is folded into Ok. Going through
+        // `ensure_folder` also seeds the session cache, so the
+        // pushes that follow skip their own create_folder RPCs.
         if !self.base_path.is_empty() {
-            files::create_folder(&self.http, &token, &self.base_path)
-                .await
-                .map_err(dropbox_to_sync)?;
+            self.ensure_folder(&token, &self.base_path).await?;
         }
-        files::create_folder(&self.http, &token, &self.remote_path("log"))
-            .await
-            .map_err(dropbox_to_sync)?;
-        files::create_folder(&self.http, &token, &self.remote_path("assets"))
-            .await
-            .map_err(dropbox_to_sync)?;
-        files::create_folder(&self.http, &token, &self.remote_path("assets/sounds"))
-            .await
-            .map_err(dropbox_to_sync)?;
+        self.ensure_folder(&token, &self.remote_path("log")).await?;
+        self.ensure_folder(&token, &self.remote_path("assets"))
+            .await?;
+        self.ensure_folder(&token, &self.remote_path("assets/sounds"))
+            .await?;
         Ok(())
     }
 
@@ -267,44 +303,50 @@ impl SyncAdapter for DropboxSyncAdapter {
             Err(err) => return Err(dropbox_to_sync(err)),
         };
 
-        let mut wanted: Vec<LogFileName> = Vec::new();
-        for raw in entries {
-            let name = raw.rsplit('/').next().unwrap_or(&raw);
-            let parsed = match LogFileName::from_filename(name) {
-                Ok(p) => p,
-                Err(_) => {
-                    debug!(name = %name, "skipping non-log entry in list_folder");
-                    continue;
-                }
-            };
-            if since.wants(&parsed) {
-                wanted.push(parsed);
-            }
-        }
+        let wanted = select_wanted_logs(since, &entries);
 
-        let mut out = Vec::with_capacity(wanted.len());
-        for parsed in wanted {
-            let path = format!("{}/{}", log_dir, parsed.to_filename());
-            match self.download_with_retry(&path).await {
-                Ok(Some(bytes)) => out.push(LogFile {
-                    name: parsed,
-                    bytes,
-                }),
-                Ok(None) => {
-                    // Compactor raced us between list_folder +
-                    // download; skip silently.
-                    debug!(
-                        path = %path,
-                        "log file listed but no longer present",
-                    );
+        // Download with bounded concurrency: a multi-file backlog
+        // (onboarding, post-offline catch-up, multi-device burst)
+        // used to pay one serial content-host round-trip per file.
+        // The bound stays modest so we sit far below Dropbox's
+        // per-app rate limits. Out-of-order completion is fine —
+        // the orchestrator sorts chronologically before apply.
+        const LOG_FETCH_CONCURRENCY: usize = 4;
+        let results: Vec<SyncResult<Option<LogFile>>> = stream::iter(wanted)
+            .map(|parsed| {
+                let path = format!("{}/{}", log_dir, parsed.to_filename());
+                async move {
+                    match self.download_with_retry(&path).await? {
+                        Some(bytes) => Ok(Some(LogFile {
+                            name: parsed,
+                            bytes,
+                        })),
+                        None => {
+                            // Compactor raced us between list_folder
+                            // + download; skip silently — the next
+                            // round sees an updated listing.
+                            debug!(
+                                path = %path,
+                                "log file listed but no longer present",
+                            );
+                            Ok(None)
+                        }
+                    }
                 }
-                Err(err) => {
-                    warn!(
-                        path = %path,
-                        ?err,
-                        "download log file failed; skipping",
-                    );
-                }
+            })
+            .buffer_unordered(LOG_FETCH_CONCURRENCY)
+            .collect()
+            .await;
+        // Any hard download failure fails the WHOLE fetch (the
+        // caller serves stale and retries next round). Skipping
+        // just the failed file would let the orchestrator advance
+        // the cursor past it — its events would sit below the
+        // cursor with no applied-length record, permanently lost
+        // to this device.
+        let mut out = Vec::with_capacity(results.len());
+        for result in results {
+            if let Some(log) = result? {
+                out.push(log);
             }
         }
         Ok(out)
@@ -312,11 +354,11 @@ impl SyncAdapter for DropboxSyncAdapter {
 
     async fn push_log(&self, log: &LogFile) -> SyncResult<()> {
         // Lazy-create log/ on first push so a brand-new dataset
-        // doesn't bounce off path/not_found.
+        // doesn't bounce off path/not_found — but only once per
+        // session; the ensured cache skips the redundant RPC on
+        // every later push.
         let token = self.access_token().await?;
-        files::create_folder(&self.http, &token, &self.remote_path("log"))
-            .await
-            .map_err(dropbox_to_sync)?;
+        self.ensure_folder(&token, &self.remote_path("log")).await?;
         let path = self.remote_path(&format!("log/{}", log.name.to_filename()));
         self.upload_with_retry(&path, log.bytes.clone()).await
     }
@@ -371,12 +413,10 @@ impl SyncAdapter for DropboxSyncAdapter {
 
     async fn push_sound_asset(&self, hash: &str, extension: &str, bytes: &[u8]) -> SyncResult<()> {
         let token = self.access_token().await?;
-        files::create_folder(&self.http, &token, &self.remote_path("assets"))
-            .await
-            .map_err(dropbox_to_sync)?;
-        files::create_folder(&self.http, &token, &self.remote_path("assets/sounds"))
-            .await
-            .map_err(dropbox_to_sync)?;
+        self.ensure_folder(&token, &self.remote_path("assets"))
+            .await?;
+        self.ensure_folder(&token, &self.remote_path("assets/sounds"))
+            .await?;
         let path = self.remote_path(&format!("assets/sounds/{hash}.{extension}"));
         self.upload_with_retry(&path, bytes.to_vec()).await
     }
@@ -430,6 +470,37 @@ impl DropboxSyncAdapter {
 // ─────────────────────────────────────────────────────────────────
 // Pure helpers
 // ─────────────────────────────────────────────────────────────────
+
+/// Pick the log files the cursor wants from a raw `list_folder`
+/// listing of `(basename, listed size)` pairs. Pure so the
+/// selection is unit-testable without HTTP.
+///
+/// The size feeds the growth-refetch check (`wants_sized`): a
+/// peer's live session file that gained appended events since we
+/// last applied it is re-fetched even though its timestamp sits
+/// at/below the cursor. Sizes are the RAW remote byte counts as
+/// listed — under E2E that's ciphertext, and `EncryptingAdapter`
+/// already translated the cursor's `known_lengths` into the same
+/// domain before this adapter sees them, so no adjustment here.
+fn select_wanted_logs(since: &DeviceCursor, entries: &[(String, Option<u64>)]) -> Vec<LogFileName> {
+    let mut wanted = Vec::new();
+    for (raw, size) in entries {
+        // list_folder's `name` is already a basename; the rsplit
+        // is defensive against a path sneaking in.
+        let name = raw.rsplit('/').next().unwrap_or(raw);
+        let parsed = match LogFileName::from_filename(name) {
+            Ok(p) => p,
+            Err(_) => {
+                debug!(name = %name, "skipping non-log entry in list_folder");
+                continue;
+            }
+        };
+        if since.wants_sized(&parsed, name, *size) {
+            wanted.push(parsed);
+        }
+    }
+    wanted
+}
 
 /// Join `relative` onto `base`. `relative` MUST NOT start with
 /// `/`; `base` is empty or starts with `/` without trailing slash.
@@ -495,6 +566,93 @@ fn dropbox_to_sync(err: DropboxError) -> SyncError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
+    use sync_core::{DeviceId, KnownLogLength};
+
+    fn log_name(ts_secs: i64, device: &str) -> LogFileName {
+        LogFileName::new(
+            Utc.timestamp_opt(ts_secs, 0).unwrap(),
+            DeviceId::from_string(device.into()),
+        )
+    }
+
+    #[test]
+    fn selection_applies_cursor_horizon_and_skips_non_logs() {
+        let cursor = DeviceCursor {
+            last_seen_log: Utc.timestamp_opt(1_500, 0).unwrap(),
+            exclude_device: None,
+            known_lengths: Vec::new(),
+        };
+        let newer = log_name(2_000, "peer");
+        let older = log_name(1_000, "peer");
+        let entries = vec![
+            (newer.to_filename(), Some(10)),
+            (older.to_filename(), Some(10)),
+            // Stray non-log entry (temp file, editor backup) —
+            // silently dropped by the filename parse.
+            ("garbage.tmp".to_string(), Some(3)),
+        ];
+        assert_eq!(select_wanted_logs(&cursor, &entries), vec![newer]);
+    }
+
+    #[test]
+    fn selection_skips_own_device_files() {
+        let cursor = DeviceCursor {
+            last_seen_log: Utc.timestamp_opt(1_000, 0).unwrap(),
+            exclude_device: Some(DeviceId::from_string("me".into())),
+            known_lengths: Vec::new(),
+        };
+        let own = log_name(2_000, "me");
+        assert!(select_wanted_logs(&cursor, &[(own.to_filename(), Some(50))]).is_empty());
+    }
+
+    #[test]
+    fn grown_file_at_the_cursor_is_selected_again() {
+        // The append-miss fix, selection-level mirror of the local
+        // adapter's grown_file_at_the_cursor_is_refetched: a peer's
+        // live session file gained events AFTER we applied it; its
+        // timestamp sits AT the cursor, but the listed size exceeds
+        // the recorded applied length, so it must be fetched again.
+        let file = log_name(1_000, "peer");
+        let filename = file.to_filename();
+        let cursor = DeviceCursor {
+            last_seen_log: Utc.timestamp_opt(1_000, 0).unwrap(),
+            exclude_device: None,
+            known_lengths: vec![KnownLogLength {
+                name: filename.clone(),
+                len: 100,
+            }],
+        };
+        // Listed size grew past the applied length → re-selected.
+        assert_eq!(
+            select_wanted_logs(&cursor, &[(filename.clone(), Some(150))]),
+            vec![file],
+        );
+        // Unchanged → skipped.
+        assert!(select_wanted_logs(&cursor, &[(filename.clone(), Some(100))]).is_empty());
+        // No listed size → plain timestamp semantics, skipped.
+        assert!(select_wanted_logs(&cursor, &[(filename, None)]).is_empty());
+    }
+
+    #[test]
+    fn ensured_cache_is_shared_across_clones() {
+        // The once-per-SESSION semantics depend on clones sharing
+        // the cache — the host hands out clones of one adapter, and
+        // a per-clone cache would silently regress to one
+        // create_folder RPC per clone.
+        let adapter = DropboxSyncAdapter::new(
+            DropboxAccountConfig {
+                client_id: "cid".into(),
+                client_secret: String::new(),
+                base_path: "/aperio".into(),
+            },
+            "refresh-token",
+        )
+        .unwrap();
+        let clone = adapter.clone();
+        adapter.ensured.lock().unwrap().insert("/aperio/log".into());
+        assert!(clone.ensured.lock().unwrap().contains("/aperio/log"));
+    }
 
     #[test]
     fn normalise_base_handles_common_shapes() {

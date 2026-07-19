@@ -158,29 +158,52 @@ pub async fn delete(http: &Client, access_token: &str, path: &str) -> DropboxRes
     rpc_no_body(response, "delete_v2").await
 }
 
+/// One page of a `list_folder` / `list_folder/continue`
+/// response. Module-scoped (rather than local to the fn) so the
+/// parse is unit-testable against a captured response fixture.
+#[derive(Deserialize)]
+struct ListResponse {
+    entries: Vec<Entry>,
+    cursor: String,
+    has_more: bool,
+}
+
+/// One listing entry. `.tag` discriminates files from folders;
+/// `size` is present on every `FileMetadata` (file) row and
+/// absent on folders. The size feeds the cursor's growth-refetch
+/// check and MUST stay the raw remote byte count — under E2E
+/// that's ciphertext, and `EncryptingAdapter` translates the
+/// cursor's `known_lengths` into the same domain before this
+/// adapter compares them.
+#[derive(Deserialize)]
+struct Entry {
+    #[serde(rename = ".tag")]
+    tag: String,
+    name: String,
+    #[serde(default)]
+    size: Option<u64>,
+}
+
+/// Append one page's file rows (basename + listed size) to
+/// `out`, skipping folder rows.
+fn collect_files(page: &ListResponse, out: &mut Vec<(String, Option<u64>)>) {
+    for entry in &page.entries {
+        if entry.tag == "file" {
+            out.push((entry.name.clone(), entry.size));
+        }
+    }
+}
+
 /// `POST /2/files/list_folder`. Walks pagination internally:
 /// keeps issuing `/list_folder/continue` while the response's
-/// `has_more` is `true`. Returns just the filenames (basenames
-/// — the caller never needs anything else for the log
-/// filename parse).
+/// `has_more` is `true`. Returns the filenames (basenames)
+/// paired with the byte size Dropbox natively lists for every
+/// file — the caller's `wants_sized` growth check needs it.
 pub async fn list_folder(
     http: &Client,
     access_token: &str,
     folder: &str,
-) -> DropboxResult<Vec<String>> {
-    #[derive(Deserialize)]
-    struct ListResponse {
-        entries: Vec<Entry>,
-        cursor: String,
-        has_more: bool,
-    }
-    #[derive(Deserialize)]
-    struct Entry {
-        #[serde(rename = ".tag")]
-        tag: String,
-        name: String,
-    }
-
+) -> DropboxResult<Vec<(String, Option<u64>)>> {
     let mut names = Vec::new();
     let initial = json!({
         "path": folder,
@@ -198,19 +221,11 @@ pub async fn list_folder(
         initial.to_string(),
     )
     .await?;
-    for entry in &current.entries {
-        if entry.tag == "file" {
-            names.push(entry.name.clone());
-        }
-    }
+    collect_files(&current, &mut names);
     while current.has_more {
         let body = json!({ "cursor": current.cursor }).to_string();
         current = post_rpc_json(http, access_token, "/2/files/list_folder/continue", body).await?;
-        for entry in &current.entries {
-            if entry.tag == "file" {
-                names.push(entry.name.clone());
-            }
-        }
+        collect_files(&current, &mut names);
     }
     Ok(names)
 }
@@ -298,6 +313,43 @@ fn classify_response_text(status: u16, text: &str) -> DropboxError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn list_folder_page_parses_the_native_size_field() {
+        // Trimmed from a real /2/files/list_folder response.
+        // Every file entry carries `size` (the growth-refetch
+        // signal); folder entries never do and are dropped.
+        let body = r#"{
+            "entries": [
+                {
+                    ".tag": "file",
+                    "name": "2026-05-01T00-00-00Z_dev-a.jsonl",
+                    "path_lower": "/aperio/log/2026-05-01t00-00-00z_dev-a.jsonl",
+                    "id": "id:a4ayc_80_OEAAAAAAAAAXw",
+                    "server_modified": "2026-05-01T00:00:07Z",
+                    "rev": "015f0f1a3b",
+                    "size": 1234,
+                    "content_hash": "cafe"
+                },
+                {
+                    ".tag": "folder",
+                    "name": "nested",
+                    "path_lower": "/aperio/log/nested",
+                    "id": "id:b5bzd_91_PFBBBBBBBBBYx"
+                }
+            ],
+            "cursor": "AAaaExampleCursor",
+            "has_more": false
+        }"#;
+        let page: ListResponse = serde_json::from_str(body).expect("fixture parses");
+        let mut files = Vec::new();
+        collect_files(&page, &mut files);
+        assert_eq!(
+            files,
+            vec![("2026-05-01T00-00-00Z_dev-a.jsonl".to_string(), Some(1234))],
+        );
+        assert!(!page.has_more);
+    }
 
     #[test]
     fn classify_not_found_picks_notfound_variant() {
