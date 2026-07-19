@@ -42,6 +42,27 @@ Die Protokolldateien liegen in deinem Datenverzeichnis im Ordner `logs/`
 einer **Pfad kopieren**-Schaltfläche. Dateien, die älter als 14 Tage sind,
 werden automatisch entfernt.
 
+## Ein Konto aktualisiert sich nicht mehr
+
+Wenn ein verbundenes Konto nicht mehr aktualisiert werden kann — meist, weil
+das Passwort bzw. App-Passwort geändert oder widerrufen wurde — zeigt Aperio
+weiter die zuletzt bekannten Daten und warnt dich, statt still zu scheitern:
+
+- **Desktop:** Das Konto in der Seitenleiste trägt eine Warnung, und eine
+  höfliche Screenreader-Ansage verweist auf **Einstellungen → Konten**. Dort
+  listet das betroffene Konto jeden fehlschlagenden Kalender bzw. jede Liste,
+  den Fehler des Anbieters und den Zeitpunkt der letzten erfolgreichen
+  Aktualisierung. Deuten die Fehler auf ein Anmeldeproblem hin, öffnet eine
+  Schaltfläche **Passwort neu eingeben** direkt den Verbinden-Dialog.
+- **Mobil:** Die Sync-Schaltfläche in der Kopfzeile wird zur Warnung (ihre
+  Beschriftung nennt das Problem), die Details stehen im Bereich
+  **Synchronisierung**, und das betroffene Konto erhält auf dem
+  Konten-Bildschirm eine Schaltfläche **Neu verbinden**, um das Passwort neu
+  einzugeben bzw. die Anbieter-Anmeldung zu wiederholen.
+
+Die Warnung verschwindet von selbst, sobald eine Aktualisierung wieder
+gelingt.
+
 ## Einen Fehler melden
 
 1. Stelle in Einstellungen → Protokolle die Stufe auf **Debug**.

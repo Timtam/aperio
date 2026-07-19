@@ -33,6 +33,10 @@ import {
 import type { Account, AdapterKind } from '../api/types';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
+import {
+  clampErrorText,
+  useRefreshErrors,
+} from '../state/useRefreshErrors';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ContactsPrivacyNoticeModal } from './ContactsPrivacyNoticeModal';
 
@@ -165,8 +169,11 @@ const EMPTY_TODOIST: TodoistFields = {
 };
 
 export function AccountsPanel() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const announce = useAnnouncer();
+  // Per-account refresh-error surface: failing containers per account
+  // (silent-staleness warning + the re-enter-password hint).
+  const { errorsByAccount } = useRefreshErrors();
   // The store owns the calendar / task-list catalog the sidebar
   // renders from. We have to nudge it manually after creating or
   // deleting an account — otherwise the new account's calendars
@@ -764,6 +771,20 @@ export function AccountsPanel() {
   // and gives sighted keyboard users a clear visual landing point.
   const errorRef = useRef<HTMLParagraphElement>(null);
   const [focusIndex, setFocusIndex] = useState(0);
+  // The refresh-error details are focus stops that a background refetch
+  // (60s poll / pass end) can UNMOUNT while they hold keyboard focus —
+  // the errors just cleared. Focus would fall to <body>, outside the
+  // application role, dropping NVDA out of focus mode with the dialog's
+  // key handlers dead (the stranded-focus class of a3746ada). Catch the
+  // drop after each error-set change and put focus back on the list.
+  useEffect(() => {
+    if (
+      document.activeElement === document.body ||
+      document.activeElement === null
+    ) {
+      listRef.current?.focus({ preventScroll: true });
+    }
+  }, [errorsByAccount]);
   // Track whether the listbox currently owns DOM focus. Used to gate
   // `aria-activedescendant` so it only points at an option while the
   // listbox is actually focused. With the attribute set unconditionally
@@ -1051,10 +1072,20 @@ export function AccountsPanel() {
                     // into the list, listHasFocus flips and the right
                     // row gets aria-selected back.
                     aria-selected={listHasFocus ? focused : undefined}
-                    aria-label={t(rowLabelKey, {
-                      name: acc.display_name,
-                      kind: t(`dialogs.accounts.kindName.${acc.adapter_kind}`),
-                    })}
+                    aria-label={
+                      t(rowLabelKey, {
+                        name: acc.display_name,
+                        kind: t(`dialogs.accounts.kindName.${acc.adapter_kind}`),
+                      }) +
+                      (errorsByAccount.has(acc.id)
+                        ? ' ' +
+                          t(
+                            errorsByAccount.get(acc.id)?.auth_suspected
+                              ? 'sidebar.tree.refreshErrorAuth'
+                              : 'sidebar.tree.refreshError',
+                          )
+                        : '')
+                    }
                     className={
                       'accounts-list__item' +
                       (focused ? ' accounts-list__item--focused' : '') +
@@ -1116,11 +1147,115 @@ export function AccountsPanel() {
                         {t('dialogs.accounts.missingBadge')}
                       </span>
                     )}
+                    {errorsByAccount.has(acc.id) && (
+                      <span
+                        className="accounts-list__badge accounts-list__badge--refresh-error"
+                        aria-hidden="true"
+                      >
+                        ⚠️ {t('dialogs.accounts.refreshErrors.badge')}
+                      </span>
+                    )}
                   </li>
                 );
               })}
             </ul>
           )}
+          {/* Refresh-error DETAILS for the focused account: which containers
+              are failing, the provider's error text, and how stale the data
+              the user currently sees is (last successful refresh). This panel
+              lives inside the Settings Modal whose body is role="application"
+              (NVDA stays in focus mode), so every line must be a FOCUS STOP —
+              static markup would be invisible to NVDA here (see
+              FocusableNote.tsx). Auth-shaped errors additionally get a real
+              re-enter-password button: the reconnect wizard accepts any
+              account, but its banner entry point only appears for MISSING
+              credentials, so a present-but-wrong password needs this path. */}
+          {accounts[focusIndex] &&
+            errorsByAccount.has(accounts[focusIndex].id) && (
+              <section
+                className="accounts-refresh-errors"
+                aria-label={t('dialogs.accounts.refreshErrors.heading', {
+                  name: accounts[focusIndex].display_name,
+                })}
+              >
+                <h4
+                  tabIndex={0}
+                  aria-label={t('dialogs.accounts.refreshErrors.heading', {
+                    name: accounts[focusIndex].display_name,
+                  })}
+                >
+                  {t('dialogs.accounts.refreshErrors.heading', {
+                    name: accounts[focusIndex].display_name,
+                  })}
+                </h4>
+                {errorsByAccount.get(accounts[focusIndex].id)
+                  ?.auth_suspected && (
+                  <FocusableNote className="accounts-refresh-errors__auth-hint">
+                    {t(
+                      accounts[focusIndex].adapter_kind === 'google' ||
+                        accounts[focusIndex].adapter_kind === 'microsoft_graph'
+                        ? 'dialogs.accounts.refreshErrors.authHintOauth'
+                        : 'dialogs.accounts.refreshErrors.authHint',
+                    )}
+                  </FocusableNote>
+                )}
+                <ul>
+                  {errorsByAccount
+                    .get(accounts[focusIndex].id)
+                    ?.errors.map((err) => {
+                      const line = `${t(
+                        'dialogs.accounts.refreshErrors.entry',
+                        {
+                          container:
+                            err.container_name ??
+                            t(
+                              `dialogs.accounts.refreshErrors.scope.${err.scope}`,
+                              { defaultValue: err.scope },
+                            ),
+                          error: clampErrorText(err.error),
+                        },
+                      )} ${
+                        err.last_success_at
+                          ? t('dialogs.accounts.refreshErrors.lastSuccess', {
+                              time: new Date(
+                                err.last_success_at,
+                              ).toLocaleString(i18n.language, {
+                                dateStyle: 'long',
+                                timeStyle: 'short',
+                              }),
+                            })
+                          : t('dialogs.accounts.refreshErrors.neverSucceeded')
+                      }`;
+                      return (
+                        <li
+                          key={`${err.scope}:${err.container_id}`}
+                          tabIndex={0}
+                          aria-label={line}
+                        >
+                          {line}
+                        </li>
+                      );
+                    })}
+                </ul>
+                {errorsByAccount.get(accounts[focusIndex].id)
+                  ?.auth_suspected && (
+                  <button
+                    type="button"
+                    className="form__action accounts-refresh-errors__reconnect"
+                    onClick={() =>
+                      openSyncAccountsConnect([accounts[focusIndex]], 'repair')
+                    }
+                  >
+                    {t(
+                      accounts[focusIndex].adapter_kind === 'google' ||
+                        accounts[focusIndex].adapter_kind === 'microsoft_graph'
+                        ? 'dialogs.accounts.refreshErrors.signInAgain'
+                        : 'dialogs.accounts.refreshErrors.reenterPassword',
+                    )}
+                  </button>
+                )}
+              </section>
+            )}
           {/* Per-account recovery: force a full cold re-sync of the FOCUSED
               external account. Clears its delta tokens + cached window so the
               next refresh re-bootstraps the whole collection from the provider —

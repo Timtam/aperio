@@ -1856,3 +1856,156 @@ fn identical_replace_after_reset_rewrites_rows() {
         .unwrap();
     assert_ne!(stamp_before, stamp_after, "row was physically rewritten");
 }
+
+// ── Per-account refresh-error surface ────────────────────────────────
+
+#[test]
+fn refresh_errors_groups_per_account_and_resolves_names() {
+    let store = setup();
+    // A listed calendar whose events refresh failed → named entry.
+    store.replace_calendars(ACC, &[calendar(CAL)]).unwrap();
+    store
+        .mark_error(ACC, SyncScope::Events, CAL, "HTTP 401 Unauthorized")
+        .unwrap();
+    // A task list the listing does NOT know → unnamed entry, non-auth.
+    store
+        .mark_error(
+            ACC,
+            SyncScope::Tasks,
+            "list-unknown",
+            "connection timed out",
+        )
+        .unwrap();
+
+    // A SECOND account failing independently → its own group, and its
+    // non-auth error must not inherit the first account's auth flag.
+    store
+        .db
+        .with_conn(|c| {
+            c.execute(
+                "INSERT INTO accounts (id, adapter_kind, display_name, config_json, created_at, updated_at)
+                 VALUES ('acc-2', 'caldav', 'Home', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+        })
+        .unwrap();
+    store
+        .mark_error("acc-2", SyncScope::Contacts, "", "connection reset")
+        .unwrap();
+
+    let errors = store.refresh_errors().unwrap();
+    assert_eq!(errors.len(), 2, "one group per failing account");
+    let acc = errors.iter().find(|a| a.account_id == ACC).unwrap();
+    assert!(acc.auth_suspected, "401 counts as auth-shaped");
+    assert_eq!(acc.errors.len(), 2);
+    let events_err = acc.errors.iter().find(|e| e.scope == "events").unwrap();
+    assert_eq!(events_err.container_name.as_deref(), Some("Cal cal-1"));
+    let tasks_err = acc.errors.iter().find(|e| e.scope == "tasks").unwrap();
+    assert!(tasks_err.container_name.is_none());
+    let other = errors.iter().find(|a| a.account_id == "acc-2").unwrap();
+    assert!(
+        !other.auth_suspected,
+        "auth flag must not leak across accounts"
+    );
+    assert_eq!(other.errors.len(), 1);
+}
+
+#[test]
+fn refresh_errors_prefer_the_rename_override() {
+    let store = setup();
+    store.replace_calendars(ACC, &[calendar(CAL)]).unwrap();
+    store
+        .db
+        .with_conn(|c| {
+            c.execute(
+                "INSERT INTO container_name_overrides (container_id, kind, name, updated_at)
+                 VALUES (?1, 'calendar', 'Arbeit', '2026-01-01T00:00:00Z')",
+                rusqlite::params![CAL],
+            )
+        })
+        .unwrap();
+    store
+        .mark_error(ACC, SyncScope::Events, CAL, "HTTP 401 Unauthorized")
+        .unwrap();
+
+    let errors = store.refresh_errors().unwrap();
+    let err = &errors[0].errors[0];
+    assert_eq!(
+        err.container_name.as_deref(),
+        Some("Arbeit"),
+        "the error surface must use the same name as every other surface"
+    );
+}
+
+#[test]
+fn refresh_errors_skip_containers_dropped_from_the_listing() {
+    let store = setup();
+    // Non-empty calendar listing that does NOT contain "cal-gone": the
+    // container was deleted server-side; a refresh against a stale
+    // persisted selection re-created its sync-state row. Without the
+    // orphan filter this would be a permanent unnamed warning.
+    store.replace_calendars(ACC, &[calendar(CAL)]).unwrap();
+    store
+        .mark_error(ACC, SyncScope::Events, "cal-gone", "HTTP 404 Not Found")
+        .unwrap();
+    assert!(
+        store.refresh_errors().unwrap().is_empty(),
+        "orphaned container rows must not surface"
+    );
+
+    // But with a COLD (empty) listing the same row must surface — the
+    // listing has no authority yet (it may itself be what is failing).
+    store
+        .mark_error(ACC, SyncScope::Tasks, "list-cold", "connection timed out")
+        .unwrap();
+    let errors = store.refresh_errors().unwrap();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].errors[0].container_id, "list-cold");
+}
+
+#[test]
+fn refresh_errors_skip_containers_after_the_listing_emptied() {
+    let store = setup();
+    // The account's ONLY calendar is deleted server-side: a successful
+    // listing pass replaces the listing with the EMPTY set. A refresh
+    // against a stale persisted selection then 404s and re-creates the
+    // sync-state row. Empty + succeeded-at-least-once = authoritative,
+    // so the orphan must not surface (it could never clear).
+    store.replace_calendars(ACC, &[calendar(CAL)]).unwrap();
+    store.replace_calendars(ACC, &[]).unwrap();
+    store
+        .mark_error(ACC, SyncScope::Events, CAL, "HTTP 404 Not Found")
+        .unwrap();
+    assert!(
+        store.refresh_errors().unwrap().is_empty(),
+        "authoritatively-empty listing must orphan the row"
+    );
+}
+
+#[test]
+fn refresh_errors_clear_after_a_successful_write() {
+    let store = setup();
+    store
+        .mark_error(ACC, SyncScope::Tasks, LIST, "boom")
+        .unwrap();
+    assert_eq!(store.refresh_errors().unwrap().len(), 1);
+    // Any successful replace clears last_error for the container.
+    store.replace_list_tasks(ACC, LIST, &[task("t1")]).unwrap();
+    assert!(store.refresh_errors().unwrap().is_empty());
+}
+
+#[test]
+fn auth_shaped_heuristic() {
+    assert!(super::is_auth_shaped("HTTP 401 Unauthorized"));
+    assert!(super::is_auth_shaped("server said: invalid credentials"));
+    assert!(super::is_auth_shaped("403 Forbidden"));
+    // Revoked OAuth grant: the token endpoint's HTTP 400 body embedded
+    // in a protocol error — the exact string shape both OAuth adapters
+    // record (Google/Graph map token failures to a 400, not a 401).
+    assert!(super::is_auth_shaped(
+        "protocol error: Google HTTP 400: {\"error\":\"invalid_grant\",\
+         \"error_description\":\"Token has been expired or revoked.\"}"
+    ));
+    assert!(!super::is_auth_shaped("connection reset by peer"));
+    assert!(!super::is_auth_shaped("timeout after 30s"));
+}

@@ -233,6 +233,26 @@
     "never": "External data not refreshed yet",
     "refreshNow": "Refresh external data"
   },
+  "refreshErrors": {
+    "announce": "Warning: updating one or more accounts is failing. Details are on the Sync screen.",
+    "announceAuth": "Warning: updating one or more accounts is failing, likely an authentication problem. Details are on the Sync screen.",
+    "banner": "Some accounts are not updating. Details are on the Sync screen.",
+    "bannerAuth": "Some accounts are not updating — possibly a password problem. Details are on the Sync screen.",
+    "heading": "Update problems for {{name}}",
+    "authHint": "The errors look like an authentication problem — re-enter the password via \"Reconnect\" on the accounts screen.",
+    "entry": "{{container}}: {{error}}",
+    "lastSuccess": "Last successful update: {{time}}.",
+    "neverSucceeded": "Never updated successfully.",
+    "scope": {
+      "calendars": "Calendar list",
+      "task_lists": "Task-list catalog",
+      "contact_lists": "Address-book catalog",
+      "events": "Calendar",
+      "tasks": "Task list",
+      "sections": "Sections",
+      "contacts": "Address book"
+    }
+  },
   "syncStatus": {
     "label": "Sync status",
     "synced": "Synced",
@@ -280,7 +300,9 @@
   "syncAccountsConnect": {
     "title": "Reconnect accounts",
     "body": "We pulled in your accounts from the sync store, but the passwords and tokens are stored only on each device. Please re-attach the credentials for the following accounts so this device can reach them too.",
+    "bodyRepair": "The provider no longer accepts the stored credentials for the following accounts — every update attempt is rejected. Re-enter the current password (for Google or Microsoft: sign in again) so updates work again.",
     "hint": "You can also dismiss this dialog and reconnect later from Settings → Accounts. Until then, calendars and tasks from these accounts will be unavailable on this device.",
+    "hintRepair": "You can also close this dialog and repair the connection later from Settings → Accounts. Until then, the affected calendars and tasks keep showing the last successfully fetched data.",
     "empty": "All accounts are reconnected.",
     "secretLabelPassword": "Password",
     "secretLabelToken": "API token",
@@ -1596,6 +1618,28 @@
       "rowLabelMissing": "{{name}} ({{kind}}). Credentials missing on this device. Press Enter or Delete to remove.",
       "rowLabelMissingPlugin": "{{name}} ({{kind}}). Plugin not installed on this device — open Settings → Plugins to install it.",
       "missingBadge": "needs credentials",
+      "refreshErrors": {
+        "badge": "update failing",
+        "announce": "Warning: updating one or more accounts is failing. Details: Settings, Accounts.",
+        "announceAuth": "Warning: updating one or more accounts is failing, likely an authentication problem. Details: Settings, Accounts.",
+        "heading": "Update problems for {{name}}",
+        "authHint": "The errors look like an authentication problem — re-enter the password for this account using the button below.",
+        "authHintOauth": "The errors look like an authentication problem — sign in to this account again using the button below.",
+        "reenterPassword": "Re-enter password…",
+        "signInAgain": "Sign in again…",
+        "entry": "{{container}}: {{error}}",
+        "lastSuccess": "Last successful update: {{time}}.",
+        "neverSucceeded": "Never updated successfully.",
+        "scope": {
+          "calendars": "Calendar list",
+          "task_lists": "Task-list catalog",
+          "contact_lists": "Address-book catalog",
+          "events": "Calendar",
+          "tasks": "Task list",
+          "sections": "Sections",
+          "contacts": "Address book"
+        }
+      },
       "missingPluginBadge": "plugin missing",
       "missingCredentials_one": "1 account needs credentials on this device.",
       "missingCredentials_other": "{{count}} accounts need credentials on this device.",
@@ -1782,6 +1826,8 @@
     "treeLabel": "Accounts, calendars and task lists",
     "tree": {
       "accountLabel": "{{name}} ({{kind}})",
+      "refreshError": "Warning: updating this account is failing; shown data may be outdated.",
+      "refreshErrorAuth": "Warning: updating this account is failing — re-enter the password under Settings, Accounts.",
       "sectionLabel": "{{name}}",
       "empty": "No calendars or task lists yet — open this account in \"Manage accounts\" to check the connection.",
       "contextMenuHint": "Use arrow keys to navigate, Space to toggle visibility, Shift+F10 or the Menu key for actions."

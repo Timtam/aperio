@@ -445,3 +445,30 @@ export type PluginTypeWire =
   | 'videoconference-adapter'
   | 'notification'
   | string;
+
+/** One container whose most recent background refresh FAILED — the raw
+ *  material of the per-account error surface (silent staleness, e.g. a
+ *  revoked iCloud app password). Mirrors host-core
+ *  `cache::ContainerRefreshError`. */
+export interface ContainerRefreshError {
+  /** SyncScope wire string: "events" | "tasks" | "sections" | "contacts"
+   *  or a listing scope ("calendars" | "task_lists" | "contact_lists"). */
+  scope: string;
+  /** Container id, or "" for an account-level listing failure. */
+  container_id: string;
+  /** Resolved container name, when the cached listing knows it. */
+  container_name: string | null;
+  /** The recorded provider error text. */
+  error: string;
+  /** Last SUCCESSFUL refresh (RFC 3339) — how stale the visible data is.
+   *  `null`: never refreshed successfully. */
+  last_success_at: string | null;
+}
+
+/** Every failing container of one account, plus the auth heuristic that
+ *  drives the "re-enter password" hint. */
+export interface AccountRefreshErrors {
+  account_id: string;
+  auth_suspected: boolean;
+  errors: ContainerRefreshError[];
+}

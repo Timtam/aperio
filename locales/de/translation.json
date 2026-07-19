@@ -233,6 +233,26 @@
     "never": "Externe Daten noch nicht aktualisiert",
     "refreshNow": "Externe Daten aktualisieren"
   },
+  "refreshErrors": {
+    "announce": "Achtung: Die Aktualisierung mindestens eines Kontos schlägt fehl. Details im Bereich Synchronisierung.",
+    "announceAuth": "Achtung: Die Aktualisierung mindestens eines Kontos schlägt fehl, vermutlich ein Anmeldeproblem. Details im Bereich Synchronisierung.",
+    "banner": "Einige Konten werden nicht aktualisiert. Details im Bereich Synchronisierung.",
+    "bannerAuth": "Einige Konten werden nicht aktualisiert – möglicherweise ein Passwortproblem. Details im Bereich Synchronisierung.",
+    "heading": "Aktualisierungsprobleme bei {{name}}",
+    "authHint": "Die Fehler deuten auf ein Anmeldeproblem hin — bitte das Passwort über „Neu verbinden\" auf dem Konten-Bildschirm neu eingeben.",
+    "entry": "{{container}}: {{error}}",
+    "lastSuccess": "Letzte erfolgreiche Aktualisierung: {{time}}.",
+    "neverSucceeded": "Noch nie erfolgreich aktualisiert.",
+    "scope": {
+      "calendars": "Kalenderliste",
+      "task_lists": "Aufgabenlisten-Katalog",
+      "contact_lists": "Adressbuch-Katalog",
+      "events": "Kalender",
+      "tasks": "Aufgabenliste",
+      "sections": "Abschnitte",
+      "contacts": "Adressbuch"
+    }
+  },
   "syncStatus": {
     "label": "Sync-Status",
     "synced": "Synchronisiert",
@@ -280,7 +300,9 @@
   "syncAccountsConnect": {
     "title": "Konten verbinden",
     "body": "Deine Konten wurden aus dem Sync-Speicher übernommen, aber Passwörter und Tokens werden ausschließlich pro Gerät gespeichert. Bitte hinterlege die Zugangsdaten für die folgenden Konten erneut, damit dieses Gerät sie verwenden kann.",
+    "bodyRepair": "Der Anbieter akzeptiert die gespeicherten Zugangsdaten der folgenden Konten nicht mehr — jeder Aktualisierungsversuch wird abgelehnt. Bitte gib das aktuelle Passwort neu ein (bei Google oder Microsoft: erneut anmelden), damit die Aktualisierung wieder funktioniert.",
     "hint": "Du kannst diesen Dialog auch schließen und die Konten später unter Einstellungen → Konten verbinden. Bis dahin sind Kalender und Aufgaben dieser Konten auf diesem Gerät nicht verfügbar.",
+    "hintRepair": "Du kannst diesen Dialog auch schließen und die Verbindung später unter Einstellungen → Konten reparieren. Bis dahin zeigen die betroffenen Kalender und Aufgaben weiterhin den zuletzt erfolgreich geladenen Stand.",
     "empty": "Alle Konten sind wieder verbunden.",
     "secretLabelPassword": "Passwort",
     "secretLabelToken": "API-Token",
@@ -1596,6 +1618,28 @@
       "rowLabelMissing": "{{name}} ({{kind}}). Zugangsdaten auf diesem Gerät fehlen. Enter oder Entf zum Entfernen.",
       "rowLabelMissingPlugin": "{{name}} ({{kind}}). Plugin auf diesem Gerät nicht installiert — öffne Einstellungen → Plugins, um es zu installieren.",
       "missingBadge": "Zugangsdaten fehlen",
+      "refreshErrors": {
+        "badge": "Aktualisierung fehlgeschlagen",
+        "announce": "Achtung: Die Aktualisierung mindestens eines Kontos schlägt fehl. Details unter Einstellungen, Konten.",
+        "announceAuth": "Achtung: Die Aktualisierung mindestens eines Kontos schlägt fehl, vermutlich ein Anmeldeproblem. Details unter Einstellungen, Konten.",
+        "heading": "Aktualisierungsprobleme bei {{name}}",
+        "authHint": "Die Fehler deuten auf ein Anmeldeproblem hin — bitte das Passwort für dieses Konto über die Schaltfläche unten neu eingeben.",
+        "authHintOauth": "Die Fehler deuten auf ein Anmeldeproblem hin — bitte über die Schaltfläche unten erneut bei diesem Konto anmelden.",
+        "reenterPassword": "Passwort neu eingeben…",
+        "signInAgain": "Erneut anmelden…",
+        "entry": "{{container}}: {{error}}",
+        "lastSuccess": "Letzte erfolgreiche Aktualisierung: {{time}}.",
+        "neverSucceeded": "Noch nie erfolgreich aktualisiert.",
+        "scope": {
+          "calendars": "Kalenderliste",
+          "task_lists": "Aufgabenlisten-Katalog",
+          "contact_lists": "Adressbuch-Katalog",
+          "events": "Kalender",
+          "tasks": "Aufgabenliste",
+          "sections": "Abschnitte",
+          "contacts": "Adressbuch"
+        }
+      },
       "missingPluginBadge": "Plugin fehlt",
       "missingCredentials_one": "1 Konto benötigt auf diesem Gerät Zugangsdaten.",
       "missingCredentials_other": "{{count}} Konten benötigen auf diesem Gerät Zugangsdaten.",
@@ -1782,6 +1826,8 @@
     "treeLabel": "Konten, Kalender und Aufgabenlisten",
     "tree": {
       "accountLabel": "{{name}} ({{kind}})",
+      "refreshError": "Achtung: Die Aktualisierung dieses Kontos schlägt fehl; angezeigte Daten sind möglicherweise veraltet.",
+      "refreshErrorAuth": "Achtung: Die Aktualisierung dieses Kontos schlägt fehl — bitte das Passwort unter Einstellungen, Konten neu eingeben.",
       "sectionLabel": "{{name}}",
       "empty": "Noch keine Kalender oder Aufgabenlisten — über „Konten verwalten\" die Verbindung prüfen.",
       "contextMenuHint": "Mit den Pfeiltasten navigieren, Leertaste zum Ein-/Ausblenden, Umschalt+F10 oder Menü-Taste für Aktionen."

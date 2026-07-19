@@ -31,6 +31,7 @@ import type { RootStackParamList, RootTabParamList } from './navigation/types';
 import { useReminderTriggers } from './reminders/scheduler';
 import { useAppBadge } from './state/useAppBadge';
 import { useDayStartChecks } from './state/useDayStartChecks';
+import { startRefreshErrorsWatcher } from './state/useRefreshErrors';
 import { useStoredLanguage } from './settings/language';
 import { useSyncStatus } from './state/useSyncStatus';
 import AccountsScreen from './screens/AccountsScreen';
@@ -460,6 +461,13 @@ function AppContent() {
   // (the user-chosen behaviour). The bus the screens subscribe to via
   // useCacheReload is driven here.
   useCacheUpdates();
+  // App-root refresh-error watcher: fetches the per-account refresh-error
+  // aggregate no matter which screen the user lands on, and makes the ONE
+  // polite announcement when a new account starts failing. Screens (Sync /
+  // Calendars / Lists banners, the header sync button) only subscribe.
+  useEffect(() => {
+    startRefreshErrorsWatcher();
+  }, []);
   // App-wide sync status: a Settings-tab badge for sighted users + spoken
   // announcements of attention-class transitions (conflict / failure /
   // schema-too-old) for screen-reader users. The data is already bridged.

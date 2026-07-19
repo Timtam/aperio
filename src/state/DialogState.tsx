@@ -107,7 +107,14 @@ export type DialogMode =
   | { kind: 'syncConflicts' }
   | { kind: 'syncSchemaTooOld'; required: string; running: string }
   | { kind: 'syncStaleResume'; snapshotAt: string }
-  | { kind: 'syncAccountsConnect'; accounts: Account[] }
+  | {
+      kind: 'syncAccountsConnect';
+      accounts: Account[];
+      /** Which story the wizard tells: 'restore' = §19.11 credentials
+       *  missing after a sync restore (default); 'repair' = credentials
+       *  present but rejected (refresh-error surface). */
+      reason?: 'restore' | 'repair';
+    }
   | { kind: 'firstLaunchWizard' };
 
 /**
@@ -175,6 +182,10 @@ export interface DialogStateValue {
    * working without rewriting every call site.
    */
   openSettings: (initialTab?: SettingsTabId) => void;
+  /** Persist the Settings dialog's current tab into its stack frame so a
+   *  stacked-dialog round trip (e.g. the reconnect wizard) remounts
+   *  Settings on the SAME tab instead of resetting to General. */
+  recordSettingsTab: (tab: SettingsTabId) => void;
   /** Convenience: open Settings on the Color-labels tab. */
   openColorLabels: () => void;
   /** Convenience: open Settings on the Accounts tab. */
@@ -228,7 +239,10 @@ export interface DialogStateValue {
    *  when the snapshot brought in account rows that don't yet
    *  have their secrets on this device. The dialog walks the
    *  user through re-attaching credentials per account. */
-  openSyncAccountsConnect: (accounts: Account[]) => void;
+  openSyncAccountsConnect: (
+    accounts: Account[],
+    reason?: 'restore' | 'repair',
+  ) => void;
   /** §19.11 first-launch wizard. Opened by `FirstLaunchWizardChecker` on a
    *  fresh instance: language → sync (restore / create / skip) → first
    *  account. */
@@ -390,6 +404,21 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     (initialTab?: SettingsTabId) => push({ kind: 'settings', initialTab }),
     [push],
   );
+  // Record the Settings dialog's CURRENT tab in its stack frame. Only the
+  // top of the stack renders, so pushing another dialog on top (reconnect
+  // wizard, OAuth guide) unmounts Settings; on return it remounts from the
+  // frame and would otherwise reset to the General tab mid-task.
+  const recordSettingsTab = useCallback(
+    (tab: SettingsTabId) =>
+      setStack((s) =>
+        s.some((f) => f.kind === 'settings' && f.initialTab !== tab)
+          ? s.map((f) =>
+              f.kind === 'settings' ? { ...f, initialTab: tab } : f,
+            )
+          : s,
+      ),
+    [],
+  );
   const openColorLabels = useCallback(
     () => openSettings('colorLabels'),
     [openSettings],
@@ -449,7 +478,8 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     [push],
   );
   const openSyncAccountsConnect = useCallback(
-    (accounts: Account[]) => push({ kind: 'syncAccountsConnect', accounts }),
+    (accounts: Account[], reason?: 'restore' | 'repair') =>
+      push({ kind: 'syncAccountsConnect', accounts, reason }),
     [push],
   );
   const openFirstLaunchWizard = useCallback(
@@ -511,6 +541,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openQuickAddTask,
       openCreateChooser,
       openSettings,
+      recordSettingsTab,
       openColorLabels,
       openAccounts,
       openSearch,
@@ -539,6 +570,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openQuickAddTask,
       openCreateChooser,
       openSettings,
+      recordSettingsTab,
       openColorLabels,
       openAccounts,
       openSearch,

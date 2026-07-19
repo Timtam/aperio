@@ -189,6 +189,64 @@ pub struct SyncState {
     pub last_error: Option<String>,
 }
 
+/// One container whose most recent background refresh FAILED — the raw
+/// material of the per-account error surface (a container that silently
+/// serves stale cached data, e.g. after an iCloud app-password revoke,
+/// is invisible to the user without this). `last_error` is written by
+/// `mark_error` on every failed refresh and cleared by every successful
+/// write, so presence == "the latest attempt failed".
+#[derive(Debug, Clone, Serialize)]
+pub struct ContainerRefreshError {
+    /// The [`SyncScope`] wire string ("events", "tasks", "calendars", …).
+    pub scope: String,
+    /// Container id, or `""` for an account-level listing failure.
+    pub container_id: String,
+    /// Human-readable container name resolved from the cached listing,
+    /// when the listing has the container. `None` for listing-scope
+    /// failures and containers the listing doesn't (yet) know.
+    pub container_name: Option<String>,
+    /// The recorded provider error text.
+    pub error: String,
+    /// Last SUCCESSFUL refresh (RFC 3339) — how stale the data the user
+    /// currently sees is. `None`: never refreshed successfully.
+    pub last_success_at: Option<String>,
+}
+
+/// Every failing container of one account, plus whether any error looks
+/// authentication-shaped (drives the "re-enter password" hint).
+#[derive(Debug, Clone, Serialize)]
+pub struct AccountRefreshErrors {
+    pub account_id: String,
+    pub auth_suspected: bool,
+    pub errors: Vec<ContainerRefreshError>,
+}
+
+/// Heuristic: does a provider error text look like an AUTH failure (as
+/// opposed to a network blip)? Substring match over the usual suspects —
+/// conservative on purpose: a false "auth" only makes the UI suggest
+/// re-checking the password. The OAuth needles matter because a revoked
+/// Google/Graph grant surfaces as the TOKEN endpoint's HTTP 400 body
+/// (`{"error":"invalid_grant",...}`) embedded in a protocol error, not
+/// as a 401 — exactly the case where re-authenticating is the fix.
+pub fn is_auth_shaped(error: &str) -> bool {
+    let lower = error.to_lowercase();
+    [
+        "401",
+        "403",
+        "unauthorized",
+        "unauthorised",
+        "forbidden",
+        "authentication",
+        "invalid credentials",
+        "password",
+        "invalid_grant",
+        "invalid_client",
+        "expired or revoked",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
 /// Outcome of an incremental sync the host hands to [`CacheStore`].
 #[derive(Debug, Clone, Default)]
 pub struct Delta<T> {
@@ -346,6 +404,148 @@ impl CacheStore {
             }
             Ok::<(), DbError>(())
         })?;
+        Ok(out)
+    }
+
+    /// Every account's currently-failing containers (rows whose latest
+    /// refresh attempt recorded `last_error`), grouped per account with
+    /// container names resolved from the cached listings. Powers the
+    /// per-account error surface on both platforms. Cheap: errors are
+    /// rare, the scan is one indexed SELECT plus a name lookup per hit.
+    pub fn refresh_errors(&self) -> DbResult<Vec<AccountRefreshErrors>> {
+        struct Row {
+            account: String,
+            scope: String,
+            container: String,
+            error: String,
+            last_success: Option<String>,
+        }
+        let rows: Vec<Row> = self.db.with_read_conn(|c| {
+            let mut stmt = c.prepare(
+                "SELECT account_id, scope, container_id, last_error, last_refreshed_at
+                 FROM cache_sync_state
+                 WHERE last_error IS NOT NULL
+                 ORDER BY account_id, scope, container_id",
+            )?;
+            let mapped = stmt.query_map([], |r| {
+                Ok(Row {
+                    account: r.get(0)?,
+                    scope: r.get(1)?,
+                    container: r.get(2)?,
+                    error: r.get(3)?,
+                    last_success: r.get(4)?,
+                })
+            })?;
+            mapped.collect::<rusqlite::Result<Vec<_>>>()
+        })?;
+
+        // Resolve container identity from the cached listings. `None`
+        // means the row is ORPHANED: the listing authoritatively does
+        // not contain this container (deleted server-side; the
+        // sync-state row was re-created by a refresh against a stale
+        // persisted selection) — surfacing it would be a permanent
+        // unnamed warning the user can never clear. Authority means
+        // either the listing has OTHER containers, or it is empty but
+        // has succeeded at least once (last_refreshed_at set — its last
+        // success returned the empty set). A cold listing keeps the row.
+        // The name prefers the user's rename override — the name every
+        // other surface shows — over the raw listing payload. Every
+        // lookup degrades FAIL-OPEN (keep the row, name unknown): a
+        // transient read error must dim the surface, never blank it,
+        // and orphaning needs positive confirmation.
+        let resolve = |scope: &str, account: &str, container: &str| -> Option<Option<String>> {
+            if container.is_empty() {
+                return Some(None);
+            }
+            let (table, kind, listing_scope) = match scope {
+                "events" => ("cache_calendars", "calendar", "calendars"),
+                "tasks" | "sections" => ("cache_task_lists", "task_list", "task_lists"),
+                "contacts" => ("cache_contact_lists", "contact_list", "contact_lists"),
+                _ => return Some(None),
+            };
+            self.db.with_read_conn(|c| {
+                let payload: Option<String> = match c
+                    .query_row(
+                        &format!("SELECT payload FROM {table} WHERE account_id = ?1 AND id = ?2"),
+                        params![account, container],
+                        |r| r.get(0),
+                    )
+                    .optional()
+                {
+                    Ok(p) => p,
+                    Err(_) => return Some(None),
+                };
+                if payload.is_none() {
+                    let listed: i64 = match c.query_row(
+                        &format!("SELECT COUNT(*) FROM {table} WHERE account_id = ?1"),
+                        params![account],
+                        |r| r.get(0),
+                    ) {
+                        Ok(n) => n,
+                        Err(_) => return Some(None),
+                    };
+                    if listed > 0 {
+                        return None;
+                    }
+                    let listing_succeeded = c
+                        .query_row(
+                            "SELECT 1 FROM cache_sync_state
+                             WHERE account_id = ?1 AND scope = ?2 AND container_id = ''
+                               AND last_refreshed_at IS NOT NULL",
+                            params![account, listing_scope],
+                            |r| r.get::<_, i64>(0),
+                        )
+                        .optional()
+                        .ok()
+                        .flatten()
+                        .is_some();
+                    if listing_succeeded {
+                        return None;
+                    }
+                }
+                let override_name: Option<String> = c
+                    .query_row(
+                        "SELECT name FROM container_name_overrides
+                         WHERE container_id = ?1 AND kind = ?2",
+                        params![container, kind],
+                        |r| r.get(0),
+                    )
+                    .optional()
+                    .ok()
+                    .flatten();
+                let name = override_name.or_else(|| {
+                    payload
+                        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                        .and_then(|v| v.get("name").and_then(|n| n.as_str().map(str::to_string)))
+                });
+                Some(name)
+            })
+        };
+
+        let mut out: Vec<AccountRefreshErrors> = Vec::new();
+        for row in rows {
+            let Some(container_name) = resolve(&row.scope, &row.account, &row.container) else {
+                continue;
+            };
+            let entry = ContainerRefreshError {
+                container_name,
+                scope: row.scope,
+                container_id: row.container,
+                error: row.error,
+                last_success_at: row.last_success,
+            };
+            match out.last_mut() {
+                Some(acc) if acc.account_id == row.account => {
+                    acc.auth_suspected |= is_auth_shaped(&entry.error);
+                    acc.errors.push(entry);
+                }
+                _ => out.push(AccountRefreshErrors {
+                    account_id: row.account,
+                    auth_suspected: is_auth_shaped(&entry.error),
+                    errors: vec![entry],
+                }),
+            }
+        }
         Ok(out)
     }
 

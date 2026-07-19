@@ -37,6 +37,25 @@ The log files are stored under your data directory, in a `logs/` folder
 (`aperio.log.<date>`). Settings → Logs shows the exact path with a **Copy
 path** button. Files older than 14 days are removed automatically.
 
+## An account stops updating
+
+If a connected account can no longer be refreshed — most commonly because its
+password or app password was changed or revoked — Aperio keeps showing the
+last data it has and warns you instead of failing silently:
+
+- **Desktop:** the account in the sidebar carries a warning, and a polite
+  screen-reader announcement points you at **Settings → Accounts**. There the
+  affected account lists each failing calendar or list, the provider's error,
+  and when the last successful update happened. If the errors look like a
+  login problem, a **Re-enter password** button opens the reconnect flow
+  directly.
+- **Mobile:** the sync button in the header turns into a warning (its label
+  says some accounts are not updating), the details are on the **Sync**
+  screen, and the affected account on the accounts screen gets a
+  **Reconnect** button to re-enter the password or redo the provider sign-in.
+
+The warning clears by itself as soon as an update succeeds again.
+
 ## Reporting a bug
 
 1. In Settings → Logs, set the level to **Debug**.

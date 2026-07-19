@@ -7,6 +7,7 @@ import {
   isCommandError,
   reconnectGoogleAccount,
   reconnectMicrosoftAccount,
+  refreshExternalCache,
   setAccountSecret,
 } from '../api/client';
 import type { Account, AdapterKind } from '../api/types';
@@ -44,6 +45,12 @@ import { Modal } from './Modal';
 export interface SyncAccountsConnectDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Which story the intro tells. 'restore' (default): §19.11 —
+   *  accounts came from the sync store and their credentials are
+   *  missing on this device. 'repair': the credentials exist but the
+   *  provider rejects them (refresh-error surface) — the restore copy
+   *  would be factually wrong for that user. */
+  reason?: 'restore' | 'repair';
   /** Pre-fetched list of accounts the dialog should walk. The
    *  caller (SyncPanel) reads this from
    *  `listAccountsMissingCredentials` so the wizard only opens
@@ -67,6 +74,7 @@ export function SyncAccountsConnectDialog({
   isOpen,
   onClose,
   accounts: initialAccounts,
+  reason = 'restore',
 }: SyncAccountsConnectDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
@@ -166,6 +174,11 @@ export function SyncAccountsConnectDialog({
           }),
         );
         removeRow(account.id);
+        // Retry the failing containers right away: storing the secret alone
+        // never contacts the provider, so without this kick the refresh-error
+        // warning would outlive a successful repair until the next scheduled
+        // pass — and a still-wrong password would look identical to success.
+        void refreshExternalCache().catch(() => undefined);
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('set_account_secret failed', err);
@@ -195,6 +208,9 @@ export function SyncAccountsConnectDialog({
           }),
         );
         removeRow(account.id);
+        // Same rationale as the password path: retry now so the error
+        // surface reflects the repair (or its failure) promptly.
+        void refreshExternalCache().catch(() => undefined);
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('reconnect_oauth_account failed', err);
@@ -220,10 +236,18 @@ export function SyncAccountsConnectDialog({
       dismissOnBackdrop={false}
     >
       <FocusableNote className="sync-accounts-connect__body">
-        {t('syncAccountsConnect.body')}
+        {t(
+          reason === 'repair'
+            ? 'syncAccountsConnect.bodyRepair'
+            : 'syncAccountsConnect.body',
+        )}
       </FocusableNote>
       <FocusableNote className="sync-accounts-connect__hint">
-        {t('syncAccountsConnect.hint')}
+        {t(
+          reason === 'repair'
+            ? 'syncAccountsConnect.hintRepair'
+            : 'syncAccountsConnect.hint',
+        )}
       </FocusableNote>
       {pending.length === 0 ? (
         <FocusableNote className="sync-accounts-connect__empty">

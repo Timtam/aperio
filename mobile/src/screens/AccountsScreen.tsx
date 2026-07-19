@@ -31,6 +31,7 @@ import {
 import { getUserPref, setUserPref } from '../api/prefs';
 import { reconnectOAuthAccount, type OAuthProvider } from '../api/oauth';
 import { refreshExternalCache } from '../api/sync';
+import { useRefreshErrors } from '../state/useRefreshErrors';
 import { AppDialog } from '../components/AppDialog';
 import ContactsPrivacyNoticeModal from '../components/ContactsPrivacyNoticeModal';
 import { FormScrollView } from '../components/FormScrollView';
@@ -160,6 +161,10 @@ function errorMessage(err: unknown): string {
 export default function AccountsScreen() {
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
+  // Per-account refresh errors: an auth-suspected account gets the same
+  // Reconnect affordance as a missing-credential one (a present-but-wrong
+  // password is invisible to the keychain probe).
+  const { errorsByAccount } = useRefreshErrors();
 
   const [accounts, setAccounts] = useState<Account[]>([]);
   // Ids of external accounts whose required keychain secret is absent — the
@@ -528,6 +533,10 @@ export default function AccountsScreen() {
         announce(
           t('dialogs.accounts.credentialUpdated', { name: account.display_name }),
         );
+        // Retry the failing containers right away — storing the grant alone
+        // never contacts the provider, so the refresh-error warning would
+        // otherwise outlive the repair until the next scheduled pass.
+        void refreshExternalCache().catch(() => undefined);
       } catch (err) {
         const message = errorMessage(err);
         setError(message);
@@ -577,6 +586,9 @@ export default function AccountsScreen() {
         announce(
           t('dialogs.accounts.credentialUpdated', { name: account.display_name }),
         );
+        // Same rationale as reconnectOauth: retry now so the error surface
+        // reflects the repair (or a still-wrong password) promptly.
+        void refreshExternalCache().catch(() => undefined);
       } catch (err) {
         // The secret stays in place on a registration failure — let the user
         // retry without re-typing (the field is still open).
@@ -633,12 +645,20 @@ export default function AccountsScreen() {
             const kindName = t(`dialogs.accounts.kindName.${account.adapter_kind}`);
             const missing = missingIds.has(account.id);
             const oauth = isOAuthKind(account.adapter_kind);
+            // A present-but-WRONG credential (revoked app password, expired
+            // OAuth grant) never lands in `missing` — the refresh-error
+            // surface flags it, and the same Reconnect affordance is the fix.
+            const authSuspected =
+              errorsByAccount.get(account.id)?.auth_suspected === true;
+            const needsReconnect = missing || authSuspected;
             // Fold the credential state into the row's single SR label; a
             // "Reconnect" affordance follows for both kinds (OAuth re-runs the
             // provider sign-in; others reveal the inline secret field).
             const rowLabel = missing
               ? `${account.display_name}, ${kindName}, ${t('dialogs.accounts.missingBadge')}`
-              : `${account.display_name}, ${kindName}`;
+              : authSuspected
+                ? `${account.display_name}, ${kindName}, ${t('dialogs.accounts.refreshErrors.badge')}`
+                : `${account.display_name}, ${kindName}`;
             if (repairId === account.id) {
               return (
                 <View key={account.id} style={styles.row}>
@@ -719,7 +739,7 @@ export default function AccountsScreen() {
                   isLocal
                     ? undefined
                     : [
-                        ...(missing
+                        ...(needsReconnect
                           ? [{ name: 'reconnect', label: t('dialogs.accounts.reconnect') }]
                           : []),
                         { name: 'rename', label: t('mobile.rename') },
@@ -743,15 +763,19 @@ export default function AccountsScreen() {
                 <View style={styles.rowText}>
                   <Text style={styles.accountName}>{account.display_name}</Text>
                   <Text style={styles.accountKind}>{kindName}</Text>
-                  {missing && (
+                  {missing ? (
                     <Text style={styles.badge} importantForAccessibility="no">
                       {t('dialogs.accounts.missingBadge')}
                     </Text>
-                  )}
+                  ) : authSuspected ? (
+                    <Text style={styles.badge} importantForAccessibility="no">
+                      {t('dialogs.accounts.refreshErrors.badge')}
+                    </Text>
+                  ) : null}
                 </View>
                 {!isLocal && (
                   <>
-                    {missing && (
+                    {needsReconnect && (
                       <Pressable
                         accessibilityRole="button"
                         accessibilityLabel={`${t('dialogs.accounts.reconnect')}: ${account.display_name}`}

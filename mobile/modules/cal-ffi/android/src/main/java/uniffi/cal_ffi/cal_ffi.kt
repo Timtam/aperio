@@ -1006,6 +1006,8 @@ external fun uniffi_cal_ffi_checksum_method_host_get_user_pref(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_import_sound_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_is_device_account(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_list_accounts_missing_credentials_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_list_calendars_json(
@@ -1029,6 +1031,8 @@ external fun uniffi_cal_ffi_checksum_method_host_preview_sync_target_json(
 external fun uniffi_cal_ffi_checksum_method_host_push_now(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_query_free_busy_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_refresh_errors_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_refresh_external_cache(
 ): Short
@@ -1374,6 +1378,8 @@ external fun uniffi_cal_ffi_fn_method_host_get_user_pref(`ptr`: Long,`key`: Rust
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_import_sound_json(`ptr`: Long,`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_is_device_account(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
 external fun uniffi_cal_ffi_fn_method_host_list_accounts_missing_credentials_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_calendars_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1397,6 +1403,8 @@ external fun uniffi_cal_ffi_fn_method_host_preview_sync_target_json(`ptr`: Long,
 external fun uniffi_cal_ffi_fn_method_host_push_now(`ptr`: Long,`trigger`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
 external fun uniffi_cal_ffi_fn_method_host_query_free_busy_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_refresh_errors_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_refresh_external_cache(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -1898,7 +1906,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_get_event_by_id_json() != 41217.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_get_events_json() != 18958.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_get_events_json() != 32309.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_get_log_level() != 43590.toShort()) {
@@ -1917,6 +1925,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_import_sound_json() != 40673.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_is_device_account() != 47677.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_list_accounts_missing_credentials_json() != 60783.toShort()) {
@@ -1953,6 +1964,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_query_free_busy_json() != 44096.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_refresh_errors_json() != 55989.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_refresh_external_cache() != 5904.toShort()) {
@@ -4467,8 +4481,8 @@ public interface HostInterface {
      * events are synthesised from the underlying contact list's birthdays,
      * local in-process + external from the snapshot cache). A LOCAL calendar is
      * a direct read; an EXTERNAL one is stale-while-revalidate (serve the cached
-     * snapshot + background-refresh, with a cold-fallback live read), mirroring
-     * the desktop `get_events`.
+     * snapshot — empty on a never-warmed calendar — and background-refresh),
+     * mirroring the desktop `get_events`.
      *
      * The local adapter currently returns rows whose stored start/end
      * intersect the range (RRULE occurrence expansion is its own later phase),
@@ -4514,6 +4528,13 @@ public interface HostInterface {
      * immediate preview). Validates format + size via the shared importer.
      */
     fun `importSoundJson`(`path`: kotlin.String): kotlin.String
+    
+    /**
+     * Whether `account_id` belongs to a device-calendar/-reminder account (the
+     * phone's own EventKit / CalendarProvider store). Used to skip Aperio-side
+     * recurrence reconciliation the OS already owns.
+     */
+    fun `isDeviceAccount`(`accountId`: kotlin.String): kotlin.Boolean
     
     /**
      * External accounts whose required keychain secret is absent — the data
@@ -4612,6 +4633,14 @@ public interface HostInterface {
      * "free/unknown" rather than an error. Mirrors the desktop `query_free_busy`.
      */
     fun `queryFreeBusyJson`(`requestJson`: kotlin.String): kotlin.String
+    
+    /**
+     * Every account's currently-failing containers as a JSON
+     * `AccountRefreshErrors[]` — the per-account error surface, so a
+     * revoked/wrong provider password shows up as a warning instead of
+     * silent staleness. Mirrors the desktop `get_refresh_errors`.
+     */
+    fun `refreshErrorsJson`(): kotlin.String
     
     /**
      * Kick an immediate warm pass over every external account's containers +
@@ -6175,8 +6204,8 @@ open class Host: Disposable, AutoCloseable, HostInterface
      * events are synthesised from the underlying contact list's birthdays,
      * local in-process + external from the snapshot cache). A LOCAL calendar is
      * a direct read; an EXTERNAL one is stale-while-revalidate (serve the cached
-     * snapshot + background-refresh, with a cold-fallback live read), mirroring
-     * the desktop `get_events`.
+     * snapshot — empty on a never-warmed calendar — and background-refresh),
+     * mirroring the desktop `get_events`.
      *
      * The local adapter currently returns rows whose stored start/end
      * intersect the range (RRULE occurrence expansion is its own later phase),
@@ -6300,6 +6329,24 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_import_sound_json(
         it,
         FfiConverterString.lower(`path`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Whether `account_id` belongs to a device-calendar/-reminder account (the
+     * phone's own EventKit / CalendarProvider store). Used to skip Aperio-side
+     * recurrence reconciliation the OS already owns.
+     */override fun `isDeviceAccount`(`accountId`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_is_device_account(
+        it,
+        FfiConverterString.lower(`accountId`),_status)
 }
     }
     )
@@ -6542,6 +6589,26 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_query_free_busy_json(
         it,
         FfiConverterString.lower(`requestJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Every account's currently-failing containers as a JSON
+     * `AccountRefreshErrors[]` — the per-account error surface, so a
+     * revoked/wrong provider password shows up as a warning instead of
+     * silent staleness. Mirrors the desktop `get_refresh_errors`.
+     */
+    @Throws(StoreException::class)override fun `refreshErrorsJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_refresh_errors_json(
+        it,
+        _status)
 }
     }
     )
