@@ -488,6 +488,10 @@ pub fn run() {
     // before the process dies.
     let orchestrator_for_exit = Arc::clone(&sync_orchestrator);
     let scheduler_kick_for_setup = Arc::clone(&kick_notify);
+    // A round that APPLIED foreign events may have created external accounts
+    // (restore / another device); the scheduler registers their adapters, so
+    // it holds the same registry Arc as everyone else.
+    let registry_for_sync_scheduler = Arc::clone(&registry);
     let scheduler_orchestrator = Arc::clone(&sync_orchestrator);
     let scheduler_db = db.shared();
 
@@ -843,6 +847,10 @@ pub fn run() {
                 // "Re-sync from scratch" does (reset + trigger).
                 cache_refresher.trigger();
             }
+            // The sync scheduler warms the cache after it registers adapters
+            // for accounts that arrived through sync, so it needs its own
+            // handle before the primary Arc moves into Tauri State.
+            let refresher_for_sync_scheduler = Arc::clone(&cache_refresher);
             app.manage(cache_refresher);
 
             // Phase Se: sync scheduler. Spawns the periodic worker
@@ -856,6 +864,8 @@ pub fn run() {
                 Arc::clone(&scheduler_orchestrator),
                 scheduler_db.clone(),
                 Arc::clone(&scheduler_kick_for_setup),
+                Arc::clone(&registry_for_sync_scheduler),
+                refresher_for_sync_scheduler,
                 app.handle().clone(),
             );
             app.manage(sync_scheduler);

@@ -49,6 +49,7 @@ use crate::event_log::{
     CompactionReport, OnboardingReport, OnboardingService, SyncOrchestrator, SyncPreview,
     SyncRoundReport, SyncScheduler, SyncStatus,
 };
+use crate::registry::AdapterRegistry;
 use crate::secrets::{self, SecretSlot};
 use crate::sftp_host_keys::UserPrefsHostKeyVerifier;
 use crate::sync_log::{SyncLogEntry, SyncLogRepo, MAX_LOG_ROWS};
@@ -1309,6 +1310,46 @@ pub async fn preview_sync_target(
     onboarding.preview(adapter.as_ref()).await.map_err(sync_err)
 }
 
+/// Bring up adapters for external accounts an onboarding pass just
+/// materialised, then warm their cache.
+///
+/// Onboarding creates external accounts as ROWS: it applies the remote
+/// snapshot + logs straight to SQLite and never passes through the
+/// add-account commands that call `AdapterRegistry::register`. Without this
+/// the accounts show up in the sidebar by name but list no calendars, task
+/// lists or address books — and nothing fixes it until the next app start
+/// runs `bootstrap` (exactly the "restart made it work" report).
+///
+/// Only ADAPTER-LESS accounts are registered — rebuilding a live account's
+/// adapter would throw away its in-memory provider state and force a cold
+/// re-drain. Called unconditionally rather than gated on `report.applied`:
+/// a compacted dataset restores its accounts through the SNAPSHOT, which
+/// that log-event counter doesn't see.
+///
+/// The warm pass runs either way: the boot pass already ran before these
+/// accounts existed, so their containers would otherwise stay unfetched.
+fn register_onboarded_accounts(
+    shared: &SharedConn,
+    registry: &AdapterRegistry,
+    refresher: &CacheRefresher,
+) {
+    let registered = {
+        let repo = AccountsRepo::new(shared);
+        registry.register_missing(&repo)
+    };
+    if registered > 0 {
+        tracing::info!(
+            registered,
+            "registered adapters for accounts restored by onboarding",
+        );
+    }
+    // UN-forced, matching the mobile path: the restored accounts' first
+    // warm is automatic bookkeeping, so a network blip during it must be
+    // confirmed by a second attempt before it surfaces. A wrong/missing
+    // credential is auth-shaped and still surfaces at once.
+    refresher.trigger_background();
+}
+
 /// "Datensatz übernehmen" path of the §19.11 onboarding flow.
 ///
 /// Configures the orchestrator with the chosen adapter, pulls every
@@ -1326,6 +1367,7 @@ pub async fn accept_remote_dataset(
     onboarding: State<'_, Arc<OnboardingService>>,
     plugin_manager: State<'_, Arc<PluginManager>>,
     refresher: State<'_, Arc<CacheRefresher>>,
+    registry: State<'_, Arc<AdapterRegistry>>,
     config: SyncAdapterConfig,
     device_name: Option<String>,
     passphrase: Option<String>,
@@ -1413,11 +1455,7 @@ pub async fn accept_remote_dataset(
         let _ = prefs.delete(PREF_E2E_ENABLED);
     }
     scheduler.kick();
-    // Onboarding just created this device's EXTERNAL accounts; the boot warm
-    // pass already ran (before they existed), so without a kick their calendars
-    // and lists wouldn't populate until the next app start re-runs it. Trigger a
-    // warm now so the sidebar fills immediately.
-    refresher.trigger();
+    register_onboarded_accounts(&shared, &registry, &refresher);
     Ok(report)
 }
 
@@ -2566,8 +2604,11 @@ pub async fn trust_sftp_host_key(
 #[tauri::command]
 pub async fn resume_stale_device(
     app: tauri::AppHandle,
+    db: State<'_, DbHandle>,
     orchestrator: State<'_, Arc<SyncOrchestrator>>,
     onboarding: State<'_, Arc<OnboardingService>>,
+    registry: State<'_, Arc<AdapterRegistry>>,
+    refresher: State<'_, Arc<CacheRefresher>>,
 ) -> CommandResult<OnboardingReport> {
     let adapter = orchestrator.adapter_handle().ok_or(CommandError {
         code: "not_configured",
@@ -2595,6 +2636,9 @@ pub async fn resume_stale_device(
     ) {
         tracing::warn!(?err, "failed to emit post-resume sync-status");
     }
+    // A stale-resume re-onboards from the target, so it can materialise
+    // accounts this device never saw — same registration gap as a join.
+    register_onboarded_accounts(&db.shared(), &registry, &refresher);
     Ok(report)
 }
 

@@ -17,7 +17,6 @@ import {
   previewSftpHostKey,
   previewSyncTarget,
   refreshExternalCache,
-  testSyncAdapter,
   trustSftpHostKey,
   type HostKeyPreview,
   type SyncAdapterConfig,
@@ -153,7 +152,6 @@ export function SyncTargetConfigForm({
   const [enableE2eDraft, setEnableE2eDraft] = useState(false);
   const [deviceNameDraft, setDeviceNameDraft] = useState('');
   const [busyAdapter, setBusyAdapter] = useState(false);
-  const [busyTest, setBusyTest] = useState(false);
   const [busyAdopt, setBusyAdopt] = useState(false);
   const [adapterFeedback, setAdapterFeedback] = useState<{
     kind: 'ok' | 'error';
@@ -467,34 +465,6 @@ export function SyncTargetConfigForm({
     setTrustPreview(null);
     setPendingSftpConfig(null);
   }, []);
-
-  const onTest = useCallback(async () => {
-    setAdapterFeedback(null);
-    if (configMissingRequired) {
-      setAdapterFeedback({
-        kind: 'error',
-        message: t('dialogs.settings.sync.adapterNeedPath'),
-      });
-      return;
-    }
-    setBusyTest(true);
-    try {
-      await testSyncAdapter(buildConfig());
-      setAdapterFeedback({
-        kind: 'ok',
-        message: t('dialogs.settings.sync.adapterTestOk'),
-      });
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('test_sync_adapter failed', err);
-      setAdapterFeedback({
-        kind: 'error',
-        message: `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
-      });
-    } finally {
-      setBusyTest(false);
-    }
-  }, [buildConfig, configMissingRequired, messageForError, t]);
 
   // Destructive secondary action for an EXISTING dataset: discard it and
   // re-initialize from this device (plaintext; encryption can be enabled
@@ -1287,6 +1257,9 @@ export function SyncTargetConfigForm({
         </>
       )}
 
+      {/* Connect is the SINGLE primary action: it already probes the target
+          (preview → accept/adopt, each of which tests the connection first),
+          so a separate "test connection" button was pure redundancy. */}
       <div className="sync-panel__actions">
         <button
           type="button"
@@ -1297,17 +1270,6 @@ export function SyncTargetConfigForm({
             ? t('dialogs.settings.sync.adapterConnecting')
             : t('dialogs.settings.sync.adapterConfigure')}
         </button>
-        {kindDraft !== 'none' && (
-          <button
-            type="button"
-            disabled={busyAdapter || busyTest}
-            onClick={() => void onTest()}
-          >
-            {busyTest
-              ? t('dialogs.settings.sync.adapterTesting')
-              : t('dialogs.settings.sync.adapterTest')}
-          </button>
-        )}
       </div>
 
       {preview?.kind === 'existing' && (

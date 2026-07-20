@@ -81,6 +81,10 @@ pub struct CacheRefresher {
     notify: Arc<Notify>,
     /// `true` while a pass runs; concurrent triggers no-op.
     in_flight: Arc<Mutex<bool>>,
+    /// Forced-ness the NEXT notify-woken pass should run with. Written by
+    /// `trigger` (user action → forced) / `trigger_background` (automatic
+    /// → un-forced) just before waking the loop.
+    next_trigger_forced: Arc<AtomicBool>,
     /// Whether the CURRENT pass was user-forced (manual refresh). Set at
     /// the top of `warm_all`; read by the enumerate/refresh failure paths
     /// so a forced failure surfaces at once (see `CacheStore::mark_error`).
@@ -151,6 +155,9 @@ impl CacheRefresher {
             notify: Arc::new(Notify::new()),
             in_flight: Arc::new(Mutex::new(false)),
             pass_forced: Arc::new(AtomicBool::new(false)),
+            // Default matches the historical `trigger()` semantics: an
+            // untagged wake is treated as the user asking.
+            next_trigger_forced: Arc::new(AtomicBool::new(true)),
             last_refreshed: Arc::new(Mutex::new(initial_last)),
         })
     }
@@ -185,19 +192,36 @@ impl CacheRefresher {
                         worker.warm_all(false).await;
                     }
                     _ = worker.notify.notified() => {
-                        debug!(target: "aperio::cache", "manual cache warm trigger");
-                        // Explicitly triggered (manual refresh, account
-                        // change) — surface its failures immediately.
-                        worker.warm_all(true).await;
+                        // Forced only when the wake came from a USER action
+                        // (`trigger`); an automatic wake (`trigger_background`,
+                        // e.g. accounts that just arrived over sync) still
+                        // needs its failures confirmed.
+                        let forced = worker.next_trigger_forced.load(Ordering::Relaxed);
+                        debug!(target: "aperio::cache", forced, "cache warm trigger");
+                        worker.warm_all(forced).await;
                     }
                 }
             }
         });
     }
 
-    /// Wake the worker for an immediate pass (manual refresh / settings
-    /// change). No-op if a pass is already running.
+    /// Wake the worker for an immediate pass on an explicit USER action
+    /// (manual refresh, settings/account change). No-op if a pass is
+    /// already running. The pass runs FORCED, so its failures surface at
+    /// once instead of waiting for a confirming second attempt.
     pub fn trigger(&self) {
+        self.next_trigger_forced.store(true, Ordering::Relaxed);
+        self.notify.notify_one();
+    }
+
+    /// Wake the worker for an immediate pass that is NOT a user action —
+    /// e.g. accounts that just arrived over sync and need their first
+    /// listing. Runs UN-forced: a network blip during it must still be
+    /// confirmed by a second attempt before it surfaces, exactly like the
+    /// app-start / periodic pass (auth failures surface immediately
+    /// either way).
+    pub fn trigger_background(&self) {
+        self.next_trigger_forced.store(false, Ordering::Relaxed);
         self.notify.notify_one();
     }
 
