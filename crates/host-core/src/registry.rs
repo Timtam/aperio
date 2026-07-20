@@ -38,7 +38,7 @@
 //! the dlopen pipeline for now — DESIGN.md §22.2's `plugins/
 //! bundled/` build step lands in a later phase.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, RwLock};
 
 use cal_core::{CalendarFeature, ContactsFeature, TasksFeature};
@@ -103,6 +103,11 @@ pub struct AdapterRegistry {
     external_vc: RwLock<HashMap<String, Arc<dyn VcAdapter>>>,
     /// Reverse lookup for routing writes back to the right adapter.
     routes: Mutex<Routes>,
+    /// Accounts whose registration has already failed and been warned
+    /// about. The post-sync sweep retries them every round (credentials
+    /// can arrive at any time), so this keeps that retry from spamming a
+    /// WARN per round; cleared for an account the moment it registers.
+    unregisterable: Mutex<HashSet<String>>,
     /// Loaded plugins keyed by their canonical id. Every
     /// `register_*` fn pulls the matching plugin out of here +
     /// opens a fresh per-account instance against it. Empty on
@@ -153,6 +158,7 @@ impl AdapterRegistry {
             external_contacts: RwLock::new(HashMap::new()),
             external_vc: RwLock::new(HashMap::new()),
             routes: Mutex::new(Routes::default()),
+            unregisterable: Mutex::new(HashSet::new()),
             plugin_manager,
             data_dir,
             secret_store,
@@ -241,6 +247,10 @@ impl AdapterRegistry {
             match self.try_register(&account) {
                 Ok(()) => {
                     registered += 1;
+                    self.unregisterable
+                        .lock()
+                        .expect("registry poisoned")
+                        .remove(&account.id);
                     // INFO-level so a user diagnosing "calendar X
                     // shows no events" can verify the adapter
                     // actually came up for that account.
@@ -254,13 +264,36 @@ impl AdapterRegistry {
                     );
                 }
                 Err(err) => {
-                    warn!(
-                        account_id = %account.id,
-                        kind = ?account.adapter_kind,
-                        ?err,
-                        phase,
-                        "skipping account"
-                    );
+                    // An account that CANNOT register (credentials absent on
+                    // this device — the §19.11 reconnect wizard's job) fails
+                    // again on every single pass. `bootstrap` runs once, so
+                    // it warns; the post-sync sweep runs after every round,
+                    // so warning each time would be pure log spam. Warn once
+                    // per account, then drop to debug until it succeeds (a
+                    // successful registration removes it from the set, so a
+                    // later regression warns again).
+                    let first = self
+                        .unregisterable
+                        .lock()
+                        .expect("registry poisoned")
+                        .insert(account.id.clone());
+                    if first {
+                        warn!(
+                            account_id = %account.id,
+                            kind = ?account.adapter_kind,
+                            ?err,
+                            phase,
+                            "skipping account"
+                        );
+                    } else {
+                        tracing::debug!(
+                            account_id = %account.id,
+                            kind = ?account.adapter_kind,
+                            ?err,
+                            phase,
+                            "still skipping account"
+                        );
+                    }
                 }
             }
         }

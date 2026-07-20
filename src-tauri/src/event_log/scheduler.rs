@@ -293,14 +293,22 @@ impl SyncScheduler {
                         warn!(?err, "failed to emit sync-conflicts-changed");
                     }
                 }
-                // The applied events may have created external ACCOUNTS
-                // (a restore into a fresh install, or an account added on
-                // another device). Same reasoning as the conflicts emit
-                // above: the applier only writes rows, so the host layer
-                // has to bring the adapters up.
-                if report.applied > 0 {
-                    self.register_synced_accounts(app);
-                }
+                // The round may have created external ACCOUNTS (a restore
+                // into a fresh install, or an account added on another
+                // device). Same reasoning as the conflicts emit above: the
+                // applier only writes rows, so the host layer has to bring
+                // the adapters up.
+                //
+                // Deliberately UNconditional — `report.applied` counts only
+                // applied LOG events, and the two paths that matter most
+                // here restore accounts from a SNAPSHOT instead: the §19.10
+                // inline auto-resume inside the round (its OnboardingReport
+                // is discarded before the round's report is built) and a
+                // join. Gating on `applied > 0` silently skipped both.
+                // `register_synced_accounts` is self-gating: it costs one
+                // indexed query and returns immediately when nothing new
+                // showed up.
+                self.register_synced_accounts(app);
             }
             Err(err) => {
                 warn!(?err, "scheduled sync round failed");
@@ -339,7 +347,7 @@ impl SyncScheduler {
     /// Nothing new ⇒ nothing else happens. This runs after every applying
     /// round, so a spurious warm pass / event burst here would be constant
     /// background noise.
-    fn register_synced_accounts<R: Runtime>(&self, app: &AppHandle<R>) {
+    pub(crate) fn register_synced_accounts<R: Runtime>(&self, app: &AppHandle<R>) {
         let registered = {
             let repo = AccountsRepo::new(&self.db);
             self.registry.register_missing(&repo)

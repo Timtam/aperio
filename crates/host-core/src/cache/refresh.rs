@@ -81,9 +81,13 @@ pub struct CacheRefresher {
     notify: Arc<Notify>,
     /// `true` while a pass runs; concurrent triggers no-op.
     in_flight: Arc<Mutex<bool>>,
-    /// Forced-ness the NEXT notify-woken pass should run with. Written by
-    /// `trigger` (user action → forced) / `trigger_background` (automatic
-    /// → un-forced) just before waking the loop.
+    /// Sticky "a USER asked for the next pass" latch. `Notify` holds at
+    /// most ONE permit, so a user `trigger` and an automatic
+    /// `trigger_background` arriving before the worker wakes collapse into
+    /// a single pass — hence a latch that only `trigger` SETS and the pass
+    /// CONSUMES, never a value the later caller overwrites. Collapsing
+    /// therefore resolves in the user's favour (forced), and forced-ness
+    /// can never leak into a later, unrelated wake.
     next_trigger_forced: Arc<AtomicBool>,
     /// Whether the CURRENT pass was user-forced (manual refresh). Set at
     /// the top of `warm_all`; read by the enumerate/refresh failure paths
@@ -155,9 +159,8 @@ impl CacheRefresher {
             notify: Arc::new(Notify::new()),
             in_flight: Arc::new(Mutex::new(false)),
             pass_forced: Arc::new(AtomicBool::new(false)),
-            // Default matches the historical `trigger()` semantics: an
-            // untagged wake is treated as the user asking.
-            next_trigger_forced: Arc::new(AtomicBool::new(true)),
+            // Unset until a user `trigger` latches it.
+            next_trigger_forced: Arc::new(AtomicBool::new(false)),
             last_refreshed: Arc::new(Mutex::new(initial_last)),
         })
     }
@@ -180,7 +183,10 @@ impl CacheRefresher {
             info!(target: "aperio::cache", "running app-start cache warm pass");
             // App-start pass is NOT forced: it is the one most prone to a
             // network-not-ready blip, so its failures must be confirmed by
-            // a second attempt before they surface.
+            // a second attempt before they surface. Clear the latch too —
+            // a `trigger` that short-circuited the delay above is served by
+            // THIS pass, so leaving it set would force an unrelated later one.
+            worker.next_trigger_forced.store(false, Ordering::Relaxed);
             worker.warm_all(false).await;
 
             loop {
@@ -196,7 +202,10 @@ impl CacheRefresher {
                         // (`trigger`); an automatic wake (`trigger_background`,
                         // e.g. accounts that just arrived over sync) still
                         // needs its failures confirmed.
-                        let forced = worker.next_trigger_forced.load(Ordering::Relaxed);
+                        // CONSUME the latch: a collapsed forced+background
+                        // pair resolves as forced, and the flag can't leak
+                        // into the next automatic wake.
+                        let forced = worker.next_trigger_forced.swap(false, Ordering::Relaxed);
                         debug!(target: "aperio::cache", forced, "cache warm trigger");
                         worker.warm_all(forced).await;
                     }
@@ -221,7 +230,8 @@ impl CacheRefresher {
     /// app-start / periodic pass (auth failures surface immediately
     /// either way).
     pub fn trigger_background(&self) {
-        self.next_trigger_forced.store(false, Ordering::Relaxed);
+        // Deliberately does NOT touch the latch: it must never downgrade a
+        // user request that is already waiting for the same wake.
         self.notify.notify_one();
     }
 

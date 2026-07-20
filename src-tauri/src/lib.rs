@@ -703,7 +703,6 @@ pub fn run() {
             // orchestrator is registered in setup; these commands
             // are the user-facing surface.
             commands::configure_sync_adapter,
-            commands::test_sync_adapter,
             commands::sync_now,
             commands::get_sync_status,
             commands::get_sync_adapter_summary,

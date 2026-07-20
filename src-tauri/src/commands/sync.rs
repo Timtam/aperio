@@ -1091,6 +1091,13 @@ pub async fn sync_now(
         }
     };
     scheduler.note_success();
+    // A manual round applies foreign events (and can auto-resume a stale
+    // device from a snapshot) exactly like the scheduled one, so it can
+    // bring in ACCOUNTS whose adapters nobody has built yet. This command
+    // bypasses `run_round`, so it has to do the same post-round work or
+    // "Sync now" leaves the new accounts dead until the next app start.
+    // Self-gating: a no-op when nothing new arrived.
+    scheduler.register_synced_accounts(&app);
     // If new conflicts landed during this manual round, kick
     // the frontend's conflict-count refetch + notification
     // path. Same logic as the periodic scheduler's `run_round`.
@@ -1257,34 +1264,6 @@ pub async fn compact_now(
     // compaction run. Mirrors the manual-sync_now bookkeeping.
     scheduler.record_compaction_outcome(&app, &result, duration_ms);
     result.map_err(sync_err)
-}
-
-/// Test the supplied adapter config end-to-end without committing
-/// anything. Builds the adapter, calls `test_connection`, throws
-/// away the adapter handle. Intended for the SyncPanel's
-/// "Verbindung testen" button so the user can verify URL / host /
-/// credentials in isolation before they hit Connect.
-///
-/// SFTP semantics: the test path uses the same UserPrefs-backed
-/// host-key verifier the real adapter would use. If the user
-/// hasn't pinned yet, the silent-TOFU verifier will accept and
-/// pin on first contact — same behaviour as if they'd clicked
-/// Connect directly. That's fine: the trust-dialog flow is
-/// upstream of this command, and the user wouldn't reach the
-/// test button without having seen it.
-///
-/// Returns no payload on success; failures map to the standard
-/// `sync_err` codes (`network`, `auth`, `not_found`, …) so the
-/// frontend can reuse the same error formatting it already has.
-#[tauri::command]
-pub async fn test_sync_adapter(
-    db: State<'_, DbHandle>,
-    plugin_manager: State<'_, Arc<PluginManager>>,
-    config: SyncAdapterConfig,
-) -> CommandResult<()> {
-    let shared = db.shared();
-    let adapter = build_adapter(&config, &shared, plugin_manager.inner())?;
-    adapter.test_connection().await.map_err(sync_err)
 }
 
 // ---------------------------------------------------------------------------

@@ -1309,14 +1309,6 @@ export const syncNow = () =>
 export const configureSyncAdapter = (config: SyncAdapterConfig) =>
   invoke<void>('configure_sync_adapter', { config });
 
-/** Test the supplied adapter config without committing it. Builds
- *  the adapter, runs `test_connection`, throws away the handle.
- *  Used by SyncPanel's "Verbindung testen" button so the user
- *  can verify host/credentials/path without modifying the
- *  configured adapter or persisting anything. */
-export const testSyncAdapter = (config: SyncAdapterConfig) =>
-  invoke<void>('test_sync_adapter', { config });
-
 /** Update the periodic interval (in minutes). Clamps to ≥1 on the
  *  backend; returns the value actually persisted. */
 export const setSyncInterval = (minutes: number) =>

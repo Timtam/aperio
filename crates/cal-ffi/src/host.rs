@@ -5107,13 +5107,18 @@ impl Host {
                     duration_ms,
                     None,
                 );
-                // The applied events may have created external ACCOUNTS (an
-                // account added on another device). The applier only writes
-                // rows — bringing their adapters up is the host's job, or
-                // they stay dead until the next app start.
-                if report.applied > 0 {
-                    self.register_synced_accounts();
-                }
+                // The round may have created external ACCOUNTS (an account
+                // added on another device). The applier only writes rows —
+                // bringing their adapters up is the host's job, or they stay
+                // dead until the next app start.
+                //
+                // Deliberately UNconditional: `report.applied` counts only
+                // applied LOG events, while the §19.10 inline auto-resume
+                // restores accounts from a SNAPSHOT (its report is discarded
+                // before the round's is built), so `applied` can be 0 with
+                // brand-new accounts on disk. The call is self-gating —
+                // one indexed query, immediate return when nothing is new.
+                self.register_synced_accounts();
                 to_json(&report)
             }
             Err(e) => {
