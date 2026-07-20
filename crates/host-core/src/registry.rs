@@ -38,7 +38,7 @@
 //! the dlopen pipeline for now — DESIGN.md §22.2's `plugins/
 //! bundled/` build step lands in a later phase.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, RwLock};
 
 use cal_core::{CalendarFeature, ContactsFeature, TasksFeature};
@@ -103,6 +103,11 @@ pub struct AdapterRegistry {
     external_vc: RwLock<HashMap<String, Arc<dyn VcAdapter>>>,
     /// Reverse lookup for routing writes back to the right adapter.
     routes: Mutex<Routes>,
+    /// Accounts whose registration has already failed and been warned
+    /// about. The post-sync sweep retries them every round (credentials
+    /// can arrive at any time), so this keeps that retry from spamming a
+    /// WARN per round; cleared for an account the moment it registers.
+    unregisterable: Mutex<HashSet<String>>,
     /// Loaded plugins keyed by their canonical id. Every
     /// `register_*` fn pulls the matching plugin out of here +
     /// opens a fresh per-account instance against it. Empty on
@@ -153,6 +158,7 @@ impl AdapterRegistry {
             external_contacts: RwLock::new(HashMap::new()),
             external_vc: RwLock::new(HashMap::new()),
             routes: Mutex::new(Routes::default()),
+            unregisterable: Mutex::new(HashSet::new()),
             plugin_manager,
             data_dir,
             secret_store,
@@ -183,13 +189,49 @@ impl AdapterRegistry {
     /// per account are logged and skipped so one broken row doesn't
     /// stop the rest of the app from booting.
     pub fn bootstrap(&self, repo: &AccountsRepo<'_>) {
+        self.register_persisted(repo, false);
+    }
+
+    /// Register adapters for persisted accounts that currently have NO
+    /// adapter, and return how many were newly registered.
+    ///
+    /// Accounts that arrive through SYNC (a restore into a fresh install,
+    /// or an account added on another device) are written straight into
+    /// the `accounts` table by the event-log applier — they never pass
+    /// through the add-account commands that call [`Self::register`], so
+    /// their adapter only ever comes up at the next [`Self::bootstrap`].
+    /// Until then the sidebar shows the account name with no containers
+    /// and no items. Hosts call this after a sync round that applied
+    /// something to close that gap without an app restart.
+    ///
+    /// Deliberately NOT a blanket re-bootstrap: re-registering a live
+    /// account rebuilds its plugin instance and throws away the adapter's
+    /// in-memory provider state, so e.g. EWS would cold-start and re-drain
+    /// every item. Only adapter-less accounts are touched. Accounts whose
+    /// credentials don't exist on this device fail `try_register` — that's
+    /// expected (the reconnect wizard covers them); they're logged and
+    /// skipped, exactly as at bootstrap.
+    pub fn register_missing(&self, repo: &AccountsRepo<'_>) -> usize {
+        self.register_persisted(repo, true)
+    }
+
+    /// Shared body of [`Self::bootstrap`] + [`Self::register_missing`].
+    /// `only_missing` skips accounts that already have an adapter.
+    /// Returns the number of accounts newly registered.
+    fn register_persisted(&self, repo: &AccountsRepo<'_>, only_missing: bool) -> usize {
+        let phase = if only_missing {
+            "post-sync"
+        } else {
+            "bootstrap"
+        };
         let accounts = match repo.list() {
             Ok(a) => a,
             Err(err) => {
-                warn!(?err, "failed to list accounts at bootstrap");
-                return;
+                warn!(?err, phase, "failed to list accounts");
+                return 0;
             }
         };
+        let mut registered = 0usize;
         for account in accounts {
             // Local is host-internal; DeviceCalendar is built + inserted by the
             // cal-ffi layer once its native bridge is set. Neither registers here.
@@ -199,8 +241,16 @@ impl AdapterRegistry {
             ) {
                 continue;
             }
+            if only_missing && self.has_adapter(&account.id) {
+                continue;
+            }
             match self.try_register(&account) {
                 Ok(()) => {
+                    registered += 1;
+                    self.unregisterable
+                        .lock()
+                        .expect("registry poisoned")
+                        .remove(&account.id);
                     // INFO-level so a user diagnosing "calendar X
                     // shows no events" can verify the adapter
                     // actually came up for that account.
@@ -209,19 +259,71 @@ impl AdapterRegistry {
                         account_id = %account.id,
                         kind = ?account.adapter_kind,
                         display_name = %account.display_name,
+                        phase,
                         "registered external account adapter",
                     );
                 }
                 Err(err) => {
-                    warn!(
-                        account_id = %account.id,
-                        kind = ?account.adapter_kind,
-                        ?err,
-                        "skipping account at bootstrap"
-                    );
+                    // An account that CANNOT register (credentials absent on
+                    // this device — the §19.11 reconnect wizard's job) fails
+                    // again on every single pass. `bootstrap` runs once, so
+                    // it warns; the post-sync sweep runs after every round,
+                    // so warning each time would be pure log spam. Warn once
+                    // per account, then drop to debug until it succeeds (a
+                    // successful registration removes it from the set, so a
+                    // later regression warns again).
+                    let first = self
+                        .unregisterable
+                        .lock()
+                        .expect("registry poisoned")
+                        .insert(account.id.clone());
+                    if first {
+                        warn!(
+                            account_id = %account.id,
+                            kind = ?account.adapter_kind,
+                            ?err,
+                            phase,
+                            "skipping account"
+                        );
+                    } else {
+                        tracing::debug!(
+                            account_id = %account.id,
+                            kind = ?account.adapter_kind,
+                            ?err,
+                            phase,
+                            "still skipping account"
+                        );
+                    }
                 }
             }
         }
+        registered
+    }
+
+    /// Whether `account_id` already has an adapter on ANY feature surface.
+    /// All four maps are consulted because the surfaces an account fills
+    /// depend on its kind (VC accounts only ever land in `external_vc`,
+    /// Todoist only in `external_tasks`, …).
+    fn has_adapter(&self, account_id: &str) -> bool {
+        self.external_cal
+            .read()
+            .expect("registry cal poison")
+            .contains_key(account_id)
+            || self
+                .external_tasks
+                .read()
+                .expect("registry tasks poison")
+                .contains_key(account_id)
+            || self
+                .external_contacts
+                .read()
+                .expect("registry contacts poison")
+                .contains_key(account_id)
+            || self
+                .external_vc
+                .read()
+                .expect("registry vc poison")
+                .contains_key(account_id)
     }
 
     /// Register a single account at runtime. Used by
@@ -1076,4 +1178,138 @@ pub enum RegistryError {
     /// as a "Plugin fehlt" affordance.
     #[error("plugin not installed: {0}")]
     PluginMissing(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::DbHandle;
+    use plugin_core::manifest::PluginManifest;
+    use plugin_core::{Capability, PluginType, ABI_VERSION};
+
+    /// Manifest twin for the statically-linked iCal plugin (the dlopen
+    /// path reads this from `plugin.json`; a static consumer hands it in).
+    fn ical_manifest() -> PluginManifest {
+        PluginManifest {
+            id: PLUGIN_ID_ICAL.into(),
+            name: "Aperio iCal Feed".into(),
+            version: "0.1.0".into(),
+            plugin_type: PluginType::CalendarAdapter,
+            capabilities: vec![Capability::Calendar],
+            abi_version: ABI_VERSION,
+            min_app_version: "0.1.0".into(),
+            author: None,
+            description: None,
+            signed: false,
+            recurrence: Default::default(),
+            tasks: Default::default(),
+        }
+    }
+
+    /// Registry backed by exactly one real plugin. iCal needs no keychain
+    /// secret and opens its instance without touching the network, so the
+    /// register path runs for real without any fixture server.
+    fn ical_registry() -> AdapterRegistry {
+        let manager = Arc::new(PluginManager::new("0.1.0"));
+        let descriptor = unsafe { cal_adapter_ical_plugin::build_descriptor() };
+        manager
+            .register_static(
+                ical_manifest(),
+                descriptor,
+                cal_adapter_ical_plugin::DESTROY_FN,
+            )
+            .expect("register the static iCal plugin");
+        AdapterRegistry::new(
+            manager,
+            Arc::new(sync_engine::test_support::FakeSecrets::default()),
+        )
+    }
+
+    fn ical_config(url: &str) -> String {
+        json!({ "feed_url": url, "username": Value::Null }).to_string()
+    }
+
+    /// The calendar adapter currently registered for `account_id`, if any.
+    fn cal_adapter(
+        registry: &AdapterRegistry,
+        account_id: &str,
+    ) -> Option<Arc<dyn CalendarFeature>> {
+        registry
+            .snapshot_calendar_adapters()
+            .into_iter()
+            .find(|(id, _)| id == account_id)
+            .map(|(_, adapter)| adapter)
+    }
+
+    #[test]
+    fn register_missing_registers_only_adapter_less_accounts() {
+        let db = DbHandle::open_in_memory().expect("in-memory db");
+        let shared = db.shared();
+        let repo = AccountsRepo::new(&shared);
+        let registry = ical_registry();
+
+        // `live` stands in for an account added through the normal command
+        // path (already registered); `synced` for one the event-log applier
+        // wrote during a sync round — its row exists, its adapter doesn't.
+        let live = repo
+            .create(
+                AdapterKind::Ical,
+                "Live",
+                &ical_config("https://example.invalid/live.ics"),
+            )
+            .expect("create live account");
+        let synced = repo
+            .create(
+                AdapterKind::Ical,
+                "Synced",
+                &ical_config("https://example.invalid/synced.ics"),
+            )
+            .expect("create synced account");
+
+        registry.register(&live).expect("register the live account");
+        let before = cal_adapter(&registry, &live.id).expect("live adapter present");
+        assert!(
+            cal_adapter(&registry, &synced.id).is_none(),
+            "the synced account starts adapter-less — that IS the bug",
+        );
+
+        assert_eq!(
+            registry.register_missing(&repo),
+            1,
+            "only the adapter-less account is registered",
+        );
+
+        // The live account's adapter instance must be the SAME Arc: rebuilding
+        // it would drop the plugin's in-memory provider state (delta cursors,
+        // caches) and force a cold re-drain.
+        let after = cal_adapter(&registry, &live.id).expect("live adapter still present");
+        assert!(
+            Arc::ptr_eq(&before, &after),
+            "an already-registered account must not be rebuilt",
+        );
+        assert!(
+            cal_adapter(&registry, &synced.id).is_some(),
+            "the synced account now has an adapter",
+        );
+
+        // Idempotent: a second round applies nothing new, so nothing registers.
+        assert_eq!(registry.register_missing(&repo), 0);
+    }
+
+    #[test]
+    fn register_missing_skips_local_and_device_calendar_accounts() {
+        let db = DbHandle::open_in_memory().expect("in-memory db");
+        let shared = db.shared();
+        let repo = AccountsRepo::new(&shared);
+        let registry = ical_registry();
+
+        // Migration 0003 seeds the implicit local account; the device
+        // calendar is built by the cal-ffi layer against its native bridge.
+        // Neither may be registered here — and neither counts as "newly
+        // registered", so a round with only these must not kick a warm pass.
+        repo.create(AdapterKind::DeviceCalendar, "Phone", "{}")
+            .expect("create device-calendar account");
+        assert_eq!(registry.register_missing(&repo), 0);
+        assert!(cal_adapter(&registry, LOCAL_ID).is_none());
+    }
 }

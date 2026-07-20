@@ -2852,6 +2852,7 @@ version = "0.1.0"
 dependencies = [
  "aperio-db",
  "async-trait",
+ "cal-adapter-ical-plugin",
  "cal-adapter-local",
  "cal-core",
  "chrono",

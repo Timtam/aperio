@@ -54,7 +54,7 @@ use host_core::accounts::{AccountsRepo, AdapterKind};
 use host_core::cache::{
     event_self_warm_needed, has_snapshot, is_stale, refresh_contacts, refresh_events,
     refresh_sections, refresh_tasks, spawn_item_refresh, spawn_refresh, CacheObserver,
-    CacheRefresher, CacheStore, RefreshCoordinator, SyncScope, SWR_TTL_SECS,
+    CacheRefresher, CacheStore, CacheUpdatedPayload, RefreshCoordinator, SyncScope, SWR_TTL_SECS,
 };
 use host_core::conflicts::{
     ConflictKind, ConflictRecord, ConflictsError, ConflictsRepo, ResolutionChoice,
@@ -2102,6 +2102,68 @@ impl Host {
             supports_reminders.then_some(adapter as Arc<dyn cal_core::TasksFeature>);
         self.registry
             .register_host_adapter(account_id, Some(cal), tasks);
+    }
+
+    /// Bring up adapters for external accounts that arrived through SYNC.
+    ///
+    /// Accounts created on another device — or restored into a fresh install
+    /// by the onboarding wizard — are written into the `accounts` table by
+    /// the event-log applier; they never pass through the add-account paths
+    /// that register an adapter. Without this the account row exists (its
+    /// name shows up) but it has no adapter, so it lists no calendars / task
+    /// lists / address books and shows no items until the next app start
+    /// re-runs `bootstrap`. The desktop twin lives in the sync scheduler's
+    /// post-round hook (`SyncScheduler::register_synced_accounts`).
+    ///
+    /// Only ADAPTER-LESS accounts are registered: rebuilding a live
+    /// account's adapter would throw away the plugin instance's in-memory
+    /// provider state and force a cold re-drain. Accounts whose credentials
+    /// aren't on this device fail to register — expected (§19.11's reconnect
+    /// wizard covers them); `register_missing` logs and moves on.
+    ///
+    /// Nothing new ⇒ nothing else happens: this runs after every applying
+    /// round, so an unconditional warm pass would be constant background
+    /// noise.
+    fn register_synced_accounts(&self) {
+        let registered = {
+            let shared = self.db.shared();
+            let repo = AccountsRepo::new(&shared);
+            self.registry.register_missing(&repo)
+        };
+        if registered == 0 {
+            return;
+        }
+        tracing::info!(
+            target: "aperio::registry",
+            registered,
+            "registered adapters for accounts that arrived through sync",
+        );
+        // Fresh adapters have nothing cached, so warm them: the pass
+        // enumerates the new accounts' containers and fills their items.
+        // AUTOMATIC, so it runs UN-forced (like warm_cache_on_foreground) —
+        // a cold-start network blip must be confirmed by a second attempt
+        // before it surfaces as a per-account error.
+        let refresher = Arc::clone(&self.cache_refresher);
+        self.runtime.handle().spawn(async move {
+            refresher.warm_all(false).await;
+        });
+        // …and tell the UI to re-read its catalogs NOW instead of waiting out
+        // the pass. The listing scopes are the channel the app already uses
+        // for "the container lists changed" (cacheObserver.ts maps them to
+        // the calendar / tasks / contacts reload categories). The JS side
+        // keys off `scope` alone; the ids stay empty because this signal is
+        // account-wide, not per-container.
+        for scope in [
+            SyncScope::Calendars,
+            SyncScope::TaskLists,
+            SyncScope::ContactLists,
+        ] {
+            self.cache_observer.cache_updated(&CacheUpdatedPayload {
+                scope: scope.as_str().to_string(),
+                account_id: String::new(),
+                container_id: String::new(),
+            });
+        }
     }
 }
 
@@ -4399,6 +4461,10 @@ impl Host {
             .block_on(async { self.onboarding.resume_from_stale(adapter.as_ref()).await })
             .map_err(sync_err)?;
         self.orchestrator.clear_stale_device();
+        // A stale-resume re-onboards from the target, so it can materialise
+        // accounts this device never saw — same registration gap as a join
+        // (and the snapshot path doesn't show up in `report.applied` either).
+        self.register_synced_accounts();
         to_json(&report)
     }
 
@@ -4490,6 +4556,12 @@ impl Host {
             // Joining a plaintext dataset clears any stale flag.
             let _ = prefs.delete(host_core::credential_sync::PREF_E2E_ENABLED);
         }
+        // Joining just materialised this device's external accounts. Register
+        // their adapters NOW — unconditionally, not gated on `report.applied`:
+        // a dataset that was compacted into a snapshot restores every account
+        // through the SNAPSHOT, which `applied` (a log-event counter) doesn't
+        // see. Self-gating: a no-op when nothing was missing.
+        self.register_synced_accounts();
         to_json(&report)
     }
 
@@ -5035,6 +5107,18 @@ impl Host {
                     duration_ms,
                     None,
                 );
+                // The round may have created external ACCOUNTS (an account
+                // added on another device). The applier only writes rows —
+                // bringing their adapters up is the host's job, or they stay
+                // dead until the next app start.
+                //
+                // Deliberately UNconditional: `report.applied` counts only
+                // applied LOG events, while the §19.10 inline auto-resume
+                // restores accounts from a SNAPSHOT (its report is discarded
+                // before the round's is built), so `applied` can be 0 with
+                // brand-new accounts on disk. The call is self-gating —
+                // one indexed query, immediate return when nothing is new.
+                self.register_synced_accounts();
                 to_json(&report)
             }
             Err(e) => {

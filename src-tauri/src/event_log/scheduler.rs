@@ -56,8 +56,11 @@ use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::Notify;
 use tracing::{debug, info, warn};
 
+use crate::accounts::AccountsRepo;
+use crate::cache::{CacheRefresher, CacheUpdatedPayload, SyncScope};
 use crate::db::SharedConn;
 use crate::event_log::{SyncOrchestrator, SyncRoundReport, SyncStatus};
+use crate::registry::AdapterRegistry;
 use crate::sync_log::{SyncLogCounters, SyncLogRepo, SyncTrigger};
 use crate::user_prefs::UserPrefsRepo;
 
@@ -124,6 +127,16 @@ pub struct SyncStatusPayload {
 pub struct SyncScheduler {
     orchestrator: Arc<SyncOrchestrator>,
     db: SharedConn,
+    /// Adapter registry, so a round that APPLIED foreign events can bring
+    /// up adapters for accounts that arrived through sync (see
+    /// [`Self::register_synced_accounts`]). The applier can't do this
+    /// itself — it is deliberately handle-free.
+    registry: Arc<AdapterRegistry>,
+    /// External-cache warm pass, kicked when the round above actually
+    /// registered something: a brand-new adapter has no cached containers,
+    /// so without a warm the sidebar would stay empty until the periodic
+    /// tick.
+    cache_refresher: Arc<CacheRefresher>,
     /// Kick channel shared with the [`EventLogWriter`]. The writer's
     /// `append()` calls `notify_one`; the scheduler's loop wakes,
     /// debounces, and triggers a round.
@@ -163,12 +176,16 @@ impl SyncScheduler {
         orchestrator: Arc<SyncOrchestrator>,
         db: SharedConn,
         kick: Arc<Notify>,
+        registry: Arc<AdapterRegistry>,
+        cache_refresher: Arc<CacheRefresher>,
         app: AppHandle<R>,
     ) -> Arc<Self> {
         let scheduler = Arc::new(Self {
             orchestrator,
             db,
             kick,
+            registry,
+            cache_refresher,
             started: Arc::new(Mutex::new(false)),
             consecutive_failures: Arc::new(Mutex::new(0)),
             last_error_code: Arc::new(Mutex::new(None)),
@@ -276,6 +293,22 @@ impl SyncScheduler {
                         warn!(?err, "failed to emit sync-conflicts-changed");
                     }
                 }
+                // The round may have created external ACCOUNTS (a restore
+                // into a fresh install, or an account added on another
+                // device). Same reasoning as the conflicts emit above: the
+                // applier only writes rows, so the host layer has to bring
+                // the adapters up.
+                //
+                // Deliberately UNconditional — `report.applied` counts only
+                // applied LOG events, and the two paths that matter most
+                // here restore accounts from a SNAPSHOT instead: the §19.10
+                // inline auto-resume inside the round (its OnboardingReport
+                // is discarded before the round's report is built) and a
+                // join. Gating on `applied > 0` silently skipped both.
+                // `register_synced_accounts` is self-gating: it costs one
+                // indexed query and returns immediately when nothing new
+                // showed up.
+                self.register_synced_accounts(app);
             }
             Err(err) => {
                 warn!(?err, "scheduled sync round failed");
@@ -295,6 +328,67 @@ impl SyncScheduler {
             }
         }
         self.write_sync_log(app, trigger, &result, duration_ms);
+    }
+
+    /// Bring up adapters for external accounts that arrived through sync.
+    ///
+    /// Accounts created on another device (or restored into a fresh install
+    /// by the onboarding wizard) land in the `accounts` table via the
+    /// event-log applier — they never pass through the add-account commands
+    /// that register an adapter. Without this, the account exists (the
+    /// sidebar reads the DB and shows its name) but has no adapter, so it
+    /// lists no calendars / task lists / address books and shows no items
+    /// until the next app start runs `bootstrap`.
+    ///
+    /// Only ADAPTER-LESS accounts are registered: rebuilding a live
+    /// account's adapter would drop the plugin instance's in-memory
+    /// provider state and force a cold re-drain of everything.
+    ///
+    /// Nothing new ⇒ nothing else happens. This runs after every applying
+    /// round, so a spurious warm pass / event burst here would be constant
+    /// background noise.
+    pub(crate) fn register_synced_accounts<R: Runtime>(&self, app: &AppHandle<R>) {
+        let registered = {
+            let repo = AccountsRepo::new(&self.db);
+            self.registry.register_missing(&repo)
+        };
+        if registered == 0 {
+            return;
+        }
+        info!(
+            registered,
+            "registered adapters for accounts that arrived through sync",
+        );
+        // A fresh adapter has nothing cached, so warm it: the pass
+        // enumerates the new accounts' containers and fills their items.
+        // UN-forced — this warm is a consequence of a background sync, not
+        // a user asking, so a network blip during it must still be
+        // confirmed before it surfaces (auth failures surface either way).
+        self.cache_refresher.trigger_background();
+        // …and tell the frontend to re-read its catalogs NOW instead of
+        // waiting out the pass. `cache-updated` on the three listing scopes
+        // is the channel the app already uses for "the container lists
+        // changed" (CacheSyncListener.tsx re-runs refreshCalendars /
+        // refreshTaskLists / refreshContactLists and invalidates the data
+        // hooks). The listener keys off `scope` alone; the ids stay empty
+        // because this signal is account-wide, not per-container.
+        for scope in [
+            SyncScope::Calendars,
+            SyncScope::TaskLists,
+            SyncScope::ContactLists,
+        ] {
+            let payload = CacheUpdatedPayload {
+                scope: scope.as_str().to_string(),
+                account_id: String::new(),
+                container_id: String::new(),
+            };
+            if let Err(err) = app.emit("cache-updated", &payload) {
+                warn!(
+                    ?err,
+                    "failed to emit cache-updated after account registration"
+                );
+            }
+        }
     }
 
     /// Append one row to the §19.9 sync_log table + emit a

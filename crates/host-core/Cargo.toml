@@ -43,6 +43,10 @@ async-trait.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
+# The registry tests need ONE real plugin to register an account against.
+# iCal is the cheapest: no keychain secret, and opening an instance does no
+# network I/O (the feed is only fetched on the first read).
+cal-adapter-ical-plugin = { path = "../cal-adapter-ical-plugin" }
 # The sound-asset sync test drives a real local-filesystem sync target.
 sync-adapter-local = { path = "../sync-adapter-local" }
 # Re-declare the engine + local adapter with their test-support features so the
