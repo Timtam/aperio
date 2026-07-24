@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useId, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Modal } from './Modal';
@@ -37,6 +37,7 @@ export function EditEventScopeDialog({
 }: EditEventScopeDialogProps) {
   const { t } = useTranslation();
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const msgId = useId();
 
   useEffect(() => {
     if (!isOpen) return;
@@ -51,7 +52,11 @@ export function EditEventScopeDialog({
       className="modal--confirm modal--confirm-wide"
       dismissOnBackdrop={false}
     >
-      <p className="form__message">
+      {/* The message names WHICH recurring event is being edited. It lives in
+          Modal's role="application" body, where a static <p> is invisible to
+          focus-mode traversal — so describe the initially-focused Cancel button
+          with it, and NVDA speaks it the instant the dialog opens. */}
+      <p id={msgId} className="form__message">
         {t('dialogs.editScope.message', { title })}
       </p>
       <div className="form__actions">
@@ -60,6 +65,7 @@ export function EditEventScopeDialog({
           type="button"
           onClick={onClose}
           className="form__action"
+          aria-describedby={msgId}
         >
           {t('dialogs.editScope.cancel')}
         </button>

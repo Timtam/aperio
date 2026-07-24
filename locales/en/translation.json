@@ -304,6 +304,7 @@
     "hint": "You can also dismiss this dialog and reconnect later from Settings → Accounts. Until then, calendars and tasks from these accounts will be unavailable on this device.",
     "hintRepair": "You can also close this dialog and repair the connection later from Settings → Accounts. Until then, the affected calendars and tasks keep showing the last successfully fetched data.",
     "empty": "All accounts are reconnected.",
+    "listLabel": "Accounts to reconnect",
     "secretLabelPassword": "Password",
     "secretLabelToken": "API token",
     "oauthHint": "Opens the sign-in page in your default browser.",
@@ -888,6 +889,8 @@
       "title": "Sync conflicts",
       "intro_one": "One field was edited differently on two devices. Pick which version to keep.",
       "intro_other": "{{count}} fields were edited differently on two devices. Pick which version to keep for each.",
+      "loading": "Loading conflicts …",
+      "loadError": "Couldn't load conflicts. Close and reopen to try again.",
       "empty": "No open conflicts.",
       "fieldLabel": "Field",
       "remoteSourceLabel": "Other version from {{time}} (device {{device}})",
@@ -1146,6 +1149,7 @@
       "notifyLegend": "Attendees",
       "notifyAttendees": "Notify attendees",
       "notifySilent": "Remove without notifying",
+      "notifyRevealed": "You organize this meeting — choose above whether to notify attendees.",
       "organizerMessage": "\"{{title}}\" is part of a series you organize. Choose below whether attendees are notified, then the scope:"
     },
     "moveScope": {

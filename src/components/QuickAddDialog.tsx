@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
 } from 'react';
@@ -69,13 +70,56 @@ export function QuickAddDialog({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Live mirrors for the pristine check — refs so the reset effect reads the
+  // CURRENT fields without listing them as deps (which would defeat the guard).
+  const titleRef = useRef(title);
+  titleRef.current = title;
+  const dateRef = useRef(date);
+  dateRef.current = date;
+  const timeRef = useRef(time);
+  timeRef.current = time;
+  const calendarIdRef = useRef(calendarId);
+  calendarIdRef.current = calendarId;
+  const appliedInitialRef = useRef<Initial | null>(null);
+
+  // `initial` is a useMemo over `selectable` (calendars + selection), so it
+  // re-derives identity on every background catalog refresh while the dialog is
+  // open. Re-applying it then wiped the title the user was typing. The guard is
+  // PER FIELD: adopt a re-derived value only for a field the user hasn't touched
+  // (its live value still equals the last one we applied). This lets a
+  // late-arriving default calendar populate an untouched picker on a cold open
+  // even after the user has typed a title — an all-or-nothing guard would leave
+  // the required calendar empty and block submit.
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) {
+      appliedInitialRef.current = null;
+      return;
+    }
+    const b = appliedInitialRef.current;
+    if (b === null) {
+      appliedInitialRef.current = { ...initial };
       setTitle(initial.title);
       setDate(initial.date);
       setTime(initial.time);
       setCalendarId(initial.calendarId);
       setError(null);
+      return;
+    }
+    if (titleRef.current === b.title) {
+      b.title = initial.title;
+      setTitle(initial.title);
+    }
+    if (dateRef.current === b.date) {
+      b.date = initial.date;
+      setDate(initial.date);
+    }
+    if (timeRef.current === b.time) {
+      b.time = initial.time;
+      setTime(initial.time);
+    }
+    if (calendarIdRef.current === b.calendarId) {
+      b.calendarId = initial.calendarId;
+      setCalendarId(initial.calendarId);
     }
   }, [isOpen, initial]);
 
@@ -130,14 +174,17 @@ export function QuickAddDialog({
   );
 
   const openFullDialog = useCallback(() => {
-    onClose();
+    // Hand off by REPLACING the quick-add frame (not close()+push): the editor
+    // then inherits the quick-add's trigger, so closing it returns focus to the
+    // calendar grid / day the user activated — not the view's first focusable.
     openEventDialog(null, {
       calendarId: calendarId || undefined,
       defaultDate: date || undefined,
       // Carry the in-progress title over so it isn't lost on the hand-off.
       defaultTitle: title || undefined,
+      replace: true,
     });
-  }, [onClose, openEventDialog, calendarId, date, title]);
+  }, [openEventDialog, calendarId, date, title]);
 
   return (
     <Modal

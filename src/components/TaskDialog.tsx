@@ -215,6 +215,57 @@ export function TaskDialog({
       setFocusedSubtaskIdx(Math.max(0, subtasks.length - 1));
     }
   }, [subtasks.length, focusedSubtaskIdx]);
+
+  // Deleting the last subtask unmounts the focused listbox <ul> (replaced by the
+  // empty note), dropping focus to <body> — out of the modal's role=application.
+  // On the non-empty→empty transition, land focus on the still-mounted add-input
+  // (a natural, announceable spot) or the empty note, keeping NVDA in the dialog.
+  const prevSubtaskLen = useRef(subtasks.length);
+  useEffect(() => {
+    if (prevSubtaskLen.current > 0 && subtasks.length === 0) {
+      // Only repark when focus was actually stranded on <body>/null — a remote
+      // deletion of the last subtask (a synced subtasks-supporting list) must
+      // NOT steal focus from a field the user is editing. The add-input and the
+      // empty note both live inside the subtasks fieldset, which itself unmounts
+      // on a subtasks:false list once the last child is gone, so fall through to
+      // the always-present section select / title input.
+      const active = document.activeElement;
+      if (active === document.body || active === null) {
+        (
+          subtaskInputRef.current ??
+          subtaskEmptyRef.current ??
+          sectionSelectRef.current ??
+          titleInputRef.current
+        )?.focus({ preventScroll: true });
+      }
+    }
+    prevSubtaskLen.current = subtasks.length;
+  }, [subtasks.length]);
+
+  // Closing the inline section editor (Cancel, save, or Escape) unmounts the
+  // focused control; deleting a section unmounts the delete button. Both would
+  // drop focus to <body>. Return focus to the stable section <select> whenever
+  // the editor closes. The was-open guard keeps this from stealing Modal's
+  // open-focus (on mount sectionMode is already null → no-op).
+  const [sectionMode, setSectionMode] = useState<'create' | 'rename' | null>(
+    null,
+  );
+  const sectionEditorWasOpen = useRef(false);
+  useEffect(() => {
+    if (sectionMode !== null) {
+      sectionEditorWasOpen.current = true;
+    } else if (sectionEditorWasOpen.current) {
+      sectionEditorWasOpen.current = false;
+      // Only repark when the editor's own control had focus and thus dropped to
+      // <body> when it unmounted — NOT when the editor closed as a side effect
+      // of a list-picker change (the reset effect sets sectionMode = null on a
+      // listId change; focus is then on the list <select>, which we must not
+      // steal).
+      if (document.activeElement === document.body) {
+        sectionSelectRef.current?.focus({ preventScroll: true });
+      }
+    }
+  }, [sectionMode]);
   const initialState = useMemo<FormState>(
     () =>
       buildInitialState(
@@ -240,6 +291,19 @@ export function TaskDialog({
   // the date is empty, so focus would otherwise fall to <body>).
   const scheduledDateRef = useRef<HTMLInputElement>(null);
   const deadlineDateRef = useRef<HTMLInputElement>(null);
+  // The edit-mode "add subtask" input. Focus returns here after each add so the
+  // user can keep typing the next subtask (the button blurs to <body> when its
+  // title clears — this keeps focus inside the dialog).
+  const subtaskInputRef = useRef<HTMLInputElement>(null);
+  // The stable section <select>: focus lands here after a section is deleted or
+  // the inline section editor closes, so focus never falls to <body>.
+  const sectionSelectRef = useRef<HTMLSelectElement>(null);
+  // Landing spot when the subtask list empties out (its listbox unmounts).
+  const subtaskEmptyRef = useRef<HTMLParagraphElement>(null);
+  // Always-present top-of-form field: the last-resort repark target when the
+  // whole subtasks fieldset unmounts (a subtasks:false list whose last child is
+  // deleted — then the add-input AND the empty note are both gone).
+  const titleInputRef = useRef<HTMLInputElement>(null);
   // Tracks whether the user changed the Status field by hand. While false, the
   // sync effect below keeps the field mirroring the live store status (so a
   // subtask cascade shows up in the dropdown); once true, the field is the
@@ -400,10 +464,8 @@ export function TaskDialog({
   // ── Section management (local lists only) ───────────────────────────
   // `sectionMode` reveals an inline name input for create / rename; the
   // commands persist immediately (like subtasks) and reload the list's
-  // sections so the picker reflects the change.
-  const [sectionMode, setSectionMode] = useState<'create' | 'rename' | null>(
-    null,
-  );
+  // sections so the picker reflects the change. (`sectionMode` is declared
+  // above, next to the focus-return effect that watches it.)
   const [sectionDraft, setSectionDraft] = useState('');
   // Color label bound while creating / editing a section in the inline
   // editor. The section color cascades to its colorless tasks.
@@ -496,6 +558,10 @@ export function TaskDialog({
       console.warn('delete_section failed', err);
     } finally {
       setSectionBusy(false);
+      // The delete button unmounts once form.sectionId clears (the manage
+      // buttons hide), so land focus on the stable section <select> — which now
+      // reads "Kein Abschnitt" — instead of letting it fall to <body>.
+      sectionSelectRef.current?.focus({ preventScroll: true });
     }
   }, [
     form.sectionId,
@@ -545,6 +611,10 @@ export function TaskDialog({
     if (!task) return;
     const trimmed = newSubtaskTitle.trim();
     if (!trimmed || subtaskBusy) return;
+    // Remember which control triggered the add (the input on the Enter path,
+    // the button on the click path) so the finally can tell "focus is still
+    // where I left it" from "the user tabbed away during the round-trip".
+    const focusAtStart = document.activeElement;
     setSubtaskBusy(true);
     try {
       const created = await apiCreateTask({
@@ -581,7 +651,10 @@ export function TaskDialog({
         }),
         [...tasks, created],
       );
-      setNewSubtaskTitle('');
+      // Clear only if the field still holds what we submitted. The input stays
+      // enabled during the round-trip (so the Enter path never blurs to <body>),
+      // so a fast user may have started the next title — don't wipe that.
+      setNewSubtaskTitle((prev) => (prev.trim() === trimmed ? '' : prev));
       invalidateData();
       announce(t('dialogs.task.subtasks.added', { title: trimmed }));
     } catch (err) {
@@ -591,6 +664,16 @@ export function TaskDialog({
       );
     } finally {
       setSubtaskBusy(false);
+      // Return focus to the (cleared) input so the user keeps typing the next
+      // subtask instead of landing on <body> once the button disables itself —
+      // but ONLY if they haven't deliberately moved focus elsewhere. Refocus
+      // when focus still rests on the triggering control (input on Enter, the
+      // now-disabled button on click) or was stranded on <body>; if the user
+      // tabbed to another field mid-round-trip, leave their focus alone.
+      const active = document.activeElement;
+      if (active === focusAtStart || active === document.body || active === null) {
+        subtaskInputRef.current?.focus();
+      }
     }
   }, [
     task,
@@ -1089,6 +1172,7 @@ export function TaskDialog({
         <label className="form__field">
           <span className="form__label">{t('dialogs.task.fields.title')}</span>
           <input
+            ref={titleInputRef}
             type="text"
             value={form.title}
             onChange={(e) => update('title', e.target.value)}
@@ -1173,6 +1257,7 @@ export function TaskDialog({
             <div className="section-field">
               <select
                 id={sectionFieldId}
+                ref={sectionSelectRef}
                 value={form.sectionId}
                 onChange={(e) => update('sectionId', e.target.value)}
                 disabled={sectionMode !== null}
@@ -1240,6 +1325,10 @@ export function TaskDialog({
                       void submitSection();
                     } else if (e.key === 'Escape') {
                       e.preventDefault();
+                      // Stop Escape from bubbling to Modal's handler, which
+                      // would close the WHOLE task editor and discard unsaved
+                      // field edits. Escape here cancels only the section editor.
+                      e.stopPropagation();
                       setSectionMode(null);
                       setSectionDraft('');
                     }
@@ -1251,7 +1340,11 @@ export function TaskDialog({
                       : t('dialogs.task.section.newLabel')
                   }
                   autoFocus
-                  disabled={sectionBusy}
+                  // Intentionally NOT disabled while busy: this input is
+                  // autofocused, so a native disable mid-save would blur focus
+                  // to <body> and strand it there on the error path. The
+                  // submitSection guard already blocks re-entry. Matches the
+                  // standalone SectionDialog.
                 />
                 <ColorLabelSelect
                   value={sectionColorDraft}
@@ -1263,8 +1356,12 @@ export function TaskDialog({
                 <button
                   type="button"
                   className="section-field__button"
-                  onClick={() => void submitSection()}
-                  disabled={sectionBusy || !sectionDraft.trim()}
+                  // aria-disabled keeps focus in the dialog through the save;
+                  // the submitSection guard blocks a double write / empty name.
+                  onClick={() => {
+                    if (!sectionBusy && sectionDraft.trim()) void submitSection();
+                  }}
+                  aria-disabled={sectionBusy || !sectionDraft.trim() || undefined}
                 >
                   {sectionMode === 'rename'
                     ? t('dialogs.task.section.save')
@@ -1549,7 +1646,16 @@ export function TaskDialog({
                 changes are saved yet. Create mode has its own staged
                 variant below (the parent has no id to reference yet). */}
             {subtasks.length === 0 ? (
-              <p className="subtasks__empty">
+              <p
+                ref={subtaskEmptyRef}
+                tabIndex={-1}
+                className="subtasks__empty"
+                // A focus stop (programmatic only) so, when the last subtask is
+                // deleted and the listbox unmounts, focus can land here — with an
+                // accessible name — instead of falling to <body>. Used as the
+                // fallback target when the add-subtask input isn't rendered.
+                aria-label={t('dialogs.task.subtasks.empty')}
+              >
                 {t('dialogs.task.subtasks.empty')}
               </p>
             ) : (
@@ -1631,6 +1737,7 @@ export function TaskDialog({
             {supportsSubtasks && (
               <div className="subtasks__add">
                 <input
+                  ref={subtaskInputRef}
                   type="text"
                   value={newSubtaskTitle}
                   onChange={(e) => setNewSubtaskTitle(e.target.value)}
@@ -1645,12 +1752,20 @@ export function TaskDialog({
                   }}
                   placeholder={t('dialogs.task.subtasks.placeholder')}
                   aria-label={t('dialogs.task.subtasks.newAria')}
-                  disabled={subtaskBusy}
+                  // Intentionally NOT disabled while busy: the addSubtask guard
+                  // already blocks re-entry, and keeping it enabled means the
+                  // Enter path never blurs focus to <body> mid-round-trip.
                 />
                 <button
                   type="button"
-                  onClick={() => void addSubtask()}
-                  disabled={subtaskBusy || !newSubtaskTitle.trim()}
+                  // aria-disabled (not native `disabled`) so a click doesn't
+                  // drop focus to <body> during the create round-trip; the
+                  // handler re-checks both guard conditions.
+                  onClick={() => {
+                    if (!subtaskBusy && newSubtaskTitle.trim()) void addSubtask();
+                  }}
+                  aria-disabled={subtaskBusy || !newSubtaskTitle.trim()}
+                  aria-busy={subtaskBusy}
                   className="subtasks__add-button"
                 >
                   {t('dialogs.task.subtasks.addButton')}
@@ -1753,15 +1868,24 @@ export function TaskDialog({
           )}
           <button
             type="button"
-            onClick={onClose}
-            disabled={submitting}
+            // aria-disabled (matching the delete button above) instead of native
+            // disabled: natively disabling the focused Save/Cancel button blurs
+            // focus to <body> for the whole save and strands it there when the
+            // save fails. The onClick guard preserves "can't cancel mid-save".
+            onClick={() => {
+              if (!submitting) onClose();
+            }}
+            aria-disabled={submitting || undefined}
             className="form__action"
           >
             {t('dialogs.cancel')}
           </button>
           <button
             type="submit"
-            disabled={submitting}
+            // aria-disabled keeps focus on Save through the round-trip; the
+            // onSubmit re-entry guard (`if (submitting) return`) already blocks
+            // a double write.
+            aria-disabled={submitting || undefined}
             className="form__action form__action--primary"
           >
             {isEdit ? t('dialogs.save') : t('dialogs.create')}

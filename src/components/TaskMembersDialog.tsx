@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/announcerContext';
@@ -60,6 +60,9 @@ export function TaskMembersDialog({
   >('idle');
   const [searchError, setSearchError] = useState('');
   const [busy, setBusy] = useState(false);
+  // The add/search input is always mounted and never disabled — the stable
+  // landing spot after an action removes/unmounts the control that had focus.
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -124,6 +127,13 @@ export function TaskMembersDialog({
         setError(formatErr(err));
       } finally {
         setBusy(false);
+        // Remove/Add/Invite disable then unmount the clicked control (the row or
+        // result is gone after reload), dropping focus to <body> — out of the
+        // modal's role="application", so NVDA leaves application mode. If focus
+        // was stranded, return it to the always-mounted add/search input.
+        if (document.activeElement === document.body) {
+          inputRef.current?.focus({ preventScroll: true });
+        }
       }
     },
     [reload],
@@ -283,6 +293,7 @@ export function TaskMembersDialog({
               {t('dialogs.taskMembers.addLabel')}
             </span>
             <input
+              ref={inputRef}
               type={addByEmail ? 'email' : 'text'}
               value={query}
               onChange={(e) => setQuery(e.target.value)}

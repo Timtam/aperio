@@ -3,6 +3,7 @@ import {
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
 } from 'react';
@@ -263,22 +264,57 @@ export function EventDialog({
     initialScope ?? 'occurrence',
   );
 
-  // Reset the form whenever the dialog is opened with new context. We
-  // key on isOpen + initialState; isOpen=false keeps the previous form
-  // around briefly while the close animation runs (if we ever add one).
+  // Live mirror of the form for the pristine check below — a ref, so the reset
+  // effect reads the CURRENT form without listing it as a dep (which would
+  // re-run it on every keystroke).
+  const formRef = useRef(form);
+  formRef.current = form;
+  // The initialState this dialog last reset to — the pristine baseline.
+  const appliedInitialRef = useRef<FormState | null>(null);
+
+  // Reset the form whenever the dialog is opened with new context.
+  //
+  // `initialState` is a useMemo over `calendars` + `selectedCalendarIds`, so it
+  // re-derives identity on every background calendar-catalog refresh
+  // (CacheSyncListener → refreshCalendars) while the dialog is open. Resetting
+  // then unmounted the focused attendee/notify controls (focus fell to <body>,
+  // NVDA switched to browse mode with the dialog still up) AND silently wiped
+  // everything the user had typed. So: adopt a fresh initialState only while the
+  // form is still PRISTINE (byte-identical to the last one we applied). Once the
+  // user has touched anything, their edits win until the dialog closes.
+  //
+  // `initialState` is not final at first render: the calendar default-reminders
+  // overlay hydrates via an async pref read, and a cold calendar store resolves
+  // the default calendarId a beat late — both re-derive `initialState` shortly
+  // after mount. So `setForm` (and its COUPLED keep-as-default flag — applying
+  // the overlaid reminders while leaving the flag false would submit them as
+  // per-event VALARMs) must adopt the fresh initialState on EVERY pristine run,
+  // exactly like ContactDialog. Only the toggles that are INDEPENDENT of `form`
+  // (edit scope, notify) and the transient availability/error resets are gated
+  // to the first hydrate — re-arming those on an incidental pristine churn would
+  // undo an untouched-form change like the user unchecking "notify attendees".
   useEffect(() => {
-    if (isOpen) {
-      setForm(initialState);
-      setError(null);
-      setEditScope(initialScope ?? 'occurrence');
-      // Re-arm the "keep defaults out of the wire" flag every time
-      // the dialog (re-)opens with a fresh event.
-      setKeepRemindersAsDefault(remindersWereFromDefault);
-      setNotifyAttendees(true);
-      setAvailability(null);
-      setAvailabilityWindow(null);
-      setAvailabilityError(null);
+    if (!isOpen) {
+      appliedInitialRef.current = null;
+      return;
     }
+    const baseline = appliedInitialRef.current;
+    const firstHydrate = baseline === null;
+    const pristine =
+      firstHydrate ||
+      formRef.current === baseline ||
+      JSON.stringify(formRef.current) === JSON.stringify(baseline);
+    if (!pristine) return; // user touched the form → their edits win
+    appliedInitialRef.current = initialState;
+    setForm(initialState);
+    setKeepRemindersAsDefault(remindersWereFromDefault);
+    if (!firstHydrate) return; // form tracked; leave the independent toggles alone
+    setError(null);
+    setEditScope(initialScope ?? 'occurrence');
+    setNotifyAttendees(true);
+    setAvailability(null);
+    setAvailabilityWindow(null);
+    setAvailabilityError(null);
   }, [isOpen, initialState, remindersWereFromDefault, initialScope]);
 
   // Any change to the attendee set, the start/end window, the all-day
@@ -1234,15 +1270,25 @@ export function EventDialog({
           )}
           <button
             type="button"
-            onClick={onClose}
-            disabled={submitting}
+            // aria-disabled (matching the delete button above) instead of native
+            // disabled: natively disabling the focused Save/Cancel button blurs
+            // focus to <body> for the whole save round-trip and strands it there
+            // when the save fails. The onClick guard preserves "can't cancel
+            // mid-save".
+            onClick={() => {
+              if (!submitting) onClose();
+            }}
+            aria-disabled={submitting || undefined}
             className="form__action"
           >
             {t('dialogs.cancel')}
           </button>
           <button
             type="submit"
-            disabled={submitting}
+            // aria-disabled keeps focus on Save through the round-trip; the
+            // onSubmit re-entry guard (`if (submitting) return`) already blocks
+            // a double PUT, so no native disable is needed.
+            aria-disabled={submitting || undefined}
             className="form__action form__action--primary"
           >
             {isEdit ? t('dialogs.save') : t('dialogs.create')}

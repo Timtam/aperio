@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { HostKeyPreview } from '../api/client';
+import { FocusableNote } from '../a11y/FocusableNote';
 import { Modal } from './Modal';
 
 /**
@@ -85,32 +86,58 @@ export function SyncSftpTrustDialog({
       dismissOnBackdrop
     >
       <div className="sftp-trust">
-        <p>
+        {/*
+          Body prose and every fingerprint value must be REACHABLE. Modal's
+          body is `role="application"`, where a static <p>/<dt>/<dd> is
+          invisible to NVDA's focus-mode traversal — the user would accept or
+          reject a host key (a MITM decision) without ever hearing the host,
+          the stored/presented fingerprints, or the warning. FocusableNote
+          makes the prose a focus stop; each value gets a generic focusable
+          <span> whose aria-label carries "label: value" (the <dt> label alone
+          is unreachable, so the label rides on the value). The visual <dl> is
+          kept intact for sighted users.
+        */}
+        <FocusableNote>
           {isChange
             ? t('dialogs.settings.sync.sftpTrustChangedBody')
             : t('dialogs.settings.sync.sftpTrustNewBody')}
-        </p>
+        </FocusableNote>
         <dl className="sftp-trust__details">
           <dt>{t('dialogs.settings.sync.sftpTrustHostLabel')}</dt>
           <dd>
-            <code>{preview.host_port}</code>
+            <span
+              tabIndex={0}
+              aria-label={`${t('dialogs.settings.sync.sftpTrustHostLabel')}: ${preview.host_port}`}
+            >
+              <code>{preview.host_port}</code>
+            </span>
           </dd>
           {isChange && preview.status.kind === 'changed' && (
             <>
               <dt>{t('dialogs.settings.sync.sftpTrustStoredLabel')}</dt>
               <dd>
-                <code>{preview.status.stored}</code>
+                <span
+                  tabIndex={0}
+                  aria-label={`${t('dialogs.settings.sync.sftpTrustStoredLabel')}: ${preview.status.stored}`}
+                >
+                  <code>{preview.status.stored}</code>
+                </span>
               </dd>
             </>
           )}
           <dt>{t('dialogs.settings.sync.sftpTrustPresentedLabel')}</dt>
           <dd>
-            <code>{preview.fingerprint}</code>
+            <span
+              tabIndex={0}
+              aria-label={`${t('dialogs.settings.sync.sftpTrustPresentedLabel')}: ${preview.fingerprint}`}
+            >
+              <code>{preview.fingerprint}</code>
+            </span>
           </dd>
         </dl>
-        <p className="sftp-trust__verify">
+        <FocusableNote className="sftp-trust__verify">
           {t('dialogs.settings.sync.sftpTrustVerifyHint')}
-        </p>
+        </FocusableNote>
         <div className="sftp-trust__actions">
           <button type="button" onClick={onCancel}>
             {t('dialogs.settings.sync.sftpTrustCancel')}

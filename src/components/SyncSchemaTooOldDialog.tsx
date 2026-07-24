@@ -1,5 +1,7 @@
+import { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { FocusableNote } from '../a11y/FocusableNote';
 import { Modal } from './Modal';
 
 /**
@@ -48,6 +50,7 @@ export function SyncSchemaTooOldDialog({
   running,
 }: SyncSchemaTooOldDialogProps) {
   const { t } = useTranslation();
+  const introRef = useRef<HTMLParagraphElement>(null);
 
   const onUpdate = () => {
     // Open the releases page in the OS default browser. Tauri's
@@ -64,21 +67,47 @@ export function SyncSchemaTooOldDialog({
       title={t('syncSchemaTooOld.title')}
       className="sync-schema-too-old"
       dismissOnBackdrop={false}
+      // Open focus lands on the explanation, NOT the "Jetzt aktualisieren"
+      // button — a reflexive Enter must not launch a browser before the user
+      // has heard what the dialog wants.
+      initialFocusRef={introRef}
     >
-      <p>{t('syncSchemaTooOld.body')}</p>
+      {/*
+        Body, versions and hint must be REACHABLE: Modal's body is
+        role="application", where static <p>/<dt>/<dd> is invisible to NVDA's
+        focus-mode traversal — the user would hear only the title and the two
+        buttons, never the required/running versions or that "Offline
+        fortfahren" exists. FocusableNote makes the prose focus stops; each
+        version value rides on a focusable span labelled "label: value".
+      */}
+      <FocusableNote ref={introRef}>{t('syncSchemaTooOld.body')}</FocusableNote>
       <dl className="sync-schema-too-old__versions">
         <dt>{t('syncSchemaTooOld.minVersion')}</dt>
-        <dd>{required}</dd>
+        <dd>
+          <span
+            tabIndex={0}
+            aria-label={`${t('syncSchemaTooOld.minVersion')}: ${required}`}
+          >
+            {required}
+          </span>
+        </dd>
         {running && (
           <>
             <dt>{t('syncSchemaTooOld.runningVersion')}</dt>
-            <dd>{running}</dd>
+            <dd>
+              <span
+                tabIndex={0}
+                aria-label={`${t('syncSchemaTooOld.runningVersion')}: ${running}`}
+              >
+                {running}
+              </span>
+            </dd>
           </>
         )}
       </dl>
-      <p className="sync-schema-too-old__hint">
+      <FocusableNote className="sync-schema-too-old__hint">
         {t('syncSchemaTooOld.hint')}
-      </p>
+      </FocusableNote>
       <div className="sync-schema-too-old__actions">
         <button type="button" onClick={onUpdate}>
           {t('syncSchemaTooOld.actionUpdate')}

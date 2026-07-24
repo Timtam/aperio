@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/announcerContext';
+import { FocusableNote } from '../a11y/FocusableNote';
 import {
   createColorLabel,
   getOrCreateAdHocColorLabel,
@@ -103,7 +104,12 @@ export function ColorPickerModal({
       dismissOnBackdrop={false}
     >
       <form className="form" onSubmit={(e) => void onSubmit(e)}>
-        <p className="form__hint">{t('dialogs.colorPicker.intro')}</p>
+        {/* FocusableNote (not a static <p>): in Modal's role="application"
+            body a bare paragraph is skipped by NVDA's focus-mode traversal, so
+            the explanation of Apply vs. "save to palette" was never spoken. */}
+        <FocusableNote className="form__hint">
+          {t('dialogs.colorPicker.intro')}
+        </FocusableNote>
         <div className="form__field">
           <span className="form__label">
             {t('dialogs.colorPicker.colorLabel')}

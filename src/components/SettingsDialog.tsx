@@ -107,6 +107,11 @@ export function SettingsDialog({
     [idPrefix],
   );
 
+  // Resolves to the ACTIVE tab's button so open focus lands on the tab whose
+  // panel is showing (Modal.initialFocusRef). Without it Modal focused the
+  // first focusable — always the 'Allgemein' tab — so NVDA announced a tab out
+  // of sync with the visible panel, and the roving index started off by one.
+  const activeTabRef = useRef<HTMLButtonElement | null>(null);
   // One ref per tab so arrow-key activation can move DOM focus to
   // the newly-active tab (the roving-tabindex contract requires it).
   const tabRefs = useRef<Record<SettingsTabId, HTMLButtonElement | null>>({
@@ -201,6 +206,7 @@ export function SettingsDialog({
       onClose={onClose}
       title={t('dialogs.settings.title')}
       className="modal--settings"
+      initialFocusRef={activeTabRef}
     >
       <div className="settings">
         <div
@@ -217,6 +223,7 @@ export function SettingsDialog({
                 key={id}
                 ref={(el) => {
                   tabRefs.current[id] = el;
+                  if (id === activeTab) activeTabRef.current = el;
                 }}
                 id={tabId(id)}
                 role="tab"

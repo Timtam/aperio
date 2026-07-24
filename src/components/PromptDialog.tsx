@@ -60,14 +60,24 @@ export function PromptDialog({
 }: PromptDialogProps) {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
+  const wasOpenRef = useRef(false);
   const [value, setValue] = useState(defaultValue);
   const colorDefault = colorField?.defaultLabelId ?? null;
   const [colorLabelId, setColorLabelId] = useState<string | null>(colorDefault);
 
-  // Reset to the suggested default each time the dialog (re)opens, then
-  // focus + select so Enter accepts the suggestion and typing replaces it.
+  // Seed the suggested default (and focus + select so Enter accepts it and
+  // typing replaces it) exactly once per open — on the closed→open TRANSITION,
+  // not on every `defaultValue` change while open. `defaultValue` is derived
+  // from the container count / active language, so a background catalog refresh
+  // or a locale switch would otherwise re-fire this and clobber the name the
+  // user is typing, re-selecting the field under them.
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      wasOpenRef.current = false;
+      return;
+    }
+    if (wasOpenRef.current) return; // already open: leave the in-progress input alone
+    wasOpenRef.current = true;
     setValue(defaultValue);
     setColorLabelId(colorDefault);
     queueMicrotask(() => {

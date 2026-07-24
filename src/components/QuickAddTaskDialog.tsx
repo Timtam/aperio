@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
 } from 'react';
@@ -53,12 +54,47 @@ export function QuickAddTaskDialog({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Live mirrors for the pristine check — refs so the reset effect reads the
+  // CURRENT fields without listing them as deps.
+  const titleRef = useRef(title);
+  titleRef.current = title;
+  const dateRef = useRef(date);
+  dateRef.current = date;
+  const listIdRef = useRef(listId);
+  listIdRef.current = listId;
+  const appliedInitialRef = useRef<Initial | null>(null);
+
+  // `initial` is a useMemo over the task-list catalog, so it re-derives identity
+  // on every background refresh while the dialog is open. Re-applying it then
+  // wiped the title the user was typing. The guard is PER FIELD: adopt a
+  // re-derived value only for a field the user hasn't touched (its live value
+  // still equals the last one we applied), so a late-arriving default list still
+  // populates an untouched picker even after the user has typed a title.
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) {
+      appliedInitialRef.current = null;
+      return;
+    }
+    const b = appliedInitialRef.current;
+    if (b === null) {
+      appliedInitialRef.current = { ...initial };
       setTitle(initial.title);
       setDate(initial.date);
       setListId(initial.listId);
       setError(null);
+      return;
+    }
+    if (titleRef.current === b.title) {
+      b.title = initial.title;
+      setTitle(initial.title);
+    }
+    if (dateRef.current === b.date) {
+      b.date = initial.date;
+      setDate(initial.date);
+    }
+    if (listIdRef.current === b.listId) {
+      b.listId = initial.listId;
+      setListId(initial.listId);
     }
   }, [isOpen, initial]);
 
@@ -116,14 +152,17 @@ export function QuickAddTaskDialog({
   );
 
   const openFullDialog = useCallback(() => {
-    onClose();
+    // Hand off by REPLACING the quick-add frame (not close()+push) so the editor
+    // inherits the quick-add's trigger and focus returns to the original opener
+    // (the calendar grid / task row) when the editor closes.
     openTaskDialog(null, {
       listId: listId || undefined,
       defaultDate: date || undefined,
       // Carry the in-progress title over so it isn't lost on the hand-off.
       defaultTitle: title || undefined,
+      replace: true,
     });
-  }, [onClose, openTaskDialog, listId, date, title]);
+  }, [openTaskDialog, listId, date, title]);
 
   // Writable + checked in the sidebar — the same set TaskDialog offers, plus
   // the current pick so a pre-seeded list never vanishes from its own picker.
