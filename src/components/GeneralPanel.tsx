@@ -149,6 +149,20 @@ export function GeneralPanel() {
     });
   };
 
+  // Explicit "turn autostart off" action (removes the OS registration). Same
+  // effect as unchecking the box, but a clear one-click off / recovery from a
+  // stuck registration. On failure, re-read the real OS state.
+  const onDisableAutostart = () => {
+    setAutostart(false);
+    void autostartSet(false).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn('autostart disable failed', err);
+      void autostartIsEnabled()
+        .then(setAutostart)
+        .catch(() => {});
+    });
+  };
+
   const trayDisabled = available !== true;
   const autostartDisabled = autostartSupported !== true;
 
@@ -330,6 +344,15 @@ export function GeneralPanel() {
         <p className="form__hint general-panel__toggle-hint">
           {t('dialogs.settings.general.autostartHint')}
         </p>
+        {autostart && (
+          <button
+            type="button"
+            className="form__action form__action--secondary general-panel__autostart-off"
+            onClick={onDisableAutostart}
+          >
+            {t('dialogs.settings.general.autostartDisable')}
+          </button>
+        )}
       </section>
 
       <section

@@ -122,9 +122,10 @@ behaves normally.
 So reminders fire again after a restart without you opening Aperio by hand,
 turn on **"Launch Aperio when I sign in"** under **Settings → General →
 Startup**. Aperio then starts automatically once you log in to this computer.
-The setting applies to this device only and can be turned off again at any
-time. Combined with the system tray (above), Aperio runs quietly in the
-background.
+If the system tray (above) is available, it starts minimized there rather than
+opening a window — click the tray icon to bring it up. The setting applies to
+this device only; use the **"Turn off autostart"** button (or clear the
+checkbox) to remove it again.
 
 ## Summary
 

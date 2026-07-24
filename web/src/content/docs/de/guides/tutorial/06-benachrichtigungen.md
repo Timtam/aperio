@@ -129,9 +129,10 @@ Damit Erinnerungen auch nach einem Neustart wieder ausgelöst werden, ohne dass
 du Aperio von Hand öffnest, kannst du unter **Einstellungen → Allgemein →
 Systemstart** die Option **„Aperio bei der Anmeldung starten"** aktivieren.
 Aperio startet dann automatisch, sobald du dich an diesem Computer anmeldest.
-Die Einstellung gilt nur für dieses Gerät und lässt sich jederzeit wieder
-ausschalten. In Kombination mit dem Infobereich (siehe oben) läuft Aperio so
-unauffällig im Hintergrund.
+Ist ein Infobereich (siehe oben) vorhanden, startet Aperio dort minimiert,
+statt ein Fenster zu öffnen — ein Klick auf das Infobereich-Symbol holt es
+hervor. Die Einstellung gilt nur für dieses Gerät; mit dem Knopf **„Autostart
+abschalten"** (oder durch Entfernen des Häkchens) wird sie wieder entfernt.
 
 ## Zusammenfassung
 
