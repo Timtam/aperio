@@ -3,7 +3,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { FocusableNote } from '../a11y/FocusableNote';
-import { getUserPref, setUserPref, trayAvailable } from '../api/client';
+import {
+  autostartIsEnabled,
+  autostartSet,
+  getUserPref,
+  setUserPref,
+  trayAvailable,
+} from '../api/client';
 import { localeFor } from '../intl/dateFormat';
 import {
   readLanguagePref,
@@ -69,6 +75,12 @@ export function GeneralPanel() {
   const [available, setAvailable] = useState<boolean | null>(null);
   const [closeToTray, setCloseToTray] = useState(false);
   const [minimizeToTray, setMinimizeToTray] = useState(false);
+  // Autostart (§17.4). `null` = still probing / unsupported (e.g. outside the
+  // Tauri runtime); the OS registration is the source of truth for the value.
+  const [autostart, setAutostart] = useState(false);
+  const [autostartSupported, setAutostartSupported] = useState<boolean | null>(
+    null,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -93,6 +105,19 @@ export function GeneralPanel() {
         console.warn('tray availability probe failed', err);
         setAvailable(false);
       }
+      // Probe autostart independently so a tray-probe failure doesn't hide it
+      // (and vice versa).
+      try {
+        const enabled = await autostartIsEnabled();
+        if (cancelled) return;
+        setAutostart(enabled);
+        setAutostartSupported(true);
+      } catch (err) {
+        if (cancelled) return;
+        // eslint-disable-next-line no-console
+        console.warn('autostart probe failed', err);
+        setAutostartSupported(false);
+      }
     })();
     return () => {
       cancelled = true;
@@ -113,7 +138,33 @@ export function GeneralPanel() {
     void setUserPref(key, value ? 'true' : 'false');
   };
 
+  // Autostart has no pref — the OS registration is the source of truth. Write it
+  // optimistically and revert the toggle if the OS call fails.
+  const onToggleAutostart = (next: boolean) => {
+    setAutostart(next);
+    void autostartSet(next).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn('autostart set failed', err);
+      setAutostart(!next);
+    });
+  };
+
+  // Explicit "turn autostart off" action (removes the OS registration). Same
+  // effect as unchecking the box, but a clear one-click off / recovery from a
+  // stuck registration. On failure, re-read the real OS state.
+  const onDisableAutostart = () => {
+    setAutostart(false);
+    void autostartSet(false).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn('autostart disable failed', err);
+      void autostartIsEnabled()
+        .then(setAutostart)
+        .catch(() => {});
+    });
+  };
+
   const trayDisabled = available !== true;
+  const autostartDisabled = autostartSupported !== true;
 
   return (
     <div className="settings-panel general-panel">
@@ -267,6 +318,41 @@ export function GeneralPanel() {
         <p className="form__hint">
           {t('dialogs.settings.general.themeHint')}
         </p>
+      </section>
+
+      <section
+        className="general-panel__section"
+        aria-label={t('dialogs.settings.general.startupHeading')}
+      >
+        <h3 className="calendars-panel__account">
+          {t('dialogs.settings.general.startupHeading')}
+        </h3>
+        {autostartSupported === false && (
+          <FocusableNote className="form__hint">
+            {t('dialogs.settings.general.autostartUnavailable')}
+          </FocusableNote>
+        )}
+        <label className="general-panel__toggle">
+          <input
+            type="checkbox"
+            checked={autostart}
+            disabled={autostartDisabled}
+            onChange={(e) => onToggleAutostart(e.target.checked)}
+          />
+          <span>{t('dialogs.settings.general.autostartLabel')}</span>
+        </label>
+        <p className="form__hint general-panel__toggle-hint">
+          {t('dialogs.settings.general.autostartHint')}
+        </p>
+        {autostart && (
+          <button
+            type="button"
+            className="form__action form__action--secondary general-panel__autostart-off"
+            onClick={onDisableAutostart}
+          >
+            {t('dialogs.settings.general.autostartDisable')}
+          </button>
+        )}
       </section>
 
       <section

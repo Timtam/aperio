@@ -2264,6 +2264,29 @@ Beim ersten Start erscheint ein barrierefreier Einrichtungsdialog, der alle Syst
 - Dialog ist vollständig mit Screen Readern nutzbar (`role="dialog"`, Fokus-Falle)
 - Einstellungen nachträglich unter `Einstellungen → Systemintegration` änderbar, inkl. Rückgängig-Machen aller Registrierungen
 
+### 17.4 Autostart (Start bei der Anmeldung)
+
+Aperio kann sich so registrieren, dass es **automatisch beim Anmelden** an diesem Computer startet. Da Aperio Erinnerungen als native Systembenachrichtigungen zustellt (Abschnitt 14.3), sorgt Autostart dafür, dass der Erinnerungs-Scheduler nach jedem Neustart wieder läuft, ohne dass die App von Hand geöffnet werden muss.
+
+Umgesetzt über `tauri-plugin-autostart`. Die Betriebssystem-Registrierung ist die **alleinige Quelle der Wahrheit** – es gibt keine separate, synchronisierte Einstellung; der Schalter liest und schreibt direkt den OS-Zustand und spiegelt ihn daher auch dann korrekt, wenn der Eintrag außerhalb der App geändert wird.
+
+| Plattform | Mechanismus |
+|---|---|
+| **Windows** | Registry-Wert unter `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` |
+| **macOS** | LaunchAgent (`~/Library/LaunchAgents`) |
+| **Linux** | `.desktop`-Autostart-Datei unter `~/.config/autostart` |
+
+- **Geräte-lokal:** Autostart gilt nur für das Gerät, auf dem er aktiviert wird – wie die Tray- und Darstellungs-Einstellungen wird er **nicht** über das Event Log synchronisiert.
+- **Bedienung:** Ein Schalter „Aperio bei der Anmeldung starten" unter `Einstellungen → Allgemein → Systemstart`, plus – solange aktiv – ein expliziter Knopf **„Autostart abschalten"** (entfernt die Registrierung; auch als Wiederherstellung bei einem hängenden Eintrag). Vollständig per Tastatur bedienbar und mit Screen Readern nutzbar; ist der Start bei der Anmeldung in der Laufzeitumgebung nicht verfügbar, bleibt der Schalter deaktiviert mit erklärendem Hinweis.
+- **Startverhalten:** Der beim Autostart registrierte Aufruf trägt das Argument `--minimized`. Existiert ein Infobereich (Abschnitt 15.3), startet Aperio dann direkt **minimiert im Infobereich** (das Fenster wird mit `visible: false` erzeugt und beim Autostart gar nicht erst eingeblendet – kein Aufblitzen); ein Klick auf das Infobereich-Symbol holt es hervor. Ohne nutzbaren Infobereich wird das Fenster normal angezeigt, damit die App nie unsichtbar-und-unerreichbar startet. Ein manueller Start (ohne `--minimized`) öffnet immer normal.
+- Registrierung erfolgt benutzerspezifisch (kein Admin-Recht nötig); Abschalten entfernt den Eintrag wieder vollständig.
+
+Optional lässt sich Autostart auch im Erststart-Assistenten (17.3) als weitere Checkbox anbieten:
+
+```
+[ ] Aperio bei der Anmeldung automatisch starten
+```
+
 ---
 
 ## 18. Offline-Fähigkeit & Datensynchronisation

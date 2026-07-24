@@ -117,6 +117,16 @@ Both options are off by default. If your system has no tray (e.g. GNOME
 without an AppIndicator extension), the toggles are disabled and the window
 behaves normally.
 
+## Launch at login
+
+So reminders fire again after a restart without you opening Aperio by hand,
+turn on **"Launch Aperio when I sign in"** under **Settings → General →
+Startup**. Aperio then starts automatically once you log in to this computer.
+If the system tray (above) is available, it starts minimized there rather than
+opening a window — click the tray icon to bring it up. The setting applies to
+this device only; use the **"Turn off autostart"** button (or clear the
+checkbox) to remove it again.
+
 ## Summary
 
 You can create reminders, set their sounds and respond to them with dismiss

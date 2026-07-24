@@ -505,6 +505,14 @@ pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        // §17.4 Autostart. The registered command carries `--minimized` so an
+        // autostart launch can start hidden in the tray (see the setup hook);
+        // a hand-launch has no such arg and opens normally. The OS registration
+        // is the single source of truth, toggled from the `autostart_*` commands.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--minimized"]),
+        ))
         .manage(audio_player)
         .manage(commands::SoundsDir(sounds_dir_for_commands))
         .manage(local_adapter)
@@ -581,6 +589,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_info,
+            autostart_is_enabled,
+            autostart_set,
             frontend_log,
             commands::get_log_level,
             commands::set_log_level,
@@ -888,6 +898,10 @@ pub fn run() {
             // toggles disable themselves. Built here, after the window
             // exists.
             let tray_handles = tray::build(app.handle());
+            // Captured before `manage` moves it — the setup below needs to know
+            // whether a tray exists to decide if an autostart `--minimized`
+            // launch may start hidden.
+            let tray_available = tray_handles.available;
             app.manage(tray_handles);
 
             // §15.3: restore the saved window size + position (device-local,
@@ -910,6 +924,16 @@ pub fn run() {
                 // (the sync indicator) off-canvas. The resize it may emit is
                 // picked up by the geometry store registered just above.
                 window_state::fit_to_current_monitor(&win);
+                // §17.4: the window is created hidden (`visible: false` in
+                // tauri.conf.json) to avoid a flash. Show it now — UNLESS this
+                // is an autostart `--minimized` launch AND a tray exists to
+                // reach it from, in which case it starts tucked in the tray.
+                // Without a tray we always show, so the app can never launch
+                // invisible-and-unreachable.
+                let start_hidden = tray_available && std::env::args().any(|a| a == "--minimized");
+                if !start_hidden {
+                    let _ = win.show();
+                }
             }
             Ok(())
         })
@@ -961,6 +985,30 @@ fn app_info() -> AppInfo {
         name: env!("CARGO_PKG_NAME").to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
     }
+}
+
+/// §17.4 Autostart — is Aperio registered to launch at OS login? The OS
+/// registration (Windows Run key / macOS LaunchAgent / Linux `.desktop`
+/// autostart) is the single source of truth; the Settings toggle reads it here
+/// so it always reflects reality even if the entry is changed outside the app.
+#[tauri::command]
+fn autostart_is_enabled(app: tauri::AppHandle) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+/// §17.4 Autostart — enable or disable launch-at-login (see
+/// [`autostart_is_enabled`]).
+#[tauri::command]
+fn autostart_set(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let manager = app.autolaunch();
+    if enabled {
+        manager.enable()
+    } else {
+        manager.disable()
+    }
+    .map_err(|e| e.to_string())
 }
 
 /// Mirror a webview `console.*` call into the Rust tracing stream (target

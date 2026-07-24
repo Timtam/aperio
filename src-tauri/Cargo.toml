@@ -21,6 +21,10 @@ tauri-build = { version = "2", features = [] }
 # decode the embedded tray icon (icons/icon.png) at runtime.
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-notification = "2"
+# §17.4 Autostart: register Aperio to launch at OS login (Windows Run key,
+# macOS LaunchAgent, Linux .desktop autostart). Driven only from our own
+# `autostart_*` commands, so no webview-facing capability is exposed.
+tauri-plugin-autostart = "2"
 # Native file picker for the SFTP SSH-key path (DESIGN.md §19.6).
 # A bare text input would let users mis-type the path; the picker
 # also matches the platform's "select a file" idiom (NSOpenPanel
