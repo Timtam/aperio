@@ -102,6 +102,9 @@ export function SyncConflictsDialog({
   // aria-busy until the round-trip settles.
   const [busyKeys, setBusyKeys] = useState<Set<string>>(new Set());
   const listRef = useRef<HTMLUListElement>(null);
+  // Stable id for the always-rendered intro note so reparkFocus can fall back
+  // to it once the list <ul> has unmounted (the last conflict resolved).
+  const introId = useId();
 
   const groups = groupSyncConflicts(conflicts);
 
@@ -155,11 +158,19 @@ export function SyncConflictsDialog({
 
   // Re-park focus on the listbox so the user keeps walking the remaining
   // cards after a row/group unmounts (otherwise focus drops to <body>).
+  // On the LAST conflict the <ul> itself unmounts (replaced by the "Keine
+  // Konflikte" intro), so listRef is null and focusing it would be a no-op that
+  // strands focus on <body> — NVDA leaves application mode with the dialog
+  // still up. Fall back to the always-rendered intro note (it now reads the
+  // empty state) so focus stays inside the role="application" body and the new
+  // state is spoken.
   const reparkFocus = useCallback(() => {
     requestAnimationFrame(() => {
-      listRef.current?.focus({ preventScroll: true });
+      (listRef.current ?? document.getElementById(introId))?.focus({
+        preventScroll: true,
+      });
     });
-  }, []);
+  }, [introId]);
 
   const afterResolveError = useCallback(
     (err: unknown) => {
@@ -250,7 +261,7 @@ export function SyncConflictsDialog({
       title={t('dialogs.syncConflicts.title')}
       className="sync-conflicts-dialog"
     >
-      <FocusableNote className="sync-conflicts__intro">
+      <FocusableNote id={introId} className="sync-conflicts__intro">
         {conflicts.length === 0 ? t('dialogs.syncConflicts.empty') : intro}
       </FocusableNote>
       {conflicts.length > 0 && (

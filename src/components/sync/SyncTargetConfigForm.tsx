@@ -1132,8 +1132,17 @@ export function SyncTargetConfigForm({
           <div className="sync-panel__actions">
             <button
               type="button"
-              disabled={busyDropboxOauth}
-              onClick={() => void onConnectDropbox()}
+              // aria-disabled (not native `disabled`): natively disabling the
+              // focused button mid-round-trip drops focus to <body>, pulling
+              // NVDA out of the dialog for the whole OAuth window. Keep it
+              // focusable and block re-entry in the handler; styles.css gives
+              // aria-disabled buttons pointer-events:none so mouse double-clicks
+              // are blocked too.
+              aria-disabled={busyDropboxOauth}
+              aria-busy={busyDropboxOauth}
+              onClick={() => {
+                if (!busyDropboxOauth) void onConnectDropbox();
+              }}
             >
               {busyDropboxOauth
                 ? t('dialogs.settings.sync.adapterDropboxSigningIn')
@@ -1201,8 +1210,13 @@ export function SyncTargetConfigForm({
           <div className="sync-panel__actions">
             <button
               type="button"
-              disabled={busyGdriveOauth}
-              onClick={() => void onConnectGoogledrive()}
+              // aria-disabled keeps focus in the dialog during the OAuth
+              // round-trip — see the Dropbox button above for the rationale.
+              aria-disabled={busyGdriveOauth}
+              aria-busy={busyGdriveOauth}
+              onClick={() => {
+                if (!busyGdriveOauth) void onConnectGoogledrive();
+              }}
             >
               {busyGdriveOauth
                 ? t('dialogs.settings.sync.adapterGoogledriveSigningIn')
@@ -1263,8 +1277,15 @@ export function SyncTargetConfigForm({
       <div className="sync-panel__actions">
         <button
           type="button"
-          disabled={busyAdapter}
-          onClick={() => void onConnect()}
+          // aria-disabled keeps this primary action focusable while the
+          // connect round-trip is in flight: a native `disabled` here blurs
+          // focus to <body> the instant it is set, so NVDA leaves the dialog
+          // and never speaks the result. See the OAuth buttons above.
+          aria-disabled={busyAdapter}
+          aria-busy={busyAdapter}
+          onClick={() => {
+            if (!busyAdapter) void onConnect();
+          }}
         >
           {busyAdapter
             ? t('dialogs.settings.sync.adapterConnecting')
@@ -1276,8 +1297,13 @@ export function SyncTargetConfigForm({
         <button
           type="button"
           className="sync-panel__overwrite form__action--danger"
-          disabled={busyAdopt}
-          onClick={() => void onOverwrite()}
+          // aria-disabled keeps focus in the dialog during the adopt/overwrite
+          // round-trip — same rationale as the primary Connect button.
+          aria-disabled={busyAdopt}
+          aria-busy={busyAdopt}
+          onClick={() => {
+            if (!busyAdopt) void onOverwrite();
+          }}
         >
           {t('dialogs.settings.sync.previewAdoptButton')}
         </button>

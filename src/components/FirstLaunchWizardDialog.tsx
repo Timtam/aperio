@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { FocusableNote } from '../a11y/FocusableNote';
@@ -48,6 +54,28 @@ export function FirstLaunchWizardDialog({
 
   const [step, setStep] = useState<WizardStep>('language');
   const [language, setLanguage] = useState<LanguagePref>('system');
+
+  // Each step advance/back UNMOUNTS the button that was just pressed (only one
+  // step renders at a time), which drops native focus to <body> — outside
+  // #app-root's role="application" — so NVDA silently leaves application mode
+  // and the wizard's Escape/Tab handlers go dead. Move focus onto the newly
+  // mounted step's heading on every transition so focus stays inside the dialog
+  // and NVDA announces which step the user landed on. A useLayoutEffect (not
+  // useEffect) so it runs synchronously in the same commit and beats Modal's
+  // focus-recovery microtask — no transient flash onto the × button. The
+  // first-render guard leaves Modal's own open-focus (the step indicator)
+  // untouched. Only the mounted step's <h3> binds headingRef, so this always
+  // targets the step now on screen. Also covers the async connect→account jump
+  // in onSyncConnected, which has the identical unmount-under-focus shape.
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const didMountRef = useRef(false);
+  useLayoutEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
+    headingRef.current?.focus({ preventScroll: true });
+  }, [step]);
 
   // Seed the radio from the persisted choice.
   useEffect(() => {
@@ -115,7 +143,9 @@ export function FirstLaunchWizardDialog({
 
         {step === 'language' && (
           <section className="first-launch-wizard__step">
-            <h3>{t('dialogs.firstLaunchWizard.languageHeading')}</h3>
+            <h3 ref={headingRef} tabIndex={-1}>
+              {t('dialogs.firstLaunchWizard.languageHeading')}
+            </h3>
             <FocusableNote className="first-launch-wizard__hint">
               {t('dialogs.firstLaunchWizard.languageHint')}
             </FocusableNote>
@@ -144,7 +174,9 @@ export function FirstLaunchWizardDialog({
 
         {step === 'sync' && (
           <section className="first-launch-wizard__step">
-            <h3>{t('dialogs.firstLaunchWizard.syncHeading')}</h3>
+            <h3 ref={headingRef} tabIndex={-1}>
+              {t('dialogs.firstLaunchWizard.syncHeading')}
+            </h3>
             <FocusableNote className="first-launch-wizard__hint">
               {t('dialogs.firstLaunchWizard.syncHint')}
             </FocusableNote>
@@ -162,7 +194,9 @@ export function FirstLaunchWizardDialog({
 
         {step === 'account' && (
           <section className="first-launch-wizard__step">
-            <h3>{t('dialogs.firstLaunchWizard.accountHeading')}</h3>
+            <h3 ref={headingRef} tabIndex={-1}>
+              {t('dialogs.firstLaunchWizard.accountHeading')}
+            </h3>
             <FocusableNote className="first-launch-wizard__hint">
               {t('dialogs.firstLaunchWizard.accountHint')}
             </FocusableNote>

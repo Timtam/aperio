@@ -3,6 +3,7 @@ import {
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
 } from 'react';
@@ -263,22 +264,49 @@ export function EventDialog({
     initialScope ?? 'occurrence',
   );
 
-  // Reset the form whenever the dialog is opened with new context. We
-  // key on isOpen + initialState; isOpen=false keeps the previous form
-  // around briefly while the close animation runs (if we ever add one).
+  // Live mirror of the form for the pristine check below — a ref, so the reset
+  // effect reads the CURRENT form without listing it as a dep (which would
+  // re-run it on every keystroke).
+  const formRef = useRef(form);
+  formRef.current = form;
+  // The initialState this dialog last reset to — the pristine baseline.
+  const appliedInitialRef = useRef<FormState | null>(null);
+
+  // Reset the form whenever the dialog is opened with new context.
+  //
+  // `initialState` is a useMemo over `calendars` + `selectedCalendarIds`, so it
+  // re-derives identity on every background calendar-catalog refresh
+  // (CacheSyncListener → refreshCalendars) while the dialog is open. Resetting
+  // then unmounted the focused attendee/notify controls (focus fell to <body>,
+  // NVDA switched to browse mode with the dialog still up) AND silently wiped
+  // everything the user had typed. So: adopt a fresh initialState only while the
+  // form is still PRISTINE (byte-identical to the last one we applied). Once the
+  // user has touched anything, their edits win until the dialog closes. The
+  // sibling toggles (edit scope, notify, keep-as-default) are re-armed ONLY on
+  // the first hydrate of this open — never on an incidental pristine re-run,
+  // which would re-check "notify attendees" after the user unchecked it.
   useEffect(() => {
-    if (isOpen) {
-      setForm(initialState);
-      setError(null);
-      setEditScope(initialScope ?? 'occurrence');
-      // Re-arm the "keep defaults out of the wire" flag every time
-      // the dialog (re-)opens with a fresh event.
-      setKeepRemindersAsDefault(remindersWereFromDefault);
-      setNotifyAttendees(true);
-      setAvailability(null);
-      setAvailabilityWindow(null);
-      setAvailabilityError(null);
+    if (!isOpen) {
+      appliedInitialRef.current = null;
+      return;
     }
+    const baseline = appliedInitialRef.current;
+    const firstHydrate = baseline === null;
+    const pristine =
+      firstHydrate ||
+      formRef.current === baseline ||
+      JSON.stringify(formRef.current) === JSON.stringify(baseline);
+    if (!pristine) return; // user touched the form → their edits win
+    appliedInitialRef.current = initialState;
+    if (!firstHydrate) return; // pristine churn: form already correct, leave toggles alone
+    setForm(initialState);
+    setError(null);
+    setEditScope(initialScope ?? 'occurrence');
+    setKeepRemindersAsDefault(remindersWereFromDefault);
+    setNotifyAttendees(true);
+    setAvailability(null);
+    setAvailabilityWindow(null);
+    setAvailabilityError(null);
   }, [isOpen, initialState, remindersWereFromDefault, initialScope]);
 
   // Any change to the attendee set, the start/end window, the all-day

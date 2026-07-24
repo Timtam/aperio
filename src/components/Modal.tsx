@@ -3,6 +3,7 @@ import {
   useEffect,
   useId,
   useRef,
+  type FocusEvent,
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
@@ -58,6 +59,16 @@ export interface ModalProps {
    * reader in an undetermined mode.
    */
   initialFocusRef?: RefObject<HTMLElement | null>;
+  /**
+   * Id of an element inside the dialog whose text DESCRIBES it (a confirm
+   * message, a warning, an intro). Wired to the `role="dialog"` element's
+   * `aria-describedby`, so NVDA reads it as part of the dialog's own
+   * open announcement. The body is `role="application"`, where a static
+   * `<p>` is otherwise invisible to focus-mode traversal — this is the
+   * ARIA-correct way to make that prose reachable without turning it into
+   * a Tab stop (cf. `FocusableNote` for text that must be a stop).
+   */
+  describedById?: string;
 }
 
 export function Modal({
@@ -68,6 +79,7 @@ export function Modal({
   className,
   dismissOnBackdrop = true,
   initialFocusRef,
+  describedById,
 }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
@@ -154,6 +166,48 @@ export function Modal({
     [onClose],
   );
 
+  // Focus-recovery safety net. A dialog control that the user is on can be
+  // DISABLED (`disabled={busy}` during an async action) or UNMOUNTED (a step
+  // advance, a resolved/removed row, a wiped form) — either drops native focus
+  // to `<body>`, which sits OUTSIDE `#app-root`'s `role="application"`, so NVDA
+  // silently leaves application mode and the dialog's own Escape/Tab handlers
+  // (React listeners on this subtree) stop receiving keys. This is the single
+  // most common dialog focus bug. Rather than fix it at every call site, catch
+  // it here: when focus leaves a dialog descendant to nowhere (body / null)
+  // while the dialog is still open, pull it back to a stable in-dialog stop.
+  // A dialog that moves focus itself lands on an in-dialog element, so
+  // `relatedTarget` is inside the dialog and this never fires — explicit moves
+  // always win; this only rescues the cases nobody handled.
+  const handleFocusOut = useCallback((e: FocusEvent<HTMLDivElement>) => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const next: EventTarget | null = e.relatedTarget;
+    // Focus went somewhere real INSIDE the dialog → nothing to do.
+    if (next instanceof HTMLElement && dialog.contains(next)) return;
+    // Focus moved to another real element outside the dialog (shouldn't
+    // happen while open — Tab is trapped — but never fight a deliberate
+    // move to a concrete element).
+    if (next instanceof HTMLElement && next !== document.body) return;
+    // Otherwise focus was LOST (to <body> or nothing). Recover — but only if
+    // the dialog is still mounted and open (a CLOSING dialog must let focus go
+    // so `close()` can restore the trigger). Defer on requestAnimationFrame,
+    // not a microtask: a dialog that reparks focus deliberately (a step-heading
+    // useLayoutEffect, a reparkFocus rAF scheduled synchronously in its click
+    // handler) runs its move BEFORE this frame callback, so by the time this
+    // fires focus is already back inside and the guard below bails. That makes
+    // this a true last resort for the cases nobody handled, never a competitor
+    // that yanks focus to the × button for a frame first.
+    requestAnimationFrame(() => {
+      const d = dialogRef.current;
+      if (!d || !d.isConnected) return;
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && d.contains(active)) return; // already recovered
+      const focusables = getFocusables(d);
+      // The header close button is always present, so there is always a stop.
+      (focusables[0] ?? d).focus({ preventScroll: true });
+    });
+  }, []);
+
   const handleBackdrop = useCallback(
     (e: MouseEvent<HTMLDivElement>) => {
       if (!dismissOnBackdrop) return;
@@ -183,7 +237,9 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-describedby={describedById}
         className={'modal' + (className ? ' ' + className : '')}
+        onBlur={handleFocusOut}
       >
         <header className="modal__header">
           <h2 id={titleId} className="modal__title">

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useId, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Modal } from './Modal';
@@ -43,10 +43,21 @@ export function ConfirmDialog({
   message,
   confirmLabel,
   cancelLabel,
+  describedById,
   extraActions,
 }: ConfirmDialogProps) {
   const { t } = useTranslation();
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const messageId = useId();
+
+  // The message names WHICH item is about to be deleted. It lives in Modal's
+  // `role="application"` body, where a static <p> is invisible to focus-mode
+  // traversal — the user would confirm a destructive action without ever
+  // hearing the target. Describe every action button with it (focus opens on
+  // Cancel, so it is spoken the instant the dialog opens, and re-spoken as the
+  // user Tabs to the danger/extra buttons). Merge any caller-supplied hint.
+  const describedBy =
+    [messageId, describedById].filter(Boolean).join(' ') || undefined;
 
   // Focus the cancel button first — see component docstring for why.
   useEffect(() => {
@@ -62,13 +73,16 @@ export function ConfirmDialog({
       className="modal--confirm"
       dismissOnBackdrop={false}
     >
-      <p className="form__message">{message}</p>
+      <p id={messageId} className="form__message">
+        {message}
+      </p>
       <div className="form__actions">
         <button
           ref={cancelRef}
           type="button"
           onClick={onClose}
           className="form__action"
+          aria-describedby={describedBy}
         >
           {cancelLabel ?? t('dialogs.confirm.cancel')}
         </button>
@@ -83,6 +97,7 @@ export function ConfirmDialog({
             className={`form__action${
               action.danger ? ' form__action--danger' : ''
             }`}
+            aria-describedby={describedBy}
           >
             {action.label}
           </button>
@@ -94,6 +109,7 @@ export function ConfirmDialog({
             onClose();
           }}
           className="form__action form__action--danger"
+          aria-describedby={describedBy}
         >
           {confirmLabel ?? t('dialogs.confirm.confirm')}
         </button>

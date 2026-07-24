@@ -312,29 +312,61 @@ export function ContactDialog({
   const photoInputRef = useRef<HTMLInputElement>(null);
   const photoInputId = useId();
 
-  // Reset / hydrate the form whenever the dialog opens or the
-  // editing target swaps. Putting focus on the display-name field
-  // is the standard treatment — that's almost always the first
-  // thing the user wants to type.
+  // Live mirrors for the pristine check below — refs, so the hydrate effect
+  // reads the CURRENT edits without listing them as deps (which would defeat
+  // the guard by re-running on every keystroke).
+  const formRef = useRef(form);
+  formRef.current = form;
+  const photoDirtyRef = useRef(photoDirty);
+  photoDirtyRef.current = photoDirty;
+  // The form this dialog last hydrated to — the pristine baseline. Null until
+  // the first hydrate of this open.
+  const appliedBaselineRef = useRef<FormState | null>(null);
+
+  // Reset / hydrate the form whenever the dialog opens or the editing target
+  // swaps. Putting focus on the display-name field is the standard treatment —
+  // that's almost always the first thing the user wants to type.
+  //
+  // `resolveDefaultListId` re-derives while the dialog is OPEN whenever its memo
+  // inputs churn identity — routinely on every background contact_lists catalog
+  // refresh (CacheSyncListener → refreshContactLists rebuilds writableLists +
+  // contactLists). Re-hydrating then wiped the user's in-progress edits back to
+  // the stored contact, dropped a freshly chosen photo, and yanked focus out of
+  // the field being typed back to the display-name input — all with no
+  // announcement. So: adopt a fresh form only while the form is still PRISTINE
+  // (byte-identical to the last one we applied, no photo change). Once the user
+  // has touched anything, their edits win until the dialog closes. Focus and the
+  // photo-state reset fire ONLY on the first hydrate of this open, never on an
+  // incidental pristine re-run (which must leave focus where the user tabbed).
   useEffect(() => {
-    if (!isOpen) return;
-    if (contact) {
-      setForm(fromContact(contact));
-    } else {
-      setForm({
-        ...emptyForm(),
-        listId: resolveDefaultListId(),
-      });
+    if (!isOpen) {
+      appliedBaselineRef.current = null;
+      return;
     }
+    const nextForm: FormState = contact
+      ? fromContact(contact)
+      : { ...emptyForm(), listId: resolveDefaultListId() };
+    const baseline = appliedBaselineRef.current;
+    const firstHydrate = baseline === null;
+    const pristine =
+      firstHydrate ||
+      (JSON.stringify(formRef.current) === JSON.stringify(baseline) &&
+        !photoDirtyRef.current);
+    if (!pristine) return; // user touched the form → their edits win
+    appliedBaselineRef.current = nextForm;
+    setForm(nextForm);
     setError(null);
     setConfirmDelete(false);
-    // Reset photo state on every open. We re-fetch below when
-    // editing a contact that claims to have one.
-    setPhoto(null);
-    setPhotoDirty(false);
-    setPhotoError(null);
-    setPhotoLoading(false);
-    queueMicrotask(() => firstFieldRef.current?.focus());
+    if (firstHydrate) {
+      // Reset photo state on a genuine open. We re-fetch below when editing a
+      // contact that claims to have one. Skipped on pristine churn re-runs so a
+      // loaded photo doesn't blink away.
+      setPhoto(null);
+      setPhotoDirty(false);
+      setPhotoError(null);
+      setPhotoLoading(false);
+      queueMicrotask(() => firstFieldRef.current?.focus());
+    }
   }, [isOpen, contact, resolveDefaultListId]);
 
   // Lazy photo fetch: only when editing a contact whose listing

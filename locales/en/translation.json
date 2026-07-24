@@ -304,6 +304,7 @@
     "hint": "You can also dismiss this dialog and reconnect later from Settings → Accounts. Until then, calendars and tasks from these accounts will be unavailable on this device.",
     "hintRepair": "You can also close this dialog and repair the connection later from Settings → Accounts. Until then, the affected calendars and tasks keep showing the last successfully fetched data.",
     "empty": "All accounts are reconnected.",
+    "listLabel": "Accounts to reconnect",
     "secretLabelPassword": "Password",
     "secretLabelToken": "API token",
     "oauthHint": "Opens the sign-in page in your default browser.",

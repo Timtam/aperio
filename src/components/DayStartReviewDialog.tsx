@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -211,6 +218,30 @@ export function DayStartReviewDialog({
       onClose();
     }
   }, [isOpen, totalRemaining, resolvedIds.size, announce, t, onClose]);
+
+  // Each per-row action unmounts the very button that was pressed, dropping
+  // focus to <body> — outside #app-root's role="application", so NVDA leaves
+  // application mode and Escape/Tab go dead while the dialog is still up. When a
+  // row resolves and others remain, repark focus onto the next actionable
+  // control so the user keeps working through the list without the reader
+  // falling out. A useLayoutEffect runs in the same commit (before Modal's
+  // last-resort recovery frame), so this informed repark wins. Gated on
+  // resolvedIds.size so it never fires on first open (Modal's initialFocusRef
+  // owns that) and on totalRemaining so the emptied-list path is left to the
+  // auto-close effect above. Only acts when focus actually fell outside the
+  // dialog body — a still-mounted bulk button keeping focus is left alone.
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    if (resolvedIds.size === 0) return;
+    if (totalRemaining === 0) return;
+    const body = introRef.current?.closest('.modal__body') ?? null;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && body?.contains(active)) return;
+    const next =
+      body?.querySelector<HTMLElement>('.missed-tasks__actions button') ??
+      introRef.current;
+    next?.focus({ preventScroll: true });
+  }, [isOpen, totalRemaining, resolvedIds]);
 
   // ── Deadline-section actions ────────────────────────────────────────
 

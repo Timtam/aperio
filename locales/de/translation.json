@@ -304,6 +304,7 @@
     "hint": "Du kannst diesen Dialog auch schließen und die Konten später unter Einstellungen → Konten verbinden. Bis dahin sind Kalender und Aufgaben dieser Konten auf diesem Gerät nicht verfügbar.",
     "hintRepair": "Du kannst diesen Dialog auch schließen und die Verbindung später unter Einstellungen → Konten reparieren. Bis dahin zeigen die betroffenen Kalender und Aufgaben weiterhin den zuletzt erfolgreich geladenen Stand.",
     "empty": "Alle Konten sind wieder verbunden.",
+    "listLabel": "Zu verbindende Konten",
     "secretLabelPassword": "Passwort",
     "secretLabelToken": "API-Token",
     "oauthHint": "Öffnet die Anmeldeseite im Standardbrowser.",

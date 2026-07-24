@@ -240,6 +240,10 @@ export function TaskDialog({
   // the date is empty, so focus would otherwise fall to <body>).
   const scheduledDateRef = useRef<HTMLInputElement>(null);
   const deadlineDateRef = useRef<HTMLInputElement>(null);
+  // The edit-mode "add subtask" input. Focus returns here after each add so the
+  // user can keep typing the next subtask (the button blurs to <body> when its
+  // title clears — this keeps focus inside the dialog).
+  const subtaskInputRef = useRef<HTMLInputElement>(null);
   // Tracks whether the user changed the Status field by hand. While false, the
   // sync effect below keeps the field mirroring the live store status (so a
   // subtask cascade shows up in the dropdown); once true, the field is the
@@ -591,6 +595,9 @@ export function TaskDialog({
       );
     } finally {
       setSubtaskBusy(false);
+      // Return focus to the (cleared) input so the user keeps typing the next
+      // subtask instead of landing on <body> once the button disables itself.
+      subtaskInputRef.current?.focus();
     }
   }, [
     task,
@@ -1631,6 +1638,7 @@ export function TaskDialog({
             {supportsSubtasks && (
               <div className="subtasks__add">
                 <input
+                  ref={subtaskInputRef}
                   type="text"
                   value={newSubtaskTitle}
                   onChange={(e) => setNewSubtaskTitle(e.target.value)}
@@ -1645,12 +1653,20 @@ export function TaskDialog({
                   }}
                   placeholder={t('dialogs.task.subtasks.placeholder')}
                   aria-label={t('dialogs.task.subtasks.newAria')}
-                  disabled={subtaskBusy}
+                  // Intentionally NOT disabled while busy: the addSubtask guard
+                  // already blocks re-entry, and keeping it enabled means the
+                  // Enter path never blurs focus to <body> mid-round-trip.
                 />
                 <button
                   type="button"
-                  onClick={() => void addSubtask()}
-                  disabled={subtaskBusy || !newSubtaskTitle.trim()}
+                  // aria-disabled (not native `disabled`) so a click doesn't
+                  // drop focus to <body> during the create round-trip; the
+                  // handler re-checks both guard conditions.
+                  onClick={() => {
+                    if (!subtaskBusy && newSubtaskTitle.trim()) void addSubtask();
+                  }}
+                  aria-disabled={subtaskBusy || !newSubtaskTitle.trim()}
+                  aria-busy={subtaskBusy}
                   className="subtasks__add-button"
                 >
                   {t('dialogs.task.subtasks.addButton')}

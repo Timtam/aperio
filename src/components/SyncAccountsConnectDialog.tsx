@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/announcerContext';
@@ -114,23 +121,41 @@ export function SyncAccountsConnectDialog({
     return undefined;
   }, [isOpen, onClose, pending.length]);
 
+  // Resolving a row unmounts the Save/Sign-in button that was holding focus,
+  // which drops focus to <body> — out of #app-root's role="application", so
+  // NVDA leaves application mode and Escape/Tab go dead. Repark focus onto the
+  // still-mounted list container so focus stays inside the dialog and the next
+  // pending account is one Tab away. When the LAST row resolves the <ul> is
+  // gone (replaced by the "done" note) so listRef is null and this is a
+  // harmless no-op — the auto-close effect + Modal's restore take over. The rAF
+  // runs after the removal commits (so listRef reflects the shrunk list) and
+  // before Modal's last-resort recovery frame, so this informed repark wins.
+  const listRef = useRef<HTMLUListElement>(null);
+  const reparkFocus = useCallback(() => {
+    requestAnimationFrame(() => listRef.current?.focus({ preventScroll: true }));
+  }, []);
+
   const setStatus = useCallback((accountId: string, status: RowStatus) => {
     setRowStatus((prev) => ({ ...prev, [accountId]: status }));
   }, []);
 
-  const removeRow = useCallback((accountId: string) => {
-    setPending((prev) => prev.filter((row) => row.id !== accountId));
-    setRowStatus((prev) => {
-      const next = { ...prev };
-      delete next[accountId];
-      return next;
-    });
-    setPasswordInputs((prev) => {
-      const next = { ...prev };
-      delete next[accountId];
-      return next;
-    });
-  }, []);
+  const removeRow = useCallback(
+    (accountId: string) => {
+      setPending((prev) => prev.filter((row) => row.id !== accountId));
+      setRowStatus((prev) => {
+        const next = { ...prev };
+        delete next[accountId];
+        return next;
+      });
+      setPasswordInputs((prev) => {
+        const next = { ...prev };
+        delete next[accountId];
+        return next;
+      });
+      reparkFocus();
+    },
+    [reparkFocus],
+  );
 
   // Translate a thrown error from the backend reconnect commands
   // into a short user-visible message. We keep the original
@@ -254,7 +279,12 @@ export function SyncAccountsConnectDialog({
           {t('syncAccountsConnect.empty')}
         </FocusableNote>
       ) : (
-        <ul className="sync-accounts-connect__list">
+        <ul
+          ref={listRef}
+          tabIndex={-1}
+          aria-label={t('syncAccountsConnect.listLabel')}
+          className="sync-accounts-connect__list"
+        >
           {pending.map((account) => (
             <SyncAccountsConnectRow
               key={account.id}
@@ -338,7 +368,19 @@ function SyncAccountsConnectRow({
           <p className="sync-accounts-connect__row-hint">
             {t('syncAccountsConnect.oauthHint')}
           </p>
-          <button type="button" disabled={isBusy} onClick={onOAuthSignIn}>
+          <button
+            type="button"
+            // aria-disabled, not native `disabled`: the OAuth round-trip opens
+            // the system browser and blocks for a long time; natively disabling
+            // the focused button would drop focus to <body> for that whole
+            // window, pulling NVDA out of the dialog. Keep it focusable and
+            // block re-entry in the handler.
+            aria-disabled={isBusy}
+            aria-busy={isBusy}
+            onClick={() => {
+              if (!isBusy) onOAuthSignIn();
+            }}
+          >
             {isBusy
               ? t('syncAccountsConnect.signingIn')
               : t('syncAccountsConnect.actionSignIn')}
@@ -357,8 +399,14 @@ function SyncAccountsConnectRow({
           />
           <button
             type="button"
-            disabled={isBusy || password.trim().length === 0}
-            onClick={onSavePassword}
+            // aria-disabled keeps focus on Save through the save round-trip
+            // (native `disabled` would blur to <body>). The empty-password gate
+            // rides the same flag; the handler re-checks both conditions.
+            aria-disabled={isBusy || password.trim().length === 0}
+            aria-busy={isBusy}
+            onClick={() => {
+              if (!isBusy && password.trim().length > 0) onSavePassword();
+            }}
           >
             {isBusy
               ? t('syncAccountsConnect.saving')
