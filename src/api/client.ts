@@ -727,6 +727,17 @@ export const setUserPref = (key: string, value: string) =>
 export const deleteUserPref = (key: string) =>
   invoke<void>('delete_user_pref', { key });
 
+// ── Autostart (launch at OS login, §17.4) ─────────────────────────────
+
+/** Whether Aperio is registered to launch at OS login. The OS registration is
+ *  the source of truth; the General settings toggle reflects this value. */
+export const autostartIsEnabled = () =>
+  invoke<boolean>('autostart_is_enabled');
+
+/** Enable or disable launch-at-login. */
+export const autostartSet = (enabled: boolean) =>
+  invoke<void>('autostart_set', { enabled });
+
 // ── System tray (close/minimize to tray) ──────────────────────────────
 
 /** Whether the platform/desktop exposes a system tray. The General

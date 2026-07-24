@@ -123,6 +123,16 @@ aus. Hat dein System keinen Infobereich (z. B. GNOME ohne
 AppIndicator-Erweiterung), sind die Schalter deaktiviert und das Fenster
 verhält sich normal.
 
+## Bei der Anmeldung starten
+
+Damit Erinnerungen auch nach einem Neustart wieder ausgelöst werden, ohne dass
+du Aperio von Hand öffnest, kannst du unter **Einstellungen → Allgemein →
+Systemstart** die Option **„Aperio bei der Anmeldung starten"** aktivieren.
+Aperio startet dann automatisch, sobald du dich an diesem Computer anmeldest.
+Die Einstellung gilt nur für dieses Gerät und lässt sich jederzeit wieder
+ausschalten. In Kombination mit dem Infobereich (siehe oben) läuft Aperio so
+unauffällig im Hintergrund.
+
 ## Zusammenfassung
 
 Du kannst Erinnerungen anlegen, ihre Töne einstellen und auf sie mit

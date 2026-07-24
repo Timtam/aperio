@@ -505,6 +505,13 @@ pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        // §17.4 Autostart. No launch args → a normal foreground start at login;
+        // the OS registration is the single source of truth, toggled from the
+        // `autostart_*` commands below.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .manage(audio_player)
         .manage(commands::SoundsDir(sounds_dir_for_commands))
         .manage(local_adapter)
@@ -581,6 +588,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_info,
+            autostart_is_enabled,
+            autostart_set,
             frontend_log,
             commands::get_log_level,
             commands::set_log_level,
@@ -961,6 +970,30 @@ fn app_info() -> AppInfo {
         name: env!("CARGO_PKG_NAME").to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
     }
+}
+
+/// §17.4 Autostart — is Aperio registered to launch at OS login? The OS
+/// registration (Windows Run key / macOS LaunchAgent / Linux `.desktop`
+/// autostart) is the single source of truth; the Settings toggle reads it here
+/// so it always reflects reality even if the entry is changed outside the app.
+#[tauri::command]
+fn autostart_is_enabled(app: tauri::AppHandle) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+/// §17.4 Autostart — enable or disable launch-at-login (see
+/// [`autostart_is_enabled`]).
+#[tauri::command]
+fn autostart_set(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let manager = app.autolaunch();
+    if enabled {
+        manager.enable()
+    } else {
+        manager.disable()
+    }
+    .map_err(|e| e.to_string())
 }
 
 /// Mirror a webview `console.*` call into the Rust tracing stream (target
