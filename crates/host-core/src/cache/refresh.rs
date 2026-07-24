@@ -571,6 +571,18 @@ impl CacheRefresher {
                     Ok(changed) => {
                         if changed {
                             self.emit_updated(SyncScope::Contacts, &account, &list_id);
+                            // A contacts change can also change the CALENDAR
+                            // LISTING: §10.3 birthday calendars are synthesised
+                            // per contact list that has at least one contact
+                            // with a birthday, and for external accounts
+                            // `list_birthday_calendars` reads the CACHE only.
+                            // Without this the freshly-cached contacts never
+                            // reach the calendar list — the birthday calendar
+                            // stayed missing for the whole session and only
+                            // appeared one app start LATER (when the startup
+                            // listing finally saw the cached contacts).
+                            // Account-wide signal, so no container id.
+                            self.emit_updated(SyncScope::Calendars, &account, "");
                         }
                     }
                     Err(err) => {

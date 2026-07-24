@@ -157,11 +157,27 @@ pub fn spawn_item_refresh<F, Fut>(
     }
     rt.spawn(async move {
         match refresh().await {
-            Ok(true) => observer.cache_updated(&CacheUpdatedPayload {
-                scope: scope.as_str().to_string(),
-                account_id: account.clone(),
-                container_id: container.clone(),
-            }),
+            Ok(true) => {
+                observer.cache_updated(&CacheUpdatedPayload {
+                    scope: scope.as_str().to_string(),
+                    account_id: account.clone(),
+                    container_id: container.clone(),
+                });
+                // A contacts change can also change the CALENDAR LISTING:
+                // §10.3 birthday calendars are synthesised per contact list
+                // that has a contact with a birthday, and for external
+                // accounts `list_birthday_calendars` reads the CACHE only.
+                // Without this signal the freshly-cached contacts never reach
+                // the calendar list, so a birthday calendar only shows up an
+                // app start later. Account-wide, hence no container id.
+                if matches!(scope, SyncScope::Contacts) {
+                    observer.cache_updated(&CacheUpdatedPayload {
+                        scope: SyncScope::Calendars.as_str().to_string(),
+                        account_id: account.clone(),
+                        container_id: String::new(),
+                    });
+                }
+            }
             Ok(false) => {} // content identical — nothing for the UI to reload
             Err(err) => {
                 let _ = cache.mark_error(&account, scope, &container, &err.to_string(), false);
@@ -551,7 +567,84 @@ pub async fn refresh_contacts(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::DbHandle;
     use chrono::Duration;
+    use std::sync::Mutex;
+
+    /// Records every `cache_updated` payload so a test can assert exactly
+    /// which scopes a refresh announced.
+    #[derive(Default)]
+    struct RecordingObserver {
+        seen: Mutex<Vec<(String, String)>>,
+    }
+
+    impl RecordingObserver {
+        fn scopes(&self) -> Vec<String> {
+            self.seen
+                .lock()
+                .expect("observer poisoned")
+                .iter()
+                .map(|(scope, _)| scope.clone())
+                .collect()
+        }
+    }
+
+    impl CacheObserver for RecordingObserver {
+        fn cache_updated(&self, payload: &CacheUpdatedPayload) {
+            self.seen
+                .lock()
+                .expect("observer poisoned")
+                .push((payload.scope.clone(), payload.container_id.clone()));
+        }
+        fn refresh_status(&self, _status: &crate::cache::CacheRefreshStatus) {}
+    }
+
+    /// Drive `spawn_item_refresh` for `scope` with a refresh that reports the
+    /// content as CHANGED, and return the scopes it announced.
+    async fn announced_scopes_for(scope: SyncScope) -> Vec<String> {
+        let observer = Arc::new(RecordingObserver::default());
+        let cache = Arc::new(CacheStore::new(DbHandle::open_in_memory().unwrap()));
+        let coord = Arc::new(RefreshCoordinator::new());
+        let handle = tokio::runtime::Handle::current();
+        spawn_item_refresh(
+            &handle,
+            Arc::clone(&observer) as Arc<dyn CacheObserver>,
+            cache,
+            coord,
+            scope,
+            "acc-1".to_string(),
+            "list-1".to_string(),
+            || async { Ok(true) },
+        );
+        // The refresh is spawned; let it run to completion.
+        tokio::task::yield_now().await;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        observer.scopes()
+    }
+
+    #[tokio::test]
+    async fn a_contacts_refresh_also_announces_the_calendar_listing() {
+        // §10.3 birthday calendars are synthesised from CACHED contacts, so
+        // fresh contacts must invalidate the calendar LISTING too — without
+        // this the birthday calendar only appeared an app start later.
+        let scopes = announced_scopes_for(SyncScope::Contacts).await;
+        assert!(
+            scopes.iter().any(|s| s == SyncScope::Contacts.as_str()),
+            "the contacts change itself must still be announced: {scopes:?}"
+        );
+        assert!(
+            scopes.iter().any(|s| s == SyncScope::Calendars.as_str()),
+            "a contacts change must also invalidate the calendar listing: {scopes:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_non_contacts_refresh_announces_only_its_own_scope() {
+        // The extra signal is contacts-specific; events/tasks must not drag
+        // a calendar re-listing along on every refresh.
+        let scopes = announced_scopes_for(SyncScope::Tasks).await;
+        assert_eq!(scopes, vec![SyncScope::Tasks.as_str().to_string()]);
+    }
 
     /// A `SyncState` refreshed `refreshed_secs_ago` seconds ago, with an optional
     /// window expressed as day offsets from now.
