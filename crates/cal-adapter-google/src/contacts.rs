@@ -359,14 +359,40 @@ pub async fn other_contacts_delta(
     Ok(delta)
 }
 
+/// A People *directory* request can fail simply because the account is not a
+/// Google Workspace (G Suite) domain user — a personal `@gmail.com` account has
+/// no company directory. Google is inconsistent about how it reports this:
+/// `listDirectoryPeople` returns **403** for some scopes and **400
+/// FAILED_PRECONDITION** ("must be a G suite domain user.") for others. Both
+/// mean "there is no directory here", not a real failure, so the directory list
+/// must collapse to empty instead of failing the whole account refresh.
+///
+/// Kept NARROW: a 400 only counts when it carries the precondition signature, so
+/// a genuine `INVALID_ARGUMENT` 400 (a request bug — bad readMask/sources) still
+/// surfaces as an error rather than being silently swallowed.
+fn directory_unavailable(err: &GoogleError) -> bool {
+    match err {
+        GoogleError::Http { status: 403, .. } => true,
+        GoogleError::Http {
+            status: 400,
+            message,
+        } => {
+            let m = message.to_ascii_lowercase();
+            m.contains("failed_precondition") || m.contains("g suite domain")
+        }
+        _ => false,
+    }
+}
+
 /// Page `/v1/people:listDirectoryPeople` and return the company
 /// directory. Two sources combine into one logical list:
 ///   - `DOMAIN_CONTACT` — shared contacts the admin maintains
 ///     for the organisation (vendors, partners, etc.)
 ///   - `DOMAIN_PROFILE` — every user account in the Workspace
 ///     domain
-/// Personal `@gmail.com` accounts get 403 here; we swallow that
-/// and surface an empty list, mirroring how the EWS GAL behaves
+/// Personal `@gmail.com` accounts have no directory (403 or 400
+/// FAILED_PRECONDITION, see [`directory_unavailable`]); we swallow
+/// that and surface an empty list, mirroring how the EWS GAL behaves
 /// for unsupported configurations.
 async fn list_directory_people(state: &ApiState) -> GoogleResult<Vec<Contact>> {
     let mut out: Vec<Contact> = Vec::new();
@@ -385,10 +411,11 @@ async fn list_directory_people(state: &ApiState) -> GoogleResult<Vec<Contact>> {
         }
         let response: ListDirectoryPeopleResponse = match get_absolute(state, &url).await {
             Ok(r) => r,
-            Err(GoogleError::Http { status: 403, .. }) => {
+            Err(e) if directory_unavailable(&e) => {
                 tracing::debug!(
                     target: "cal_adapter_google::contacts",
-                    "Directory unavailable (personal account or scope not granted)",
+                    error = ?e,
+                    "Directory unavailable (personal / non-Workspace account); returning empty",
                 );
                 return Ok(Vec::new());
             }
@@ -486,7 +513,14 @@ async fn search_directory_people(state: &ApiState, query: &str) -> GoogleResult<
         urlencoding(query),
         urlencoding(PERSON_FIELDS),
     );
-    let response: SearchDirectoryResponse = get_absolute(state, &url).await?;
+    let response: SearchDirectoryResponse = match get_absolute(state, &url).await {
+        Ok(r) => r,
+        // A personal account has no directory to search — treat it as no hits,
+        // not an error (the caller swallows per-source failures anyway, but this
+        // keeps the two directory paths consistent).
+        Err(e) if directory_unavailable(&e) => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
     Ok(response
         .people
         .into_iter()
@@ -1838,6 +1872,35 @@ mod tests {
             GoogleError::Http { status, .. } => assert_eq!(status, 403),
             other => panic!("expected Http 403, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn directory_unavailable_covers_personal_account_signals() {
+        // Personal @gmail.com accounts: Google returns 403 for some scopes …
+        assert!(directory_unavailable(&GoogleError::Http {
+            status: 403,
+            message: "insufficient scope".into(),
+        }));
+        // … and 400 FAILED_PRECONDITION ("must be a G suite domain user.") on
+        // the directory endpoint. Both must collapse to an empty directory
+        // rather than failing the whole account refresh.
+        assert!(directory_unavailable(&GoogleError::Http {
+            status: 400,
+            message: r#"{"error":{"code":400,"message":"must be a G suite domain user.","status":"FAILED_PRECONDITION"}}"#
+                .into(),
+        }));
+        // A genuine request bug (INVALID_ARGUMENT 400) must still surface.
+        assert!(!directory_unavailable(&GoogleError::Http {
+            status: 400,
+            message:
+                r#"{"error":{"code":400,"message":"Invalid readMask","status":"INVALID_ARGUMENT"}}"#
+                    .into(),
+        }));
+        // Unrelated failures stay errors.
+        assert!(!directory_unavailable(&GoogleError::Http {
+            status: 500,
+            message: "server error".into(),
+        }));
     }
 
     #[tokio::test]

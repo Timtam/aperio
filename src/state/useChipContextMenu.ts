@@ -17,6 +17,7 @@ import type {
   TaskPriority,
   TaskStatus,
 } from '../api/types';
+import { duplicateTask } from '../components/duplicateActions';
 import { seriesIdOf } from '../intl/recurrence';
 import { useCalendarStore } from './calendarStoreContext';
 import { useDialogState } from './dialogStateContext';
@@ -317,6 +318,7 @@ export function useChipContextMenu(): ChipContextMenuActions {
       const isDeferred = task.resurface_date !== null;
       const items: ContextMenuItemRequest[] = [
         { id: 'edit', label: t('chipMenu.edit') },
+        { id: 'duplicate', label: t('chipMenu.duplicate') },
         statusSubmenu,
         prioritySubmenu,
         ...(isDeferred
@@ -342,6 +344,20 @@ export function useChipContextMenu(): ChipContextMenuActions {
       }
       if (selected === 'edit') {
         openTaskDialog(task);
+      } else if (selected === 'duplicate') {
+        // Same primitive as the Ctrl+D shortcut and the mobile menu — a flat,
+        // in-place copy in the same list (no subtree, parent_id reset).
+        try {
+          await duplicateTask(task);
+          announce(t('actions.duplicated', { title: task.title }));
+          invalidateData();
+        } catch (err) {
+          if (isCommandError(err)) {
+            announce(`${err.code}: ${err.message}`);
+          } else {
+            announce(String(err));
+          }
+        }
       } else if (selected === 'move') {
         openMoveCopy({ kind: 'task', task, defaultMode: 'move' });
       } else if (selected === 'copy') {
