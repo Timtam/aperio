@@ -195,6 +195,21 @@ export function SyncConflictsDialog({
     });
   }, [introId]);
 
+  // A REMOTE `sync-conflicts-changed` refresh (another device resolved a
+  // conflict) can unmount the card the user is focused in, dropping focus to
+  // <body>. The local resolve paths already reparkFocus, but nothing handled the
+  // remote case. Repark only when focus was actually stranded — a refresh that
+  // leaves the focused card (or the Copy button) mounted must not steal it. The
+  // first-commit skip avoids racing Modal's open-focus onto the intro.
+  const seenConflictsRef = useRef(false);
+  useEffect(() => {
+    if (!seenConflictsRef.current) {
+      seenConflictsRef.current = true;
+      return;
+    }
+    if (document.activeElement === document.body) reparkFocus();
+  }, [conflicts, reparkFocus]);
+
   const afterResolveError = useCallback(
     (err: unknown) => {
       // eslint-disable-next-line no-console

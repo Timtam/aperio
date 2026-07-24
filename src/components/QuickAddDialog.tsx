@@ -160,14 +160,17 @@ export function QuickAddDialog({
   );
 
   const openFullDialog = useCallback(() => {
-    onClose();
+    // Hand off by REPLACING the quick-add frame (not close()+push): the editor
+    // then inherits the quick-add's trigger, so closing it returns focus to the
+    // calendar grid / day the user activated — not the view's first focusable.
     openEventDialog(null, {
       calendarId: calendarId || undefined,
       defaultDate: date || undefined,
       // Carry the in-progress title over so it isn't lost on the hand-off.
       defaultTitle: title || undefined,
+      replace: true,
     });
-  }, [onClose, openEventDialog, calendarId, date, title]);
+  }, [openEventDialog, calendarId, date, title]);
 
   return (
     <Modal

@@ -91,9 +91,23 @@ export function RemindersDialog({ isOpen, onClose }: RemindersDialogProps) {
   // empty list. Same idea as ColorLabelDialog / AccountsDialog.
   const listRef = useRef<HTMLUListElement>(null);
   const sectionRef = useRef<HTMLElement>(null);
+  // Land focus on the freshly-populated list ONCE after the async load, so
+  // arrow keys work — but never yank focus off a control the user Tabbed to
+  // during a slow load. Re-armed each mount (the dialog remounts per open). Only
+  // acts when focus is still on the loading section or nowhere (<body>/null).
+  const landOnLoadRef = useRef(true);
   useEffect(() => {
     if (!isOpen || loading) return;
-    (listRef.current ?? sectionRef.current)?.focus({ preventScroll: true });
+    if (!landOnLoadRef.current) return;
+    const active = document.activeElement;
+    if (
+      active === sectionRef.current ||
+      active === document.body ||
+      active === null
+    ) {
+      landOnLoadRef.current = false;
+      (listRef.current ?? sectionRef.current)?.focus({ preventScroll: true });
+    }
   }, [isOpen, loading, items.length]);
 
   const rows = useMemo(

@@ -142,14 +142,17 @@ export function QuickAddTaskDialog({
   );
 
   const openFullDialog = useCallback(() => {
-    onClose();
+    // Hand off by REPLACING the quick-add frame (not close()+push) so the editor
+    // inherits the quick-add's trigger and focus returns to the original opener
+    // (the calendar grid / task row) when the editor closes.
     openTaskDialog(null, {
       listId: listId || undefined,
       defaultDate: date || undefined,
       // Carry the in-progress title over so it isn't lost on the hand-off.
       defaultTitle: title || undefined,
+      replace: true,
     });
-  }, [onClose, openTaskDialog, listId, date, title]);
+  }, [openTaskDialog, listId, date, title]);
 
   // Writable + checked in the sidebar — the same set TaskDialog offers, plus
   // the current pick so a pre-seeded list never vanishes from its own picker.
