@@ -50,6 +50,9 @@ export type DialogMode =
       calendarId?: string;
       /** Pre-fill start/end around this date when creating a new event. */
       defaultDate?: string;
+      /** Pre-fill the start time (HH:mm) when creating — carries the quick-add's
+       *  picked time over the "weitere Details" hand-off. */
+      defaultTime?: string;
       /** Pre-fill the title when creating (quick-add → "weitere Details"). */
       defaultTitle?: string;
       /** When editing a recurring occurrence, the scope the up-front prompt
@@ -126,6 +129,10 @@ export interface OpenEventOptions {
   calendarId?: string;
   /** Pre-fill start/end around this date (ISO string). */
   defaultDate?: string;
+  /** Pre-fill the start time (HH:mm) — carries the quick-add's picked time over
+   *  the "weitere Details" hand-off so the editor keeps it instead of
+   *  re-deriving its own default slot. */
+  defaultTime?: string;
   /** Pre-fill the title when creating — carries the in-progress title over
    *  from the event quick-add's "weitere Details" hand-off. */
   defaultTitle?: string;
@@ -353,6 +360,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
         event,
         calendarId: options?.calendarId,
         defaultDate: options?.defaultDate,
+        defaultTime: options?.defaultTime,
         defaultTitle: options?.defaultTitle,
       };
       // The quick-add "weitere Details" hand-off swaps its own frame for the

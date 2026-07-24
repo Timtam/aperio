@@ -108,6 +108,10 @@ export interface EventDialogProps {
    * defaults are "next full hour on that day". Ignored when editing.
    */
   defaultDate?: string;
+  /** Pre-fill the start time (HH:mm) when creating — carries the quick-add's
+   *  picked time over the "weitere Details" hand-off, so the editor keeps it
+   *  instead of re-deriving its own default slot. Ignored when editing. */
+  defaultTime?: string;
   /** Pre-fill the title when creating — carries the in-progress title over
    *  from the event quick-add's "weitere Details" hand-off. Ignored when
    *  editing. */
@@ -158,6 +162,7 @@ export function EventDialog({
   event,
   defaultCalendarId,
   defaultDate,
+  defaultTime,
   defaultTitle,
   initialScope,
 }: EventDialogProps) {
@@ -204,6 +209,7 @@ export function EventDialog({
       event,
       defaultCalendarId,
       defaultDate,
+      defaultTime,
       defaultTitle,
       calendars,
       selectedCalendarIds,
@@ -219,6 +225,7 @@ export function EventDialog({
     event,
     defaultCalendarId,
     defaultDate,
+    defaultTime,
     defaultTitle,
     calendars,
     selectedCalendarIds,
@@ -1350,6 +1357,7 @@ function buildInitialState(
   event: CalendarEvent | null,
   defaultCalendarId: string | undefined,
   defaultDate: string | undefined,
+  defaultTime: string | undefined,
   defaultTitle: string | undefined,
   calendars: { id: string; read_only: boolean }[],
   selectedIds: ReadonlySet<string>,
@@ -1385,7 +1393,17 @@ function buildInitialState(
   //  - no anchor at all        → next full hour from now
   // The anchor is normally the day the active view is focused on,
   // threaded in by the caller as `defaultDate`.
-  const { start, end } = defaultNewEventTimes(defaultDate, new Date());
+  let { start, end } = defaultNewEventTimes(defaultDate, new Date());
+  // …but if the caller carried a picked start time over (the quick-add's
+  // "weitere Details" hand-off), honour it instead of the derived slot, keeping
+  // the 1-hour duration.
+  if (defaultTime && /^\d{2}:\d{2}$/.test(defaultTime)) {
+    const [h, m] = defaultTime.split(':').map(Number);
+    const picked = new Date(start);
+    picked.setHours(h, m, 0, 0);
+    start = picked;
+    end = new Date(picked.getTime() + 60 * 60 * 1000);
+  }
 
   // Fallback chain for the calendar dropdown on a *new* event:
   //   1. explicit `defaultCalendarId` from the caller (e.g. when the
