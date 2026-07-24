@@ -38,6 +38,7 @@ export function DialogHost() {
           event={mode.event}
           defaultCalendarId={mode.calendarId}
           defaultDate={mode.defaultDate}
+          defaultTime={mode.defaultTime}
           defaultTitle={mode.defaultTitle}
           initialScope={mode.initialScope}
         />

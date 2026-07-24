@@ -180,11 +180,13 @@ export function QuickAddDialog({
     openEventDialog(null, {
       calendarId: calendarId || undefined,
       defaultDate: date || undefined,
-      // Carry the in-progress title over so it isn't lost on the hand-off.
+      // Carry the in-progress title AND picked time over so neither is lost on
+      // the hand-off.
+      defaultTime: time || undefined,
       defaultTitle: title || undefined,
       replace: true,
     });
-  }, [openEventDialog, calendarId, date, title]);
+  }, [openEventDialog, calendarId, date, time, title]);
 
   return (
     <Modal
