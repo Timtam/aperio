@@ -102,6 +102,9 @@ export function SyncConflictsDialog({
   // the load returned — the user heard "no conflicts", pressed Escape, and left
   // real conflicts unresolved.
   const [loaded, setLoaded] = useState(false);
+  // True when the load FAILED — distinct from a genuine empty result, so a
+  // transient backend/IPC error doesn't render/announce the false "no conflicts".
+  const [loadError, setLoadError] = useState(false);
   const [labelByKey, setLabelByKey] = useState<Map<string, string>>(new Map());
   // Group keys currently resolving — disables that card's buttons + marks it
   // aria-busy until the round-trip settles.
@@ -119,10 +122,14 @@ export function SyncConflictsDialog({
 
   const refresh = useCallback(() => {
     listSyncConflicts()
-      .then(setConflicts)
+      .then((c) => {
+        setConflicts(c);
+        setLoadError(false);
+      })
       .catch((err) => {
         // eslint-disable-next-line no-console
         console.warn('list_sync_conflicts failed', err);
+        setLoadError(true);
       })
       .finally(() => setLoaded(true));
   }, []);
@@ -171,13 +178,17 @@ export function SyncConflictsDialog({
     if (!loaded || announcedLoadRef.current) return;
     announcedLoadRef.current = true;
     announce(
-      conflicts.length === 0
-        ? t('dialogs.syncConflicts.empty')
-        : conflicts.length === 1
-          ? t('dialogs.syncConflicts.intro_one')
-          : t('dialogs.syncConflicts.intro_other', { count: conflicts.length }),
+      loadError
+        ? t('dialogs.syncConflicts.loadError')
+        : conflicts.length === 0
+          ? t('dialogs.syncConflicts.empty')
+          : conflicts.length === 1
+            ? t('dialogs.syncConflicts.intro_one')
+            : t('dialogs.syncConflicts.intro_other', {
+                count: conflicts.length,
+              }),
     );
-  }, [loaded, conflicts.length, announce, t]);
+  }, [loaded, loadError, conflicts.length, announce, t]);
 
   // Re-park focus on the listbox so the user keeps walking the remaining
   // cards after a row/group unmounts (otherwise focus drops to <body>).
@@ -302,9 +313,11 @@ export function SyncConflictsDialog({
       <FocusableNote id={introId} className="sync-conflicts__intro">
         {!loaded
           ? t('dialogs.syncConflicts.loading')
-          : conflicts.length === 0
-            ? t('dialogs.syncConflicts.empty')
-            : intro}
+          : loadError
+            ? t('dialogs.syncConflicts.loadError')
+            : conflicts.length === 0
+              ? t('dialogs.syncConflicts.empty')
+              : intro}
       </FocusableNote>
       {conflicts.length > 0 && (
         <button

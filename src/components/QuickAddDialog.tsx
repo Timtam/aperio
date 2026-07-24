@@ -84,29 +84,43 @@ export function QuickAddDialog({
 
   // `initial` is a useMemo over `selectable` (calendars + selection), so it
   // re-derives identity on every background catalog refresh while the dialog is
-  // open. Re-applying it then wiped the title the user was typing. Adopt a fresh
-  // `initial` only while the form is still PRISTINE (equal to the last one we
-  // applied) — this still lets a late-arriving default calendar populate on a
-  // cold open, but once the user types, their input wins until the dialog closes.
+  // open. Re-applying it then wiped the title the user was typing. The guard is
+  // PER FIELD: adopt a re-derived value only for a field the user hasn't touched
+  // (its live value still equals the last one we applied). This lets a
+  // late-arriving default calendar populate an untouched picker on a cold open
+  // even after the user has typed a title — an all-or-nothing guard would leave
+  // the required calendar empty and block submit.
   useEffect(() => {
     if (!isOpen) {
       appliedInitialRef.current = null;
       return;
     }
-    const baseline = appliedInitialRef.current;
-    const pristine =
-      baseline === null ||
-      (titleRef.current === baseline.title &&
-        dateRef.current === baseline.date &&
-        timeRef.current === baseline.time &&
-        calendarIdRef.current === baseline.calendarId);
-    if (!pristine) return; // user touched the form → their input wins
-    appliedInitialRef.current = initial;
-    setTitle(initial.title);
-    setDate(initial.date);
-    setTime(initial.time);
-    setCalendarId(initial.calendarId);
-    setError(null);
+    const b = appliedInitialRef.current;
+    if (b === null) {
+      appliedInitialRef.current = { ...initial };
+      setTitle(initial.title);
+      setDate(initial.date);
+      setTime(initial.time);
+      setCalendarId(initial.calendarId);
+      setError(null);
+      return;
+    }
+    if (titleRef.current === b.title) {
+      b.title = initial.title;
+      setTitle(initial.title);
+    }
+    if (dateRef.current === b.date) {
+      b.date = initial.date;
+      setDate(initial.date);
+    }
+    if (timeRef.current === b.time) {
+      b.time = initial.time;
+      setTime(initial.time);
+    }
+    if (calendarIdRef.current === b.calendarId) {
+      b.calendarId = initial.calendarId;
+      setCalendarId(initial.calendarId);
+    }
   }, [isOpen, initial]);
 
   const onSubmit = useCallback(

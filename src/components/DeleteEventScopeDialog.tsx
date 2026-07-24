@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/announcerContext';
@@ -49,6 +49,7 @@ export function DeleteEventScopeDialog({
   const { offersChoice } = useCancellationChoice(event);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const notifyRef = useRef<HTMLInputElement>(null);
+  const messageId = useId();
   // Live mirror of offersChoice so the open-focus effect can read the value AT
   // OPEN without depending on it (which would re-run and STEAL focus onto the
   // notify radio if the async organizer check resolves mid-life).
@@ -103,8 +104,13 @@ export function DeleteEventScopeDialog({
       title={t('dialogs.deleteScope.title')}
       className="modal--confirm modal--confirm-wide"
       dismissOnBackdrop={false}
+      // The message names WHICH event is being deleted; the generic title does
+      // not. As a static <p> in the role="application" body it was unreachable
+      // to NVDA — wire it as the dialog's aria-describedby so it is read in the
+      // open announcement.
+      describedById={messageId}
     >
-      <p className="form__message">
+      <p id={messageId} className="form__message">
         {t(
           offersChoice
             ? 'dialogs.deleteScope.organizerMessage'

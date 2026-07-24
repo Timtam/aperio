@@ -66,26 +66,36 @@ export function QuickAddTaskDialog({
 
   // `initial` is a useMemo over the task-list catalog, so it re-derives identity
   // on every background refresh while the dialog is open. Re-applying it then
-  // wiped the title the user was typing. Adopt a fresh `initial` only while the
-  // form is still PRISTINE (equal to the last one we applied) — a late-arriving
-  // default list still populates on a cold open, but typed input then wins.
+  // wiped the title the user was typing. The guard is PER FIELD: adopt a
+  // re-derived value only for a field the user hasn't touched (its live value
+  // still equals the last one we applied), so a late-arriving default list still
+  // populates an untouched picker even after the user has typed a title.
   useEffect(() => {
     if (!isOpen) {
       appliedInitialRef.current = null;
       return;
     }
-    const baseline = appliedInitialRef.current;
-    const pristine =
-      baseline === null ||
-      (titleRef.current === baseline.title &&
-        dateRef.current === baseline.date &&
-        listIdRef.current === baseline.listId);
-    if (!pristine) return; // user touched the form → their input wins
-    appliedInitialRef.current = initial;
-    setTitle(initial.title);
-    setDate(initial.date);
-    setListId(initial.listId);
-    setError(null);
+    const b = appliedInitialRef.current;
+    if (b === null) {
+      appliedInitialRef.current = { ...initial };
+      setTitle(initial.title);
+      setDate(initial.date);
+      setListId(initial.listId);
+      setError(null);
+      return;
+    }
+    if (titleRef.current === b.title) {
+      b.title = initial.title;
+      setTitle(initial.title);
+    }
+    if (dateRef.current === b.date) {
+      b.date = initial.date;
+      setDate(initial.date);
+    }
+    if (listIdRef.current === b.listId) {
+      b.listId = initial.listId;
+      setListId(initial.listId);
+    }
   }, [isOpen, initial]);
 
   const onSubmit = useCallback(

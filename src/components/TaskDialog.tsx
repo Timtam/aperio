@@ -223,9 +223,21 @@ export function TaskDialog({
   const prevSubtaskLen = useRef(subtasks.length);
   useEffect(() => {
     if (prevSubtaskLen.current > 0 && subtasks.length === 0) {
-      (subtaskInputRef.current ?? subtaskEmptyRef.current)?.focus({
-        preventScroll: true,
-      });
+      // Only repark when focus was actually stranded on <body>/null — a remote
+      // deletion of the last subtask (a synced subtasks-supporting list) must
+      // NOT steal focus from a field the user is editing. The add-input and the
+      // empty note both live inside the subtasks fieldset, which itself unmounts
+      // on a subtasks:false list once the last child is gone, so fall through to
+      // the always-present section select / title input.
+      const active = document.activeElement;
+      if (active === document.body || active === null) {
+        (
+          subtaskInputRef.current ??
+          subtaskEmptyRef.current ??
+          sectionSelectRef.current ??
+          titleInputRef.current
+        )?.focus({ preventScroll: true });
+      }
     }
     prevSubtaskLen.current = subtasks.length;
   }, [subtasks.length]);
@@ -244,7 +256,14 @@ export function TaskDialog({
       sectionEditorWasOpen.current = true;
     } else if (sectionEditorWasOpen.current) {
       sectionEditorWasOpen.current = false;
-      sectionSelectRef.current?.focus({ preventScroll: true });
+      // Only repark when the editor's own control had focus and thus dropped to
+      // <body> when it unmounted — NOT when the editor closed as a side effect
+      // of a list-picker change (the reset effect sets sectionMode = null on a
+      // listId change; focus is then on the list <select>, which we must not
+      // steal).
+      if (document.activeElement === document.body) {
+        sectionSelectRef.current?.focus({ preventScroll: true });
+      }
     }
   }, [sectionMode]);
   const initialState = useMemo<FormState>(
@@ -281,6 +300,10 @@ export function TaskDialog({
   const sectionSelectRef = useRef<HTMLSelectElement>(null);
   // Landing spot when the subtask list empties out (its listbox unmounts).
   const subtaskEmptyRef = useRef<HTMLParagraphElement>(null);
+  // Always-present top-of-form field: the last-resort repark target when the
+  // whole subtasks fieldset unmounts (a subtasks:false list whose last child is
+  // deleted — then the add-input AND the empty note are both gone).
+  const titleInputRef = useRef<HTMLInputElement>(null);
   // Tracks whether the user changed the Status field by hand. While false, the
   // sync effect below keeps the field mirroring the live store status (so a
   // subtask cascade shows up in the dropdown); once true, the field is the
@@ -1149,6 +1172,7 @@ export function TaskDialog({
         <label className="form__field">
           <span className="form__label">{t('dialogs.task.fields.title')}</span>
           <input
+            ref={titleInputRef}
             type="text"
             value={form.title}
             onChange={(e) => update('title', e.target.value)}
@@ -1316,7 +1340,11 @@ export function TaskDialog({
                       : t('dialogs.task.section.newLabel')
                   }
                   autoFocus
-                  disabled={sectionBusy}
+                  // Intentionally NOT disabled while busy: this input is
+                  // autofocused, so a native disable mid-save would blur focus
+                  // to <body> and strand it there on the error path. The
+                  // submitSection guard already blocks re-entry. Matches the
+                  // standalone SectionDialog.
                 />
                 <ColorLabelSelect
                   value={sectionColorDraft}
@@ -1328,8 +1356,12 @@ export function TaskDialog({
                 <button
                   type="button"
                   className="section-field__button"
-                  onClick={() => void submitSection()}
-                  disabled={sectionBusy || !sectionDraft.trim()}
+                  // aria-disabled keeps focus in the dialog through the save;
+                  // the submitSection guard blocks a double write / empty name.
+                  onClick={() => {
+                    if (!sectionBusy && sectionDraft.trim()) void submitSection();
+                  }}
+                  aria-disabled={sectionBusy || !sectionDraft.trim() || undefined}
                 >
                   {sectionMode === 'rename'
                     ? t('dialogs.task.section.save')
