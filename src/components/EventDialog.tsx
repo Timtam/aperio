@@ -1270,15 +1270,25 @@ export function EventDialog({
           )}
           <button
             type="button"
-            onClick={onClose}
-            disabled={submitting}
+            // aria-disabled (matching the delete button above) instead of native
+            // disabled: natively disabling the focused Save/Cancel button blurs
+            // focus to <body> for the whole save round-trip and strands it there
+            // when the save fails. The onClick guard preserves "can't cancel
+            // mid-save".
+            onClick={() => {
+              if (!submitting) onClose();
+            }}
+            aria-disabled={submitting || undefined}
             className="form__action"
           >
             {t('dialogs.cancel')}
           </button>
           <button
             type="submit"
-            disabled={submitting}
+            // aria-disabled keeps focus on Save through the round-trip; the
+            // onSubmit re-entry guard (`if (submitting) return`) already blocks
+            // a double PUT, so no native disable is needed.
+            aria-disabled={submitting || undefined}
             className="form__action form__action--primary"
           >
             {isEdit ? t('dialogs.save') : t('dialogs.create')}

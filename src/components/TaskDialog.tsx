@@ -215,6 +215,38 @@ export function TaskDialog({
       setFocusedSubtaskIdx(Math.max(0, subtasks.length - 1));
     }
   }, [subtasks.length, focusedSubtaskIdx]);
+
+  // Deleting the last subtask unmounts the focused listbox <ul> (replaced by the
+  // empty note), dropping focus to <body> — out of the modal's role=application.
+  // On the non-empty→empty transition, land focus on the still-mounted add-input
+  // (a natural, announceable spot) or the empty note, keeping NVDA in the dialog.
+  const prevSubtaskLen = useRef(subtasks.length);
+  useEffect(() => {
+    if (prevSubtaskLen.current > 0 && subtasks.length === 0) {
+      (subtaskInputRef.current ?? subtaskEmptyRef.current)?.focus({
+        preventScroll: true,
+      });
+    }
+    prevSubtaskLen.current = subtasks.length;
+  }, [subtasks.length]);
+
+  // Closing the inline section editor (Cancel, save, or Escape) unmounts the
+  // focused control; deleting a section unmounts the delete button. Both would
+  // drop focus to <body>. Return focus to the stable section <select> whenever
+  // the editor closes. The was-open guard keeps this from stealing Modal's
+  // open-focus (on mount sectionMode is already null → no-op).
+  const [sectionMode, setSectionMode] = useState<'create' | 'rename' | null>(
+    null,
+  );
+  const sectionEditorWasOpen = useRef(false);
+  useEffect(() => {
+    if (sectionMode !== null) {
+      sectionEditorWasOpen.current = true;
+    } else if (sectionEditorWasOpen.current) {
+      sectionEditorWasOpen.current = false;
+      sectionSelectRef.current?.focus({ preventScroll: true });
+    }
+  }, [sectionMode]);
   const initialState = useMemo<FormState>(
     () =>
       buildInitialState(
@@ -244,6 +276,11 @@ export function TaskDialog({
   // user can keep typing the next subtask (the button blurs to <body> when its
   // title clears — this keeps focus inside the dialog).
   const subtaskInputRef = useRef<HTMLInputElement>(null);
+  // The stable section <select>: focus lands here after a section is deleted or
+  // the inline section editor closes, so focus never falls to <body>.
+  const sectionSelectRef = useRef<HTMLSelectElement>(null);
+  // Landing spot when the subtask list empties out (its listbox unmounts).
+  const subtaskEmptyRef = useRef<HTMLParagraphElement>(null);
   // Tracks whether the user changed the Status field by hand. While false, the
   // sync effect below keeps the field mirroring the live store status (so a
   // subtask cascade shows up in the dropdown); once true, the field is the
@@ -404,10 +441,8 @@ export function TaskDialog({
   // ── Section management (local lists only) ───────────────────────────
   // `sectionMode` reveals an inline name input for create / rename; the
   // commands persist immediately (like subtasks) and reload the list's
-  // sections so the picker reflects the change.
-  const [sectionMode, setSectionMode] = useState<'create' | 'rename' | null>(
-    null,
-  );
+  // sections so the picker reflects the change. (`sectionMode` is declared
+  // above, next to the focus-return effect that watches it.)
   const [sectionDraft, setSectionDraft] = useState('');
   // Color label bound while creating / editing a section in the inline
   // editor. The section color cascades to its colorless tasks.
@@ -500,6 +535,10 @@ export function TaskDialog({
       console.warn('delete_section failed', err);
     } finally {
       setSectionBusy(false);
+      // The delete button unmounts once form.sectionId clears (the manage
+      // buttons hide), so land focus on the stable section <select> — which now
+      // reads "Kein Abschnitt" — instead of letting it fall to <body>.
+      sectionSelectRef.current?.focus({ preventScroll: true });
     }
   }, [
     form.sectionId,
@@ -1194,6 +1233,7 @@ export function TaskDialog({
             <div className="section-field">
               <select
                 id={sectionFieldId}
+                ref={sectionSelectRef}
                 value={form.sectionId}
                 onChange={(e) => update('sectionId', e.target.value)}
                 disabled={sectionMode !== null}
@@ -1261,6 +1301,10 @@ export function TaskDialog({
                       void submitSection();
                     } else if (e.key === 'Escape') {
                       e.preventDefault();
+                      // Stop Escape from bubbling to Modal's handler, which
+                      // would close the WHOLE task editor and discard unsaved
+                      // field edits. Escape here cancels only the section editor.
+                      e.stopPropagation();
                       setSectionMode(null);
                       setSectionDraft('');
                     }
@@ -1570,7 +1614,16 @@ export function TaskDialog({
                 changes are saved yet. Create mode has its own staged
                 variant below (the parent has no id to reference yet). */}
             {subtasks.length === 0 ? (
-              <p className="subtasks__empty">
+              <p
+                ref={subtaskEmptyRef}
+                tabIndex={-1}
+                className="subtasks__empty"
+                // A focus stop (programmatic only) so, when the last subtask is
+                // deleted and the listbox unmounts, focus can land here — with an
+                // accessible name — instead of falling to <body>. Used as the
+                // fallback target when the add-subtask input isn't rendered.
+                aria-label={t('dialogs.task.subtasks.empty')}
+              >
                 {t('dialogs.task.subtasks.empty')}
               </p>
             ) : (
@@ -1783,15 +1836,24 @@ export function TaskDialog({
           )}
           <button
             type="button"
-            onClick={onClose}
-            disabled={submitting}
+            // aria-disabled (matching the delete button above) instead of native
+            // disabled: natively disabling the focused Save/Cancel button blurs
+            // focus to <body> for the whole save and strands it there when the
+            // save fails. The onClick guard preserves "can't cancel mid-save".
+            onClick={() => {
+              if (!submitting) onClose();
+            }}
+            aria-disabled={submitting || undefined}
             className="form__action"
           >
             {t('dialogs.cancel')}
           </button>
           <button
             type="submit"
-            disabled={submitting}
+            // aria-disabled keeps focus on Save through the round-trip; the
+            // onSubmit re-entry guard (`if (submitting) return`) already blocks
+            // a double write.
+            aria-disabled={submitting || undefined}
             className="form__action form__action--primary"
           >
             {isEdit ? t('dialogs.save') : t('dialogs.create')}

@@ -1,6 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { FocusableNote } from '../a11y/FocusableNote';
 import type { AdapterKind } from '../api/types';
 import { Modal } from './Modal';
 
@@ -26,8 +27,9 @@ import { Modal } from './Modal';
  *     If the user wants out, they delete the account in the
  *     same panel.
  *
- * The single acknowledge button focuses on mount so a keyboard
- * user can dismiss with Enter without a Tab.
+ * Open focus lands on the notice text (via `initialFocusRef`), not the
+ * acknowledge button — the whole point of the modal is that the user reads
+ * (hears) what gets cached and whose policy applies before dismissing it.
  */
 
 export interface ContactsPrivacyNoticeModalProps {
@@ -77,16 +79,7 @@ export function ContactsPrivacyNoticeModal({
   onAcknowledge,
 }: ContactsPrivacyNoticeModalProps) {
   const { t } = useTranslation();
-  const acknowledgeRef = useRef<HTMLButtonElement>(null);
-
-  // Auto-focus the OK button so Enter dismisses without a Tab.
-  // queueMicrotask defers past the Modal's own focus trap so the
-  // button is the first focusable element after the mount cycle
-  // settles.
-  useEffect(() => {
-    if (!isOpen) return;
-    queueMicrotask(() => acknowledgeRef.current?.focus());
-  }, [isOpen]);
+  const introRef = useRef<HTMLParagraphElement>(null);
 
   const provider = providerPolicyFor(adapterKind);
 
@@ -97,14 +90,31 @@ export function ContactsPrivacyNoticeModal({
       title={t('dialogs.accounts.privacyNotice.title')}
       className="modal--confirm"
       dismissOnBackdrop={false}
+      initialFocusRef={introRef}
     >
+      {/*
+        Every line must be REACHABLE — Modal's body is role="application", where
+        a static <p> is invisible to NVDA's focus-mode traversal, so the notice
+        (what is cached, whose policy applies) was never spoken. FocusableNote
+        makes each paragraph a focus stop; the provider line keeps its live link
+        (a focus stop already) but its leading text rides a focusable span.
+      */}
       <div className="form">
-        <p>{t('dialogs.accounts.privacyNotice.body')}</p>
+        <FocusableNote ref={introRef}>
+          {t('dialogs.accounts.privacyNotice.body')}
+        </FocusableNote>
         {provider ? (
           <p>
-            {t('dialogs.accounts.privacyNotice.providerLine', {
-              provider: provider.name,
-            })}{' '}
+            <span
+              tabIndex={0}
+              aria-label={t('dialogs.accounts.privacyNotice.providerLine', {
+                provider: provider.name,
+              })}
+            >
+              {t('dialogs.accounts.privacyNotice.providerLine', {
+                provider: provider.name,
+              })}
+            </span>{' '}
             <a
               href={provider.url}
               target="_blank"
@@ -116,15 +126,16 @@ export function ContactsPrivacyNoticeModal({
             </a>
           </p>
         ) : (
-          <p>{t('dialogs.accounts.privacyNotice.providerGeneric')}</p>
+          <FocusableNote>
+            {t('dialogs.accounts.privacyNotice.providerGeneric')}
+          </FocusableNote>
         )}
-        <p className="form__hint">
+        <FocusableNote className="form__hint">
           {t('dialogs.accounts.privacyNotice.cacheHint')}
-        </p>
+        </FocusableNote>
       </div>
       <div className="form__actions">
         <button
-          ref={acknowledgeRef}
           type="button"
           className="form__action form__action--primary"
           onClick={onAcknowledge}

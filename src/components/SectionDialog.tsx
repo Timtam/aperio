@@ -150,7 +150,10 @@ export function SectionDialog({
             placeholder={t('dialogs.task.section.namePlaceholder')}
             aria-required="true"
             autoFocus
-            disabled={busy}
+            // Intentionally NOT disabled while busy: this input is autofocused,
+            // so disabling it mid-save would blur focus to <body> for the whole
+            // round-trip (and strand it there on the error path). The submit
+            // guard (`if (!trimmed || busy) return`) already blocks re-entry.
           />
         </label>
         <ColorLabelSelect
@@ -164,15 +167,19 @@ export function SectionDialog({
           <button
             type="button"
             className="form__action form__action--secondary"
-            onClick={onClose}
-            disabled={busy}
+            onClick={() => {
+              if (!busy) onClose();
+            }}
+            aria-disabled={busy || undefined}
           >
             {t('dialogs.task.section.cancel')}
           </button>
           <button
             type="submit"
             className="form__action"
-            disabled={busy || !name.trim()}
+            // aria-disabled keeps focus in the dialog through the round-trip;
+            // the onSubmit guard blocks a double write and an empty name.
+            aria-disabled={busy || !name.trim() || undefined}
           >
             {isRename
               ? t('dialogs.task.section.save')

@@ -49,7 +49,7 @@ import { notify } from './notify';
  */
 export function useSync() {
   const { t } = useTranslation();
-  const { openSyncSchemaTooOld, openSyncStaleResume } = useDialogState();
+  const { mode, openSyncSchemaTooOld, openSyncStaleResume } = useDialogState();
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [lastReport, setLastReport] = useState<SyncRoundReport | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -169,7 +169,13 @@ export function useSync() {
   // then forward again).
   useEffect(() => {
     if (status?.schema_too_old && status.min_app_version_required) {
-      if (!announcedSchemaTooOldRef.current) {
+      // Only auto-pop when no dialog is open. DialogHost renders just the top
+      // stack frame, so pushing this on top of an open editor UNMOUNTS it,
+      // tearing the focused input out from under the user and discarding the
+      // in-progress edit. `mode.kind` is a dep and the ref-set stays INSIDE this
+      // branch (not latched while a dialog is up), so the moment the user closes
+      // back to the main view the effect re-runs and the modal pops then.
+      if (!announcedSchemaTooOldRef.current && mode.kind === 'none') {
         announcedSchemaTooOldRef.current = true;
         // No `running` field on the backend status; the modal
         // copy shows it from the user's perspective ("Deine
@@ -191,6 +197,7 @@ export function useSync() {
   }, [
     status?.schema_too_old,
     status?.min_app_version_required,
+    mode.kind,
     openSyncSchemaTooOld,
   ]);
 
@@ -203,14 +210,17 @@ export function useSync() {
   useEffect(() => {
     const since = status?.stale_device_since;
     if (since) {
-      if (!announcedStaleResumeRef.current) {
+      // Defer until no dialog is open — pushing onto the stack unmounts an open
+      // editor and loses its edits (see the schema-too-old effect above). The
+      // `mode.kind` dep re-runs this when the user returns to the main view.
+      if (!announcedStaleResumeRef.current && mode.kind === 'none') {
         announcedStaleResumeRef.current = true;
         openSyncStaleResume(since);
       }
     } else {
       announcedStaleResumeRef.current = false;
     }
-  }, [status?.stale_device_since, openSyncStaleResume]);
+  }, [status?.stale_device_since, mode.kind, openSyncStaleResume]);
 
   // `sync-conflicts-changed` listener — fires when the applier
   // records a new conflict + after every resolve_sync_conflict

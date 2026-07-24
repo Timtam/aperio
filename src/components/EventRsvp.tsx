@@ -141,8 +141,15 @@ export function EventRsvp({ event, onResponded }: EventRsvpProps) {
                 current ? ' rsvp__button--current' : ''
               }`}
               aria-pressed={current}
-              disabled={pending !== null}
-              onClick={() => respond(status)}
+              // aria-disabled (not native disabled): natively disabling the
+              // focused RSVP button blurs focus to <body> for the whole request
+              // and strands it there when the response fails. Keep it focusable;
+              // guard re-entry so a second click while pending is a no-op.
+              aria-disabled={pending !== null || undefined}
+              aria-busy={pending === status || undefined}
+              onClick={() => {
+                if (pending === null) void respond(status);
+              }}
             >
               {t(`dialogs.event.rsvp.action.${status}`)}
             </button>

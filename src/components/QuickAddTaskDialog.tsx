@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
 } from 'react';
@@ -53,13 +54,38 @@ export function QuickAddTaskDialog({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Live mirrors for the pristine check — refs so the reset effect reads the
+  // CURRENT fields without listing them as deps.
+  const titleRef = useRef(title);
+  titleRef.current = title;
+  const dateRef = useRef(date);
+  dateRef.current = date;
+  const listIdRef = useRef(listId);
+  listIdRef.current = listId;
+  const appliedInitialRef = useRef<Initial | null>(null);
+
+  // `initial` is a useMemo over the task-list catalog, so it re-derives identity
+  // on every background refresh while the dialog is open. Re-applying it then
+  // wiped the title the user was typing. Adopt a fresh `initial` only while the
+  // form is still PRISTINE (equal to the last one we applied) — a late-arriving
+  // default list still populates on a cold open, but typed input then wins.
   useEffect(() => {
-    if (isOpen) {
-      setTitle(initial.title);
-      setDate(initial.date);
-      setListId(initial.listId);
-      setError(null);
+    if (!isOpen) {
+      appliedInitialRef.current = null;
+      return;
     }
+    const baseline = appliedInitialRef.current;
+    const pristine =
+      baseline === null ||
+      (titleRef.current === baseline.title &&
+        dateRef.current === baseline.date &&
+        listIdRef.current === baseline.listId);
+    if (!pristine) return; // user touched the form → their input wins
+    appliedInitialRef.current = initial;
+    setTitle(initial.title);
+    setDate(initial.date);
+    setListId(initial.listId);
+    setError(null);
   }, [isOpen, initial]);
 
   const onSubmit = useCallback(

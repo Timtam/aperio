@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { useAnnouncer } from '../a11y/announcerContext';
 import type { CalendarEvent } from '../api/types';
 import { useCancellationChoice } from '../state/useCancellationChoice';
 import { Modal } from './Modal';
@@ -44,9 +45,15 @@ export function DeleteEventScopeDialog({
   onSeries,
 }: DeleteEventScopeDialogProps) {
   const { t } = useTranslation();
+  const announce = useAnnouncer();
   const { offersChoice } = useCancellationChoice(event);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const notifyRef = useRef<HTMLInputElement>(null);
+  // Live mirror of offersChoice so the open-focus effect can read the value AT
+  // OPEN without depending on it (which would re-run and STEAL focus onto the
+  // notify radio if the async organizer check resolves mid-life).
+  const offersChoiceRef = useRef(offersChoice);
+  offersChoiceRef.current = offersChoice;
 
   // Notify default = on (the common intent when cancelling a meeting you own).
   const [notify, setNotify] = useState(true);
@@ -54,15 +61,35 @@ export function DeleteEventScopeDialog({
     if (isOpen) setNotify(true);
   }, [isOpen]);
 
-  // Focus the radio first when it's shown (non-destructive), else the cancel
-  // button — never a scope (delete) button.
+  // Focus ONCE per open — the radio when the organizer choice is already known
+  // at open (non-destructive), else Cancel; never a scope (delete) button. Keyed
+  // on isOpen only (reads the ref), so a late organizer-check resolve grows the
+  // dialog but never yanks focus onto a control the user hasn't heard of.
   useEffect(() => {
     if (!isOpen) return;
     queueMicrotask(() => {
-      if (offersChoice) notifyRef.current?.focus();
+      if (offersChoiceRef.current) notifyRef.current?.focus();
       else cancelRef.current?.focus();
     });
-  }, [isOpen, offersChoice]);
+  }, [isOpen]);
+
+  // The organizer check resolves async, so the notify section appears a beat
+  // after open. Announce that reveal (a false→true transition while open) so the
+  // grown dialog isn't a silent surprise; focus deliberately stays put (see
+  // above), and the user can Tab to the newly announced radios. `prev` starts at
+  // the current value, so a section already present on the first render (were
+  // the check ever synchronous) would not announce.
+  const prevOffersChoiceRef = useRef(offersChoice);
+  useEffect(() => {
+    if (!isOpen) {
+      prevOffersChoiceRef.current = offersChoice;
+      return;
+    }
+    if (offersChoice && !prevOffersChoiceRef.current) {
+      announce(t('dialogs.deleteScope.notifyRevealed'));
+    }
+    prevOffersChoiceRef.current = offersChoice;
+  }, [isOpen, offersChoice, announce, t]);
 
   const run = (fn: (send: boolean) => void) => {
     fn(offersChoice ? notify : false);

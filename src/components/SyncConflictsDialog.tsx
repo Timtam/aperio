@@ -97,6 +97,11 @@ export function SyncConflictsDialog({
   const announce = useAnnouncer();
   const fmt = useDateFormat();
   const [conflicts, setConflicts] = useState<SyncConflict[]>([]);
+  // False until the first listSyncConflicts() settles. Without it the dialog
+  // rendered the "Keine Konflikte" copy against the initial empty array before
+  // the load returned — the user heard "no conflicts", pressed Escape, and left
+  // real conflicts unresolved.
+  const [loaded, setLoaded] = useState(false);
   const [labelByKey, setLabelByKey] = useState<Map<string, string>>(new Map());
   // Group keys currently resolving — disables that card's buttons + marks it
   // aria-busy until the round-trip settles.
@@ -105,6 +110,10 @@ export function SyncConflictsDialog({
   // Stable id for the always-rendered intro note so reparkFocus can fall back
   // to it once the list <ul> has unmounted (the last conflict resolved).
   const introId = useId();
+  // The intro note holds focus on open but reads the "loading" text; once the
+  // first load settles its text changes, but a focused element isn't re-read —
+  // so announce the real count/empty state exactly once.
+  const announcedLoadRef = useRef(false);
 
   const groups = groupSyncConflicts(conflicts);
 
@@ -114,7 +123,8 @@ export function SyncConflictsDialog({
       .catch((err) => {
         // eslint-disable-next-line no-console
         console.warn('list_sync_conflicts failed', err);
-      });
+      })
+      .finally(() => setLoaded(true));
   }, []);
 
   useEffect(() => {
@@ -155,6 +165,19 @@ export function SyncConflictsDialog({
     // `groups` is derived from conflicts; keying on conflicts is sufficient.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conflicts]);
+
+  // Speak the real state once the first load settles (see announcedLoadRef).
+  useEffect(() => {
+    if (!loaded || announcedLoadRef.current) return;
+    announcedLoadRef.current = true;
+    announce(
+      conflicts.length === 0
+        ? t('dialogs.syncConflicts.empty')
+        : conflicts.length === 1
+          ? t('dialogs.syncConflicts.intro_one')
+          : t('dialogs.syncConflicts.intro_other', { count: conflicts.length }),
+    );
+  }, [loaded, conflicts.length, announce, t]);
 
   // Re-park focus on the listbox so the user keeps walking the remaining
   // cards after a row/group unmounts (otherwise focus drops to <body>).
@@ -262,7 +285,11 @@ export function SyncConflictsDialog({
       className="sync-conflicts-dialog"
     >
       <FocusableNote id={introId} className="sync-conflicts__intro">
-        {conflicts.length === 0 ? t('dialogs.syncConflicts.empty') : intro}
+        {!loaded
+          ? t('dialogs.syncConflicts.loading')
+          : conflicts.length === 0
+            ? t('dialogs.syncConflicts.empty')
+            : intro}
       </FocusableNote>
       {conflicts.length > 0 && (
         <button

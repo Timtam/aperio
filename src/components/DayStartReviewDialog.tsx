@@ -610,7 +610,18 @@ export function DayStartReviewDialog({
       // (which routes to the same announced snooze via onClose).
       dismissOnBackdrop={false}
     >
-      <p ref={introRef} tabIndex={-1} className="form__hint">
+      <p
+        ref={introRef}
+        tabIndex={-1}
+        className="form__hint"
+        // The dialog opens with focus here (initialFocusRef). A bare focusable
+        // <p> computes no accessible name, so NVDA announced only the dialog
+        // title and fell silent — the hint that explains the dialog's purpose
+        // was never spoken. Mirror the text into aria-label (same technique as
+        // FocusableNote and the row titles) so it is read on open. Kept
+        // tabIndex={-1}: a programmatic landing spot, not a Tab stop.
+        aria-label={t('dialogs.dayStartReview.hint')}
+      >
         {t('dialogs.dayStartReview.hint')}
       </p>
 

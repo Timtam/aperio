@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
@@ -78,6 +84,12 @@ export function SyncTargetConfigForm({
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const fmt = useDateFormat();
+  // The encryption checkbox that the empty-target "press Verbinden again" step
+  // reveals — focused when it appears so it self-announces and anchors focus.
+  const e2eCheckboxRef = useRef<HTMLInputElement>(null);
+  // The SFTP host field: focus lands here after "Pin vergessen" removes the
+  // pinned-fingerprint block that held the pressed button.
+  const sftpHostRef = useRef<HTMLInputElement>(null);
   const { invalidateData } = useDialogState();
   // After onboarding pulls a whole dataset into the local DB, the sidebar's
   // container catalogs don't re-read on a dataVersion bump — refresh them
@@ -158,6 +170,16 @@ export function SyncTargetConfigForm({
     message: string;
   } | null>(null);
   const [preview, setPreview] = useState<SyncPreview | null>(null);
+  // When the empty-target preview reveals the encryption setup, move focus onto
+  // the newly mounted checkbox so it self-announces ("Verschlüsselung
+  // aktivieren, Kontrollkästchen") instead of appearing silently under the
+  // still-focused Verbinden button — a one-shot, irreversible choice the user
+  // would otherwise skip past unaware.
+  useEffect(() => {
+    if (preview?.kind === 'empty') {
+      e2eCheckboxRef.current?.focus({ preventScroll: true });
+    }
+  }, [preview?.kind]);
   // SFTP host-key trust dialog state.
   const [trustPreview, setTrustPreview] = useState<HostKeyPreview | null>(null);
   const [pendingSftpConfig, setPendingSftpConfig] =
@@ -338,6 +360,12 @@ export function SyncTargetConfigForm({
               kind: 'ok',
               message: t('dialogs.settings.sync.connectEmptyReveal'),
             });
+            // Announce via the persistent announcer too: the feedback <p> is
+            // freshly MOUNTED here (role="status" only announces content that
+            // changes inside an already-present live region), so on its own it
+            // is unreliable. The focus move onto the revealed checkbox (effect
+            // above) then names the new control.
+            announce(t('dialogs.settings.sync.connectEmptyReveal'));
             return;
           }
           if (enableE2eDraft && !passphraseDraft.trim()) {
@@ -578,6 +606,12 @@ export function SyncTargetConfigForm({
       await forgetSftpHostKey(hostPort);
       setPinnedFingerprint(null);
       announce(t('dialogs.settings.sync.sftpForgetPinDone'));
+      // Clearing the pin unmounts the block that held the pressed button,
+      // dropping focus to <body> (out of the modal's role="application"). Land
+      // it on the stable SFTP host field once the removal has committed.
+      requestAnimationFrame(() => {
+        sftpHostRef.current?.focus({ preventScroll: true });
+      });
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('forget_sftp_host_key failed', err);
@@ -801,6 +835,7 @@ export function SyncTargetConfigForm({
             <label>
               {t('dialogs.settings.sync.adapterSftpHost')}
               <input
+                ref={sftpHostRef}
                 type="text"
                 value={sftpHostDraft}
                 onChange={(e) => setSftpHostDraft(e.target.value)}
@@ -1255,6 +1290,7 @@ export function SyncTargetConfigForm({
           onToggle={setEnableE2eDraft}
           passphrase={passphraseDraft}
           onPassphraseChange={setPassphraseDraft}
+          checkboxRef={e2eCheckboxRef}
           t={t}
         />
       )}
@@ -1381,18 +1417,21 @@ function E2eEnableInput({
   onToggle,
   passphrase,
   onPassphraseChange,
+  checkboxRef,
   t,
 }: {
   enabled: boolean;
   onToggle: (next: boolean) => void;
   passphrase: string;
   onPassphraseChange: (next: string) => void;
+  checkboxRef?: RefObject<HTMLInputElement>;
   t: ReturnType<typeof useTranslation>['t'];
 }) {
   return (
     <div className="sync-panel__e2e">
       <label className="sync-panel__field">
         <input
+          ref={checkboxRef}
           type="checkbox"
           checked={enabled}
           onChange={(e) => onToggle(e.target.checked)}

@@ -886,6 +886,7 @@
       "title": "Sync-Konflikte",
       "intro_one": "Ein Feld ist auf zwei Geräten unterschiedlich geändert worden. Wähle, welche Version übernommen werden soll.",
       "intro_other": "{{count}} Felder sind auf zwei Geräten unterschiedlich geändert worden. Wähle pro Eintrag, welche Version übernommen werden soll.",
+      "loading": "Konflikte werden geladen …",
       "empty": "Keine offenen Konflikte.",
       "fieldLabel": "Feld",
       "remoteSourceLabel": "Andere Version vom {{time}} (Gerät {{device}})",
@@ -1144,6 +1145,7 @@
       "notifyLegend": "Teilnehmer",
       "notifyAttendees": "Teilnehmer benachrichtigen",
       "notifySilent": "Ohne Benachrichtigung entfernen",
+      "notifyRevealed": "Du organisierst diesen Termin — wähle oben, ob Teilnehmer benachrichtigt werden.",
       "organizerMessage": "„{{title}}\" ist Teil einer Serie, die du organisierst. Wähle unten, ob die Teilnehmer benachrichtigt werden, und dann den Umfang:"
     },
     "moveScope": {

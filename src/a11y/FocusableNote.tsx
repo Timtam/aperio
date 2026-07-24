@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { forwardRef } from 'react';
 
 /**
  * A focusable paragraph that NVDA reads aloud when it receives
@@ -54,24 +54,23 @@ export interface FocusableNoteProps {
   id?: string;
 }
 
-export function FocusableNote({
-  children,
-  className,
-  id,
-}: FocusableNoteProps): ReactNode {
-  return (
-    <p
-      id={id}
-      tabIndex={0}
-      // `aria-label` mirrors the visible text. Without it, NVDA
-      // in focus mode either falls back to the role (silent for
-      // bare `<p>`, or "Anmerkung" with `role="note"`) or
-      // announces nothing. The duplication isn't ideal but it
-      // gives screen-reader and sighted users the same content.
-      aria-label={children}
-      className={className}
-    >
-      {children}
-    </p>
-  );
-}
+export const FocusableNote = forwardRef<HTMLParagraphElement, FocusableNoteProps>(
+  function FocusableNote({ children, className, id }, ref) {
+    return (
+      <p
+        ref={ref}
+        id={id}
+        tabIndex={0}
+        // `aria-label` mirrors the visible text. Without it, NVDA
+        // in focus mode either falls back to the role (silent for
+        // bare `<p>`, or "Anmerkung" with `role="note"`) or
+        // announces nothing. The duplication isn't ideal but it
+        // gives screen-reader and sighted users the same content.
+        aria-label={children}
+        className={className}
+      >
+        {children}
+      </p>
+    );
+  },
+);
