@@ -1096,8 +1096,11 @@ export function AccountsPanel() {
                       // Ignore row clicks while inline-editing — the
                       // click bubbles from the rename <input>.
                       if (editingRef.current) return;
+                      // A click only SELECTS the row (like arrowing to it).
+                      // Deleting is a deliberate action — the Delete key (per
+                      // the list hint) or the explicit "Delete account" button
+                      // in the detail area below — never an accidental click.
                       setFocusIndex(i);
-                      if (!isLocal) setConfirmTarget(acc);
                     }}
                   >
                     {editingId === acc.id ? (
@@ -1275,6 +1278,20 @@ export function AccountsPanel() {
                 : t('dialogs.accounts.forceResync', {
                     name: accounts[focusIndex].display_name,
                   })}
+            </button>
+          )}
+          {/* Explicit delete affordance for the focused external account — the
+              pointer path now that a row click only selects. Keyboard users
+              still delete via the Delete key (see the list hint). */}
+          {accounts[focusIndex] && !isLocalAt(focusIndex) && (
+            <button
+              type="button"
+              className="form__action form__action--danger accounts-list__delete"
+              onClick={() => tryDelete(focusIndex)}
+            >
+              {t('dialogs.accounts.deleteAccount', {
+                name: accounts[focusIndex].display_name,
+              })}
             </button>
           )}
         </section>

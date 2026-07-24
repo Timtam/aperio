@@ -117,6 +117,7 @@
   },
   "chipMenu": {
     "edit": "Bearbeiten …",
+    "duplicate": "Duplizieren",
     "delete": "Löschen",
     "cancelNotify": "Absagen & Teilnehmer benachrichtigen",
     "cancelSilent": "Ohne Benachrichtigung entfernen",
@@ -1587,6 +1588,7 @@
       "manageHint": "Mit F2 umbenennen, mit Entf entfernen.",
       "forceResync": "„{{name}}“ vollständig neu synchronisieren",
       "forceResyncShort": "Vollständig neu synchronisieren",
+      "deleteAccount": "Konto „{{name}}“ löschen",
       "resyncing": "Wird neu synchronisiert …",
       "resyncStarted": "Vollständige Neusynchronisierung für „{{name}}“ gestartet. Die Kalender und Listen werden im Hintergrund frisch vom Server geladen.",
       "renameLabel": "Konto umbenennen: {{name}}",

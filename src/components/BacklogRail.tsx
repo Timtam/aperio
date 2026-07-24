@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { useAnnouncer } from '../a11y/announcerContext';
 import { isCommandError } from '../api/client';
 import type { Task } from '../api/types';
+import { duplicateTask } from './duplicateActions';
 import { useDateFormat } from '../intl/dateFormat';
 import { labelsLookup, resolveTaskColor } from '../intl/eventColor';
 import {
@@ -300,9 +301,10 @@ function BacklogList({
   showDeadline = false,
 }: BacklogListProps) {
   const { t } = useTranslation();
+  const announce = useAnnouncer();
   const fmt = useDateFormat();
   const { tasks, taskListById } = useTasks();
-  const { openTaskDialog, openPlanTask } = useDialogState();
+  const { openTaskDialog, openPlanTask, invalidateData } = useDialogState();
   const { sectionColorById } = useCalendarStore();
   const { openForTask } = useChipContextMenu();
   const { visualEffortSizing } = useTaskCascadeEnabled();
@@ -345,6 +347,13 @@ function BacklogList({
         if (e.shiftKey) {
           e.preventDefault();
           openPlanTask(task);
+        } else if (e.ctrlKey || e.metaKey) {
+          // Ctrl+D duplicates in place, matching TaskView.
+          e.preventDefault();
+          void duplicateTask(task).then(() => {
+            invalidateData();
+            announce(t('actions.duplicated', { title: task.title }));
+          });
         }
         return;
       case 'ContextMenu':
