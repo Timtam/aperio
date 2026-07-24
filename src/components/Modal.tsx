@@ -166,18 +166,21 @@ export function Modal({
     [onClose],
   );
 
-  // Focus-recovery safety net. A dialog control that the user is on can be
-  // DISABLED (`disabled={busy}` during an async action) or UNMOUNTED (a step
-  // advance, a resolved/removed row, a wiped form) — either drops native focus
-  // to `<body>`, which sits OUTSIDE `#app-root`'s `role="application"`, so NVDA
-  // silently leaves application mode and the dialog's own Escape/Tab handlers
-  // (React listeners on this subtree) stop receiving keys. This is the single
-  // most common dialog focus bug. Rather than fix it at every call site, catch
-  // it here: when focus leaves a dialog descendant to nowhere (body / null)
-  // while the dialog is still open, pull it back to a stable in-dialog stop.
-  // A dialog that moves focus itself lands on an in-dialog element, so
-  // `relatedTarget` is inside the dialog and this never fires — explicit moves
-  // always win; this only rescues the cases nobody handled.
+  // Focus-recovery safety net (best-effort backstop). A dialog control the user
+  // is on can be DISABLED (`disabled={busy}` during an async action) — the
+  // browser blurs it to `<body>`, outside `#app-root`'s `role="application"`,
+  // so NVDA silently leaves application mode and the dialog's own Escape/Tab
+  // handlers (React listeners on this subtree) stop receiving keys. `onBlur`
+  // (a root-delegated focusout listener) reliably catches that still-connected
+  // case and we pull focus back to a stable in-dialog stop. It does NOT
+  // reliably fire when a focused element UNMOUNTS (a step advance, a resolved
+  // row, a wiped form): the removed node is already disconnected, so its
+  // focusout has no path to React's root listener. Those transitions are
+  // therefore handled explicitly at the call sites (a step-heading
+  // useLayoutEffect, a reparkFocus, a pristine guard that prevents the unmount
+  // altogether); this net is the backstop for anything they miss. A dialog that
+  // moves focus itself lands on an in-dialog element, so `relatedTarget` is
+  // inside the dialog and this never fires — explicit moves always win.
   const handleFocusOut = useCallback((e: FocusEvent<HTMLDivElement>) => {
     const dialog = dialogRef.current;
     if (!dialog) return;

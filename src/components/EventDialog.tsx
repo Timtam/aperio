@@ -281,10 +281,18 @@ export function EventDialog({
   // NVDA switched to browse mode with the dialog still up) AND silently wiped
   // everything the user had typed. So: adopt a fresh initialState only while the
   // form is still PRISTINE (byte-identical to the last one we applied). Once the
-  // user has touched anything, their edits win until the dialog closes. The
-  // sibling toggles (edit scope, notify, keep-as-default) are re-armed ONLY on
-  // the first hydrate of this open — never on an incidental pristine re-run,
-  // which would re-check "notify attendees" after the user unchecked it.
+  // user has touched anything, their edits win until the dialog closes.
+  //
+  // `initialState` is not final at first render: the calendar default-reminders
+  // overlay hydrates via an async pref read, and a cold calendar store resolves
+  // the default calendarId a beat late — both re-derive `initialState` shortly
+  // after mount. So `setForm` (and its COUPLED keep-as-default flag — applying
+  // the overlaid reminders while leaving the flag false would submit them as
+  // per-event VALARMs) must adopt the fresh initialState on EVERY pristine run,
+  // exactly like ContactDialog. Only the toggles that are INDEPENDENT of `form`
+  // (edit scope, notify) and the transient availability/error resets are gated
+  // to the first hydrate — re-arming those on an incidental pristine churn would
+  // undo an untouched-form change like the user unchecking "notify attendees".
   useEffect(() => {
     if (!isOpen) {
       appliedInitialRef.current = null;
@@ -298,11 +306,11 @@ export function EventDialog({
       JSON.stringify(formRef.current) === JSON.stringify(baseline);
     if (!pristine) return; // user touched the form → their edits win
     appliedInitialRef.current = initialState;
-    if (!firstHydrate) return; // pristine churn: form already correct, leave toggles alone
     setForm(initialState);
+    setKeepRemindersAsDefault(remindersWereFromDefault);
+    if (!firstHydrate) return; // form tracked; leave the independent toggles alone
     setError(null);
     setEditScope(initialScope ?? 'occurrence');
-    setKeepRemindersAsDefault(remindersWereFromDefault);
     setNotifyAttendees(true);
     setAvailability(null);
     setAvailabilityWindow(null);

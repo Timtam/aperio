@@ -61,19 +61,18 @@ export function FirstLaunchWizardDialog({
   // and the wizard's Escape/Tab handlers go dead. Move focus onto the newly
   // mounted step's heading on every transition so focus stays inside the dialog
   // and NVDA announces which step the user landed on. A useLayoutEffect (not
-  // useEffect) so it runs synchronously in the same commit and beats Modal's
-  // focus-recovery microtask — no transient flash onto the × button. The
-  // first-render guard leaves Modal's own open-focus (the step indicator)
-  // untouched. Only the mounted step's <h3> binds headingRef, so this always
-  // targets the step now on screen. Also covers the async connect→account jump
-  // in onSyncConnected, which has the identical unmount-under-focus shape.
+  // useEffect) so it runs synchronously in the same commit. We fire only when
+  // the step VALUE actually changed (not merely on every effect run): that
+  // leaves Modal's own open-focus (the step indicator) untouched on mount and
+  // is robust to StrictMode's dev-only double-invocation. Only the mounted
+  // step's <h3> binds headingRef, so this always targets the step now on
+  // screen. Also covers the async connect→account jump in onSyncConnected,
+  // which has the identical unmount-under-focus shape.
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const didMountRef = useRef(false);
+  const prevStepRef = useRef(step);
   useLayoutEffect(() => {
-    if (!didMountRef.current) {
-      didMountRef.current = true;
-      return;
-    }
+    if (prevStepRef.current === step) return;
+    prevStepRef.current = step;
     headingRef.current?.focus({ preventScroll: true });
   }, [step]);
 

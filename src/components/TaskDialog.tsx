@@ -549,6 +549,10 @@ export function TaskDialog({
     if (!task) return;
     const trimmed = newSubtaskTitle.trim();
     if (!trimmed || subtaskBusy) return;
+    // Remember which control triggered the add (the input on the Enter path,
+    // the button on the click path) so the finally can tell "focus is still
+    // where I left it" from "the user tabbed away during the round-trip".
+    const focusAtStart = document.activeElement;
     setSubtaskBusy(true);
     try {
       const created = await apiCreateTask({
@@ -585,7 +589,10 @@ export function TaskDialog({
         }),
         [...tasks, created],
       );
-      setNewSubtaskTitle('');
+      // Clear only if the field still holds what we submitted. The input stays
+      // enabled during the round-trip (so the Enter path never blurs to <body>),
+      // so a fast user may have started the next title — don't wipe that.
+      setNewSubtaskTitle((prev) => (prev.trim() === trimmed ? '' : prev));
       invalidateData();
       announce(t('dialogs.task.subtasks.added', { title: trimmed }));
     } catch (err) {
@@ -596,8 +603,15 @@ export function TaskDialog({
     } finally {
       setSubtaskBusy(false);
       // Return focus to the (cleared) input so the user keeps typing the next
-      // subtask instead of landing on <body> once the button disables itself.
-      subtaskInputRef.current?.focus();
+      // subtask instead of landing on <body> once the button disables itself —
+      // but ONLY if they haven't deliberately moved focus elsewhere. Refocus
+      // when focus still rests on the triggering control (input on Enter, the
+      // now-disabled button on click) or was stranded on <body>; if the user
+      // tabbed to another field mid-round-trip, leave their focus alone.
+      const active = document.activeElement;
+      if (active === focusAtStart || active === document.body || active === null) {
+        subtaskInputRef.current?.focus();
+      }
     }
   }, [
     task,
