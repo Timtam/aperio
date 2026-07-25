@@ -2277,9 +2277,12 @@ Umgesetzt über `tauri-plugin-autostart`. Die Betriebssystem-Registrierung ist d
 | **Linux** | `.desktop`-Autostart-Datei unter `~/.config/autostart` |
 
 - **Geräte-lokal:** Autostart gilt nur für das Gerät, auf dem er aktiviert wird – wie die Tray- und Darstellungs-Einstellungen wird er **nicht** über das Event Log synchronisiert.
-- **Bedienung:** Ein Schalter „Aperio bei der Anmeldung starten" unter `Einstellungen → Allgemein → Systemstart`, plus – solange aktiv – ein expliziter Knopf **„Autostart abschalten"** (entfernt die Registrierung; auch als Wiederherstellung bei einem hängenden Eintrag). Vollständig per Tastatur bedienbar und mit Screen Readern nutzbar; ist der Start bei der Anmeldung in der Laufzeitumgebung nicht verfügbar, bleibt der Schalter deaktiviert mit erklärendem Hinweis.
-- **Startverhalten:** Der beim Autostart registrierte Aufruf trägt das Argument `--minimized`. Existiert ein Infobereich (Abschnitt 15.3), startet Aperio dann direkt **minimiert im Infobereich** (das Fenster wird mit `visible: false` erzeugt und beim Autostart gar nicht erst eingeblendet – kein Aufblitzen); ein Klick auf das Infobereich-Symbol holt es hervor. Ohne nutzbaren Infobereich wird das Fenster normal angezeigt, damit die App nie unsichtbar-und-unerreichbar startet. Ein manueller Start (ohne `--minimized`) öffnet immer normal.
-- Registrierung erfolgt benutzerspezifisch (kein Admin-Recht nötig); Abschalten entfernt den Eintrag wieder vollständig.
+- **Bedienung:** Zwei Häkchen unter `Einstellungen → Allgemein → Systemstart`:
+  1. **„Aperio bei der Anmeldung starten"** – schaltet die OS-Registrierung an/aus (Abhaken entfernt den Eintrag wieder vollständig).
+  2. **„Minimiert im Infobereich starten"** – nur sichtbar, solange Autostart an ist; steuert das Startverhalten (siehe unten). Geräte-lokale Einstellung `window.autostartMinimized`, Standard **an**; ohne nutzbaren Infobereich deaktiviert.
+  Beide vollständig per Tastatur bedienbar und mit Screen Readern nutzbar; ist der Start bei der Anmeldung in der Laufzeitumgebung nicht verfügbar, bleibt der erste Schalter deaktiviert mit erklärendem Hinweis.
+- **Startverhalten:** Der beim Autostart registrierte Aufruf trägt das Argument `--autostart` (markiert nur die Startquelle). Beim Start entscheidet die App: Ist es ein Autostart-Aufruf, existiert ein Infobereich (Abschnitt 15.3) **und** ist die Pref „minimiert starten" an, startet Aperio direkt **minimiert im Infobereich** (das Fenster wird mit `visible: false` erzeugt und gar nicht erst eingeblendet – kein Aufblitzen); ein Klick auf das Infobereich-Symbol holt es hervor. Sonst – kein Infobereich, Pref aus, oder manueller Start (ohne `--autostart`) – wird das Fenster normal angezeigt, sodass die App nie unsichtbar-und-unerreichbar startet.
+- Registrierung erfolgt benutzerspezifisch (kein Admin-Recht nötig).
 
 Optional lässt sich Autostart auch im Erststart-Assistenten (17.3) als weitere Checkbox anbieten:
 

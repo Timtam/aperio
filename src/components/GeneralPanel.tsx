@@ -28,6 +28,9 @@ import { useViewState } from '../state/viewStateContext';
 
 const CLOSE_TO_TRAY = 'window.closeToTray';
 const MINIMIZE_TO_TRAY = 'window.minimizeToTray';
+// §17.4: whether an autostart launch starts hidden in the tray. Device-local;
+// defaults ON (unset ⇒ on) — matches the backend `pref_bool(..., true)`.
+const AUTOSTART_MINIMIZED = 'window.autostartMinimized';
 
 /**
  * General app settings (Settings → Allgemein):
@@ -81,6 +84,9 @@ export function GeneralPanel() {
   const [autostartSupported, setAutostartSupported] = useState<boolean | null>(
     null,
   );
+  // Whether an autostart launch starts hidden in the tray (device-local pref,
+  // default on). Only meaningful when a tray exists.
+  const [autostartMinimized, setAutostartMinimized] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -88,12 +94,15 @@ export function GeneralPanel() {
       const langPref = await readLanguagePref();
       if (!cancelled) setLanguage(langPref);
       try {
-        const [avail, closePref, minPref] = await Promise.all([
+        const [avail, closePref, minPref, autoMinPref] = await Promise.all([
           trayAvailable(),
           getUserPref(CLOSE_TO_TRAY),
           getUserPref(MINIMIZE_TO_TRAY),
+          getUserPref(AUTOSTART_MINIMIZED),
         ]);
         if (cancelled) return;
+        // Default ON: only an explicit "false" turns minimized-start off.
+        setAutostartMinimized(autoMinPref !== 'false');
         setAvailable(avail);
         setCloseToTray(closePref === 'true');
         setMinimizeToTray(minPref === 'true');
@@ -146,20 +155,6 @@ export function GeneralPanel() {
       // eslint-disable-next-line no-console
       console.warn('autostart set failed', err);
       setAutostart(!next);
-    });
-  };
-
-  // Explicit "turn autostart off" action (removes the OS registration). Same
-  // effect as unchecking the box, but a clear one-click off / recovery from a
-  // stuck registration. On failure, re-read the real OS state.
-  const onDisableAutostart = () => {
-    setAutostart(false);
-    void autostartSet(false).catch((err) => {
-      // eslint-disable-next-line no-console
-      console.warn('autostart disable failed', err);
-      void autostartIsEnabled()
-        .then(setAutostart)
-        .catch(() => {});
     });
   };
 
@@ -345,13 +340,28 @@ export function GeneralPanel() {
           {t('dialogs.settings.general.autostartHint')}
         </p>
         {autostart && (
-          <button
-            type="button"
-            className="form__action form__action--secondary general-panel__autostart-off"
-            onClick={onDisableAutostart}
-          >
-            {t('dialogs.settings.general.autostartDisable')}
-          </button>
+          <>
+            <label className="general-panel__toggle">
+              <input
+                type="checkbox"
+                checked={autostartMinimized}
+                disabled={trayDisabled}
+                onChange={(e) =>
+                  persist(
+                    AUTOSTART_MINIMIZED,
+                    e.target.checked,
+                    setAutostartMinimized,
+                  )
+                }
+              />
+              <span>
+                {t('dialogs.settings.general.autostartMinimizedLabel')}
+              </span>
+            </label>
+            <p className="form__hint general-panel__toggle-hint">
+              {t('dialogs.settings.general.autostartMinimizedHint')}
+            </p>
+          </>
         )}
       </section>
 

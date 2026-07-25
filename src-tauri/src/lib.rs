@@ -505,13 +505,15 @@ pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
-        // §17.4 Autostart. The registered command carries `--minimized` so an
-        // autostart launch can start hidden in the tray (see the setup hook);
-        // a hand-launch has no such arg and opens normally. The OS registration
-        // is the single source of truth, toggled from the `autostart_*` commands.
+        // §17.4 Autostart. The registered command carries `--autostart` to mark
+        // the launch source; the setup hook then decides whether to start hidden
+        // in the tray based on the `window.autostartMinimized` pref. A
+        // hand-launch has no such arg and always opens normally. The OS
+        // registration is the single source of truth, toggled from the
+        // `autostart_*` commands.
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec!["--minimized"]),
+            Some(vec!["--autostart"]),
         ))
         .manage(audio_player)
         .manage(commands::SoundsDir(sounds_dir_for_commands))
@@ -926,11 +928,16 @@ pub fn run() {
                 window_state::fit_to_current_monitor(&win);
                 // §17.4: the window is created hidden (`visible: false` in
                 // tauri.conf.json) to avoid a flash. Show it now — UNLESS this
-                // is an autostart `--minimized` launch AND a tray exists to
-                // reach it from, in which case it starts tucked in the tray.
-                // Without a tray we always show, so the app can never launch
-                // invisible-and-unreachable.
-                let start_hidden = tray_available && std::env::args().any(|a| a == "--minimized");
+                // is an autostart launch (marked `--autostart`; `--minimized`
+                // also matches any entry a pre-toggle build registered), a tray
+                // exists to reach it from, AND the "start minimized" pref is on
+                // (default on). Without a tray we always show, so the app can
+                // never launch invisible-and-unreachable.
+                let is_autostart_launch =
+                    std::env::args().any(|a| a == "--autostart" || a == "--minimized");
+                let start_hidden = is_autostart_launch
+                    && tray_available
+                    && tray::pref_bool(app.handle(), tray::AUTOSTART_MINIMIZED_PREF, true);
                 if !start_hidden {
                     let _ = win.show();
                 }
