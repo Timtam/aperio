@@ -29,6 +29,11 @@ use crate::DbHandle;
 pub const CLOSE_TO_TRAY_PREF: &str = "window.closeToTray";
 /// `"true"` ⇒ the minimize button hides to tray instead of minimizing.
 pub const MINIMIZE_TO_TRAY_PREF: &str = "window.minimizeToTray";
+/// §17.4: whether an autostart launch starts hidden in the tray (rather than
+/// showing the window). Only honoured when a tray exists. Defaults ON — the
+/// point of autostart is background reminders — so an UNSET pref means "start
+/// minimized"; only an explicit `"false"` opts out.
+pub const AUTOSTART_MINIMIZED_PREF: &str = "window.autostartMinimized";
 
 const MAIN_WINDOW: &str = "main";
 
@@ -134,6 +139,22 @@ pub fn pref_is_true(app: &AppHandle, key: &str) -> bool {
             .as_deref(),
         Some("true"),
     )
+}
+
+/// Read a boolean user-pref, returning `default` when it is unset (or
+/// unreadable). Used for prefs whose off value isn't the natural default.
+pub fn pref_bool(app: &AppHandle, key: &str, default: bool) -> bool {
+    let shared = app.state::<DbHandle>().shared();
+    match UserPrefsRepo::new(&shared)
+        .get(key)
+        .ok()
+        .flatten()
+        .as_deref()
+    {
+        Some("true") => true,
+        Some("false") => false,
+        _ => default,
+    }
 }
 
 /// Whether a system tray exists — drives the Settings toggles' enabled state.
