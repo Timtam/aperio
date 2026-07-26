@@ -1066,7 +1066,7 @@
     "dayStartReview": {
       "title": "Tageswechsel-Übersicht",
       "hint": "Aufgaben, die nach gestern noch eine Entscheidung brauchen. Pro Eintrag entscheiden oder die Sammelaktionen je Abschnitt nutzen.",
-      "hintRemindersOnly": "Erinnerungen für heute — hier ist nichts zu entscheiden. Eine Aufgabe öffnen, um dorthin zu springen, oder mit OK schließen.",
+      "hintRemindersOnly": "Erinnerungen für heute — hier ist nichts zu entscheiden. Nach dem Lesen mit OK schließen.",
       "snooze": "Später erinnern",
       "acknowledge": "OK",
       "snoozed": "Erinnerung für 4 Stunden verschoben.",

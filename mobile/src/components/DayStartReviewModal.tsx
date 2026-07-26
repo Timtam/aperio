@@ -226,6 +226,13 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   );
   const totalRemaining = remainingOverdue.length + remainingSlipped.length;
 
+  // Reminders-only review: nothing left to decide, just today's read-only
+  // nudges. "Remind me later" is meaningless here (no work to defer, and the
+  // day is already marked reviewed before the modal opens), so the footer
+  // offers a plain acknowledge, hardware-back closes without burning a snooze,
+  // and the intro copy swaps. Mirrors the desktop dialog.
+  const remindersOnly = totalRemaining === 0 && hasReminders;
+
   // ── Managed screen-reader focus ─────────────────────────────────────────────
   // Each row registers its title node; after an action we land focus on the
   // next remaining row so the user keeps their place. The title gets focus on
@@ -268,14 +275,15 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   // defensive empty-on-open (checker + modal raced) closes WITHOUT snoozing —
   // there's no reason to suppress a real future trigger. Both wait for the
   // initial fetch + behaviour load so a transient empty state can't close us.
-  // A reminders-ONLY review (no actionable rows opened, nothing resolved yet)
-  // stays open: reminders are a valid reason to surface the dialog, so it isn't
-  // auto-dismissed here. Once the user has resolved a row, the "all handled"
-  // close still fires — the read-only reminders never block that.
+  // Reminders keep the modal up — whether the review opened that way or the
+  // user just cleared the last actionable row. The day's fire marker is written
+  // BEFORE the modal opens, so closing here is FINAL for today: auto-dismissing
+  // on the last "done" tap would silently eat reminders the user never read.
+  // It falls through to the reminders-only state instead (announced below).
   useEffect(() => {
     if (!visible || behaviour == null || loading) return;
     if (totalRemaining > 0) return;
-    if (resolvedIds.size === 0 && hasReminders) return;
+    if (hasReminders) return;
     if (resolvedIds.size > 0) {
       announce(t('dialogs.dayStartReview.allHandled'));
       void snoozeDayStartReview(4);
@@ -295,6 +303,27 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
     t,
     onClose,
   ]);
+
+  // Speak the switch INTO the reminders-only state: the intro copy and the
+  // footer button's identity both change, and VoiceOver doesn't re-read an
+  // element whose label changed under it. Either the user cleared the last
+  // actionable row, or the rows were never really there (a stale read on the
+  // opening render) — the first wants "all handled", the second the new hint.
+  const wasRemindersOnly = useRef(false);
+  useEffect(() => {
+    if (!visible) {
+      wasRemindersOnly.current = false;
+      return;
+    }
+    if (remindersOnly && !wasRemindersOnly.current) {
+      announce(
+        resolvedIds.size > 0
+          ? t('dialogs.dayStartReview.allHandled')
+          : t('dialogs.dayStartReview.hintRemindersOnly'),
+      );
+    }
+    wasRemindersOnly.current = remindersOnly;
+  }, [visible, remindersOnly, resolvedIds.size, announce, t]);
 
   // ── Deadline-section actions ────────────────────────────────────────────────
 
@@ -519,14 +548,6 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   );
 
   // ── Snooze ───────────────────────────────────────────────────────────────────
-
-  // Reminders-only review: nothing to decide, just today's read-only nudges.
-  // "Remind me later" is meaningless here (there's no work to defer, and the
-  // day is already marked reviewed), so the footer offers a plain acknowledge
-  // instead and hardware-back closes without burning a 4-hour snooze. The intro
-  // copy swaps too — the default hint promises decisions + bulk actions that
-  // don't exist in this state. Mirrors the desktop dialog.
-  const remindersOnly = totalRemaining === 0 && hasReminders;
 
   const snoozeLater = useCallback(() => {
     // Reachable as the hardware-back handler even while the behaviour read is
@@ -821,9 +842,16 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
                   : 'dialogs.dayStartReview.snooze',
               )}
               onPress={remindersOnly ? onClose : snoozeLater}
-              style={({ pressed }) => [styles.snoozeButton, pressed && styles.actionPressed]}
+              style={({ pressed }) => [
+                styles.snoozeButton,
+                remindersOnly && styles.acknowledgeButton,
+                pressed && styles.actionPressed,
+              ]}
             >
-              <Text style={styles.snoozeText} importantForAccessibility="no">
+              <Text
+                style={[styles.snoozeText, remindersOnly && styles.acknowledgeText]}
+                importantForAccessibility="no"
+              >
                 {t(
                   remindersOnly
                     ? 'dialogs.dayStartReview.acknowledge'
@@ -928,4 +956,13 @@ const makeStyles = (c: ThemeColors) =>
       marginTop: 8,
     },
     snoozeText: { fontSize: 16, fontWeight: '600', color: c.link },
+    // Reminders-only: OK is the modal's PRIMARY and only explicit exit, so it
+    // gets a filled button instead of the borderless link styling — otherwise
+    // it reads as just another link like the reminder rows above it.
+    acknowledgeButton: {
+      backgroundColor: c.accent,
+      minHeight: 44,
+      justifyContent: 'center',
+    },
+    acknowledgeText: { color: c.textOnAccent },
   });
