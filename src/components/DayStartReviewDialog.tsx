@@ -596,10 +596,25 @@ export function DayStartReviewDialog({
     return null;
   }
 
+  // Reminders-only review: nothing to decide, just today's read-only nudges.
+  // "Später erinnern" is meaningless here (there's no work to defer, and the
+  // day is already marked reviewed — the gate won't re-fire today either way),
+  // so the footer offers a plain acknowledge instead, and Escape / the × close
+  // without burning a 4-hour snooze. The intro copy swaps too: the default
+  // hint promises per-row decisions and bulk actions that don't exist here.
+  const remindersOnly = totalRemaining === 0 && hasReminders;
+  const hintText = t(
+    remindersOnly
+      ? 'dialogs.dayStartReview.hintRemindersOnly'
+      : 'dialogs.dayStartReview.hint',
+  );
+
   return (
     <Modal
       isOpen={isOpen}
-      onClose={snoozeLater}
+      // Escape / the × snooze a real review, but merely acknowledge a
+      // reminders-only one (see `remindersOnly` above).
+      onClose={remindersOnly ? onClose : snoozeLater}
       title={t('dialogs.dayStartReview.title')}
       className="modal--form modal--day-start-review"
       initialFocusRef={introRef}
@@ -620,9 +635,9 @@ export function DayStartReviewDialog({
         // was never spoken. Mirror the text into aria-label (same technique as
         // FocusableNote and the row titles) so it is read on open. Kept
         // tabIndex={-1}: a programmatic landing spot, not a Tab stop.
-        aria-label={t('dialogs.dayStartReview.hint')}
+        aria-label={hintText}
       >
-        {t('dialogs.dayStartReview.hint')}
+        {hintText}
       </p>
 
       {remainingOverdue.length > 0 && (
@@ -853,9 +868,19 @@ export function DayStartReviewDialog({
       )}
 
       <div className="form__actions">
-        <button type="button" className="form__action" onClick={snoozeLater}>
-          {t('dialogs.dayStartReview.snooze')}
-        </button>
+        {remindersOnly ? (
+          <button
+            type="button"
+            className="form__action form__action--primary"
+            onClick={onClose}
+          >
+            {t('dialogs.dayStartReview.acknowledge')}
+          </button>
+        ) : (
+          <button type="button" className="form__action" onClick={snoozeLater}>
+            {t('dialogs.dayStartReview.snooze')}
+          </button>
+        )}
       </div>
     </Modal>
   );

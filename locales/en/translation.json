@@ -1069,7 +1069,9 @@
     "dayStartReview": {
       "title": "Day-start review",
       "hint": "Tasks that need a decision now that yesterday is over. Resolve them one by one or use the bulk actions per section.",
+      "hintRemindersOnly": "Reminders for today — nothing needs a decision. Open a task to jump to it, or acknowledge to close.",
       "snooze": "Remind me later",
+      "acknowledge": "OK",
       "snoozed": "Reminder snoozed for 4 hours.",
       "allHandled": "All review items handled.",
       "delete": "Delete",

@@ -520,6 +520,14 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
 
   // ── Snooze ───────────────────────────────────────────────────────────────────
 
+  // Reminders-only review: nothing to decide, just today's read-only nudges.
+  // "Remind me later" is meaningless here (there's no work to defer, and the
+  // day is already marked reviewed), so the footer offers a plain acknowledge
+  // instead and hardware-back closes without burning a 4-hour snooze. The intro
+  // copy swaps too — the default hint promises decisions + bulk actions that
+  // don't exist in this state. Mirrors the desktop dialog.
+  const remindersOnly = totalRemaining === 0 && hasReminders;
+
   const snoozeLater = useCallback(() => {
     // Reachable as the hardware-back handler even while the behaviour read is
     // still in flight (the visible "Remind me later" button only renders once
@@ -628,14 +636,20 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
     <Modal
       visible={visible}
       animationType="slide"
-      onRequestClose={snoozeLater}
+      onRequestClose={remindersOnly ? onClose : snoozeLater}
       onShow={focusTitle}
     >
       <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
         <Text ref={titleRef} accessibilityRole="header" style={styles.title}>
           {t('dialogs.dayStartReview.title')}
         </Text>
-        <Text style={styles.hint}>{t('dialogs.dayStartReview.hint')}</Text>
+        <Text style={styles.hint}>
+          {t(
+            remindersOnly
+              ? 'dialogs.dayStartReview.hintRemindersOnly'
+              : 'dialogs.dayStartReview.hint',
+          )}
+        </Text>
 
         {behaviour == null || (loading && totalRemaining === 0) ? (
           <View
@@ -801,12 +815,20 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
 
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={t('dialogs.dayStartReview.snooze')}
-              onPress={snoozeLater}
+              accessibilityLabel={t(
+                remindersOnly
+                  ? 'dialogs.dayStartReview.acknowledge'
+                  : 'dialogs.dayStartReview.snooze',
+              )}
+              onPress={remindersOnly ? onClose : snoozeLater}
               style={({ pressed }) => [styles.snoozeButton, pressed && styles.actionPressed]}
             >
               <Text style={styles.snoozeText} importantForAccessibility="no">
-                {t('dialogs.dayStartReview.snooze')}
+                {t(
+                  remindersOnly
+                    ? 'dialogs.dayStartReview.acknowledge'
+                    : 'dialogs.dayStartReview.snooze',
+                )}
               </Text>
             </Pressable>
           </ScrollView>
