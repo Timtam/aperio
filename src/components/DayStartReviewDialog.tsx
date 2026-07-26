@@ -208,16 +208,62 @@ export function DayStartReviewDialog({
   );
   const totalRemaining = remainingOverdue.length + remainingSlipped.length;
 
-  // Close + snooze when the list empties out mid-session — the user
-  // just cleared everything, no point keeping the modal up.
+  // Reminders-only review: nothing left to decide, just today's read-only
+  // nudges. "Später erinnern" is meaningless here (no work to defer, and the
+  // day is already marked reviewed before the dialog opens — the gate won't
+  // re-fire today either way), so the footer offers a plain acknowledge, Escape
+  // and the × close without burning a snooze, and the intro copy swaps.
+  const remindersOnly = totalRemaining === 0 && hasReminders;
+
+  // Close when the actionable list empties out mid-session — the user just
+  // cleared everything, no point keeping the modal up.
+  //
+  // …UNLESS reminders are still on screen. The day's fire marker is written
+  // BEFORE the dialog opens, so a close here is FINAL for today: tearing the
+  // dialog down the moment the last deadline is ticked off would silently eat
+  // reminders the user never read. Fall through to the reminders-only state
+  // instead (the announce + focus repark below carry the transition).
   useEffect(() => {
     if (!isOpen) return;
-    if (totalRemaining === 0 && resolvedIds.size > 0) {
-      snoozeDayStartReview(4);
-      announce(t('dialogs.dayStartReview.allHandled'));
-      onClose();
+    if (totalRemaining > 0 || resolvedIds.size === 0) return;
+    if (hasReminders) return;
+    snoozeDayStartReview(4);
+    announce(t('dialogs.dayStartReview.allHandled'));
+    onClose();
+  }, [
+    isOpen,
+    totalRemaining,
+    resolvedIds.size,
+    hasReminders,
+    announce,
+    t,
+    onClose,
+  ]);
+
+  // Speak the switch INTO the reminders-only state. The intro's text (and its
+  // aria-label) and the footer button's identity both change here, and a
+  // focused element is not re-read when its label changes — so a silent swap
+  // would leave the screen reader describing a dialog that no longer exists.
+  // Two ways in: the user cleared the last actionable row (announce what
+  // happened; the repark below then lands on the intro, which reads the new
+  // hint), or the rows were never really there (a stale `tasks` read on the
+  // mount render) — then focus is already parked on the intro and only the
+  // text changed, so the hint itself is what needs speaking.
+  const wasRemindersOnly = useRef(false);
+  useEffect(() => {
+    if (!isOpen) {
+      wasRemindersOnly.current = false;
+      return;
     }
-  }, [isOpen, totalRemaining, resolvedIds.size, announce, t, onClose]);
+    if (remindersOnly && !wasRemindersOnly.current) {
+      announce(
+        resolvedIds.size > 0
+          ? t('dialogs.dayStartReview.allHandled')
+          : t('dialogs.dayStartReview.hintRemindersOnly'),
+      );
+    }
+    wasRemindersOnly.current = remindersOnly;
+  }, [isOpen, remindersOnly, resolvedIds.size, announce, t]);
 
   // Each per-row action unmounts the very button that was pressed, dropping
   // focus to <body> — outside #app-root's role="application", so NVDA leaves
@@ -227,19 +273,22 @@ export function DayStartReviewDialog({
   // falling out. A useLayoutEffect runs in the same commit (before Modal's
   // last-resort recovery frame), so this informed repark wins. Gated on
   // resolvedIds.size so it never fires on first open (Modal's initialFocusRef
-  // owns that) and on totalRemaining so the emptied-list path is left to the
-  // auto-close effect above. Only acts when focus actually fell outside the
-  // dialog body — a still-mounted bulk button keeping focus is left alone.
+  // owns that). Only acts when focus actually fell outside the dialog body — a
+  // still-mounted bulk button keeping focus is left alone. When the last
+  // actionable row goes and reminders keep the dialog up, there is no next
+  // action button to land on: fall back to the intro, whose aria-label now
+  // carries the reminders-only hint, so the screen reader describes the state
+  // the dialog just switched into.
   useLayoutEffect(() => {
     if (!isOpen) return;
     if (resolvedIds.size === 0) return;
-    if (totalRemaining === 0) return;
     const body = introRef.current?.closest('.modal__body') ?? null;
     const active = document.activeElement;
     if (active instanceof HTMLElement && body?.contains(active)) return;
     const next =
-      body?.querySelector<HTMLElement>('.missed-tasks__actions button') ??
-      introRef.current;
+      (totalRemaining > 0
+        ? body?.querySelector<HTMLElement>('.missed-tasks__actions button')
+        : null) ?? introRef.current;
     next?.focus({ preventScroll: true });
   }, [isOpen, totalRemaining, resolvedIds]);
 
@@ -596,10 +645,20 @@ export function DayStartReviewDialog({
     return null;
   }
 
+  // The intro copy follows the same switch: the default hint promises per-row
+  // decisions and bulk actions that don't exist in a reminders-only review.
+  const hintText = t(
+    remindersOnly
+      ? 'dialogs.dayStartReview.hintRemindersOnly'
+      : 'dialogs.dayStartReview.hint',
+  );
+
   return (
     <Modal
       isOpen={isOpen}
-      onClose={snoozeLater}
+      // Escape / the × snooze a real review, but merely acknowledge a
+      // reminders-only one (see `remindersOnly` above).
+      onClose={remindersOnly ? onClose : snoozeLater}
       title={t('dialogs.dayStartReview.title')}
       className="modal--form modal--day-start-review"
       initialFocusRef={introRef}
@@ -620,9 +679,9 @@ export function DayStartReviewDialog({
         // was never spoken. Mirror the text into aria-label (same technique as
         // FocusableNote and the row titles) so it is read on open. Kept
         // tabIndex={-1}: a programmatic landing spot, not a Tab stop.
-        aria-label={t('dialogs.dayStartReview.hint')}
+        aria-label={hintText}
       >
-        {t('dialogs.dayStartReview.hint')}
+        {hintText}
       </p>
 
       {remainingOverdue.length > 0 && (
@@ -853,9 +912,19 @@ export function DayStartReviewDialog({
       )}
 
       <div className="form__actions">
-        <button type="button" className="form__action" onClick={snoozeLater}>
-          {t('dialogs.dayStartReview.snooze')}
-        </button>
+        {remindersOnly ? (
+          <button
+            type="button"
+            className="form__action form__action--primary"
+            onClick={onClose}
+          >
+            {t('dialogs.dayStartReview.acknowledge')}
+          </button>
+        ) : (
+          <button type="button" className="form__action" onClick={snoozeLater}>
+            {t('dialogs.dayStartReview.snooze')}
+          </button>
+        )}
       </div>
     </Modal>
   );
