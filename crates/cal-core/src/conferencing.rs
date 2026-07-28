@@ -118,6 +118,19 @@ pub struct ConferenceLink {
     /// A dial-in number, as a `tel:` URI.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phone: Option<String>,
+    /// The `label: value` lines the invitation itself puts next to the link,
+    /// with the labels exactly as they were written.
+    ///
+    /// This is how the details survive without a dictionary: a real Webex
+    /// invitation from an Exchange organiser carries no `tel:` and no `sip:`
+    /// at all, and its meeting id and password sit behind prose labels —
+    /// "Besprechungs-ID", "Meeting number (access code)", whatever the sender's
+    /// Webex site is set to. Rather than learning those, the label is treated
+    /// as DATA and handed on verbatim. A screen reader then reads
+    /// "Besprechungs-ID, 27401156686" in the language the invitation actually
+    /// arrived in, and Aperio never needed to know what the words mean.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labelled_details: Vec<(String, String)>,
 }
 
 /// The fields a detector looks at, in the order it prefers them.
@@ -197,6 +210,10 @@ pub fn detect_conference(sources: &ConferenceSources<'_>) -> Option<ConferenceLi
             .flatten()
             .collect();
             let details = extract_details(&all);
+            let labelled = sources
+                .description
+                .map(|d| labelled_lines_near(d, &join_url))
+                .unwrap_or_default();
             return Some(ConferenceLink {
                 join_url,
                 provider,
@@ -205,6 +222,7 @@ pub fn detect_conference(sources: &ConferenceSources<'_>) -> Option<ConferenceLi
                 password: details.password,
                 sip_address: details.sip_address,
                 phone: details.phone,
+                labelled_details: labelled,
             });
         }
     }
@@ -336,6 +354,57 @@ fn host_of(lower_url: &str) -> Option<&str> {
         .next()?;
     // Drop the port.
     Some(host.split(':').next().unwrap_or(host))
+}
+
+/// How many `label: value` pairs are worth carrying. A conferencing block has
+/// a handful; more than this means the scan wandered into the body text.
+const MAX_LABELLED: usize = 6;
+/// Bounds that keep an ordinary sentence containing a colon from looking like a
+/// labelled field.
+const MAX_LABEL_CHARS: usize = 40;
+const MAX_VALUE_CHARS: usize = 60;
+
+/// Read the `label: value` lines that follow the join link.
+///
+/// Deliberately knows no labels. It takes the text from the join link onward —
+/// which is where every invitation puts these — and reads each line that has
+/// the shape, keeping the label exactly as written. The bounds are what stop it
+/// from harvesting prose: a real label is short, a real value is short and on
+/// the same line, and a line whose value is a URL is the link itself rather
+/// than a detail.
+fn labelled_lines_near(description: &str, join_url: &str) -> Vec<(String, String)> {
+    let from = description
+        .find(join_url)
+        .map(|at| at + join_url.len())
+        .unwrap_or(0);
+    let mut out: Vec<(String, String)> = Vec::new();
+    for line in description[from..].lines() {
+        if out.len() >= MAX_LABELLED {
+            break;
+        }
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Some((label, value)) = line.split_once(':') else {
+            continue;
+        };
+        let label = label.trim();
+        let value = value.trim();
+        if label.is_empty()
+            || value.is_empty()
+            || label.chars().count() > MAX_LABEL_CHARS
+            || value.chars().count() > MAX_VALUE_CHARS
+            // A URL is the link, not a detail — and `https` would otherwise
+            // read as a label with the rest of the address as its value.
+            || value.starts_with("//")
+            || value.contains("://")
+        {
+            continue;
+        }
+        out.push((label.to_string(), value.to_string()));
+    }
+    out
 }
 
 #[derive(Default)]
@@ -614,6 +683,123 @@ mod tests {
             let found = from_description(&format!("Link: {url}")).expect(url);
             assert_eq!(found.provider, provider, "for {url}");
         }
+    }
+
+    /// A real German Webex invitation, as Exchange delivers it.
+    ///
+    /// Structure, wording and escaping are verbatim from a captured
+    /// `text/calendar` part (`PRODID:Microsoft Exchange Server 2010`); the
+    /// names, the site, the MTID, the meeting id and the password are invented.
+    /// What it pins down, and what made it worth capturing:
+    ///
+    /// * `LOCATION;LANGUAGE=de-DE:` was **empty** — for this Exchange-plus-Webex
+    ///   path the location carries nothing, so a detector that only looked
+    ///   there would find no meeting at all;
+    /// * the invitation has **no** `CONFERENCE`, no `X-WEBEX-*` and no
+    ///   `X-MICROSOFT-SKYPETEAMS*` — only `X-MICROSOFT-CDO-*`, which say
+    ///   nothing about conferencing;
+    /// * it has **no** `tel:` and **no** `sip:`, so the machine-readable detail
+    ///   carriers are absent and the id and password exist only behind German
+    ///   labels — with an alphanumeric password, which no digit heuristic
+    ///   would have found either.
+    const GERMAN_EXCHANGE_INVITATION: &str = "                Hallo Leonie,\n\
+        \n\
+        wie vereinbart, hier der Regeltermin für die Abstimmung deiner Bachelorarbeit.\n\
+        \n\
+        Bis dahin!\n\
+        \n\
+        Mit lieben Grüßen.\n\
+        \n\
+        Toni\n\
+        ________________________________\n\
+        Nehmen Sie an dieser Videokonferenz teil via \
+        https://example.webex.com/example/j.php?MTID=m0123456789abcdef0123456789abcdef\n\
+        \n\
+        Besprechungs-ID: 27401156686\n\
+        Passwort: PteT3RSYi92\n";
+
+    #[test]
+    fn the_real_german_invitation_is_recognised_with_an_empty_location() {
+        let found = detect_conference(&ConferenceSources {
+            // Exactly as Exchange delivered it: present, and empty.
+            location: Some(""),
+            description: Some(GERMAN_EXCHANGE_INVITATION),
+            ..Default::default()
+        })
+        .expect("the join link must be found");
+
+        assert_eq!(found.provider, ConferenceProvider::Webex);
+        assert_eq!(found.source, ConferenceSource::Description);
+        assert_eq!(
+            found.join_url,
+            "https://example.webex.com/example/j.php?MTID=m0123456789abcdef0123456789abcdef"
+        );
+    }
+
+    #[test]
+    fn the_real_invitations_details_survive_without_knowing_any_german() {
+        let found = detect_conference(&ConferenceSources {
+            description: Some(GERMAN_EXCHANGE_INVITATION),
+            ..Default::default()
+        })
+        .expect("detected");
+
+        // No tel:, no sip: — so the machine-readable path finds nothing, and
+        // saying otherwise would be the claim this fixture disproves.
+        assert!(found.meeting_number.is_none());
+        assert!(found.password.is_none());
+        assert!(found.phone.is_none() && found.sip_address.is_none());
+
+        // The labels carry them instead, verbatim and in the sender's language.
+        assert_eq!(
+            found.labelled_details,
+            vec![
+                ("Besprechungs-ID".to_string(), "27401156686".to_string()),
+                ("Passwort".to_string(), "PteT3RSYi92".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_prose_above_the_link_is_not_harvested_as_details() {
+        // The greeting, the sign-off and the separator rule all precede the
+        // link; only the block after it is a conferencing block.
+        let found = detect_conference(&ConferenceSources {
+            description: Some(GERMAN_EXCHANGE_INVITATION),
+            ..Default::default()
+        })
+        .expect("detected");
+        assert!(
+            found
+                .labelled_details
+                .iter()
+                .all(|(l, _)| l != "Hallo Leonie"),
+            "picked up prose: {:?}",
+            found.labelled_details
+        );
+        assert_eq!(found.labelled_details.len(), 2);
+    }
+
+    #[test]
+    fn an_english_invitation_yields_english_labels_from_the_same_code() {
+        // The point of treating the label as data: no branch, no dictionary.
+        let found = from_description(
+            "Join the meeting: https://example.webex.com/e/j.php?MTID=m1\n\
+             \n\
+             Meeting number (access code): 2550 311 3955\n\
+             Meeting password: ocn114\n",
+        )
+        .expect("detected");
+        assert_eq!(
+            found.labelled_details,
+            vec![
+                (
+                    "Meeting number (access code)".to_string(),
+                    "2550 311 3955".to_string()
+                ),
+                ("Meeting password".to_string(), "ocn114".to_string()),
+            ]
+        );
     }
 
     #[test]
