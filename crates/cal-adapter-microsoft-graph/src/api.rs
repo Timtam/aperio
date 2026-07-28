@@ -21,9 +21,9 @@ use crate::error::{GraphError, GraphResult};
 use crate::mapping::{
     aperio_extension_write, event_to_body, map_calendar, map_event, map_task, map_task_list,
     new_event_to_body, new_task_to_body, split_task_id, task_to_body, CalendarListResponse,
-    EventDeltaResponse, EventEntry, EventListResponse, GraphDateTime, TodoListEntry,
-    TodoListResponse, TodoTaskDeltaResponse, TodoTaskEntry, TodoTaskResponse,
-    APERIO_EXTENSION_NAME,
+    EventBodyRead, EventDeltaResponse, EventEntry, EventListResponse, EventWriteBody,
+    GraphDateTime, TodoListEntry, TodoListResponse, TodoTaskDeltaResponse, TodoTaskEntry,
+    TodoTaskResponse, APERIO_EXTENSION_NAME,
 };
 
 pub const API_BASE: &str = "https://graph.microsoft.com/v1.0";
@@ -447,10 +447,77 @@ pub async fn update_event(state: &ApiState, ev: &Event) -> GraphResult<Event> {
     // unique within the mailbox.
     let id_enc = urlencoding(&ev.id);
     let path = format!("/me/events/{id_enc}");
-    let body = event_to_body(ev)?;
+    // Do not rewrite a description the user did not touch.
+    //
+    // Aperio's `Event.description` is PLAIN TEXT, but an Outlook body is
+    // usually HTML — meeting invitations especially, with their dial-in blocks
+    // and links. Sending the flattened text back would replace the server's
+    // formatted body with its own plain-text shadow on every save, even one
+    // that only moved the event by an hour. So: read what the server has,
+    // flatten it exactly as the read path does, and if that equals what we are
+    // about to send, omit `body` from the PATCH. Graph leaves an omitted
+    // property untouched.
+    //
+    // The extra GET costs one round-trip per update and is worth it: the
+    // alternative is silent, irreversible, server-side data loss. If it fails
+    // we send the body anyway — the user asked to save, and a failed save is
+    // worse than a flattened description.
+    let current = match state.get_json::<EventEntry>(&path).await {
+        Ok(current) => Some(current),
+        Err(err) => {
+            tracing::warn!(
+                ?err,
+                event_id = %ev.id,
+                "could not read the current event before update; sending the body as \
+                 plain text, which flattens an HTML description"
+            );
+            None
+        }
+    };
+    let body = body_for_update(current.as_ref(), ev)?;
+
     let entry: EventEntry = state.patch_json(&path, &body).await?;
     map_event(entry, &ev.calendar_id)?
         .ok_or_else(|| GraphError::Protocol("update returned cancelled event".into()))
+}
+
+/// Whether the description the caller is about to write is the same text the
+/// server already has, ignoring differences that survive neither the HTML
+/// flattening nor a text field: trailing whitespace and line-ending style.
+///
+/// `None` and `Some("")` are the same thing here — an event with no description
+/// and one with an empty description are indistinguishable to the user, and
+/// treating them as different would rewrite the body on every save of an event
+/// that never had one.
+fn description_matches(server: Option<&str>, outgoing: Option<&str>) -> bool {
+    fn norm(v: Option<&str>) -> String {
+        v.unwrap_or_default()
+            .replace("\r\n", "\n")
+            .trim()
+            .to_string()
+    }
+    norm(server) == norm(outgoing)
+}
+
+/// Build the PATCH body for an update, dropping `body` when the description is
+/// the one already on the server. Split out from [`update_event`] so the
+/// decision is unit-testable without an HTTP round-trip — it is the part that
+/// prevents server-side data loss, so it deserves a direct test rather than one
+/// that infers it from a serialised request.
+fn body_for_update(current: Option<&EventEntry>, ev: &Event) -> GraphResult<EventWriteBody> {
+    let mut body = event_to_body(ev)?;
+    if let Some(current) = current {
+        let server_text = current
+            .body
+            .as_ref()
+            .and_then(EventBodyRead::as_plain_text)
+            .filter(|s| !s.is_empty())
+            .or_else(|| current.body_preview.clone());
+        if description_matches(server_text.as_deref(), ev.description.as_deref()) {
+            body.body = None;
+        }
+    }
+    Ok(body)
 }
 
 pub async fn delete_event(state: &ApiState, event_id: &str) -> GraphResult<()> {
@@ -1164,6 +1231,157 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, GraphError::Http { status: 410, .. }));
+    }
+
+    /// Build an Event for the update tests without spelling out 20 fields.
+    fn event_fixture(description: Option<&str>) -> Event {
+        serde_json::from_value(serde_json::json!({
+            "id": "ev1",
+            "calendar_id": "cal-1",
+            "title": "Weekly",
+            "description": description,
+            "location": null,
+            "start": "2026-05-25T10:00:00Z",
+            "end": "2026-05-25T10:30:00Z",
+            "all_day": false,
+            "recurrence": null,
+            "color_label": null,
+            "reminders": [],
+            "sound": null,
+            "attendees": [],
+            "created_at": "2026-05-01T00:00:00Z",
+            "updated_at": "2026-05-01T00:00:00Z",
+            "etag": null,
+        }))
+        .expect("event fixture")
+    }
+
+    const SERVER_EVENT_HTML: &str = r##"{
+        "id": "ev1",
+        "subject": "Weekly",
+        "isAllDay": false,
+        "isReminderOn": false,
+        "bodyPreview": "Join the meeting Code 1234",
+        "body": {
+            "contentType": "html",
+            "content": "<html><body><p>Join the meeting</p><p>Code 1234</p></body></html>"
+        },
+        "start": {"dateTime": "2026-05-25T10:00:00", "timeZone": "UTC"},
+        "end":   {"dateTime": "2026-05-25T10:30:00", "timeZone": "UTC"}
+    }"##;
+
+    #[test]
+    fn update_omits_the_body_when_the_description_was_not_touched() {
+        // THE regression this whole change exists for. The user moved the
+        // event, not its description — so the formatted HTML body on the server
+        // must survive, which means the PATCH carries no `body` at all.
+        let current: EventEntry = serde_json::from_str(SERVER_EVENT_HTML).expect("entry");
+        // What the editor round-trips back: the flattened text it was shown.
+        let ev = event_fixture(Some("Join the meeting\nCode 1234"));
+        let body = body_for_update(Some(&current), &ev).expect("body");
+        assert!(
+            body.body.is_none(),
+            "an untouched description must not be written back"
+        );
+        assert_eq!(
+            body.subject.as_deref(),
+            Some("Weekly"),
+            "the rest still goes"
+        );
+        // And the serialised request really has no `body` key — `body` is
+        // `skip_serializing_if = "Option::is_none"`, but that is the property
+        // the fix depends on, so assert it rather than assume it.
+        let json = serde_json::to_string(&body).expect("serialise");
+        assert!(!json.contains("\"body\""), "serialised as {json}");
+    }
+
+    #[test]
+    fn update_omits_the_body_for_an_event_that_never_had_a_description() {
+        // `None` on both sides must also count as unchanged, or every save of a
+        // description-less event would write an empty body.
+        let current: EventEntry = serde_json::from_value(serde_json::json!({
+            "id": "ev1",
+            "subject": "Weekly",
+            "isAllDay": false,
+            "isReminderOn": false,
+            "start": {"dateTime": "2026-05-25T10:00:00", "timeZone": "UTC"},
+            "end":   {"dateTime": "2026-05-25T10:30:00", "timeZone": "UTC"},
+        }))
+        .expect("entry");
+        let body = body_for_update(Some(&current), &event_fixture(None)).expect("body");
+        assert!(body.body.is_none());
+    }
+
+    #[test]
+    fn update_sends_the_body_when_there_is_nothing_to_compare_against() {
+        // The pre-read failed, so we cannot know — send it. A failed save would
+        // be worse than a flattened description.
+        let body = body_for_update(None, &event_fixture(Some("whatever"))).expect("body");
+        assert_eq!(body.body.map(|b| b.content).as_deref(), Some("whatever"));
+    }
+
+    #[tokio::test]
+    async fn update_sends_the_body_when_the_description_really_changed() {
+        let mut server = mockito::Server::new_async().await;
+        let get = server
+            .mock("GET", "/me/events/ev1")
+            .with_status(200)
+            .with_body(SERVER_EVENT_HTML)
+            .create_async()
+            .await;
+        let patch = server
+            .mock("PATCH", "/me/events/ev1")
+            .match_body(mockito::Matcher::Regex(
+                r#""content":"Rewritten by the user""#.into(),
+            ))
+            .with_status(200)
+            .with_body(SERVER_EVENT_HTML)
+            .create_async()
+            .await;
+
+        let state = fixture_state(&server.url());
+        let ev = event_fixture(Some("Rewritten by the user"));
+        update_event(&state, &ev).await.unwrap();
+
+        get.assert_async().await;
+        patch.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn update_still_saves_when_the_pre_read_fails() {
+        // A failed save is worse than a flattened description: the user asked
+        // to save, so a GET that 500s must not block the PATCH.
+        let mut server = mockito::Server::new_async().await;
+        let get = server
+            .mock("GET", "/me/events/ev1")
+            .with_status(500)
+            .with_body("{}")
+            .create_async()
+            .await;
+        let patch = server
+            .mock("PATCH", "/me/events/ev1")
+            .with_status(200)
+            .with_body(SERVER_EVENT_HTML)
+            .create_async()
+            .await;
+
+        let state = fixture_state(&server.url());
+        update_event(&state, &event_fixture(Some("anything")))
+            .await
+            .unwrap();
+
+        get.assert_async().await;
+        patch.assert_async().await;
+    }
+
+    #[test]
+    fn description_matches_ignores_line_endings_and_empty_versus_absent() {
+        assert!(description_matches(Some("a\r\nb"), Some("a\nb")));
+        assert!(description_matches(Some("text  \n"), Some("text")));
+        assert!(description_matches(None, Some("")));
+        assert!(description_matches(Some(""), None));
+        assert!(description_matches(None, None));
+        assert!(!description_matches(Some("old"), Some("new")));
     }
 
     #[tokio::test]

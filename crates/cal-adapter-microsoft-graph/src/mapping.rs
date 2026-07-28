@@ -111,6 +111,15 @@ pub struct EventEntry {
     pub id: String,
     #[serde(default)]
     pub subject: Option<String>,
+    /// The FULL body. Graph returns it on every event read (the adapter sets
+    /// no `$select`, so the default property set applies) — reading only
+    /// `bodyPreview` and then writing that back as `body` truncated every
+    /// description to its ~255-character preview, server-side.
+    #[serde(default)]
+    pub body: Option<EventBodyRead>,
+    /// Graph's truncated plain-text preview. Kept as a FALLBACK for a shape
+    /// that carries no `body`, so the field is not silently dropped if a
+    /// future `$select` narrows the read.
     #[serde(default, rename = "bodyPreview")]
     pub body_preview: Option<String>,
     #[serde(default)]
@@ -140,6 +149,162 @@ pub struct EventEntry {
     /// The meeting organizer.
     #[serde(default)]
     pub organizer: Option<GraphRecipient>,
+}
+
+/// An event body as Graph returns it: the content plus which of the two
+/// content types it is in.
+#[derive(Debug, Clone, Deserialize)]
+pub struct EventBodyRead {
+    #[serde(default, rename = "contentType")]
+    pub content_type: Option<String>,
+    #[serde(default)]
+    pub content: Option<String>,
+}
+
+impl EventBodyRead {
+    /// True when Graph labelled this body as HTML.
+    pub fn is_html(&self) -> bool {
+        self.content_type
+            .as_deref()
+            .is_some_and(|t| t.eq_ignore_ascii_case("html"))
+    }
+
+    /// The body as plain text for Aperio's `Event.description`, which is a
+    /// plain-text field rendered as such on both platforms.
+    pub fn as_plain_text(&self) -> Option<String> {
+        let content = self.content.as_deref()?;
+        Some(if self.is_html() {
+            html_to_text(content)
+        } else {
+            content.to_string()
+        })
+    }
+}
+
+/// Flatten an HTML body to readable plain text.
+///
+/// Deliberately small: Graph event bodies are Outlook-authored HTML and the
+/// goal is a description a human can read in a plain-text field, not fidelity.
+/// Anything richer would be a lie anyway, because the editor cannot round-trip
+/// it — which is exactly why an UNCHANGED body is never written back (see
+/// `api::update_event`).
+pub fn html_to_text(html: &str) -> String {
+    let bytes = html.as_bytes();
+    let mut out = String::with_capacity(html.len());
+    let mut i = 0usize;
+    while i < html.len() {
+        if bytes[i] != b'<' {
+            // Copy one whole char — indexing by byte would split a multi-byte
+            // one, and Outlook bodies are full of umlauts and dashes.
+            let ch = html[i..].chars().next().expect("i is a char boundary");
+            out.push(ch);
+            i += ch.len_utf8();
+            continue;
+        }
+        let Some(close_rel) = html[i..].find('>') else {
+            // Unterminated tag: the rest is not markup, so keep it as text
+            // rather than swallowing the tail of the description.
+            out.push_str(&html[i..]);
+            break;
+        };
+        let tag = &html[i + 1..i + close_rel];
+        i += close_rel + 1;
+
+        let closing = tag.starts_with('/');
+        let name = tag
+            .trim_start_matches('/')
+            .split(|ch: char| ch.is_whitespace() || ch == '/')
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+
+        match name.as_str() {
+            // Script and style contents are not text — skip past the close tag.
+            "script" | "style" if !closing => {
+                let needle = format!("</{name}");
+                let rest = &html[i..];
+                i += match rest.to_ascii_lowercase().find(&needle) {
+                    Some(pos) => rest[pos..]
+                        .find('>')
+                        .map(|e| pos + e + 1)
+                        .unwrap_or(rest.len()),
+                    None => rest.len(),
+                };
+            }
+            // Block-level elements and breaks become newlines so the text keeps
+            // a shape; every other tag simply disappears.
+            "br" | "p" | "div" | "tr" | "li" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
+            | "blockquote" | "table" => out.push('\n'),
+            _ => {}
+        }
+    }
+
+    let decoded = decode_entities(&out);
+    // Drop the blank lines the block tags leave behind. Both the opening and
+    // the closing tag emit a newline — the opening one so a block starts on its
+    // own line, the closing one so text that follows the block does not run
+    // into it — which leaves an empty line between every pair of blocks. Outlook
+    // wraps nearly every line in its own `<div>`, so keeping them would
+    // double-space the whole description. Dropping them gives one line per
+    // block, which is what a plain-text field and a screen reader both want.
+    decoded
+        .lines()
+        .map(str::trim_end)
+        .filter(|line| !line.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
+/// Decode the entities that actually appear in Outlook bodies, plus numeric
+/// references. An unknown named entity is left verbatim — showing `&hearts;`
+/// beats swallowing text.
+fn decode_entities(s: &str) -> String {
+    if !s.contains('&') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(amp) = rest.find('&') {
+        out.push_str(&rest[..amp]);
+        let tail = &rest[amp..];
+        let Some(semi) = tail[..tail.len().min(12)].find(';') else {
+            out.push('&');
+            rest = &tail[1..];
+            continue;
+        };
+        let entity = &tail[1..semi];
+        let replacement = match entity {
+            "amp" => Some("&".to_string()),
+            "lt" => Some("<".to_string()),
+            "gt" => Some(">".to_string()),
+            "quot" => Some("\"".to_string()),
+            "apos" | "#39" => Some("'".to_string()),
+            "nbsp" => Some("\u{a0}".to_string()),
+            other => other
+                .strip_prefix('#')
+                .and_then(|n| {
+                    n.strip_prefix(['x', 'X'])
+                        .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+                        .or_else(|| n.parse::<u32>().ok())
+                })
+                .and_then(char::from_u32)
+                .map(|c| c.to_string()),
+        };
+        match replacement {
+            Some(r) => {
+                out.push_str(&r);
+                rest = &tail[semi + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = &tail[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 #[derive(Debug, Deserialize)]
@@ -397,7 +562,12 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Eve
         id: entry.id,
         calendar_id: calendar_id.to_string(),
         title: entry.subject.unwrap_or_default(),
-        description: entry.body_preview,
+        description: entry
+            .body
+            .as_ref()
+            .and_then(EventBodyRead::as_plain_text)
+            .filter(|s| !s.is_empty())
+            .or(entry.body_preview),
         location: entry.location.and_then(|l| l.display_name),
         start,
         end,
@@ -1526,6 +1696,95 @@ fn day_name_to_weekday(s: &str) -> Option<cal_core::Weekday> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── description round-trip ────────────────────────────────────────────
+    //
+    // Regression cover for a live data-loss bug: the adapter read
+    // `bodyPreview` — Graph's ~255-character plain-text preview — into
+    // `Event.description`, and the write path sent that back as the full
+    // `body`. Saving an unrelated field on an Outlook event therefore replaced
+    // its description with a truncated, unformatted stump, server-side.
+
+    #[test]
+    fn description_comes_from_the_full_body_not_the_preview() {
+        let entry: EventEntry = serde_json::from_value(serde_json::json!({
+            "id": "evt-1",
+            "subject": "Weekly",
+            "bodyPreview": "Truncated preview…",
+            "body": { "contentType": "text", "content": "The whole description." },
+            "start": { "dateTime": "2026-07-28T09:00:00.0000000", "timeZone": "UTC" },
+            "end": { "dateTime": "2026-07-28T10:00:00.0000000", "timeZone": "UTC" },
+        }))
+        .expect("event entry");
+        let ev = map_event(entry, "cal-1").unwrap().expect("event");
+        assert_eq!(ev.description.as_deref(), Some("The whole description."));
+    }
+
+    #[test]
+    fn description_falls_back_to_the_preview_when_there_is_no_body() {
+        let entry: EventEntry = serde_json::from_value(serde_json::json!({
+            "id": "evt-2",
+            "subject": "Weekly",
+            "bodyPreview": "Only a preview",
+            "start": { "dateTime": "2026-07-28T09:00:00.0000000", "timeZone": "UTC" },
+            "end": { "dateTime": "2026-07-28T10:00:00.0000000", "timeZone": "UTC" },
+        }))
+        .expect("event entry");
+        let ev = map_event(entry, "cal-1").unwrap().expect("event");
+        assert_eq!(ev.description.as_deref(), Some("Only a preview"));
+    }
+
+    #[test]
+    fn an_html_body_is_flattened_for_the_plain_text_description() {
+        let entry: EventEntry = serde_json::from_value(serde_json::json!({
+            "id": "evt-3",
+            "subject": "Weekly",
+            "bodyPreview": "Join here",
+            "body": {
+                "contentType": "html",
+                "content": "<html><body><p>Join here:</p><p><a href=\"https://x/j\">https://x/j</a></p><div>Code&nbsp;1234</div></body></html>"
+            },
+            "start": { "dateTime": "2026-07-28T09:00:00.0000000", "timeZone": "UTC" },
+            "end": { "dateTime": "2026-07-28T10:00:00.0000000", "timeZone": "UTC" },
+        }))
+        .expect("event entry");
+        let ev = map_event(entry, "cal-1").unwrap().expect("event");
+        let text = ev.description.expect("description");
+        assert!(text.contains("Join here:"), "text was {text:?}");
+        assert!(
+            text.contains("https://x/j"),
+            "the join URL must survive: {text:?}"
+        );
+        assert!(
+            text.contains('\u{a0}') || text.contains("Code"),
+            "entities decode: {text:?}"
+        );
+        assert!(!text.contains('<'), "no markup may remain: {text:?}");
+    }
+
+    #[test]
+    fn html_to_text_keeps_line_structure_and_drops_scripts() {
+        let html = "<p>One</p><script>var x = '<p>not text</p>';</script><p>Two</p>";
+        assert_eq!(html_to_text(html), "One\nTwo");
+    }
+
+    #[test]
+    fn html_to_text_survives_multibyte_and_unterminated_tags() {
+        // A byte-indexed scanner would split "ü"; an unterminated tag must not
+        // swallow the rest of a description.
+        assert_eq!(html_to_text("Grüße <b>Welt</b>"), "Grüße Welt");
+        assert_eq!(html_to_text("tail <notclosed"), "tail <notclosed");
+    }
+
+    #[test]
+    fn html_to_text_decodes_numeric_and_named_entities() {
+        assert_eq!(
+            html_to_text("a &amp; b &lt;c&gt; &#65; &#x42;"),
+            "a & b <c> A B"
+        );
+        // An unknown entity is left verbatim rather than swallowed.
+        assert_eq!(html_to_text("&hearts;"), "&hearts;");
+    }
 
     /// All-day instants the way the frontend produces them: LOCAL
     /// midnights (end exclusive), expressed in UTC. Keeps the asserted
