@@ -690,6 +690,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "builtin-oauth"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "serde",
+ "sha2",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

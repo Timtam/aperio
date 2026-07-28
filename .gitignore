@@ -42,6 +42,13 @@ desktop.ini
 .env.local
 .env.*.local
 
+# Built-in OAuth client credentials for LOCAL builds — real client ids and
+# secrets for Webex / Google / …, read at build time by crates/builtin-oauth.
+# NEVER commit. CI supplies the same values as environment variables from
+# repository secrets instead of a file. See crates/builtin-oauth/README.md.
+/oauth-clients.local.env
+/oauth-clients.local.env.*
+
 # Claude Code — local settings & worktrees
 .claude/settings.local.json
 .claude/worktrees/
