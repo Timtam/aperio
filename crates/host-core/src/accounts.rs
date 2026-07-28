@@ -183,7 +183,27 @@ impl<'a> AccountsRepo<'a> {
         let rows = stmt.query_map([], row_to_account)?;
         let mut out = Vec::new();
         for r in rows {
-            out.push(r??);
+            match r? {
+                Ok(account) => out.push(account),
+                // SKIP, don't propagate. `adapter_kind` is written into this
+                // table by the sync applier as an OPAQUE string, so a device
+                // running an older build receives rows for kinds it has never
+                // heard of the moment the newer device creates one. Failing the
+                // whole listing on a single such row took the entire Accounts
+                // panel down AND aborted `register_persisted`, i.e. every
+                // adapter stopped registering — one unknown account, no
+                // calendars at all. The row stays in the table untouched and
+                // reappears once this device is updated.
+                Err(AccountsError::UnknownKind(kind)) => {
+                    tracing::warn!(
+                        adapter_kind = %kind,
+                        "skipping account with an adapter kind this build does not know \
+                         (created by a newer Aperio on another device); update this device \
+                         to use it"
+                    );
+                }
+                Err(other) => return Err(other),
+            }
         }
         Ok(out)
     }
@@ -365,6 +385,46 @@ mod tests {
         let repo = AccountsRepo::new(&shared);
         let renamed = repo.rename(LOCAL_ACCOUNT_ID, "My device").unwrap();
         assert_eq!(renamed.display_name, "My device");
+    }
+
+    #[test]
+    fn list_skips_rows_whose_adapter_kind_this_build_does_not_know() {
+        // The sync applier writes `adapter_kind` as an opaque string, so a
+        // device running an older build WILL see kinds it cannot parse once a
+        // newer device creates one. Before the skip, `list()` returned Err for
+        // the whole table — the Accounts panel went empty and
+        // `register_persisted` bailed, so NO adapter registered at all.
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        let repo = AccountsRepo::new(&shared);
+        let known = repo.create(AdapterKind::Caldav, "Nextcloud", "{}").unwrap();
+
+        {
+            let conn = shared.lock().unwrap();
+            conn.execute(
+                "INSERT INTO accounts (id, adapter_kind, display_name,
+                                       config_json, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+                params![
+                    "from-the-future",
+                    "quantum_teleconference",
+                    "Something newer",
+                    "{}",
+                    "2026-07-28T00:00:00Z",
+                    "2026-07-28T00:00:00Z"
+                ],
+            )
+            .unwrap();
+        }
+
+        let listed = repo.list().expect("an unknown kind must not fail the list");
+        assert!(listed.iter().any(|a| a.id == known.id));
+        assert!(listed.iter().all(|a| a.id != "from-the-future"));
+
+        // A direct lookup by id still reports the truth — the caller asked for
+        // that specific row, so silently returning None would be a lie.
+        let err = repo.get("from-the-future").unwrap_err();
+        assert!(matches!(err, AccountsError::UnknownKind(_)));
     }
 
     #[test]

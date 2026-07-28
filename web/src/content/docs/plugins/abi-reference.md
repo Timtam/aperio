@@ -135,6 +135,6 @@ match the C header, so the Rust and C views can't drift.
 
 ## Other plugin types
 
-`sync-adapter` and `vc-adapter` plugins use the same lifecycle and
+`sync-adapter` and `videoconference-adapter` plugins use the same lifecycle and
 JSON-over-FFI mechanics with their own vtables. The patterns below
 generalise.

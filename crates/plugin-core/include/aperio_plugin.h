@@ -207,9 +207,23 @@ typedef struct AperioPlugin {
     const char *version;
 
     /* Plugin-type tag string ("calendar-adapter", "sync-adapter",
-       …). The enum above mirrors the canonical set; future tags
-       can be added without bumping ABI as long as the host
-       gracefully degrades on unknown values. */
+       …). The enum above mirrors the canonical set.
+
+       Adding a future tag does not require an ABI bump — but note
+       what a host that predates the tag actually does today: it
+       PARSES the unknown value fine and then REFUSES the load with
+       a manifest error, which the Settings UI reports as "this
+       plugin's manifest is invalid". That is a misleading
+       diagnosis for what is really "this Aperio is too old". Until
+       that path grows its own reason code, a plugin introducing a
+       new type should set `min_app_version` in plugin.json to the
+       release that understands it, so older hosts fail with the
+       accurate "update Aperio" message instead.
+
+       Note also that the host does NOT dispatch on this string —
+       it selects the vtable cast from the account's adapter kind.
+       The tag is what the loader validates and what the Settings
+       UI groups by. */
     const char *plugin_type;
 
     /*

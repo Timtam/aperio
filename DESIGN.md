@@ -3014,36 +3014,93 @@ Das `plugin-core`-Crate stellt bereit:
 - Rust-seitige `unsafe`-Wrapper für sicheres Laden
 - Ein Rust-SDK-Crate (`plugin-sdk`) mit ergonomischen Abstraktionen für Rust-Plugin-Autoren
 
+> **Verbindlich ist der Header, nicht dieser Abschnitt.** Der Vertrag steht in
+> `crates/plugin-core/include/aperio_plugin.h` (Deskriptor, Exporte, Speicher-
+> und Threading-Regeln) und `aperio_plugin_vtables.h` (Vtable-Layouts je Typ).
+> Was hier steht, ist die Zusammenfassung dazu und wird bei jeder ABI-Änderung
+> mitgezogen.
+
+**Aktuelle ABI-Version: 2.** Sie wird beim Laden auf **strikte Gleichheit**
+geprüft, nicht auf „mindestens“ — ein Plugin für v1 und ein Plugin für v3
+werden beide abgewiesen. Geprüft wird zweimal: gegen `abi_version` im Manifest
+und gegen `abi_version` im Deskriptor, und beide müssen auch untereinander
+übereinstimmen. v1 kannte genau eine Instanz je geladener Bibliothek und trug
+`init`/`destroy` am Deskriptor; v2 führte Instanz-Handles ein, ersetzte die
+beiden durch `open_instance`/`close_instance` und stellte jeder Vtable-Methode
+das Instanz-Handle als erstes Argument voran.
+
 ```c
-// aperio_plugin.h (vereinfacht)
+// aperio_plugin.h (vereinfacht — Feldreihenfolge ist verbindlich)
 
 typedef struct AperioPlugin {
+    uint32_t abi_version;     // == APERIO_PLUGIN_ABI_VERSION (2)
     const char* id;           // z.B. "com.example.myplugin"
     const char* name;         // Anzeigename
     const char* version;      // SemVer
     const char* plugin_type;  // "calendar-adapter" | "sync-adapter" | ...
-    uint32_t abi_version;     // ABI-Version (aktuell: 1)
 
-    // Lifecycle
-    int  (*init)(const char* config_json);
-    void (*destroy)(void);
+    // Lebenszyklus je KONTO. Ein Plugin bedient beliebig viele Instanzen.
+    OpenInstanceResult (*open_instance)(const char* config_json);
+    void               (*close_instance)(void* instance);
 
-    // Plugin-Typ-spezifische Vtable (als void*, gecastet je nach plugin_type)
+    // Typ-spezifische Vtable (als void*, gecastet je nach plugin_type)
     void* vtable;
 } AperioPlugin;
 
-// Jede shared library exportiert diese Funktion:
+// Jede shared library exportiert diese beiden Funktionen — sonst nichts Pflicht:
 AperioPlugin* aperio_plugin_create(void);
 void          aperio_plugin_destroy(AperioPlugin*);
 ```
 
-Die `vtable` enthält typ-spezifische Funktionszeiger. Bei einem `calendar-adapter` ist die `vtable` selbst eine Struktur, die optionale Sub-Vtables für jedes Feature enthält:
+Alle Zeichenketten im Deskriptor gehören dem Plugin und bleiben bis zur
+Rückkehr von `aperio_plugin_destroy` gültig; der Host gibt sie nie frei.
 
-- `calendar_vtable` (nicht-null, wenn `"calendar"` in `capabilities`): Zeiger auf `list_calendars`, `get_events`, `create_event`, `update_event`, `delete_event`, `get_free_busy`, `calendar_color`
-- `tasks_vtable` (nicht-null, wenn `"tasks"` in `capabilities`): Zeiger auf `list_task_lists`, `get_tasks`, `create_task`, `update_task`, `delete_task`
-- `contacts_vtable` (nicht-null, wenn `"contacts"` in `capabilities`): Zeiger auf `list_contacts`, `search_contacts`
+Daneben gibt es **optionale** benannte Exporte, die der Host beim Laden
+best-effort auflöst — fehlt einer, wird das Plugin trotzdem geladen:
 
-Andere Plugin-Typen haben eigene Vtable-Strukturen (`sync-adapter` → `fetch_new_logs`, `push_log`, ...; `videoconference-adapter` → `generate_link`, `list_rooms`, ...).
+| Export | Zweck |
+|---|---|
+| `aperio_plugin_set_log` | Log-Brücke; wird einmal direkt nach `create` aufgerufen und leitet `tracing` des Plugins in den Host-Log um |
+| `aperio_plugin_interactive_auth` | Interaktiver OAuth-Flow außerhalb einer Konto-Instanz |
+| `aperio_plugin_discover` | Autodiscover (EWS) |
+| `aperio_plugin_probe_host_key` | Host-Key-Abfrage vor dem ersten Verbinden (SFTP, TOFU) |
+
+Jede Vtable ist eine `#[repr(C)]`-Struktur aus `uint32_t vtable_version` plus
+Funktionszeigern desselben Typs:
+
+```c
+typedef PluginCallResult (*AperioVtableMethodFn)(
+    void* instance, const uint8_t* args_ptr, size_t args_len);
+```
+
+Alle Fachdaten queren die Grenze als **JSON**; die Argumentschlüssel spiegeln
+die Rust-Parameternamen. Ein NULL-Slot bedeutet „nicht unterstützt“ und wird
+vom Host in den `Unsupported`-Fehler der jeweiligen Domäne übersetzt. Ergebnis-
+puffer allokiert das Plugin und liefert seinen eigenen `free`-Funktionszeiger
+mit, sodass kein Allokator geteilt wird. Fehler reisen als `int32`-Status aus
+einer festen Tabelle (`APERIO_PLUGIN_CALL_ERR_*`) plus UTF-8-Meldung. Es gibt
+**kein Timeout und keinen Abbruch** — der Host wartet unbegrenzt.
+
+Ein `calendar-adapter` zeigt auf eine `AperioCalendarPluginVtable`, die
+optionale Sub-Vtables je Fähigkeit enthält:
+
+- `calendar_vtable` (nicht-null, wenn `"calendar"` in `capabilities`)
+- `tasks_vtable` (nicht-null, wenn `"tasks"` in `capabilities`)
+- `contacts_vtable` (nicht-null, wenn `"contacts"` in `capabilities`)
+
+Die anderen Typen zeigen direkt auf ihre Vtable: `sync-adapter` auf
+`AperioSyncVtable`, `videoconference-adapter` auf `AperioVcVtable` mit den
+Slots `test_connection`, `create_meeting`, `get_meeting`, `delete_meeting`
+(Spiegel von `vc_core::VcAdapter`, siehe Abschnitt 11).
+
+> **Slots anhängen ist derzeit nur zusammen mit einer ABI-Erhöhung sicher.**
+> Das Feld `vtable_version` wird von jedem Plugin gesetzt, vom Host aber noch
+> **nicht ausgewertet**; geprüft wird allein `abi_version`. Würde man einer
+> bestehenden Vtable einen Slot anhängen, ohne die ABI-Version zu erhöhen,
+> läse der Host bei einem älteren Plugin über dessen Struktur hinaus und riefe
+> auf, was dahinter liegt. Eine **neue** Vtable für einen **neuen** Plugin-Typ
+> anzulegen ist dagegen unkritisch: sie wird nur gelesen, wenn dieser Typ
+> überhaupt existiert.
 
 ### 20.4 Plugin-Manifest (`plugin.json`)
 
@@ -3064,7 +3121,7 @@ myplugin/
   "version": "1.0.0",
   "plugin_type": "calendar-adapter",
   "capabilities": ["calendar"],
-  "abi_version": 1,
+  "abi_version": 2,
   "min_app_version": "1.0.0",
   "author": "Max Mustermann",
   "description": "Verbindet sich mit XY-Kalender",
@@ -3072,7 +3129,7 @@ myplugin/
 }
 ```
 
-`abi_version` im Manifest muss mit der vom Plugin-Manager unterstützten ABI-Version übereinstimmen, sonst wird das Plugin abgelehnt. `capabilities` deklariert die unterstützten Features (`calendar`, `tasks`, `contacts` – siehe Abschnitt 10.2 für Details).
+`abi_version` im Manifest muss mit der vom Plugin-Manager unterstützten ABI-Version übereinstimmen, sonst wird das Plugin abgelehnt — und zwar exakt, nicht „mindestens“ (siehe Abschnitt 20.3). `min_app_version` ist der Hebel für Vorwärtskompatibilität: ein Plugin, das eine erst später eingeführte Fähigkeit oder einen neuen Plugin-Typ voraussetzt, trägt hier die einführende Release-Version ein, damit ältere Aperio-Versionen mit „Aperio aktualisieren“ scheitern statt mit einer irreführenden Manifest-Fehlermeldung. `capabilities` deklariert die unterstützten Features (`calendar`, `tasks`, `contacts` – siehe Abschnitt 10.2 für Details).
 
 ### 20.5 Plugin-Manager (Laufzeit)
 
