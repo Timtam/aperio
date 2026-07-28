@@ -20,6 +20,10 @@ serde.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
+# The interactive-auth export drives the OAuth exchange itself, so it needs its
+# own client: the adapter's lives behind an open instance, and sign-in happens
+# before there is one.
+reqwest.workspace = true
 
 [dev-dependencies]
 plugin-core.workspace = true

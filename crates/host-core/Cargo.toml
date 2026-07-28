@@ -10,6 +10,7 @@ description = "Aperio — Tauri-free host logic shared by the desktop backend an
 
 [dependencies]
 aperio-db.workspace = true
+builtin-oauth.workspace = true
 cal-core.workspace = true
 cal-adapter-local.workspace = true
 plugin-core.workspace = true

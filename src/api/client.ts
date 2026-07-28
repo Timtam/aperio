@@ -615,6 +615,35 @@ export const connectMicrosoftAccount = (
     request: { client_id, display_name, authority: authority ?? null },
   });
 
+/** What this build can offer for an OAuth provider.
+ *
+ *  A build can carry Aperio's own registered client (`builtin`), in which case
+ *  connecting is one button; a build without one asks the user to register
+ *  their own integration. Never reports the credentials themselves — only
+ *  whether they are there, and whether a bring-your-own form has to ask for a
+ *  secret as well as an id. */
+export interface OauthClientPosture {
+  builtin: boolean;
+  requires_secret: boolean;
+}
+
+export const oauthClientPosture = (provider: 'webex' | 'google' | 'microsoft') =>
+  invoke<OauthClientPosture>('oauth_client_posture', { provider });
+
+/** Kick off the Webex OAuth dance and create the account.
+ *
+ *  `client_id` / `client_secret` are omitted to use the build's own
+ *  credentials, or both supplied to use the user's own integration — never one
+ *  of the two, which the backend rejects rather than silently deciding for
+ *  them. The secret goes to the platform keychain and never to `config_json`. */
+export const connectWebexAccount = (request: {
+  display_name: string;
+  client_id?: string;
+  client_secret?: string;
+  use_personal_room: boolean;
+  send_webex_emails: boolean;
+}) => invoke<Account>('connect_webex_account', { request });
+
 /** Which container namespace an override applies to. Calendars and
  *  task lists have disjoint ids today but the backend keeps them
  *  separately namespaced so a future code-path can enforce kind. */

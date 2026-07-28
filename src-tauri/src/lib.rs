@@ -672,6 +672,8 @@ pub fn run() {
             commands::test_todoist_connection,
             commands::discover_ews_endpoint,
             commands::connect_google_account,
+            commands::connect_webex_account,
+            commands::oauth_client_posture,
             commands::connect_microsoft_account,
             commands::set_container_name_override,
             commands::clear_container_name_override,

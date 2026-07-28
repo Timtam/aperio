@@ -349,7 +349,8 @@
       "microsoft_graph": "Microsoft 365",
       "ews": "Exchange (EWS)",
       "vikunja": "Vikunja",
-      "todoist": "Todoist"
+      "todoist": "Todoist",
+      "webex": "Cisco Webex"
     }
   },
   "dialogs": {
@@ -1708,6 +1709,15 @@
       "googleClientSecretPlaceholder": "z. B. GOCSPX-…",
       "googleClientSecretHint": "Direkt unter der Client-ID in der Cloud Console. Trotz „Secret\" laut Google für Desktop-Apps nicht wirklich geheim — wird in Aperios DB neben der Client-ID abgelegt.",
       "googleFlowHint": "Auf „Hinzufügen\" öffnet Aperio deinen Browser zur Google-Anmeldung. Nach der Zustimmung schließt sich der Tab automatisch und der Kalender erscheint in der Seitenleiste.",
+      "webexOwnIntegrationHint": "Diese Version enthält keine eigenen Webex-Zugangsdaten. Lege unter developer.webex.com eine Integration an und trage deren Client-ID und Client-Secret hier ein. Als Redirect-URI muss http://127.0.0.1:8080/oauth/webex hinterlegt sein.",
+      "webexClientIdLabel": "Client-ID",
+      "webexClientSecretLabel": "Client-Secret",
+      "webexClientSecretHint": "Wird im Schlüsselbund des Systems abgelegt, nie in der Kontodatenbank — Webex verlangt es auch bei PKCE.",
+      "webexPersonalRoomLabel": "Persönlichen Raum verwenden",
+      "webexPersonalRoomHint": "Statt für jeden Termin ein eigenes Meeting anzulegen, wird dein dauerhafter persönlicher Raum verlinkt. Braucht keine Planungslizenz und hat kein Tageslimit, aber alle Termine teilen sich denselben Link.",
+      "webexEmailsLabel": "Webex eigene Einladungen senden lassen",
+      "webexEmailsHint": "Aus, weil Webex-Mails einen Kalenderanhang mitschicken — eingeschaltet landet bei allen Teilnehmern ein zweiter Termin im Kalender.",
+      "webexFlowHint": "Beim Hinzufügen öffnet Aperio den Browser zur Webex-Anmeldung. Nach der Zustimmung schließt sich der Tab von selbst.",
       "clientIdRequired": "Bitte gib die Client-ID ein.",
       "clientSecretRequired": "Bitte gib das Client-Secret ein.",
       "microsoftClientIdLabel": "Microsoft Application (Client) ID",

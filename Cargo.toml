@@ -132,6 +132,7 @@ type_complexity = "allow"
 # Aperio internal crates
 aperio-db = { path = "crates/aperio-db" }
 cal-core = { path = "crates/cal-core" }
+builtin-oauth = { path = "crates/builtin-oauth" }
 cal-adapter-local = { path = "crates/cal-adapter-local" }
 cal-adapter-device-calendar = { path = "crates/cal-adapter-device-calendar" }
 host-core = { path = "crates/host-core" }

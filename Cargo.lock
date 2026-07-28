@@ -130,6 +130,7 @@ dependencies = [
  "aperio-db",
  "async-trait",
  "base64 0.22.1",
+ "builtin-oauth",
  "cal-adapter-local",
  "cal-core",
  "chrono",
@@ -2893,6 +2894,7 @@ version = "0.1.0"
 dependencies = [
  "aperio-db",
  "async-trait",
+ "builtin-oauth",
  "cal-adapter-ical-plugin",
  "cal-adapter-local",
  "cal-core",
@@ -7965,6 +7967,7 @@ dependencies = [
  "async-trait",
  "plugin-core",
  "plugin-sdk",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tokio",

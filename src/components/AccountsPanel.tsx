@@ -13,6 +13,8 @@ import { FocusableNote } from '../a11y/FocusableNote';
 import {
   connectGoogleAccount,
   connectMicrosoftAccount,
+  connectWebexAccount,
+  oauthClientPosture,
   createAccount,
   syncContactsNow,
   deleteAccount,
@@ -81,6 +83,7 @@ const KIND_ORDER: AdapterKind[] = [
   'ews',
   'vikunja',
   'todoist',
+  'webex',
 ];
 
 const ENABLED_KINDS: ReadonlySet<AdapterKind> = new Set([
@@ -92,7 +95,13 @@ const ENABLED_KINDS: ReadonlySet<AdapterKind> = new Set([
   'ews',
   'vikunja',
   'todoist',
+  'webex',
 ]);
+
+/** Kinds that carry no calendars and no task lists — they exist so an event can
+ *  be given a meeting. Listed last, and the form skips everything about
+ *  containers for them. */
+const VIDEOCONFERENCE_KINDS: ReadonlySet<AdapterKind> = new Set(['webex']);
 
 interface CaldavFields {
   serverUrl: string;
@@ -126,6 +135,21 @@ interface GoogleFields {
 const EMPTY_GOOGLE: GoogleFields = {
   clientId: '',
   clientSecret: '',
+};
+
+interface WebexFields {
+  /** Both empty → sign in with the credentials this build carries. */
+  clientId: string;
+  clientSecret: string;
+  usePersonalRoom: boolean;
+  sendWebexEmails: boolean;
+}
+
+const EMPTY_WEBEX: WebexFields = {
+  clientId: '',
+  clientSecret: '',
+  usePersonalRoom: false,
+  sendWebexEmails: false,
 };
 
 interface MicrosoftFields {
@@ -219,6 +243,12 @@ export function AccountsPanel() {
   const [caldav, setCaldav] = useState<CaldavFields>(EMPTY_CALDAV);
   const [ical, setIcal] = useState<IcalFields>(EMPTY_ICAL);
   const [google, setGoogle] = useState<GoogleFields>(EMPTY_GOOGLE);
+  const [webex, setWebex] = useState<WebexFields>(EMPTY_WEBEX);
+  // Whether this build carries Aperio's own Webex credentials. `null` while the
+  // answer is still in flight; the form asks for a client id and secret only
+  // once it knows there is nothing to fall back on, so a build WITH credentials
+  // never flashes two fields the user does not need.
+  const [webexBuiltin, setWebexBuiltin] = useState<boolean | null>(null);
   const [microsoft, setMicrosoft] = useState<MicrosoftFields>(EMPTY_MICROSOFT);
   const [ews, setEws] = useState<EwsFields>(EMPTY_EWS);
   const [vikunja, setVikunja] = useState<VikunjaFields>(EMPTY_VIKUNJA);
@@ -254,6 +284,32 @@ export function AccountsPanel() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Ask, once the user actually picks Webex, whether this build carries
+  // Aperio's own credentials. Deferred to the moment it matters rather than
+  // fetched on mount: it is a question about one adapter, and the answer costs
+  // a round-trip that every other kind would pay for nothing.
+  //
+  // A failed probe falls back to `false` — the bring-your-own form. That is the
+  // safe direction: it asks for something the user may not need to give, which
+  // is recoverable, where the other direction would offer a one-button connect
+  // that cannot work and would fail with a token error naming nothing.
+  useEffect(() => {
+    if (kind !== 'webex' || webexBuiltin !== null) return;
+    let cancelled = false;
+    oauthClientPosture('webex')
+      .then((posture) => {
+        if (!cancelled) setWebexBuiltin(posture.builtin);
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn('oauth_client_posture failed', err);
+        if (!cancelled) setWebexBuiltin(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [kind, webexBuiltin]);
 
   // Closing the reconnect wizard bumps `dataVersion`. Re-probe so
   // rows that just got their credentials drop off the banner
@@ -300,6 +356,18 @@ export function AccountsPanel() {
       return t('dialogs.accounts.clientSecretRequired');
     return null;
   }, [google, t]);
+
+  const validateWebex = useCallback((): string | null => {
+    // A build with built-in credentials needs nothing; without them both halves
+    // are required. Half a pair is rejected rather than silently completed —
+    // see `choose_webex_client` on the Rust side for why.
+    const id = webex.clientId.trim();
+    const secret = webex.clientSecret.trim();
+    if (webexBuiltin === true && !id && !secret) return null;
+    if (!id) return t('dialogs.accounts.clientIdRequired');
+    if (!secret) return t('dialogs.accounts.clientSecretRequired');
+    return null;
+  }, [webex, webexBuiltin, t]);
 
   const validateMicrosoft = useCallback((): string | null => {
     if (!microsoft.clientId.trim())
@@ -391,6 +459,13 @@ export function AccountsPanel() {
           return;
         }
       }
+      if (kind === 'webex') {
+        const v = validateWebex();
+        if (v) {
+          setError(v);
+          return;
+        }
+      }
       setSubmitting(true);
       setError(null);
       try {
@@ -413,6 +488,20 @@ export function AccountsPanel() {
             name,
             microsoft.authority.trim() || undefined,
           );
+        } else if (kind === 'webex') {
+          // Both credential fields are sent or neither is: an empty pair means
+          // "use the build's own client", and the backend refuses a half pair
+          // rather than deciding which registration the account belongs to.
+          const clientId = webex.clientId.trim();
+          const clientSecret = webex.clientSecret.trim();
+          created = await connectWebexAccount({
+            display_name: name,
+            ...(clientId || clientSecret
+              ? { client_id: clientId, client_secret: clientSecret }
+              : {}),
+            use_personal_room: webex.usePersonalRoom,
+            send_webex_emails: webex.sendWebexEmails,
+          });
         } else {
           const configJson =
             kind === 'caldav'
@@ -491,6 +580,7 @@ export function AccountsPanel() {
         setEws(EMPTY_EWS);
         setVikunja(EMPTY_VIKUNJA);
         setTodoist(EMPTY_TODOIST);
+        setWebex(EMPTY_WEBEX);
         refresh();
         // Re-fetch the calendar / task-list catalog so the sidebar
         // picks up the new account's containers without the user
@@ -507,11 +597,13 @@ export function AccountsPanel() {
         // `syncContactsNow` to pre-warm each book's contents (respecting
         // the user's "include read-only directories" pref) so opening the
         // Contacts view is instant.
-        const refreshes: Promise<unknown>[] = [
-          refreshAccounts(),
-          refreshCalendars(),
-          refreshTaskLists(),
-        ];
+        //
+        // A videoconference account owns neither, so it refreshes only the
+        // account list — the two catalog calls have a blocking cold path and
+        // there would be nothing at the end of them.
+        const refreshes: Promise<unknown>[] = VIDEOCONFERENCE_KINDS.has(kind)
+          ? [refreshAccounts()]
+          : [refreshAccounts(), refreshCalendars(), refreshTaskLists()];
         if (CONTACTS_CAPABLE_KINDS.has(kind)) {
           refreshes.push(refreshContactLists(), syncContactsNow());
         }
@@ -526,6 +618,8 @@ export function AccountsPanel() {
     [
       displayName,
       kind,
+      webex,
+      validateWebex,
       caldav,
       ical,
       google,
@@ -1536,6 +1630,96 @@ export function AccountsPanel() {
                 </label>
                 <FocusableNote className="form__hint accounts-google-flow-hint">
                   {t('dialogs.accounts.googleFlowHint')}
+                </FocusableNote>
+              </>
+            )}
+
+            {kind === 'webex' && (
+              <>
+                {/* The credential fields appear only on a build that carries
+                    none of its own. On a build that does, connecting is a name
+                    and a button, and showing two empty fields would read as
+                    "you must supply these" when nothing is required. */}
+                {webexBuiltin === false && (
+                  <>
+                    <FocusableNote className="form__hint">
+                      {t('dialogs.accounts.webexOwnIntegrationHint')}
+                    </FocusableNote>
+                    <label className="form__field">
+                      <span className="form__label">
+                        {t('dialogs.accounts.webexClientIdLabel')}
+                      </span>
+                      <input
+                        type="text"
+                        value={webex.clientId}
+                        onChange={(e) =>
+                          setWebex((prev) => ({
+                            ...prev,
+                            clientId: e.target.value,
+                          }))
+                        }
+                        autoComplete="off"
+                        spellCheck={false}
+                        required
+                      />
+                    </label>
+                    <label className="form__field">
+                      <span className="form__label">
+                        {t('dialogs.accounts.webexClientSecretLabel')}
+                      </span>
+                      <input
+                        type="password"
+                        value={webex.clientSecret}
+                        onChange={(e) =>
+                          setWebex((prev) => ({
+                            ...prev,
+                            clientSecret: e.target.value,
+                          }))
+                        }
+                        autoComplete="off"
+                        spellCheck={false}
+                        required
+                      />
+                      <span className="form__hint">
+                        {t('dialogs.accounts.webexClientSecretHint')}
+                      </span>
+                    </label>
+                  </>
+                )}
+                <label className="form__checkbox">
+                  <input
+                    type="checkbox"
+                    checked={webex.usePersonalRoom}
+                    onChange={(e) =>
+                      setWebex((prev) => ({
+                        ...prev,
+                        usePersonalRoom: e.target.checked,
+                      }))
+                    }
+                  />
+                  <span>{t('dialogs.accounts.webexPersonalRoomLabel')}</span>
+                </label>
+                <FocusableNote className="form__hint">
+                  {t('dialogs.accounts.webexPersonalRoomHint')}
+                </FocusableNote>
+                <label className="form__checkbox">
+                  <input
+                    type="checkbox"
+                    checked={webex.sendWebexEmails}
+                    onChange={(e) =>
+                      setWebex((prev) => ({
+                        ...prev,
+                        sendWebexEmails: e.target.checked,
+                      }))
+                    }
+                  />
+                  <span>{t('dialogs.accounts.webexEmailsLabel')}</span>
+                </label>
+                <FocusableNote className="form__hint">
+                  {t('dialogs.accounts.webexEmailsHint')}
+                </FocusableNote>
+                <FocusableNote className="form__hint">
+                  {t('dialogs.accounts.webexFlowHint')}
                 </FocusableNote>
               </>
             )}

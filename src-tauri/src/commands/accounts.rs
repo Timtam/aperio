@@ -104,6 +104,7 @@ const PLUGIN_ID_VIKUNJA: &str = "com.aperio.cal-adapter-vikunja";
 const PLUGIN_ID_TODOIST: &str = "com.aperio.cal-adapter-todoist";
 const PLUGIN_ID_GOOGLE: &str = "com.aperio.cal-adapter-google";
 const PLUGIN_ID_GRAPH: &str = "com.aperio.cal-adapter-microsoft-graph";
+const PLUGIN_ID_WEBEX: &str = "com.aperio.vc-adapter-webex";
 
 /// Wire-shape entry returned by [`list_accounts`]. Wraps the
 /// persisted [`Account`] with derived per-row status the
@@ -1119,6 +1120,248 @@ pub struct ConnectMicrosoftRequest {
     pub display_name: String,
 }
 
+/// What this build can offer for a given OAuth provider, so the connect form
+/// knows whether to ask for a client id and secret at all.
+#[derive(Debug, serde::Serialize)]
+pub struct OauthClientPosture {
+    /// True when the build carries credentials and the user needs only a name.
+    pub builtin: bool,
+    /// True when the provider's token endpoint needs a client secret, so a
+    /// bring-your-own form has to ask for one.
+    pub requires_secret: bool,
+}
+
+/// Whether this build carries built-in OAuth credentials for `provider`.
+///
+/// Deliberately reports a posture and never a value: the frontend has no reason
+/// to see a client id, and a command that could hand one out would be a
+/// standing invitation to log it.
+#[tauri::command]
+pub fn oauth_client_posture(provider: String) -> CommandResult<OauthClientPosture> {
+    let provider = builtin_oauth::Provider::parse(provider.trim()).ok_or(CommandError {
+        code: "invalid_input",
+        message: "unknown OAuth provider".into(),
+    })?;
+    Ok(OauthClientPosture {
+        builtin: builtin_oauth::has_builtin_client(provider),
+        requires_secret: provider.requires_secret(),
+    })
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ConnectWebexRequest {
+    pub display_name: String,
+    /// Absent → use the credentials this build carries. Present → the user
+    /// registered their own integration on developer.webex.com.
+    #[serde(default)]
+    pub client_id: Option<String>,
+    #[serde(default)]
+    pub client_secret: Option<String>,
+    /// Use the account's permanent Personal Meeting Room rather than creating a
+    /// meeting per event. Needs no scheduling licence and has no daily cap, but
+    /// every event shares one link.
+    #[serde(default)]
+    pub use_personal_room: bool,
+    /// Let Webex send its own invitation emails on top of Aperio's. Off by
+    /// default because Webex's mails carry an iCalendar attachment, so leaving
+    /// it on puts a duplicate entry in every attendee's calendar.
+    #[serde(default)]
+    pub send_webex_emails: bool,
+}
+
+/// The client id and secret a connect request signs in with, plus the
+/// account-row fields recording which posture it was.
+struct WebexClientChoice {
+    client_id: String,
+    client_secret: String,
+    /// Extra keys for `config_json`. A built-in account persists a marker and a
+    /// fingerprint and NO id; a bring-your-own account persists the id.
+    config: Vec<(&'static str, Value)>,
+    /// Whether the secret belongs to the user and therefore has to be kept.
+    persist_secret: bool,
+}
+
+/// Decide which OAuth client a new Webex account uses.
+///
+/// A half-filled form is an error rather than a silent fallback to the built-in
+/// client: someone who typed their own client id and left the secret blank
+/// meant to use their own integration, and quietly signing them in as Aperio
+/// would link the account to a credential they did not choose and cannot
+/// rotate.
+fn choose_webex_client(request: &ConnectWebexRequest) -> CommandResult<WebexClientChoice> {
+    let id = request.client_id.as_deref().unwrap_or_default().trim();
+    let secret = request.client_secret.as_deref().unwrap_or_default().trim();
+    match (id.is_empty(), secret.is_empty()) {
+        (false, false) => Ok(WebexClientChoice {
+            client_id: id.to_string(),
+            client_secret: secret.to_string(),
+            config: vec![("client_id", Value::String(id.to_string()))],
+            persist_secret: true,
+        }),
+        (true, true) => {
+            let client = builtin_oauth::builtin_client(builtin_oauth::Provider::Webex).ok_or(
+                CommandError {
+                    code: "invalid_input",
+                    message: "This build carries no Webex credentials. Register an integration at \
+                              developer.webex.com and enter its client ID and secret."
+                        .into(),
+                },
+            )?;
+            let secret = client.client_secret.ok_or(CommandError {
+                code: "internal",
+                message: "the built-in Webex credentials carry no secret".into(),
+            })?;
+            Ok(WebexClientChoice {
+                client_id: client.client_id.to_string(),
+                client_secret: secret.to_string(),
+                // No client id in the row: the built-in one is a property of
+                // the build, not of the account, and persisting it would pin
+                // the account to whatever it was on the day it was created.
+                config: vec![
+                    ("client_source", Value::String("builtin".into())),
+                    (
+                        "client_fingerprint",
+                        Value::String(client.fingerprint().as_str().to_string()),
+                    ),
+                ],
+                persist_secret: false,
+            })
+        }
+        (false, true) => Err(CommandError {
+            code: "invalid_input",
+            message: "A Webex client secret is required — Webex issues no token without one, even \
+                      under PKCE."
+                .into(),
+        }),
+        (true, false) => Err(CommandError {
+            code: "invalid_input",
+            message: "A Webex client ID is required alongside the secret.".into(),
+        }),
+    }
+}
+
+/// Interactive Webex sign-in. The same shape as the Google and Microsoft
+/// equivalents — browser, OAuth dance, persist, register — with two differences
+/// that matter.
+///
+/// The **client secret** never reaches `config_json`. That column is documented
+/// as non-secret and the sync engine appends it to the event log unencrypted
+/// whenever end-to-end encryption is off, so a secret there would travel to the
+/// user's own sync target in the clear. A user's own secret goes to the
+/// keychain; Aperio's built-in secret is not persisted at all, because it
+/// belongs to the build and is read back from `builtin-oauth` at open time.
+///
+/// The account is a **videoconference** account, not a calendar one: it owns no
+/// calendars and no task lists, and nothing in the refresh path touches it. It
+/// exists so an event can be given a meeting.
+#[tauri::command]
+pub async fn connect_webex_account(
+    db: State<'_, DbHandle>,
+    registry: State<'_, Arc<AdapterRegistry>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
+    event_log: State<'_, Arc<EventLogWriter>>,
+    request: ConnectWebexRequest,
+) -> CommandResult<Account> {
+    let name = request.display_name.trim();
+    if name.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "display_name must not be empty".into(),
+        });
+    }
+    let choice = choose_webex_client(&request)?;
+
+    // 1) The OAuth dance, before anything persistent is touched, so a denied or
+    //    abandoned consent leaves nothing behind.
+    let tokens = run_plugin_auth(
+        plugin_manager.inner(),
+        PLUGIN_ID_WEBEX,
+        json!({
+            "client_id": choice.client_id,
+            "client_secret": choice.client_secret,
+        }),
+    )
+    .await?;
+    let refresh = tokens
+        .get("refresh_token")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or(CommandError {
+            code: "protocol",
+            message: "Webex returned no refresh token — the account could not be kept signed in"
+                .into(),
+        })?;
+
+    // 2) The account row. `site_url` is deliberately absent: the adapter fills
+    //    it from the account's own default site at first use, and asking here
+    //    would mean asking the user for something most people do not know.
+    let mut config = serde_json::Map::new();
+    for (key, value) in choice.config {
+        config.insert(key.to_string(), value);
+    }
+    config.insert(
+        "use_personal_room".into(),
+        Value::Bool(request.use_personal_room),
+    );
+    config.insert(
+        "send_webex_emails".into(),
+        Value::Bool(request.send_webex_emails),
+    );
+    let shared = db.shared();
+    let repo = AccountsRepo::new(&shared);
+    let created = repo.create(AdapterKind::Webex, name, &Value::Object(config).to_string())?;
+
+    // 3) Credentials to the keychain. Each failure rolls back everything
+    //    written so far, so a retry starts from a clean slate rather than from
+    //    a half-connected account that fails later for an unrelated-looking
+    //    reason.
+    if choice.persist_secret {
+        if let Err(err) = secrets::store(
+            &created.id,
+            SecretSlot::OauthClientSecret,
+            &choice.client_secret,
+        ) {
+            let _ = repo.delete(&created.id);
+            return Err(CommandError {
+                code: "internal",
+                message: format!("failed to store the Webex client secret: {err}"),
+            });
+        }
+    }
+    if let Err(err) = secrets::store(&created.id, SecretSlot::RefreshToken, refresh) {
+        let _ = secrets::delete_all(&created.id);
+        let _ = repo.delete(&created.id);
+        return Err(CommandError {
+            code: "internal",
+            message: format!("failed to store the Webex refresh token: {err}"),
+        });
+    }
+    // E2E only: carry the durable refresh token to the user's other devices.
+    // The client secret is NOT synced — a bring-your-own secret is the user's
+    // to enter once per device, and the built-in one is persisted nowhere.
+    crate::credential_sync::emit_credential_set(
+        &event_log,
+        &shared,
+        &created.id,
+        SecretSlot::RefreshToken,
+        refresh,
+    );
+
+    if let Err(err) = registry.register(&created) {
+        let _ = secrets::delete_all(&created.id);
+        let _ = repo.delete(&created.id);
+        return Err(CommandError {
+            code: "internal",
+            message: format!("adapter registration failed: {err}"),
+        });
+    }
+    event_log.append(SyncEvent::AccountCreated(account_payload(&created)));
+    // No `refresher.trigger()`: a Webex account owns no calendars and no task
+    // lists, so a warm pass would have nothing to fetch.
+    Ok(created)
+}
+
 // google_error_to_command + graph_error_to_command moved into
 // the plugins themselves — the OAuth dance now runs plugin-side,
 // the typed adapter error enums never cross into the host. The
@@ -1396,5 +1639,102 @@ mod tests {
             required_secret_slot(AdapterKind::MicrosoftGraph),
             Some(SecretSlot::RefreshToken)
         ));
+    }
+
+    // ── choose_webex_client ─────────────────────────────────────────────
+
+    fn webex_request(client_id: &str, client_secret: &str) -> ConnectWebexRequest {
+        ConnectWebexRequest {
+            display_name: "Hochschule".into(),
+            client_id: Some(client_id.into()),
+            client_secret: Some(client_secret.into()),
+            use_personal_room: false,
+            send_webex_emails: false,
+        }
+    }
+
+    #[test]
+    fn a_users_own_credentials_are_persisted_as_id_in_the_row_and_secret_in_the_keychain() {
+        let choice =
+            choose_webex_client(&webex_request(" C-mine ", " s3cr3t ")).expect("a full pair");
+        assert_eq!(choice.client_id, "C-mine", "surrounding space is trimmed");
+        assert_eq!(choice.client_secret, "s3cr3t");
+        assert!(choice.persist_secret, "the user's secret is theirs to keep");
+        let keys: Vec<&str> = choice.config.iter().map(|(k, _)| *k).collect();
+        assert_eq!(keys, vec!["client_id"]);
+        assert!(
+            !choice.config.iter().any(|(k, _)| k.contains("secret")),
+            "a secret must never reach config_json — that column syncs in the clear"
+        );
+    }
+
+    #[test]
+    fn half_a_credential_pair_is_refused_rather_than_quietly_completed() {
+        // Falling back to the built-in client here would link the account to a
+        // credential the user did not choose and cannot rotate, and they would
+        // have no way to tell from the outside.
+        //
+        // `expect_err` is avoided deliberately: it would need `Debug` on the
+        // success type, and that type holds a client secret. A struct that can
+        // format itself is a struct that eventually appears in a log line.
+        for (id, secret) in [("C-mine", ""), ("C-mine", "   "), ("", "s3cr3t")] {
+            match choose_webex_client(&webex_request(id, secret)) {
+                Ok(_) => panic!("({id:?}, {secret:?}) must not resolve"),
+                Err(err) => assert_eq!(err.code, "invalid_input"),
+            }
+        }
+    }
+
+    #[test]
+    fn an_empty_pair_follows_this_builds_posture() {
+        // Green in BOTH postures: the suite must not depend on whether the
+        // machine running it has a credentials file.
+        let request = webex_request("", "");
+        match choose_webex_client(&request) {
+            Ok(choice) => {
+                assert!(
+                    builtin_oauth::has_builtin_client(builtin_oauth::Provider::Webex),
+                    "resolving without input means this build carries credentials"
+                );
+                assert!(
+                    !choice.persist_secret,
+                    "Aperio's own secret belongs to the build, not to the user's keychain"
+                );
+                let keys: Vec<&str> = choice.config.iter().map(|(k, _)| *k).collect();
+                assert_eq!(keys, vec!["client_source", "client_fingerprint"]);
+                assert!(
+                    !keys.contains(&"client_id"),
+                    "pinning the id would freeze the account to today's registration"
+                );
+            }
+            Err(err) => {
+                assert!(!builtin_oauth::has_builtin_client(
+                    builtin_oauth::Provider::Webex
+                ));
+                assert_eq!(err.code, "invalid_input");
+                assert!(
+                    err.message.contains("developer.webex.com"),
+                    "the error has to say where to get credentials: {}",
+                    err.message
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn absent_credential_fields_read_the_same_as_empty_ones() {
+        // The frontend omits both keys rather than sending empty strings when
+        // the user leaves them blank; the two spellings must not diverge.
+        let omitted = ConnectWebexRequest {
+            display_name: "Hochschule".into(),
+            client_id: None,
+            client_secret: None,
+            use_personal_room: false,
+            send_webex_emails: false,
+        };
+        assert_eq!(
+            choose_webex_client(&omitted).is_ok(),
+            choose_webex_client(&webex_request("", "")).is_ok()
+        );
     }
 }
