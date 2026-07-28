@@ -6,6 +6,7 @@
 pub mod adapter;
 pub mod attendee;
 pub mod color;
+pub mod conferencing;
 pub mod error;
 pub mod extras;
 pub mod recurrence;
