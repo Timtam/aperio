@@ -2235,6 +2235,9 @@ impl Host {
         // the sync round (which already push/fetches it via build_orchestrator's
         // DesktopSyncRoundHooks) and the desktop SoundsDir.
         let sounds_dir = host_core::sound_assets::sounds_dir_under(&data_dir);
+        // Install the plugin→host channel BEFORE any instance is opened — see
+        // the desktop side for why the ordering matters.
+        host_core::plugin_channel::HostChannel::install(Arc::clone(&secret_store));
         let registry = Arc::new(AdapterRegistry::with_data_dir(
             Arc::clone(&plugin_manager),
             Arc::clone(&secret_store),

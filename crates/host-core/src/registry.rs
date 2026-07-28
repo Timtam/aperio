@@ -129,6 +129,14 @@ pub struct AdapterRegistry {
     /// through this instead of a hard-coded keyring call, so the
     /// registry stays Tauri-/platform-free.
     secret_store: Arc<dyn SecretStore>,
+    /// Host-channel capability tokens, keyed by account id.
+    ///
+    /// A token retires the moment it is dropped, so it has to outlive the
+    /// instance it was minted for; parking it here ties its life to the
+    /// registration. Re-registering an account replaces its token, which
+    /// retires the old one into the grace ring where a report that was already
+    /// in flight can still land.
+    scope_tokens: Mutex<HashMap<String, plugin_core::host_channel::ScopeToken>>,
 }
 
 impl AdapterRegistry {
@@ -162,6 +170,7 @@ impl AdapterRegistry {
             plugin_manager,
             data_dir,
             secret_store,
+            scope_tokens: Mutex::new(HashMap::new()),
         }
     }
 
@@ -661,6 +670,15 @@ impl AdapterRegistry {
     /// Open an instance of the named plugin with the supplied JSON
     /// config. Maps plugin-side errors into the registry error
     /// type so callers can handle them uniformly.
+    /// Park a capability token for the lifetime of this account's
+    /// registration. Replacing one retires its predecessor.
+    fn retain_scope(&self, account_id: &str, scope: plugin_core::host_channel::ScopeToken) {
+        self.scope_tokens
+            .lock()
+            .expect("scope token map poisoned")
+            .insert(account_id.to_string(), scope);
+    }
+
     fn open_plugin_instance(
         &self,
         plugin_id: &str,
@@ -1034,12 +1052,39 @@ impl AdapterRegistry {
     }
 
     fn register_webex(&self, account: &Account) -> Result<(), RegistryError> {
-        let plugin_config = oauth_refresh_plugin_config(
-            self.secret_store.as_ref(),
-            &account.id,
+        // Webex needs a CLIENT secret as well as the user's refresh token, and
+        // it lives in its own keychain slot rather than in `config_json`: that
+        // column is documented as non-secret and the sync engine appends it to
+        // the event log unencrypted whenever E2E is off, so a secret there
+        // would travel to the user's own sync target in the clear.
+        let client_secret = self
+            .secret_store
+            .retrieve(&account.id, SecretSlot::OauthClientSecret)
+            .map_err(|e| RegistryError::Secret(format!("missing Webex client secret: {e}")))?;
+        let refresh = self
+            .secret_store
+            .retrieve(&account.id, SecretSlot::RefreshToken)
+            .map_err(|e| RegistryError::Secret(format!("missing refresh token: {e}")))?;
+
+        // A capability token, so this instance can report a rotated credential
+        // back and the host knows WHICH account is speaking. It rides the
+        // TRANSIENT merged config only — never the persisted row.
+        let scope = plugin_core::host_channel::mint_scope(&account.id, PLUGIN_ID_WEBEX);
+        let plugin_config = merge_account_config(
             &account.config_json,
+            &[
+                ("client_secret", Value::String(client_secret)),
+                ("refresh_token", Value::String(refresh)),
+                (
+                    plugin_core::abi::HOST_TOKEN_CONFIG_KEY,
+                    Value::String(scope.as_str().to_string()),
+                ),
+            ],
         )?;
         let instance = self.open_plugin_instance(PLUGIN_ID_WEBEX, plugin_config)?;
+        // The token must outlive the instance: dropping it retires the scope,
+        // so it is parked alongside.
+        self.retain_scope(&account.id, scope);
         self.insert_vc(&account.id, instance)?;
         Ok(())
     }

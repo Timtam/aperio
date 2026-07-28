@@ -83,6 +83,11 @@ pub struct WebexAdapter {
     /// The site resolved at first use, so the per-event create does not re-ask
     /// for something that does not change.
     site: OnceCell<Option<String>>,
+    /// Where a rotated credential is reported, and the capability token that
+    /// names this account when it is. Both `None` in an embedding that does not
+    /// persist credentials — tests, and any host without the channel.
+    scope_token: Option<String>,
+    credential_sink: std::sync::Mutex<Option<Box<dyn api::CredentialSink>>>,
 }
 
 impl WebexAdapter {
@@ -106,7 +111,21 @@ impl WebexAdapter {
                 .expect("reqwest client"),
             state: OnceCell::new(),
             site: OnceCell::new(),
+            scope_token: None,
+            credential_sink: std::sync::Mutex::new(None),
         }
+    }
+
+    /// Attach the host channel. Called by the plugin wrapper, which is the only
+    /// layer that knows about FFI; the adapter itself stays a plain library.
+    pub fn with_credential_sink(
+        mut self,
+        scope_token: Option<String>,
+        sink: Box<dyn api::CredentialSink>,
+    ) -> Self {
+        self.scope_token = scope_token;
+        self.credential_sink = std::sync::Mutex::new(Some(sink));
+        self
     }
 
     /// The shared authenticated state, built on first use.
@@ -127,7 +146,7 @@ impl WebexAdapter {
                         "this Webex account has no refresh token — sign in to Webex again".into(),
                     ));
                 }
-                Ok(ApiState::new(
+                let state = ApiState::new(
                     TokenSet {
                         access_token: String::new(),
                         refresh_token: Some(self.refresh_token.clone()),
@@ -139,7 +158,19 @@ impl WebexAdapter {
                     self.config.client_id.clone(),
                     Some(self.client_secret.clone()),
                     self.http.clone(),
-                ))
+                );
+                // Hand the sink over once, when the state is built. Taken out
+                // of the mutex rather than cloned because a boxed trait object
+                // is not Clone and there is exactly one state per adapter.
+                let sink = self
+                    .credential_sink
+                    .lock()
+                    .expect("credential sink poisoned")
+                    .take();
+                Ok(match sink {
+                    Some(sink) => state.with_credential_sink(self.scope_token.clone(), sink),
+                    None => state,
+                })
             })
             .await
     }

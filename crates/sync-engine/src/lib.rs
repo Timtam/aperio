@@ -138,6 +138,21 @@ pub enum SecretSlot {
     ApiToken,
     /// 32-byte AES-256 key for cross-device E2E (base64 in the store).
     SyncEncryptionKey,
+    /// An OAuth CLIENT secret, as opposed to a user credential.
+    ///
+    /// Some providers will not issue tokens to a client that cannot present
+    /// one — Cisco Webex refuses even under PKCE, verified against a live
+    /// account. It has to live somewhere, and the somewhere may not be the
+    /// account's `config_json`: that column is documented as non-secret and the
+    /// sync engine appends it to the event log unencrypted whenever
+    /// end-to-end encryption is off, so a secret there would travel to the
+    /// user's own sync target in the clear.
+    ///
+    /// Deliberately NOT in [`Self::syncable_from_wire`]. A client secret is a
+    /// property of the BUILD or of the user's own provider registration, not of
+    /// the account, and every device resolves its own — so syncing it would put
+    /// a credential on the wire for no benefit at all.
+    OauthClientSecret,
 }
 
 impl SecretSlot {
@@ -150,6 +165,7 @@ impl SecretSlot {
             SecretSlot::Password => "password",
             SecretSlot::ApiToken => "api_token",
             SecretSlot::SyncEncryptionKey => "sync_encryption_key",
+            SecretSlot::OauthClientSecret => "oauth_client_secret",
         }
     }
 
@@ -157,7 +173,10 @@ impl SecretSlot {
     /// travel through cross-device credential sync. The short-lived access
     /// token (re-derived per device) and the E2E key itself (syncing it would
     /// defeat E2E) are deliberately rejected — the single allowlist that
-    /// decides what a received credential event may write.
+    /// decides what a received credential event may write. So is the OAuth
+    /// client secret: it belongs to the build or to the user's own provider
+    /// registration, and every device resolves its own, so putting it on the
+    /// wire would be pure exposure.
     pub fn syncable_from_wire(name: &str) -> Option<SecretSlot> {
         match name {
             "password" => Some(SecretSlot::Password),

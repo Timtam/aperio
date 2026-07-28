@@ -139,6 +139,11 @@ pub fn run() {
         }
     }
 
+    // Install the plugin→host channel BEFORE any instance is opened. A plugin
+    // that reported before a handler existed would be told FAILED and would
+    // keep a rotated credential in memory, which is the exact failure the
+    // channel exists to prevent.
+    host_core::plugin_channel::HostChannel::install(Arc::new(crate::secrets::KeyringSecretStore));
     let registry = Arc::new(AdapterRegistry::with_data_dir(
         Arc::clone(&plugin_manager),
         Arc::new(crate::secrets::KeyringSecretStore),

@@ -210,6 +210,11 @@ pub async fn list_accounts_missing_credentials(
 /// the two stay consistent: any future adapter that needs a
 /// different secret shape adds itself here too.
 fn required_secret_slot(kind: AdapterKind) -> Option<SecretSlot> {
+    // Exhaustive on purpose. The catch-all this replaces answered `Password`
+    // for every kind it had not heard of, so a new OAuth kind was silently
+    // probed for a password it never has — and every working account of that
+    // kind was then reported as needing to be reconnected. A missing arm should
+    // fail the build, not the user.
     match kind {
         // No stored credential: iCal feeds are public, Local is host-internal,
         // and the mobile-only device-calendar account authenticates via the OS
@@ -217,7 +222,13 @@ fn required_secret_slot(kind: AdapterKind) -> Option<SecretSlot> {
         AdapterKind::Ical | AdapterKind::Local | AdapterKind::DeviceCalendar => None,
         AdapterKind::Vikunja | AdapterKind::Todoist => Some(SecretSlot::ApiToken),
         AdapterKind::Google | AdapterKind::MicrosoftGraph => Some(SecretSlot::RefreshToken),
-        _ => Some(SecretSlot::Password),
+        AdapterKind::Caldav | AdapterKind::Ews => Some(SecretSlot::Password),
+        // Video conferencing is OAuth throughout. Teams and Meet ride the
+        // token of their calendar sibling, but each still has its own account
+        // row and its own refresh token in its own slot.
+        AdapterKind::Zoom | AdapterKind::Teams | AdapterKind::Meet | AdapterKind::Webex => {
+            Some(SecretSlot::RefreshToken)
+        }
     }
 }
 

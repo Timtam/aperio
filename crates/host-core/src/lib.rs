@@ -24,6 +24,7 @@ pub mod event_log;
 pub mod logging;
 pub mod overrides;
 pub mod paths;
+pub mod plugin_channel;
 pub mod registry;
 pub mod reminders;
 pub mod remote_plugins;

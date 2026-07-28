@@ -38,11 +38,37 @@ use vc_core::{MeetingId, NewMeeting, VcAdapter};
 
 plugin_sdk::vc_dispatch_helpers!(WebexAdapter);
 
+/// Bridges the adapter's credential reports onto the plugin host channel.
+///
+/// The adapter is a plain library and knows nothing about FFI; this wrapper is
+/// where the two meet.
+struct HostChannelSink;
+
+impl vc_adapter_webex::api::CredentialSink for HostChannelSink {
+    fn credential_rotated(&self, scope: &str, slot: &str, value: &str, expires_at: Option<&str>) {
+        let status =
+            plugin_sdk::host_channel::report_credential_rotated(scope, slot, value, expires_at);
+        // Never log the value. The status alone says whether the host took
+        // durable responsibility, which is the only thing worth knowing here.
+        if status != plugin_sdk::plugin_core::abi::HOST_CHANNEL_ACCEPTED {
+            tracing::warn!(
+                slot,
+                status,
+                "the host did not accept a rotated Webex credential; it stays in memory                  until this instance closes"
+            );
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct InitConfig {
     client_id: String,
     client_secret: String,
     refresh_token: String,
+    /// The capability token the host splices in so a report can name this
+    /// account. Absent on a host that predates the channel.
+    #[serde(default, rename = "__aperio_host_token")]
+    host_token: Option<String>,
     #[serde(default)]
     site_url: Option<String>,
     #[serde(default)]
@@ -72,7 +98,8 @@ pub unsafe extern "C" fn plugin_open_instance(config_json: *const c_char) -> Ope
             },
             cfg.client_secret,
             cfg.refresh_token,
-        ))
+        )
+        .with_credential_sink(cfg.host_token, Box::new(HostChannelSink)))
     })
 }
 

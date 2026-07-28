@@ -56,6 +56,26 @@ pub struct ApiState {
     /// Overridable for tests.
     pub api_base: String,
     pub token_url: String,
+    /// The host-channel capability token for this account, if the host gave
+    /// one. Without it a refreshed credential cannot be reported and stays in
+    /// memory — which is the whole failure this exists to prevent.
+    pub scope_token: Option<String>,
+    /// Told to the host, so it can persist what the provider handed back.
+    ///
+    /// Injected rather than called directly so this crate stays free of the
+    /// plugin SDK: the adapter is a plain library that a `-plugin` crate wraps,
+    /// and only that wrapper knows about FFI.
+    pub credential_sink: Option<Box<dyn CredentialSink>>,
+}
+
+/// How the adapter tells whoever owns it that a credential changed.
+///
+/// Implemented by the plugin wrapper over the host channel; `None` in tests and
+/// in any embedding that does not persist credentials.
+pub trait CredentialSink: Send + Sync {
+    /// `slot` is the host's vocabulary — `refresh_token`, `access_token`.
+    /// `expires_at` is RFC 3339 when the provider reported one.
+    fn credential_rotated(&self, scope: &str, slot: &str, value: &str, expires_at: Option<&str>);
 }
 
 impl ApiState {
@@ -72,7 +92,21 @@ impl ApiState {
             http,
             api_base: API_BASE.to_string(),
             token_url: oauth::WEBEX_TOKEN_URL.to_string(),
+            scope_token: None,
+            credential_sink: None,
         }
+    }
+
+    /// Attach the host channel, so a rotated credential is persisted rather
+    /// than kept in memory until the instance closes.
+    pub fn with_credential_sink(
+        mut self,
+        scope_token: Option<String>,
+        sink: Box<dyn CredentialSink>,
+    ) -> Self {
+        self.scope_token = scope_token;
+        self.credential_sink = Some(sink);
+        self
     }
 
     fn access_token(&self) -> String {
@@ -129,6 +163,23 @@ impl ApiState {
             refresh_token: carried,
             ..fresh
         };
+        let reportable = tokens.refresh_token.clone();
+        let expires = tokens.refresh_expires_at.map(|at| at.to_rfc3339());
+        drop(tokens);
+
+        // Tell the host. Webex was measured returning the SAME value with a
+        // fresh 90-day clock, so this usually only moves an expiry — but the
+        // expiry is exactly what a host that stores values alone would miss,
+        // and the day Webex starts rotating values this is what keeps the
+        // account alive. Reported AFTER the lock is released: the sink may do
+        // real work and must not hold the token mutex while it does.
+        if let (Some(sink), Some(scope), Some(value)) = (
+            self.credential_sink.as_ref(),
+            self.scope_token.as_deref(),
+            reportable.as_deref(),
+        ) {
+            sink.credential_rotated(scope, "refresh_token", value, expires.as_deref());
+        }
         Ok(())
     }
 
@@ -558,6 +609,104 @@ mod tests {
         first.assert_async().await;
         token.assert_async().await;
         second.assert_async().await;
+    }
+
+    #[derive(Default)]
+    struct RecordingSink {
+        seen: std::sync::Mutex<Vec<(String, String, Option<String>)>>,
+    }
+
+    impl CredentialSink for RecordingSink {
+        fn credential_rotated(
+            &self,
+            scope: &str,
+            slot: &str,
+            value: &str,
+            expires_at: Option<&str>,
+        ) {
+            self.seen.lock().unwrap().push((
+                format!("{scope}/{slot}"),
+                value.to_string(),
+                expires_at.map(str::to_owned),
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn a_refresh_reports_the_credential_so_the_host_can_persist_it() {
+        // Webex was measured returning the SAME value with a fresh 90-day
+        // clock, so this usually only moves an expiry — which is precisely
+        // what a host storing values alone would miss, watching a working
+        // credential appear to die on day 90.
+        let mut server = mockito::Server::new_async().await;
+        let _t = server
+            .mock("POST", "/access_token")
+            .with_status(200)
+            .with_body(
+                r#"{"access_token":"AT2","refresh_token":"RT","expires_in":1209599,
+                    "refresh_token_expires_in":7776000}"#,
+            )
+            .create_async()
+            .await;
+        let _c = server
+            .mock("GET", "/thing")
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+
+        let sink = std::sync::Arc::new(RecordingSink::default());
+        struct Forward(std::sync::Arc<RecordingSink>);
+        impl CredentialSink for Forward {
+            fn credential_rotated(
+                &self,
+                scope: &str,
+                slot: &str,
+                value: &str,
+                expires_at: Option<&str>,
+            ) {
+                self.0.credential_rotated(scope, slot, value, expires_at);
+            }
+        }
+        let state = state(&server.url(), 10)
+            .with_credential_sink(Some("the-token".into()), Box::new(Forward(sink.clone())));
+        let _: serde_json::Value = state.get_json("/thing").await.expect("call");
+
+        let seen = sink.seen.lock().unwrap();
+        assert_eq!(seen.len(), 1, "exactly one report per refresh");
+        assert_eq!(seen[0].0, "the-token/refresh_token");
+        assert_eq!(seen[0].1, "RT");
+        assert!(seen[0].2.is_some(), "the expiry must ride along");
+    }
+
+    #[tokio::test]
+    async fn without_a_scope_token_nothing_is_reported() {
+        // A host that predates the channel gives no token; reporting into the
+        // void would be noise.
+        let mut server = mockito::Server::new_async().await;
+        let _t = server
+            .mock("POST", "/access_token")
+            .with_status(200)
+            .with_body(r#"{"access_token":"AT2","refresh_token":"RT","expires_in":1209599}"#)
+            .create_async()
+            .await;
+        let _c = server
+            .mock("GET", "/thing")
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        let sink = std::sync::Arc::new(RecordingSink::default());
+        struct Forward(std::sync::Arc<RecordingSink>);
+        impl CredentialSink for Forward {
+            fn credential_rotated(&self, s: &str, sl: &str, v: &str, e: Option<&str>) {
+                self.0.credential_rotated(s, sl, v, e);
+            }
+        }
+        let state =
+            state(&server.url(), 10).with_credential_sink(None, Box::new(Forward(sink.clone())));
+        let _: serde_json::Value = state.get_json("/thing").await.expect("call");
+        assert!(sink.seen.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
