@@ -894,6 +894,8 @@ external fun uniffi_cal_ffi_checksum_method_deviceeventstorebridge_delete_remind
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_account_form_spec_json(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_accounts_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_add_event_exdate_json(
@@ -901,6 +903,8 @@ external fun uniffi_cal_ffi_checksum_method_host_add_event_exdate_json(
 external fun uniffi_cal_ffi_checksum_method_host_adopt_local_dataset_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_begin_account_oauth_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_begin_oauth_json(
 ): Short
@@ -925,6 +929,8 @@ external fun uniffi_cal_ffi_checksum_method_host_complete_oauth_reconnect_json(
 external fun uniffi_cal_ffi_checksum_method_host_complete_sync_oauth_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_connect_account_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_contact_lists_json(
 ): Short
@@ -1266,6 +1272,8 @@ external fun uniffi_cal_ffi_fn_constructor_host_open(`dbPath`: RustBuffer.ByValu
 ): Long
 external fun uniffi_cal_ffi_fn_method_host_accept_remote_dataset_json(`ptr`: Long,`configJson`: RustBuffer.ByValue,`deviceName`: RustBuffer.ByValue,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_account_form_spec_json(`ptr`: Long,`adapterKind`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_accounts_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_add_event_exdate_json(`ptr`: Long,`id`: RustBuffer.ByValue,`occurrence`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,`sendCancellations`: Byte,uniffi_out_err: UniffiRustCallStatus, 
@@ -1274,6 +1282,8 @@ external fun uniffi_cal_ffi_fn_method_host_adopt_local_dataset_json(`ptr`: Long,
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_adopt_remote_encryption_json(`ptr`: Long,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_begin_account_oauth_json(`ptr`: Long,`adapterKind`: RustBuffer.ByValue,`valuesJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_begin_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_calendar_current_user_email(`ptr`: Long,`calendarId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1298,6 +1308,8 @@ external fun uniffi_cal_ffi_fn_method_host_complete_sync_oauth_json(`ptr`: Long,
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_configure_sync_adapter_json(`ptr`: Long,`configJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_connect_account_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_contact_lists_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_contacts_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1759,6 +1771,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json() != 45743.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_account_form_spec_json() != 41169.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_accounts_json() != 21992.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1769,6 +1784,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json() != 12036.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_begin_account_oauth_json() != 37389.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_begin_oauth_json() != 10684.toShort()) {
@@ -1805,6 +1823,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json() != 45284.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_connect_account_json() != 39707.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_contact_lists_json() != 57501.toShort()) {
@@ -2107,7 +2128,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_update_task_json() != 47251.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_warm_cache_on_foreground() != 9470.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_warm_cache_on_foreground() != 16318.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_keychainbridge_store() != 54380.toShort()) {
@@ -4036,6 +4057,16 @@ public interface HostInterface {
     fun `acceptRemoteDatasetJson`(`configJson`: kotlin.String, `deviceName`: kotlin.String?, `passphrase`: kotlin.String?): kotlin.String
     
     /**
+     * The connect form an adapter declares, as JSON, or `null` when it
+     * declares none.
+     *
+     * The `builtin` flag inside the OAuth block is resolved HERE rather than
+     * in the UI: it is a question about what this build carries, which the
+     * frontend cannot see and should never be handed.
+     */
+    fun `accountFormSpecJson`(`adapterKind`: kotlin.String): kotlin.String
+    
+    /**
      * All persisted accounts as JSON (the `cal_core`/desktop wire shape).
      */
     fun `accountsJson`(): kotlin.String
@@ -4077,6 +4108,21 @@ public interface HostInterface {
      * dataset decrypted. Mirrors the desktop `adopt_remote_encryption`.
      */
     fun `adoptRemoteEncryptionJson`(`passphrase`: kotlin.String)
+    
+    /**
+     * Begin a schema-driven OAuth sign-in: build the consent URL for the
+     * adapter's own flow.
+     *
+     * `values_json` is the form as filled so far, keyed by the schema's field
+     * keys — the host reads the credential pair out of it and decides the
+     * posture. Returns the plugin's `{authorize_url, pkce_verifier, state}`
+     * for a native auth session to open.
+     *
+     * The posture is NOT remembered between this call and the completion: it
+     * is re-derived from the same values, which is deterministic for a given
+     * build, and means the host holds no cross-call credential state.
+     */
+    fun `beginAccountOauthJson`(`adapterKind`: kotlin.String, `valuesJson`: kotlin.String): kotlin.String
     
     /**
      * Begin a host-driven OAuth flow for `plugin_id` (e.g.
@@ -4207,6 +4253,16 @@ public interface HostInterface {
      * [`Self::accept_remote_dataset_json`].
      */
     fun `configureSyncAdapterJson`(`configJson`: kotlin.String)
+    
+    /**
+     * Finish a schema-driven connect: exchange the code if there is an OAuth
+     * block, then create the account.
+     *
+     * Works for BOTH shapes. An adapter with no OAuth block skips straight to
+     * the account creation, so the mobile UI has one call to make either way.
+     * Returns the created account as JSON.
+     */
+    fun `connectAccountJson`(`requestJson`: kotlin.String): kotlin.String
     
     /**
      * All contact lists (local + external) as a JSON `ContactListRow[]` (each
@@ -5058,7 +5114,11 @@ public interface HostInterface {
     /**
      * Warm the cache when the app foregrounds — the mobile stand-in for a tick
      * of the desktop periodic warm loop (which mobile can't run while
-     * backgrounded). Same fire-and-forget warm pass as the manual refresh.
+     * backgrounded). This is AUTOMATIC (not a user action), so it runs the
+     * pass UN-forced, exactly like the desktop app-start/periodic pass: a
+     * cold-start/resume network blip must be confirmed by a second attempt
+     * before it surfaces, instead of alarming on the first failure. Only the
+     * genuine manual `refresh_external_cache` is forced.
      */
     fun `warmCacheOnForeground`()
     
@@ -5192,6 +5252,28 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * The connect form an adapter declares, as JSON, or `null` when it
+     * declares none.
+     *
+     * The `builtin` flag inside the OAuth block is resolved HERE rather than
+     * in the UI: it is a question about what this build carries, which the
+     * frontend cannot see and should never be handed.
+     */
+    @Throws(StoreException::class)override fun `accountFormSpecJson`(`adapterKind`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_account_form_spec_json(
+        it,
+        FfiConverterString.lower(`adapterKind`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * All persisted accounts as JSON (the `cal_core`/desktop wire shape).
      */
     @Throws(StoreException::class)override fun `accountsJson`(): kotlin.String {
@@ -5277,6 +5359,33 @@ open class Host: Disposable, AutoCloseable, HostInterface
 }
     }
     
+    
+
+    
+    /**
+     * Begin a schema-driven OAuth sign-in: build the consent URL for the
+     * adapter's own flow.
+     *
+     * `values_json` is the form as filled so far, keyed by the schema's field
+     * keys — the host reads the credential pair out of it and decides the
+     * posture. Returns the plugin's `{authorize_url, pkce_verifier, state}`
+     * for a native auth session to open.
+     *
+     * The posture is NOT remembered between this call and the completion: it
+     * is re-derived from the same values, which is deterministic for a given
+     * build, and means the host holds no cross-call credential state.
+     */
+    @Throws(StoreException::class)override fun `beginAccountOauthJson`(`adapterKind`: kotlin.String, `valuesJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_begin_account_oauth_json(
+        it,
+        FfiConverterString.lower(`adapterKind`),FfiConverterString.lower(`valuesJson`),_status)
+}
+    }
+    )
+    }
     
 
     
@@ -5546,6 +5655,28 @@ open class Host: Disposable, AutoCloseable, HostInterface
 }
     }
     
+    
+
+    
+    /**
+     * Finish a schema-driven connect: exchange the code if there is an OAuth
+     * block, then create the account.
+     *
+     * Works for BOTH shapes. An adapter with no OAuth block skips straight to
+     * the account creation, so the mobile UI has one call to make either way.
+     * Returns the created account as JSON.
+     */
+    @Throws(StoreException::class)override fun `connectAccountJson`(`requestJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_connect_account_json(
+        it,
+        FfiConverterString.lower(`requestJson`),_status)
+}
+    }
+    )
+    }
     
 
     
@@ -7559,7 +7690,11 @@ open class Host: Disposable, AutoCloseable, HostInterface
     /**
      * Warm the cache when the app foregrounds — the mobile stand-in for a tick
      * of the desktop periodic warm loop (which mobile can't run while
-     * backgrounded). Same fire-and-forget warm pass as the manual refresh.
+     * backgrounded). This is AUTOMATIC (not a user action), so it runs the
+     * pass UN-forced, exactly like the desktop app-start/periodic pass: a
+     * cold-start/resume network blip must be confirmed by a second attempt
+     * before it surfaces, instead of alarming on the first failure. Only the
+     * genuine manual `refresh_external_cache` is forced.
      */override fun `warmCacheOnForeground`()
         = 
     callWithHandle {

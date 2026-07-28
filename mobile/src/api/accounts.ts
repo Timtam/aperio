@@ -8,6 +8,8 @@
 // here (not yet in @aperio/shared) to keep this increment off the desktop;
 // it hoists to the shared package when the desktop account UI is ported.
 
+import type { AccountFormSpec } from '@aperio/shared';
+
 import CalFfi from '../../modules/cal-ffi';
 
 import { scheduleBackgroundPush } from './syncTriggers';
@@ -168,6 +170,62 @@ export const discoverEwsEndpoint = async (
 export const OAUTH_PLUGIN_IDS: Record<'google' | 'microsoft_graph', string> = {
   google: 'com.aperio.cal-adapter-google',
   microsoft_graph: 'com.aperio.cal-adapter-microsoft-graph',
+};
+
+// ── Schema-driven accounts ──────────────────────────────────────────────────
+//
+// The generic path: an adapter declares its connect form in its `plugin.json`
+// and the host executes the declaration. Nothing here names a provider, and
+// adding an adapter adds no code — the desktop half is identical, and both call
+// the same Rust.
+
+/** The connect form an adapter declares, or `null` when it declares none —
+ *  which is the correct answer for the adapters still on the older per-kind
+ *  path, and for plugins with no accounts at all. */
+export const accountFormSpec = async (
+  kind: AdapterKind,
+): Promise<AccountFormSpec | null> =>
+  JSON.parse(await CalFfi.accountFormSpecJson(kind)) as AccountFormSpec | null;
+
+/** Begin a schema-driven OAuth sign-in. The host reads the credential pair out
+ *  of the form's values, decides whether this is the build's own registration
+ *  or the user's, and returns the consent URL for a native auth session.
+ *
+ *  The posture is deliberately NOT remembered between this call and
+ *  {@link connectAccount}: the host re-derives it from the same values, so it
+ *  holds no credential state across the round trip. */
+export const beginAccountOauth = async (
+  kind: AdapterKind,
+  values: Record<string, string | boolean>,
+): Promise<OAuthAuthorize> =>
+  JSON.parse(
+    await CalFfi.beginAccountOauthJson(kind, JSON.stringify(values)),
+  ) as OAuthAuthorize;
+
+/** Everything {@link connectAccount} needs. The four OAuth fields are empty for
+ *  an adapter that has no OAuth block — one request shape serves both, so the
+ *  UI has one call to make either way. */
+export interface ConnectAccountRequest {
+  adapter_kind: AdapterKind;
+  display_name: string;
+  values: Record<string, string | boolean>;
+  code?: string;
+  pkce_verifier?: string;
+  state?: string;
+  returned_state?: string;
+}
+
+/** Finish a schema-driven connect: exchange the code if there is an OAuth
+ *  block, then create the account — row, keychain writes and adapter
+ *  registration, all Rust-side, all driven by what the adapter declared. */
+export const connectAccount = async (
+  request: ConnectAccountRequest,
+): Promise<Account> => {
+  const created = JSON.parse(
+    await CalFfi.connectAccountJson(JSON.stringify(request)),
+  ) as Account;
+  scheduleBackgroundPush();
+  return created;
 };
 
 /** The authorize-phase result from {@link beginOauth}: the Host built the consent

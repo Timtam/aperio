@@ -557,6 +557,25 @@ public class CalFfiModule: Module {
       try self.host.taskSetMemberRight(listId: listId, memberRef: memberRef, right: right)
     }
 
+    // ─── Schema-driven accounts ──────────────────────────────────────────────
+    // The generic connect path: the adapter declares its form in its
+    // plugin.json and the host executes the declaration, so adding an adapter
+    // adds no code here either.
+
+    AsyncFunction("accountFormSpecJson") { (adapterKind: String) -> String in
+      try self.host.accountFormSpecJson(adapterKind: adapterKind)
+    }
+
+    // Pure (no network): builds the consent URL + PKCE verifier + state.
+    AsyncFunction("beginAccountOauthJson") { (adapterKind: String, valuesJson: String) -> String in
+      try self.host.beginAccountOauthJson(adapterKind: adapterKind, valuesJson: valuesJson)
+    }
+
+    // Network: the token exchange, then the row + keychain + registration.
+    AsyncFunction("connectAccountJson") { (requestJson: String) -> String in
+      try self.host.connectAccountJson(requestJson: requestJson)
+    }.runOnQueue(slowQueue)
+
     // ─── OAuth (host-driven; mobile opens authorize_url in a native session) ──
 
     AsyncFunction("beginOauthJson") { (pluginId: String, argsJson: String) -> String in

@@ -16,9 +16,11 @@ import {
   Account,
   AdapterKind,
   OAUTH_PLUGIN_IDS,
+  beginAccountOauth,
   beginOauth,
   completeOauth,
   completeOauthReconnect,
+  connectAccount,
 } from './accounts';
 import { SYNC_OAUTH_PLUGIN_IDS, completeSyncOauth } from './sync';
 
@@ -261,4 +263,71 @@ function firstString(
 ): string | undefined {
   if (value == null) return undefined;
   return Array.isArray(value) ? value[0] : value;
+}
+
+// ── Schema-driven connect ───────────────────────────────────────────────────
+
+/** Run a connect for any adapter that declares an account schema.
+ *
+ *  One function for both shapes. An adapter with an OAuth block gets the
+ *  two-phase dance around a native auth session; one without goes straight to
+ *  the account creation. Which it is comes from the adapter's own declaration,
+ *  so this never grows a branch per provider — the whole point of the schema.
+ *
+ *  The redirect URI is the app's own scheme, which is the only thing a native
+ *  auth session can return to. The adapter declares it (defaulting to
+ *  `aperio://oauth-callback`) so a plugin registered against a different scheme
+ *  can say so. */
+export async function connectSchemaAccount(input: {
+  kind: AdapterKind;
+  displayName: string;
+  values: Record<string, string | boolean>;
+  /** From the adapter's spec: absent means no sign-in step. */
+  hasOauth: boolean;
+}): Promise<OAuthConnectResult> {
+  if (!input.hasOauth) {
+    const account = await connectAccount({
+      adapter_kind: input.kind,
+      display_name: input.displayName,
+      values: input.values,
+    });
+    return { kind: 'connected', account };
+  }
+
+  const authz = await beginAccountOauth(input.kind, input.values);
+  const result = await WebBrowser.openAuthSessionAsync(
+    authz.authorize_url,
+    OAUTH_REDIRECT_URI,
+  );
+  if (result.type !== 'success') {
+    return { kind: 'cancelled' };
+  }
+
+  const params = Linking.parse(result.url).queryParams ?? {};
+  const errorParam = firstString(params.error);
+  if (errorParam != null) {
+    // Declining consent is a cancellation, not a failure — the same reading the
+    // Google/Microsoft flow above gives it.
+    if (errorParam === 'access_denied' || errorParam === 'user_cancelled') {
+      return { kind: 'cancelled' };
+    }
+    throw new Error(errorParam);
+  }
+  const code = firstString(params.code);
+  if (code == null || code.length === 0) {
+    throw new Error('OAUTH_NO_CODE');
+  }
+
+  const account = await connectAccount({
+    adapter_kind: input.kind,
+    display_name: input.displayName,
+    // The same values go back: the host re-derives which OAuth client this is
+    // rather than holding one across the round trip.
+    values: input.values,
+    code,
+    pkce_verifier: authz.pkce_verifier,
+    state: authz.state,
+    returned_state: firstString(params.state) ?? '',
+  });
+  return { kind: 'connected', account };
 }

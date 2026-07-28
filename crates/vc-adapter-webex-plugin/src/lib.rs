@@ -311,3 +311,105 @@ plugin_sdk::declare_lifecycle! {
     open_instance: plugin_open_instance,
     close_instance: plugin_close_instance,
 }
+
+#[cfg(test)]
+mod tests {
+
+    /// The manifest ships beside this crate and is the ONLY thing that tells
+    /// the host how to set up a Webex account. Parsing it here means a typo
+    /// fails the build rather than the first user who tries to connect.
+    fn manifest() -> plugin_sdk::plugin_core::manifest::PluginManifest {
+        plugin_sdk::plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
+            "../plugin.json"
+        ))
+        .expect("plugin.json parses and its account schema validates")
+    }
+
+    #[test]
+    fn every_schema_field_is_a_key_the_init_config_actually_reads() {
+        // The schema and `InitConfig` are two descriptions of the same thing,
+        // in two languages, and nothing but this test connects them. A field
+        // the host faithfully collects and merges under a name the plugin does
+        // not deserialise is silently dropped — the account connects, and then
+        // behaves as though the setting were never set.
+        let schema = manifest()
+            .account
+            .expect("Webex declares an account schema");
+        let known = [
+            "client_id",
+            "client_secret",
+            "refresh_token",
+            "site_url",
+            "use_personal_room",
+            "send_webex_emails",
+        ];
+        for field in &schema.fields {
+            assert!(
+                known.contains(&field.key.as_str()),
+                "schema field `{}` is not read by InitConfig",
+                field.key
+            );
+        }
+        let oauth = schema.oauth.expect("Webex signs in via OAuth");
+        for key in [
+            Some(oauth.client_id_field.as_str()),
+            oauth.client_secret_field.as_deref(),
+            oauth.refresh_token_field.as_deref(),
+            oauth.access_token_field.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            assert!(
+                known.contains(&key),
+                "oauth key `{key}` is not read by InitConfig"
+            );
+        }
+    }
+
+    #[test]
+    fn the_two_credentials_are_routed_away_from_the_account_row() {
+        use plugin_sdk::plugin_core::account_schema::AccountSecretSlot;
+        let schema = manifest().account.unwrap();
+        let secret = schema.field("client_secret").unwrap();
+        assert_eq!(
+            secret.secret_slot,
+            Some(AccountSecretSlot::OauthClientSecret)
+        );
+        // The client id is NOT a secret: it travels in every authorization URL
+        // the user's own browser visits, and the host needs it in the row to
+        // record which registration an account belongs to.
+        assert!(!schema.field("client_id").unwrap().is_secret());
+        assert_eq!(
+            schema
+                .oauth
+                .as_ref()
+                .unwrap()
+                .refresh_token_field
+                .as_deref(),
+            Some("refresh_token")
+        );
+    }
+
+    #[test]
+    fn the_adapter_asks_for_a_capability_token() {
+        // It reports a rotated refresh token back through the host channel, and
+        // without a token the host cannot tell which account is speaking.
+        assert!(manifest().account.unwrap().host_channel);
+    }
+
+    #[test]
+    fn no_access_token_is_requested() {
+        // The adapter mints one on first use from the refresh token, so being
+        // handed a stale one would only give the host something to keep fresh.
+        assert_eq!(
+            manifest()
+                .account
+                .unwrap()
+                .oauth
+                .unwrap()
+                .access_token_field,
+            None
+        );
+    }
+}

@@ -3131,6 +3131,96 @@ myplugin/
 
 `abi_version` im Manifest muss mit der vom Plugin-Manager unterstützten ABI-Version übereinstimmen, sonst wird das Plugin abgelehnt — und zwar exakt, nicht „mindestens“ (siehe Abschnitt 20.3). `min_app_version` ist der Hebel für Vorwärtskompatibilität: ein Plugin, das eine erst später eingeführte Fähigkeit oder einen neuen Plugin-Typ voraussetzt, trägt hier die einführende Release-Version ein, damit ältere Aperio-Versionen mit „Aperio aktualisieren“ scheitern statt mit einer irreführenden Manifest-Fehlermeldung. `capabilities` deklariert die unterstützten Features (`calendar`, `tasks`, `contacts` – siehe Abschnitt 10.2 für Details).
 
+#### 20.4.1 Konto-Schema (`account`)
+
+Ein Adapter, der Konten hat, beschreibt sie **selbst** — im Manifest, nicht im
+Kern. Der Host führt diese Beschreibung nur aus: er zeichnet das Formular, sammelt
+die Werte, führt die Anmeldung durch, trennt Geheimnisse von Nicht-Geheimnissen
+und reicht dem Plugin beim Öffnen genau die Init-Config, die es benannt hat. In
+keiner dieser Stufen steht ein Adaptername im Kern-Code. Ein Adapter, den Aperios
+Autoren nie gesehen haben, wird darum genauso eingerichtet wie ein mitgelieferter.
+
+Der Block ist optional. Fehlt er, hat der Host keinen generischen Weg, dieses
+Plugin zu verbinden — die richtige Antwort für einen Benachrichtigungskanal und
+für die Adapter, die noch auf dem älteren, pro Art fest verdrahteten Pfad liegen.
+
+```json
+"account": {
+  "fields": [
+    { "key": "client_id", "kind": "text", "label": "Client ID",
+      "label_key": "dialogs.accounts.webexClientIdLabel", "required": true },
+    { "key": "client_secret", "kind": "secret",
+      "secret_slot": "oauth_client_secret", "label": "Client secret",
+      "required": true },
+    { "key": "use_personal_room", "kind": "bool",
+      "label": "Persönlichen Raum verwenden", "default": false }
+  ],
+  "oauth": {
+    "builtin_provider": "webex",
+    "client_id_field": "client_id",
+    "client_secret_field": "client_secret",
+    "refresh_token_field": "refresh_token"
+  },
+  "host_channel": true
+}
+```
+
+**Felder.** `key` ist zugleich der Schlüssel, unter dem der Wert in der
+Init-Config des Plugins auftaucht — ein Nicht-Geheimnis wird unter demselben
+Namen in `config_json` abgelegt, die Rückreise braucht also keine Zuordnungs-
+tabelle. `kind` ist `text`, `url`, `secret` oder `bool` und steuert das
+Eingabefeld auf beiden Plattformen (auf Mobil auch die Bildschirmtastatur, was
+`url` von `text` unterscheidet). `label` ist die Zeichenkette des Plugin-Autors;
+`label_key` benennt zusätzlich einen Übersetzungsschlüssel, den die App in der
+Sprache des Nutzers auflöst und der Vorrang hat. Mitgelieferte Adapter setzen
+den Schlüssel — so liegen die Texte in den Sprachdateien, wo Übersetzungen
+hingehören, und die Struktur im Manifest, wo das Wissen des Adapters hingehört.
+Ein Fremd-Plugin ohne Übersetzung fällt auf sein Literal zurück, was ehrlicher
+ist als ein fehlender Schlüssel. `hint`/`hint_key` funktionieren genauso.
+
+**Geheimnisse.** Ein Feld ist genau dann ein Geheimnis, wenn es `secret_slot`
+nennt, und ein Geheimnis erreicht **niemals** `config_json`: diese Spalte ist als
+nicht-geheim dokumentiert und wird bei ausgeschalteter Ende-zu-Ende-Verschlüsse-
+lung unverschlüsselt an das Sync-Log angehängt, träfe also im Klartext beim
+eigenen Sync-Ziel des Nutzers ein. Beide Richtungen werden beim Laden geprüft:
+ein `secret` ohne Slot und ein Slot an einem Nicht-Geheimnis lassen das Manifest
+scheitern. Erlaubt sind `access_token`, `refresh_token`, `password`, `api_token`
+und `oauth_client_secret`. Der Ende-zu-Ende-Schlüssel ist **nicht benennbar** —
+es gibt für ihn keine Variante in diesem Enum, er wird also nicht etwa abgelehnt,
+sondern kann gar nicht erst erfragt werden.
+
+**OAuth.** Der Host führt den *Ablauf* (Browser bzw. native Auth-Session, die
+beiden Mobil-Phasen, das Verwahren des Ergebnisses) und weiß nichts über den
+Anbieter; Endpunkte, Scopes und Tausch gehören dem Plugin und laufen über dessen
+`aperio_plugin_interactive_auth`. `client_id_field` und `client_secret_field`
+benennen die beiden Felder; `refresh_token_field` und `access_token_field`
+sagen, unter welchem Namen die Token beim Öffnen in die Init-Config gehören —
+fehlt eins, will das Plugin es nicht haben.
+
+`builtin_provider` benennt den Satz Zugangsdaten, den ein Build für diesen
+Anbieter mitbringen kann (siehe `crates/builtin-oauth`). Trägt der Build ihn,
+werden die beiden Zugangsdaten-Felder optional: bleiben beide leer, meldet sich
+Aperio mit der eigenen Registrierung an, und das Konto merkt sich nur, *welche*
+das war (`client_source` + ein zwölfstelliger Fingerabdruck), nicht die Zugangs-
+daten selbst. Das ist Absicht: Aperios Client-Secret gehört dem Build und nicht
+dem Nutzer, es in dessen Schlüsselbund zu kopieren würde es auf jedes Gerät
+tragen, auf das das Konto synchronisiert, und auf dem Wert einfrieren, den es am
+Anlegetag hatte — genau die beiden Eigenschaften, die etwas Rotierbares nicht
+haben darf. Ein Build mit einer *anderen* Registrierung wird beim Registrieren
+am Fingerabdruck erkannt und sagt das, statt Wochen später als unerklärliches
+`invalid_grant` zu enden.
+
+Eine *halbe* Angabe — Client-ID getippt, Secret leer — ist ein Fehler und keine
+stille Rückfallebene auf die eingebauten Zugangsdaten: wer die eigene ID einträgt,
+will die eigene Integration, und eine stille Anmeldung als Aperio bände das Konto
+an Zugangsdaten, die der Nutzer nicht gewählt hat und nicht rotieren kann, ohne
+dass es von außen sichtbar wäre.
+
+**`host_channel`.** Setzt das Plugin es, bekommt jede Instanz ein Capability-Token
+und kann darüber ein rotiertes Zugangsdatum zurückmelden (Abschnitt 20.10). Aus,
+solange es nicht verlangt wird: das Token ist Vollmacht, und Vollmacht, die
+niemand angefordert hat, hat auch niemand geprüft.
+
 ### 20.5 Plugin-Manager (Laufzeit)
 
 Der Plugin-Manager im Rust-Backend ist zuständig für:

@@ -17,6 +17,7 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 import {
   Account,
   AdapterKind,
+  accountFormSpec,
   createAccount,
   deleteAccount,
   discoverEwsEndpoint,
@@ -29,9 +30,20 @@ import {
   testAccount,
 } from '../api/accounts';
 import { getUserPref, setUserPref } from '../api/prefs';
-import { reconnectOAuthAccount, type OAuthProvider } from '../api/oauth';
+import {
+  connectSchemaAccount,
+  reconnectOAuthAccount,
+  type OAuthProvider,
+} from '../api/oauth';
 import { refreshExternalCache } from '../api/sync';
 import { useRefreshErrors } from '../state/useRefreshErrors';
+import {
+  collectValues,
+  firstMissingField,
+  type AccountFormSpec,
+} from '@aperio/shared';
+
+import { AccountSchemaForm } from '../components/AccountSchemaForm';
 import { AppDialog } from '../components/AppDialog';
 import ContactsPrivacyNoticeModal from '../components/ContactsPrivacyNoticeModal';
 import { FormScrollView } from '../components/FormScrollView';
@@ -110,6 +122,9 @@ const PICKER_KINDS: AdapterKind[] = [
   ...OFFERED_KINDS.filter((k) => k !== 'local'),
   'google',
   'microsoft_graph',
+  // Adapters that declare their own connect form. The screen asks the host for
+  // that form when one is picked, so nothing about them is described here.
+  'webex',
 ];
 
 /** OAuth kinds can't be repaired with a pasted secret — they re-run the
@@ -195,9 +210,17 @@ export default function AccountsScreen() {
   // 'picker' a provider menu; 'credential'/'oauth' the chosen provider's form —
   // replacing the old always-mounted credential + OAuth forms (one long view).
   const [mode, setMode] = useState<
-    'list' | 'picker' | 'credential' | 'oauth' | 'device'
+    'list' | 'picker' | 'credential' | 'oauth' | 'device' | 'schema'
   >('list');
   const [pickedOAuth, setPickedOAuth] = useState<OAuthProvider | null>(null);
+  // The connect form for a schema-declaring adapter, as that ADAPTER declares
+  // it — plus the values collected for it. Nothing in this screen knows what
+  // any of the fields mean.
+  const [formSpec, setFormSpec] = useState<AccountFormSpec | null>(null);
+  const [formValues, setFormValues] = useState<
+    Record<string, string | boolean>
+  >({});
+  const [schemaKind, setSchemaKind] = useState<AdapterKind | null>(null);
 
   const rowTags = useRef<Record<string, number | null>>({});
   const pendingFocusId = useRef<string | null>(null);
@@ -278,21 +301,102 @@ export default function AccountsScreen() {
       if (picked === 'device_calendar') {
         // No credentials — the OS permission prompt IS the auth step.
         setMode('device');
-      } else if (isOAuthKind(picked)) {
+        return;
+      }
+      if (isOAuthKind(picked)) {
         setPickedOAuth(picked as OAuthProvider);
         setMode('oauth');
-      } else {
-        onChangeKind(picked as keyof typeof KIND_FORMS);
-        setMode('credential');
+        return;
       }
+      // Does this adapter declare its own connect form? If so it is rendered
+      // from the declaration and connected through the generic path; if not it
+      // falls back to the older per-kind table above. Asking the host is what
+      // keeps this screen free of per-adapter knowledge.
+      void accountFormSpec(picked)
+        .then((spec) => {
+          if (spec) {
+            setSchemaKind(picked);
+            setFormSpec(spec);
+            setFormValues({});
+            setMode('schema');
+          } else {
+            onChangeKind(picked as keyof typeof KIND_FORMS);
+            setMode('credential');
+          }
+        })
+        .catch(() => {
+          // A failed probe falls back to the older path rather than stranding
+          // the user on a picker that did nothing.
+          onChangeKind(picked as keyof typeof KIND_FORMS);
+          setMode('credential');
+        });
     },
     [onChangeKind],
   );
+
+  /** Connect an adapter that declared its own form. */
+  const addFromSchema = useCallback(async () => {
+    const name = displayName.trim();
+    if (name.length === 0) {
+      setError(t('dialogs.accounts.nameRequired'));
+      announce(t('dialogs.accounts.nameRequired'));
+      return;
+    }
+    if (!formSpec || !schemaKind) return;
+    const missing = firstMissingField(formSpec, formValues);
+    if (missing) {
+      const label = missing.label_key
+        ? t(missing.label_key, { defaultValue: missing.label })
+        : missing.label;
+      const message = t('dialogs.accounts.fieldRequired', { field: label });
+      setError(message);
+      announce(message);
+      return;
+    }
+    setError(null);
+    setSubmitting(true);
+    try {
+      const result = await connectSchemaAccount({
+        kind: schemaKind,
+        displayName: name,
+        values: collectValues(formSpec, formValues),
+        hasOauth: formSpec.oauth != null,
+      });
+      if (result.kind === 'cancelled') return;
+      resetForm();
+      setFormValues({});
+      setMode('list');
+      await load();
+      pendingFocusId.current = result.account.id;
+      announce(t('dialogs.accounts.created', { name }));
+      void refreshExternalCache().catch(() => undefined);
+      await maybeShowPrivacyNotice(schemaKind);
+    } catch (err) {
+      const message = errorMessage(err);
+      setError(message);
+      announce(t('mobile.error', { message }));
+    } finally {
+      setSubmitting(false);
+    }
+  }, [
+    announce,
+    displayName,
+    formSpec,
+    formValues,
+    load,
+    maybeShowPrivacyNotice,
+    resetForm,
+    schemaKind,
+    t,
+  ]);
 
   const cancelAdd = useCallback(() => {
     resetForm();
     setError(null);
     setPickedOAuth(null);
+    setFormSpec(null);
+    setFormValues({});
+    setSchemaKind(null);
     setMode('list');
   }, [resetForm]);
 
@@ -886,6 +990,46 @@ export default function AccountsScreen() {
             </Text>
           </Pressable>
         )}
+      </AppDialog>
+
+      {/* An adapter that declares its own connect form renders it straight
+          from the declaration — no branch here, and none needed when the next
+          adapter arrives. */}
+      <AppDialog
+        visible={mode === 'schema' && formSpec != null}
+        title={
+          schemaKind
+            ? t(`dialogs.accounts.kindName.${schemaKind}`, {
+                defaultValue: schemaKind,
+              })
+            : ''
+        }
+        confirmLabel={t('dialogs.accounts.add')}
+        cancelLabel={t('mobile.cancel')}
+        onConfirm={() => void addFromSchema()}
+        onCancel={cancelAdd}
+        busy={submitting}
+      >
+        <View style={styles.field}>
+          <Text style={styles.label}>{t('dialogs.accounts.nameLabel')}</Text>
+          <TextInput
+            style={styles.input}
+            value={displayName}
+            onChangeText={setDisplayName}
+            placeholder={t('dialogs.accounts.namePlaceholder')}
+            accessibilityLabel={t('dialogs.accounts.nameLabel')}
+          />
+        </View>
+        {formSpec && (
+          <AccountSchemaForm
+            spec={formSpec}
+            values={formValues}
+            onChange={(key, value) =>
+              setFormValues((prev) => ({ ...prev, [key]: value }))
+            }
+          />
+        )}
+        {error != null && <Text style={styles.error}>{error}</Text>}
       </AppDialog>
 
       <AppDialog

@@ -867,6 +867,18 @@ impl AdapterRegistry {
     }
 
     fn try_register(&self, account: &Account) -> Result<(), RegistryError> {
+        // A plugin that publishes an account schema is registered generically:
+        // the schema says which secrets it wants and what to call them, so the
+        // host needs no per-adapter branch and an adapter Aperio has never seen
+        // registers exactly like one it ships. The match below is the older
+        // per-kind path, kept for the adapters that have not declared a schema
+        // yet — every one of them can move over by adding the block to its
+        // `plugin.json`, without a line changing here.
+        if let Some(plugin_id) = account.adapter_kind.plugin_id() {
+            if let Some(schema) = self.account_schema(plugin_id) {
+                return self.register_from_schema(account, plugin_id, &schema);
+            }
+        }
         match account.adapter_kind {
             AdapterKind::Local => Ok(()),
             // Built + inserted by the cal-ffi host layer (it needs the native
@@ -883,7 +895,9 @@ impl AdapterRegistry {
             AdapterKind::Zoom => self.register_zoom(account),
             AdapterKind::Teams => self.register_teams(account),
             AdapterKind::Meet => self.register_meet(account),
-            AdapterKind::Webex => self.register_webex(account),
+            // Webex declares an account schema, so it never reaches this arm; the
+            // fallback exists only for a build where the plugin failed to load.
+            AdapterKind::Webex => Err(RegistryError::PluginMissing(PLUGIN_ID_WEBEX.to_string())),
         }
     }
 
@@ -1051,126 +1065,96 @@ impl AdapterRegistry {
         Ok(())
     }
 
-    fn register_webex(&self, account: &Account) -> Result<(), RegistryError> {
-        // Which OAuth client this account is linked to, and where its secret
-        // comes from. See `webex_client_for` — the two postures differ in more
-        // than a lookup.
-        let client = webex_client_for(&account.config_json, || {
-            self.secret_store
-                .retrieve(&account.id, SecretSlot::OauthClientSecret)
-        })?;
-        let refresh = self
-            .secret_store
-            .retrieve(&account.id, SecretSlot::RefreshToken)
-            .map_err(|e| RegistryError::Secret(format!("missing refresh token: {e}")))?;
+    /// The account schema a plugin published, if it did.
+    fn account_schema(
+        &self,
+        plugin_id: &str,
+    ) -> Option<plugin_core::account_schema::AccountSchema> {
+        self.plugin_manager
+            .get(plugin_id)
+            .and_then(|p| p.manifest.account.clone())
+    }
 
-        // A capability token, so this instance can report a rotated credential
-        // back and the host knows WHICH account is speaking. It rides the
-        // TRANSIENT merged config only — never the persisted row.
-        let scope = plugin_core::host_channel::mint_scope(&account.id, PLUGIN_ID_WEBEX);
-        let plugin_config = merge_account_config(
-            &account.config_json,
-            &[
-                ("client_id", Value::String(client.id)),
-                ("client_secret", Value::String(client.secret)),
-                ("refresh_token", Value::String(refresh)),
-                (
+    /// Open an instance for any plugin that declared an [`AccountSchema`].
+    ///
+    /// Everything provider-specific comes out of the schema: which keychain
+    /// slots to read, what to call each value in the init config, and whether
+    /// there is an OAuth client to resolve. The host contributes only the two
+    /// things a plugin cannot do for itself — reaching the platform keychain,
+    /// and minting the capability token that lets an instance report a rotated
+    /// credential back and be believed about which account it speaks for.
+    fn register_from_schema(
+        &self,
+        account: &Account,
+        plugin_id: &str,
+        schema: &plugin_core::account_schema::AccountSchema,
+    ) -> Result<(), RegistryError> {
+        let mut plugin_config =
+            crate::account_setup::init_config(schema, &account.config_json, |slot| {
+                self.secret_store.retrieve(&account.id, slot)
+            })
+            .map_err(|e| match e {
+                crate::account_setup::AccountSetupError::Config(m)
+                | crate::account_setup::AccountSetupError::InvalidInput(m) => {
+                    RegistryError::Config(m)
+                }
+                crate::account_setup::AccountSetupError::Secret(m) => RegistryError::Secret(m),
+            })?;
+
+        // The capability token rides the TRANSIENT merged config only — never
+        // the persisted row — and must outlive the instance, since dropping it
+        // retires the scope. Parking it beside the registration ties the two
+        // lifetimes together.
+        let scope = schema
+            .host_channel
+            .then(|| plugin_core::host_channel::mint_scope(&account.id, plugin_id));
+        if let Some(scope) = &scope {
+            plugin_config = merge_account_config(
+                &plugin_config,
+                &[(
                     plugin_core::abi::HOST_TOKEN_CONFIG_KEY,
                     Value::String(scope.as_str().to_string()),
-                ),
-            ],
-        )?;
-        let instance = self.open_plugin_instance(PLUGIN_ID_WEBEX, plugin_config)?;
-        // The token must outlive the instance: dropping it retires the scope,
-        // so it is parked alongside.
-        self.retain_scope(&account.id, scope);
-        self.insert_vc(&account.id, instance)?;
-        Ok(())
-    }
-}
+                )],
+            )?;
+        }
 
-/// The OAuth client an account signs in with, once resolved.
-#[derive(Debug)]
-pub(crate) struct ResolvedOauthClient {
-    pub id: String,
-    pub secret: String,
-}
+        let instance = self.open_plugin_instance(plugin_id, plugin_config)?;
+        if let Some(scope) = scope {
+            self.retain_scope(&account.id, scope);
+        }
 
-/// Marker in `config_json` naming which posture an account was created under.
-const CLIENT_SOURCE_KEY: &str = "client_source";
-const CLIENT_SOURCE_BUILTIN: &str = "builtin";
-/// Digest of the built-in credential the account was linked to, so a build
-/// carrying a *different* registration is caught here rather than surfacing as
-/// an unexplained `invalid_grant` weeks later.
-const CLIENT_FINGERPRINT_KEY: &str = "client_fingerprint";
-
-/// Resolve the Webex OAuth client for an account.
-///
-/// Two postures, and they are genuinely different — not a lookup with two
-/// sources:
-///
-///  - **Built-in** — the account was created against the credentials this build
-///    carries. Nothing about the client is persisted: the id and the secret
-///    both come from `builtin-oauth` at open time. That is deliberate. Aperio's
-///    own client secret is not the user's, so copying it into the user's
-///    keychain would spread it across every device the account syncs to and
-///    freeze it at the value it had on the day the account was made — exactly
-///    the two properties you do not want when it has to be rotatable.
-///  - **Bring your own** — the user registered their own integration. The id is
-///    non-secret and lives in `config_json`; the secret is theirs and lives in
-///    the keychain, never in `config_json`, because that column is appended to
-///    the sync event log unencrypted whenever end-to-end encryption is off.
-///
-/// `keychain` is a closure rather than a value so the built-in path does not
-/// perform a keychain read it has no use for — on a locked keychain that read
-/// can prompt.
-pub(crate) fn webex_client_for(
-    config_json: &str,
-    keychain: impl FnOnce() -> Result<String, sync_engine::SecretError>,
-) -> Result<ResolvedOauthClient, RegistryError> {
-    let cfg: Value =
-        serde_json::from_str(config_json).map_err(|e| RegistryError::Config(e.to_string()))?;
-    let source = cfg.get(CLIENT_SOURCE_KEY).and_then(Value::as_str);
-
-    if source == Some(CLIENT_SOURCE_BUILTIN) {
-        let client =
-            builtin_oauth::builtin_client(builtin_oauth::Provider::Webex).ok_or_else(|| {
-                RegistryError::Secret(
-                    "this account uses Aperio's built-in Webex credentials, and this build carries \
-                     none — sign in again with your own Webex integration"
-                        .to_string(),
-                )
-            })?;
-        // A secret is guaranteed present for a provider that requires one:
-        // `builtin_client` returns None rather than a half-configured pair.
-        let secret = client.client_secret.ok_or_else(|| {
-            RegistryError::Secret("the built-in Webex credentials carry no secret".to_string())
-        })?;
-        if let Some(expected) = cfg.get(CLIENT_FINGERPRINT_KEY).and_then(Value::as_str) {
-            let actual = builtin_oauth::ClientFingerprint::of(client.client_id, Some(secret));
-            if actual.as_str() != expected {
-                return Err(RegistryError::Secret(format!(
-                    "this account was linked to Webex client {expected}, but this build carries \
-                     {actual} — sign in to Webex again"
-                )));
+        // Which maps the instance lands in follows from the plugin's declared
+        // type and capabilities — the same source the per-kind path consults,
+        // read generically.
+        let manifest = self
+            .plugin_manager
+            .get(plugin_id)
+            .ok_or_else(|| RegistryError::PluginMissing(plugin_id.to_string()))?
+            .manifest
+            .clone();
+        match manifest.plugin_type {
+            plugin_core::PluginType::VideoconferenceAdapter => {
+                self.insert_vc(&account.id, instance)?;
+            }
+            plugin_core::PluginType::CalendarAdapter => {
+                if manifest.has_capability(&plugin_core::Capability::Calendar) {
+                    self.insert_calendar(&account.id, instance.clone())?;
+                }
+                if manifest.has_capability(&plugin_core::Capability::Tasks) {
+                    self.insert_tasks(&account.id, instance.clone())?;
+                }
+                if manifest.has_capability(&plugin_core::Capability::Contacts) {
+                    self.insert_contacts(&account.id, instance)?;
+                }
+            }
+            other => {
+                return Err(RegistryError::Construct(format!(
+                    "plugin type {other:?} has no account-backed adapter surface"
+                )))
             }
         }
-        return Ok(ResolvedOauthClient {
-            id: client.client_id.to_string(),
-            secret: secret.to_string(),
-        });
+        Ok(())
     }
-
-    let id = cfg
-        .get("client_id")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| RegistryError::Config("this Webex account has no client id".to_string()))?
-        .to_string();
-    let secret = keychain()
-        .map_err(|e| RegistryError::Secret(format!("missing Webex client secret: {e}")))?;
-    Ok(ResolvedOauthClient { id, secret })
 }
 
 /// Merge keychain-sourced secret fields into the account's
@@ -1331,6 +1315,7 @@ mod tests {
             signed: false,
             recurrence: Default::default(),
             tasks: Default::default(),
+            account: None,
         }
     }
 
@@ -1439,97 +1424,5 @@ mod tests {
             .expect("create device-calendar account");
         assert_eq!(registry.register_missing(&repo), 0);
         assert!(cal_adapter(&registry, LOCAL_ID).is_none());
-    }
-
-    // ── webex_client_for ────────────────────────────────────────────────
-
-    /// A keychain closure that records whether it ran. The built-in path must
-    /// never touch the keychain: there is nothing there for it, and on a locked
-    /// keychain the read alone can raise a system prompt.
-    fn spy_keychain<'a>(
-        value: &str,
-        called: &'a std::cell::Cell<bool>,
-    ) -> impl FnOnce() -> Result<String, sync_engine::SecretError> + 'a {
-        let value = value.to_string();
-        move || {
-            called.set(true);
-            Ok(value)
-        }
-    }
-
-    #[test]
-    fn a_bring_your_own_account_reads_its_id_from_the_row_and_its_secret_from_the_keychain() {
-        let called = std::cell::Cell::new(false);
-        let client = webex_client_for(
-            r#"{"client_id":"C-mine","use_personal_room":false}"#,
-            spy_keychain("s3cr3t", &called),
-        )
-        .expect("a row with a client id resolves");
-        assert_eq!(client.id, "C-mine");
-        assert_eq!(client.secret, "s3cr3t");
-        assert!(called.get(), "the secret has to come from the keychain");
-    }
-
-    #[test]
-    fn a_row_without_a_client_id_is_a_config_error_not_a_keychain_read() {
-        let called = std::cell::Cell::new(false);
-        for config in [r#"{}"#, r#"{"client_id":""}"#, r#"{"client_id":"   "}"#] {
-            let err = webex_client_for(config, spy_keychain("s", &called))
-                .expect_err("no client id must not resolve");
-            assert!(
-                matches!(err, RegistryError::Config(_)),
-                "{config} gave {err:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_builtin_path_never_touches_the_keychain() {
-        let called = std::cell::Cell::new(false);
-        // Runs green in BOTH postures: with credentials it resolves, without
-        // them it fails — and neither outcome may involve the keychain, which
-        // is the property under test.
-        let _ = webex_client_for(r#"{"client_source":"builtin"}"#, spy_keychain("s", &called));
-        assert!(
-            !called.get(),
-            "a built-in account has no user secret to look up"
-        );
-    }
-
-    #[test]
-    fn a_builtin_account_from_a_different_registration_is_refused() {
-        let called = std::cell::Cell::new(false);
-        let err = webex_client_for(
-            r#"{"client_source":"builtin","client_fingerprint":"000000000000"}"#,
-            spy_keychain("s", &called),
-        )
-        .expect_err("a fingerprint that cannot match must not resolve");
-        // Either this build carries nothing (no credentials) or it carries a
-        // real registration whose digest is not twelve zeroes. Both are the
-        // same refusal from the user's side, and both must name the fix.
-        let message = err.to_string();
-        assert!(
-            message.contains("sign in"),
-            "the error has to say what to do: {message}"
-        );
-    }
-
-    #[test]
-    fn a_builtin_account_resolves_when_this_build_carries_that_very_client() {
-        let Some(client) = builtin_oauth::builtin_client(builtin_oauth::Provider::Webex) else {
-            // A build with no credentials cannot exercise the happy path, and
-            // the suite must not depend on whether the machine running it has a
-            // credentials file.
-            return;
-        };
-        let called = std::cell::Cell::new(false);
-        let config = format!(
-            r#"{{"client_source":"builtin","client_fingerprint":"{}"}}"#,
-            client.fingerprint()
-        );
-        let resolved =
-            webex_client_for(&config, spy_keychain("unused", &called)).expect("matching digest");
-        assert_eq!(resolved.id, client.client_id);
-        assert!(!resolved.secret.is_empty());
     }
 }

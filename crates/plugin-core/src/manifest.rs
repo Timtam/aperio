@@ -40,6 +40,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::account_schema::AccountSchema;
 use crate::capability::Capability;
 use crate::error::{PluginError, PluginResult};
 use crate::plugin_type::PluginType;
@@ -323,6 +324,14 @@ pub struct PluginManifest {
     /// need no change.
     #[serde(default)]
     pub tasks: TaskCapabilities,
+
+    /// What this plugin needs in order to have an account — the fields to ask
+    /// for, which of them are secrets, and whether it signs in via OAuth. See
+    /// [`AccountSchema`]. Absent means the host has no generic way to connect
+    /// this plugin, which is the correct answer for a notification channel and
+    /// for the adapters still on the host's older per-kind connect path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<AccountSchema>,
 }
 
 impl PluginManifest {
@@ -367,6 +376,12 @@ impl PluginManifest {
         // compare on first use.
         crate::Version::parse(&self.version)?;
         crate::Version::parse(&self.min_app_version)?;
+        // A malformed account schema fails HERE, while the plugin is loading,
+        // rather than halfway through creating an account with secrets already
+        // written to the keychain.
+        if let Some(account) = &self.account {
+            account.validate()?;
+        }
         Ok(())
     }
 

@@ -7045,6 +7045,288 @@ impl Host {
             })?;
         to_json(&account)
     }
+
+    // ── Schema-driven accounts ───────────────────────────────────────────────
+    //
+    // The generic path: an adapter publishes an account schema in its
+    // `plugin.json`, and the host executes it. Nothing below names a provider,
+    // and adding an adapter adds no code here. The desktop twin lives in
+    // `src-tauri/src/commands/accounts.rs`; both call the same
+    // `host_core::account_setup`, so a posture decided on one platform reads
+    // back identically on the other.
+
+    /// The connect form an adapter declares, as JSON, or `null` when it
+    /// declares none.
+    ///
+    /// The `builtin` flag inside the OAuth block is resolved HERE rather than
+    /// in the UI: it is a question about what this build carries, which the
+    /// frontend cannot see and should never be handed.
+    pub fn account_form_spec_json(&self, adapter_kind: String) -> Result<String, StoreError> {
+        let kind = AdapterKind::parse(&adapter_kind).ok_or_else(|| StoreError::InvalidField {
+            field: "adapter_kind".to_string(),
+            detail: format!("unknown adapter kind `{adapter_kind}`"),
+        })?;
+        let Some(plugin_id) = kind.plugin_id() else {
+            return Ok("null".to_string());
+        };
+        let Some(schema) = self
+            .plugin_manager
+            .get(plugin_id)
+            .and_then(|p| p.manifest.account.clone())
+        else {
+            return Ok("null".to_string());
+        };
+        let spec = serde_json::json!({
+            "plugin_id": plugin_id,
+            "fields": schema.fields,
+            "oauth": schema.oauth.as_ref().map(|o| serde_json::json!({
+                "builtin": host_core::account_setup::has_builtin_client(o),
+                "client_id_field": o.client_id_field,
+                "client_secret_field": o.client_secret_field,
+                "app_redirect_uri": o.app_redirect_uri,
+            })),
+        });
+        Ok(spec.to_string())
+    }
+
+    /// Begin a schema-driven OAuth sign-in: build the consent URL for the
+    /// adapter's own flow.
+    ///
+    /// `values_json` is the form as filled so far, keyed by the schema's field
+    /// keys — the host reads the credential pair out of it and decides the
+    /// posture. Returns the plugin's `{authorize_url, pkce_verifier, state}`
+    /// for a native auth session to open.
+    ///
+    /// The posture is NOT remembered between this call and the completion: it
+    /// is re-derived from the same values, which is deterministic for a given
+    /// build, and means the host holds no cross-call credential state.
+    pub fn begin_account_oauth_json(
+        &self,
+        adapter_kind: String,
+        values_json: String,
+    ) -> Result<String, StoreError> {
+        let (plugin_id, schema) = self.schema_for(&adapter_kind)?;
+        let oauth = schema
+            .oauth
+            .as_ref()
+            .ok_or_else(|| StoreError::InvalidField {
+                field: "adapter_kind".to_string(),
+                detail: "this adapter does not sign in via OAuth".to_string(),
+            })?;
+        let values: serde_json::Map<String, serde_json::Value> = from_json("values", &values_json)?;
+        let client = self.oauth_client_for(oauth, &values)?;
+        let args = serde_json::json!({
+            "phase": "authorize",
+            "client_id": client.id,
+            "redirect_uri": oauth.app_redirect_uri,
+        });
+        let bytes = self
+            .runtime
+            .block_on(async {
+                self.plugin_manager
+                    .interactive_auth(&plugin_id, &args.to_string())
+                    .await
+            })
+            .map_err(|e| StoreError::Auth {
+                detail: e.to_string(),
+            })?;
+        String::from_utf8(bytes).map_err(|e| StoreError::Protocol {
+            detail: format!("authorize response was not UTF-8: {e}"),
+        })
+    }
+
+    /// Finish a schema-driven connect: exchange the code if there is an OAuth
+    /// block, then create the account.
+    ///
+    /// Works for BOTH shapes. An adapter with no OAuth block skips straight to
+    /// the account creation, so the mobile UI has one call to make either way.
+    /// Returns the created account as JSON.
+    pub fn connect_account_json(&self, request_json: String) -> Result<String, StoreError> {
+        let req: ConnectAccountRequest = from_json("connect account", &request_json)?;
+        let name = req.display_name.trim();
+        if name.is_empty() {
+            return Err(StoreError::InvalidField {
+                field: "display_name".to_string(),
+                detail: "display name must not be empty".to_string(),
+            });
+        }
+        let (plugin_id, schema) = self.schema_for(&req.adapter_kind)?;
+        let kind =
+            AdapterKind::parse(&req.adapter_kind).ok_or_else(|| StoreError::InvalidField {
+                field: "adapter_kind".to_string(),
+                detail: format!("unknown adapter kind `{}`", req.adapter_kind),
+            })?;
+
+        // 1. Exchange FIRST, so a failed sign-in never leaves an orphaned row.
+        let mut choice = None;
+        let mut tokens = None;
+        if let Some(oauth) = &schema.oauth {
+            let client = self.oauth_client_for(oauth, &req.values)?;
+            let exchange = serde_json::json!({
+                "phase": "exchange",
+                "client_id": client.id,
+                "client_secret": client.secret,
+                "code": req.code,
+                "pkce_verifier": req.pkce_verifier,
+                "state": req.state,
+                "returned_state": req.returned_state,
+                "redirect_uri": oauth.app_redirect_uri,
+            });
+            let bytes = self
+                .runtime
+                .block_on(async {
+                    self.plugin_manager
+                        .interactive_auth(&plugin_id, &exchange.to_string())
+                        .await
+                })
+                .map_err(|e| StoreError::Auth {
+                    detail: e.to_string(),
+                })?;
+            tokens = Some(
+                serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|e| {
+                    StoreError::Protocol {
+                        detail: format!("token blob: {e}"),
+                    }
+                })?,
+            );
+            choice = Some(
+                host_core::account_setup::choose_oauth_client(
+                    oauth,
+                    supplied_value(&req.values, &oauth.client_id_field).as_deref(),
+                    oauth
+                        .client_secret_field
+                        .as_deref()
+                        .and_then(|k| supplied_value(&req.values, k))
+                        .as_deref(),
+                )
+                .map_err(setup_err)?,
+            );
+        }
+
+        // 2. Split the form into the row and the keychain writes.
+        let mut plan =
+            host_core::account_setup::plan_new_account(&schema, &req.values, choice.as_ref())
+                .map_err(setup_err)?;
+
+        // 3. The sign-in's tokens join the keychain writes, but only the ones
+        //    the plugin asked to be handed back.
+        let mut refresh_for_sync = None;
+        if let (Some(oauth), Some(tokens)) = (&schema.oauth, &tokens) {
+            if oauth.refresh_token_field.is_some() {
+                let refresh = tokens
+                    .get("refresh_token")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| StoreError::Protocol {
+                        detail: "the provider returned no refresh token — the account could not \
+                                 be kept signed in"
+                            .to_string(),
+                    })?
+                    .to_string();
+                plan.secrets
+                    .push((SecretSlot::RefreshToken, refresh.clone()));
+                refresh_for_sync = Some(refresh);
+            }
+            if oauth.access_token_field.is_some() {
+                if let Some(access) = tokens
+                    .get("access_token")
+                    .and_then(serde_json::Value::as_str)
+                {
+                    plan.secrets
+                        .push((SecretSlot::AccessToken, access.to_string()));
+                }
+            }
+        }
+
+        // 4. Persist: row, secrets, registration — unwinding all of it on any
+        //    failure so a retry starts clean.
+        let shared = self.db.shared();
+        let repo = AccountsRepo::new(&shared);
+        let created = repo
+            .create(kind, name, &plan.config_json)
+            .map_err(acc_err)?;
+        for (slot, value) in &plan.secrets {
+            if let Err(err) = self.secret_store.store(&created.id, *slot, value) {
+                let _ = self.secret_store.delete_all(&created.id);
+                let _ = repo.delete(&created.id);
+                return Err(StoreError::Storage {
+                    detail: format!("store {}: {err}", slot.wire_name()),
+                });
+            }
+        }
+        if let Some(refresh) = refresh_for_sync {
+            host_core::credential_sync::emit_credential_set(
+                &self.writer,
+                &shared,
+                &created.id,
+                SecretSlot::RefreshToken,
+                &refresh,
+            );
+        }
+        if let Err(err) = self.registry.register(&created) {
+            let _ = self.secret_store.delete_all(&created.id);
+            let _ = repo.delete(&created.id);
+            return Err(StoreError::Storage {
+                detail: format!("adapter registration failed: {err}"),
+            });
+        }
+        self.writer
+            .append(SyncEvent::AccountCreated(account_payload(&created)));
+        to_json(&created)
+    }
+}
+
+/// Helpers the exported surface uses internally.
+///
+/// A separate, NON-exported `impl` block on purpose: everything in the
+/// `#[uniffi::export]` block above becomes part of the mobile API, and these
+/// take types (a plugin manifest's schema, a resolved OAuth client) that have
+/// no business crossing the FFI boundary — the client in particular holds a
+/// secret.
+impl Host {
+    /// The plugin id + account schema for an adapter kind, or a typed error.
+    fn schema_for(
+        &self,
+        adapter_kind: &str,
+    ) -> Result<(String, plugin_core::account_schema::AccountSchema), StoreError> {
+        let kind = AdapterKind::parse(adapter_kind).ok_or_else(|| StoreError::InvalidField {
+            field: "adapter_kind".to_string(),
+            detail: format!("unknown adapter kind `{adapter_kind}`"),
+        })?;
+        let plugin_id = kind.plugin_id().ok_or_else(|| StoreError::InvalidField {
+            field: "adapter_kind".to_string(),
+            detail: "this adapter kind has no plugin".to_string(),
+        })?;
+        let schema = self
+            .plugin_manager
+            .get(plugin_id)
+            .and_then(|p| p.manifest.account.clone())
+            .ok_or_else(|| StoreError::InvalidField {
+                field: "adapter_kind".to_string(),
+                detail: "this adapter declares no account schema".to_string(),
+            })?;
+        Ok((plugin_id.to_string(), schema))
+    }
+
+    /// Resolve the OAuth client from the form's values + this build's posture.
+    fn oauth_client_for(
+        &self,
+        oauth: &plugin_core::account_schema::AccountOauth,
+        values: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<host_core::account_setup::OauthClient, StoreError> {
+        host_core::account_setup::choose_oauth_client(
+            oauth,
+            supplied_value(values, &oauth.client_id_field).as_deref(),
+            oauth
+                .client_secret_field
+                .as_deref()
+                .and_then(|k| supplied_value(values, k))
+                .as_deref(),
+        )
+        .map(|choice| choice.client)
+        .map_err(setup_err)
+    }
 }
 
 /// Request body for [`Host::complete_oauth_json`]. The `config_json` is the
@@ -7068,6 +7350,58 @@ struct CompleteOAuthRequest {
     state: String,
     returned_state: String,
     redirect_uri: String,
+}
+
+/// Request body for [`Host::connect_account_json`] — the form's values plus,
+/// for an adapter that signs in via OAuth, the redirect's outcome.
+///
+/// The OAuth fields are absent for an adapter with no OAuth block, which is why
+/// they all default: one request shape serves both, so the mobile UI has one
+/// call to make either way.
+#[derive(serde::Deserialize)]
+struct ConnectAccountRequest {
+    adapter_kind: String,
+    display_name: String,
+    /// Keyed by the schema's field keys.
+    #[serde(default)]
+    values: serde_json::Map<String, serde_json::Value>,
+    #[serde(default)]
+    code: String,
+    #[serde(default)]
+    pkce_verifier: String,
+    #[serde(default)]
+    state: String,
+    #[serde(default)]
+    returned_state: String,
+}
+
+/// A form value as a trimmed string, or `None` when absent or not a string.
+fn supplied_value(
+    values: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Option<String> {
+    values
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+}
+
+/// Map an account-setup failure onto the FFI error, keeping the three meanings
+/// apart: something the user can fix, a row that no longer makes sense, and a
+/// credential store that would not answer.
+fn setup_err(err: host_core::account_setup::AccountSetupError) -> StoreError {
+    use host_core::account_setup::AccountSetupError as E;
+    match err {
+        E::InvalidInput(detail) => StoreError::InvalidField {
+            field: "account".to_string(),
+            detail,
+        },
+        E::Config(detail) => StoreError::InvalidField {
+            field: "config_json".to_string(),
+            detail,
+        },
+        E::Secret(detail) => StoreError::Storage { detail },
+    }
 }
 
 /// The bits of the plugin's token response the host needs to persist.

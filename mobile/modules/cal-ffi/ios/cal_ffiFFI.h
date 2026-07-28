@@ -687,6 +687,11 @@ uint64_t uniffi_cal_ffi_fn_constructor_host_open(RustBuffer db_path, uint64_t ke
 RustBuffer uniffi_cal_ffi_fn_method_host_accept_remote_dataset_json(uint64_t ptr, RustBuffer config_json, RustBuffer device_name, RustBuffer passphrase, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_ACCOUNT_FORM_SPEC_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_ACCOUNT_FORM_SPEC_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_account_form_spec_json(uint64_t ptr, RustBuffer adapter_kind, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_ACCOUNTS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_ACCOUNTS_JSON
 RustBuffer uniffi_cal_ffi_fn_method_host_accounts_json(uint64_t ptr, RustCallStatus *_Nonnull out_status
@@ -705,6 +710,11 @@ RustBuffer uniffi_cal_ffi_fn_method_host_adopt_local_dataset_json(uint64_t ptr, 
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_ADOPT_REMOTE_ENCRYPTION_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_ADOPT_REMOTE_ENCRYPTION_JSON
 void uniffi_cal_ffi_fn_method_host_adopt_remote_encryption_json(uint64_t ptr, RustBuffer passphrase, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_BEGIN_ACCOUNT_OAUTH_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_BEGIN_ACCOUNT_OAUTH_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_begin_account_oauth_json(uint64_t ptr, RustBuffer adapter_kind, RustBuffer values_json, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_BEGIN_OAUTH_JSON
@@ -765,6 +775,11 @@ void uniffi_cal_ffi_fn_method_host_complete_sync_oauth_json(uint64_t ptr, RustBu
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_CONFIGURE_SYNC_ADAPTER_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_CONFIGURE_SYNC_ADAPTER_JSON
 void uniffi_cal_ffi_fn_method_host_configure_sync_adapter_json(uint64_t ptr, RustBuffer config_json, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_CONNECT_ACCOUNT_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_CONNECT_ACCOUNT_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_connect_account_json(uint64_t ptr, RustBuffer request_json, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_CONTACT_LISTS_JSON
@@ -1822,6 +1837,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_ACCOUNT_FORM_SPEC_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_ACCOUNT_FORM_SPEC_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_account_form_spec_json(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_ACCOUNTS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_ACCOUNTS_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_accounts_json(void
@@ -1843,6 +1864,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_adopt_local_dataset_json(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_ADOPT_REMOTE_ENCRYPTION_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_ADOPT_REMOTE_ENCRYPTION_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_BEGIN_ACCOUNT_OAUTH_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_BEGIN_ACCOUNT_OAUTH_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_begin_account_oauth_json(void
     
 );
 #endif
@@ -1915,6 +1942,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_complete_sync_oauth_json(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_CONFIGURE_SYNC_ADAPTER_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_CONFIGURE_SYNC_ADAPTER_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_CONNECT_ACCOUNT_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_CONNECT_ACCOUNT_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_connect_account_json(void
     
 );
 #endif

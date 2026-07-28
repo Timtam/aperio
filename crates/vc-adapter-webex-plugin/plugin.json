@@ -7,5 +7,57 @@
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Generate Cisco WebEx meeting links via the WebEx Meetings REST API. Uses a separate WebEx OAuth flow per account.",
-  "signed": false
+  "signed": false,
+  "account": {
+    "fields": [
+      {
+        "key": "client_id",
+        "kind": "text",
+        "label": "Client ID",
+        "label_key": "dialogs.accounts.webexClientIdLabel",
+        "hint_key": "dialogs.accounts.webexClientIdHint",
+        "required": true
+      },
+      {
+        "key": "client_secret",
+        "kind": "secret",
+        "secret_slot": "oauth_client_secret",
+        "label": "Client secret",
+        "label_key": "dialogs.accounts.webexClientSecretLabel",
+        "hint_key": "dialogs.accounts.webexClientSecretHint",
+        "required": true
+      },
+      {
+        "key": "site_url",
+        "kind": "text",
+        "label": "Webex site",
+        "label_key": "dialogs.accounts.webexSiteLabel",
+        "hint_key": "dialogs.accounts.webexSiteHint",
+        "required": false
+      },
+      {
+        "key": "use_personal_room",
+        "kind": "bool",
+        "label": "Use the Personal Meeting Room",
+        "label_key": "dialogs.accounts.webexPersonalRoomLabel",
+        "hint_key": "dialogs.accounts.webexPersonalRoomHint",
+        "default": false
+      },
+      {
+        "key": "send_webex_emails",
+        "kind": "bool",
+        "label": "Let Webex send its own invitations",
+        "label_key": "dialogs.accounts.webexEmailsLabel",
+        "hint_key": "dialogs.accounts.webexEmailsHint",
+        "default": false
+      }
+    ],
+    "oauth": {
+      "builtin_provider": "webex",
+      "client_id_field": "client_id",
+      "client_secret_field": "client_secret",
+      "refresh_token_field": "refresh_token"
+    },
+    "host_channel": true
+  }
 }

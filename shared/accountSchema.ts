@@ -1,0 +1,113 @@
+/**
+ * An adapter's connect form, as its `plugin.json` declares it — and the pure
+ * logic both frontends run over it.
+ *
+ * Shared because the desktop and the mobile app must agree on what "the user
+ * left this blank" means. They ask different hosts (a Tauri command / the
+ * cal-ffi bridge) but both hosts answer with this shape, and both frontends
+ * render it without knowing what any field means.
+ */
+
+/** One thing the connect form asks for, or one setting it offers. */
+export interface AccountFormField {
+  key: string;
+  kind: 'text' | 'url' | 'secret' | 'bool';
+  /** The plugin author's own string. */
+  label: string;
+  /** A translation key the app resolves in the user's language, which takes
+   *  precedence. Bundled adapters set it; a third-party adapter without one
+   *  falls back to its literal, which beats a missing-key marker. */
+  label_key: string | null;
+  hint: string | null;
+  hint_key: string | null;
+  required: boolean;
+  default_bool: boolean | null;
+  default_text: string | null;
+}
+
+/** The OAuth half, when the adapter signs in that way. */
+export interface AccountFormOauth {
+  /** True when this build carries credentials for the provider, so the two
+   *  client fields need not be shown or filled at all. */
+  builtin: boolean;
+  client_id_field: string;
+  client_secret_field: string | null;
+}
+
+/** Everything needed to render an adapter's connect form. */
+export interface AccountFormSpec {
+  plugin_id: string;
+  fields: AccountFormField[];
+  oauth: AccountFormOauth | null;
+}
+
+/** Which fields the OAuth posture makes optional, if any. */
+function optionalUnderBuiltinCredentials(spec: AccountFormSpec): Set<string> {
+  const optional = new Set<string>();
+  if (spec.oauth?.builtin) {
+    optional.add(spec.oauth.client_id_field);
+    if (spec.oauth.client_secret_field) {
+      optional.add(spec.oauth.client_secret_field);
+    }
+  }
+  return optional;
+}
+
+/** The effective text of a field: what was typed, else its declared default. */
+function textOf(
+  field: AccountFormField,
+  values: Record<string, string | boolean>,
+): string {
+  const value = values[field.key];
+  return typeof value === 'string' ? value : (field.default_text ?? '');
+}
+
+/**
+ * The first required field still empty, or `null` when the form is complete.
+ *
+ * The OAuth client pair is the one exception a schema cannot express on its
+ * own: with built-in credentials both halves are optional, without them both
+ * are required. Half a pair is refused by the backend rather than quietly
+ * completed — see `choose_oauth_client` — so this only catches the plain
+ * "nothing entered" case, where the message can name a field the user is
+ * looking at.
+ */
+export function firstMissingField(
+  spec: AccountFormSpec,
+  values: Record<string, string | boolean>,
+): AccountFormField | null {
+  const optional = optionalUnderBuiltinCredentials(spec);
+  for (const field of spec.fields) {
+    if (field.kind === 'bool' || !field.required || optional.has(field.key)) {
+      continue;
+    }
+    if (!textOf(field, values).trim()) return field;
+  }
+  return null;
+}
+
+/**
+ * The values to send, dropping anything left blank.
+ *
+ * An untouched optional field has to stay ABSENT rather than become `""`: the
+ * two mean different things to an adapter. Webex's site field is exactly that
+ * case — blank means "use the account's own default site", where an empty
+ * string would mean "a site whose name is nothing".
+ */
+export function collectValues(
+  spec: AccountFormSpec,
+  values: Record<string, string | boolean>,
+): Record<string, string | boolean> {
+  const out: Record<string, string | boolean> = {};
+  for (const field of spec.fields) {
+    if (field.kind === 'bool') {
+      const value = values[field.key];
+      out[field.key] =
+        typeof value === 'boolean' ? value : (field.default_bool ?? false);
+      continue;
+    }
+    const text = textOf(field, values).trim();
+    if (text) out[field.key] = text;
+  }
+  return out;
+}

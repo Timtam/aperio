@@ -26,6 +26,7 @@
 //!     the Tasks / Contacts / Sync shims arrive in P1b.
 
 pub mod abi;
+pub mod account_schema;
 pub mod archive;
 pub mod capability;
 pub mod error;

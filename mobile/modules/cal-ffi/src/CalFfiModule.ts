@@ -420,6 +420,22 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** Change a member's `right` ('read'|'write'|'admin') on `listId` (Vikunja). */
   taskSetMemberRight(listId: string, memberRef: string, right: string): Promise<void>;
 
+  // ── Schema-driven accounts ───────────────────────────────────────────────
+  /** The connect form the adapter for `adapterKind` declares in its
+   *  `plugin.json`, as JSON, or the literal `null` when it declares none. The
+   *  host resolves whether this build carries the provider's OAuth credentials
+   *  and reports that as a flag — the UI never sees a credential. */
+  accountFormSpecJson(adapterKind: string): Promise<string>;
+  /** Begin a schema-driven OAuth sign-in. `valuesJson` is the form as filled so
+   *  far, keyed by the schema's field keys; the host reads the credential pair
+   *  out of it and returns `{authorize_url, pkce_verifier, state}`. */
+  beginAccountOauthJson(adapterKind: string, valuesJson: string): Promise<string>;
+  /** Finish a schema-driven connect: exchange the code when the adapter has an
+   *  OAuth block, then create + register the account. `requestJson` carries
+   *  `{adapter_kind, display_name, values[, code, pkce_verifier, state,
+   *  returned_state]}`. Returns the created `Account` as JSON. */
+  connectAccountJson(requestJson: string): Promise<string>;
+
   // ── OAuth (host-driven; mobile opens authorize_url in a native session) ──
   /** Begin OAuth for an account plugin (e.g. `com.aperio.cal-adapter-google`).
    *  `argsJson` carries `{client_id, redirect_uri[, authority]}`. Returns the

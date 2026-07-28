@@ -1710,6 +1710,16 @@ public protocol HostProtocol: AnyObject, Sendable {
     func acceptRemoteDatasetJson(configJson: String, deviceName: String?, passphrase: String?) throws  -> String
     
     /**
+     * The connect form an adapter declares, as JSON, or `null` when it
+     * declares none.
+     *
+     * The `builtin` flag inside the OAuth block is resolved HERE rather than
+     * in the UI: it is a question about what this build carries, which the
+     * frontend cannot see and should never be handed.
+     */
+    func accountFormSpecJson(adapterKind: String) throws  -> String
+    
+    /**
      * All persisted accounts as JSON (the `cal_core`/desktop wire shape).
      */
     func accountsJson() throws  -> String
@@ -1751,6 +1761,21 @@ public protocol HostProtocol: AnyObject, Sendable {
      * dataset decrypted. Mirrors the desktop `adopt_remote_encryption`.
      */
     func adoptRemoteEncryptionJson(passphrase: String) throws 
+    
+    /**
+     * Begin a schema-driven OAuth sign-in: build the consent URL for the
+     * adapter's own flow.
+     *
+     * `values_json` is the form as filled so far, keyed by the schema's field
+     * keys — the host reads the credential pair out of it and decides the
+     * posture. Returns the plugin's `{authorize_url, pkce_verifier, state}`
+     * for a native auth session to open.
+     *
+     * The posture is NOT remembered between this call and the completion: it
+     * is re-derived from the same values, which is deterministic for a given
+     * build, and means the host holds no cross-call credential state.
+     */
+    func beginAccountOauthJson(adapterKind: String, valuesJson: String) throws  -> String
     
     /**
      * Begin a host-driven OAuth flow for `plugin_id` (e.g.
@@ -1881,6 +1906,16 @@ public protocol HostProtocol: AnyObject, Sendable {
      * [`Self::accept_remote_dataset_json`].
      */
     func configureSyncAdapterJson(configJson: String) throws 
+    
+    /**
+     * Finish a schema-driven connect: exchange the code if there is an OAuth
+     * block, then create the account.
+     *
+     * Works for BOTH shapes. An adapter with no OAuth block skips straight to
+     * the account creation, so the mobile UI has one call to make either way.
+     * Returns the created account as JSON.
+     */
+    func connectAccountJson(requestJson: String) throws  -> String
     
     /**
      * All contact lists (local + external) as a JSON `ContactListRow[]` (each
@@ -2732,7 +2767,11 @@ public protocol HostProtocol: AnyObject, Sendable {
     /**
      * Warm the cache when the app foregrounds — the mobile stand-in for a tick
      * of the desktop periodic warm loop (which mobile can't run while
-     * backgrounded). Same fire-and-forget warm pass as the manual refresh.
+     * backgrounded). This is AUTOMATIC (not a user action), so it runs the
+     * pass UN-forced, exactly like the desktop app-start/periodic pass: a
+     * cold-start/resume network blip must be confirmed by a second attempt
+     * before it surfaces, instead of alarming on the first failure. Only the
+     * genuine manual `refresh_external_cache` is forced.
      */
     func warmCacheOnForeground() 
     
@@ -2832,6 +2871,23 @@ open func acceptRemoteDatasetJson(configJson: String, deviceName: String?, passp
 }
     
     /**
+     * The connect form an adapter declares, as JSON, or `null` when it
+     * declares none.
+     *
+     * The `builtin` flag inside the OAuth block is resolved HERE rather than
+     * in the UI: it is a question about what this build carries, which the
+     * frontend cannot see and should never be handed.
+     */
+open func accountFormSpecJson(adapterKind: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_account_form_spec_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(adapterKind),$0
+    )
+})
+}
+    
+    /**
      * All persisted accounts as JSON (the `cal_core`/desktop wire shape).
      */
 open func accountsJson()throws  -> String  {
@@ -2902,6 +2958,29 @@ open func adoptRemoteEncryptionJson(passphrase: String)throws   {try rustCallWit
         FfiConverterString.lower(passphrase),$0
     )
 }
+}
+    
+    /**
+     * Begin a schema-driven OAuth sign-in: build the consent URL for the
+     * adapter's own flow.
+     *
+     * `values_json` is the form as filled so far, keyed by the schema's field
+     * keys — the host reads the credential pair out of it and decides the
+     * posture. Returns the plugin's `{authorize_url, pkce_verifier, state}`
+     * for a native auth session to open.
+     *
+     * The posture is NOT remembered between this call and the completion: it
+     * is re-derived from the same values, which is deterministic for a given
+     * build, and means the host holds no cross-call credential state.
+     */
+open func beginAccountOauthJson(adapterKind: String, valuesJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_begin_account_oauth_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(adapterKind),
+        FfiConverterString.lower(valuesJson),$0
+    )
+})
 }
     
     /**
@@ -3113,6 +3192,23 @@ open func configureSyncAdapterJson(configJson: String)throws   {try rustCallWith
         FfiConverterString.lower(configJson),$0
     )
 }
+}
+    
+    /**
+     * Finish a schema-driven connect: exchange the code if there is an OAuth
+     * block, then create the account.
+     *
+     * Works for BOTH shapes. An adapter with no OAuth block skips straight to
+     * the account creation, so the mobile UI has one call to make either way.
+     * Returns the created account as JSON.
+     */
+open func connectAccountJson(requestJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_connect_account_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(requestJson),$0
+    )
+})
 }
     
     /**
@@ -4656,7 +4752,11 @@ open func updateTaskJson(taskJson: String, previousListId: String?)throws  -> St
     /**
      * Warm the cache when the app foregrounds — the mobile stand-in for a tick
      * of the desktop periodic warm loop (which mobile can't run while
-     * backgrounded). Same fire-and-forget warm pass as the manual refresh.
+     * backgrounded). This is AUTOMATIC (not a user action), so it runs the
+     * pass UN-forced, exactly like the desktop app-start/periodic pass: a
+     * cold-start/resume network blip must be confirmed by a second attempt
+     * before it surfaces, instead of alarming on the first failure. Only the
+     * genuine manual `refresh_external_cache` is forced.
      */
 open func warmCacheOnForeground()  {try! rustCall() {
     uniffi_cal_ffi_fn_method_host_warm_cache_on_foreground(
@@ -8238,6 +8338,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json() != 45743) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_account_form_spec_json() != 41169) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_accounts_json() != 21992) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -8248,6 +8351,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json() != 12036) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_begin_account_oauth_json() != 37389) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_begin_oauth_json() != 10684) {
@@ -8284,6 +8390,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json() != 45284) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_connect_account_json() != 39707) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_contact_lists_json() != 57501) {
@@ -8586,7 +8695,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_update_task_json() != 47251) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_warm_cache_on_foreground() != 9470) {
+    if (uniffi_cal_ffi_checksum_method_host_warm_cache_on_foreground() != 16318) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_keychainbridge_store() != 54380) {

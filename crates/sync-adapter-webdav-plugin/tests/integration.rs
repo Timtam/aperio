@@ -22,6 +22,7 @@ fn manifest() -> PluginManifest {
         signed: false,
         recurrence: Default::default(),
         tasks: Default::default(),
+        account: None,
     }
 }
 

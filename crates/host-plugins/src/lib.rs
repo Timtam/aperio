@@ -189,10 +189,15 @@ pub fn register_all_static(manager: &PluginManager) -> PluginResult<()> {
         vc_adapter_meet_plugin,
         "../../vc-adapter-meet-plugin/plugin.json"
     );
+    // Webex runs its own OAuth against the Meetings API rather than sharing a
+    // calendar adapter's tokens, so the auth hook has to be wired for the
+    // statically-embedded build too — without it a mobile sign-in has nothing
+    // to call.
     #[cfg(feature = "vc-webex")]
     register!(
         vc_adapter_webex_plugin,
-        "../../vc-adapter-webex-plugin/plugin.json"
+        "../../vc-adapter-webex-plugin/plugin.json",
+        interactive_auth
     );
 
     Ok(())

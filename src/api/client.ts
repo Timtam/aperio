@@ -615,34 +615,33 @@ export const connectMicrosoftAccount = (
     request: { client_id, display_name, authority: authority ?? null },
   });
 
-/** What this build can offer for an OAuth provider.
- *
- *  A build can carry Aperio's own registered client (`builtin`), in which case
- *  connecting is one button; a build without one asks the user to register
- *  their own integration. Never reports the credentials themselves — only
- *  whether they are there, and whether a bring-your-own form has to ask for a
- *  secret as well as an id. */
-export interface OauthClientPosture {
-  builtin: boolean;
-  requires_secret: boolean;
-}
+/** The wire shapes for a schema-driven connect form live in `@aperio/shared`:
+ *  the mobile app renders the same declaration from the same types. */
+export type {
+  AccountFormField,
+  AccountFormOauth,
+  AccountFormSpec,
+} from '@aperio/shared';
+import type { AccountFormSpec } from '@aperio/shared';
 
-export const oauthClientPosture = (provider: 'webex' | 'google' | 'microsoft') =>
-  invoke<OauthClientPosture>('oauth_client_posture', { provider });
+/** The connect form an adapter declares, or `null` when it declares none —
+ *  which is the correct answer for the adapters still on the older per-kind
+ *  connect path, and for plugins that have no accounts at all. */
+export const accountFormSpec = (adapter_kind: AdapterKind) =>
+  invoke<AccountFormSpec | null>('account_form_spec', {
+    adapterKind: adapter_kind,
+  });
 
-/** Kick off the Webex OAuth dance and create the account.
+/** Create an account for any adapter that declares a schema.
  *
- *  `client_id` / `client_secret` are omitted to use the build's own
- *  credentials, or both supplied to use the user's own integration — never one
- *  of the two, which the backend rejects rather than silently deciding for
- *  them. The secret goes to the platform keychain and never to `config_json`. */
-export const connectWebexAccount = (request: {
+ *  `values` is keyed by the schema's field keys. The backend runs the OAuth
+ *  sign-in if the schema has one, keeps every declared secret in the platform
+ *  keychain, and puts only the non-secret half in the account row. */
+export const connectAccount = (request: {
+  adapter_kind: AdapterKind;
   display_name: string;
-  client_id?: string;
-  client_secret?: string;
-  use_personal_room: boolean;
-  send_webex_emails: boolean;
-}) => invoke<Account>('connect_webex_account', { request });
+  values: Record<string, string | boolean>;
+}) => invoke<Account>('connect_account', { request });
 
 /** Which container namespace an override applies to. Calendars and
  *  task lists have disjoint ids today but the backend keeps them
