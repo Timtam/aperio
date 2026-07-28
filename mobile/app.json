@@ -42,7 +42,19 @@
     },
     "owner": "tonirbarth",
     "plugins": [
-      "expo-splash-screen",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#E6F4FE",
+          "dark": {
+            "image": "./assets/splash-icon.png",
+            "backgroundColor": "#11151c"
+          }
+        }
+      ],
       "expo-web-browser",
       [
         "expo-image-picker",
