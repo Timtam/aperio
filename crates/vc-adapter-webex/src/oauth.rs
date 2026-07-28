@@ -13,25 +13,34 @@
 //! fallback to the `localhost` form, even though it is registered too — see
 //! [`bind_loopback`] for why a fallback there would be worse than failing.
 //!
-//! **The refresh token ROTATES.** Webex returns a new refresh token on every
-//! refresh and restarts its 90-day clock, so the caller MUST persist what comes
-//! back. Google keeps reusing one token and may omit it entirely. A caller that
-//! treats Webex like Google throws away the only credential that still works,
-//! and the account dies quietly at most 90 days later.
+//! **The refresh token's CLOCK restarts on every use.** Measured against a live
+//! account on 2026-07-28: the access token lasts 14 days, the refresh token 90,
+//! and a refresh moved the refresh expiry 90 days out again while returning the
+//! SAME token value. So the design assumption going in — that the value
+//! rotates — did not hold in that observation, but the consequence is
+//! unchanged and is the reason this is called out: **the caller must persist
+//! whatever comes back, value and expiry both.** Storing only the value would
+//! let an account look dead 90 days after first sign-in while the credential is
+//! still perfectly good; ignoring a value that HAS changed would throw away the
+//! only one that works. One observation is not a guarantee that Webex never
+//! rotates, so the code treats a returned token as authoritative either way.
 //!
-//! **A client secret is (apparently) required even under PKCE.** Webex
-//! documents no public-client mode. The exchange below therefore sends PKCE
-//! *and* the secret when it has one — PKCE costs nothing and blocks code
-//! injection — but it is written so the secret can be absent, and
-//! [`exchange_code`] reports precisely which combination the server rejected.
-//! That distinction is what the `webex-auth` example is for: the claim is
-//! unverified in Cisco's documentation, and if it turns out a public client
-//! works, Aperio can stop shipping a secret at all.
+//! **A client secret is required even under PKCE — verified, not assumed.** The
+//! `webex-auth` example ran the identical flow twice against a live account on
+//! 2026-07-28: without the secret Webex answered `client_secret cannot be null
+//! or empty`, with it the exchange succeeded. There is no public-client mode.
+//! The secret stays optional in these signatures anyway, because the failure it
+//! produces is worth naming precisely and because a future Webex may change its
+//! mind; [`exchange_code`] reports which posture was refused.
 //!
-//! **`spark:kms` rides along whether or not you ask for it.** Webex appends its
-//! key-management scope to every integration. It is required and harmless; it
-//! is emphatically not `spark:all`, which Aperio does not request and which the
-//! App Hub rejects on sight.
+//! **`spark:kms` is not needed.** Webex's portal shows it in the convenience
+//! authorization URL it generates, which is where the assumption that it is
+//! mandatory came from. It is not: the live run requested exactly the three
+//! meeting scopes below and was granted exactly those three, and both the
+//! exchange and the refresh worked. Should a Meetings API call ever come back
+//! demanding it, add it here — but do not add it on spec, and never add
+//! `spark:all`, which grants far more than a calendar app has any business
+//! holding and is an automatic App Hub rejection.
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
@@ -93,9 +102,11 @@ const MAX_REQUEST_BYTES: usize = 16 * 1024;
 
 /// Tokens from Webex's `/access_token` endpoint.
 ///
-/// Unlike Google's, `refresh_token` is NOT optional in practice and MUST be
-/// persisted after every refresh: Webex issues a new one each time and resets
-/// its 90-day expiry, so the stored copy goes stale the moment it is used.
+/// Both fields must be persisted after every refresh. The observed behaviour is
+/// that the refresh token's VALUE stays the same while its 90-day expiry moves
+/// forward, so a host that stores only the value watches a perfectly good
+/// credential appear to die — and one that assumes the value never changes
+/// would be wrong the first time Webex decides otherwise.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenSet {
     pub access_token: String,
@@ -312,9 +323,10 @@ fn code_exchange_form<'a>(
 
 /// Trade the refresh token for a fresh access token.
 ///
-/// The returned [`TokenSet`] carries a NEW refresh token that the caller must
-/// persist — see the type's documentation. When the response omits one, the
-/// previous token is still valid and the caller keeps it.
+/// The returned [`TokenSet`] must be persisted whole — see the type's
+/// documentation. The refresh token usually comes back unchanged in value with
+/// a fresh 90-day expiry; when the response omits it entirely, the previous one
+/// is still valid and the caller keeps it.
 pub async fn refresh(
     http: &reqwest::Client,
     token_url: &str,
