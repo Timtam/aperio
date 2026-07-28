@@ -2374,12 +2374,37 @@ impl Host {
         }))
     }
 
-    /// All persisted accounts as JSON (the `cal_core`/desktop wire shape).
+    /// All persisted accounts as JSON (the `cal_core`/desktop wire shape),
+    /// each with the derived flags the desktop listing also carries.
+    ///
+    /// `is_videoconference` comes from the plugin's declared TYPE rather than
+    /// from a list of provider names, so an adapter added later is offered by
+    /// the editor's "create meeting" control without a change here or in the
+    /// UI. `plugin_loaded` mirrors the desktop's, so a missing plugin reads the
+    /// same on both platforms.
     pub fn accounts_json(&self) -> Result<String, StoreError> {
         let shared = self.db.shared();
         let repo = AccountsRepo::new(&shared);
         let accounts = repo.list().map_err(acc_err)?;
-        to_json(&accounts)
+        let enriched: Vec<serde_json::Value> = accounts
+            .into_iter()
+            .map(|account| {
+                let plugin = self
+                    .plugin_manager
+                    .plugin_for_adapter_kind(account.adapter_kind.as_str());
+                let is_videoconference = plugin.as_ref().is_some_and(|p| {
+                    p.manifest.plugin_type == plugin_core::PluginType::VideoconferenceAdapter
+                });
+                let plugin_loaded = account.adapter_kind.is_host_internal() || plugin.is_some();
+                let mut value = serde_json::to_value(&account).unwrap_or(serde_json::Value::Null);
+                if let Some(obj) = value.as_object_mut() {
+                    obj.insert("plugin_loaded".into(), plugin_loaded.into());
+                    obj.insert("is_videoconference".into(), is_videoconference.into());
+                }
+                value
+            })
+            .collect();
+        to_json(&enriched)
     }
 
     /// Create an external (or local) account: persist the row, store the
