@@ -257,8 +257,15 @@ impl ApiState {
 
 fn decode<T: DeserializeOwned>(text: &str, path: &str) -> VcResult<T> {
     serde_json::from_str(text).map_err(|e| {
+        // Carry a bounded excerpt. On a CREATE this is the difference between
+        // an orphan and a recoverable one: Webex emits the meeting id first, so
+        // it lands inside the excerpt and the meeting stays findable even
+        // though the response could not be decoded. Never auto-deleted — a
+        // response we could not read is not evidence about what exists.
+        let excerpt: String = text.trim().chars().take(300).collect();
+        warn!(path, error = %e, "could not decode a Webex response");
         VcError::Protocol(format!(
-            "Webex answered {path} with something this adapter could not read: {e}"
+            "Webex answered with something Aperio could not read. {e} (response began:              {excerpt})"
         ))
     })
 }
@@ -266,6 +273,10 @@ fn decode<T: DeserializeOwned>(text: &str, path: &str) -> VcResult<T> {
 /// Sort a failure into the variant that matches what the user can DO.
 fn map_status(status: reqwest::StatusCode, body: &str, path: &str) -> VcError {
     let detail = describe(body);
+    // The path — percent-encoded id, query flags and all — belongs in the log,
+    // not in a sentence a screen reader reads out. It is genuinely useful here:
+    // it records which meeting and, on a delete, which notify flag.
+    warn!(status = status.as_u16(), path, detail = %detail, "a Webex request failed");
     match status.as_u16() {
         400 => VcError::InvalidInput(format!("Webex rejected the request: {detail}")),
         401 => VcError::Authentication(format!(
@@ -278,14 +289,20 @@ fn map_status(status: reqwest::StatusCode, body: &str, path: &str) -> VcError {
             "This Webex account is not allowed to do that: {detail}. Meetings need a Webex \
              Meetings subscription on a site backed by Cisco Common Identity."
         )),
-        404 => VcError::NotFound(format!("Webex has no {path}: {detail}")),
+        // No path and no id in the message: both are opaque blobs a screen
+        // reader spells out character by character, and neither tells the user
+        // anything they can act on.
+        404 => VcError::NotFound(format!(
+            "Webex could not find what this request asked for; it may already have been              deleted on Webex's side. {detail}"
+        )),
         409 => VcError::Protocol(format!("Webex reported a conflict: {detail}")),
         // Transient. `Network` is the variant the UI offers a retry for.
         408 | 500..=599 => VcError::Network(format!(
-            "Webex is unavailable ({}): {detail}",
-            status.as_u16()
+            "Webex is not responding just now — this usually passes. {detail}"
         )),
-        other => VcError::Protocol(format!("Webex answered {other} for {path}: {detail}")),
+        _ => VcError::Protocol(format!(
+            "Webex answered in a way Aperio did not expect. {detail}"
+        )),
     }
 }
 
@@ -429,6 +446,46 @@ mod tests {
             map_status(reqwest::StatusCode::REQUEST_TIMEOUT, body, "/meetings"),
             VcError::Network(_)
         ));
+    }
+
+    #[test]
+    fn user_facing_messages_carry_no_path_status_code_or_meeting_id() {
+        // These strings are read aloud verbatim. A percent-encoded API route
+        // and an opaque base64-ish meeting id are spelled out character by
+        // character and tell the user nothing they can act on; both belong in
+        // the log, which map_status now writes.
+        let body = r#"{"message":"m","trackingId":"ROUTERGW_x"}"#;
+        for (status, path) in [
+            (reqwest::StatusCode::NOT_FOUND, "/meetings/AbC%2F123%2Bx"),
+            (
+                reqwest::StatusCode::SERVICE_UNAVAILABLE,
+                "/meetings/AbC%2F123%2Bx?sendEmail=false",
+            ),
+            (reqwest::StatusCode::IM_A_TEAPOT, "/meetings/AbC%2F123%2Bx"),
+        ] {
+            let text = map_status(status, body, path).to_string();
+            assert!(!text.contains('%'), "percent-encoding leaked: {text}");
+            assert!(!text.contains("AbC"), "the meeting id leaked: {text}");
+            assert!(!text.contains("sendEmail"), "a query flag leaked: {text}");
+            assert!(!text.contains("/meetings"), "the API path leaked: {text}");
+            // The tracking id is the one opaque string worth keeping — it is
+            // the only handle Cisco support accepts — and it sits at the end.
+            assert!(text.contains("ROUTERGW_x"), "tracking id lost: {text}");
+        }
+    }
+
+    #[test]
+    fn an_undecodable_response_keeps_enough_to_find_what_was_created() {
+        // A create that Webex accepted but whose body we could not read would
+        // otherwise leave a meeting nothing can name. Webex emits the id first,
+        // so the excerpt keeps it findable — and nothing is auto-deleted, since
+        // a response we could not read is not evidence about what exists.
+        let err = decode::<serde_json::Value>(
+            r#"{"id":"MEETING-abc123","webLink":<broken>}"#,
+            "/meetings",
+        )
+        .expect_err("must fail");
+        assert!(err.to_string().contains("MEETING-abc123"), "got {err}");
     }
 
     #[test]

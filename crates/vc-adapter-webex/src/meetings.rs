@@ -28,6 +28,19 @@ const MIN_DURATION: Duration = Duration::minutes(10);
 const MAX_DURATION: Duration = Duration::seconds(23 * 3600 + 59 * 60);
 /// What a meeting gets when the caller names no window at all.
 const DEFAULT_DURATION: Duration = Duration::hours(1);
+/// Head room between "now" and the earliest start Webex will accept.
+///
+/// Webex refuses a meeting that starts in the past, and by the time it reads
+/// the clock the request has already spent a token refresh and a round trip —
+/// so "now" is not far enough, and an ordinarily-skewed client clock makes it
+/// worse.
+const START_FLOOR: Duration = Duration::minutes(1);
+/// Webex caps a meeting title at 128 characters and answers 400 above it.
+const MAX_TITLE: usize = 128;
+/// …and an agenda at 1300.
+const MAX_AGENDA: usize = 1300;
+/// …and one integration tag at 64.
+const MAX_TAG: usize = 64;
 
 // ── wire types ───────────────────────────────────────────────────────────
 
@@ -94,14 +107,24 @@ struct Site {
 struct PersonalRoomResponse {
     #[serde(rename = "personalMeetingRoomLink", default)]
     link: Option<String>,
+    /// Webex calls this `topic` on the preferences object even though the
+    /// Meetings object calls the same thing `title`. Reading it as `title`
+    /// deserialises silently to `None` on every call, so the room's real name —
+    /// usually the host's, which is what an attendee recognises — never
+    /// arrives.
     #[serde(default)]
-    title: Option<String>,
+    topic: Option<String>,
+    /// An attendee join code, if a site variant ever returns one.
+    ///
+    /// Deliberately NOT falling back to `hostPin`, which this endpoint does
+    /// return: the host PIN claims HOST of the room and starts it from a phone.
+    /// `Meeting.password` is attendee-facing — the host renders it beside the
+    /// join link in an event that syncs to every attendee — so putting the PIN
+    /// there would hand every invitee the ability to take over the room.
     #[serde(default)]
     password: Option<String>,
     #[serde(rename = "sipAddress", default)]
     sip_address: Option<String>,
-    #[serde(rename = "hostPin", default)]
-    host_pin: Option<String>,
 }
 
 // ── operations ───────────────────────────────────────────────────────────
@@ -152,27 +175,31 @@ pub async fn create_meeting(
     if use_personal_room {
         return personal_room(state).await;
     }
-    let title = spec.title.trim();
-    if title.is_empty() {
+    if spec.title.trim().is_empty() {
         return Err(VcError::InvalidInput(
             "a Webex meeting needs a title".into(),
         ));
     }
-    let (start, end) = window_for(spec);
+    let title = clamp(spec.title.trim(), MAX_TITLE, "title");
+    let agenda = spec
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .map(|d| clamp(d, MAX_AGENDA, "agenda"));
+    let (start, end) = window_for(spec, Utc::now());
 
     let body = CreateMeetingBody {
-        title,
+        title: &title,
         start: wire_time(start),
         end: wire_time(end),
         timezone: "UTC",
-        agenda: spec
-            .description
-            .as_deref()
-            .map(str::trim)
-            .filter(|d| !d.is_empty()),
+        agenda: agenda.as_deref(),
         site_url,
         send_email: send_webex_emails,
-        integration_tags: event_tag.map(|t| vec![truncate_tag(t)]).unwrap_or_default(),
+        integration_tags: event_tag
+            .map(|t| vec![clamp(t, MAX_TAG, "integrationTag")])
+            .unwrap_or_default(),
     };
     let created: MeetingResponse = state.post_json("/meetings", &body).await?;
     to_meeting(created)
@@ -226,15 +253,17 @@ async fn personal_room(state: &ApiState) -> VcResult<Meeting> {
         // a path that is not a meeting.
         id: format!("{PERSONAL_ROOM_ID_PREFIX}{link}"),
         join_url: link,
-        title: room.title.unwrap_or_else(|| "Personal Room".to_string()),
+        title: room
+            .topic
+            .filter(|t| !t.trim().is_empty())
+            .unwrap_or_else(|| "Personal Room".to_string()),
         // No window: the room is always on. `vc_core` documents exactly this
         // case for `start_time` / `end_time` being None.
         start_time: None,
         end_time: None,
-        password: room
-            .password
-            .or(room.host_pin)
-            .filter(|p| !p.trim().is_empty()),
+        // Only a genuine attendee join code — never the host PIN. See the
+        // struct field above for why that distinction is not cosmetic.
+        password: room.password.filter(|p| !p.trim().is_empty()),
     })
     .inspect(|_| {
         if let Some(sip) = room.sip_address.as_deref() {
@@ -263,33 +292,64 @@ pub fn is_personal_room(id: &str) -> bool {
 /// that differs slightly from the event's: the join link is what the user
 /// wanted, and the times on the Webex side are advisory — the room does not
 /// lock. So the window is clamped, and any adjustment is logged.
-fn window_for(spec: &NewMeeting) -> (DateTime<Utc>, DateTime<Utc>) {
-    let start = spec.start_time.unwrap_or_else(Utc::now);
-    let end = spec.end_time.unwrap_or(start + DEFAULT_DURATION);
+fn window_for(spec: &NewMeeting, now: DateTime<Utc>) -> (DateTime<Utc>, DateTime<Utc>) {
+    let requested_start = spec.start_time.unwrap_or(now);
+    let requested_end = spec.end_time.unwrap_or(requested_start + DEFAULT_DURATION);
+
+    // Webex refuses a start that has already passed, which an event routinely
+    // has by the time somebody asks it for a link. Move the WHOLE window
+    // forward rather than only the start, so the duration the user asked for
+    // survives — flooring the start alone would make the span negative and
+    // collapse an hour-long event to the ten-minute minimum.
+    let floor = now + START_FLOOR;
+    let shift = if requested_start < floor {
+        floor - requested_start
+    } else {
+        Duration::zero()
+    };
+    if shift > Duration::zero() {
+        warn!(
+            shift_seconds = shift.num_seconds(),
+            "the event has already started and Webex refuses a meeting that starts in the              past; the meeting window is moved forward at both ends (the event itself is              unchanged)"
+        );
+    }
+    let start = requested_start + shift;
+    let end = requested_end + shift;
     let requested = end - start;
 
     if requested < MIN_DURATION {
         warn!(
             requested_seconds = requested.num_seconds(),
-            "the event is shorter than Webex's 10-minute minimum; the meeting window is \
-             stretched to fit (the event itself is unchanged)"
+            "the event is shorter than Webex's 10-minute minimum; the meeting window is              stretched to fit (the event itself is unchanged)"
         );
         return (start, start + MIN_DURATION);
     }
     if requested > MAX_DURATION {
         warn!(
             requested_seconds = requested.num_seconds(),
-            "the event is longer than Webex's 23h59m maximum; the meeting window is \
-             shortened to fit (the event itself is unchanged)"
+            "the event is longer than Webex's 23h59m maximum; the meeting window is              shortened to fit (the event itself is unchanged)"
         );
         return (start, start + MAX_DURATION);
     }
     (start, end)
 }
 
-/// Webex caps an integration tag at 64 characters.
-fn truncate_tag(tag: &str) -> String {
-    tag.chars().take(64).collect()
+/// Clamp a string Webex caps, rather than letting it 400.
+///
+/// Same trade as the window: a meeting whose agenda is cut short is a far
+/// better answer than no join link at all, and the event itself is untouched
+/// either way. One helper for all three caps so they cannot drift apart.
+fn clamp(value: &str, max: usize, field: &'static str) -> String {
+    if value.chars().count() <= max {
+        return value.to_string();
+    }
+    warn!(
+        field,
+        max,
+        length = value.chars().count(),
+        "Webex caps this field; the value sent is shortened (the event itself is unchanged)"
+    );
+    value.chars().take(max).collect()
 }
 
 /// Percent-encode a path segment. Meeting ids are opaque and long, and Webex
@@ -364,9 +424,15 @@ mod tests {
         Utc.with_ymd_and_hms(2026, 7, 28, h, m, 0).unwrap()
     }
 
+    /// A fixed clock, so the window tests stay deterministic instead of
+    /// depending on when they happen to run.
+    fn early() -> DateTime<Utc> {
+        at(8, 0)
+    }
+
     #[test]
     fn a_normal_window_is_passed_through_untouched() {
-        let (s, e) = window_for(&spec(Some(at(9, 0)), Some(at(10, 0))));
+        let (s, e) = window_for(&spec(Some(at(9, 0)), Some(at(10, 0))), early());
         assert_eq!((s, e), (at(9, 0), at(10, 0)));
     }
 
@@ -375,22 +441,95 @@ mod tests {
         // Webex refuses under 10 minutes. Refusing to mint a link at all would
         // be a worse answer than a window that runs five minutes past the
         // event — the room does not lock, and the link is what was wanted.
-        let (s, e) = window_for(&spec(Some(at(9, 0)), Some(at(9, 5))));
+        let (s, e) = window_for(&spec(Some(at(9, 0)), Some(at(9, 5))), early());
         assert_eq!(s, at(9, 0));
         assert_eq!(e - s, MIN_DURATION);
     }
 
     #[test]
     fn an_all_day_event_is_clamped_rather_than_rejected() {
-        let (s, e) = window_for(&spec(Some(at(0, 0)), Some(at(0, 0) + Duration::days(3))));
+        let (s, e) = window_for(
+            &spec(Some(at(0, 0)), Some(at(0, 0) + Duration::days(3))),
+            at(0, 0) - Duration::hours(1),
+        );
         assert_eq!(s, at(0, 0));
         assert_eq!(e - s, MAX_DURATION);
     }
 
     #[test]
     fn a_missing_end_becomes_an_hour() {
-        let (s, e) = window_for(&spec(Some(at(9, 0)), None));
+        let (s, e) = window_for(&spec(Some(at(9, 0)), None), early());
         assert_eq!(e - s, DEFAULT_DURATION);
+    }
+
+    #[test]
+    fn an_event_that_already_started_is_moved_forward_whole() {
+        // Webex refuses a start in the past, which an event routinely has by
+        // the time somebody asks it for a link. Moving only the start would
+        // make the span negative and collapse the hour to the 10-minute floor,
+        // so the whole window shifts and the duration survives.
+        let now = at(9, 15);
+        let (s, e) = window_for(&spec(Some(at(9, 0)), Some(at(10, 0))), now);
+        assert!(s > now, "the start must be in the future, got {s}");
+        assert_eq!(
+            e - s,
+            Duration::hours(1),
+            "the duration must survive the shift"
+        );
+    }
+
+    #[test]
+    fn a_meeting_with_no_start_still_lands_in_the_future() {
+        // `now` is stamped before a token refresh and a round trip, so a start
+        // of exactly now would already be past by the time Webex reads it.
+        let now = at(9, 0);
+        let (s, _e) = window_for(&spec(None, None), now);
+        assert!(s >= now + START_FLOOR, "needs head room, got {s}");
+    }
+
+    #[test]
+    fn a_future_event_is_not_moved_at_all() {
+        let (s, e) = window_for(&spec(Some(at(15, 0)), Some(at(16, 0))), at(9, 0));
+        assert_eq!((s, e), (at(15, 0), at(16, 0)));
+    }
+
+    #[test]
+    fn the_fields_webex_caps_are_shortened_rather_than_rejected() {
+        // Same trade as the window: a shortened agenda beats no join link.
+        assert_eq!(
+            clamp(&"x".repeat(200), MAX_TITLE, "title").chars().count(),
+            128
+        );
+        assert_eq!(
+            clamp(&"y".repeat(2000), MAX_AGENDA, "agenda")
+                .chars()
+                .count(),
+            1300
+        );
+        assert_eq!(clamp(&"z".repeat(100), MAX_TAG, "tag").chars().count(), 64);
+        assert_eq!(clamp("short", MAX_TITLE, "title"), "short");
+        // Character-counted, not byte-counted: a description full of umlauts
+        // must not be cut mid-character.
+        assert_eq!(
+            clamp(&"ü".repeat(200), MAX_TITLE, "title").chars().count(),
+            128
+        );
+    }
+
+    #[test]
+    fn the_personal_room_never_publishes_the_host_pin() {
+        // hostPin claims HOST of the room. Meeting.password is attendee-facing
+        // and syncs to every invitee, so putting the PIN there would hand each
+        // of them the ability to take the room over.
+        let raw: PersonalRoomResponse = serde_json::from_value(serde_json::json!({
+            "personalMeetingRoomLink": "https://x.webex.com/meet/toni",
+            "topic": "Tonis Raum",
+            "hostPin": "1234",
+            "sipAddress": "toni@x.webex.com",
+        }))
+        .expect("personal room");
+        assert!(raw.password.is_none(), "no attendee code was returned");
+        assert_eq!(raw.topic.as_deref(), Some("Tonis Raum"));
     }
 
     #[test]
@@ -408,12 +547,6 @@ mod tests {
         assert_eq!(urlencode("abc-123_x.y~z"), "abc-123_x.y~z");
         assert_eq!(urlencode("a/b+c"), "a%2Fb%2Bc");
         assert_eq!(urlencode("a b"), "a%20b");
-    }
-
-    #[test]
-    fn an_integration_tag_is_capped_at_the_documented_64() {
-        assert_eq!(truncate_tag(&"x".repeat(100)).chars().count(), 64);
-        assert_eq!(truncate_tag("short"), "short");
     }
 
     #[test]
@@ -533,7 +666,7 @@ mod tests {
             .with_status(200)
             .with_body(
                 r#"{"personalMeetingRoomLink":"https://x.webex.com/meet/toni",
-                    "title":"Tonis Raum","hostPin":"1234"}"#,
+                    "topic":"Tonis Raum","hostPin":"1234"}"#,
             )
             .create_async()
             .await;

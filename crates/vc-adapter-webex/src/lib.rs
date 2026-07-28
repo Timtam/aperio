@@ -91,7 +91,19 @@ impl WebexAdapter {
             config,
             client_secret,
             refresh_token,
-            http: reqwest::Client::new(),
+            // Timeouts, matching every other HTTP adapter in this workspace —
+            // and mattering more here than anywhere else. The API layer
+            // deliberately refuses to sleep through a rate limit because "a
+            // plugin call has no cancellation"; that same argument makes an
+            // untimed request a hang with no way out. `expect` rather than a
+            // fallback to `Client::new()`: the builder only fails when the TLS
+            // backend cannot initialise, and falling back would silently
+            // reinstate the untimed client this exists to delete.
+            http: reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(10))
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .expect("reqwest client"),
             state: OnceCell::new(),
             site: OnceCell::new(),
         }
