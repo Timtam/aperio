@@ -6,12 +6,28 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Aperio — Cisco WebEx Meetings REST API adapter (DESIGN.md §11). Stub VcAdapter impl pending the OAuth + API layer."
+description = "Aperio — Cisco WebEx Meetings REST API adapter (DESIGN.md §11)."
 
 [dependencies]
 vc-core.workspace = true
 async-trait.workspace = true
+base64 = "0.22"
+chrono.workspace = true
+hex = "0.4"
+open = "5"
+rand = "0.8"
+reqwest.workspace = true
 serde.workspace = true
+serde_json = "1"
+serde_urlencoded = "0.7"
+sha2 = "0.10"
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "time"] }
+tracing.workspace = true
+url = "2"
+
+[dev-dependencies]
+mockito = "1"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true

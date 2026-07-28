@@ -16,6 +16,8 @@
 //! `interactive_auth` entry point; the refresh token lives in
 //! the OS keychain under a WebEx-specific slot.
 
+pub mod oauth;
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use vc_core::{Meeting, MeetingId, NewMeeting, VcAdapter, VcError, VcResult};

@@ -7931,7 +7931,20 @@ name = "vc-adapter-webex"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "hex",
+ "mockito",
+ "open",
+ "rand 0.8.6",
+ "reqwest 0.12.28",
  "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "sha2",
+ "tokio",
+ "tracing",
+ "url",
  "vc-core",
 ]
 
