@@ -102,11 +102,6 @@ const ENABLED_KINDS: ReadonlySet<AdapterKind> = new Set([
   'webex',
 ]);
 
-/** Kinds that carry no calendars and no task lists — they exist so an event can
- *  be given a meeting. Listed last, and the form skips everything about
- *  containers for them. */
-const VIDEOCONFERENCE_KINDS: ReadonlySet<AdapterKind> = new Set(['webex']);
-
 interface CaldavFields {
   serverUrl: string;
   username: string;
@@ -584,10 +579,12 @@ export function AccountsPanel() {
         //
         // An account that owns no calendars and no task lists refreshes only
         // the account list — the two catalog calls have a blocking cold path
-        // and there would be nothing at the end of them.
-        const refreshes: Promise<unknown>[] = VIDEOCONFERENCE_KINDS.has(kind)
-          ? [refreshAccounts()]
-          : [refreshAccounts(), refreshCalendars(), refreshTaskLists()];
+        // and there would be nothing at the end of them. Which adapters those
+        // are comes from the adapter's own declaration, not from a list here.
+        const refreshes: Promise<unknown>[] =
+          formSpec && !formSpec.owns_containers
+            ? [refreshAccounts()]
+            : [refreshAccounts(), refreshCalendars(), refreshTaskLists()];
         if (CONTACTS_CAPABLE_KINDS.has(kind)) {
           refreshes.push(refreshContactLists(), syncContactsNow());
         }

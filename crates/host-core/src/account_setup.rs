@@ -199,6 +199,41 @@ pub fn has_builtin_client(oauth: &AccountOauth) -> bool {
         .is_some_and(builtin_oauth::has_builtin_client)
 }
 
+/// The keychain slots an account of this schema must have populated to count as
+/// connected.
+///
+/// What "connected" means is the adapter's own statement: a required secret
+/// field is a credential the account cannot work without, and an OAuth block
+/// that keeps a refresh token cannot work without that either. The alternative
+/// — a table in the host mapping each adapter kind to a slot — has already gone
+/// wrong once here, probing a kind for a password it never had and reporting
+/// every working account of that kind as needing to be reconnected.
+///
+/// The OAuth CLIENT secret is deliberately absent: for the built-in posture
+/// there is nothing in the keychain to find, and an account is not
+/// disconnected for that.
+pub fn required_slots(schema: &AccountSchema) -> Vec<SecretSlot> {
+    let client_secret_field = schema
+        .oauth
+        .as_ref()
+        .and_then(|o| o.client_secret_field.as_deref());
+    let mut slots: Vec<SecretSlot> = schema
+        .fields
+        .iter()
+        .filter(|f| f.required && Some(f.key.as_str()) != client_secret_field)
+        .filter_map(|f| f.secret_slot.map(host_slot))
+        .collect();
+    if schema
+        .oauth
+        .as_ref()
+        .is_some_and(|o| o.refresh_token_field.is_some())
+    {
+        slots.push(SecretSlot::RefreshToken);
+    }
+    slots.dedup();
+    slots
+}
+
 // ── 2. Creating an account ───────────────────────────────────────────────────
 
 /// What to write when creating an account.

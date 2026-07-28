@@ -39,6 +39,7 @@ const OAUTH_SPEC: AccountFormSpec = {
     client_id_field: 'client_id',
     client_secret_field: 'client_secret',
   },
+  owns_containers: false,
 };
 
 const BASIC_SPEC: AccountFormSpec = {
@@ -49,6 +50,7 @@ const BASIC_SPEC: AccountFormSpec = {
     field('password', { kind: 'secret', required: true }),
   ],
   oauth: null,
+  owns_containers: true,
 };
 
 describe('firstMissingField', () => {

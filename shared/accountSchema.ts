@@ -39,6 +39,11 @@ export interface AccountFormSpec {
   plugin_id: string;
   fields: AccountFormField[];
   oauth: AccountFormOauth | null;
+  /** Whether accounts of this adapter own calendars and task lists. False for a
+   *  videoconference adapter, which owns neither — so a frontend can skip the
+   *  catalog refresh after connecting one without keeping its own list of which
+   *  adapters those are. */
+  owns_containers: boolean;
 }
 
 /** Which fields the OAuth posture makes optional, if any. */

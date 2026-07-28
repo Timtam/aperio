@@ -183,6 +183,7 @@ pub async fn list_accounts(
 #[tauri::command]
 pub async fn list_accounts_missing_credentials(
     db: State<'_, DbHandle>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
 ) -> CommandResult<Vec<Account>> {
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
@@ -192,23 +193,34 @@ pub async fn list_accounts_missing_credentials(
         if acc.id == "local" || acc.adapter_kind == AdapterKind::Local {
             continue;
         }
-        let Some(slot) = required_secret_slot(acc.adapter_kind) else {
-            continue;
-        };
-        if !secret_present(&acc.id, slot) {
+        // What "connected" means is the ADAPTER's statement when it makes one:
+        // the required secret fields of its schema. The per-kind table below is
+        // the fallback for the adapters that have not declared one yet.
+        let slots: Vec<SecretSlot> = acc
+            .adapter_kind
+            .plugin_id()
+            .and_then(|id| plugin_manager.get(id))
+            .and_then(|p| p.manifest.account.clone())
+            .map(|schema| host_core::account_setup::required_slots(&schema))
+            .unwrap_or_else(|| required_secret_slot(acc.adapter_kind).into_iter().collect());
+        if slots.iter().any(|slot| !secret_present(&acc.id, *slot)) {
             out.push(acc);
         }
     }
     Ok(out)
 }
 
-/// Which keychain slot a fully-configured account of this kind
-/// must have populated. `None` means the adapter has no required
-/// secret (iCal feeds are typically public URLs; an optional
-/// Basic-auth password fails open and surfaces as a 401 on the
-/// first fetch). Kept separate from the connect-side logic so
-/// the two stay consistent: any future adapter that needs a
-/// different secret shape adds itself here too.
+/// Which keychain slot a fully-configured account of this kind must have
+/// populated — the FALLBACK for adapters that declare no account schema.
+///
+/// An adapter that declares one answers this question itself, in its
+/// `plugin.json`, and never reaches this table; see
+/// `host_core::account_setup::required_slots`. This stays for the seven
+/// adapters still on the older per-kind path.
+///
+/// `None` means the adapter has no required secret — iCal feeds are typically
+/// public URLs, and an optional Basic-auth password fails open and surfaces as
+/// a 401 on the first fetch.
 fn required_secret_slot(kind: AdapterKind) -> Option<SecretSlot> {
     // Exhaustive on purpose. The catch-all this replaces answered `Password`
     // for every kind it had not heard of, so a new OAuth kind was silently
@@ -1131,6 +1143,12 @@ pub struct AccountFormSpec {
     pub fields: Vec<AccountFormField>,
     /// Present when connecting runs an OAuth sign-in.
     pub oauth: Option<AccountFormOauth>,
+    /// Whether accounts of this adapter own calendars and task lists. Derived
+    /// from the plugin's declared TYPE, so the frontend can skip the catalog
+    /// refresh after connecting a videoconference account — which owns neither,
+    /// and whose catalog calls have a blocking cold path — without keeping its
+    /// own list of which adapters those are.
+    pub owns_containers: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -1209,6 +1227,9 @@ pub fn account_form_spec(
             client_id_field: o.client_id_field.clone(),
             client_secret_field: o.client_secret_field.clone(),
         }),
+        owns_containers: plugin_manager
+            .get(plugin_id)
+            .is_some_and(|p| p.manifest.plugin_type == plugin_core::PluginType::CalendarAdapter),
     }))
 }
 

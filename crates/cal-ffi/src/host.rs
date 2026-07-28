@@ -7085,6 +7085,15 @@ impl Host {
                 "client_secret_field": o.client_secret_field,
                 "app_redirect_uri": o.app_redirect_uri,
             })),
+            // Derived from the plugin's declared TYPE, so a frontend can skip
+            // the catalog refresh for an adapter that owns no containers
+            // without keeping its own list of which adapters those are.
+            "owns_containers": self
+                .plugin_manager
+                .get(plugin_id)
+                .is_some_and(|p| {
+                    p.manifest.plugin_type == plugin_core::PluginType::CalendarAdapter
+                }),
         });
         Ok(spec.to_string())
     }
