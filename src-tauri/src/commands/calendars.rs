@@ -892,6 +892,44 @@ pub async fn respond_to_event(
     Ok(())
 }
 
+/// The by-id event read, callable from another command module.
+///
+/// `get_event_by_id` is a Tauri command and takes `State` wrappers, which
+/// another command cannot hand it. The meeting commands need the same lookup,
+/// so the body lives here and both call it — rather than a second, subtly
+/// different read that would drift from the recurring-master handling this one
+/// was fixed for.
+pub(crate) async fn read_event_for_meeting(
+    adapter: &LocalAdapter,
+    registry: &Arc<AdapterRegistry>,
+    cache: &Arc<CacheStore>,
+    db: &DbHandle,
+    id: &str,
+    calendar_id: &str,
+) -> CommandResult<Option<Event>> {
+    let account = registry
+        .account_for_calendar(calendar_id)
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+    if account == LOCAL_ID {
+        return Ok(adapter.get_event_by_id(id)?);
+    }
+    let whole = DateRange::new(
+        "0001-01-01T00:00:00Z"
+            .parse()
+            .expect("valid lower wide-range bound"),
+        "9999-12-31T23:59:59Z"
+            .parse()
+            .expect("valid upper wide-range bound"),
+    );
+    let _ = db;
+    let events = cache_swr::rows_or_logged_empty(
+        cache.read_events(&account, calendar_id, whole),
+        "events",
+        calendar_id,
+    );
+    Ok(events.into_iter().find(|ev| ev.id == id))
+}
+
 #[tauri::command]
 pub async fn get_event_by_id(
     adapter: State<'_, LocalAdapter>,

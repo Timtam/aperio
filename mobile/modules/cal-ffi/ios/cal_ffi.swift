@@ -1763,6 +1763,12 @@ public protocol HostProtocol: AnyObject, Sendable {
     func adoptRemoteEncryptionJson(passphrase: String) throws 
     
     /**
+     * Create a meeting for an event, write its link into the event, and record
+     * which meeting that was. Returns `{event, meeting}` as JSON.
+     */
+    func attachMeetingJson(requestJson: String) throws  -> String
+    
+    /**
      * Begin a schema-driven OAuth sign-in: build the consent URL for the
      * adapter's own flow.
      *
@@ -2102,6 +2108,13 @@ public protocol HostProtocol: AnyObject, Sendable {
     func deleteUserPref(key: String) throws 
     
     /**
+     * Delete the meeting Aperio created for an event and take its link back
+     * out. Returns the saved event as JSON, or `null` when there was no
+     * meeting of ours — someone else's link is not ours to delete.
+     */
+    func detachMeetingJson(requestJson: String) throws  -> String
+    
+    /**
      * Disable end-to-end encryption on the configured dataset (§19.7) — the
      * in-place downgrade. Verify `passphrase`, then rewrite every log + snapshot
      * as PLAINTEXT (decrypting via the data key, stripping the `credential.*`
@@ -2148,6 +2161,11 @@ public protocol HostProtocol: AnyObject, Sendable {
      * already-encrypted target + an empty passphrase.
      */
     func enableSyncEncryptionJson(passphrase: String) throws  -> String
+    
+    /**
+     * The meeting Aperio created for this event, if any, as JSON.
+     */
+    func eventMeetingJson(eventId: String) throws  -> String
     
     /**
      * Drop the pinned SFTP fingerprint for `host_port` (the "forget pin"
@@ -2970,6 +2988,19 @@ open func adoptRemoteEncryptionJson(passphrase: String)throws   {try rustCallWit
 }
     
     /**
+     * Create a meeting for an event, write its link into the event, and record
+     * which meeting that was. Returns `{event, meeting}` as JSON.
+     */
+open func attachMeetingJson(requestJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_attach_meeting_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(requestJson),$0
+    )
+})
+}
+    
+    /**
      * Begin a schema-driven OAuth sign-in: build the consent URL for the
      * adapter's own flow.
      *
@@ -3572,6 +3603,20 @@ open func deleteUserPref(key: String)throws   {try rustCallWithError(FfiConverte
 }
     
     /**
+     * Delete the meeting Aperio created for an event and take its link back
+     * out. Returns the saved event as JSON, or `null` when there was no
+     * meeting of ours — someone else's link is not ours to delete.
+     */
+open func detachMeetingJson(requestJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_detach_meeting_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(requestJson),$0
+    )
+})
+}
+    
+    /**
      * Disable end-to-end encryption on the configured dataset (§19.7) — the
      * in-place downgrade. Verify `passphrase`, then rewrite every log + snapshot
      * as PLAINTEXT (decrypting via the data key, stripping the `credential.*`
@@ -3642,6 +3687,18 @@ open func enableSyncEncryptionJson(passphrase: String)throws  -> String  {
     uniffi_cal_ffi_fn_method_host_enable_sync_encryption_json(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(passphrase),$0
+    )
+})
+}
+    
+    /**
+     * The meeting Aperio created for this event, if any, as JSON.
+     */
+open func eventMeetingJson(eventId: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_event_meeting_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(eventId),$0
     )
 })
 }
@@ -8377,6 +8434,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json() != 12036) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_attach_meeting_json() != 5554) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_begin_account_oauth_json() != 37389) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -8491,6 +8551,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_delete_user_pref() != 13418) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_detach_meeting_json() != 31724) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_disable_sync_encryption_json() != 18838) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -8501,6 +8564,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_enable_sync_encryption_json() != 14292) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_event_meeting_json() != 60698) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key() != 61915) {

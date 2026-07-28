@@ -712,6 +712,11 @@ RustBuffer uniffi_cal_ffi_fn_method_host_adopt_local_dataset_json(uint64_t ptr, 
 void uniffi_cal_ffi_fn_method_host_adopt_remote_encryption_json(uint64_t ptr, RustBuffer passphrase, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_ATTACH_MEETING_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_ATTACH_MEETING_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_attach_meeting_json(uint64_t ptr, RustBuffer request_json, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_BEGIN_ACCOUNT_OAUTH_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_BEGIN_ACCOUNT_OAUTH_JSON
 RustBuffer uniffi_cal_ffi_fn_method_host_begin_account_oauth_json(uint64_t ptr, RustBuffer adapter_kind, RustBuffer values_json, RustCallStatus *_Nonnull out_status
@@ -902,6 +907,11 @@ void uniffi_cal_ffi_fn_method_host_delete_task_list(uint64_t ptr, RustBuffer id,
 void uniffi_cal_ffi_fn_method_host_delete_user_pref(uint64_t ptr, RustBuffer key, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_DETACH_MEETING_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_DETACH_MEETING_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_detach_meeting_json(uint64_t ptr, RustBuffer request_json, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_DISABLE_SYNC_ENCRYPTION_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_DISABLE_SYNC_ENCRYPTION_JSON
 RustBuffer uniffi_cal_ffi_fn_method_host_disable_sync_encryption_json(uint64_t ptr, RustBuffer passphrase, RustCallStatus *_Nonnull out_status
@@ -920,6 +930,11 @@ RustBuffer uniffi_cal_ffi_fn_method_host_discover_json(uint64_t ptr, RustBuffer 
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_ENABLE_SYNC_ENCRYPTION_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_ENABLE_SYNC_ENCRYPTION_JSON
 RustBuffer uniffi_cal_ffi_fn_method_host_enable_sync_encryption_json(uint64_t ptr, RustBuffer passphrase, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_EVENT_MEETING_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_EVENT_MEETING_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_event_meeting_json(uint64_t ptr, RustBuffer event_id, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_FORGET_SFTP_HOST_KEY
@@ -1872,6 +1887,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_ATTACH_MEETING_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_ATTACH_MEETING_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_attach_meeting_json(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_BEGIN_ACCOUNT_OAUTH_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_BEGIN_ACCOUNT_OAUTH_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_begin_account_oauth_json(void
@@ -2100,6 +2121,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_delete_user_pref(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_DETACH_MEETING_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_DETACH_MEETING_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_detach_meeting_json(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_DISABLE_SYNC_ENCRYPTION_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_DISABLE_SYNC_ENCRYPTION_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_disable_sync_encryption_json(void
@@ -2121,6 +2148,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_discover_json(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_ENABLE_SYNC_ENCRYPTION_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_ENABLE_SYNC_ENCRYPTION_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_enable_sync_encryption_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_EVENT_MEETING_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_EVENT_MEETING_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_event_meeting_json(void
     
 );
 #endif

@@ -36,6 +36,11 @@ export interface Account {
   config_json: string;
   created_at: string;
   updated_at: string;
+  /** Derived at list-time from the plugin's declared TYPE: whether this account
+   *  can mint meetings. Drives the editor's "create meeting" control without
+   *  the UI knowing any provider names. Absent on rows that did not come from
+   *  the account listing. */
+  is_videoconference?: boolean;
 }
 
 /** Create-account request — the desktop `CreateAccountRequest` wire shape. */

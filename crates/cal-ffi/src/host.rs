@@ -62,6 +62,7 @@ use host_core::conflicts::{
 use host_core::contact_sync::{ContactSyncCore, ContactSyncObserver, ContactsSyncedPayload};
 use host_core::db::SharedConn;
 use host_core::event_log::OnboardingService;
+use host_core::meetings::MeetingsRepo;
 use host_core::overrides::{
     apply_color_to_calendars, apply_color_to_contact_lists, apply_color_to_events,
     apply_color_to_sections, apply_color_to_task_lists, apply_to_calendars, apply_to_task_lists,
@@ -82,6 +83,7 @@ use sync_core::{
     KEY_LEN,
 };
 use sync_engine::{EventLogWriter, SecretError, SecretSlot, SecretStore, SyncOrchestrator};
+use vc_core::NewMeeting;
 
 /// Sync-adapter pref keys (device-local; never propagated). Match the desktop
 /// `commands::sync` keys so the same SQLite row layout serves both backends.
@@ -7085,6 +7087,156 @@ impl Host {
         Ok(spec.to_string())
     }
 
+    // ── Meetings ─────────────────────────────────────────────────────────────
+    //
+    // The mobile twins of the desktop `attach_meeting` / `detach_meeting` /
+    // `event_meeting`. Same three steps in the same order and for the same
+    // reasons: a meeting created without its link reaching the event is
+    // invisible, and a link written without the binding recorded is a meeting
+    // nobody can delete.
+
+    /// Create a meeting for an event, write its link into the event, and record
+    /// which meeting that was. Returns `{event, meeting}` as JSON.
+    pub fn attach_meeting_json(&self, request_json: String) -> Result<String, StoreError> {
+        let req: AttachMeetingRequest = from_json("attach meeting", &request_json)?;
+        let vc =
+            self.registry
+                .vc_adapter(&req.account_id)
+                .ok_or_else(|| StoreError::InvalidField {
+                    field: "account_id".to_string(),
+                    detail: format!("no videoconference adapter for account {}", req.account_id),
+                })?;
+
+        let event = self
+            .read_event_for_meeting(&req.event_id, &req.calendar_id)?
+            .ok_or(StoreError::NotFound)?;
+
+        let shared = self.db.shared();
+        if MeetingsRepo::new(&shared)
+            .get(&req.event_id)
+            .map_err(meetings_err)?
+            .is_some()
+        {
+            return Err(StoreError::InvalidField {
+                field: "event_id".to_string(),
+                detail: "this event already has a meeting — remove it first".to_string(),
+            });
+        }
+
+        let meeting = self
+            .runtime
+            .block_on(vc.create_meeting(NewMeeting {
+                title: event.title.clone(),
+                start_time: Some(event.start),
+                end_time: Some(event.end),
+                description: event.description.clone(),
+            }))
+            .map_err(vc_err)?;
+
+        let mut updated = event.clone();
+        let block =
+            cal_core::conferencing::meeting_block(&meeting.join_url, meeting.password.as_deref());
+        updated.description = Some(match updated.description.as_deref().map(str::trim) {
+            Some(existing) if !existing.is_empty() => format!("{existing}\n\n{block}"),
+            _ => block,
+        });
+        if updated
+            .location
+            .as_deref()
+            .map(str::trim)
+            .is_none_or(str::is_empty)
+        {
+            updated.location = Some(meeting.join_url.clone());
+        }
+
+        let saved = match self.save_event_for_meeting(updated) {
+            Ok(saved) => saved,
+            Err(err) => {
+                // Nowhere for the meeting to live — take it back down rather
+                // than leaving one behind that nothing on this device knows of.
+                if let Err(cleanup) = self.runtime.block_on(vc.delete_meeting(&meeting.id)) {
+                    tracing::warn!(
+                        meeting_id = %meeting.id,
+                        ?cleanup,
+                        "could not roll back a meeting after the event failed to save"
+                    );
+                }
+                return Err(err);
+            }
+        };
+
+        MeetingsRepo::new(&shared)
+            .bind(
+                &req.event_id,
+                &req.account_id,
+                &meeting.id,
+                &meeting.join_url,
+            )
+            .map_err(meetings_err)?;
+
+        to_json(&serde_json::json!({
+            "event": saved,
+            "meeting": meeting,
+        }))
+    }
+
+    /// Delete the meeting Aperio created for an event and take its link back
+    /// out. Returns the saved event as JSON, or `null` when there was no
+    /// meeting of ours — someone else's link is not ours to delete.
+    pub fn detach_meeting_json(&self, request_json: String) -> Result<String, StoreError> {
+        let req: AttachMeetingRequest = from_json("detach meeting", &request_json)?;
+        let shared = self.db.shared();
+        let Some(binding) = MeetingsRepo::new(&shared)
+            .get(&req.event_id)
+            .map_err(meetings_err)?
+        else {
+            return Ok("null".to_string());
+        };
+
+        let vc = self
+            .registry
+            .vc_adapter(&binding.account_id)
+            .ok_or_else(|| StoreError::InvalidField {
+                field: "account_id".to_string(),
+                detail: format!(
+                    "no videoconference adapter for account {}",
+                    binding.account_id
+                ),
+            })?;
+        // Provider first: forgetting the id before the delete succeeds would
+        // strand the meeting for good.
+        self.runtime
+            .block_on(vc.delete_meeting(&binding.meeting_id))
+            .map_err(vc_err)?;
+        MeetingsRepo::new(&shared)
+            .unbind(&req.event_id)
+            .map_err(meetings_err)?;
+
+        let Some(event) = self.read_event_for_meeting(&req.event_id, &req.calendar_id)? else {
+            return Ok("null".to_string());
+        };
+        let mut updated = event.clone();
+        updated.description = updated
+            .description
+            .as_deref()
+            .map(|text| cal_core::conferencing::without_meeting_block(text, &binding.join_url))
+            .filter(|text| !text.is_empty());
+        if updated.location.as_deref().map(str::trim) == Some(binding.join_url.as_str()) {
+            updated.location = None;
+        }
+        let saved = self.save_event_for_meeting(updated)?;
+        to_json(&saved)
+    }
+
+    /// The meeting Aperio created for this event, if any, as JSON.
+    pub fn event_meeting_json(&self, event_id: String) -> Result<String, StoreError> {
+        let shared = self.db.shared();
+        let found = MeetingsRepo::new(&shared)
+            .get(&event_id)
+            .map_err(meetings_err)?;
+        to_json(&found)
+    }
+
     /// Every adapter this build can connect an account for, as JSON.
     ///
     /// Assembled from the loaded manifests rather than from a list in the UI:
@@ -7286,6 +7438,32 @@ impl Host {
 /// no business crossing the FFI boundary — the client in particular holds a
 /// secret.
 impl Host {
+    /// Read an event by id for the meeting commands.
+    ///
+    /// The same routing `get_event_by_id_json` uses — local rows straight from
+    /// the store, external ones out of the SWR cache — so a recurring master
+    /// resolves the same way here as it does everywhere else.
+    fn read_event_for_meeting(
+        &self,
+        event_id: &str,
+        calendar_id: &str,
+    ) -> Result<Option<Event>, StoreError> {
+        let json =
+            self.get_event_by_id_json(event_id.to_string(), Some(calendar_id.to_string()))?;
+        if json.trim() == "null" {
+            return Ok(None);
+        }
+        let event: Event = from_json("event", &json)?;
+        Ok(Some(event))
+    }
+
+    /// Save an event edited by the meeting commands, through the same write
+    /// path every other edit takes.
+    fn save_event_for_meeting(&self, event: Event) -> Result<Event, StoreError> {
+        let json = self.update_event_json(to_json(&event)?, None)?;
+        from_json("event", &json)
+    }
+
     /// The plugin id + account schema for an adapter kind, or a typed error.
     fn schema_for(
         &self,
@@ -7401,6 +7579,38 @@ fn setup_err(err: host_core::account_setup::AccountSetupError) -> StoreError {
             detail,
         },
         E::Secret(detail) => StoreError::Storage { detail },
+    }
+}
+
+/// Request body for [`Host::attach_meeting_json`] and
+/// [`Host::detach_meeting_json`]. `account_id` is ignored on detach — the
+/// binding already names the account that minted the meeting.
+#[derive(serde::Deserialize)]
+struct AttachMeetingRequest {
+    event_id: String,
+    calendar_id: String,
+    #[serde(default)]
+    account_id: String,
+}
+
+fn meetings_err(err: host_core::meetings::MeetingsError) -> StoreError {
+    StoreError::Storage {
+        detail: err.to_string(),
+    }
+}
+
+fn vc_err(err: vc_core::VcError) -> StoreError {
+    match err {
+        vc_core::VcError::Authentication(detail) => StoreError::Auth { detail },
+        vc_core::VcError::Forbidden(detail) => StoreError::Forbidden { detail },
+        vc_core::VcError::NotFound(_) => StoreError::NotFound,
+        vc_core::VcError::InvalidInput(detail) => StoreError::InvalidField {
+            field: "meeting".to_string(),
+            detail,
+        },
+        other => StoreError::Storage {
+            detail: other.to_string(),
+        },
     }
 }
 

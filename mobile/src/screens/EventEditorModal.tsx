@@ -35,6 +35,7 @@ import { AttendeesEditor } from '../components/AttendeesEditor';
 import { AvailabilityChecker } from '../components/AvailabilityChecker';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { ConferenceSection } from '../components/ConferenceSection';
+import { MeetingControls } from '../components/MeetingControls';
 import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { DescriptionLinks } from '../components/DescriptionLinks';
 import { EventRsvp } from '../components/EventRsvp';
@@ -835,6 +836,16 @@ export default function EventEditorModal({
           with the desktop and reads URLs rather than prose, so it does not
           depend on the invitation's language. */}
       <ConferenceSection location={location} description={description} />
+      {/* Creating one, as opposed to joining one. Only for a meeting Aperio
+          owns — an event carrying someone else's link gets Join above and no
+          Remove here. */}
+      <MeetingControls
+        event={original}
+        onEventChanged={(saved) => {
+          setLocation(saved.location ?? '');
+          setDescription(saved.description ?? '');
+        }}
+      />
 
       {/* Colour — every calendar: a local or colour-capable external calendar
           stores it on the event (color_label); a non-capable external event

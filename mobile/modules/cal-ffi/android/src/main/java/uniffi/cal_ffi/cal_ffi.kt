@@ -904,6 +904,8 @@ external fun uniffi_cal_ffi_checksum_method_host_adopt_local_dataset_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_attach_meeting_json(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_begin_account_oauth_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_begin_oauth_json(
@@ -980,6 +982,8 @@ external fun uniffi_cal_ffi_checksum_method_host_delete_task_list(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_delete_user_pref(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_detach_meeting_json(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_disable_sync_encryption_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_disconnect_sync(
@@ -987,6 +991,8 @@ external fun uniffi_cal_ffi_checksum_method_host_disconnect_sync(
 external fun uniffi_cal_ffi_checksum_method_host_discover_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_enable_sync_encryption_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_event_meeting_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key(
 ): Short
@@ -1284,6 +1290,8 @@ external fun uniffi_cal_ffi_fn_method_host_adopt_local_dataset_json(`ptr`: Long,
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_adopt_remote_encryption_json(`ptr`: Long,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_attach_meeting_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_begin_account_oauth_json(`ptr`: Long,`adapterKind`: RustBuffer.ByValue,`valuesJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_begin_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1360,6 +1368,8 @@ external fun uniffi_cal_ffi_fn_method_host_delete_task_list(`ptr`: Long,`id`: Ru
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_delete_user_pref(`ptr`: Long,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_detach_meeting_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_disable_sync_encryption_json(`ptr`: Long,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_disconnect_sync(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1367,6 +1377,8 @@ external fun uniffi_cal_ffi_fn_method_host_disconnect_sync(`ptr`: Long,uniffi_ou
 external fun uniffi_cal_ffi_fn_method_host_discover_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_enable_sync_encryption_json(`ptr`: Long,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_event_meeting_json(`ptr`: Long,`eventId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_forget_sftp_host_key(`ptr`: Long,`hostPort`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -1790,6 +1802,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json() != 12036.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_attach_meeting_json() != 5554.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_begin_account_oauth_json() != 37389.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1904,6 +1919,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_delete_user_pref() != 13418.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_detach_meeting_json() != 31724.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_disable_sync_encryption_json() != 18838.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1914,6 +1932,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_enable_sync_encryption_json() != 14292.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_event_meeting_json() != 60698.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key() != 61915.toShort()) {
@@ -4117,6 +4138,12 @@ public interface HostInterface {
     fun `adoptRemoteEncryptionJson`(`passphrase`: kotlin.String)
     
     /**
+     * Create a meeting for an event, write its link into the event, and record
+     * which meeting that was. Returns `{event, meeting}` as JSON.
+     */
+    fun `attachMeetingJson`(`requestJson`: kotlin.String): kotlin.String
+    
+    /**
      * Begin a schema-driven OAuth sign-in: build the consent URL for the
      * adapter's own flow.
      *
@@ -4456,6 +4483,13 @@ public interface HostInterface {
     fun `deleteUserPref`(`key`: kotlin.String)
     
     /**
+     * Delete the meeting Aperio created for an event and take its link back
+     * out. Returns the saved event as JSON, or `null` when there was no
+     * meeting of ours — someone else's link is not ours to delete.
+     */
+    fun `detachMeetingJson`(`requestJson`: kotlin.String): kotlin.String
+    
+    /**
      * Disable end-to-end encryption on the configured dataset (§19.7) — the
      * in-place downgrade. Verify `passphrase`, then rewrite every log + snapshot
      * as PLAINTEXT (decrypting via the data key, stripping the `credential.*`
@@ -4502,6 +4536,11 @@ public interface HostInterface {
      * already-encrypted target + an empty passphrase.
      */
     fun `enableSyncEncryptionJson`(`passphrase`: kotlin.String): kotlin.String
+    
+    /**
+     * The meeting Aperio created for this event, if any, as JSON.
+     */
+    fun `eventMeetingJson`(`eventId`: kotlin.String): kotlin.String
     
     /**
      * Drop the pinned SFTP fingerprint for `host_port` (the "forget pin"
@@ -5379,6 +5418,24 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Create a meeting for an event, write its link into the event, and record
+     * which meeting that was. Returns `{event, meeting}` as JSON.
+     */
+    @Throws(StoreException::class)override fun `attachMeetingJson`(`requestJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_attach_meeting_json(
+        it,
+        FfiConverterString.lower(`requestJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Begin a schema-driven OAuth sign-in: build the consent URL for the
      * adapter's own flow.
      *
@@ -6157,6 +6214,25 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Delete the meeting Aperio created for an event and take its link back
+     * out. Returns the saved event as JSON, or `null` when there was no
+     * meeting of ours — someone else's link is not ours to delete.
+     */
+    @Throws(StoreException::class)override fun `detachMeetingJson`(`requestJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_detach_meeting_json(
+        it,
+        FfiConverterString.lower(`requestJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Disable end-to-end encryption on the configured dataset (§19.7) — the
      * in-place downgrade. Verify `passphrase`, then rewrite every log + snapshot
      * as PLAINTEXT (decrypting via the data key, stripping the `credential.*`
@@ -6244,6 +6320,23 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_enable_sync_encryption_json(
         it,
         FfiConverterString.lower(`passphrase`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The meeting Aperio created for this event, if any, as JSON.
+     */
+    @Throws(StoreException::class)override fun `eventMeetingJson`(`eventId`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_event_meeting_json(
+        it,
+        FfiConverterString.lower(`eventId`),_status)
 }
     }
     )

@@ -781,6 +781,9 @@ pub fn run() {
             // REST layers land.
             commands::test_vc_connection,
             commands::create_meeting,
+            commands::attach_meeting,
+            commands::detach_meeting,
+            commands::event_meeting,
             commands::get_meeting,
             commands::delete_meeting,
             // §20.10 Settings → Plugins panel. list_plugins

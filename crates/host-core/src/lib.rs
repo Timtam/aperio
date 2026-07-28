@@ -23,6 +23,7 @@ pub mod db;
 pub mod device_names;
 pub mod event_log;
 pub mod logging;
+pub mod meetings;
 pub mod overrides;
 pub mod paths;
 pub mod plugin_channel;

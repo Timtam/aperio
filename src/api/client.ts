@@ -668,6 +668,49 @@ export const connectAccount = (request: {
   values: Record<string, string | boolean>;
 }) => invoke<Account>('connect_account', { request });
 
+/** A meeting on the provider side. */
+export interface Meeting {
+  id: string;
+  join_url: string;
+  title: string;
+  start_time: string | null;
+  end_time: string | null;
+  password: string | null;
+}
+
+/** The record that a meeting was created BY Aperio for a given event.
+ *
+ *  Host-local: it says which provider-side meeting this device can still take
+ *  down. An event carrying someone else's meeting link has no binding, which is
+ *  why the editor offers Join but not Remove for it. */
+export interface EventMeetingBinding {
+  event_id: string;
+  account_id: string;
+  meeting_id: string;
+  join_url: string;
+  created_at: string;
+}
+
+/** Create a meeting for an event, write its link into the event, and record the
+ *  binding — one call, because doing the three separately is how an event ends
+ *  up linking a meeting nobody can delete. Returns the event as saved. */
+export const attachMeeting = (request: {
+  event_id: string;
+  calendar_id: string;
+  account_id: string;
+}) => invoke<{ event: CalendarEvent; meeting: Meeting }>('attach_meeting', { request });
+
+/** Delete the meeting Aperio created for an event and take its link back out.
+ *  `null` when the event had no meeting of ours. */
+export const detachMeeting = (request: {
+  event_id: string;
+  calendar_id: string;
+}) => invoke<CalendarEvent | null>('detach_meeting', { request });
+
+/** The meeting Aperio created for this event, if any. */
+export const eventMeeting = (event_id: string) =>
+  invoke<EventMeetingBinding | null>('event_meeting', { eventId: event_id });
+
 /** Which container namespace an override applies to. Calendars and
  *  task lists have disjoint ids today but the backend keeps them
  *  separately namespaced so a future code-path can enforce kind. */

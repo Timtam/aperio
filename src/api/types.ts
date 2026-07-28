@@ -289,6 +289,10 @@ export interface Account {
   config_json: string;
   created_at: string;
   updated_at: string;
+  /** Derived at list-time from the plugin's declared TYPE: whether this
+   *  account can mint meetings. Drives the event editor's "create meeting"
+   *  control without the UI knowing any provider names. */
+  is_videoconference?: boolean;
   /** Derived at list-time by the backend: `true` when this
    *  account's `adapter_kind` maps to a plugin id that's
    *  currently loaded + enabled in the host's PluginManager.

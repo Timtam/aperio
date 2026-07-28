@@ -39,6 +39,7 @@ import { AttendeePicker } from './AttendeePicker';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ColorLabelSelect } from './ColorLabelSelect';
 import { ConferenceSection } from './ConferenceSection';
+import { MeetingControls } from './MeetingControls';
 import {
   allDayFormEndDate,
   allDayWireEnd,
@@ -1073,6 +1074,16 @@ export function EventDialog({
         <ConferenceSection
           location={form.location}
           description={form.description}
+        />
+        {/* Creating one, as opposed to joining one. Only for a meeting Aperio
+            owns — an event carrying someone else's link gets Join above and no
+            Remove here, because it is not ours to delete. */}
+        <MeetingControls
+          event={event ?? null}
+          onEventChanged={(saved) => {
+            update('location', saved.location ?? '');
+            update('description', saved.description ?? '');
+          }}
         />
 
         <div className="form__field">

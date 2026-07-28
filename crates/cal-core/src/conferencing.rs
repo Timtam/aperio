@@ -236,6 +236,96 @@ pub fn detect_conference(sources: &ConferenceSources<'_>) -> Option<ConferenceLi
 /// cases are the entire difficulty, and they are easier to be exact about here.
 /// A URL wrapped in angle brackets that keeps its `%3E`, or a link at the end
 /// of a sentence that keeps the full stop, is a link that does not open.
+/// The block Aperio appends to an event's description when it creates a
+/// meeting for it.
+///
+/// Written in the shape real invitations use — a join line, then labelled
+/// detail lines — because that is what every other calendar client, and this
+/// app's own detector, reads. Nothing here is Aperio-specific: an attendee
+/// opening the event in Outlook sees a link and a password, not a marker.
+///
+/// The labels are English on purpose. They are not UI text: they travel to
+/// other people's calendars, in an event whose language Aperio does not know,
+/// and the detector reads them back as DATA rather than matching on them. An
+/// invitation that says "Passwort" is read exactly as well.
+pub fn meeting_block(join_url: &str, password: Option<&str>) -> String {
+    let mut out = String::from("Join the meeting: ");
+    out.push_str(join_url);
+    if let Some(password) = password.map(str::trim).filter(|p| !p.is_empty()) {
+        out.push_str("\nMeeting password: ");
+        out.push_str(password);
+    }
+    out
+}
+
+/// Remove the block [`meeting_block`] added, leaving the user's own text.
+///
+/// Matches on the JOIN URL rather than on the surrounding words, for the same
+/// reason the detector does: the words may have been translated, reflowed, or
+/// rewritten by another client on the way through, and the URL is the only part
+/// that has to survive unchanged for the meeting to work at all.
+///
+/// Removes the line carrying the URL, plus any immediately following labelled
+/// detail lines (`Label: value`), which is where the password sits. Text the
+/// user wrote before or after the block is untouched, and a description that
+/// never had a block comes back unchanged.
+pub fn without_meeting_block(description: &str, join_url: &str) -> String {
+    if join_url.is_empty() || !description.contains(join_url) {
+        return description.to_string();
+    }
+    let mut kept: Vec<&str> = Vec::new();
+    let mut lines = description.lines().peekable();
+    while let Some(line) = lines.next() {
+        if !line.contains(join_url) {
+            kept.push(line);
+            continue;
+        }
+        // The URL's line goes, and so do the labelled detail lines that follow
+        // it — but only while they LOOK like details, so a paragraph the user
+        // wrote underneath survives.
+        while lines.peek().is_some_and(|next| is_detail_line(next)) {
+            lines.next();
+        }
+    }
+    // Collapse the blank run the removal can leave behind, and trim the ends,
+    // so removing a block from an otherwise empty description gives an empty
+    // description rather than a stack of newlines.
+    let mut out = String::new();
+    let mut blank_run = 0usize;
+    for line in kept {
+        if line.trim().is_empty() {
+            blank_run += 1;
+            if blank_run > 1 {
+                continue;
+            }
+        } else {
+            blank_run = 0;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.trim().to_string()
+}
+
+/// A `Label: value` line, the shape invitations use for meeting details.
+///
+/// Deliberately narrow: a label with no blank lines and no URL in it, short
+/// enough to be a label rather than a sentence that happens to contain a colon.
+fn is_detail_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let Some((label, value)) = trimmed.split_once(':') else {
+        return false;
+    };
+    !label.trim().is_empty()
+        && label.chars().count() <= 40
+        && !label.contains("://")
+        && !value.trim().is_empty()
+        && !value.contains("://")
+}
+
 pub fn extract_urls(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let bytes = text.as_bytes();
@@ -825,5 +915,105 @@ mod tests {
             from_description("Grüße — beitreten: https://example.webex.com/e/j.php?MTID=mü1 …")
                 .expect("detected");
         assert!(found.join_url.starts_with("https://example.webex.com"));
+    }
+
+    // ── meeting_block / without_meeting_block ───────────────────────────────
+
+    #[test]
+    fn the_block_is_readable_by_the_detector_that_reads_everyone_elses() {
+        // The whole point: what Aperio writes has to come back out through the
+        // same path an Outlook or eM Client invitation does.
+        let url = "https://example.webex.com/example/j.php?MTID=mabc";
+        let text = meeting_block(url, Some("s3cr3t"));
+        let found = detect_conference(&ConferenceSources {
+            description: Some(&text),
+            ..Default::default()
+        })
+        .expect("its own block must be detectable");
+        assert_eq!(found.join_url, url);
+        assert!(found
+            .labelled_details
+            .iter()
+            .any(|(_, value)| value == "s3cr3t"));
+    }
+
+    #[test]
+    fn a_meeting_without_a_password_gets_no_password_line() {
+        let text = meeting_block("https://example.webex.com/e/j.php?MTID=m1", None);
+        assert!(!text.contains("password"), "{text}");
+        // An empty string is the same as none — a provider that returns "" must
+        // not produce a line inviting the user to type nothing.
+        assert_eq!(
+            meeting_block("https://example.webex.com/e/j.php?MTID=m1", Some("  ")),
+            text
+        );
+    }
+
+    #[test]
+    fn removing_the_block_leaves_the_users_own_text_alone() {
+        let url = "https://example.webex.com/example/j.php?MTID=mabc";
+        let user_text = "Bring the Q3 numbers.\n\nAgenda:\n- budget\n- hiring";
+        let combined = format!("{user_text}\n\n{}", meeting_block(url, Some("s3cr3t")));
+        assert_eq!(without_meeting_block(&combined, url), user_text);
+    }
+
+    #[test]
+    fn removing_a_block_that_is_the_whole_description_empties_it() {
+        let url = "https://example.webex.com/e/j.php?MTID=m1";
+        let only = meeting_block(url, Some("pw"));
+        assert_eq!(without_meeting_block(&only, url), "");
+    }
+
+    #[test]
+    fn a_description_that_never_had_a_block_is_returned_unchanged() {
+        let text = "Just a note.\nWith two lines.";
+        assert_eq!(
+            without_meeting_block(text, "https://example.webex.com/e/j.php?MTID=m1"),
+            text
+        );
+        // And an empty URL must never match everything.
+        assert_eq!(without_meeting_block(text, ""), text);
+    }
+
+    #[test]
+    fn text_written_below_the_block_survives() {
+        // The detail-line sweep must stop at a real sentence, or removing a
+        // meeting would eat whatever the user wrote underneath it.
+        let url = "https://example.webex.com/e/j.php?MTID=m1";
+        let combined = format!(
+            "{}\nPlease dial in five minutes early.",
+            meeting_block(url, Some("pw"))
+        );
+        assert_eq!(
+            without_meeting_block(&combined, url),
+            "Please dial in five minutes early."
+        );
+    }
+
+    #[test]
+    fn a_block_written_by_another_client_is_removed_too() {
+        // Aperio did not write this one — a colleague's Outlook did — but the
+        // URL is the same meeting, and matching on the URL rather than on the
+        // wording is what makes that work.
+        let url = "https://example.webex.com/example/j.php?MTID=mabc";
+        let foreign = format!(
+            "Nehmen Sie an dieser Videokonferenz teil via {url}\n\
+             Besprechungs-ID: 27401156686\n\
+             Passwort: PteT3RSYi92\n\
+             \n\
+             Bis dahin!"
+        );
+        assert_eq!(without_meeting_block(&foreign, url), "Bis dahin!");
+    }
+
+    #[test]
+    fn the_round_trip_is_stable() {
+        // Attach, detach, attach again: a description must not accumulate.
+        let url = "https://example.webex.com/e/j.php?MTID=m1";
+        let user_text = "Notes.";
+        let once = format!("{user_text}\n\n{}", meeting_block(url, Some("pw")));
+        let stripped = without_meeting_block(&once, url);
+        let twice = format!("{stripped}\n\n{}", meeting_block(url, Some("pw")));
+        assert_eq!(once, twice);
     }
 }

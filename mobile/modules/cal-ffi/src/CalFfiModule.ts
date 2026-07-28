@@ -427,6 +427,18 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  and reports that as a flag — the UI never sees a credential. */
   /** Every adapter this build can connect an account for, as JSON — assembled
    *  from the embedded plugins' manifests rather than from a list in the UI. */
+  // ── Meetings ─────────────────────────────────────────────────────────────
+  /** Create a meeting for an event, write its link into the event, and record
+   *  the binding — one call. `requestJson` carries `{event_id, calendar_id,
+   *  account_id}`; returns `{event, meeting}` as JSON. */
+  attachMeetingJson(requestJson: string): Promise<string>;
+  /** Delete the meeting Aperio created for an event and take its link back
+   *  out. Returns the saved event as JSON, or the literal `null` when the event
+   *  had no meeting of ours — someone else's link is not ours to delete. */
+  detachMeetingJson(requestJson: string): Promise<string>;
+  /** The meeting Aperio created for this event, if any, as JSON. */
+  eventMeetingJson(eventId: string): Promise<string>;
+
   listAdapterKindsJson(): Promise<string>;
   accountFormSpecJson(adapterKind: string): Promise<string>;
   /** Begin a schema-driven OAuth sign-in. `valuesJson` is the form as filled so

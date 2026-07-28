@@ -57,6 +57,7 @@ rusqlite.workspace = true
 # other device can reach, so mobile never offers it — no point building or
 # embedding it. cal-adapter-local (the local DATA store) is separate + always on.
 host-core.workspace = true
+vc-core.workspace = true
 host-plugins = { workspace = true, features = [
     "caldav",
     "ical",

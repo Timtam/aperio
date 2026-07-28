@@ -123,6 +123,11 @@ pub struct AccountListEntry {
     #[serde(flatten)]
     pub account: Account,
     pub plugin_loaded: bool,
+    /// Whether this account can mint meetings — i.e. its plugin declares itself
+    /// a `videoconference-adapter`. Read from the manifest rather than from a
+    /// list of provider names, so an adapter added later is offered without a
+    /// change here or in the UI.
+    pub is_videoconference: bool,
 }
 
 #[tauri::command]
@@ -142,9 +147,15 @@ pub async fn list_accounts(
                 || plugin_manager
                     .plugin_for_adapter_kind(account.adapter_kind.as_str())
                     .is_some();
+            let is_videoconference = plugin_manager
+                .plugin_for_adapter_kind(account.adapter_kind.as_str())
+                .is_some_and(|p| {
+                    p.manifest.plugin_type == plugin_core::PluginType::VideoconferenceAdapter
+                });
             AccountListEntry {
                 account,
                 plugin_loaded,
+                is_videoconference,
             }
         })
         .collect();

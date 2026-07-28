@@ -562,6 +562,20 @@ public class CalFfiModule: Module {
     // plugin.json and the host executes the declaration, so adding an adapter
     // adds no code here either.
 
+    // ─── Meetings (network: they talk to the provider) ───────────────────────
+
+    AsyncFunction("attachMeetingJson") { (requestJson: String) -> String in
+      try self.host.attachMeetingJson(requestJson: requestJson)
+    }.runOnQueue(slowQueue)
+
+    AsyncFunction("detachMeetingJson") { (requestJson: String) -> String in
+      try self.host.detachMeetingJson(requestJson: requestJson)
+    }.runOnQueue(slowQueue)
+
+    AsyncFunction("eventMeetingJson") { (eventId: String) -> String in
+      try self.host.eventMeetingJson(eventId: eventId)
+    }
+
     AsyncFunction("listAdapterKindsJson") { () -> String in
       try self.host.listAdapterKindsJson()
     }
