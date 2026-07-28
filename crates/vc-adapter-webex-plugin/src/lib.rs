@@ -7,20 +7,24 @@
 //! {
 //!   "client_id": "…",
 //!   "client_secret": "…",
-//!   "refresh_token": "…"
+//!   "refresh_token": "…",
+//!   "site_url": "example.webex.com",
+//!   "use_personal_room": false,
+//!   "send_webex_emails": false
 //! }
 //! ```
 //!
-//! Unlike Teams (Microsoft Graph) and Meet (Google Calendar),
-//! WebEx does not piggy-back on any of Aperio's calendar
-//! adapters — it runs its own dedicated OAuth flow against
-//! the WebEx Meetings REST API. The `refresh_token` therefore
-//! lives in a WebEx-specific keychain slot, distinct from the
-//! Google / Microsoft / Zoom slots, and the host runs a fresh
-//! sign-in dance for each WebEx account. The current trait
-//! impl is a stub: all four FFI methods route through to
-//! `WebexAdapter`'s `Unsupported` returns until the REST
-//! layer lands.
+//! The host merges the two CREDENTIALS — `client_secret` and `refresh_token` —
+//! in from the keychain at open time; only the rest is persisted in the account
+//! row. That split matters: the account row is appended to the sync event log
+//! unencrypted whenever end-to-end encryption is off, so a secret living there
+//! would travel to the user's own sync target in the clear.
+//!
+//! Unlike Teams (Microsoft Graph) and Meet (Google Calendar), Webex does not
+//! piggy-back on any of Aperio's calendar adapters — it runs its own OAuth flow
+//! against the Webex Meetings REST API, so the refresh token lives in a
+//! Webex-specific keychain slot and the host runs a separate sign-in for each
+//! Webex account.
 
 use std::os::raw::{c_char, c_void};
 
@@ -39,6 +43,12 @@ struct InitConfig {
     client_id: String,
     client_secret: String,
     refresh_token: String,
+    #[serde(default)]
+    site_url: Option<String>,
+    #[serde(default)]
+    use_personal_room: bool,
+    #[serde(default)]
+    send_webex_emails: bool,
 }
 
 /// # Safety
@@ -56,8 +66,11 @@ pub unsafe extern "C" fn plugin_open_instance(config_json: *const c_char) -> Ope
         Ok(WebexAdapter::new(
             WebexAccountConfig {
                 client_id: cfg.client_id,
-                client_secret: cfg.client_secret,
+                site_url: cfg.site_url.filter(|s| !s.trim().is_empty()),
+                use_personal_room: cfg.use_personal_room,
+                send_webex_emails: cfg.send_webex_emails,
             },
+            cfg.client_secret,
             cfg.refresh_token,
         ))
     })
