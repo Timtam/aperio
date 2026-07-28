@@ -73,6 +73,23 @@ impl FfiSyncAdapter {
         // so the vtable pointer is a *const SyncVtable per the
         // ABI contract.
         let vtable_ref: &SyncVtable = unsafe { &*(raw as *const SyncVtable) };
+        // Read `vtable_version` BEFORE trusting the rest of the layout. It is at
+        // offset 0 in every vtable in every revision, so it is the one field
+        // that is safe to read before the layout is known — and until this
+        // check existed, a plugin built against a shorter revision passed the
+        // loader on `abi_version` alone and the host read past the end of its
+        // struct. See `vtables::vtable_layout_ok`.
+        if !crate::vtables::vtable_layout_ok(vtable_ref.vtable_version) {
+            {
+                warn!(
+                    plugin_id = %plugin.manifest.id,
+                    vtable_version = vtable_ref.vtable_version,
+                    host_abi = crate::ABI_VERSION,
+                    "sync plugin's vtable declares an unknown layout revision; refusing to wrap",
+                );
+                return None;
+            }
+        }
         if !vtable_ref.has_minimum_surface() {
             warn!(
                 plugin_id = %plugin.manifest.id,

@@ -110,6 +110,23 @@ impl FfiCalendarAdapter {
         // is a calendar-adapter, so the vtable pointer points at
         // a CalendarAdapterVtable per the ABI contract.
         let outer: &CalendarAdapterVtable = unsafe { &*(raw as *const CalendarAdapterVtable) };
+        // Read `vtable_version` BEFORE trusting the rest of the layout. It is at
+        // offset 0 in every vtable in every revision, so it is the one field
+        // that is safe to read before the layout is known — and until this
+        // check existed, a plugin built against a shorter revision passed the
+        // loader on `abi_version` alone and the host read past the end of its
+        // struct. See `vtables::vtable_layout_ok`.
+        if !crate::vtables::vtable_layout_ok(outer.vtable_version) {
+            {
+                warn!(
+                    plugin_id = %plugin.manifest.id,
+                    vtable_version = outer.vtable_version,
+                    host_abi = crate::ABI_VERSION,
+                    "calendar plugin's vtable declares an unknown layout revision; refusing to wrap",
+                );
+                return None;
+            }
+        }
         if outer.calendar.is_null() {
             // Plugin didn't declare Capability::Calendar — not an
             // error, just means the registry should skip the

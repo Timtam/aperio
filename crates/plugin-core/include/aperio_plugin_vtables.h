@@ -32,13 +32,28 @@
  *
  * ── Stability ─────────────────────────────────────────────────────────
  * Every struct here is `#[repr(C)]` on the Rust side; field order and
- * types below MUST match it byte-for-byte. New methods are APPENDED at
- * the end of a vtable. Appending is binary-safe ONLY for plugins built
- * against the same `APERIO_PLUGIN_ABI_VERSION` as the host — a plugin
- * compiled against an older (shorter) layout MUST NOT be read past its
- * last slot. The host gates this on `vtable_version` / `abi_version`;
- * plugin authors MUST set every `vtable_version` field to
- * `APERIO_PLUGIN_ABI_VERSION`.
+ * types below MUST match it byte-for-byte.
+ *
+ * `vtable_version` is the FIRST field of every vtable, in every revision,
+ * and the host READS it before trusting anything else in the struct: a
+ * value other than `APERIO_PLUGIN_ABI_VERSION` means the host cannot know
+ * how many slots are really there, so it refuses to wrap the plugin
+ * rather than reading past the end of it. Plugin authors MUST set every
+ * `vtable_version` field to `APERIO_PLUGIN_ABI_VERSION`.
+ *
+ * New methods are APPENDED at the end of a vtable, and appending to an
+ * EXISTING vtable REQUIRES bumping `APERIO_PLUGIN_ABI_VERSION`. Strict
+ * equality on the manifest then keeps an older plugin out entirely, which
+ * is the only safe answer while the host has no per-vtable length. Adding
+ * a WHOLE NEW vtable for a new plugin type needs no bump: nothing reads
+ * it unless that type exists.
+ *
+ * The four bytes of alignment padding after `vtable_version` on 64-bit
+ * targets are RESERVED for a future `uint32_t struct_size`. Do not write
+ * into them. When that field arrives it will carry a NEW
+ * `vtable_version`, because padding in a plugin built before it existed
+ * is indeterminate and a garbage value there would defeat the very gate
+ * it is meant to relax.
  *
  * Keep this file in sync with `crates/plugin-core/src/vtables/*.rs`
  * whenever a slot is added.

@@ -146,6 +146,41 @@ impl std::fmt::Debug for CalendarAdapterVtable {
     }
 }
 
+/// Layout revision of a plugin-supplied vtable, as the FIRST field of every
+/// one of them.
+///
+/// The C header has always promised that "the host gates this on
+/// `vtable_version` / `abi_version`". Until now only `abi_version` was checked,
+/// which left the promise unkept in the one place it matters: appending a slot
+/// to an existing vtable. A plugin built against the shorter layout still
+/// declares `abi_version = 2` and passes the loader, and the host would then
+/// read past the end of the plugin's struct and CALL whatever `.rodata`
+/// happened to follow it.
+///
+/// So the shims read it now. `vtable_version` sits at offset 0 in every vtable
+/// in every revision — it is the one field that is safe to read before the
+/// layout is known — and anything other than the current value means the host
+/// cannot know how many slots are really there.
+///
+/// # The rule for the next slot append
+///
+/// Appending a slot to an EXISTING vtable requires bumping
+/// [`crate::ABI_VERSION`]. Strict equality on the manifest then keeps an older
+/// plugin out entirely, which is the only safe answer while the host has no
+/// per-vtable length. Adding a WHOLE NEW vtable for a new plugin kind is
+/// unaffected: nothing reads it unless that kind exists.
+///
+/// A future revision may put a `u32 struct_size` in the four bytes of padding
+/// that follow this field on 64-bit targets, at which point a host could read a
+/// longer plugin's shorter prefix safely. That field must only ever be trusted
+/// when `vtable_version` carries a NEW value: padding bytes in a plugin built
+/// before the field existed are indeterminate, and a garbage value there that
+/// happened to exceed the host's size would reintroduce exactly the hazard this
+/// gate closes.
+pub fn vtable_layout_ok(vtable_version: u32) -> bool {
+    vtable_version == crate::ABI_VERSION
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,6 +217,32 @@ mod tests {
     /// header to match (and bump the expected size here). This keeps
     /// the hand-maintained header from silently drifting from the Rust
     /// source of truth.
+    #[test]
+    fn the_layout_gate_accepts_only_the_current_revision() {
+        // Every bundled plugin stamps ABI_VERSION, so this accepts them all.
+        // What it catches is a hand-written plugin built against a stale
+        // header: it would still declare the right `abi_version` and pass the
+        // loader, and the host would then read past the end of its vtable.
+        assert!(vtable_layout_ok(crate::ABI_VERSION));
+        assert!(!vtable_layout_ok(crate::ABI_VERSION - 1));
+        assert!(!vtable_layout_ok(crate::ABI_VERSION + 1));
+        assert!(!vtable_layout_ok(0));
+    }
+
+    #[test]
+    fn every_vtable_constructor_stamps_the_current_revision() {
+        // The gate is only as good as the constructors: one that forgot to
+        // stamp the field would lock its own plugin out.
+        assert!(vtable_layout_ok(CalendarVtable::empty().vtable_version));
+        assert!(vtable_layout_ok(TasksVtable::empty().vtable_version));
+        assert!(vtable_layout_ok(ContactsVtable::empty().vtable_version));
+        assert!(vtable_layout_ok(SyncVtable::empty().vtable_version));
+        assert!(vtable_layout_ok(VcVtable::empty().vtable_version));
+        assert!(vtable_layout_ok(
+            CalendarAdapterVtable::empty().vtable_version
+        ));
+    }
+
     #[cfg(target_pointer_width = "64")]
     #[test]
     fn vtable_sizes_match_c_header() {
