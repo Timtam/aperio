@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 
 import { detectConference } from '@aperio/shared';
 
+import { FocusableNote } from '../a11y/FocusableNote';
 import { useAnnouncer } from '../a11y/announcerContext';
 import { isCommandError, openExternalUrl } from '../api/client';
 
@@ -77,29 +78,24 @@ export function ConferenceSection({
       >
         {t('conferencing.joinNamed', { provider: providerName })}
       </button>
-      {details.length > 0 && (
-        <dl className="conference__details">
-          {details.map((detail) => (
-            <div className="conference__detail" key={`${detail.label}:${detail.value}`}>
-              <dt className="conference__detail-label">{detail.label}</dt>
-              {/* tabIndex 0: the surrounding dialog body carries
-                  role="application", where NVDA's focus-mode traversal skips
-                  static text — a password nobody can reach is a password
-                  nobody has. */}
-              <dd
-                className="conference__detail-value"
-                tabIndex={0}
-                aria-label={t('conferencing.detail', {
-                  label: detail.label,
-                  value: detail.value,
-                })}
-              >
-                {detail.value}
-              </dd>
-            </div>
-          ))}
-        </dl>
-      )}
+      {/* FocusableNote rather than a hand-rolled focusable element: the
+          dialog body is role="application", where NVDA's focus-mode traversal
+          skips static text, and a bare focusable paragraph computes no
+          accessible name at all — so the value would be reachable and still
+          silent. The component solves exactly that, and it keeps the visible
+          text and the announced text identical, which is what a password
+          needs. */}
+      {details.map((detail) => (
+        <FocusableNote
+          key={`${detail.label}:${detail.value}`}
+          className="conference__detail"
+        >
+          {t('conferencing.detail', {
+            label: detail.label,
+            value: detail.value,
+          })}
+        </FocusableNote>
+      ))}
     </section>
   );
 }

@@ -5437,29 +5437,17 @@ button[aria-disabled='true'] {
   align-self: flex-start;
 }
 
-.conference__details {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  margin: 0;
-}
-
-/* Each detail is its own row: a meeting number and a password run together
-   are read as one sentence, and a password is what someone most needs to hear
-   separately. */
+/* One focusable line per detail (FocusableNote). A meeting number and a
+   password run together are read as one sentence, and a password is what
+   someone most needs to hear on its own — so each gets its own stop in the
+   focus order, reading exactly what it shows. */
 .conference__detail {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.conference__detail-label {
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.conference__detail-value {
   margin: 0;
   font-family: var(--font-mono, monospace);
   user-select: all;
+}
+
+.conference__detail:focus-visible {
+  box-shadow: var(--focus-ring);
+  border-radius: 0.25rem;
 }
