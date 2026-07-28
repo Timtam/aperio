@@ -3,6 +3,8 @@ import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { isBirthdayEventId } from '@aperio/shared';
+
 import { upcomingReminders, UpcomingReminder } from '../api/reminders';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -83,7 +85,13 @@ export default function RemindersScreen({
       if (r.item_kind === 'task') {
         navigation.navigate('TaskEditor', { taskId: r.item_id, listId: r.container_id });
       } else {
-        navigation.navigate('EventEditor', { eventId: r.item_id, calendarId: r.container_id });
+        navigation.navigate('EventEditor', {
+          eventId: r.item_id,
+          calendarId: r.container_id,
+          // A synthetic birthday reminder opens a read-only summary that can't
+          // re-fetch its own name — hand it over from the reminder row.
+          initialTitle: isBirthdayEventId(r.item_id) ? r.title : undefined,
+        });
       }
     },
     [navigation],

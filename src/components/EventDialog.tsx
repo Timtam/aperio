@@ -9,8 +9,6 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { selectableEventCalendars } from '@aperio/shared';
-
 import { useAnnouncer } from '../a11y/announcerContext';
 import { FocusableNote } from '../a11y/FocusableNote';
 import { DescriptionLinks } from './DescriptionLinks';
@@ -46,10 +44,12 @@ import {
   applyDateTimeChange,
   dateInput,
   defaultNewEventTimes,
+  isBirthdayEventId,
   recurrenceStartDate,
+  selectableEventCalendars,
   timeInput,
   toIso,
-} from './eventDateTime';
+} from '@aperio/shared';
 import { EventRsvp } from './EventRsvp';
 import { readLastUsedCalendar, writeLastUsedCalendar } from './lastUsedCalendar';
 import { Modal } from './Modal';
@@ -891,7 +891,7 @@ export function EventDialog({
   // fields whose save would fail at the backend — better to
   // short-circuit to a read-only summary the user can dismiss.
   // The contact source is what they edit instead.
-  if (event && event.id.startsWith('aperio-birthday:')) {
+  if (event && isBirthdayEventId(event.id)) {
     return (
       <Modal
         isOpen={isOpen}

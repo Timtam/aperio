@@ -78,8 +78,14 @@ export type RootStackParamList = {
     // day instead of today (the per-day "+ new event" affordance).
     anchor?: string;
     // `initialTitle` seeds a fresh event with the title typed into the
-    // event quick-add before "More details …".
+    // event quick-add before "More details …". It doubles as the name shown in
+    // the read-only summary a SYNTHETIC birthday event opens instead of the
+    // editor — such an id has no fetchable row behind it.
     initialTitle?: string;
+    // `initialTime` (HH:MM) seeds a fresh event's start time — carries the
+    // quick-add's picked time over the "More details …" hand-off instead of
+    // re-deriving the default slot. Ignored when editing.
+    initialTime?: string;
     // The scope the up-front edit prompt resolved to (see eventEditScope). Seeds
     // the editor's edit scope; absent ⇒ 'occurrence'. When set, the editor
     // confirms the scope read-only instead of showing the segmented control.

@@ -11,7 +11,7 @@ import {
   timeInput,
   toIso,
   type EventTimes,
-} from './eventDateTime';
+} from '@aperio/shared';
 
 const timed = (
   startDate: string,

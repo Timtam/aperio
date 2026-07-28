@@ -38,6 +38,13 @@ export function useCalendarDefaultReminders(
 
   useEffect(() => {
     let cancelled = false;
+    // No calendar to read for (the event editor passes '' while creating, where
+    // the overlay doesn't apply) — resolve empty without an FFI round-trip.
+    if (!calendarId) {
+      setValue([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     void getUserPrefJson<Reminder[]>(prefKey(calendarId))
       .then((arr) => {
