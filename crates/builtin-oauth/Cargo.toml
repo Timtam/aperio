@@ -1,0 +1,17 @@
+[package]
+name = "builtin-oauth"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aperio's own OAuth client credentials, baked in at build time with a bring-your-own fallback."
+
+[dependencies]
+serde.workspace = true
+sha2 = "0.10"
+hex = "0.4"
+
+[lints]
+workspace = true

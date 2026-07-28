@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     # Kern-Bibliotheken
     "crates/aperio-db",
+    "crates/builtin-oauth",
     "crates/cal-core",
     "crates/plugin-core",
     "crates/plugin-sdk",
