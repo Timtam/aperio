@@ -24,3 +24,4 @@ export * from './formatAttendee';
 export * from './calendarSelection';
 export * from './eventKey';
 export * from './eventDateTime';
+export * from './conferencing';

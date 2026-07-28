@@ -38,6 +38,7 @@ import { useViewState } from '../state/viewStateContext';
 import { AttendeePicker } from './AttendeePicker';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ColorLabelSelect } from './ColorLabelSelect';
+import { ConferenceSection } from './ConferenceSection';
 import {
   allDayFormEndDate,
   allDayWireEnd,
@@ -1065,6 +1066,14 @@ export function EventDialog({
           />
         </label>
         <DescriptionLinks text={form.description} />
+        {/* Any conference in this event, whoever created it — an Outlook or
+            eM Client invitation as readily as one Aperio made. Detection is
+            shared with the mobile app and reads URLs rather than prose, so it
+            does not depend on the invitation's language. */}
+        <ConferenceSection
+          location={form.location}
+          description={form.description}
+        />
 
         <div className="form__field">
           <span className="form__label" id={attendeesLabelId}>

@@ -5420,3 +5420,46 @@ button[aria-disabled='true'] {
   flex-wrap: wrap;
   gap: var(--space-1);
 }
+
+/* ── Video meeting on an event ─────────────────────────────────────────── */
+
+.conference {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface);
+}
+
+.conference__join {
+  align-self: flex-start;
+}
+
+.conference__details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+}
+
+/* Each detail is its own row: a meeting number and a password run together
+   are read as one sentence, and a password is what someone most needs to hear
+   separately. */
+.conference__detail {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.conference__detail-label {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.conference__detail-value {
+  margin: 0;
+  font-family: var(--font-mono, monospace);
+  user-select: all;
+}

@@ -34,6 +34,7 @@ import {
 import { AttendeesEditor } from '../components/AttendeesEditor';
 import { AvailabilityChecker } from '../components/AvailabilityChecker';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
+import { ConferenceSection } from '../components/ConferenceSection';
 import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { DescriptionLinks } from '../components/DescriptionLinks';
 import { EventRsvp } from '../components/EventRsvp';
@@ -828,6 +829,12 @@ export default function EventEditorModal({
         />
         <DescriptionLinks text={description} />
       </View>
+
+      {/* Any conference in this event, whoever created it — an Outlook or eM
+          Client invitation as readily as one Aperio made. Detection is shared
+          with the desktop and reads URLs rather than prose, so it does not
+          depend on the invitation's language. */}
+      <ConferenceSection location={location} description={description} />
 
       {/* Colour — every calendar: a local or colour-capable external calendar
           stores it on the event (color_label); a non-capable external event

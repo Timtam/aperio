@@ -106,6 +106,29 @@
     "open": "Open link: {{url}}",
     "openFailed": "Could not open the link: {{message}}"
   },
+  "conferencing": {
+    "label": "Video meeting",
+    "join": "Join the meeting",
+    "joinNamed": "Join the {{provider}} meeting",
+    "openFailed": "The meeting could not be opened: {{message}}",
+    "detailsLabel": "Meeting details",
+    "detail": "{{label}}: {{value}}",
+    "meetingNumber": "Meeting number",
+    "password": "Password",
+    "sipAddress": "SIP address",
+    "phone": "Dial-in",
+    "provider": {
+      "webex": "Webex",
+      "teams": "Microsoft Teams",
+      "zoom": "Zoom",
+      "googleMeet": "Google Meet",
+      "jitsi": "Jitsi",
+      "goToMeeting": "GoTo Meeting",
+      "bigBlueButton": "BigBlueButton",
+      "whereby": "Whereby",
+      "other": "Video meeting"
+    }
+  },
   "actions": {
     "duplicated": "\"{{title}}\" duplicated."
   },
