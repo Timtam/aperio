@@ -192,6 +192,8 @@ pub fn html_to_text(html: &str) -> String {
     let bytes = html.as_bytes();
     let mut out = String::with_capacity(html.len());
     let mut i = 0usize;
+    // Where the current `<a>` started in `out`, and the URL it points at.
+    let mut anchor: Option<(usize, String)> = None;
     while i < html.len() {
         if bytes[i] != b'<' {
             // Copy one whole char — indexing by byte would split a multi-byte
@@ -231,6 +233,25 @@ pub fn html_to_text(html: &str) -> String {
                     None => rest.len(),
                 };
             }
+            // Links are the one tag whose ATTRIBUTE is content. An Outlook
+            // invitation writes its join link as `<a href="…">Join meeting</a>`
+            // — dropping the tag would leave the words and lose the URL, so the
+            // description would carry no link at all and neither the user nor
+            // DescriptionLinks could reach the meeting.
+            "a" if !closing => {
+                anchor = attr_value(tag, "href").map(|href| (out.len(), href));
+            }
+            "a" => {
+                if let Some((start, href)) = anchor.take() {
+                    // Usually the anchor text IS the URL; only append when it
+                    // would otherwise be lost, so the common case reads cleanly.
+                    let text = &out[start.min(out.len())..];
+                    if !text.contains(href.as_str()) {
+                        let sep = if text.trim().is_empty() { "" } else { " " };
+                        out.push_str(&format!("{sep}{href}"));
+                    }
+                }
+            }
             // Block-level elements and breaks become newlines so the text keeps
             // a shape; every other tag simply disappears.
             "br" | "p" | "div" | "tr" | "li" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
@@ -255,6 +276,37 @@ pub fn html_to_text(html: &str) -> String {
         .join("\n")
         .trim()
         .to_string()
+}
+
+/// Read one attribute out of a start tag, handling `x="…"`, `x='…'` and a bare
+/// unquoted value. Entities are decoded, because a URL in an HTML attribute
+/// routinely arrives with `&amp;` where the real URL has `&` — and a join link
+/// with a mangled query string is a dead link.
+fn attr_value(tag: &str, name: &str) -> Option<String> {
+    let lower = tag.to_ascii_lowercase();
+    let mut from = 0usize;
+    loop {
+        let rel = lower[from..].find(name)?;
+        let at = from + rel;
+        // Must be preceded by whitespace, so `href` does not match `xhref`.
+        let preceded_ok = at > 0
+            && lower[..at]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_whitespace);
+        let after = lower[at + name.len()..].trim_start();
+        if preceded_ok && after.starts_with('=') {
+            let eq = tag[at + name.len()..].find('=')? + at + name.len() + 1;
+            let rest = tag[eq..].trim_start();
+            let value = match rest.chars().next() {
+                Some(q @ ('"' | '\'')) => rest[1..].split(q).next().unwrap_or(""),
+                _ => rest.split_whitespace().next().unwrap_or(""),
+            };
+            let value = decode_entities(value);
+            return (!value.is_empty()).then_some(value);
+        }
+        from = at + name.len();
+    }
 }
 
 /// Decode the entities that actually appear in Outlook bodies, plus numeric
@@ -1760,6 +1812,45 @@ mod tests {
             "entities decode: {text:?}"
         );
         assert!(!text.contains('<'), "no markup may remain: {text:?}");
+    }
+
+    #[test]
+    fn html_to_text_keeps_the_url_behind_a_link() {
+        // An Outlook / Webex Scheduler invitation writes its join link as an
+        // anchor whose TEXT is a label. Dropping the tag would leave the words
+        // and lose the meeting entirely.
+        assert_eq!(
+            html_to_text(r#"<a href="https://x.webex.com/j.php?MTID=abc">Join meeting</a>"#),
+            "Join meeting https://x.webex.com/j.php?MTID=abc"
+        );
+    }
+
+    #[test]
+    fn html_to_text_does_not_repeat_a_url_that_is_already_the_link_text() {
+        assert_eq!(
+            html_to_text(r#"<a href="https://x/j">https://x/j</a>"#),
+            "https://x/j"
+        );
+    }
+
+    #[test]
+    fn html_to_text_unescapes_ampersands_inside_an_href() {
+        // `&amp;` in the attribute is `&` in the real URL — a join link whose
+        // query string is mangled is a dead link.
+        assert_eq!(
+            html_to_text(r#"<a href="https://x/j?a=1&amp;b=2">Join</a>"#),
+            "Join https://x/j?a=1&b=2"
+        );
+    }
+
+    #[test]
+    fn html_to_text_handles_single_quoted_and_extra_attributes() {
+        assert_eq!(
+            html_to_text("<a class='btn' href='https://x/j' target='_blank'>Go</a>"),
+            "Go https://x/j"
+        );
+        // A tag whose name merely CONTAINS the attribute name must not match.
+        assert_eq!(html_to_text(r#"<a data-href="nope">Go</a>"#), "Go");
     }
 
     #[test]
