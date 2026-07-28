@@ -36,6 +36,10 @@ chrono.workspace = true
 # them across the FFI boundary (same convention sync-core's
 # on-disk format uses) so the JSON-args contract stays clean.
 base64 = "0.22"
+# The plugin host-channel mints an unguessable capability token per
+# instance — a derivable one could be forged by any plugin in the process.
+rand = "0.8"
+hex = "0.4"
 
 [dev-dependencies]
 # The manager's bundled-dir walk + missing-manifest paths are

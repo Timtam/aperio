@@ -201,6 +201,77 @@ pub type AperioLogFn =
 /// "no log forwarding".
 pub type AperioPluginSetLogFn = unsafe extern "C" fn(log: AperioLogFn);
 
+/// Outcome of one [`AperioHostChannelFn`] call, mirroring the
+/// `APERIO_HOST_CHANNEL_*` constants in `aperio_plugin.h`.
+///
+/// A plugin may act on these — retry, give up, back off — but is not
+/// obliged to. `ACCEPTED` is the only one that promises anything: the
+/// host has taken durable responsibility for what was reported.
+pub const HOST_CHANNEL_ACCEPTED: c_int = 0;
+/// The `kind` is one this host does not know. Older host, newer plugin.
+pub const HOST_CHANNEL_UNKNOWN_KIND: c_int = 1;
+/// The capability token names no live account. The instance was closed,
+/// or the token was never one the host issued.
+pub const HOST_CHANNEL_UNKNOWN_SCOPE: c_int = 2;
+/// Understood and deliberately declined — a credential slot that may not
+/// be written, for instance.
+pub const HOST_CHANNEL_REFUSED: c_int = 3;
+/// Understood and attempted, but it did not land. Worth retrying later.
+pub const HOST_CHANNEL_FAILED: c_int = 4;
+/// The envelope was not readable at all.
+pub const HOST_CHANNEL_MALFORMED: c_int = 5;
+/// Too many reports from this scope too quickly.
+pub const HOST_CHANNEL_THROTTLED: c_int = 6;
+
+/// Host-supplied sink for out-of-band reports from a plugin, handed over
+/// by the optional `aperio_plugin_set_host_channel` export.
+///
+/// This is the ONLY channel from a plugin back to the host other than the
+/// log bridge. Vtable calls run host→plugin and return data; nothing in
+/// them lets a plugin say "by the way, my refresh token changed" — which
+/// is exactly what an OAuth provider that rotates credentials forces an
+/// adapter to say.
+///
+/// `json_ptr` / `json_len` describe a plugin-owned UTF-8 JSON object,
+/// valid only for the duration of the call. Pointer-plus-length rather
+/// than a NUL-terminated string because that is what every other
+/// JSON-carrying boundary in this ABI already uses, and because it avoids
+/// a `CString` round-trip on a live secret. The callback must not unwind
+/// across the FFI boundary.
+///
+/// The envelope is `{"v":1,"scope":"…","kind":"…","payload":{…}}`. `kind`
+/// is an open string rather than an enum so a later signal costs no ABI
+/// change; a host that does not know one answers
+/// [`HOST_CHANNEL_UNKNOWN_KIND`] and carries on.
+pub type AperioHostChannelFn = unsafe extern "C" fn(json_ptr: *const u8, json_len: usize) -> c_int;
+
+/// Function-pointer type matching the optional
+/// `aperio_plugin_set_host_channel` export: the host calls it once, right
+/// after `create`, to hand the plugin its [`AperioHostChannelFn`]. MAY be
+/// absent — a plugin that never reports anything simply does not export
+/// it, and the loader treats the missing symbol as "no channel".
+pub type AperioPluginSetHostChannelFn = unsafe extern "C" fn(sink: AperioHostChannelFn);
+
+/// Envelope schema version. A host rejects anything else as malformed
+/// rather than guessing.
+pub const HOST_CHANNEL_ENVELOPE_V1: u32 = 1;
+
+/// `kind` for "the credential I hold for this account has changed".
+pub const KIND_CREDENTIAL_ROTATED: &str = "credential.rotated";
+
+/// Reserved key the host splices into the TRANSIENT merged config it
+/// hands `open_instance`, carrying the capability token that lets an
+/// instance name its own account when it reports back.
+///
+/// It is never written to the persisted account row, and therefore never
+/// reaches the sync event log. The token is opaque and unguessable by
+/// design: deriving it from the account id would let any plugin in the
+/// process forge another account's identity by string concatenation.
+pub const HOST_TOKEN_CONFIG_KEY: &str = "__aperio_host_token";
+
+/// Hard ceiling on one envelope, enforced before any allocation.
+pub const HOST_CHANNEL_MAX_PAYLOAD: usize = 64 * 1024;
+
 /// Symbol names the host's loader looks up in every plugin's
 /// shared library. Defined here so the SDK macros emit
 /// `#[no_mangle] pub extern "C" fn` items with the exact same
@@ -209,6 +280,8 @@ pub const SYMBOL_CREATE: &[u8] = b"aperio_plugin_create";
 pub const SYMBOL_DESTROY: &[u8] = b"aperio_plugin_destroy";
 /// Optional log-forwarding sink installer; see [`AperioPluginSetLogFn`].
 pub const SYMBOL_SET_LOG: &[u8] = b"aperio_plugin_set_log";
+/// Optional plugin→host channel installer; see [`AperioPluginSetHostChannelFn`].
+pub const SYMBOL_SET_HOST_CHANNEL: &[u8] = b"aperio_plugin_set_host_channel";
 
 #[cfg(test)]
 mod tests {

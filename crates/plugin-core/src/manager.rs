@@ -52,9 +52,10 @@ use libloading::Library;
 use tracing::{debug, error, info, trace, warn};
 
 use crate::abi::{
-    AperioPlugin, AperioPluginCreateFn, AperioPluginDestroyFn, AperioPluginSetLogFn,
-    OpenInstanceResult, LOG_LEVEL_DEBUG, LOG_LEVEL_ERROR, LOG_LEVEL_INFO, LOG_LEVEL_WARN,
-    PLUGIN_OK, SYMBOL_CREATE, SYMBOL_DESTROY, SYMBOL_SET_LOG,
+    AperioPlugin, AperioPluginCreateFn, AperioPluginDestroyFn, AperioPluginSetHostChannelFn,
+    AperioPluginSetLogFn, OpenInstanceResult, LOG_LEVEL_DEBUG, LOG_LEVEL_ERROR, LOG_LEVEL_INFO,
+    LOG_LEVEL_WARN, PLUGIN_OK, SYMBOL_CREATE, SYMBOL_DESTROY, SYMBOL_SET_HOST_CHANNEL,
+    SYMBOL_SET_LOG,
 };
 use crate::error::{PluginError, PluginResult};
 use crate::ffi::{PluginCallResult, PLUGIN_CALL_OK};
@@ -725,6 +726,19 @@ impl PluginManager {
         unsafe {
             if let Ok(set_log) = library.get::<AperioPluginSetLogFn>(SYMBOL_SET_LOG) {
                 set_log(forward_plugin_log);
+            }
+        }
+
+        // Hand over the plugin→host channel the same way. Optional for the
+        // same reasons: a plugin that never reports anything does not export
+        // it, and on the static-link path the cdylib shell is not loaded at
+        // all. See `crate::host_channel` for what it carries and why the
+        // account is named by an opaque token rather than by the plugin.
+        unsafe {
+            if let Ok(set_channel) =
+                library.get::<AperioPluginSetHostChannelFn>(SYMBOL_SET_HOST_CHANNEL)
+            {
+                set_channel(crate::host_channel::forward_host_event);
             }
         }
 

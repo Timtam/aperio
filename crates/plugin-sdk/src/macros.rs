@@ -652,6 +652,25 @@ macro_rules! declare_cdylib_exports {
             $crate::log_forward::install_log_forwarding(log)
         }
 
+        /// `aperio_plugin_set_host_channel` — hand the plugin a sink for
+        /// reports the host did not ask for. The host calls this once right
+        /// after `create`. Vtable calls run host→plugin only, so this is the
+        /// sole way an adapter can say "the credential I hold has changed",
+        /// which an OAuth provider that rotates tokens forces it to say.
+        /// Emitted unconditionally: a plugin that never reports simply never
+        /// calls it, and a host that predates the export never looks it up.
+        ///
+        /// # Safety
+        ///
+        /// FFI export. `sink` must be a valid `'static` host function pointer
+        /// (the loader passes one).
+        #[no_mangle]
+        pub unsafe extern "C" fn aperio_plugin_set_host_channel(
+            sink: $crate::plugin_core::abi::AperioHostChannelFn,
+        ) {
+            $crate::host_channel::install_host_channel(sink)
+        }
+
         $($crate::declare_cdylib_exports!(@interactive_auth $plugin, $ia);)?
         $($crate::declare_cdylib_exports!(@discover $plugin, $disc);)?
         $($crate::declare_cdylib_exports!(@probe_host_key $plugin, $probe);)?

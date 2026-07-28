@@ -30,6 +30,7 @@ pub mod archive;
 pub mod capability;
 pub mod error;
 pub mod ffi;
+pub mod host_channel;
 pub mod manager;
 pub mod manifest;
 pub mod plugin_type;

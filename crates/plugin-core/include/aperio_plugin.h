@@ -309,6 +309,66 @@ typedef void (*AperioLogFn)(uint8_t level, const char *target, const char *messa
 void aperio_plugin_set_log(AperioLogFn log);
 
 /*
+ * Status codes returned by an AperioHostChannelFn call.
+ *
+ * A plugin MAY act on these — retry, give up, back off — but is not
+ * obliged to. APERIO_HOST_CHANNEL_ACCEPTED is the only one that
+ * promises anything: the host has taken durable responsibility for
+ * what was reported.
+ */
+#define APERIO_HOST_CHANNEL_ACCEPTED      0
+#define APERIO_HOST_CHANNEL_UNKNOWN_KIND  1  /* older host, newer plugin  */
+#define APERIO_HOST_CHANNEL_UNKNOWN_SCOPE 2  /* no such live account      */
+#define APERIO_HOST_CHANNEL_REFUSED       3  /* understood, declined      */
+#define APERIO_HOST_CHANNEL_FAILED        4  /* attempted, did not land   */
+#define APERIO_HOST_CHANNEL_MALFORMED     5  /* envelope unreadable       */
+#define APERIO_HOST_CHANNEL_THROTTLED     6  /* too much, too fast        */
+
+/*
+ * Host-supplied sink for reports the host did not ask for.
+ *
+ * Vtable calls run host→plugin and return data. Nothing in that shape
+ * lets a plugin say "by the way, the credential I hold has changed" —
+ * which is exactly what an OAuth provider that rotates tokens forces an
+ * adapter to say. This is the only channel back other than the log sink.
+ *
+ * `json_ptr` / `json_len` describe a plugin-owned UTF-8 JSON object,
+ * valid only for the duration of the call. Pointer-plus-length rather
+ * than a NUL-terminated string, matching every other JSON-carrying
+ * boundary in this ABI. MUST NOT unwind across the boundary.
+ *
+ * The envelope is:
+ *
+ *   { "v": 1, "scope": "<token>", "kind": "<string>", "payload": { … } }
+ *
+ * `scope` is the opaque capability token the host placed in this
+ * instance's `open_instance` config under the reserved key
+ * `__aperio_host_token`. It is how the host knows WHICH account is
+ * speaking: every plugin in the process shares an address space, so an
+ * account id a plugin merely asserts is one it could have invented. The
+ * token is random and unguessable for that reason, and it never appears
+ * in the persisted account row.
+ *
+ * `kind` is an open string rather than an enum, so a later signal costs
+ * no ABI change; a host that does not know one answers
+ * APERIO_HOST_CHANNEL_UNKNOWN_KIND and carries on. The kind defined
+ * today is "credential.rotated", whose payload is
+ * { "slot": "refresh_token" | "access_token" | "api_token",
+ *   "value": "…", "expires_at": "<RFC 3339>" (optional) }.
+ *
+ * Envelopes larger than 64 KiB are refused before allocation.
+ */
+typedef int (*AperioHostChannelFn)(const uint8_t *json_ptr, size_t json_len);
+
+/*
+ * OPTIONAL export. The host calls it once, right after
+ * `aperio_plugin_create`, to hand the plugin its channel. A plugin that
+ * never reports anything simply does not export it; a missing symbol is
+ * not an error and does not block loading.
+ */
+void aperio_plugin_set_host_channel(AperioHostChannelFn sink);
+
+/*
  * Optional: interactive authentication entry point.
  *
  * Plugins that need a setup step the user has to drive through

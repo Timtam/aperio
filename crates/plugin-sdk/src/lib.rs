@@ -108,6 +108,7 @@ pub mod args;
 pub mod discover;
 pub mod dispatch;
 pub mod error_map;
+pub mod host_channel;
 pub mod instance;
 pub mod interactive_auth;
 pub mod log_forward;
