@@ -8,8 +8,6 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { selectableEventCalendars } from '@aperio/shared';
-
 import { useAnnouncer } from '../a11y/announcerContext';
 import { createEvent as apiCreateEvent, isCommandError } from '../api/client';
 import { useCalendarStore } from '../state/calendarStoreContext';
@@ -18,9 +16,10 @@ import { useViewState } from '../state/viewStateContext';
 import {
   dateInput,
   defaultNewEventTimes,
+  selectableEventCalendars,
   timeInput,
   toIso,
-} from './eventDateTime';
+} from '@aperio/shared';
 import { Modal } from './Modal';
 
 /**

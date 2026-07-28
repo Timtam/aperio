@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -10,11 +10,25 @@ import {
   View,
 } from 'react-native';
 
-import type { ColorLabel, ExpandedOccurrence, Reminder } from '@aperio/shared';
+import type {
+  ColorLabel,
+  EventTimes,
+  ExpandedOccurrence,
+  Reminder,
+} from '@aperio/shared';
 import {
+  allDayFormEndDate,
+  allDayWireEnd,
+  applyDateTimeChange,
+  dateInput,
+  defaultNewEventTimes,
   expandEvent,
+  isBirthdayEventId,
+  recurrenceStartDate,
   selectableEventCalendars,
   splitRRuleForEdit,
+  timeInput,
+  toIso,
 } from '@aperio/shared';
 
 import { AttendeesEditor } from '../components/AttendeesEditor';
@@ -44,6 +58,8 @@ import type { RootStackScreenProps } from '../navigation/types';
 import { useShowHiddenCalendarTargets } from '../settings/hiddenTargets';
 import { useCalendarVisibility } from '../state/calendarVisibility';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
+import { writeLastUsedCalendar } from '../state/lastUsedCalendar';
+import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
 import { useSoundPref } from '../state/useSoundPref';
 import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
@@ -55,62 +71,13 @@ import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 // reminders / attendees / the inline sound field round-trip untouched (the
 // per-event sound OVERRIDE is a `sound.item.{id}` pref, edited below).
 
-const pad = (n: number) => String(n).padStart(2, '0');
-
+/** Split a stored RFC-3339 instant into the form's local `YYYY-MM-DD` +
+ *  `HH:MM` strings. Built on the shared formatters (local components, never
+ *  `toISOString`, which would shift the day east of GMT). */
 function isoToLocalParts(iso: string): { date: string; time: string } {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return { date: '', time: '' };
-  return {
-    date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
-    time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
-  };
-}
-
-/** Local `YYYY-MM-DD` + `HH:MM` → RFC-3339 UTC, or null when unparseable. */
-function localToIso(date: string, time: string): string | null {
-  if (!date.trim()) return null;
-  const d = new Date(`${date.trim()}T${time.trim() || '00:00'}`);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
-}
-
-/** All-day end instant for the wire: the convention is END-EXCLUSIVE at the day
- *  level (the view's `daysCoveredKeys` walks `[start, endDay)` and breaks on the
- *  end day), so the form's last *inclusive* day `YYYY-MM-DD` stores as local
- *  midnight of the day AFTER it. Mirrors the desktop `allDayWireEnd`; without it
- *  a mobile-created multi-day all-day event drops its last day in every view. */
-function allDayWireEnd(endDate: string): string | null {
-  const d = endDate.trim();
-  if (!d) return null;
-  const date = new Date(`${d}T00:00`);
-  if (Number.isNaN(date.getTime())) return null;
-  date.setDate(date.getDate() + 1);
-  return date.toISOString();
-}
-
-/** Inverse of {@link allDayWireEnd} for hydrating the form: the stored
- *  (exclusive) end instant maps back to the LAST covered day (end − 1 day, local
- *  time), clamped to the start's day so a legacy inclusive row (end == start)
- *  still hydrates to a valid single-day range. Mirrors the desktop
- *  `allDayFormEndDate`. */
-function allDayFormEndDate(startIso: string, endIso: string): string {
-  const start = new Date(startIso);
-  const end = new Date(endIso);
-  const lastDay = new Date(end.getFullYear(), end.getMonth(), end.getDate() - 1);
-  const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-  const pick = lastDay.getTime() < startDay.getTime() ? startDay : lastDay;
-  return `${pick.getFullYear()}-${pad(pick.getMonth() + 1)}-${pad(pick.getDate())}`;
-}
-
-/** The start `YYYY-MM-DD` as a local Date for the recurrence selector's derived
- *  monthly/yearly options, or undefined when the field is empty/unparseable. */
-function recurrenceStartDate(date: string): Date | undefined {
-  if (!date.trim()) return undefined;
-  const d = new Date(`${date.trim()}T00:00`);
-  return Number.isNaN(d.getTime()) ? undefined : d;
-}
-
-function todayParts(): { date: string; time: string } {
-  return isoToLocalParts(new Date().toISOString());
+  return { date: dateInput(d), time: timeInput(d) };
 }
 
 function errorMessage(err: unknown): string {
@@ -127,8 +94,15 @@ export default function EventEditorModal({
   const { hidden: hiddenCalendars } = useCalendarVisibility();
   const showHiddenCalendarTargets = useShowHiddenCalendarTargets();
   useCancelHeader(navigation);
-  const { eventId, calendarId, occurrence, anchor, initialTitle, initialScope } =
-    route.params;
+  const {
+    eventId,
+    calendarId,
+    occurrence,
+    anchor,
+    initialTitle,
+    initialTime,
+    initialScope,
+  } = route.params;
   const editing = eventId != null;
   // A single occurrence of a recurring series was opened (occurrence = its
   // instant) — offer the edit scope + seed the dates from the occurrence.
@@ -149,11 +123,26 @@ export default function EventEditorModal({
 
   const [title, setTitle] = useState('');
   const [calId, setCalId] = useState(calendarId);
-  const [allDay, setAllDay] = useState(false);
-  const [startDate, setStartDate] = useState('');
-  const [startTime, setStartTime] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [endTime, setEndTime] = useState('');
+  // The four date/time fields + all-day live in ONE state object because they
+  // are COUPLED: moving the start slides the end along (duration preserved),
+  // and the end is clamped so it can never precede the start. That maths needs
+  // all four values at once, which separate setters can't give atomically —
+  // it's delegated to the shared, unit-tested `applyDateTimeChange` the desktop
+  // EventDialog uses, so both platforms behave identically (Outlook/Google).
+  const [times, setTimes] = useState<EventTimes>({
+    startDate: '',
+    startTime: '',
+    endDate: '',
+    endTime: '',
+    allDay: false,
+  });
+  const { startDate, startTime, endDate, endTime, allDay } = times;
+  const setDateTime = useCallback(
+    (key: 'startDate' | 'startTime' | 'endDate' | 'endTime', value: string) => {
+      setTimes((prev) => applyDateTimeChange(prev, key, value));
+    },
+    [],
+  );
   const [location, setLocation] = useState('');
   const [description, setDescription] = useState('');
   // The bound colour-label id ('' = none). Only LOCAL events carry it on their
@@ -163,6 +152,12 @@ export default function EventEditorModal({
   // Reminders (relative-to-start / absolute / app-start), the same Reminder[]
   // the task editor edits — round-trips through create/update_event unchanged.
   const [reminders, setReminders] = useState<Reminder[]>([]);
+  // True while the rows on screen came from the CALENDAR's default reminders
+  // rather than from the event itself (see the overlay effect below). While it
+  // holds, the save sends `[]` — the default stays a default instead of being
+  // silently promoted to a per-event VALARM on the server. Mirrors the desktop
+  // EventDialog's keepRemindersAsDefault.
+  const [keepRemindersAsDefault, setKeepRemindersAsDefault] = useState(false);
   // The RRULE body (without "RRULE:"), or null = non-recurring. The series'
   // EXDATE exceptions are preserved from the original on save.
   const [recurrence, setRecurrence] = useState<string | null>(null);
@@ -176,6 +171,31 @@ export default function EventEditorModal({
   // id yet, so it inherits the container/global default until re-edited (matches
   // the desktop, which hides this picker on create).
   const itemSound = useSoundPref(original ? `sound.item.${original.id}` : null);
+
+  // Per-calendar default reminders (Settings → Kalender), for the OVERLAY
+  // below. iOS-style "Standard-Hinweise" are applied at notification time and
+  // never written into the event body, so iCloud hands us `reminders: []` and
+  // the editor has to re-overlay the calendar default — otherwise the event
+  // reads as "no reminder" although one demonstrably fires. Edit-only (an
+  // empty id short-circuits the hook), exactly like the desktop.
+  const calendarDefaults = useCalendarDefaultReminders(
+    original?.calendar_id ?? '',
+  );
+  // Guards the one-shot overlay: it must not fire twice for the same event and
+  // must never clobber rows the user already edited (the pref read can resolve
+  // a beat after the editor is usable).
+  const overlaidForRef = useRef<string | null>(null);
+  const remindersTouchedRef = useRef(false);
+  useEffect(() => {
+    if (!editing || original == null || calendarDefaults.loading) return;
+    if (overlaidForRef.current === original.id) return;
+    overlaidForRef.current = original.id;
+    if (remindersTouchedRef.current) return;
+    if ((original.reminders ?? []).length > 0) return;
+    if (calendarDefaults.value.length === 0) return;
+    setReminders(calendarDefaults.value);
+    setKeepRemindersAsDefault(true);
+  }, [editing, original, calendarDefaults.loading, calendarDefaults.value]);
 
   useEffect(() => {
     void (async () => {
@@ -197,7 +217,6 @@ export default function EventEditorModal({
             setOriginal(ev);
             setTitle(ev.title);
             setCalId(ev.calendar_id);
-            setAllDay(ev.all_day);
             // Editing a single occurrence shows ITS date (the master's start is
             // the first occurrence); keep the master's time-of-day + duration.
             // Gate on the freshly-loaded recurrence, not just the route param: if
@@ -210,23 +229,28 @@ export default function EventEditorModal({
               const occEnd = new Date(occStart.getTime() + (Number.isFinite(dur) ? dur : 0));
               const so = isoToLocalParts(occStart.toISOString());
               const eo = isoToLocalParts(occEnd.toISOString());
-              setStartDate(so.date);
-              setStartTime(so.time);
-              // All-day: map the (exclusive) end back to the last inclusive day,
-              // else the editor shows one day too many (see allDayFormEndDate).
-              setEndDate(
-                ev.all_day
-                  ? allDayFormEndDate(occStart.toISOString(), occEnd.toISOString())
-                  : eo.date,
-              );
-              setEndTime(eo.time);
+              setTimes({
+                startDate: so.date,
+                startTime: so.time,
+                // All-day: map the (exclusive) end back to the last inclusive
+                // day, else the editor shows one day too many (see the shared
+                // allDayFormEndDate).
+                endDate: ev.all_day ? allDayFormEndDate(occStart, occEnd) : eo.date,
+                endTime: eo.time,
+                allDay: ev.all_day,
+              });
             } else {
               const s = isoToLocalParts(ev.start);
               const e = isoToLocalParts(ev.end);
-              setStartDate(s.date);
-              setStartTime(s.time);
-              setEndDate(ev.all_day ? allDayFormEndDate(ev.start, ev.end) : e.date);
-              setEndTime(e.time);
+              setTimes({
+                startDate: s.date,
+                startTime: s.time,
+                endDate: ev.all_day
+                  ? allDayFormEndDate(new Date(ev.start), new Date(ev.end))
+                  : e.date,
+                endTime: e.time,
+                allDay: ev.all_day,
+              });
             }
             setLocation(ev.location ?? '');
             setDescription(ev.description ?? '');
@@ -236,16 +260,31 @@ export default function EventEditorModal({
             setAttendees(ev.attendees ?? []);
           }
         } else {
-          // New event: the next full hour, one hour long, on the anchored day
-          // (the tapped calendar day) when given, else today. `initialTitle`
-          // carries the title typed into the event quick-add before
-          // "More details …".
-          const now = todayParts();
-          const date = anchor ?? now.date;
-          setStartDate(date);
-          setStartTime(now.time);
-          setEndDate(date);
-          setEndTime(now.time);
+          // New event: a ONE-HOUR slot whose time-of-day adapts to context —
+          // anchored on today → the next :00/:30 slot, on another day → 09:00,
+          // with no anchor → the next full hour. Identical to the desktop
+          // (shared defaultNewEventTimes); the old code seeded end = start,
+          // so every new mobile event opened zero minutes long and refused to
+          // save until the end was fixed by hand.
+          let { start, end } = defaultNewEventTimes(anchor, new Date());
+          // …unless the quick-add handed a picked start time over ("More
+          // details …"); then honour it and keep the one-hour duration.
+          if (initialTime && /^\d{2}:\d{2}$/.test(initialTime)) {
+            const [h, m] = initialTime.split(':').map(Number);
+            const picked = new Date(start);
+            picked.setHours(h, m, 0, 0);
+            start = picked;
+            end = new Date(picked.getTime() + 60 * 60 * 1000);
+          }
+          setTimes({
+            startDate: dateInput(start),
+            startTime: timeInput(start),
+            endDate: dateInput(end),
+            endTime: timeInput(end),
+            allDay: false,
+          });
+          // `initialTitle` carries the title typed into the event quick-add
+          // before "More details …".
           if (initialTitle) setTitle(initialTitle);
         }
       } catch (err) {
@@ -256,7 +295,16 @@ export default function EventEditorModal({
         setLoading(false);
       }
     })();
-  }, [editing, eventId, calendarId, occurrence, anchor, initialTitle, t]);
+  }, [
+    editing,
+    eventId,
+    calendarId,
+    occurrence,
+    anchor,
+    initialTitle,
+    initialTime,
+    t,
+  ]);
 
   const save = useCallback(async () => {
     const trimmedTitle = title.trim();
@@ -271,13 +319,17 @@ export default function EventEditorModal({
     // All-day: start = local midnight of the start day; end = local midnight of
     // the day AFTER the last picked day (END-EXCLUSIVE, the view convention —
     // see allDayWireEnd). Timed: the entered times.
-    const start = localToIso(startDate, allDay ? '00:00' : startTime);
-    const end = allDay ? allDayWireEnd(endDate) : localToIso(endDate, endTime);
+    const start = toIso(startDate, startTime, allDay);
+    const end = allDay ? allDayWireEnd(endDate) : toIso(endDate, endTime, false);
     if (start == null || end == null) {
       setError(t('dialogs.event.dateInvalid'));
       return;
     }
-    if (end <= start) {
+    // Reject only an end BEFORE the start — a zero-length event is legal (and
+    // the desktop accepts it). The strings are UTC ISO from the same builder,
+    // but compare as instants so a differing sub-second/offset shape can't
+    // flip the verdict.
+    if (new Date(end).getTime() < new Date(start).getTime()) {
       setError(t('dialogs.event.endBeforeStart'));
       return;
     }
@@ -296,6 +348,11 @@ export default function EventEditorModal({
     // supports_scheduling gating.
     const sendInvitations =
       (cal?.supports_scheduling ?? false) && attendees.length > 0 && notifyAttendees;
+    // Reminders for the wire: while `keepRemindersAsDefault` holds, the rows on
+    // screen came from the CALENDAR default and were never touched — sending
+    // them would promote the default into a per-event VALARM that then lives on
+    // independently of it. Send `[]` instead (same rule as the desktop).
+    const remindersForWire = keepRemindersAsDefault ? [] : reminders;
     // Keep the series' EXDATE exceptions when editing; a fresh rule has none.
     const recurrenceToSend = recurrence
       ? { rrule: recurrence, exceptions: original?.recurrence?.exceptions ?? [] }
@@ -326,7 +383,7 @@ export default function EventEditorModal({
           all_day: allDay,
           recurrence: null,
           color_label: colorToSend,
-          reminders,
+          reminders: remindersForWire,
           sound: null,
           attendees,
           send_invitations: sendInvitations,
@@ -416,7 +473,7 @@ export default function EventEditorModal({
                 tzid: original.recurrence.tzid ?? null,
               },
               color_label: colorToSend,
-              reminders,
+              reminders: remindersForWire,
               sound: null,
               attendees,
               send_invitations: sendInvitations,
@@ -464,7 +521,7 @@ export default function EventEditorModal({
             location: location.trim() || null,
             description: description.trim() || null,
             color_label: colorToSend,
-            reminders,
+            reminders: remindersForWire,
             recurrence: recurrenceToSend,
             attendees,
             send_invitations: sendInvitations,
@@ -491,7 +548,7 @@ export default function EventEditorModal({
           all_day: allDay,
           recurrence: recurrenceToSend,
           color_label: colorToSend,
-          reminders,
+          reminders: remindersForWire,
           sound: null,
           attendees,
           send_invitations: sendInvitations,
@@ -499,6 +556,10 @@ export default function EventEditorModal({
         if (!isLocalCal) {
           await setEventColor(created.id, calId, colorCapable ? null : colorToSend);
         }
+        // Remember the calendar for the next new-event open. CREATES only:
+        // an edit shouldn't bias future picks, since the user might have just
+        // touched a series in a calendar they never write to.
+        void writeLastUsedCalendar(calId);
         AccessibilityInfo.announceForAccessibility(
           t('dialogs.event.created', { title: created.title }),
         );
@@ -523,6 +584,7 @@ export default function EventEditorModal({
     endDate,
     endTime,
     isOccurrence,
+    keepRemindersAsDefault,
     location,
     navigation,
     notifyAttendees,
@@ -577,6 +639,38 @@ export default function EventEditorModal({
     );
   }
 
+  // Birthday events (DESIGN §10.3) are SYNTHESISED from contacts — there is no
+  // row behind the id, so the load comes back empty and every field would be a
+  // dead end whose save fails at the backend. Short-circuit to a read-only
+  // summary the user can dismiss, exactly like the desktop EventDialog; the
+  // contact is what they edit instead. The name comes from the row that opened
+  // us (`initialTitle`) because the id can't be re-fetched.
+  if (eventId != null && isBirthdayEventId(eventId)) {
+    const name = original?.title ?? initialTitle ?? '';
+    const age = original?.description ?? '';
+    return (
+      <FormScrollView style={styles.screen} contentContainerStyle={styles.content}>
+        {name.length > 0 && <Text style={styles.birthdayName}>{name}</Text>}
+        {age.length > 0 && (
+          <Text style={styles.hint}>
+            {t('dialogs.event.birthdayAge', { age })}
+          </Text>
+        )}
+        <Text style={styles.hint}>{t('dialogs.event.birthdayHint')}</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('dialogs.event.birthdayClose')}
+          onPress={() => navigation.goBack()}
+          style={({ pressed }) => [styles.primaryButton, pressed && styles.primaryPressed]}
+        >
+          <Text style={styles.primaryButtonText}>
+            {t('dialogs.event.birthdayClose')}
+          </Text>
+        </Pressable>
+      </FormScrollView>
+    );
+  }
+
   return (
     <FormScrollView style={styles.screen} contentContainerStyle={styles.content}>
       {error != null && (
@@ -623,7 +717,7 @@ export default function EventEditorModal({
         accessibilityRole="switch"
         accessibilityState={{ checked: allDay }}
         accessibilityLabel={t('dialogs.event.fields.allDay')}
-        onPress={() => setAllDay((v) => !v)}
+        onPress={() => setTimes((p) => ({ ...p, allDay: !p.allDay }))}
         style={({ pressed }) => [styles.switchRow, pressed && styles.pressed]}
       >
         <Text style={styles.switchLabel} importantForAccessibility="no">
@@ -659,7 +753,7 @@ export default function EventEditorModal({
           label={t('dialogs.event.fields.startDate')}
           mode="date"
           value={startDate}
-          onChange={setStartDate}
+          onChange={(next) => setDateTime('startDate', next)}
         />
       </View>
       {!allDay && (
@@ -675,7 +769,7 @@ export default function EventEditorModal({
             label={t('dialogs.event.fields.startTime')}
             mode="time"
             value={startTime}
-            onChange={setStartTime}
+            onChange={(next) => setDateTime('startTime', next)}
           />
         </View>
       )}
@@ -692,7 +786,7 @@ export default function EventEditorModal({
           label={t('dialogs.event.fields.endDate')}
           mode="date"
           value={endDate}
-          onChange={setEndDate}
+          onChange={(next) => setDateTime('endDate', next)}
         />
       </View>
       {!allDay && (
@@ -708,7 +802,7 @@ export default function EventEditorModal({
             label={t('dialogs.event.fields.endTime')}
             mode="time"
             value={endTime}
-            onChange={setEndTime}
+            onChange={(next) => setDateTime('endTime', next)}
           />
         </View>
       )}
@@ -781,6 +875,14 @@ export default function EventEditorModal({
         />
       )}
 
+      {/* Editing a whole recurring series: say so, so a change to the times or
+          the rule isn't mistaken for a one-off edit. Mirrors the desktop hint. */}
+      {editing && original?.recurrence != null && !isOccurrence && (
+        <Text style={styles.hint}>
+          {t('dialogs.event.recurrence.editsSeries')}
+        </Text>
+      )}
+
       {/* Recurrence — RRULE builder (freq / interval / weekly days / monthly
           mode / end). Hidden when editing a single occurrence (the standalone
           it becomes is non-recurring); shown for new events + whole-series edits. */}
@@ -795,7 +897,18 @@ export default function EventEditorModal({
 
       {/* Reminders — relative-to-start / absolute / app-start, the same editor
           as tasks (mode="event" labels the relative kind "Before start"). */}
-      <RemindersEditor mode="event" value={reminders} onChange={setReminders} />
+      <RemindersEditor
+        mode="event"
+        value={reminders}
+        onChange={(next) => {
+          setReminders(next);
+          // The moment the user touches the editor the rows become REAL
+          // per-event reminders — drop the "keep as default" gate so the save
+          // actually sends them, and block a late-resolving overlay.
+          remindersTouchedRef.current = true;
+          setKeepRemindersAsDefault(false);
+        }}
+      />
 
       {/* Per-event sound override (§14.4 item level) — edit-only (a new event has
           no id to key the pref on yet; it inherits until re-edited). */}
@@ -832,8 +945,8 @@ export default function EventEditorModal({
           <AvailabilityChecker
             calendarId={calId}
             attendees={attendees}
-            start={localToIso(startDate, allDay ? '00:00' : startTime)}
-            end={allDay ? allDayWireEnd(endDate) : localToIso(endDate, endTime)}
+            start={toIso(startDate, startTime, allDay)}
+            end={allDay ? allDayWireEnd(endDate) : toIso(endDate, endTime, false)}
           />
         )}
 
@@ -938,6 +1051,8 @@ const makeStyles = (c: ThemeColors) =>
     deleteDisabled: { opacity: 0.5 },
     deleteButtonText: { fontSize: 16, fontWeight: '700', color: c.danger },
     muted: { fontSize: 15, color: c.textSecondary, padding: 16 },
+    birthdayName: { fontSize: 22, fontWeight: '700', color: c.textPrimary },
+    hint: { fontSize: 15, color: c.textSecondary },
     pressed: { opacity: 0.7 },
     error: { fontSize: 15, fontWeight: '600', color: c.danger },
   });

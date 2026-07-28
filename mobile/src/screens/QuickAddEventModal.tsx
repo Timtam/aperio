@@ -10,16 +10,25 @@ import {
   View,
 } from 'react-native';
 
-import { selectableEventCalendars } from '@aperio/shared';
+import {
+  dateInput,
+  defaultNewEventTimes,
+  selectableEventCalendars,
+  timeInput,
+  toIso,
+} from '@aperio/shared';
 
 import { createEvent, listCalendars, type Calendar } from '../api/calendar';
 import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
 import { useCancelHeader } from '../components/useCancelHeader';
-import { formatLocalDate, formatLocalTime } from '../intl/dateTimeField';
 import { useShowHiddenCalendarTargets } from '../settings/hiddenTargets';
 import { useCalendarVisibility } from '../state/calendarVisibility';
+import {
+  readLastUsedCalendar,
+  writeLastUsedCalendar,
+} from '../state/lastUsedCalendar';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -29,13 +38,6 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 // the full EventEditor. Mobile had no event quick-add before (events always
 // went straight to the full editor); this brings event parity with the task
 // quick-add and the day-activation create flow.
-
-/** Local YYYY-MM-DD + HH:MM → RFC-3339 UTC, or null when unparseable. */
-function localToIso(date: string, time: string): string | null {
-  if (!date.trim()) return null;
-  const d = new Date(`${date.trim()}T${time.trim() || '00:00'}`);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
-}
 
 export default function QuickAddEventModal({
   navigation,
@@ -48,26 +50,57 @@ export default function QuickAddEventModal({
 
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [title, setTitle] = useState('');
-  // A tapped calendar day seeds the start day; otherwise today.
-  const [date, setDate] = useState(
-    () => route.params.anchor ?? formatLocalDate(new Date()),
+  // Default slot, same policy as the desktop quick-add + the full editor
+  // (shared defaultNewEventTimes): a tapped calendar day seeds the start day,
+  // and the time is the next :00/:30 slot on today / 09:00 on another day —
+  // not the current minute, which put every quick-added event in the past.
+  const [initialSlot] = useState(() =>
+    defaultNewEventTimes(route.params.anchor, new Date()),
   );
-  const [time, setTime] = useState(() => formatLocalTime(new Date()));
+  const [date, setDate] = useState(() => dateInput(initialSlot.start));
+  const [time, setTime] = useState(() => timeInput(initialSlot.start));
   const [calId, setCalId] = useState(route.params.calendarId);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const titleRef = useRef<TextInput | null>(null);
+  // Live mirrors for the mount-only default-calendar resolution below — refs so
+  // the effect reads the CURRENT visibility rules without re-running (which
+  // would re-adopt the stored calendar over a pick the user already made).
+  const hiddenRef = useRef(hidden);
+  hiddenRef.current = hidden;
+  const includeHiddenRef = useRef(includeHidden);
+  includeHiddenRef.current = includeHidden;
+  const calIdTouchedRef = useRef(false);
 
   // Cancel button in the header (first element) so the user can back out fast.
   useCancelHeader(navigation);
 
   // Load the calendars for the picker (best-effort; the route already passed a
-  // sensible default calId so the form works before this resolves).
+  // sensible default calId so the form works before this resolves). Once the
+  // list is in, prefer the calendar the user last created on — the surfaces
+  // seed us with the FIRST writable one, which lands every event in the same
+  // calendar for anyone with more than two. Desktop does this in the event
+  // form's default chain; here it's the one create entry point, so it lives
+  // here. Only while the picker is still untouched (the read is async).
   useEffect(() => {
-    void listCalendars()
-      .then(setCalendars)
-      .catch(() => setCalendars([]));
+    void (async () => {
+      const [cals, lastUsed] = await Promise.all([
+        listCalendars().catch(() => [] as Calendar[]),
+        readLastUsedCalendar(),
+      ]);
+      setCalendars(cals);
+      // Only while the picker is still untouched — the read is async, so the
+      // user may already have chosen by the time it lands.
+      if (calIdTouchedRef.current || lastUsed == null) return;
+      const usable = cals.find(
+        (c) =>
+          c.id === lastUsed &&
+          !c.read_only &&
+          (includeHiddenRef.current || !hiddenRef.current.has(c.id)),
+      );
+      if (usable) setCalId(usable.id);
+    })();
   }, []);
 
   // Drive SR focus + the keyboard into the title field on open, so a new event
@@ -108,7 +141,7 @@ export default function QuickAddEventModal({
       fail(t('dialogs.event.calendarRequired'));
       return;
     }
-    const start = localToIso(date, time);
+    const start = toIso(date, time, false);
     if (!start) {
       fail(t('mobile.invalidDateTime'));
       return;
@@ -134,6 +167,8 @@ export default function QuickAddEventModal({
         attendees: [],
         send_invitations: false,
       });
+      // Remember the calendar for the next new-event open (see the editor).
+      void writeLastUsedCalendar(calId);
       AccessibilityInfo.announceForAccessibility(
         t('dialogs.event.created', { title: trimmed }),
       );
@@ -145,16 +180,19 @@ export default function QuickAddEventModal({
     }
   }, [calId, date, fail, navigation, t, time, title]);
 
-  // Hand off to the full editor, carrying the title/day/calendar. Replace (not
-  // push) so the quick-add doesn't linger behind the editor.
+  // Hand off to the full editor, carrying the title/day/TIME/calendar. Replace
+  // (not push) so the quick-add doesn't linger behind the editor. The picked
+  // time rides along so the editor keeps it instead of re-deriving its own
+  // default slot (the desktop QuickAddDialog does the same via defaultTime).
   const openFullEditor = useCallback(() => {
     navigation.replace('EventEditor', {
       eventId: null,
       calendarId: calId,
       anchor: date.trim() || undefined,
       initialTitle: title.trim() || undefined,
+      initialTime: time.trim() || undefined,
     });
-  }, [calId, date, navigation, title]);
+  }, [calId, date, navigation, time, title]);
 
   return (
     <FormScrollView
@@ -227,7 +265,11 @@ export default function QuickAddEventModal({
           label={t('dialogs.event.fields.calendar')}
           value={calId}
           options={calendarOptions}
-          onChange={setCalId}
+          onChange={(next) => {
+            // Their pick wins over a late-landing last-used adoption.
+            calIdTouchedRef.current = true;
+            setCalId(next);
+          }}
         />
       ) : (
         <Text style={styles.hint} accessibilityRole="text">

@@ -1,4 +1,4 @@
-import { occurrenceIsoOf, seriesIdOf } from '@aperio/shared';
+import { isBirthdayEventId, occurrenceIsoOf, seriesIdOf } from '@aperio/shared';
 
 import { showEventScopeDialog } from './eventScopeDialog';
 import { CalendarEvent } from '../api/calendar';
@@ -19,6 +19,10 @@ export interface EditEventParams {
   occurrence?: string | null;
   /** Scope the up-front prompt resolved to; seeds the editor's edit scope. */
   initialScope?: 'occurrence' | 'series' | 'this_and_future';
+  /** The row's title, passed only for a SYNTHETIC birthday event: its id has no
+   *  fetchable row behind it, so the editor's read-only birthday summary has no
+   *  other way to name the person. */
+  initialTitle?: string;
 }
 
 /** Open the event editor for `ev`. For a recurring OCCURRENCE, first pops the
@@ -31,13 +35,18 @@ export function editEventWithScope(
   navigate: (params: EditEventParams) => void,
 ): void {
   const occurrence = occurrenceIsoOf(ev);
-  const open = (initialScope?: 'occurrence' | 'series' | 'this_and_future') =>
+  const open = (initialScope?: 'occurrence' | 'series' | 'this_and_future') => {
+    const eventId = seriesIdOf(ev);
     navigate({
-      eventId: seriesIdOf(ev),
+      eventId,
       calendarId: ev.calendar_id,
       occurrence,
       initialScope,
+      // A synthetic birthday event opens a read-only summary that can't
+      // re-fetch its own name — hand it over from the row.
+      initialTitle: isBirthdayEventId(eventId) ? ev.title : undefined,
     });
+  };
 
   if (occurrence == null) {
     open();

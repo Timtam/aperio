@@ -26,6 +26,14 @@ Im Termin-Dialog kannst du außerdem festlegen:
 - **Teilnehmer** (Name und/oder E-Mail-Adresse),
 - **Wiederholung** (siehe unten).
 
+> **Beginn und Ende hängen zusammen:** Verschiebst du den **Beginn**, wandert
+> das **Ende** um denselben Betrag mit – die Dauer bleibt erhalten, auch über
+> Mitternacht und über mehrere Tage hinweg. Änderst du das **Ende**, ändert
+> sich nur die Dauer; ein Ende vor dem Beginn wird auf den Beginn gesetzt. Neue
+> Termine starten zur nächsten halben Stunde (an einem anderen Tag: 9:00 Uhr)
+> und dauern eine Stunde. Das gilt auf dem Desktop und in der mobilen App
+> gleichermaßen.
+
 > **Eigene Farbe:** Neben dem Farb-Label-Auswahlfeld findest du die
 > Schaltfläche **„Andere Farbe…"**. Damit komponierst du spontan eine
 > beliebige Farbe (Hex-Wert oder Farbfeld) und wendest sie direkt an – ohne

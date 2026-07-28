@@ -24,6 +24,13 @@ In the event dialog you can also set:
 - **attendees** (name and/or email address),
 - a **recurrence** (see below).
 
+> **Start and end are linked:** moving the **start** slides the **end** by the
+> same amount, so the duration is preserved — across midnight and across
+> several days too. Changing the **end** only resizes the event; an end before
+> the start is pulled back to the start. New events begin at the next half hour
+> (09:00 on another day) and run for one hour. This is identical on the desktop
+> and in the mobile app.
+
 > **Custom color:** Next to the color-label picker there's a **"Custom
 > color…"** button. Use it to compose an arbitrary color on the fly (hex
 > value or swatch) and apply it directly — no detour through the settings.

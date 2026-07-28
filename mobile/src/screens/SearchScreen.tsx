@@ -17,7 +17,12 @@ import {
   View,
 } from 'react-native';
 
-import { eventInstanceKey, statusI18nKey, type TaskStatus } from '@aperio/shared';
+import {
+  eventInstanceKey,
+  isBirthdayEventId,
+  statusI18nKey,
+  type TaskStatus,
+} from '@aperio/shared';
 
 import { expandedA11y } from '../a11y/roles';
 import { Calendar, listCalendars } from '../api/calendar';
@@ -346,6 +351,11 @@ export default function SearchScreen({ navigation }: RootStackScreenProps<'Searc
                   navigation.navigate('EventEditor', {
                     eventId: ev.id,
                     calendarId: ev.calendar_id,
+                    // A synthetic birthday hit opens a read-only summary that
+                    // can't re-fetch its own name — hand it over from the row.
+                    initialTitle: isBirthdayEventId(ev.id)
+                      ? ev.title
+                      : undefined,
                   })
                 }
                 style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
