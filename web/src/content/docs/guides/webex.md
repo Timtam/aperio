@@ -1,0 +1,130 @@
+---
+title: "Video meetings with Cisco Webex"
+---
+
+Aperio can do two things with Webex, and they are independent of each other.
+
+**Joining** works straight away, for any meeting, from any tool. An invitation
+written by Outlook, by eM Client or by Webex itself carries a join link, and
+Aperio finds it — in the event's location or anywhere in its text, in any
+language. You do not need a Webex account in Aperio for this, and you do not
+need to set anything up. Every event with a meeting gets a **Join** entry: in
+the event editor, in the context menu (`Shift+F10` or the Menu key on any
+event), and in the rotor on the phone.
+
+**Creating** is what needs an account. Once you have connected one, an event
+gains a **Create a meeting** button: Aperio mints a Webex meeting for that
+event, writes its link into the event where every other calendar app can read
+it, and remembers the meeting so it can also take it back down.
+
+## Connecting a Webex account
+
+Go to **Settings → Accounts → Add account** and pick **Cisco Webex**.
+
+What you see next depends on the build you are running:
+
+- If it asks only for a name, this build carries Aperio's own Webex
+  registration. Enter a name and press **Add** — your browser opens the Webex
+  sign-in page, you grant access, and the tab closes itself.
+- If it also asks for a **client ID** and a **client secret**, this build
+  carries none, and you register your own integration once. That takes about
+  five minutes and is free; the next section walks through it.
+
+Two options are worth a moment:
+
+**Use the Personal Meeting Room.** Off by default. With it on, Aperio links your
+permanent personal room instead of creating a new meeting per event. That needs
+no scheduling licence and has no daily cap — but every event shares the same
+link and the same room, so back-to-back meetings can walk into each other. With
+it off, each event gets its own meeting.
+
+**Let Webex send its own invitations.** Off by default, and worth leaving off.
+Webex's mails carry a calendar attachment, so switching this on puts a *second*
+entry in every attendee's calendar next to the one Aperio already sent.
+
+## Registering your own integration
+
+Only needed when the connect form asks for a client ID and secret.
+
+1. Open [developer.webex.com/my-apps](https://developer.webex.com/my-apps) and
+   sign in with your Webex account.
+2. **Create a New App → Integration.**
+3. Give it a name and description — these are for you; nobody else sees them.
+   An icon is required; any square PNG will do.
+4. **Redirect URI:** enter exactly
+
+   ```
+   http://127.0.0.1:8080/oauth/webex
+   ```
+
+   This has to match to the character. It is a loopback address — the page never
+   leaves your machine; Aperio listens on it for the moment the sign-in comes
+   back.
+5. **Scopes:** tick `meeting:schedules_read`, `meeting:schedules_write` and
+   `meeting:preferences_read`. Webex adds `spark:kms` by itself; that is normal
+   and nothing to worry about.
+6. Save. Webex shows a **client ID** and a **client secret**. Copy both into
+   Aperio's connect form.
+
+The secret goes into your system keychain, never into Aperio's account database
+— which matters because that database is what synchronises to your other
+devices.
+
+> **A note about "mobile SDK".** If Webex asks whether the integration uses a
+> mobile SDK, answer **no**. Aperio talks to the Meetings REST API, not to
+> Webex's own app SDK.
+
+## Creating a meeting for an event
+
+Open an event, save it if it is new, and press **Create a meeting**. Aperio:
+
+- creates the meeting on Webex with the event's title and time,
+- writes the join link into the event's location (if it was empty) and appends a
+  short block with the link and password to the description,
+- and records that this meeting belongs to this event.
+
+Anyone you invite sees the link in a perfectly ordinary event, whatever calendar
+app they use.
+
+**Remove the meeting** appears once an event has one. It deletes the meeting at
+Webex and takes the link back out of the event.
+
+You will see the remove button only for meetings **Aperio created**. An event
+carrying a colleague's Webex link gets a Join button and nothing else — that
+meeting is not yours to delete.
+
+## Things worth knowing
+
+**One meeting per event, including recurring ones.** A recurring series shares
+one meeting, exactly as a recurring meeting does in Webex itself.
+
+**Removing works from the device that created it.** The record of which meeting
+belongs to which event stays on the machine that made it — it is not
+synchronised, because it is bookkeeping about a Webex object rather than part of
+your event. On another device you can still delete the event; the meeting then
+stays on Webex, where you can remove it in Webex's own interface.
+
+**Moving an event does not move the meeting.** Webex's API has no update in the
+set Aperio uses. If a time changes materially, remove the meeting and create it
+again.
+
+**A licence is needed for scheduling.** Creating a meeting per event requires a
+Webex account that may schedule meetings. If yours may not, switch **Use the
+Personal Meeting Room** on — that works without one.
+
+## If something goes wrong
+
+**"No plugin serves this adapter kind."** The Webex plugin is not loaded or was
+switched off in **Settings → Plugins**.
+
+**Sign-in never comes back.** Check the redirect URI on your integration
+character by character, including the port and `/oauth/webex`. If port 8080 is
+in use by something else on your machine, Aperio says so before opening the
+browser.
+
+**"Sign in to Webex again" out of nowhere.** Your build's Webex registration
+changed — this happens when you move between an official build and one of your
+own. Connect the account again.
+
+Aperio's log (**Settings → Troubleshooting**) records the failing request path
+and status without ever recording your tokens.

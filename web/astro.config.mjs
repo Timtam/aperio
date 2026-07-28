@@ -94,6 +94,7 @@ export default defineConfig({
                 { label: 'Accessibility', translations: { de: 'Barrierefreiheit' }, slug: 'guides/barrierefreiheit' },
                 { label: 'Troubleshooting & Logs', translations: { de: 'Fehlersuche & Protokolle' }, slug: 'guides/troubleshooting' },
                 { label: 'Connecting Google (OAuth guide)', translations: { de: 'Google einbinden (OAuth-Anleitung)' }, slug: 'guides/google-oauth' },
+                { label: 'Video meetings with Webex', translations: { de: 'Videokonferenzen mit Webex' }, slug: 'guides/webex' },
               ],
             },
           ],
