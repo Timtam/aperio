@@ -16,7 +16,7 @@ A plugin declares one or more **capabilities**:
   provider simply declares `["tasks"]`.
 - **sync-adapter** — a storage backend for cross-device sync (WebDAV,
   Dropbox, SFTP, …).
-- **vc-adapter** — a video-conferencing integration (Meet, Zoom, …).
+- **videoconference-adapter** — a video-conferencing integration (Meet, Zoom, …).
 
 This book focuses on calendar-adapter plugins (the most common kind); the
 ABI shape is the same for the others.

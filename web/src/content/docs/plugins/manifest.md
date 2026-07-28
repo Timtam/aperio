@@ -40,7 +40,7 @@ reads it to discover the plugin before loading any code.
 | `id` | string | ✅ | Stable reverse-DNS identifier, e.g. `com.example.my-plugin`. The primary key — two plugins can't share it. |
 | `name` | string | ✅ | Human-readable display name. |
 | `version` | string | ✅ | Plugin version (semver). |
-| `plugin_type` | string | ✅ | `"calendar-adapter"`, `"sync-adapter"`, or `"vc-adapter"`. There is **no** separate `task-adapter` type — a tasks-only provider is a `calendar-adapter` with `capabilities: ["tasks"]`. |
+| `plugin_type` | string | ✅ | `"calendar-adapter"`, `"sync-adapter"`, or `"videoconference-adapter"`. There is **no** separate `task-adapter` type — a tasks-only provider is a `calendar-adapter` with `capabilities: ["tasks"]`. |
 | `capabilities` | string[] | ✅ | Which feature surfaces the plugin fills: any of `"calendars"`, `"tasks"`, `"contacts"`. Drives which vtables the host expects to be non-null. |
 | `abi_version` | number | ✅ | The ABI the plugin was built against (current: `2`). |
 | `min_app_version` | string | ✅ | Lowest app version that can load this plugin. |
