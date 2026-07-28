@@ -67,6 +67,7 @@ import {
 } from '../api/client';
 import { listColorLabels } from '../api/colorLabels';
 import { useTabBarInset } from '../hooks/useTabBarInset';
+import { joinAction, openConference } from '../intl/conferencing';
 import { resolveEventColor } from '../intl/eventColor';
 import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
 import type { RootStackParamList } from '../navigation/types';
@@ -1060,20 +1061,43 @@ export function CalendarDayList({
     const badge = span
       ? ` ${t('views.multiDayCompact', { day: span.dayIndex, total: span.totalDays })}`
       : '';
+    // Read-only calendars still get the join affordance when the event carries
+    // a meeting: these rows have no editor to open, so without it a meeting on
+    // a subscribed or shared calendar would be un-joinable from the app at all.
+    // Everything else about the row stays read-only.
+    const readOnlyJoin = readOnlyIds.has(ev.calendar_id) ? joinAction(ev, t) : null;
     if (readOnlyIds.has(ev.calendar_id)) {
+      const readOnlyActions: MenuAction[] = readOnlyJoin ? [readOnlyJoin.action] : [];
       return (
         <View
           key={rowKey}
           accessible
           accessibilityRole="text"
           accessibilityLabel={eventLabel(ev, day, span)}
+          accessibilityActions={readOnlyActions}
+          onAccessibilityAction={() => {
+            if (readOnlyJoin) void openConference(readOnlyJoin.conference, t);
+          }}
           style={
             grid
               ? [styles.gridChip, slotStyle(slot, canvasPx), tint]
               : [styles.row, extraStyle, tint]
           }
         >
-          <View style={styles.rowText}>
+          <Pressable
+            accessible={false}
+            onLongPress={
+              readOnlyJoin
+                ? () =>
+                    setMenu({
+                      title: ev.title,
+                      actions: readOnlyActions,
+                      onAction: () => void openConference(readOnlyJoin.conference, t),
+                    })
+                : undefined
+            }
+            style={styles.rowText}
+          >
             <Text
               style={titleStyle}
               importantForAccessibility="no"
@@ -1087,20 +1111,28 @@ export function CalendarDayList({
                 {eventTimeLabel(ev, day)}
               </Text>
             )}
-          </View>
+          </Pressable>
         </View>
       );
     }
     // ONE action list feeds the SR custom actions AND the sighted long-press
     // menu; the per-row delete button is gone (delete lives in the editor, the
     // menu and the SR action — the visible button was row clutter).
+    // A meeting link, if the event carries one, leads the list: a row with a
+    // meeting on it is far more often opened to JOIN than to edit, and this
+    // way joining costs one rotor step from the calendar instead of opening
+    // the editor. Provider- and language-independent, so an invitation from
+    // Outlook or eM Client offers it just the same.
+    const join = joinAction(ev, t);
     const actions: MenuAction[] = [
+      ...(join ? [join.action] : []),
       { name: 'activate', label: t('mobile.editTaskLabel') },
       { name: 'moveCopy', label: t('mobile.moveCopy') },
       { name: 'delete', label: t('dialogs.event.delete'), destructive: true },
     ];
     const runAction = (name: string) => {
-      if (name === 'delete') removeEvent(ev);
+      if (name === 'join' && join) void openConference(join.conference, t);
+      else if (name === 'delete') removeEvent(ev);
       else if (name === 'moveCopy') moveCopyEvent(ev);
       else editEvent(ev);
     };

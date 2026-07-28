@@ -2,10 +2,13 @@ import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
+import { detectConference } from '@aperio/shared';
+
 import { useAnnouncer } from '../a11y/announcerContext';
 import {
   deleteEventById,
   isCommandError,
+  openExternalUrl,
   setEventColor,
   showContextMenu,
   updateEvent as apiUpdateEvent,
@@ -44,6 +47,9 @@ function normalizeEmail(value: string | null | undefined): string {
  * Entries:
  *
  *   Events:
+ *     - Beitreten         (only when the event carries a meeting link —
+ *                          leads the menu, because that is what a meeting
+ *                          is wanted for; see shared/conferencing.ts)
  *     - Bearbeiten        (open EventDialog)
  *     - Verschieben nach… (open MoveCopyDialog, defaultMode='move')
  *     - Kopieren nach…    (open MoveCopyDialog, defaultMode='copy')
@@ -165,7 +171,31 @@ export function useChipContextMenu(): ChipContextMenuActions {
           offersChoice = !!me && normalizeEmail(event.organizer) === me;
         }
       }
+      // A meeting link, if this event carries one. Joining is what someone
+      // wants from a meeting five minutes before it starts, so it leads the
+      // menu — and it puts joining one keystroke from the calendar, without
+      // opening the editor and hunting for the button. Detection is the shared
+      // one: provider-independent and language-independent, so an invitation
+      // that arrived from Outlook or eM Client offers this too.
+      const conference = detectConference({
+        location: event.location,
+        description: event.description,
+      });
       const items: ContextMenuItemRequest[] = [
+        ...(conference
+          ? [
+              {
+                id: 'join',
+                // Same string as the button in the editor, deliberately: the
+                // menu entry and the button do the same thing, and hearing the
+                // same words in both places is what makes that obvious.
+                label: t('conferencing.joinNamed', {
+                  provider: t(`conferencing.provider.${conference.provider}`),
+                }),
+              },
+              { kind: 'separator' as const },
+            ]
+          : []),
         { id: 'edit', label: t('chipMenu.edit') },
         { id: 'move', label: t('chipMenu.moveTo') },
         { id: 'copy', label: t('chipMenu.copyTo') },
@@ -185,7 +215,14 @@ export function useChipContextMenu(): ChipContextMenuActions {
         // eslint-disable-next-line no-console
         console.warn('show_context_menu failed', err);
       }
-      if (selected === 'edit') {
+      if (selected === 'join' && conference) {
+        try {
+          await openExternalUrl(conference.joinUrl);
+        } catch (err) {
+          const message = isCommandError(err) ? err.message : String(err);
+          announce(t('conferencing.openFailed', { message }));
+        }
+      } else if (selected === 'edit') {
         openEventDialog(event);
       } else if (selected === 'move') {
         openMoveCopy({ kind: 'event', event, defaultMode: 'move' });

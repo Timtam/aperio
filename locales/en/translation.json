@@ -108,10 +108,8 @@
   },
   "conferencing": {
     "label": "Video meeting",
-    "join": "Join the meeting",
     "joinNamed": "Join the {{provider}} meeting",
     "openFailed": "The meeting could not be opened: {{message}}",
-    "detailsLabel": "Meeting details",
     "detail": "{{label}}: {{value}}",
     "meetingNumber": "Meeting number",
     "password": "Password",
