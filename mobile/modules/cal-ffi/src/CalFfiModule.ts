@@ -425,6 +425,9 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  `plugin.json`, as JSON, or the literal `null` when it declares none. The
    *  host resolves whether this build carries the provider's OAuth credentials
    *  and reports that as a flag — the UI never sees a credential. */
+  /** Every adapter this build can connect an account for, as JSON — assembled
+   *  from the embedded plugins' manifests rather than from a list in the UI. */
+  listAdapterKindsJson(): Promise<string>;
   accountFormSpecJson(adapterKind: string): Promise<string>;
   /** Begin a schema-driven OAuth sign-in. `valuesJson` is the form as filled so
    *  far, keyed by the schema's field keys; the host reads the credential pair

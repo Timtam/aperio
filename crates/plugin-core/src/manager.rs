@@ -59,7 +59,7 @@ use crate::abi::{
 };
 use crate::error::{PluginError, PluginResult};
 use crate::ffi::{PluginCallResult, PLUGIN_CALL_OK};
-use crate::manifest::{PluginManifest, MANIFEST_FILENAME};
+use crate::manifest::{AdapterKindInfo, PluginManifest, MANIFEST_FILENAME};
 use crate::plugin_type::PluginType;
 use crate::version::check_abi_version;
 
@@ -1001,6 +1001,61 @@ impl PluginManager {
         inner.plugins.get(id).cloned()
     }
 
+    /// The loaded plugin serving `adapter_kind`, if one does.
+    ///
+    /// This replaces the kind→plugin table the host used to carry. The mapping
+    /// is now a *fact about which plugins are loaded* rather than a constant in
+    /// the core: each plugin declares the kind it serves in its manifest, and
+    /// an adapter Aperio has never seen resolves exactly like one it ships.
+    ///
+    /// Disabled plugins are excluded, matching [`Self::get`] — an account whose
+    /// plugin the user switched off must read as "plugin missing" rather than
+    /// silently keep working.
+    ///
+    /// Two plugins claiming the same kind would be an install-time conflict;
+    /// the first match wins and the situation is left for the plugin panel to
+    /// surface, since refusing to resolve either would take the user's working
+    /// accounts down over someone else's packaging mistake.
+    pub fn plugin_for_adapter_kind(&self, adapter_kind: &str) -> Option<Arc<LoadedPlugin>> {
+        let inner = self.inner.read().expect("manager poisoned");
+        inner
+            .plugins
+            .values()
+            .find(|p| {
+                p.manifest.adapter_kind.as_deref() == Some(adapter_kind)
+                    && !inner.disabled.contains(&p.manifest.id)
+            })
+            .cloned()
+    }
+
+    /// Every account-bearing adapter a currently loaded plugin serves, so a
+    /// frontend can offer exactly the adapters this build actually has —
+    /// rather than a list written into the UI, which is what it used to be.
+    ///
+    /// The plugin's own `name` rides along as the fallback label: the app has
+    /// translations for the adapters it ships, and a third-party plugin's own
+    /// name beats a missing-key marker.
+    pub fn adapter_kinds(&self) -> Vec<AdapterKindInfo> {
+        let inner = self.inner.read().expect("manager poisoned");
+        let mut kinds: Vec<AdapterKindInfo> = inner
+            .plugins
+            .values()
+            .filter(|p| !inner.disabled.contains(&p.manifest.id))
+            .filter_map(|p| {
+                p.manifest.adapter_kind.clone().map(|kind| AdapterKindInfo {
+                    kind,
+                    name: p.manifest.name.clone(),
+                    plugin_id: p.manifest.id.clone(),
+                    owns_containers: p.manifest.plugin_type == PluginType::CalendarAdapter,
+                    declares_account_schema: p.manifest.account.is_some(),
+                })
+            })
+            .collect();
+        kinds.sort_by(|a, b| a.kind.cmp(&b.kind));
+        kinds.dedup_by(|a, b| a.kind == b.kind);
+        kinds
+    }
+
     /// Same as [`Self::get`] but ignores the disabled-flag
     /// gate. The Settings → Plugins panel uses this so the
     /// toggle that re-enables a plugin can read it back. The
@@ -1659,6 +1714,7 @@ mod tests {
             recurrence: Default::default(),
             tasks: Default::default(),
             account: None,
+            adapter_kind: None,
         }
     }
 

@@ -8,6 +8,7 @@
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled Microsoft Graph adapter — Outlook calendars, Microsoft To Do tasks and Outlook contacts (Microsoft 365 / Exchange Online).",
+  "adapter_kind": "microsoft_graph",
   "signed": false,
   "tasks": {
     "subtasks": false,

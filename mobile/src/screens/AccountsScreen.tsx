@@ -17,7 +17,9 @@ import { useThemedStyles, type ThemeColors } from '../theme';
 import {
   Account,
   AdapterKind,
+  AdapterKindInfo,
   accountFormSpec,
+  listAdapterKinds,
   createAccount,
   deleteAccount,
   discoverEwsEndpoint,
@@ -114,18 +116,16 @@ const KIND_FORMS: Record<Exclude<AdapterKind, 'google' | 'microsoft_graph' | 'zo
   },
 };
 
-const OFFERED_KINDS = Object.keys(KIND_FORMS) as (keyof typeof KIND_FORMS)[];
-
 /** The providers the "Add account" picker offers — the credential kinds (minus
  *  the implicit local account, which is added automatically) + the OAuth kinds. */
-const PICKER_KINDS: AdapterKind[] = [
-  ...OFFERED_KINDS.filter((k) => k !== 'local'),
-  'google',
-  'microsoft_graph',
-  // Adapters that declare their own connect form. The screen asks the host for
-  // that form when one is picked, so nothing about them is described here.
-  'webex',
-];
+/** Kinds the host implements itself, so no plugin declares them. `local` is the
+ *  built-in store (created at bootstrap, never offered); `device_calendar` is
+ *  offered separately because it is added through an OS permission grant rather
+ *  than a form. */
+const HOST_INTERNAL_KINDS: ReadonlySet<AdapterKind> = new Set([
+  'local',
+  'device_calendar',
+]);
 
 /** OAuth kinds can't be repaired with a pasted secret — they re-run the
  *  provider sign-in (a separate reconnect flow), so the inline credential field
@@ -221,6 +221,9 @@ export default function AccountsScreen() {
     Record<string, string | boolean>
   >({});
   const [schemaKind, setSchemaKind] = useState<AdapterKind | null>(null);
+  // Which adapters this build can connect, straight from the host — the picker
+  // does not carry the list, because installed plugins decide it.
+  const [availableKinds, setAvailableKinds] = useState<AdapterKindInfo[]>([]);
 
   const rowTags = useRef<Record<string, number | null>>({});
   const pendingFocusId = useRef<string | null>(null);
@@ -269,6 +272,23 @@ export default function AccountsScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listAdapterKinds()
+      .then((kinds) => {
+        if (!cancelled) {
+          setAvailableKinds(kinds.filter((k) => !HOST_INTERNAL_KINDS.has(k.kind)));
+        }
+      })
+      .catch(() => {
+        // A failed probe leaves the picker with only the device entry, which is
+        // honest: the screen genuinely does not know what else is available.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Move screen-reader focus to the newly created row once the list re-renders.
   useEffect(() => {
@@ -959,22 +979,28 @@ export default function AccountsScreen() {
         cancelLabel={t('mobile.cancel')}
         onCancel={cancelAdd}
       >
-        {PICKER_KINDS.map((k) => (
-          <Pressable
-            key={k}
-            accessibilityRole="button"
-            accessibilityLabel={t(`dialogs.accounts.kindName.${k}`)}
-            onPress={() => onPickProvider(k)}
-            style={({ pressed }) => [
-              styles.secondaryButton,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Text style={styles.secondaryButtonText}>
-              {t(`dialogs.accounts.kindName.${k}`)}
-            </Text>
-          </Pressable>
-        ))}
+        {/* Whatever the host reported. A bundled adapter gets its translated
+            name; anything else falls back to the plugin's own, which beats a
+            missing-key marker. */}
+        {availableKinds.map((entry) => {
+          const label = t(`dialogs.accounts.kindName.${entry.kind}`, {
+            defaultValue: entry.name,
+          });
+          return (
+            <Pressable
+              key={entry.kind}
+              accessibilityRole="button"
+              accessibilityLabel={label}
+              onPress={() => onPickProvider(entry.kind)}
+              style={({ pressed }) => [
+                styles.secondaryButton,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={styles.secondaryButtonText}>{label}</Text>
+            </Pressable>
+          );
+        })}
         {DEVICE_KIND_AVAILABLE && (
           <Pressable
             accessibilityRole="button"

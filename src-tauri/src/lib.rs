@@ -218,7 +218,7 @@ pub fn run() {
                     let mut healed = 0usize;
                     for acc in accts
                         .iter()
-                        .filter(|a| a.adapter_kind == accounts::AdapterKind::Ews)
+                        .filter(|a| a.adapter_kind == accounts::AdapterKind::new("ews"))
                     {
                         match cache_store.reset_event_sync(&acc.id) {
                             Ok(n) => healed += n,
@@ -270,7 +270,7 @@ pub fn run() {
                     let mut healed = 0usize;
                     for acc in accts
                         .iter()
-                        .filter(|a| a.adapter_kind == accounts::AdapterKind::Ews)
+                        .filter(|a| a.adapter_kind == accounts::AdapterKind::new("ews"))
                     {
                         match cache_store.reset_event_sync(&acc.id) {
                             Ok(n) => healed += n,
@@ -322,7 +322,7 @@ pub fn run() {
                     let mut healed = 0usize;
                     for acc in accts
                         .iter()
-                        .filter(|a| a.adapter_kind == accounts::AdapterKind::Ews)
+                        .filter(|a| a.adapter_kind == accounts::AdapterKind::new("ews"))
                     {
                         match cache_store.reset_event_sync(&acc.id) {
                             Ok(n) => healed += n,
@@ -674,6 +674,7 @@ pub fn run() {
             commands::connect_google_account,
             commands::connect_account,
             commands::account_form_spec,
+            commands::list_adapter_kinds,
             commands::connect_microsoft_account,
             commands::set_container_name_override,
             commands::clear_container_name_override,

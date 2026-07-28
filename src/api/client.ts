@@ -624,6 +624,31 @@ export type {
 } from '@aperio/shared';
 import type { AccountFormSpec } from '@aperio/shared';
 
+/** One adapter this build can connect an account for. */
+export interface AdapterKindInfo {
+  kind: AdapterKind;
+  /** The plugin's own display name — the label to use when the app has no
+   *  translation for this kind, which is the normal case for a third-party
+   *  plugin. */
+  name: string;
+  plugin_id: string;
+  /** Whether accounts of this adapter own calendars and task lists. */
+  owns_containers: boolean;
+  /** Whether it connects through the generic schema-driven flow. False for the
+   *  adapters still on the older per-kind path. */
+  declares_account_schema: boolean;
+}
+
+/** Every adapter this build can connect an account for.
+ *
+ *  Asked of the host rather than written into the UI: which adapters exist is
+ *  decided by which plugins are installed, and that can change without the
+ *  frontend being rebuilt. Host-internal kinds (the local store, the device
+ *  calendar) are not included — each frontend adds those itself where they
+ *  make sense. */
+export const listAdapterKinds = () =>
+  invoke<AdapterKindInfo[]>('list_adapter_kinds');
+
 /** The connect form an adapter declares, or `null` when it declares none —
  *  which is the correct answer for the adapters still on the older per-kind
  *  connect path, and for plugins that have no accounts at all. */

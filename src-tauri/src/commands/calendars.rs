@@ -19,7 +19,6 @@ use plugin_core::{PluginManager, RecurrenceCapabilities};
 use super::birthdays::{
     is_birthday_calendar_id, list_birthday_calendars, synthesise_birthday_events,
 };
-use super::plugins::plugin_id_for_adapter_kind;
 use super::{CommandError, CommandResult};
 use crate::accounts::{AccountsRepo, AdapterKind};
 use crate::db::DbHandle;
@@ -64,12 +63,13 @@ fn recurrence_caps_for_account(
     let Some(kind) = account_kinds.get(account_id) else {
         return RecurrenceCapabilities::default();
     };
-    let Some(plugin_id) = plugin_id_for_adapter_kind(*kind) else {
-        // Local has no plugin — full support.
-        return RecurrenceCapabilities::default();
-    };
+    // Which plugin serves this kind is the PLUGIN's own statement, read from
+    // its manifest. A host-internal kind (the local store) has none, and full
+    // RFC-5545 support is the right fallback — the host's own SQLite store has
+    // no restrictions, and a missing manifest must not silently strip options
+    // the source might actually support.
     plugin_manager
-        .get_including_disabled(plugin_id)
+        .plugin_for_adapter_kind(kind.as_str())
         .map(|p| p.manifest.recurrence.clone())
         .unwrap_or_default()
 }

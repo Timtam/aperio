@@ -8,6 +8,7 @@
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled adapter for Google Calendar, Google Tasks and Google People (Contacts).",
+  "adapter_kind": "google",
   "signed": false,
   "tasks": {
     "subtasks": true,

@@ -260,6 +260,27 @@ impl Default for TaskCapabilities {
     }
 }
 
+/// One account-bearing adapter a loaded plugin serves.
+///
+/// What a connect picker needs and nothing more. It is assembled from the
+/// manifests at call time rather than kept anywhere, so enabling or disabling a
+/// plugin changes the answer immediately.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdapterKindInfo {
+    /// The value accounts of this adapter carry in `accounts.adapter_kind`.
+    pub kind: String,
+    /// The plugin's display name — the label to use when the app has no
+    /// translation for this kind, which is the normal case for a third-party
+    /// plugin.
+    pub name: String,
+    pub plugin_id: String,
+    /// Whether accounts of this adapter own calendars and task lists.
+    pub owns_containers: bool,
+    /// Whether it can be connected through the generic schema-driven flow.
+    /// False for the adapters still on the host's older per-kind path.
+    pub declares_account_schema: bool,
+}
+
 /// Parsed `plugin.json`. All fields are owned strings so the
 /// manifest survives the file handle being dropped.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -332,6 +353,26 @@ pub struct PluginManifest {
     /// for the adapters still on the host's older per-kind connect path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<AccountSchema>,
+
+    /// The value this plugin's accounts carry in `accounts.adapter_kind` — the
+    /// short, stable routing key that identifies which adapter a row belongs
+    /// to (`"caldav"`, `"webex"`, …).
+    ///
+    /// Declared here rather than enumerated in the host: this is the mapping
+    /// that used to force an edit to the core before any adapter could exist.
+    /// The host builds the reverse map by asking the loaded plugins.
+    ///
+    /// It is deliberately NOT the plugin id. The kind is persisted in every
+    /// account row and travels in every sync payload, so it has to stay
+    /// byte-stable for the life of the data; the plugin id is free to change
+    /// when a plugin is renamed or re-homed. A new adapter is free to use its
+    /// id as its kind — nothing stops it — but the two are separate promises.
+    ///
+    /// Absent for plugins whose accounts the host does not route this way
+    /// (sync adapters live in `user_prefs`, notification channels have no
+    /// accounts at all).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapter_kind: Option<String>,
 }
 
 impl PluginManifest {

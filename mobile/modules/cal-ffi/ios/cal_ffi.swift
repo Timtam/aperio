@@ -2257,6 +2257,15 @@ public protocol HostProtocol: AnyObject, Sendable {
     func listAccountsMissingCredentialsJson() throws  -> String
     
     /**
+     * Every adapter this build can connect an account for, as JSON.
+     *
+     * Assembled from the loaded manifests rather than from a list in the UI:
+     * which adapters exist is decided by which plugins are embedded, and the
+     * connect picker has no business knowing that in advance.
+     */
+    func listAdapterKindsJson() throws  -> String
+    
+    /**
      * All calendars (local + external + synthetic birthday layers) as a JSON
      * `CalendarRow[]`, and — as a side effect — primes the registry's
      * calendar→account route map so the event methods can route. External
@@ -3833,6 +3842,21 @@ open func isDeviceAccount(accountId: String) -> Bool  {
 open func listAccountsMissingCredentialsJson()throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_list_accounts_missing_credentials_json(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Every adapter this build can connect an account for, as JSON.
+     *
+     * Assembled from the loaded manifests rather than from a list in the UI:
+     * which adapters exist is decided by which plugins are embedded, and the
+     * connect picker has no business knowing that in advance.
+     */
+open func listAdapterKindsJson()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_list_adapter_kinds_json(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -8519,6 +8543,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_list_accounts_missing_credentials_json() != 60783) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_list_adapter_kinds_json() != 24838) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_list_calendars_json() != 16827) {

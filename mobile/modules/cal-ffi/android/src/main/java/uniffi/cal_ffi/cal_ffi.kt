@@ -1016,6 +1016,8 @@ external fun uniffi_cal_ffi_checksum_method_host_is_device_account(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_list_accounts_missing_credentials_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_list_adapter_kinds_json(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_list_calendars_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_list_color_labels_json(
@@ -1393,6 +1395,8 @@ external fun uniffi_cal_ffi_fn_method_host_import_sound_json(`ptr`: Long,`path`:
 external fun uniffi_cal_ffi_fn_method_host_is_device_account(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
 external fun uniffi_cal_ffi_fn_method_host_list_accounts_missing_credentials_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_list_adapter_kinds_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_calendars_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1952,6 +1956,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_list_accounts_missing_credentials_json() != 60783.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_list_adapter_kinds_json() != 24838.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_list_calendars_json() != 16827.toShort()) {
@@ -4604,6 +4611,15 @@ public interface HostInterface {
     fun `listAccountsMissingCredentialsJson`(): kotlin.String
     
     /**
+     * Every adapter this build can connect an account for, as JSON.
+     *
+     * Assembled from the loaded manifests rather than from a list in the UI:
+     * which adapters exist is decided by which plugins are embedded, and the
+     * connect picker has no business knowing that in advance.
+     */
+    fun `listAdapterKindsJson`(): kotlin.String
+    
+    /**
      * All calendars (local + external + synthetic birthday layers) as a JSON
      * `CalendarRow[]`, and — as a side effect — primes the registry's
      * calendar→account route map so the event methods can route. External
@@ -6499,6 +6515,27 @@ open class Host: Disposable, AutoCloseable, HostInterface
     callWithHandle {
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_method_host_list_accounts_missing_credentials_json(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Every adapter this build can connect an account for, as JSON.
+     *
+     * Assembled from the loaded manifests rather than from a list in the UI:
+     * which adapters exist is decided by which plugins are embedded, and the
+     * connect picker has no business knowing that in advance.
+     */
+    @Throws(StoreException::class)override fun `listAdapterKindsJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_list_adapter_kinds_json(
         it,
         _status)
 }

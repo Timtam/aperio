@@ -53,39 +53,15 @@ pub fn pref_key_for_disabled(plugin_id: &str) -> String {
     format!("{PREF_PREFIX_PLUGIN_DISABLED}{plugin_id}")
 }
 
-/// Inverse of [`adapter_kind_for_plugin`]: maps an
-/// [`AdapterKind`] to the canonical plugin id used to serve
-/// it. Returns `None` for kinds that aren't backed by a
-/// plugin (currently just `Local`, which is host-internal).
-/// Used by `list_accounts` to compute the `plugin_loaded`
-/// status per row + by the §20.8 "Plugin fehlt" indicator on
-/// AccountsPanel.
-pub fn plugin_id_for_adapter_kind(kind: AdapterKind) -> Option<&'static str> {
-    // One shared source of the kind→plugin map now lives on AdapterKind itself
-    // (host-core), so desktop + mobile can't drift when an adapter is added.
-    kind.plugin_id()
-}
-
-/// Map a plugin id to the [`AdapterKind`] used to find
-/// matching account rows. Returns `None` for plugin types that
-/// aren't account-scoped (sync adapters live in user_prefs,
-/// not the accounts table; notification plugins have no
-/// per-account state yet).
-fn adapter_kind_for_plugin(plugin_id: &str) -> Option<AdapterKind> {
-    match plugin_id {
-        "com.aperio.cal-adapter-caldav" => Some(AdapterKind::Caldav),
-        "com.aperio.cal-adapter-ical" => Some(AdapterKind::Ical),
-        "com.aperio.cal-adapter-google" => Some(AdapterKind::Google),
-        "com.aperio.cal-adapter-microsoft-graph" => Some(AdapterKind::MicrosoftGraph),
-        "com.aperio.cal-adapter-ews" => Some(AdapterKind::Ews),
-        "com.aperio.cal-adapter-vikunja" => Some(AdapterKind::Vikunja),
-        "com.aperio.cal-adapter-todoist" => Some(AdapterKind::Todoist),
-        "com.aperio.vc-adapter-zoom" => Some(AdapterKind::Zoom),
-        "com.aperio.vc-adapter-teams" => Some(AdapterKind::Teams),
-        "com.aperio.vc-adapter-meet" => Some(AdapterKind::Meet),
-        "com.aperio.vc-adapter-webex" => Some(AdapterKind::Webex),
-        _ => None,
-    }
+/// The [`AdapterKind`] a plugin serves, from its own manifest.
+///
+/// `None` for plugin types that are not account-scoped: sync adapters live in
+/// `user_prefs`, notification channels have no per-account state.
+fn adapter_kind_for_plugin(plugin_id: &str, plugin_manager: &PluginManager) -> Option<AdapterKind> {
+    plugin_manager
+        .get_including_disabled(plugin_id)
+        .and_then(|p| p.manifest.adapter_kind.clone())
+        .map(AdapterKind::new)
 }
 
 /// Map a sync-adapter plugin id to the `sync.adapter.kind`
@@ -339,7 +315,7 @@ pub async fn set_plugin_enabled(
     //    plugin-missing error and surface it through the
     //    SyncPanel.
     if changed {
-        if let Some(kind) = adapter_kind_for_plugin(&request.plugin_id) {
+        if let Some(kind) = adapter_kind_for_plugin(&request.plugin_id, plugin_manager.inner()) {
             let accounts_repo = AccountsRepo::new(&shared);
             let accounts = accounts_repo.list().map_err(|e| CommandError {
                 code: "internal",
@@ -534,7 +510,7 @@ pub async fn install_plugin_archive(
     // installing the plugin should bring them back online
     // without an app restart.
     let plugin_id = installed.manifest.id.clone();
-    if let Some(kind) = adapter_kind_for_plugin(&plugin_id) {
+    if let Some(kind) = adapter_kind_for_plugin(&plugin_id, plugin_manager.inner()) {
         let shared = db.shared();
         let accounts_repo = AccountsRepo::new(&shared);
         let accounts = accounts_repo.list().map_err(|e| CommandError {
@@ -677,7 +653,7 @@ async fn try_unload_for_upgrade(
     //    the account so we can re-register on rollback or
     //    after the new version loads.
     let mut affected_accounts = Vec::new();
-    if let Some(kind) = adapter_kind_for_plugin(plugin_id) {
+    if let Some(kind) = adapter_kind_for_plugin(plugin_id, plugin_manager) {
         let accounts_repo = AccountsRepo::new(db);
         let accounts = accounts_repo.list().map_err(|e| CommandError {
             code: "internal",

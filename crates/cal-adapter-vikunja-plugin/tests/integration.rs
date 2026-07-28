@@ -25,6 +25,7 @@ fn manifest() -> PluginManifest {
         recurrence: Default::default(),
         tasks: Default::default(),
         account: None,
+        adapter_kind: None,
     }
 }
 

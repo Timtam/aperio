@@ -260,19 +260,26 @@ export interface SearchResults {
 /** Adapter kinds known to the backend. Phase 6a only allows `local`
  *  to be created; the others appear in the UI as "coming soon" until
  *  their respective adapter lands. */
-export type AdapterKind =
-  | 'local'
-  | 'caldav'
-  | 'ical'
-  | 'google'
-  | 'microsoft_graph'
-  | 'ews'
-  | 'vikunja'
-  | 'todoist'
-  | 'zoom'
-  | 'teams'
-  | 'meet'
-  | 'webex';
+/** Which adapter an account belongs to.
+ *
+ *  A plain string, deliberately. It used to be a closed union, which meant an
+ *  adapter could not exist until this file was edited — and the frontend has no
+ *  business holding the list at all: it is decided by which plugins are
+ *  installed, which is a runtime fact. `listAdapterKinds()` asks the host.
+ *
+ *  The VALUES are unchanged and have to stay that way: this string is persisted
+ *  in every account row and travels in every sync payload, so an older device
+ *  matches on exactly these bytes.
+ *
+ *  The two host-internal kinds are the only ones the app knows by name, because
+ *  neither is a plugin: `local` is the built-in store and `device_calendar` is
+ *  built over a native bridge. */
+export type AdapterKind = string;
+
+/** The built-in local store. */
+export const ADAPTER_KIND_LOCAL = 'local';
+/** The device's own calendar + reminders (mobile only, never synced). */
+export const ADAPTER_KIND_DEVICE_CALENDAR = 'device_calendar';
 
 export interface Account {
   id: string;

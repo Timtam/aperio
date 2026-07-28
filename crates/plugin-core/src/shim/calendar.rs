@@ -587,6 +587,7 @@ mod tests {
                 recurrence: Default::default(),
                 tasks: Default::default(),
                 account: None,
+                adapter_kind: None,
             },
             descriptor_ptr,
             noop_destroy,

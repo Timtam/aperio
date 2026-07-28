@@ -8,5 +8,6 @@
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled read-only calendar adapter for .ics-feed URLs — public calendars, hosted .ics files, share links from Google/Apple/iCloud.",
+  "adapter_kind": "ical",
   "signed": false
 }

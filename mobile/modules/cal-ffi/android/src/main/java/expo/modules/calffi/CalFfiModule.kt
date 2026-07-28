@@ -640,6 +640,10 @@ class CalFfiModule : Module() {
     // plugin.json and the host executes the declaration, so adding an adapter
     // adds no code here either.
 
+    AsyncFunction("listAdapterKindsJson") {
+      host.listAdapterKindsJson()
+    }
+
     AsyncFunction("accountFormSpecJson") { adapterKind: String ->
       host.accountFormSpecJson(adapterKind)
     }

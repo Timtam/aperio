@@ -15,6 +15,7 @@ import { FocusableNote } from '../a11y/FocusableNote';
 import {
   accountFormSpec,
   connectAccount,
+  listAdapterKinds,
   connectGoogleAccount,
   connectMicrosoftAccount,
   createAccount,
@@ -34,7 +35,7 @@ import {
   testTodoistConnection,
   testVikunjaConnection,
 } from '../api/client';
-import type { AccountFormSpec } from '../api/client';
+import type { AccountFormSpec, AdapterKindInfo } from '../api/client';
 import type { Account, AdapterKind } from '../api/types';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
@@ -75,31 +76,14 @@ const CONTACTS_CAPABLE_KINDS: ReadonlySet<AdapterKind> = new Set([
  * not-yet-implemented entries disabled and labelled "coming soon".
  */
 
-/** Order of the kind picker. Local first because it's the only
- *  enabled choice in Phase 6a; the others follow the rough release
- *  order announced in the spec. */
-const KIND_ORDER: AdapterKind[] = [
+/** The kinds the host has no plugin for because it implements them itself.
+ *
+ *  `local` is the built-in store; it is created during bootstrap and is not
+ *  offered in the picker. Everything else in the picker comes from
+ *  `listAdapterKinds()`, i.e. from the plugins that are actually installed. */
+const HOST_INTERNAL_KINDS: ReadonlySet<AdapterKind> = new Set([
   'local',
-  'caldav',
-  'ical',
-  'google',
-  'microsoft_graph',
-  'ews',
-  'vikunja',
-  'todoist',
-  'webex',
-];
-
-const ENABLED_KINDS: ReadonlySet<AdapterKind> = new Set([
-  'local',
-  'caldav',
-  'ical',
-  'google',
-  'microsoft_graph',
-  'ews',
-  'vikunja',
-  'todoist',
-  'webex',
+  'device_calendar',
 ]);
 
 interface CaldavFields {
@@ -218,7 +202,9 @@ export function AccountsPanel() {
     null,
   );
 
-  const [kind, setKind] = useState<AdapterKind>('local');
+  // Empty until the host answers: the picker cannot preselect an adapter
+  // before it knows which exist. Set to the first offered kind once it does.
+  const [kind, setKind] = useState<AdapterKind>('');
   const [displayName, setDisplayName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -230,6 +216,10 @@ export function AccountsPanel() {
   // The connect form for the selected kind, as that ADAPTER declares it. Null
   // while it is being fetched, or for the adapters still on the older per-kind
   // path below. Nothing in this component knows what any of the fields mean.
+  // Which adapters this build can connect, straight from the host. Empty until
+  // the first answer arrives; the picker simply has nothing to offer until then,
+  // which is honest — it does not yet know.
+  const [availableKinds, setAvailableKinds] = useState<AdapterKindInfo[]>([]);
   const [formSpec, setFormSpec] = useState<AccountFormSpec | null>(null);
   const [formValues, setFormValues] = useState<
     Record<string, string | boolean>
@@ -269,6 +259,33 @@ export function AccountsPanel() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // The adapter list is a property of the installed plugins, so it is fetched
+  // rather than declared. Re-fetched on `dataVersion` because enabling or
+  // disabling a plugin in Settings changes the answer.
+  useEffect(() => {
+    let cancelled = false;
+    listAdapterKinds()
+      .then((kinds) => {
+        if (cancelled) return;
+        const offered = kinds.filter((k) => !HOST_INTERNAL_KINDS.has(k.kind));
+        setAvailableKinds(offered);
+        // Preselect the first one, but never overwrite a choice the user has
+        // already made — this effect re-runs whenever a plugin is toggled.
+        setKind((current) =>
+          offered.some((entry) => entry.kind === current)
+            ? current
+            : (offered[0]?.kind ?? ''),
+        );
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn('list_adapter_kinds failed', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dataVersion]);
 
   // Fetch the selected adapter's own connect form. Deferred to the moment a
   // kind is picked rather than fetched on mount: it is a question about one
@@ -388,8 +405,9 @@ export function AccountsPanel() {
         setError(t('dialogs.accounts.nameRequired'));
         return;
       }
-      if (!ENABLED_KINDS.has(kind)) {
-        // Defence in depth — UI should already block disabled kinds.
+      if (!availableKinds.some((entry) => entry.kind === kind)) {
+        // Defence in depth: the picker only offers what the host reported, but
+        // a plugin can be switched off between opening the form and submitting.
         setError(t('dialogs.accounts.kindUnavailable'));
         return;
       }
@@ -597,6 +615,7 @@ export function AccountsPanel() {
       }
     },
     [
+      availableKinds,
       displayName,
       kind,
       formSpec,
@@ -1385,16 +1404,14 @@ export function AccountsPanel() {
                 value={kind}
                 onChange={(e) => setKind(e.target.value as AdapterKind)}
               >
-                {KIND_ORDER.map((k) => (
-                  <option
-                    key={k}
-                    value={k}
-                    disabled={!ENABLED_KINDS.has(k)}
-                  >
-                    {t(`dialogs.accounts.kindName.${k}`)}
-                    {!ENABLED_KINDS.has(k)
-                      ? ` — ${t('dialogs.accounts.comingSoon')}`
-                      : ''}
+                {/* Whatever the host reported. A bundled adapter gets its
+                    translated name; anything else falls back to the plugin's
+                    own, which beats a missing-key marker. */}
+                {availableKinds.map((entry) => (
+                  <option key={entry.kind} value={entry.kind}>
+                    {t(`dialogs.accounts.kindName.${entry.kind}`, {
+                      defaultValue: entry.name,
+                    })}
                   </option>
                 ))}
               </select>
@@ -1903,7 +1920,7 @@ export function AccountsPanel() {
                   submitting ||
                   testing ||
                   discovering ||
-                  !ENABLED_KINDS.has(kind) ||
+                  !availableKinds.some((entry) => entry.kind === kind) ||
                   undefined
                 }
               >

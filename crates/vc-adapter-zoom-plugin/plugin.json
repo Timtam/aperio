@@ -7,5 +7,6 @@
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Generate Zoom meeting links via the Zoom Meeting API v2. Uses a separate Zoom OAuth flow per account.",
+  "adapter_kind": "zoom",
   "signed": false
 }

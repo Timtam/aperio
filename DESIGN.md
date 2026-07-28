@@ -3165,6 +3165,30 @@ für die Adapter, die noch auf dem älteren, pro Art fest verdrahteten Pfad lieg
 }
 ```
 
+**`adapter_kind`.** Daneben (auf der obersten Manifest-Ebene, nicht im
+`account`-Block) deklariert ein kontoführender Adapter, welchen Wert seine Konten
+in der Spalte `accounts.adapter_kind` tragen — der kurze, stabile Routing-
+Schlüssel (`"caldav"`, `"webex"`, …). Genau diese Zuordnung war früher im Kern
+aufgezählt und zwang zu einer Änderung an der Kernanwendung, bevor irgendein
+Adapter existieren konnte; jetzt baut der Host die Rückrichtung aus den geladenen
+Manifesten (`PluginManager::plugin_for_adapter_kind`).
+
+Der Schlüssel ist **nicht** die Plugin-ID. Er steht in jeder Kontozeile und
+reist in jeder Sync-Nutzlast, muss also für die Lebensdauer der Daten
+byte-stabil bleiben; die Plugin-ID darf sich ändern, wenn ein Plugin umbenannt
+oder verschoben wird. Ein neuer Adapter darf seine ID als Art verwenden — nichts
+hindert ihn daran —, aber es sind zwei verschiedene Zusagen.
+
+Für den Host ist die Art seit dieser Runde eine **undurchsichtige Zeichenkette**.
+Nur zwei Werte kennt er beim Namen, weil sie keine Plugins sind und nie welche
+sein werden: `local` (der eingebaute Speicher) und `device_calendar` (der
+Gerätekalender über eine native Brücke). Eine Art, für die dieser Build kein
+Plugin hat, ist damit kein Parse-Fehler mehr, sondern schlicht ein fehlendes
+Plugin: die Zeile wird gelistet, behält ihre Art unverändert und registriert sich
+nicht — was die Kontenverwaltung ohnehin schon als „Plugin fehlt" anzeigt. Das
+ist die Sync-Verträglichkeit: ein Gerät mit älterem Stand verliert die Konten
+eines neueren nicht mehr aus der Anzeige.
+
 **Felder.** `key` ist zugleich der Schlüssel, unter dem der Wert in der
 Init-Config des Plugins auftaucht — ein Nicht-Geheimnis wird unter demselben
 Namen in `config_json` abgelegt, die Rückreise braucht also keine Zuordnungs-

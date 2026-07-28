@@ -14,21 +14,18 @@ import CalFfi from '../../modules/cal-ffi';
 
 import { scheduleBackgroundPush } from './syncTriggers';
 
-/** Adapter kinds the engine knows. Snake_case to match the Rust serde form. */
-export type AdapterKind =
-  | 'local'
-  | 'caldav'
-  | 'ical'
-  | 'google'
-  | 'microsoft_graph'
-  | 'ews'
-  | 'vikunja'
-  | 'todoist'
-  | 'device_calendar'
-  | 'zoom'
-  | 'teams'
-  | 'meet'
-  | 'webex';
+/** Which adapter an account belongs to — a plain string, decided by which
+ *  plugins are installed rather than by a list written here. `accountFormSpec`
+ *  and the host's own kind listing are what tell the UI which exist.
+ *
+ *  The VALUES are unchanged: this string is persisted in every account row and
+ *  travels in every sync payload, so an older device matches these bytes. */
+export type AdapterKind = string;
+
+/** The built-in local store. */
+export const ADAPTER_KIND_LOCAL = 'local';
+/** The device's own calendar + reminders. Never synced. */
+export const ADAPTER_KIND_DEVICE_CALENDAR = 'device_calendar';
 
 /** A persisted account row (the desktop `Account` wire shape). */
 export interface Account {
@@ -178,6 +175,25 @@ export const OAUTH_PLUGIN_IDS: Record<'google' | 'microsoft_graph', string> = {
 // and the host executes the declaration. Nothing here names a provider, and
 // adding an adapter adds no code — the desktop half is identical, and both call
 // the same Rust.
+
+/** One adapter this build can connect an account for. */
+export interface AdapterKindInfo {
+  kind: AdapterKind;
+  /** The plugin's own display name — the label when the app has no translation
+   *  for this kind, which is the normal case for a third-party plugin. */
+  name: string;
+  plugin_id: string;
+  owns_containers: boolean;
+  declares_account_schema: boolean;
+}
+
+/** Every adapter this build can connect an account for.
+ *
+ *  Asked of the host rather than written into the UI: which adapters exist is
+ *  decided by which plugins are embedded. Host-internal kinds (the local store,
+ *  the device calendar) are not included — the screen adds those itself. */
+export const listAdapterKinds = async (): Promise<AdapterKindInfo[]> =>
+  JSON.parse(await CalFfi.listAdapterKindsJson()) as AdapterKindInfo[];
 
 /** The connect form an adapter declares, or `null` when it declares none —
  *  which is the correct answer for the adapters still on the older per-kind

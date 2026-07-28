@@ -1428,7 +1428,7 @@ impl Host {
     /// smoke-test.
     fn probe_account(
         &self,
-        adapter_kind: AdapterKind,
+        adapter_kind: &AdapterKind,
         config_json: &str,
         secret: Option<&str>,
     ) -> Result<(), StoreError> {
@@ -1663,11 +1663,11 @@ impl Host {
         if account_id == LOCAL_ID {
             return local_task_capabilities();
         }
-        let Some(plugin_id) = account_kinds.get(account_id).and_then(|k| k.plugin_id()) else {
-            return TaskCapabilities::default();
-        };
-        self.plugin_manager
-            .get_including_disabled(plugin_id)
+        // Which plugin serves this kind is the PLUGIN's own statement, read
+        // from its manifest — the host keeps no kind→plugin table.
+        account_kinds
+            .get(account_id)
+            .and_then(|kind| self.plugin_manager.plugin_for_adapter_kind(kind.as_str()))
             .map(|p| p.manifest.tasks.clone())
             .unwrap_or_default()
     }
@@ -1685,11 +1685,13 @@ impl Host {
         if account_id == LOCAL_ID {
             return RecurrenceCapabilities::default();
         }
-        let Some(plugin_id) = account_kinds.get(account_id).and_then(|k| k.plugin_id()) else {
+        let Some(plugin) = account_kinds
+            .get(account_id)
+            .and_then(|kind| self.plugin_manager.plugin_for_adapter_kind(kind.as_str()))
+        else {
             return RecurrenceCapabilities::default();
         };
-        self.plugin_manager
-            .get_including_disabled(plugin_id)
+        Some(plugin)
             .map(|p| p.manifest.recurrence.clone())
             .unwrap_or_default()
     }
@@ -2397,14 +2399,8 @@ impl Host {
         // (a later phase); reject them here rather than persisting a row
         // that can never authenticate.
         if !matches!(
-            req.adapter_kind,
-            AdapterKind::Local
-                | AdapterKind::Caldav
-                | AdapterKind::Ical
-                | AdapterKind::Ews
-                | AdapterKind::Vikunja
-                | AdapterKind::Todoist
-                | AdapterKind::DeviceCalendar
+            req.adapter_kind.as_str(),
+            "local" | "caldav" | "ical" | "ews" | "vikunja" | "todoist" | "device_calendar"
         ) {
             return Err(StoreError::InvalidField {
                 field: "adapter_kind".to_string(),
@@ -2421,7 +2417,7 @@ impl Host {
         // bridge to register. Bail early if the bridge isn't installed (e.g. the
         // kind was requested on a platform without one) so we never persist a row
         // that can't come up.
-        let is_device = req.adapter_kind == AdapterKind::DeviceCalendar;
+        let is_device = req.adapter_kind == "device_calendar";
         let device_provider = if is_device {
             Some(
                 self.device_provider()
@@ -2446,13 +2442,17 @@ impl Host {
         // tests its credentials here.
         #[cfg(not(test))]
         if !is_device {
-            self.probe_account(req.adapter_kind, &req.config_json, req.secret.as_deref())?;
+            self.probe_account(&req.adapter_kind, &req.config_json, req.secret.as_deref())?;
         }
 
         let shared = self.db.shared();
         let repo = AccountsRepo::new(&shared);
         let created = repo
-            .create(req.adapter_kind, req.display_name.trim(), &req.config_json)
+            .create(
+                req.adapter_kind.clone(),
+                req.display_name.trim(),
+                &req.config_json,
+            )
             .map_err(acc_err)?;
 
         // Persist the secret right after the row so the keychain and DB
@@ -2460,8 +2460,8 @@ impl Host {
         // path reads back: API token for Vikunja/Todoist, password
         // otherwise. A write failure is fatal — tear the row down.
         if let Some(secret) = req.secret {
-            let slot = match req.adapter_kind {
-                AdapterKind::Vikunja | AdapterKind::Todoist => SecretSlot::ApiToken,
+            let slot = match req.adapter_kind.as_str() {
+                "vikunja" | "todoist" => SecretSlot::ApiToken,
                 _ => SecretSlot::Password,
             };
             if let Err(err) = self.secret_store.store(&created.id, slot, &secret) {
@@ -2488,7 +2488,7 @@ impl Host {
             // Host-internal device adapter — insert directly (no plugin, no
             // secret, can't fail). The provider's presence was checked above.
             self.register_device_adapter(&created.id, provider);
-        } else if req.adapter_kind != AdapterKind::Local {
+        } else if req.adapter_kind != "local" {
             if let Err(err) = self.registry.register(&created) {
                 let _ = self.secret_store.delete_all(&created.id);
                 let _ = repo.delete(&created.id);
@@ -2519,7 +2519,7 @@ impl Host {
     /// desktop `test_*_connection` commands.
     pub fn test_account_json(&self, request_json: String) -> Result<(), StoreError> {
         let req: NewAccountRequest = from_json("test account", &request_json)?;
-        self.probe_account(req.adapter_kind, &req.config_json, req.secret.as_deref())
+        self.probe_account(&req.adapter_kind, &req.config_json, req.secret.as_deref())
     }
 
     /// Delete an account: unregister its adapter, clear its secrets, and
@@ -2535,7 +2535,7 @@ impl Host {
         // row is gone.
         let is_device = matches!(
             repo.get(&account_id),
-            Ok(Some(account)) if account.adapter_kind == AdapterKind::DeviceCalendar
+            Ok(Some(account)) if account.adapter_kind == "device_calendar"
         );
         repo.delete(&account_id).map_err(acc_err)?;
         // Propagate the deletion to other devices (cascades secrets there too).
@@ -2563,7 +2563,7 @@ impl Host {
         // Device-local accounts are never synced (Option A): keep the rename
         // device-local too, so no other device receives an update for a row it
         // doesn't have.
-        if account.adapter_kind != AdapterKind::DeviceCalendar {
+        if account.adapter_kind != "device_calendar" {
             self.writer
                 .append(SyncEvent::AccountUpdated(account_payload(&account)));
         }
@@ -2583,10 +2583,10 @@ impl Host {
         let all = repo.list().map_err(acc_err)?;
         let mut out = Vec::new();
         for acc in all {
-            if acc.id == "local" || acc.adapter_kind == AdapterKind::Local {
+            if acc.id == "local" || acc.adapter_kind == "local" {
                 continue;
             }
-            let Some(slot) = required_secret_slot(acc.adapter_kind) else {
+            let Some(slot) = required_secret_slot(&acc.adapter_kind) else {
                 continue;
             };
             if self.secret_store.retrieve(&acc.id, slot).is_err() {
@@ -2611,16 +2611,13 @@ impl Host {
             .get(&account_id)
             .map_err(acc_err)?
             .ok_or(StoreError::NotFound)?;
-        if account.adapter_kind == AdapterKind::Local {
+        if account.adapter_kind == "local" {
             return Err(StoreError::InvalidField {
                 field: "account_id".to_string(),
                 detail: "the local account has no credential slot".to_string(),
             });
         }
-        if matches!(
-            account.adapter_kind,
-            AdapterKind::Google | AdapterKind::MicrosoftGraph
-        ) {
+        if matches!(account.adapter_kind.as_str(), "google" | "microsoft_graph") {
             return Err(StoreError::InvalidField {
                 field: "account_id".to_string(),
                 detail: format!(
@@ -2629,8 +2626,8 @@ impl Host {
                 ),
             });
         }
-        let slot = match account.adapter_kind {
-            AdapterKind::Vikunja | AdapterKind::Todoist => SecretSlot::ApiToken,
+        let slot = match account.adapter_kind.as_str() {
+            "vikunja" | "todoist" => SecretSlot::ApiToken,
             _ => SecretSlot::Password,
         };
         self.secret_store
@@ -3942,7 +3939,7 @@ impl Host {
             .list()
             .unwrap_or_default()
             .into_iter()
-            .any(|a| a.id == account_id && a.adapter_kind == AdapterKind::DeviceCalendar)
+            .any(|a| a.id == account_id && a.adapter_kind == "device_calendar")
     }
 
     /// Delete a task, routed by the optional `list_id` (the desktop `delete_task`
@@ -5373,7 +5370,7 @@ impl Host {
         let repo = AccountsRepo::new(&shared);
         if let Ok(accounts) = repo.list() {
             for account in accounts {
-                if account.adapter_kind == AdapterKind::DeviceCalendar {
+                if account.adapter_kind == "device_calendar" {
                     self.register_device_adapter(&account.id, Arc::clone(&provider));
                 }
             }
@@ -6830,7 +6827,7 @@ impl Host {
         }
         // Google's token endpoint requires the secret; Microsoft (a PKCE public
         // client) carries none, so only gate it for Google.
-        if matches!(req.adapter_kind, AdapterKind::Google)
+        if req.adapter_kind == "google"
             && req
                 .client_secret
                 .as_deref()
@@ -6956,10 +6953,7 @@ impl Host {
             .get(&account_id)
             .map_err(acc_err)?
             .ok_or(StoreError::NotFound)?;
-        if !matches!(
-            account.adapter_kind,
-            AdapterKind::Google | AdapterKind::MicrosoftGraph
-        ) {
+        if !matches!(account.adapter_kind.as_str(), "google" | "microsoft_graph") {
             return Err(StoreError::InvalidField {
                 field: "account_id".to_string(),
                 detail: format!(
@@ -6974,7 +6968,7 @@ impl Host {
                 detail: "client_id must not be empty".to_string(),
             });
         }
-        if matches!(account.adapter_kind, AdapterKind::Google)
+        if account.adapter_kind == "google"
             && req
                 .client_secret
                 .as_deref()
@@ -7062,18 +7056,15 @@ impl Host {
     /// in the UI: it is a question about what this build carries, which the
     /// frontend cannot see and should never be handed.
     pub fn account_form_spec_json(&self, adapter_kind: String) -> Result<String, StoreError> {
-        let kind = AdapterKind::parse(&adapter_kind).ok_or_else(|| StoreError::InvalidField {
-            field: "adapter_kind".to_string(),
-            detail: format!("unknown adapter kind `{adapter_kind}`"),
-        })?;
-        let Some(plugin_id) = kind.plugin_id() else {
+        // No "unknown kind" branch: which kinds exist is a fact about which
+        // plugins are loaded, so an unrecognised one is simply a plugin that
+        // declares no form — the same answer as an adapter still on the older
+        // per-kind path.
+        let Some(plugin) = self.plugin_manager.plugin_for_adapter_kind(&adapter_kind) else {
             return Ok("null".to_string());
         };
-        let Some(schema) = self
-            .plugin_manager
-            .get(plugin_id)
-            .and_then(|p| p.manifest.account.clone())
-        else {
+        let plugin_id = plugin.manifest.id.clone();
+        let Some(schema) = plugin.manifest.account.clone() else {
             return Ok("null".to_string());
         };
         let spec = serde_json::json!({
@@ -7088,14 +7079,19 @@ impl Host {
             // Derived from the plugin's declared TYPE, so a frontend can skip
             // the catalog refresh for an adapter that owns no containers
             // without keeping its own list of which adapters those are.
-            "owns_containers": self
-                .plugin_manager
-                .get(plugin_id)
-                .is_some_and(|p| {
-                    p.manifest.plugin_type == plugin_core::PluginType::CalendarAdapter
-                }),
+            "owns_containers":
+                plugin.manifest.plugin_type == plugin_core::PluginType::CalendarAdapter,
         });
         Ok(spec.to_string())
+    }
+
+    /// Every adapter this build can connect an account for, as JSON.
+    ///
+    /// Assembled from the loaded manifests rather than from a list in the UI:
+    /// which adapters exist is decided by which plugins are embedded, and the
+    /// connect picker has no business knowing that in advance.
+    pub fn list_adapter_kinds_json(&self) -> Result<String, StoreError> {
+        to_json(&self.plugin_manager.adapter_kinds())
     }
 
     /// Begin a schema-driven OAuth sign-in: build the consent URL for the
@@ -7160,11 +7156,7 @@ impl Host {
             });
         }
         let (plugin_id, schema) = self.schema_for(&req.adapter_kind)?;
-        let kind =
-            AdapterKind::parse(&req.adapter_kind).ok_or_else(|| StoreError::InvalidField {
-                field: "adapter_kind".to_string(),
-                detail: format!("unknown adapter kind `{}`", req.adapter_kind),
-            })?;
+        let kind = AdapterKind::new(req.adapter_kind.clone());
 
         // 1. Exchange FIRST, so a failed sign-in never leaves an orphaned row.
         let mut choice = None;
@@ -7299,23 +7291,22 @@ impl Host {
         &self,
         adapter_kind: &str,
     ) -> Result<(String, plugin_core::account_schema::AccountSchema), StoreError> {
-        let kind = AdapterKind::parse(adapter_kind).ok_or_else(|| StoreError::InvalidField {
-            field: "adapter_kind".to_string(),
-            detail: format!("unknown adapter kind `{adapter_kind}`"),
-        })?;
-        let plugin_id = kind.plugin_id().ok_or_else(|| StoreError::InvalidField {
-            field: "adapter_kind".to_string(),
-            detail: "this adapter kind has no plugin".to_string(),
-        })?;
-        let schema = self
+        let plugin = self
             .plugin_manager
-            .get(plugin_id)
-            .and_then(|p| p.manifest.account.clone())
+            .plugin_for_adapter_kind(adapter_kind)
+            .ok_or_else(|| StoreError::InvalidField {
+                field: "adapter_kind".to_string(),
+                detail: format!("no plugin serves adapter kind `{adapter_kind}`"),
+            })?;
+        let schema = plugin
+            .manifest
+            .account
+            .clone()
             .ok_or_else(|| StoreError::InvalidField {
                 field: "adapter_kind".to_string(),
                 detail: "this adapter declares no account schema".to_string(),
             })?;
-        Ok((plugin_id.to_string(), schema))
+        Ok((plugin.manifest.id.clone(), schema))
     }
 
     /// Resolve the OAuth client from the form's values + this build's posture.
@@ -7444,17 +7435,21 @@ struct CompleteSyncOAuthRequest {
 /// public; an optional Basic-auth password fails open as a 401 on first fetch).
 /// Mirrors the desktop `required_secret_slot` — the credential-repair wizard
 /// uses it to decide which accounts to flag and which slot to rewrite.
-fn required_secret_slot(kind: host_core::accounts::AdapterKind) -> Option<SecretSlot> {
-    use host_core::accounts::AdapterKind;
-    match kind {
+fn required_secret_slot(kind: &host_core::accounts::AdapterKind) -> Option<SecretSlot> {
+    match kind.as_str() {
         // No stored credential: local + iCal feeds need none, and the
         // device-calendar account authenticates via the OS permission grant
         // (EventKit / CalendarProvider), not a keychain secret — so it must NOT
         // surface in the "credentials missing" repair banner.
-        AdapterKind::Ical | AdapterKind::Local | AdapterKind::DeviceCalendar => None,
-        AdapterKind::Vikunja | AdapterKind::Todoist => Some(SecretSlot::ApiToken),
-        AdapterKind::Google | AdapterKind::MicrosoftGraph => Some(SecretSlot::RefreshToken),
-        _ => Some(SecretSlot::Password),
+        "ical" | "local" | "device_calendar" => None,
+        "vikunja" | "todoist" => Some(SecretSlot::ApiToken),
+        "google" | "microsoft_graph" => Some(SecretSlot::RefreshToken),
+        "caldav" | "ews" => Some(SecretSlot::Password),
+        // A kind this build has no entry for. `None` rather than a guess —
+        // the desktop twin says the same, and for the same reason: assuming
+        // `Password` reported every account of an unrecognised OAuth kind as
+        // needing to be reconnected.
+        _ => None,
     }
 }
 
@@ -7489,10 +7484,6 @@ fn acc_err(e: host_core::accounts::AccountsError) -> StoreError {
         AccountsError::DeleteLocalForbidden => StoreError::InvalidField {
             field: "account_id".to_string(),
             detail: "the local account cannot be deleted".to_string(),
-        },
-        AccountsError::UnknownKind(detail) => StoreError::InvalidField {
-            field: "adapter_kind".to_string(),
-            detail,
         },
         AccountsError::Sqlite(e) => StoreError::Storage {
             detail: e.to_string(),

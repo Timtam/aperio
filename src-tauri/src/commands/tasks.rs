@@ -13,7 +13,6 @@ use plugin_core::{PluginManager, TaskCapabilities};
 
 use super::cache_swr;
 use super::cache_swr::TauriCacheObserver;
-use super::plugins::plugin_id_for_adapter_kind;
 use super::{CommandError, CommandResult};
 use crate::accounts::{AccountsRepo, AdapterKind};
 use crate::cache::{CacheObserver, CacheStore, RefreshCoordinator, SyncScope};
@@ -227,12 +226,10 @@ fn task_caps_for_account(
     let Some(kind) = account_kinds.get(account_id) else {
         return TaskCapabilities::default();
     };
-    let Some(plugin_id) = plugin_id_for_adapter_kind(*kind) else {
-        // No plugin for this kind — default capabilities.
-        return TaskCapabilities::default();
-    };
+    // Which plugin serves this kind is the PLUGIN's own statement, read from
+    // its manifest; a kind with no plugin gets the defaults.
     plugin_manager
-        .get_including_disabled(plugin_id)
+        .plugin_for_adapter_kind(kind.as_str())
         .map(|p| p.manifest.tasks.clone())
         .unwrap_or_default()
 }

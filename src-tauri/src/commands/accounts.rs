@@ -8,9 +8,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use tauri::State;
 
-use super::{
-    plugin_id_for_adapter_kind, run_plugin_auth, run_plugin_discover, CommandError, CommandResult,
-};
+use super::{run_plugin_auth, run_plugin_discover, CommandError, CommandResult};
 use crate::accounts::{Account, AccountsError, AccountsRepo, AdapterKind};
 use crate::cache::CacheRefresher;
 use crate::db::DbHandle;
@@ -80,7 +78,7 @@ pub fn backfill_account_events(db: &crate::db::DbHandle, event_log: &EventLogWri
     };
     let mut emitted = 0usize;
     for acc in accounts {
-        if acc.id == "local" || acc.adapter_kind == AdapterKind::Local {
+        if acc.id == "local" || acc.adapter_kind == "local" {
             continue;
         }
         event_log.append(SyncEvent::AccountCreated(account_payload(&acc)));
@@ -138,12 +136,12 @@ pub async fn list_accounts(
     let out = accounts
         .into_iter()
         .map(|account| {
-            let plugin_loaded = match plugin_id_for_adapter_kind(account.adapter_kind) {
-                // Local accounts have no plugin to look up —
-                // they're host-internal and always available.
-                None => true,
-                Some(plugin_id) => plugin_manager.is_enabled(plugin_id),
-            };
+            // A host-internal kind has no plugin to look up and is always
+            // available; anything else is loaded iff a plugin declares it.
+            let plugin_loaded = account.adapter_kind.is_host_internal()
+                || plugin_manager
+                    .plugin_for_adapter_kind(account.adapter_kind.as_str())
+                    .is_some();
             AccountListEntry {
                 account,
                 plugin_loaded,
@@ -190,19 +188,21 @@ pub async fn list_accounts_missing_credentials(
     let all = repo.list()?;
     let mut out = Vec::new();
     for acc in all {
-        if acc.id == "local" || acc.adapter_kind == AdapterKind::Local {
+        if acc.id == "local" || acc.adapter_kind == "local" {
             continue;
         }
         // What "connected" means is the ADAPTER's statement when it makes one:
         // the required secret fields of its schema. The per-kind table below is
         // the fallback for the adapters that have not declared one yet.
-        let slots: Vec<SecretSlot> = acc
-            .adapter_kind
-            .plugin_id()
-            .and_then(|id| plugin_manager.get(id))
+        let slots: Vec<SecretSlot> = plugin_manager
+            .plugin_for_adapter_kind(acc.adapter_kind.as_str())
             .and_then(|p| p.manifest.account.clone())
             .map(|schema| host_core::account_setup::required_slots(&schema))
-            .unwrap_or_else(|| required_secret_slot(acc.adapter_kind).into_iter().collect());
+            .unwrap_or_else(|| {
+                required_secret_slot(&acc.adapter_kind)
+                    .into_iter()
+                    .collect()
+            });
         if slots.iter().any(|slot| !secret_present(&acc.id, *slot)) {
             out.push(acc);
         }
@@ -221,26 +221,32 @@ pub async fn list_accounts_missing_credentials(
 /// `None` means the adapter has no required secret — iCal feeds are typically
 /// public URLs, and an optional Basic-auth password fails open and surfaces as
 /// a 401 on the first fetch.
-fn required_secret_slot(kind: AdapterKind) -> Option<SecretSlot> {
+fn required_secret_slot(kind: &AdapterKind) -> Option<SecretSlot> {
     // Exhaustive on purpose. The catch-all this replaces answered `Password`
     // for every kind it had not heard of, so a new OAuth kind was silently
     // probed for a password it never has — and every working account of that
     // kind was then reported as needing to be reconnected. A missing arm should
     // fail the build, not the user.
-    match kind {
+    match kind.as_str() {
         // No stored credential: iCal feeds are public, Local is host-internal,
         // and the mobile-only device-calendar account authenticates via the OS
         // permission grant (never reaches desktop, but the kind is shared).
-        AdapterKind::Ical | AdapterKind::Local | AdapterKind::DeviceCalendar => None,
-        AdapterKind::Vikunja | AdapterKind::Todoist => Some(SecretSlot::ApiToken),
-        AdapterKind::Google | AdapterKind::MicrosoftGraph => Some(SecretSlot::RefreshToken),
-        AdapterKind::Caldav | AdapterKind::Ews => Some(SecretSlot::Password),
-        // Video conferencing is OAuth throughout. Teams and Meet ride the
-        // token of their calendar sibling, but each still has its own account
-        // row and its own refresh token in its own slot.
-        AdapterKind::Zoom | AdapterKind::Teams | AdapterKind::Meet | AdapterKind::Webex => {
-            Some(SecretSlot::RefreshToken)
-        }
+        "ical" | "local" | "device_calendar" => None,
+        "vikunja" | "todoist" => Some(SecretSlot::ApiToken),
+        "google" | "microsoft_graph" => Some(SecretSlot::RefreshToken),
+        "caldav" | "ews" => Some(SecretSlot::Password),
+        // Video conferencing is OAuth throughout. Teams and Meet ride the token
+        // of their calendar sibling, but each still has its own account row and
+        // its own refresh token in its own slot.
+        "zoom" | "teams" | "meet" | "webex" => Some(SecretSlot::RefreshToken),
+        // A kind this build has no entry for. `None` rather than a guess: the
+        // catch-all this replaces answered `Password`, so a new OAuth kind was
+        // probed for a password it never has and every working account of that
+        // kind was reported as needing to be reconnected. Saying nothing is
+        // required is the harmless direction — the adapter surfaces a real auth
+        // error on first use if it does need one. An adapter that declares an
+        // account schema never reaches here at all.
+        _ => None,
     }
 }
 
@@ -289,13 +295,8 @@ pub async fn create_account(
     // remaining kinds surface as an actionable "coming soon" envelope
     // rather than a half-broken row in the database.
     if !matches!(
-        request.adapter_kind,
-        AdapterKind::Local
-            | AdapterKind::Caldav
-            | AdapterKind::Ical
-            | AdapterKind::Ews
-            | AdapterKind::Vikunja
-            | AdapterKind::Todoist
+        request.adapter_kind.as_str(),
+        "local" | "caldav" | "ical" | "ews" | "vikunja" | "todoist"
     ) {
         return Err(CommandError {
             code: "unsupported",
@@ -331,7 +332,7 @@ pub async fn create_account(
             .unwrap_or("")
     };
 
-    if request.adapter_kind == AdapterKind::Caldav {
+    if request.adapter_kind == "caldav" {
         let Some(secret) = request.secret.as_deref() else {
             return Err(CommandError {
                 code: "invalid_input",
@@ -357,7 +358,7 @@ pub async fn create_account(
         .await?;
     }
 
-    if request.adapter_kind == AdapterKind::Ical {
+    if request.adapter_kind == "ical" {
         smoke_test_ical(
             plugin_manager_ref,
             str_field("feed_url"),
@@ -367,7 +368,7 @@ pub async fn create_account(
         .await?;
     }
 
-    if request.adapter_kind == AdapterKind::Ews {
+    if request.adapter_kind == "ews" {
         let Some(secret) = request.secret.as_deref() else {
             return Err(CommandError {
                 code: "invalid_input",
@@ -383,7 +384,7 @@ pub async fn create_account(
         .await?;
     }
 
-    if request.adapter_kind == AdapterKind::Vikunja {
+    if request.adapter_kind == "vikunja" {
         let Some(secret) = request.secret.as_deref() else {
             return Err(CommandError {
                 code: "invalid_input",
@@ -393,7 +394,7 @@ pub async fn create_account(
         smoke_test_vikunja(plugin_manager_ref, str_field("server_url"), secret).await?;
     }
 
-    if request.adapter_kind == AdapterKind::Todoist {
+    if request.adapter_kind == "todoist" {
         let Some(secret) = request.secret.as_deref() else {
             return Err(CommandError {
                 code: "invalid_input",
@@ -406,7 +407,7 @@ pub async fn create_account(
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
     let created = repo.create(
-        request.adapter_kind,
+        request.adapter_kind.clone(),
         request.display_name.trim(),
         &request.config_json,
     )?;
@@ -423,8 +424,8 @@ pub async fn create_account(
     // what the registry's `register_*` paths look for, so the two
     // sides have to stay in step.
     if let Some(secret) = request.secret {
-        let slot = match request.adapter_kind {
-            AdapterKind::Vikunja | AdapterKind::Todoist => SecretSlot::ApiToken,
+        let slot = match request.adapter_kind.as_str() {
+            "vikunja" | "todoist" => SecretSlot::ApiToken,
             _ => SecretSlot::Password,
         };
         if let Err(err) = secrets::store(&created.id, slot, &secret) {
@@ -450,7 +451,7 @@ pub async fn create_account(
     // reads/writes route through it. We already smoke-tested for
     // CalDAV; treating a registration failure here as fatal keeps
     // the keychain + DB + registry strictly in sync.
-    if request.adapter_kind != AdapterKind::Local {
+    if request.adapter_kind != "local" {
         if let Err(err) = registry.register(&created) {
             let _ = secrets::delete_all(&created.id);
             let _ = repo.delete(&created.id);
@@ -876,10 +877,6 @@ impl From<AccountsError> for CommandError {
                 code: "forbidden",
                 message: "The local account cannot be deleted.".into(),
             },
-            AccountsError::UnknownKind(msg) => CommandError {
-                code: "invalid_input",
-                message: format!("unknown adapter kind: {msg}"),
-            },
             AccountsError::Sqlite(err) => CommandError {
                 code: "internal",
                 message: err.to_string(),
@@ -956,7 +953,7 @@ pub async fn connect_google_account(
     .to_string();
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
-    let created = repo.create(AdapterKind::Google, name, &config_json)?;
+    let created = repo.create(AdapterKind::new("google"), name, &config_json)?;
 
     // 3) Persist tokens to the keychain. If either write fails
     //    we delete the row and surface an error so the user can
@@ -1072,7 +1069,7 @@ pub async fn connect_microsoft_account(
     .to_string();
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
-    let created = repo.create(AdapterKind::MicrosoftGraph, name, &config_json)?;
+    let created = repo.create(AdapterKind::new("microsoft_graph"), name, &config_json)?;
 
     let access = tokens
         .get("access_token")
@@ -1184,17 +1181,15 @@ pub fn account_form_spec(
     adapter_kind: AdapterKind,
 ) -> CommandResult<Option<AccountFormSpec>> {
     use plugin_core::account_schema::{AccountFieldDefault, AccountFieldKind};
-    let Some(plugin_id) = plugin_id_for_adapter_kind(adapter_kind) else {
+    let Some(plugin) = plugin_manager.plugin_for_adapter_kind(adapter_kind.as_str()) else {
         return Ok(None);
     };
-    let Some(schema) = plugin_manager
-        .get(plugin_id)
-        .and_then(|p| p.manifest.account.clone())
-    else {
+    let Some(schema) = plugin.manifest.account.clone() else {
         return Ok(None);
     };
+    let plugin_id = plugin.manifest.id.clone();
     Ok(Some(AccountFormSpec {
-        plugin_id: plugin_id.to_string(),
+        plugin_id,
         fields: schema
             .fields
             .iter()
@@ -1227,10 +1222,25 @@ pub fn account_form_spec(
             client_id_field: o.client_id_field.clone(),
             client_secret_field: o.client_secret_field.clone(),
         }),
-        owns_containers: plugin_manager
-            .get(plugin_id)
-            .is_some_and(|p| p.manifest.plugin_type == plugin_core::PluginType::CalendarAdapter),
+        owns_containers: plugin.manifest.plugin_type == plugin_core::PluginType::CalendarAdapter,
     }))
+}
+
+/// Every adapter this build can connect an account for.
+///
+/// Assembled from the loaded manifests, not from a list in the UI: which
+/// adapters exist is decided by which plugins are installed, and the connect
+/// picker has no business knowing that in advance. Enabling or disabling a
+/// plugin changes the answer on the next call.
+///
+/// The host-internal kinds are NOT in here — the local store is implicit and
+/// the device calendar is offered through its own OS permission flow, so each
+/// frontend adds its own entry for those where it makes sense.
+#[tauri::command]
+pub fn list_adapter_kinds(
+    plugin_manager: State<'_, Arc<PluginManager>>,
+) -> CommandResult<Vec<plugin_core::AdapterKindInfo>> {
+    Ok(plugin_manager.adapter_kinds())
 }
 
 #[derive(Debug, Deserialize)]
@@ -1271,17 +1281,17 @@ pub async fn connect_account(
             message: "display_name must not be empty".into(),
         });
     }
-    let plugin_id = plugin_id_for_adapter_kind(request.adapter_kind).ok_or(CommandError {
-        code: "invalid_input",
-        message: "this adapter kind has no plugin".into(),
-    })?;
-    let schema = plugin_manager
-        .get(plugin_id)
-        .and_then(|p| p.manifest.account.clone())
+    let plugin = plugin_manager
+        .plugin_for_adapter_kind(request.adapter_kind.as_str())
         .ok_or(CommandError {
-            code: "unsupported",
-            message: "this adapter declares no account schema".into(),
+            code: "invalid_input",
+            message: "no plugin serves this adapter kind".into(),
         })?;
+    let plugin_id = plugin.manifest.id.clone();
+    let schema = plugin.manifest.account.clone().ok_or(CommandError {
+        code: "unsupported",
+        message: "this adapter declares no account schema".into(),
+    })?;
 
     // 1) The OAuth sign-in, if the schema has one — before anything persistent
     //    is touched, so a denied or abandoned consent leaves nothing behind.
@@ -1309,7 +1319,7 @@ pub async fn connect_account(
             args.insert("client_secret".into(), Value::String(secret.clone()));
         }
         tokens =
-            Some(run_plugin_auth(plugin_manager.inner(), plugin_id, Value::Object(args)).await?);
+            Some(run_plugin_auth(plugin_manager.inner(), &plugin_id, Value::Object(args)).await?);
         oauth_choice = Some(choice);
     }
 
@@ -1352,7 +1362,7 @@ pub async fn connect_account(
     //    any failure.
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
-    let created = repo.create(request.adapter_kind, name, &plan.config_json)?;
+    let created = repo.create(request.adapter_kind.clone(), name, &plan.config_json)?;
     for (slot, value) in &plan.secrets {
         if let Err(err) = secrets::store(&created.id, *slot, value) {
             let _ = secrets::delete_all(&created.id);
@@ -1388,9 +1398,7 @@ pub async fn connect_account(
     // A warm pass only has something to fetch when the account owns containers.
     // A videoconference account owns none, and the catalog calls have a
     // blocking cold path.
-    let owns_containers = plugin_manager
-        .get(plugin_id)
-        .is_some_and(|p| p.manifest.plugin_type == plugin_core::PluginType::CalendarAdapter);
+    let owns_containers = plugin.manifest.plugin_type == plugin_core::PluginType::CalendarAdapter;
     if owns_containers {
         refresher.trigger();
     }
@@ -1458,16 +1466,13 @@ pub async fn set_account_secret(
         code: "not_found",
         message: format!("account {account_id} not found"),
     })?;
-    if account.adapter_kind == AdapterKind::Local {
+    if account.adapter_kind == "local" {
         return Err(CommandError {
             code: "invalid_input",
             message: "the local account has no credential slot".into(),
         });
     }
-    if matches!(
-        account.adapter_kind,
-        AdapterKind::Google | AdapterKind::MicrosoftGraph,
-    ) {
+    if matches!(account.adapter_kind.as_str(), "google" | "microsoft_graph") {
         return Err(CommandError {
             code: "invalid_input",
             message: format!(
@@ -1476,8 +1481,8 @@ pub async fn set_account_secret(
             ),
         });
     }
-    let slot = match account.adapter_kind {
-        AdapterKind::Vikunja | AdapterKind::Todoist => SecretSlot::ApiToken,
+    let slot = match account.adapter_kind.as_str() {
+        "vikunja" | "todoist" => SecretSlot::ApiToken,
         _ => SecretSlot::Password,
     };
     secrets::store(&account_id, slot, &secret).map_err(|err| CommandError {
@@ -1519,7 +1524,7 @@ pub async fn reconnect_google_account(
         event_log.inner(),
         plugin_manager.inner(),
         &account_id,
-        AdapterKind::Google,
+        AdapterKind::new("google"),
         PLUGIN_ID_GOOGLE,
         "Google",
         |config| {
@@ -1553,7 +1558,7 @@ pub async fn reconnect_microsoft_account(
         event_log.inner(),
         plugin_manager.inner(),
         &account_id,
-        AdapterKind::MicrosoftGraph,
+        AdapterKind::new("microsoft_graph"),
         PLUGIN_ID_GRAPH,
         "Microsoft Graph",
         |config| {
@@ -1657,38 +1662,38 @@ mod tests {
     fn required_secret_slot_maps_each_kind() {
         // Password-based providers.
         assert!(matches!(
-            required_secret_slot(AdapterKind::Caldav),
+            required_secret_slot(&AdapterKind::new("caldav")),
             Some(SecretSlot::Password)
         ));
         assert!(matches!(
-            required_secret_slot(AdapterKind::Ews),
+            required_secret_slot(&AdapterKind::new("ews")),
             Some(SecretSlot::Password)
         ));
         // No-secret providers — iCal feeds are public; Local
         // is host-internal; the device-calendar account uses the OS
         // permission grant, not a stored secret (so it must never show
         // the "credentials missing" repair banner).
-        assert!(required_secret_slot(AdapterKind::Ical).is_none());
-        assert!(required_secret_slot(AdapterKind::Local).is_none());
-        assert!(required_secret_slot(AdapterKind::DeviceCalendar).is_none());
+        assert!(required_secret_slot(&AdapterKind::new("ical")).is_none());
+        assert!(required_secret_slot(&AdapterKind::new("local")).is_none());
+        assert!(required_secret_slot(&AdapterKind::new("device_calendar")).is_none());
         // API-token providers — surfaced as "API token" in the UI.
         assert!(matches!(
-            required_secret_slot(AdapterKind::Vikunja),
+            required_secret_slot(&AdapterKind::new("vikunja")),
             Some(SecretSlot::ApiToken)
         ));
         assert!(matches!(
-            required_secret_slot(AdapterKind::Todoist),
+            required_secret_slot(&AdapterKind::new("todoist")),
             Some(SecretSlot::ApiToken)
         ));
         // OAuth providers — slot we probe for "is the user
         // signed in" is the refresh token, since the access
         // token rotates on its own.
         assert!(matches!(
-            required_secret_slot(AdapterKind::Google),
+            required_secret_slot(&AdapterKind::new("google")),
             Some(SecretSlot::RefreshToken)
         ));
         assert!(matches!(
-            required_secret_slot(AdapterKind::MicrosoftGraph),
+            required_secret_slot(&AdapterKind::new("microsoft_graph")),
             Some(SecretSlot::RefreshToken)
         ));
     }

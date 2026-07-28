@@ -42,7 +42,7 @@ use sync_core::{
 use tauri::State;
 
 use super::{run_plugin_auth, run_plugin_probe_host_key, CommandError, CommandResult};
-use crate::accounts::{AccountsRepo, AdapterKind};
+use crate::accounts::AccountsRepo;
 use crate::cache::CacheRefresher;
 use crate::db::{DbHandle, SharedConn};
 use crate::event_log::{
@@ -142,10 +142,7 @@ pub async fn is_fresh_instance(
 
     // Any non-local account → not fresh.
     let accounts = AccountsRepo::new(&shared).list()?;
-    if accounts
-        .iter()
-        .any(|a| a.adapter_kind != AdapterKind::Local)
-    {
+    if accounts.iter().any(|a| a.adapter_kind != "local") {
         return Ok(false);
     }
 

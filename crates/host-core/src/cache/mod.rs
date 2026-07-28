@@ -80,7 +80,7 @@ pub fn reconcile_cache_generation(
     }
     let mut reset = 0;
     for acc in accounts {
-        if acc.adapter_kind.plugin_id().is_none() {
+        if acc.adapter_kind.is_host_internal() {
             continue; // Local / DeviceCalendar — nothing to re-fetch.
         }
         reset += cache

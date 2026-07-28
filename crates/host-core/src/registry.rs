@@ -55,10 +55,14 @@ use crate::accounts::{Account, AccountsRepo, AdapterKind, LOCAL_ACCOUNT_ID};
 /// the `accounts` table seeds during migration 0003.
 pub const LOCAL_ID: &str = LOCAL_ACCOUNT_ID;
 
-/// Plugin-id constants — the strings the bundled plugins advertise
-/// in their `aperio_plugin_create` descriptor + their `plugin.json`
-/// manifests. Centralised here so the per-adapter routing matches
-/// each plugin verbatim.
+/// Plugin-id constants for the adapters still on the per-kind registration
+/// path below.
+///
+/// NOT the kind→plugin map any more — that comes from the manifests, via
+/// [`plugin_core::PluginManager::plugin_for_adapter_kind`]. These are only what
+/// the remaining hand-written `register_*` functions open. Each one disappears
+/// with its function as its adapter declares an account schema; Webex's already
+/// has.
 const PLUGIN_ID_CALDAV: &str = "com.aperio.cal-adapter-caldav";
 const PLUGIN_ID_ICAL: &str = "com.aperio.cal-adapter-ical";
 const PLUGIN_ID_GOOGLE: &str = "com.aperio.cal-adapter-google";
@@ -69,7 +73,6 @@ const PLUGIN_ID_TODOIST: &str = "com.aperio.cal-adapter-todoist";
 const PLUGIN_ID_ZOOM: &str = "com.aperio.vc-adapter-zoom";
 const PLUGIN_ID_TEAMS: &str = "com.aperio.vc-adapter-teams";
 const PLUGIN_ID_MEET: &str = "com.aperio.vc-adapter-meet";
-const PLUGIN_ID_WEBEX: &str = "com.aperio.vc-adapter-webex";
 
 /// Tracks which account a calendar / task-list came from so writes
 /// can find their way home. Filled lazily during the first
@@ -244,10 +247,7 @@ impl AdapterRegistry {
         for account in accounts {
             // Local is host-internal; DeviceCalendar is built + inserted by the
             // cal-ffi layer once its native bridge is set. Neither registers here.
-            if matches!(
-                account.adapter_kind,
-                AdapterKind::Local | AdapterKind::DeviceCalendar
-            ) {
+            if account.adapter_kind.is_host_internal() {
                 continue;
             }
             if only_missing && self.has_adapter(&account.id) {
@@ -699,7 +699,7 @@ impl AdapterRegistry {
     /// `test_*_connection` commands.
     pub async fn probe_account(
         &self,
-        adapter_kind: AdapterKind,
+        adapter_kind: &AdapterKind,
         config_json: &str,
         secret: Option<&str>,
     ) -> Result<(), RegistryError> {
@@ -707,8 +707,8 @@ impl AdapterRegistry {
             Calendar,
             Tasks,
         }
-        let (plugin_id, feature, config) = match adapter_kind {
-            AdapterKind::Caldav => {
+        let (plugin_id, feature, config) = match adapter_kind.as_str() {
+            "caldav" => {
                 let secret =
                     secret.ok_or_else(|| RegistryError::Secret("missing password".into()))?;
                 (
@@ -720,7 +720,7 @@ impl AdapterRegistry {
                     )?,
                 )
             }
-            AdapterKind::Ical => {
+            "ical" => {
                 // An iCal feed may be public — an empty password stays null,
                 // mirroring register_ical.
                 let password = secret
@@ -733,7 +733,7 @@ impl AdapterRegistry {
                     merge_account_config(config_json, &[("password", password)])?,
                 )
             }
-            AdapterKind::Ews => {
+            "ews" => {
                 let secret =
                     secret.ok_or_else(|| RegistryError::Secret("missing password".into()))?;
                 // No state_dir here (unlike register_ews) — a probe never
@@ -747,7 +747,7 @@ impl AdapterRegistry {
                     )?,
                 )
             }
-            AdapterKind::Vikunja => {
+            "vikunja" => {
                 let secret =
                     secret.ok_or_else(|| RegistryError::Secret("missing API token".into()))?;
                 (
@@ -759,7 +759,7 @@ impl AdapterRegistry {
                     )?,
                 )
             }
-            AdapterKind::Todoist => {
+            "todoist" => {
                 let secret =
                     secret.ok_or_else(|| RegistryError::Secret("missing API token".into()))?;
                 (
@@ -771,7 +771,7 @@ impl AdapterRegistry {
                     )?,
                 )
             }
-            other => return Err(RegistryError::Unsupported(other.as_str().to_string())),
+            other => return Err(RegistryError::Unsupported(other.to_string())),
         };
         let instance = self.open_plugin_instance(plugin_id, config)?;
         match feature {
@@ -867,37 +867,51 @@ impl AdapterRegistry {
     }
 
     fn try_register(&self, account: &Account) -> Result<(), RegistryError> {
-        // A plugin that publishes an account schema is registered generically:
-        // the schema says which secrets it wants and what to call them, so the
-        // host needs no per-adapter branch and an adapter Aperio has never seen
-        // registers exactly like one it ships. The match below is the older
-        // per-kind path, kept for the adapters that have not declared a schema
-        // yet — every one of them can move over by adding the block to its
-        // `plugin.json`, without a line changing here.
-        if let Some(plugin_id) = account.adapter_kind.plugin_id() {
-            if let Some(schema) = self.account_schema(plugin_id) {
-                return self.register_from_schema(account, plugin_id, &schema);
+        // Host-internal kinds have no plugin and never did: the local store is
+        // built in, and the device calendar is built in the cal-ffi layer over
+        // a native bridge. Both are inserted by their own host code.
+        if account.adapter_kind.is_host_internal() {
+            return Ok(());
+        }
+
+        // Which plugin serves this kind is the PLUGIN's statement, read from
+        // the loaded manifests. The host carries no table — that table was what
+        // forced an edit to the core before any adapter could exist.
+        let plugin = self
+            .plugin_manager
+            .plugin_for_adapter_kind(account.adapter_kind.as_str());
+
+        // A plugin that also declares an account schema registers generically:
+        // the schema says which secrets it wants and what to call them, so an
+        // adapter Aperio has never seen opens exactly like one it ships.
+        if let Some(plugin) = &plugin {
+            if let Some(schema) = plugin.manifest.account.clone() {
+                return self.register_from_schema(account, &plugin.manifest.id.clone(), &schema);
             }
         }
-        match account.adapter_kind {
-            AdapterKind::Local => Ok(()),
-            // Built + inserted by the cal-ffi host layer (it needs the native
-            // EventStore bridge), so the generic plugin path is a no-op here —
-            // same shape as `Local`.
-            AdapterKind::DeviceCalendar => Ok(()),
-            AdapterKind::Caldav => self.register_caldav(account),
-            AdapterKind::Ical => self.register_ical(account),
-            AdapterKind::Google => self.register_google(account),
-            AdapterKind::MicrosoftGraph => self.register_microsoft_graph(account),
-            AdapterKind::Ews => self.register_ews(account),
-            AdapterKind::Vikunja => self.register_vikunja(account),
-            AdapterKind::Todoist => self.register_todoist(account),
-            AdapterKind::Zoom => self.register_zoom(account),
-            AdapterKind::Teams => self.register_teams(account),
-            AdapterKind::Meet => self.register_meet(account),
-            // Webex declares an account schema, so it never reaches this arm; the
-            // fallback exists only for a build where the plugin failed to load.
-            AdapterKind::Webex => Err(RegistryError::PluginMissing(PLUGIN_ID_WEBEX.to_string())),
+
+        // The older per-kind path, for the adapters that have not declared a
+        // schema yet. Each can leave this list by adding the block to its own
+        // `plugin.json`; nothing here has to change when it does.
+        match account.adapter_kind.as_str() {
+            "caldav" => self.register_caldav(account),
+            "ical" => self.register_ical(account),
+            "google" => self.register_google(account),
+            "microsoft_graph" => self.register_microsoft_graph(account),
+            "ews" => self.register_ews(account),
+            "vikunja" => self.register_vikunja(account),
+            "todoist" => self.register_todoist(account),
+            "zoom" => self.register_zoom(account),
+            "teams" => self.register_teams(account),
+            "meet" => self.register_meet(account),
+            // Not host-internal, no plugin loaded for it, and not one of the
+            // kinds this build still knows by name. That is a plugin that is
+            // missing or switched off — including an account synced from a
+            // device with an adapter this build does not have — and the
+            // Accounts panel already renders exactly that. The row is kept.
+            other => Err(RegistryError::PluginMissing(format!(
+                "no plugin serves adapter kind `{other}`"
+            ))),
         }
     }
 
@@ -1063,16 +1077,6 @@ impl AdapterRegistry {
         let instance = self.open_plugin_instance(PLUGIN_ID_MEET, plugin_config)?;
         self.insert_vc(&account.id, instance)?;
         Ok(())
-    }
-
-    /// The account schema a plugin published, if it did.
-    fn account_schema(
-        &self,
-        plugin_id: &str,
-    ) -> Option<plugin_core::account_schema::AccountSchema> {
-        self.plugin_manager
-            .get(plugin_id)
-            .and_then(|p| p.manifest.account.clone())
     }
 
     /// Open an instance for any plugin that declared an [`AccountSchema`].
@@ -1316,6 +1320,7 @@ mod tests {
             recurrence: Default::default(),
             tasks: Default::default(),
             account: None,
+            adapter_kind: None,
         }
     }
 
@@ -1366,14 +1371,14 @@ mod tests {
         // wrote during a sync round — its row exists, its adapter doesn't.
         let live = repo
             .create(
-                AdapterKind::Ical,
+                AdapterKind::new("ical"),
                 "Live",
                 &ical_config("https://example.invalid/live.ics"),
             )
             .expect("create live account");
         let synced = repo
             .create(
-                AdapterKind::Ical,
+                AdapterKind::new("ical"),
                 "Synced",
                 &ical_config("https://example.invalid/synced.ics"),
             )
@@ -1420,7 +1425,7 @@ mod tests {
         // calendar is built by the cal-ffi layer against its native bridge.
         // Neither may be registered here — and neither counts as "newly
         // registered", so a round with only these must not kick a warm pass.
-        repo.create(AdapterKind::DeviceCalendar, "Phone", "{}")
+        repo.create(AdapterKind::new("device_calendar"), "Phone", "{}")
             .expect("create device-calendar account");
         assert_eq!(registry.register_missing(&repo), 0);
         assert!(cal_adapter(&registry, LOCAL_ID).is_none());

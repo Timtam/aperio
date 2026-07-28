@@ -289,7 +289,7 @@ pub async fn enumerate_external_triggers(
         .list()
         .unwrap_or_default()
         .into_iter()
-        .filter(|account| account.adapter_kind == AdapterKind::DeviceCalendar)
+        .filter(|account| account.adapter_kind == AdapterKind::DEVICE_CALENDAR)
         .map(|account| account.id)
         .collect();
 
