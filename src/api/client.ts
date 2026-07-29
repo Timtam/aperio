@@ -700,6 +700,11 @@ export const attachMeeting = (request: {
   account_id: string;
   /** Link the account's permanent room instead of minting a meeting. */
   use_personal_room?: boolean;
+  /**
+   * Which language the join block is written in. Frozen into the event, so it
+   * is decided per meeting rather than followed from the UI.
+   */
+  invitation_lang?: string;
 }) => invoke<{ event: CalendarEvent; meeting: Meeting }>('attach_meeting', { request });
 
 /** Delete the meeting Aperio created for an event and take its link back out.

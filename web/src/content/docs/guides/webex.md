@@ -84,9 +84,40 @@ answer. Either way, Aperio:
 
 - creates the meeting on Webex with the event's title and time,
 - hands Webex the event's attendees, so the meeting knows who it is for,
-- writes the join link into the event's location (if it was empty) and appends a
-  short block with the link and password to the description,
+- writes the join link into the event's location (if it was empty) and appends
+  the full join block to the description,
 - and records that this meeting belongs to this event.
+
+The block carries everything Webex will tell us, one labelled line each:
+
+```
+Join the meeting: https://example.webex.com/…
+Meeting number (access code): 2731 234 5678
+Meeting password: Tmv36kRq3vJ
+Password for phones and video systems: 98476838
+Join by phone: +49-619-6781-9736 (Germany Toll)
+Join by phone: +1-408-418-9388 (US Toll)
+Global call-in numbers: https://example.webex.com/globalcallin.php?…
+Join from a video system or application: 27312345678@example.webex.com
+```
+
+The two passwords are not a mistake. Webex issues an alphanumeric one for the
+app and a numeric one for keypads — a phone cannot type `Tmv36kRq3vJ` at all.
+Cisco's own invitations print both, and so does this.
+
+One line per fact, and plain text rather than formatted markup. Both are for the
+person joining by phone or reading with a screen reader: a wrapped value would
+be left behind when the meeting is removed, and markup a receiving client does
+not render is read out as literal angle brackets.
+
+**Invitation language.** A third control sits under the two buttons, preset to
+the language Aperio is in. It decides the language of the labels above — and it
+is per meeting, because a German user inviting English colleagues wants an
+English invitation. It has to be chosen before the meeting is made: the block is
+written into the event and travels to everyone, and no calendar app can
+translate it afterwards. The words come from the Webex adapter itself, not from
+Aperio, so a language Aperio has never heard of is a plugin update rather than a
+new app version. Anything the adapter has not translated falls back to English.
 
 Anyone you invite sees the link in a perfectly ordinary event, whatever calendar
 app they use.

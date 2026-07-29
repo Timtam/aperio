@@ -87,9 +87,43 @@ Antwort kennst. In beiden Fällen
 - legt das Meeting bei Webex mit Titel und Zeit des Termins an,
 - übergibt Webex die Teilnehmer des Termins, damit das Meeting weiß, für wen
   es ist,
-- schreibt den Beitrittslink in das Ortsfeld (falls es leer war) und hängt einen
-  kurzen Block mit Link und Passwort an die Beschreibung,
+- schreibt den Beitrittslink in das Ortsfeld (falls es leer war) und hängt den
+  vollständigen Einwahlblock an die Beschreibung,
 - und merkt sich, dass dieses Meeting zu diesem Termin gehört.
+
+Der Block enthält alles, was Webex herausgibt, je Angabe eine beschriftete
+Zeile:
+
+```
+Meeting beitreten: https://example.webex.com/…
+Meeting-Kennnummer (Zugriffscode): 2731 234 5678
+Meeting-Passwort: Tmv36kRq3vJ
+Passwort für Telefon- und Videosysteme: 98476838
+Über Telefon beitreten: +49-619-6781-9736 (Germany Toll)
+Über Telefon beitreten: +1-408-418-9388 (US Toll)
+Globale Einwahlnummern: https://example.webex.com/globalcallin.php?…
+Über Videogerät oder -anwendung beitreten: 27312345678@example.webex.com
+```
+
+Die zwei Passwörter sind kein Versehen. Webex vergibt ein alphanumerisches für
+die App und ein numerisches für Tastenfelder — `Tmv36kRq3vJ` lässt sich am
+Telefon gar nicht eingeben. Cisco druckt in seinen eigenen Einladungen beide,
+und hier steht es genauso.
+
+Je Angabe eine Zeile, und Klartext statt Auszeichnung. Beides zugunsten dessen,
+der sich einwählt oder mit einem Screenreader liest: ein umgebrochener Wert
+bliebe beim Entfernen des Meetings stehen, und Auszeichnung, die der empfangende
+Client nicht darstellt, wird als wörtliche spitze Klammern vorgelesen.
+
+**Sprache der Einladung.** Unter den beiden Knöpfen steht ein drittes
+Bedienelement, vorbelegt mit der Sprache, in der Aperio läuft. Es bestimmt die
+Sprache der Beschriftungen oben — und gilt pro Termin, denn ein deutscher
+Nutzer, der englische Kollegen einlädt, will eine englische Einladung. Die Wahl
+muss vor dem Anlegen fallen: Der Block wird in den Termin geschrieben und geht
+so an alle, und keine Kalender-App kann ihn nachträglich übersetzen. Die Wörter
+kommen vom Webex-Adapter selbst, nicht von Aperio — eine Sprache, die Aperio nie
+gesehen hat, ist damit eine Plugin-Aktualisierung und keine neue App-Version.
+Was der Adapter nicht übersetzt hat, fällt auf Englisch zurück.
 
 Wen du einlädst, sieht den Link in einem ganz gewöhnlichen Termin — egal, welche
 Kalender-App er benutzt.

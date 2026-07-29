@@ -25,7 +25,18 @@ export interface DetectedLink {
 
 /** Schemes allowed to reach the OS handler. Mirrors the desktop allowlist in
  *  `src-tauri/src/commands/external.rs` AND the mobile open-link guard. */
-export const ALLOWED_LINK_SCHEMES = new Set(['http:', 'https:', 'mailto:']);
+export const ALLOWED_LINK_SCHEMES = new Set([
+  'http:',
+  'https:',
+  'mailto:',
+  // A meeting block writes dial-in numbers and a video-system address. Without
+  // these the link bar would refuse to offer the very number Aperio had just
+  // written into the event — which matters most for the person who joins by
+  // phone rather than by clicking.
+  'tel:',
+  'sip:',
+  'sips:',
+]);
 
 // One shared instance — linkify-it is stateless across `match` calls. Defaults
 // already enable fuzzy link + fuzzy email detection, so bare `www.example.com`

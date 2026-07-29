@@ -242,20 +242,44 @@ pub fn detect_conference(sources: &ConferenceSources<'_>) -> Option<ConferenceLi
 /// Written in the shape real invitations use — a join line, then labelled
 /// detail lines — because that is what every other calendar client, and this
 /// app's own detector, reads. Nothing here is Aperio-specific: an attendee
-/// opening the event in Outlook sees a link and a password, not a marker.
+/// opening the event in Outlook sees a link, a meeting number and a dial-in
+/// number, not a marker.
 ///
-/// The labels are English on purpose. They are not UI text: they travel to
-/// other people's calendars, in an event whose language Aperio does not know,
-/// and the detector reads them back as DATA rather than matching on them. An
-/// invitation that says "Passwort" is read exactly as well.
-pub fn meeting_block(join_url: &str, password: Option<&str>) -> String {
-    let mut out = String::from("Join the meeting: ");
-    out.push_str(join_url);
-    if let Some(password) = password.map(str::trim).filter(|p| !p.is_empty()) {
-        out.push_str("\nMeeting password: ");
-        out.push_str(password);
-    }
-    out
+/// ## One line per fact, and plain text
+///
+/// Every fact gets its own `Label: value` line. Not cosmetics: the removal path
+/// ([`without_meeting_block`]) works line by line, so a value wrapped across
+/// two lines would survive the removal and strand half a block in the event.
+/// A provider's five dial-in numbers are therefore five lines, each naming its
+/// own country.
+///
+/// It is plain text everywhere, with no HTML twin. HTML would buy clickability
+/// that clients already provide for bare URLs, and would cost: `X-ALT-DESC` is
+/// read by almost nothing, a second representation goes stale when another
+/// client edits the first (and then an attendee dials a number that is no
+/// longer right), sanitizers strip exactly the `tel:` and `sip:` anchors this
+/// exists for, and unrendered markup is read out verbatim by a screen reader —
+/// NVDA is silent on `<` and `>` at default settings, so `<br>Password:` is
+/// announced as "br Password".
+///
+/// ## The labels
+///
+/// Supplied by the caller, already resolved: the adapter owns the words (see
+/// `plugin_core::strings`), and the host has picked the language before calling
+/// here. They are frozen into somebody else's calendar the moment this returns,
+/// which is why the language is a decision and not a lookup.
+///
+/// The detector reads them back as DATA rather than matching on them, so a
+/// block that says "Meeting-Kennnummer" is understood exactly as well as one
+/// that says "Meeting number".
+pub fn meeting_block(lines: &[(String, String)]) -> String {
+    lines
+        .iter()
+        .map(|(label, value)| (label.trim(), value.trim()))
+        .filter(|(label, value)| !label.is_empty() && !value.is_empty())
+        .map(|(label, value)| format!("{label}: {value}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Remove the block [`meeting_block`] added, leaving the user's own text.
@@ -309,8 +333,20 @@ pub fn without_meeting_block(description: &str, join_url: &str) -> String {
 
 /// A `Label: value` line, the shape invitations use for meeting details.
 ///
-/// Deliberately narrow: a label with no blank lines and no URL in it, short
-/// enough to be a label rather than a sentence that happens to contain a colon.
+/// Deliberately narrow: a non-empty label short enough to be a label rather
+/// than a sentence that happens to contain a colon, and a non-empty value.
+///
+/// The VALUE may be a link. It used to be barred from containing `://`, back
+/// when a block was a join line and a password and any URL below it was
+/// therefore the user's own writing. A real invitation is not that: a line
+/// pointing at the provider's list of global dial-in numbers is part of the
+/// block, and rejecting it here would strand everything below it when the
+/// meeting is removed. What still stops the walk is a blank line, which is what
+/// separates the block from whatever the user wrote — and the block is always
+/// appended after one.
+///
+/// The LABEL still must not look like a URL, so a bare link on its own line is
+/// never mistaken for `scheme: //rest`.
 fn is_detail_line(line: &str) -> bool {
     let trimmed = line.trim();
     if trimmed.is_empty() {
@@ -322,8 +358,10 @@ fn is_detail_line(line: &str) -> bool {
     !label.trim().is_empty()
         && label.chars().count() <= 40
         && !label.contains("://")
+        // A bare link on its own line splits into `https` + `//host/…`, which
+        // would otherwise read as a perfectly good label and value.
+        && !value.starts_with("//")
         && !value.trim().is_empty()
-        && !value.contains("://")
 }
 
 pub fn extract_urls(text: &str) -> Vec<String> {
@@ -918,6 +956,18 @@ mod tests {
     }
 
     // ── meeting_block / without_meeting_block ───────────────────────────────
+
+    /// The old two-line block, so the removal tests below keep asserting what
+    /// they were written to assert. A real block is longer now — the join line,
+    /// a meeting number, two passwords, a dial-in number per country — and the
+    /// tests that care about THAT are the ones further down.
+    fn meeting_block(url: &str, password: Option<&str>) -> String {
+        let mut lines = vec![("Join the meeting".to_string(), url.to_string())];
+        if let Some(p) = password.map(str::trim).filter(|p| !p.is_empty()) {
+            lines.push(("Meeting password".to_string(), p.to_string()));
+        }
+        super::meeting_block(&lines)
+    }
 
     #[test]
     fn the_block_is_readable_by_the_detector_that_reads_everyone_elses() {

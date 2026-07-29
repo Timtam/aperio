@@ -59,6 +59,16 @@ pub struct AttachMeetingRequest {
     /// per meeting, because that is what it is a property of.
     #[serde(default)]
     pub use_personal_room: bool,
+    /// Which language the join block is written in.
+    ///
+    /// Per meeting, and not necessarily the app's: a German user inviting
+    /// English colleagues writes an English invitation. It has to be decided
+    /// HERE because the block is frozen into the event the moment it is
+    /// written — it lands in other people's calendars, where nothing can
+    /// re-render it later. Absent falls back to English, which is also what an
+    /// adapter's catalogue falls back to.
+    #[serde(default)]
+    pub invitation_lang: Option<String>,
 }
 
 /// Create a meeting for an event, write its link into the event, and remember
@@ -78,6 +88,7 @@ pub struct AttachMeetingRequest {
 pub async fn attach_meeting(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    plugin_manager: State<'_, Arc<plugin_core::manager::PluginManager>>,
     cache: State<'_, Arc<CacheStore>>,
     scheduler: State<'_, SchedulerHandle>,
     event_log: State<'_, Arc<EventLogWriter>>,
@@ -135,10 +146,21 @@ pub async fn attach_meeting(
         .await
         .map_err(CommandError::from)?;
 
-    // Write the link where every other client reads it.
+    // Write the link where every other client reads it. The adapter named each
+    // line and supplied the values; its own catalogue supplies the words, in the
+    // language this request asked for.
     let mut updated = event.clone();
-    let block =
-        cal_core::conferencing::meeting_block(&meeting.join_url, meeting.password.as_deref());
+    let lang = request
+        .invitation_lang
+        .as_deref()
+        .unwrap_or(plugin_core::FALLBACK_LANG);
+    let catalogue = adapter_catalogue(&plugin_manager, &db, &request.account_id);
+    let block = cal_core::conferencing::meeting_block(&host_core::meetings::block_lines(
+        &meeting.join_details,
+        &meeting.join_url,
+        catalogue.as_ref(),
+        lang,
+    ));
     updated.description = Some(match updated.description.as_deref().map(str::trim) {
         Some(existing) if !existing.is_empty() => format!("{existing}\n\n{block}"),
         _ => block,
@@ -478,6 +500,26 @@ fn meetings_error(err: host_core::meetings::MeetingsError) -> CommandError {
         code: "internal",
         message: err.to_string(),
     }
+}
+
+/// The string catalogue of the plugin backing `account_id`, if it ships one.
+///
+/// `None` is an ordinary answer: a plugin with no catalogue renders its
+/// verbatim labels, which is what a third-party adapter with no translations
+/// does by design.
+fn adapter_catalogue(
+    plugin_manager: &plugin_core::manager::PluginManager,
+    db: &DbHandle,
+    account_id: &str,
+) -> Option<plugin_core::StringCatalogue> {
+    let shared = db.shared();
+    let account = host_core::accounts::AccountsRepo::new(&shared)
+        .get(account_id)
+        .ok()
+        .flatten()?;
+    let plugin = plugin_manager.plugin_for_adapter_kind(account.adapter_kind.as_str())?;
+    let catalogue = plugin.manifest.strings.clone();
+    (!catalogue.is_empty()).then_some(catalogue)
 }
 
 /// Whether the calendar holding an event can invite its attendees itself —

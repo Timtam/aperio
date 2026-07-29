@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { FocusableNote } from '../a11y/FocusableNote';
@@ -13,6 +13,7 @@ import {
   type EventMeetingInspection,
 } from '../api/client';
 import type { Account, CalendarEvent } from '../api/types';
+import { SUPPORTED_LANGUAGES } from '../i18n';
 
 /**
  * Creating and removing the meeting for an event.
@@ -36,7 +37,7 @@ export function MeetingControls({
   /** Called with the event as saved once a meeting is attached or removed. */
   onEventChanged: (event: CalendarEvent) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const announce = useAnnouncer();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [found, setFound] = useState<EventMeetingInspection | null>(null);
@@ -88,6 +89,22 @@ export function MeetingControls({
     };
   }, [eventId, calendarId]);
 
+  // Which language the join details are written in. Defaults to the app's,
+  // because that is the best guess about who the organizer is inviting — but it
+  // is a per-meeting choice, since a German user inviting English colleagues
+  // wants an English invitation. It has to be decided here: the block is frozen
+  // into the event the moment it is written and lands in other people's
+  // calendars, where nothing can re-render it.
+  const [lang, setLang] = useState<string>(() => {
+    // i18next hands back whatever it resolved, which may be a regional tag.
+    // The adapter catalogue falls back from `de-AT` to `de` on its own, but the
+    // picker's own <option> values are the plain codes, so normalise here or
+    // the control renders with nothing selected.
+    const base = i18n.language?.toLowerCase().split(/[-_]/, 1)[0];
+    return SUPPORTED_LANGUAGES.find((code) => code === base) ?? 'en';
+  });
+  const langFieldId = useId();
+
   const create = useCallback(
     async (usePersonalRoom: boolean) => {
     if (!event || !accountId) return;
@@ -99,6 +116,7 @@ export function MeetingControls({
         calendar_id: event.calendar_id,
         account_id: accountId,
         use_personal_room: usePersonalRoom,
+        invitation_lang: lang,
       });
       setFound({
         binding: {
@@ -121,7 +139,7 @@ export function MeetingControls({
       setBusy(false);
     }
     },
-    [accountId, announce, event, onEventChanged, t],
+    [accountId, announce, event, lang, onEventChanged, t],
   );
 
   const remove = useCallback(async () => {
@@ -281,6 +299,27 @@ export function MeetingControls({
           </button>
           <FocusableNote className="form__hint">
             {t('conferencing.personalRoomHint')}
+          </FocusableNote>
+          <label className="form__field" htmlFor={langFieldId}>
+            <span className="form__label">
+              {t('conferencing.invitationLanguage')}
+            </span>
+            <select
+              id={langFieldId}
+              className="form__input"
+              value={lang}
+              onChange={(e) => setLang(e.target.value)}
+              aria-describedby={`${langFieldId}-hint`}
+            >
+              {SUPPORTED_LANGUAGES.map((code) => (
+                <option key={code} value={code}>
+                  {t(`conferencing.language.${code}`)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <FocusableNote className="form__hint" id={`${langFieldId}-hint`}>
+            {t('conferencing.invitationLanguageHint')}
           </FocusableNote>
         </>
       )}

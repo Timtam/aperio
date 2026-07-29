@@ -7170,9 +7170,21 @@ impl Host {
             }))
             .map_err(vc_err)?;
 
+        // The adapter named each line and supplied the values; its own
+        // catalogue supplies the words, in the language the request asked for.
+        // Mirrors the desktop `attach_meeting`.
         let mut updated = event.clone();
-        let block =
-            cal_core::conferencing::meeting_block(&meeting.join_url, meeting.password.as_deref());
+        let lang = req
+            .invitation_lang
+            .as_deref()
+            .unwrap_or(plugin_core::FALLBACK_LANG);
+        let catalogue = self.adapter_catalogue(&req.account_id);
+        let block = cal_core::conferencing::meeting_block(&host_core::meetings::block_lines(
+            &meeting.join_details,
+            &meeting.join_url,
+            catalogue.as_ref(),
+            lang,
+        ));
         updated.description = Some(match updated.description.as_deref().map(str::trim) {
             Some(existing) if !existing.is_empty() => format!("{existing}\n\n{block}"),
             _ => block,
@@ -7612,6 +7624,24 @@ impl Host {
         Ok(Some(event))
     }
 
+    /// The string catalogue of the plugin backing `account_id`, if it ships one.
+    ///
+    /// `None` is an ordinary answer: a plugin with no catalogue renders its
+    /// verbatim labels, which is what a third-party adapter with no
+    /// translations does by design. Mirrors the desktop `adapter_catalogue`.
+    fn adapter_catalogue(&self, account_id: &str) -> Option<plugin_core::StringCatalogue> {
+        let shared = self.db.shared();
+        let account = host_core::accounts::AccountsRepo::new(&shared)
+            .get(account_id)
+            .ok()
+            .flatten()?;
+        let plugin = self
+            .plugin_manager
+            .plugin_for_adapter_kind(account.adapter_kind.as_str())?;
+        let catalogue = plugin.manifest.strings.clone();
+        (!catalogue.is_empty()).then_some(catalogue)
+    }
+
     /// Whether the calendar holding an event can invite its attendees itself —
     /// send them an invitation server-side and collect their replies as RSVPs.
     ///
@@ -7773,6 +7803,12 @@ struct AttachMeetingRequest {
     /// Link the account's permanent room instead of minting a meeting.
     #[serde(default)]
     use_personal_room: bool,
+    /// Which language the join block is written in. Per meeting, and not
+    /// necessarily the app's — the block is frozen into the event the moment it
+    /// is written, and lands in other people's calendars where nothing can
+    /// re-render it. Absent falls back to English.
+    #[serde(default)]
+    invitation_lang: Option<String>,
 }
 
 /// Request body for [`Host::adopt_meeting_json`].

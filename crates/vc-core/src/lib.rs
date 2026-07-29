@@ -93,6 +93,77 @@ pub struct Meeting {
     /// permits, and an empty list is the honest answer rather than a failure.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub invitees: Vec<MeetingInvitee>,
+
+    /// Everything else somebody needs to get in, in the order an invitation
+    /// presents it: meeting number, the password a keypad can actually take,
+    /// dial-in numbers, the SIP address, a link to more numbers.
+    ///
+    /// This is what makes the block Aperio writes into an event useful to
+    /// somebody joining by PHONE. Without it the event carries a link and a
+    /// password and nothing to dial, which is not an invitation for anyone
+    /// without a browser to hand.
+    ///
+    /// The first entry SHOULD be the join link itself, so the whole block is
+    /// one uniform list; a host that finds it missing prepends
+    /// [`Self::join_url`] under a default label rather than writing a block
+    /// with no way in. Empty is a valid answer — a provider that offers only a
+    /// link says so by saying nothing, and the block degrades to that one line.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub join_details: Vec<JoinDetail>,
+}
+
+/// What a value in a [`JoinDetail`] actually is, so the host can render it
+/// without knowing the provider.
+///
+/// Deliberately about the VALUE, not about the meaning: the core has no
+/// business knowing what a "meeting number" is, but it does need to know that
+/// this string is a phone number and that one is a link — to offer the right
+/// affordance, to allow the right URL scheme, and later to emit the right
+/// `FEATURE=` on an RFC 7986 `CONFERENCE` property.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JoinDetailKind {
+    /// Plain text. The safe default for anything unrecognised.
+    #[default]
+    Text,
+    /// An `http(s)` link — the join link itself, or a page listing more
+    /// dial-in numbers.
+    Url,
+    /// A dialable phone number. Written in the block as the provider gives it,
+    /// digit grouping and all: screen readers chunk digits at whitespace, and
+    /// somebody reading a number aloud needs it grouped the way it is printed.
+    Tel,
+    /// A SIP address for a video system.
+    Sip,
+    /// Something typed rather than dialled or clicked — a meeting number, an
+    /// access code, a numeric password.
+    Code,
+}
+
+/// One labelled fact about how to join a meeting.
+///
+/// The core owns the SHAPE — an ordered list of labelled lines, rendered the
+/// same way for every provider — and the adapter owns the words and the values.
+/// That is what keeps four providers looking alike in an invitation without the
+/// core learning what any of them calls anything.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JoinDetail {
+    /// Key into the plugin's own string catalogue (`plugin.json` → `strings`),
+    /// resolved by the host in the language the caller asks for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label_key: Option<String>,
+
+    /// The label to use when the catalogue cannot answer — no entry, no
+    /// catalogue at all, or a third-party plugin that ships none. Written in
+    /// whatever language the adapter author chose; it is better than a bare
+    /// value with nothing naming it.
+    pub label: String,
+
+    /// The value itself, verbatim from the provider.
+    pub value: String,
+
+    #[serde(default)]
+    pub kind: JoinDetailKind,
 }
 
 /// One person the provider lists on a meeting.

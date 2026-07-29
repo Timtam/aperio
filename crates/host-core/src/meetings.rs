@@ -105,6 +105,48 @@ pub fn should_provider_announce_removal(calendar_supports_scheduling: bool) -> b
     !calendar_supports_scheduling
 }
 
+/// The lines of the block Aperio writes into an event, with every label already
+/// resolved into `lang`.
+///
+/// The adapter names each line and supplies the value; the plugin's own
+/// catalogue supplies the words; this turns the pair into what
+/// [`cal_core::conferencing::meeting_block`] renders. Nothing here knows a
+/// provider — it knows that a meeting has labelled facts and that somebody has
+/// to pick the language before they are frozen into somebody else's calendar.
+///
+/// `join_url` is the safety net: an adapter is *supposed* to list the link
+/// first, and one that forgets would otherwise produce a block with no way in.
+/// If no line carries it, it is prepended under a plain English label — worse
+/// than the adapter doing it properly, far better than an invitation nobody can
+/// accept.
+pub fn block_lines(
+    details: &[vc_core::JoinDetail],
+    join_url: &str,
+    catalogue: Option<&plugin_core::StringCatalogue>,
+    lang: &str,
+) -> Vec<(String, String)> {
+    let mut lines: Vec<(String, String)> = details
+        .iter()
+        .filter(|detail| !detail.value.trim().is_empty())
+        .map(|detail| {
+            let label = plugin_core::resolve_label(
+                catalogue,
+                detail.label_key.as_deref(),
+                &detail.label,
+                lang,
+            );
+            (label.to_string(), detail.value.trim().to_string())
+        })
+        .collect();
+    if !lines.iter().any(|(_, value)| value == join_url.trim()) {
+        lines.insert(
+            0,
+            ("Join the meeting".to_string(), join_url.trim().to_string()),
+        );
+    }
+    lines
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum MeetingsError {
     #[error("sqlite error: {0}")]

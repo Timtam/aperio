@@ -62,9 +62,23 @@ fn validate_external_url(url: &str) -> Result<&str, CommandError> {
                 return Err(invalid("mailto: has no address"));
             }
         }
+        // A dial-in number and a video-system address, which are what a meeting
+        // block is FOR. Without these the app would refuse to open the very
+        // number it had just written into the event.
+        //
+        // Both hand off to an OS handler exactly as `mailto:` does, and neither
+        // can carry a payload: there is no filesystem path, no argument list,
+        // nothing that executes. The only thing a hostile one can do is place a
+        // call the user can see and hang up.
+        "tel" | "sip" | "sips" => {
+            let (_, rest) = url.split_once(':').unwrap_or((url, ""));
+            if rest.trim().is_empty() {
+                return Err(invalid("tel:/sip: has no number or address"));
+            }
+        }
         other => {
             return Err(invalid(format!(
-                "scheme '{other}' is not allowed (only http, https, mailto)"
+                "scheme '{other}' is not allowed (only http, https, mailto, tel, sip)"
             )));
         }
     }
@@ -73,7 +87,7 @@ fn validate_external_url(url: &str) -> Result<&str, CommandError> {
 
 /// Open a validated external URL in the OS default handler (browser /
 /// mail client). Never navigates the app's own webview. Refuses any
-/// scheme outside `http` / `https` / `mailto`.
+/// scheme outside `http` / `https` / `mailto` / `tel` / `sip`.
 #[tauri::command]
 pub fn open_external_url(url: String) -> CommandResult<()> {
     let validated = validate_external_url(&url)?;

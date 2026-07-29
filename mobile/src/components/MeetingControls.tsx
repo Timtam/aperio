@@ -11,6 +11,7 @@ import {
   inspectEventMeeting,
   type EventMeetingInspection,
 } from '../api/meetings';
+import { SUPPORTED_LANGUAGES, type SupportedLanguage } from '../../i18n';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 /**
@@ -31,7 +32,7 @@ export function MeetingControls({
   event: CalendarEvent | null;
   onEventChanged: (event: CalendarEvent) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [found, setFound] = useState<EventMeetingInspection | null>(null);
@@ -78,6 +79,15 @@ export function MeetingControls({
   const announce = (message: string) =>
     AccessibilityInfo.announceForAccessibility(message);
 
+  // Which language the join details are written in. Defaults to the app's, but
+  // it is a per-meeting choice: the block is frozen into the event the moment
+  // it is written and lands in other people's calendars, where nothing can
+  // re-render it. Mirrors the desktop MeetingControls.
+  const [lang, setLang] = useState<string>(() => {
+    const base = i18n.language?.toLowerCase().split(/[-_]/, 1)[0];
+    return SUPPORTED_LANGUAGES.find((code: SupportedLanguage) => code === base) ?? 'en';
+  });
+
   const create = useCallback(
     async (usePersonalRoom: boolean) => {
     const account = accounts[0];
@@ -90,6 +100,7 @@ export function MeetingControls({
         calendar_id: event.calendar_id,
         account_id: account.id,
         use_personal_room: usePersonalRoom,
+        invitation_lang: lang,
       });
       setFound({
         binding: {
@@ -112,7 +123,7 @@ export function MeetingControls({
       setBusy(false);
     }
     },
-    [accounts, event, onEventChanged, t],
+    [accounts, event, lang, onEventChanged, t],
   );
 
   const remove = useCallback(async () => {
@@ -240,6 +251,29 @@ export function MeetingControls({
             </Text>
           </Pressable>
           <Text style={styles.hint}>{t('conferencing.personalRoomHint')}</Text>
+          {/* One button per language rather than a picker: two named choices
+              are two stops, and a picker on this platform is a screen. */}
+          <Text style={styles.hint} accessibilityRole="header">
+            {t('conferencing.invitationLanguage')}
+          </Text>
+          {SUPPORTED_LANGUAGES.map((code: SupportedLanguage) => (
+            <Pressable
+              key={code}
+              accessibilityRole="radio"
+              accessibilityLabel={t(`conferencing.language.${code}`)}
+              accessibilityState={{ selected: lang === code, disabled: busy }}
+              onPress={() => setLang(code)}
+              disabled={busy}
+              style={({ pressed }) => [styles.button, pressed && styles.pressed]}
+            >
+              <Text style={styles.buttonText}>
+                {t(`conferencing.language.${code}`)}
+              </Text>
+            </Pressable>
+          ))}
+          <Text style={styles.hint}>
+            {t('conferencing.invitationLanguageHint')}
+          </Text>
         </>
       )}
       {error != null && <Text style={styles.error}>{error}</Text>}

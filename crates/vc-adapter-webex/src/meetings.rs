@@ -18,7 +18,9 @@
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
-use vc_core::{Meeting, MeetingId, MeetingInvitee, NewMeeting, VcError, VcResult};
+use vc_core::{
+    JoinDetail, JoinDetailKind, Meeting, MeetingId, MeetingInvitee, NewMeeting, VcError, VcResult,
+};
 
 use crate::api::{wire_time, ApiState};
 
@@ -93,10 +95,61 @@ pub struct MeetingResponse {
     pub meeting_number: Option<String>,
     #[serde(rename = "sipAddress", default)]
     pub sip_address: Option<String>,
+    /// The password a PHONE or a video system can actually take.
+    ///
+    /// Webex issues two. `password` is alphanumeric (`Tmv36kRq3vJ`) and cannot
+    /// be entered on a keypad at all; this one is the numeric twin Cisco's own
+    /// invitation prints beside it as "(98476838 from phones and video
+    /// systems)". Writing only the first is the difference between a dial-in
+    /// that works and one that silently cannot.
+    #[serde(rename = "phoneAndVideoSystemPassword", default)]
+    pub phone_password: Option<String>,
+    /// Dial-in numbers and the code that goes with them. Present on the create
+    /// response as well as on a read, so a meeting carries its phone details
+    /// from the moment it exists.
+    #[serde(default)]
+    pub telephony: Option<TelephonyResponse>,
     #[serde(default)]
     pub start: Option<DateTime<Utc>>,
     #[serde(default)]
     pub end: Option<DateTime<Utc>>,
+}
+
+/// Webex's `telephony` object.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TelephonyResponse {
+    /// The code a caller enters after dialling in. Usually the meeting number
+    /// without its spaces, but Webex is the authority on that, not us.
+    #[serde(rename = "accessCode", default)]
+    pub access_code: Option<String>,
+    #[serde(rename = "callInNumbers", default)]
+    pub call_in_numbers: Vec<CallInNumber>,
+    /// HATEOAS links, of which exactly one matters: `globalCallinNumbers`.
+    /// The sub-resource it points at is NOT a documented endpoint, and Cisco's
+    /// own two examples disagree on the href prefix — so the href is treated
+    /// as opaque and never reconstructed.
+    #[serde(default)]
+    pub links: Vec<TelephonyLink>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CallInNumber {
+    /// Webex's own description of the number — "US Toll", "Call-in toll-free
+    /// number (US/Canada)". It is DATA, not a label: Webex does not localise
+    /// it, so it stays on the value side of the line while the adapter's own
+    /// catalogue supplies the label.
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(rename = "callInNumber", default)]
+    pub number: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TelephonyLink {
+    #[serde(default)]
+    pub rel: Option<String>,
+    #[serde(default)]
+    pub href: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -394,6 +447,22 @@ async fn personal_room(state: &ApiState) -> VcResult<Meeting> {
         password: room.password.filter(|p| !p.trim().is_empty()),
         // A room has no invitee list — it is a door, not an appointment.
         invitees: Vec::new(),
+        // A room is a link and, if the site issues one, a code. It carries no
+        // dial-in numbers of its own: Webex's preferences object has no
+        // telephony block, and inventing one would be worse than saying so.
+        join_details: room
+            .sip_address
+            .as_deref()
+            .map(str::trim)
+            .filter(|sip| !sip.is_empty())
+            .map(|sip| JoinDetail {
+                label_key: Some("join.video".to_string()),
+                label: "Join from a video system or application".to_string(),
+                value: sip.to_string(),
+                kind: JoinDetailKind::Sip,
+            })
+            .into_iter()
+            .collect(),
     })
     .inspect(|_| {
         if let Some(sip) = room.sip_address.as_deref() {
@@ -499,12 +568,13 @@ fn urlencode(s: &str) -> String {
 }
 
 fn to_meeting(raw: MeetingResponse) -> VcResult<Meeting> {
-    let Some(join_url) = raw.web_link.filter(|l| !l.trim().is_empty()) else {
+    let Some(join_url) = raw.web_link.clone().filter(|l| !l.trim().is_empty()) else {
         return Err(VcError::Protocol(format!(
             "Webex returned meeting {} without a join link, so there is nothing to join",
             raw.id
         )));
     };
+    let join_details = join_details(&raw, &join_url);
     Ok(Meeting {
         id: raw.id,
         join_url,
@@ -515,6 +585,7 @@ fn to_meeting(raw: MeetingResponse) -> VcResult<Meeting> {
         // Filled by the callers that read ONE meeting; a listing does not, since
         // it would turn one calendar scroll into a request per meeting.
         invitees: Vec::new(),
+        join_details,
     })
 }
 
@@ -567,23 +638,118 @@ struct InviteeResponse {
     co_host: bool,
 }
 
-/// Everything Webex tells us about a meeting that does not fit [`Meeting`], in
-/// the order an invitation presents it.
+/// Everything somebody needs to get into this meeting, in the order Cisco's own
+/// invitation presents it.
 ///
-/// Kept separate because `vc_core::Meeting` is the shared shape across four
-/// providers and must not grow Webex-specific fields. The host stores this
-/// beside the event so a screen reader can read out "meeting number, password,
-/// dial-in" as labelled items rather than as one long string.
-pub fn join_details(raw: &MeetingResponse) -> Vec<(&'static str, String)> {
-    let mut out = Vec::new();
-    if let Some(n) = raw.meeting_number.as_deref().filter(|n| !n.is_empty()) {
-        out.push(("meeting_number", n.to_string()));
+/// The labels are keys into this plugin's catalogue (`plugin.json` → `strings`)
+/// with an English verbatim beside each, so the host can render the block in the
+/// language the organizer picked and still say something sensible for a language
+/// nobody translated. The values are Webex's, verbatim — digit grouping
+/// included, because a screen reader chunks digits at whitespace and somebody
+/// reading a number aloud needs it grouped the way it is printed.
+///
+/// Deliberately NOT included: the host key. Cisco removed it from their own
+/// invitation templates for security, and a block that travels to every attendee
+/// is the last place it belongs.
+fn join_details(raw: &MeetingResponse, join_url: &str) -> Vec<JoinDetail> {
+    fn detail(key: &str, verbatim: &str, value: &str, kind: JoinDetailKind) -> JoinDetail {
+        JoinDetail {
+            label_key: Some(key.to_string()),
+            label: verbatim.to_string(),
+            value: value.trim().to_string(),
+            kind,
+        }
     }
-    if let Some(p) = raw.password.as_deref().filter(|p| !p.is_empty()) {
-        out.push(("password", p.to_string()));
+    fn non_empty(value: Option<&String>) -> Option<&str> {
+        value.map(|v| v.trim()).filter(|v| !v.is_empty())
     }
-    if let Some(s) = raw.sip_address.as_deref().filter(|s| !s.is_empty()) {
-        out.push(("sip_address", s.to_string()));
+
+    // The link first: it is the line every client and every reader looks for,
+    // and one line that is nothing but a URL is understood in any language.
+    let mut out = vec![detail(
+        "join.link",
+        "Join the meeting",
+        join_url,
+        JoinDetailKind::Url,
+    )];
+
+    if let Some(number) = non_empty(raw.meeting_number.as_ref()) {
+        out.push(detail(
+            "join.number",
+            "Meeting number (access code)",
+            number,
+            JoinDetailKind::Code,
+        ));
+    }
+    if let Some(password) = non_empty(raw.password.as_ref()) {
+        out.push(detail(
+            "join.password",
+            "Meeting password",
+            password,
+            JoinDetailKind::Code,
+        ));
+    }
+    // The one a keypad can take. Separate line rather than a parenthesis on the
+    // line above, because every line has to survive being read on its own.
+    if let Some(phone_password) = non_empty(raw.phone_password.as_ref()) {
+        out.push(detail(
+            "join.password.phone",
+            "Password for phones and video systems",
+            phone_password,
+            JoinDetailKind::Code,
+        ));
+    }
+
+    if let Some(telephony) = raw.telephony.as_ref() {
+        // One line per number, each naming its own country. Not one line with
+        // several numbers on it: the removal path works line by line, and a
+        // wrapped value would strand half a block in the event.
+        for entry in &telephony.call_in_numbers {
+            let Some(number) = non_empty(entry.number.as_ref()) else {
+                continue;
+            };
+            // Webex's own descriptor rides with the value, since Webex does not
+            // translate it and pretending otherwise would put an English
+            // fragment inside a German label.
+            let value = match non_empty(entry.label.as_ref()) {
+                Some(descriptor) => format!("{number} ({descriptor})"),
+                None => number.to_string(),
+            };
+            out.push(detail(
+                "join.phone",
+                "Join by phone",
+                &value,
+                JoinDetailKind::Tel,
+            ));
+        }
+        if let Some(more) = telephony
+            .links
+            .iter()
+            .find(|l| l.rel.as_deref() == Some("globalCallinNumbers"))
+            .and_then(|l| non_empty(l.href.as_ref()))
+        {
+            // Only when it is a URL somebody can actually open. Webex documents
+            // this sub-resource nowhere, and the two examples in its own docs
+            // disagree on the prefix, so a relative href is dropped rather than
+            // guessed at.
+            if more.starts_with("http://") || more.starts_with("https://") {
+                out.push(detail(
+                    "join.phone.more",
+                    "Global call-in numbers",
+                    more,
+                    JoinDetailKind::Url,
+                ));
+            }
+        }
+    }
+
+    if let Some(sip) = non_empty(raw.sip_address.as_ref()) {
+        out.push(detail(
+            "join.video",
+            "Join from a video system or application",
+            sip,
+            JoinDetailKind::Sip,
+        ));
     }
     out
 }
@@ -745,6 +911,8 @@ mod tests {
             password: None,
             meeting_number: None,
             sip_address: None,
+            phone_password: None,
+            telephony: None,
             start: None,
             end: None,
         };
@@ -762,13 +930,121 @@ mod tests {
             password: Some("pw".into()),
             meeting_number: Some("123 456".into()),
             sip_address: Some("123@x.webex.com".into()),
+            phone_password: Some("98476838".into()),
+            telephony: None,
             start: None,
             end: None,
         };
-        let details = join_details(&raw);
-        assert_eq!(details.len(), 3);
-        assert_eq!(details[0], ("meeting_number", "123 456".to_string()));
-        assert!(details.iter().any(|(k, _)| *k == "sip_address"));
+        let details = join_details(&raw, "https://x/j");
+        // The link first, then the facts an invitation prints in that order.
+        let keys: Vec<&str> = details
+            .iter()
+            .map(|d| d.label_key.as_deref().unwrap_or(""))
+            .collect();
+        assert_eq!(
+            keys,
+            vec![
+                "join.link",
+                "join.number",
+                "join.password",
+                "join.password.phone",
+                "join.video",
+            ]
+        );
+        // Every line names itself in English even with no catalogue loaded, and
+        // carries the kind the host needs to render it.
+        assert_eq!(details[0].value, "https://x/j");
+        assert_eq!(details[0].kind, JoinDetailKind::Url);
+        assert_eq!(details[1].label, "Meeting number (access code)");
+        assert_eq!(details[1].value, "123 456");
+        assert_eq!(details.last().unwrap().kind, JoinDetailKind::Sip);
+    }
+
+    #[test]
+    fn the_password_a_phone_can_actually_type_is_its_own_line() {
+        // Webex issues two. `password` is alphanumeric and cannot be entered on
+        // a keypad; writing only that one is the difference between a dial-in
+        // that works and one that silently cannot.
+        let raw = MeetingResponse {
+            id: "m1".into(),
+            title: None,
+            web_link: Some("https://x/j".into()),
+            password: Some("Tmv36kRq3vJ".into()),
+            meeting_number: None,
+            sip_address: None,
+            phone_password: Some("98476838".into()),
+            telephony: None,
+            start: None,
+            end: None,
+        };
+        let details = join_details(&raw, "https://x/j");
+        let phone = details
+            .iter()
+            .find(|d| d.label_key.as_deref() == Some("join.password.phone"))
+            .expect("the numeric password must reach the block");
+        assert_eq!(phone.value, "98476838");
+        assert_eq!(phone.kind, JoinDetailKind::Code);
+    }
+
+    #[test]
+    fn every_dial_in_number_gets_its_own_line_with_its_country_on_it() {
+        // One line per number, not one line with several: the removal path
+        // works line by line, so a wrapped value would strand half a block in
+        // the event. Webex does not localise its own descriptors, so they ride
+        // with the value rather than pretending to be labels.
+        let raw: MeetingResponse = serde_json::from_str(
+            r#"{
+                "id": "m1",
+                "webLink": "https://x/j",
+                "telephony": {
+                    "accessCode": "25503113955",
+                    "callInNumbers": [
+                        {"label": "Germany Toll", "callInNumber": "+49-619-6781-9736",
+                         "tollType": "toll"},
+                        {"label": "US Toll", "callInNumber": "+1-408-418-9388",
+                         "tollType": "toll"}
+                    ],
+                    "links": [{"rel": "globalCallinNumbers",
+                               "href": "https://x.webex.com/globalcallin.php?MTID=m1",
+                               "method": "GET"}]
+                }
+            }"#,
+        )
+        .unwrap();
+        let details = join_details(&raw, "https://x/j");
+        let phones: Vec<&str> = details
+            .iter()
+            .filter(|d| d.kind == JoinDetailKind::Tel)
+            .map(|d| d.value.as_str())
+            .collect();
+        assert_eq!(
+            phones,
+            vec![
+                "+49-619-6781-9736 (Germany Toll)",
+                "+1-408-418-9388 (US Toll)"
+            ]
+        );
+        assert!(details
+            .iter()
+            .any(|d| d.label_key.as_deref() == Some("join.phone.more")));
+    }
+
+    #[test]
+    fn a_relative_more_numbers_href_is_dropped_rather_than_guessed_at() {
+        // Webex documents this sub-resource nowhere and its own two examples
+        // disagree on the prefix (`/api/v1/...` vs `/v1/...`). A link that
+        // would not open is worse than no link.
+        let raw: MeetingResponse = serde_json::from_str(
+            r#"{"id":"m1","webLink":"https://x/j","telephony":{"accessCode":"1",
+                "callInNumbers":[],
+                "links":[{"rel":"globalCallinNumbers",
+                          "href":"/api/v1/meetings/abc/globalCallinNumbers","method":"GET"}]}}"#,
+        )
+        .unwrap();
+        let details = join_details(&raw, "https://x/j");
+        assert!(!details
+            .iter()
+            .any(|d| d.label_key.as_deref() == Some("join.phone.more")));
     }
 
     #[tokio::test]
