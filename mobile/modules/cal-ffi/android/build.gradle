@@ -20,7 +20,15 @@ android {
 dependencies {
   // UniFFI's generated Kotlin bindings (uniffi/cal_ffi/cal_ffi.kt) call the
   // Rust libcal_ffi.so through JNA.
-  implementation "net.java.dev.jna:jna:5.14.0@aar"
+  //
+  // 5.17.0 is a FLOOR, not a preference: JNA shipped libjnidispatch.so with
+  // 4 KB-aligned LOAD segments until 5.17.0 (issue #1647). Google Play rejects
+  // any upload whose native libraries are not 16 KB-aligned — enforced for new
+  // apps since 2025-11-01 and for updates since 2026-05-01 — so 5.14.0 made the
+  // bundle unshippable regardless of how our own Rust library was built.
+  // Verified with `llvm-objdump -p`: 5.14.0's x86_64, armeabi-v7a and x86
+  // variants report `align 2**12`. See mobile/PLAY_RELEASE.md section 2.1.
+  implementation "net.java.dev.jna:jna:5.17.0@aar"
   // Android Keystore-wrapped EncryptedSharedPreferences backs the
   // KeychainBridge (AndroidKeychain.kt) — account credentials never sit in
   // plaintext. The master key lives in the AndroidKeyStore (hardware-backed
