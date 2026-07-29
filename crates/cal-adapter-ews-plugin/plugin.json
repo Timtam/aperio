@@ -91,7 +91,8 @@
           "username": "account_email"
         }
       }
-    ]
+    ],
+    "state_dir_field": "state_dir"
   },
   "strings": {
     "en": {

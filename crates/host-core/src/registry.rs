@@ -44,7 +44,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use cal_core::{CalendarFeature, ContactsFeature, TasksFeature};
 use plugin_core::shim::{FfiCalendarAdapter, FfiContactsAdapter, FfiTasksAdapter, FfiVcAdapter};
 use plugin_core::{LoadedInstance, LoadedPlugin, PluginManager};
-use serde_json::{json, Map, Value};
+use serde_json::Value;
 use sync_engine::{SecretSlot, SecretStore};
 use tracing::warn;
 use vc_core::VcAdapter;
@@ -59,17 +59,10 @@ pub const LOCAL_ID: &str = LOCAL_ACCOUNT_ID;
 /// path below.
 ///
 /// NOT the kind→plugin map any more — that comes from the manifests, via
-/// [`plugin_core::PluginManager::plugin_for_adapter_kind`]. These are only what
-/// the remaining hand-written `register_*` functions open. Each one disappears
-/// with its function as its adapter declares an account schema; Webex's already
-/// has.
-const PLUGIN_ID_CALDAV: &str = "com.aperio.cal-adapter-caldav";
-const PLUGIN_ID_ICAL: &str = "com.aperio.cal-adapter-ical";
-const PLUGIN_ID_GOOGLE: &str = "com.aperio.cal-adapter-google";
-const PLUGIN_ID_GRAPH: &str = "com.aperio.cal-adapter-microsoft-graph";
-const PLUGIN_ID_EWS: &str = "com.aperio.cal-adapter-ews";
-const PLUGIN_ID_VIKUNJA: &str = "com.aperio.cal-adapter-vikunja";
-const PLUGIN_ID_TODOIST: &str = "com.aperio.cal-adapter-todoist";
+/// [`plugin_core::PluginManager::plugin_for_adapter_kind`]. What remains is only
+/// what the three videoconference stubs open — they declare no account schema
+/// yet, so nothing routes them. Each disappears with its `register_*` function
+/// as its adapter declares one.
 const PLUGIN_ID_ZOOM: &str = "com.aperio.vc-adapter-zoom";
 const PLUGIN_ID_TEAMS: &str = "com.aperio.vc-adapter-teams";
 const PLUGIN_ID_MEET: &str = "com.aperio.vc-adapter-meet";
@@ -850,16 +843,10 @@ impl AdapterRegistry {
         }
 
         // The older per-kind path, for the adapters that have not declared a
-        // schema yet. Each can leave this list by adding the block to its own
-        // `plugin.json`; nothing here has to change when it does.
+        // schema yet — the three videoconference stubs. Each leaves this list by
+        // adding the block to its own `plugin.json`; nothing here changes when
+        // it does, and when the last one goes the match goes with it.
         match account.adapter_kind.as_str() {
-            "caldav" => self.register_caldav(account),
-            "ical" => self.register_ical(account),
-            "google" => self.register_google(account),
-            "microsoft_graph" => self.register_microsoft_graph(account),
-            "ews" => self.register_ews(account),
-            "vikunja" => self.register_vikunja(account),
-            "todoist" => self.register_todoist(account),
             "zoom" => self.register_zoom(account),
             "teams" => self.register_teams(account),
             "meet" => self.register_meet(account),
@@ -873,125 +860,6 @@ impl AdapterRegistry {
             ))),
         }
     }
-
-    fn register_caldav(&self, account: &Account) -> Result<(), RegistryError> {
-        let secret = self
-            .secret_store
-            .retrieve(&account.id, SecretSlot::Password)
-            .map_err(|e| RegistryError::Secret(format!("missing password: {e}")))?;
-        let plugin_config =
-            merge_account_config(&account.config_json, &[("secret", Value::String(secret))])?;
-        let instance = self.open_plugin_instance(PLUGIN_ID_CALDAV, plugin_config)?;
-        // The same LoadedInstance Arc is cloned into all three
-        // FfiAdapters — the underlying CaldavAdapter inside the
-        // plugin is shared so discovery + listing caches stay
-        // coherent across the three feature surfaces.
-        self.insert_calendar(&account.id, instance.clone())?;
-        self.insert_tasks(&account.id, instance.clone())?;
-        self.insert_contacts(&account.id, instance)?;
-        Ok(())
-    }
-
-    fn register_google(&self, account: &Account) -> Result<(), RegistryError> {
-        let plugin_config = oauth_plugin_config(
-            self.secret_store.as_ref(),
-            &account.id,
-            &account.config_json,
-        )?;
-        let instance = self.open_plugin_instance(PLUGIN_ID_GOOGLE, plugin_config)?;
-        self.insert_calendar(&account.id, instance.clone())?;
-        self.insert_tasks(&account.id, instance.clone())?;
-        self.insert_contacts(&account.id, instance)?;
-        Ok(())
-    }
-
-    fn register_microsoft_graph(&self, account: &Account) -> Result<(), RegistryError> {
-        let plugin_config = oauth_plugin_config(
-            self.secret_store.as_ref(),
-            &account.id,
-            &account.config_json,
-        )?;
-        let instance = self.open_plugin_instance(PLUGIN_ID_GRAPH, plugin_config)?;
-        self.insert_calendar(&account.id, instance.clone())?;
-        self.insert_tasks(&account.id, instance.clone())?;
-        self.insert_contacts(&account.id, instance)?;
-        Ok(())
-    }
-
-    fn register_ews(&self, account: &Account) -> Result<(), RegistryError> {
-        let password = self
-            .secret_store
-            .retrieve(&account.id, SecretSlot::Password)
-            .map_err(|e| RegistryError::Secret(format!("missing password: {e}")))?;
-        // Splice the host-computed per-account state directory
-        // into the InitConfig so the adapter can persist its
-        // sync cookie + item cache across restarts. EwsAccountConfig
-        // reads `state_dir` via serde(default), so absence is fine
-        // (test path / older registry builds without data_dir).
-        let mut extras: Vec<(&str, Value)> = vec![("password", Value::String(password))];
-        let state_dir = self.plugin_state_dir(PLUGIN_ID_EWS, &account.id);
-        if let Some(dir) = state_dir.as_ref() {
-            extras.push((
-                "state_dir",
-                Value::String(dir.to_string_lossy().into_owned()),
-            ));
-        }
-        let plugin_config = merge_account_config(&account.config_json, &extras)?;
-        let instance = self.open_plugin_instance(PLUGIN_ID_EWS, plugin_config)?;
-        self.insert_calendar(&account.id, instance.clone())?;
-        self.insert_tasks(&account.id, instance.clone())?;
-        self.insert_contacts(&account.id, instance)?;
-        Ok(())
-    }
-
-    fn register_vikunja(&self, account: &Account) -> Result<(), RegistryError> {
-        let token = self
-            .secret_store
-            .retrieve(&account.id, SecretSlot::ApiToken)
-            .map_err(|e| RegistryError::Secret(format!("missing API token: {e}")))?;
-        let plugin_config =
-            merge_account_config(&account.config_json, &[("token", Value::String(token))])?;
-        let instance = self.open_plugin_instance(PLUGIN_ID_VIKUNJA, plugin_config)?;
-        self.insert_tasks(&account.id, instance)?;
-        Ok(())
-    }
-
-    fn register_todoist(&self, account: &Account) -> Result<(), RegistryError> {
-        // Todoist's persisted config carries only an optional
-        // account label; the plugin needs just `token`. We could
-        // merge into the existing config but it's cleaner to
-        // start fresh — the plugin ignores anything but `token`.
-        let token = self
-            .secret_store
-            .retrieve(&account.id, SecretSlot::ApiToken)
-            .map_err(|e| RegistryError::Secret(format!("missing API token: {e}")))?;
-        let plugin_config = json!({ "token": token }).to_string();
-        let instance = self.open_plugin_instance(PLUGIN_ID_TODOIST, plugin_config)?;
-        self.insert_tasks(&account.id, instance)?;
-        Ok(())
-    }
-
-    fn register_ical(&self, account: &Account) -> Result<(), RegistryError> {
-        // Basic-auth password is optional for iCal — most public
-        // feeds are anonymous. A missing keychain entry is
-        // therefore not an error; merge it as JSON null so the
-        // plugin's Option<String> deserialiser is happy.
-        let password = self
-            .secret_store
-            .retrieve(&account.id, SecretSlot::Password)
-            .ok()
-            .filter(|s| !s.is_empty());
-        let password_value = password.map(Value::String).unwrap_or(Value::Null);
-        let plugin_config =
-            merge_account_config(&account.config_json, &[("password", password_value)])?;
-        let instance = self.open_plugin_instance(PLUGIN_ID_ICAL, plugin_config)?;
-        self.insert_calendar(&account.id, instance)?;
-        Ok(())
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // VC-adapter registration (DESIGN.md §11)
-    // ─────────────────────────────────────────────────────────────
 
     fn register_zoom(&self, account: &Account) -> Result<(), RegistryError> {
         let plugin_config = oauth_refresh_plugin_config(
@@ -1063,6 +931,22 @@ impl AdapterRegistry {
                 }
                 crate::account_setup::AccountSetupError::Secret(m) => RegistryError::Secret(m),
             })?;
+
+        // A writable directory of its own, for an adapter that asked for one.
+        // Declared, so the host never has to know that a particular adapter
+        // keeps a sync cookie: it knows only that this one named a key.
+        //
+        // Absent is fine and must stay fine — no data dir on the test path,
+        // and directory creation can fail — so the plugin's own field is
+        // optional and it falls back to in-memory state.
+        if let Some(key) = schema.state_dir_field.as_deref() {
+            if let Some(dir) = self.plugin_state_dir(plugin_id, &account.id) {
+                plugin_config = merge_account_config(
+                    &plugin_config,
+                    &[(key, Value::String(dir.to_string_lossy().into_owned()))],
+                )?;
+            }
+        }
 
         // The capability token rides the TRANSIENT merged config only — never
         // the persisted row — and must outlive the instance, since dropping it
@@ -1170,46 +1054,6 @@ fn merge_account_config(
     Ok(parsed.to_string())
 }
 
-/// Shared OAuth plugin-config builder for Google + Microsoft
-/// Graph. Both plugins expect `access_token` + `refresh_token`
-/// + `expires_at` + `scope` on top of whatever their persisted
-/// `client_id` / `client_secret` / `authority` config carries.
-///
-/// `expires_at` is left at epoch — the plugin's API client
-/// refreshes lazily on 401, so the persisted access token
-/// doesn't need to be fresh across app restarts.
-fn oauth_plugin_config(
-    secret_store: &dyn SecretStore,
-    account_id: &str,
-    account_config_json: &str,
-) -> Result<String, RegistryError> {
-    let access = secret_store
-        .retrieve(account_id, SecretSlot::AccessToken)
-        .map_err(|e| RegistryError::Secret(format!("missing access token: {e}")))?;
-    let refresh = secret_store
-        .retrieve(account_id, SecretSlot::RefreshToken)
-        .ok()
-        .filter(|s| !s.is_empty());
-    let refresh_value = refresh.map(Value::String).unwrap_or(Value::Null);
-
-    let mut extras = Map::with_capacity(4);
-    extras.insert("access_token".into(), Value::String(access));
-    extras.insert("refresh_token".into(), refresh_value);
-    extras.insert(
-        "expires_at".into(),
-        Value::String("1970-01-01T00:00:00Z".into()),
-    );
-    extras.insert("scope".into(), Value::Null);
-
-    let mut parsed: Value = serde_json::from_str(account_config_json)
-        .map_err(|e| RegistryError::Config(e.to_string()))?;
-    let obj = parsed.as_object_mut().ok_or_else(|| {
-        RegistryError::Config("account config_json must be a JSON object".to_string())
-    })?;
-    obj.extend(extras);
-    Ok(parsed.to_string())
-}
-
 /// Build the plugin init config for a refresh-token-only OAuth
 /// videoconference adapter (Zoom, WebEx). The persisted
 /// `config_json` already carries `client_id` + `client_secret`;
@@ -1279,28 +1123,17 @@ mod tests {
     use super::*;
     use crate::db::DbHandle;
     use plugin_core::manifest::PluginManifest;
-    use plugin_core::{Capability, PluginType, ABI_VERSION};
 
-    /// Manifest twin for the statically-linked iCal plugin (the dlopen
-    /// path reads this from `plugin.json`; a static consumer hands it in).
+    /// The REAL manifest, parsed from the plugin's own `plugin.json`.
+    ///
+    /// It used to be a hand-written twin, and the twin drifted the moment the
+    /// adapter declared an `account` block: the twin still said `adapter_kind:
+    /// None`, so `plugin_for_adapter_kind` found nothing and registration fell
+    /// through to a per-kind arm that no longer exists. A copy of a manifest is
+    /// a manifest that will disagree with the manifest.
     fn ical_manifest() -> PluginManifest {
-        PluginManifest {
-            id: PLUGIN_ID_ICAL.into(),
-            name: "Aperio iCal Feed".into(),
-            version: "0.1.0".into(),
-            plugin_type: PluginType::CalendarAdapter,
-            capabilities: vec![Capability::Calendar],
-            abi_version: ABI_VERSION,
-            min_app_version: "0.1.0".into(),
-            author: None,
-            description: None,
-            signed: false,
-            recurrence: Default::default(),
-            tasks: Default::default(),
-            account: None,
-            adapter_kind: None,
-            strings: Default::default(),
-        }
+        PluginManifest::from_bytes(include_bytes!("../../cal-adapter-ical-plugin/plugin.json"))
+            .expect("the shipped iCal manifest parses")
     }
 
     /// Registry backed by exactly one real plugin. iCal needs no keychain
@@ -1323,7 +1156,7 @@ mod tests {
     }
 
     fn ical_config(url: &str) -> String {
-        json!({ "feed_url": url, "username": Value::Null }).to_string()
+        serde_json::json!({ "feed_url": url, "username": Value::Null }).to_string()
     }
 
     /// The calendar adapter currently registered for `account_id`, if any.

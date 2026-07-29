@@ -219,6 +219,22 @@ pub struct AccountSchema {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth: Option<AccountOauth>,
 
+    /// Init-config key a per-account, host-owned, writable directory is handed
+    /// over under — for an adapter that persists something between runs, like a
+    /// sync cookie or an item cache.
+    ///
+    /// Declared rather than assumed, because the host has no business knowing
+    /// that EWS in particular keeps a sync cookie. An adapter that persists
+    /// nothing says nothing and is handed nothing; one that wants a directory
+    /// names the key it reads it under, and the host creates it.
+    ///
+    /// Absent when directory creation fails or the host has no data dir (the
+    /// test path), so the field must be optional on the plugin's side too — an
+    /// adapter that cannot persist falls back to in-memory state rather than
+    /// refusing to open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_dir_field: Option<String>,
+
     /// Whether instances of this plugin get a host-channel capability token, so
     /// they can report a rotated credential back and have the host persist it.
     /// Off unless asked for: the token is authority, and authority nobody

@@ -19,10 +19,8 @@ import {
   listAdapterKinds,
   connectGoogleAccount,
   connectMicrosoftAccount,
-  createAccount,
   syncContactsNow,
   deleteAccount,
-  discoverEwsEndpoint,
   getUserPref,
   isCommandError,
   listAccounts,
@@ -32,11 +30,6 @@ import {
   setUserPref,
   runAccountAction,
   testAccount,
-  testCaldavConnection,
-  testEwsConnection,
-  testIcalFeed,
-  testTodoistConnection,
-  testVikunjaConnection,
 } from '../api/client';
 import type { AccountFormSpec, AdapterKindInfo } from '../api/client';
 import type { Account, AdapterKind } from '../api/types';
@@ -89,79 +82,12 @@ const HOST_INTERNAL_KINDS: ReadonlySet<AdapterKind> = new Set([
   'device_calendar',
 ]);
 
-interface CaldavFields {
-  serverUrl: string;
-  username: string;
-  password: string;
-}
 
-const EMPTY_CALDAV: CaldavFields = {
-  serverUrl: '',
-  username: '',
-  password: '',
-};
 
-interface IcalFields {
-  feedUrl: string;
-  username: string;
-  password: string;
-}
 
-const EMPTY_ICAL: IcalFields = {
-  feedUrl: '',
-  username: '',
-  password: '',
-};
 
-interface GoogleFields {
-  clientId: string;
-  clientSecret: string;
-}
 
-const EMPTY_GOOGLE: GoogleFields = {
-  clientId: '',
-  clientSecret: '',
-};
 
-interface MicrosoftFields {
-  clientId: string;
-  authority: string;
-}
-
-const EMPTY_MICROSOFT: MicrosoftFields = {
-  clientId: '',
-  authority: 'common',
-};
-
-interface EwsFields {
-  endpoint: string;
-  username: string;
-  password: string;
-}
-
-const EMPTY_EWS: EwsFields = {
-  endpoint: '',
-  username: '',
-  password: '',
-};
-
-interface VikunjaFields {
-  serverUrl: string;
-  apiToken: string;
-}
-
-const EMPTY_VIKUNJA: VikunjaFields = {
-  serverUrl: '',
-  apiToken: '',
-};
-
-interface TodoistFields {
-  apiToken: string;
-}
-
-const EMPTY_TODOIST: TodoistFields = {
-  apiToken: '',
-};
 
 export function AccountsPanel() {
   const { t, i18n } = useTranslation();
@@ -211,12 +137,9 @@ export function AccountsPanel() {
   const [displayName, setDisplayName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [discovering, setDiscovering] = useState(false);
+  const [discovering] = useState(false);
   const [runningAction, setRunningAction] = useState<string | null>(null);
   const [testMessage, setTestMessage] = useState<string | null>(null);
-  const [caldav, setCaldav] = useState<CaldavFields>(EMPTY_CALDAV);
-  const [ical, setIcal] = useState<IcalFields>(EMPTY_ICAL);
-  const [google, setGoogle] = useState<GoogleFields>(EMPTY_GOOGLE);
   // The connect form for the selected kind, as that ADAPTER declares it. Null
   // while it is being fetched, or for the adapters still on the older per-kind
   // path below. Nothing in this component knows what any of the fields mean.
@@ -228,10 +151,6 @@ export function AccountsPanel() {
   const [formValues, setFormValues] = useState<
     Record<string, string | boolean>
   >({});
-  const [microsoft, setMicrosoft] = useState<MicrosoftFields>(EMPTY_MICROSOFT);
-  const [ews, setEws] = useState<EwsFields>(EMPTY_EWS);
-  const [vikunja, setVikunja] = useState<VikunjaFields>(EMPTY_VIKUNJA);
-  const [todoist, setTodoist] = useState<TodoistFields>(EMPTY_TODOIST);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -340,27 +259,6 @@ export function AccountsPanel() {
     openSyncAccountsConnect(targets);
   }, [accounts, missingIds, openSyncAccountsConnect]);
 
-  const validateCaldav = useCallback((): string | null => {
-    if (!caldav.serverUrl.trim()) return t('dialogs.accounts.serverUrlRequired');
-    if (!caldav.username.trim()) return t('dialogs.accounts.usernameRequired');
-    if (!caldav.password) return t('dialogs.accounts.passwordRequired');
-    return null;
-  }, [caldav, t]);
-
-  const validateIcal = useCallback((): string | null => {
-    // iCal only requires the URL — username + password are optional
-    // (most public feeds are anonymous).
-    if (!ical.feedUrl.trim()) return t('dialogs.accounts.feedUrlRequired');
-    return null;
-  }, [ical, t]);
-
-  const validateGoogle = useCallback((): string | null => {
-    if (!google.clientId.trim()) return t('dialogs.accounts.clientIdRequired');
-    if (!google.clientSecret.trim())
-      return t('dialogs.accounts.clientSecretRequired');
-    return null;
-  }, [google, t]);
-
   /** Validation for a schema-driven form: the adapter says what is required,
    *  so this needs no per-adapter branch either. */
   const validateSchemaForm = useCallback((): string | null => {
@@ -370,33 +268,6 @@ export function AccountsPanel() {
     // Already resolved by the host, in the plugin's own words.
     return t('dialogs.accounts.fieldRequired', { field: missing.label });
   }, [formSpec, formValues, t]);
-
-  const validateMicrosoft = useCallback((): string | null => {
-    if (!microsoft.clientId.trim())
-      return t('dialogs.accounts.clientIdRequired');
-    return null;
-  }, [microsoft, t]);
-
-  const validateEws = useCallback((): string | null => {
-    if (!ews.endpoint.trim()) return t('dialogs.accounts.ewsEndpointRequired');
-    if (!ews.username.trim()) return t('dialogs.accounts.usernameRequired');
-    if (!ews.password) return t('dialogs.accounts.passwordRequired');
-    return null;
-  }, [ews, t]);
-
-  const validateVikunja = useCallback((): string | null => {
-    if (!vikunja.serverUrl.trim())
-      return t('dialogs.accounts.vikunjaServerUrlRequired');
-    if (!vikunja.apiToken.trim())
-      return t('dialogs.accounts.vikunjaApiTokenRequired');
-    return null;
-  }, [vikunja, t]);
-
-  const validateTodoist = useCallback((): string | null => {
-    if (!todoist.apiToken.trim())
-      return t('dialogs.accounts.todoistApiTokenRequired');
-    return null;
-  }, [todoist, t]);
 
   const onSubmit = useCallback(
     async (e: FormEvent) => {
@@ -412,55 +283,6 @@ export function AccountsPanel() {
         // a plugin can be switched off between opening the form and submitting.
         setError(t('dialogs.accounts.kindUnavailable'));
         return;
-      }
-      if (kind === 'caldav' && !formSpec) {
-        const v = validateCaldav();
-        if (v) {
-          setError(v);
-          return;
-        }
-      }
-      if (kind === 'ical' && !formSpec) {
-        const v = validateIcal();
-        if (v) {
-          setError(v);
-          return;
-        }
-      }
-      if (kind === 'google' && !formSpec) {
-        const v = validateGoogle();
-        if (v) {
-          setError(v);
-          return;
-        }
-      }
-      if (kind === 'microsoft_graph' && !formSpec) {
-        const v = validateMicrosoft();
-        if (v) {
-          setError(v);
-          return;
-        }
-      }
-      if (kind === 'ews' && !formSpec) {
-        const v = validateEws();
-        if (v) {
-          setError(v);
-          return;
-        }
-      }
-      if (kind === 'vikunja' && !formSpec) {
-        const v = validateVikunja();
-        if (v) {
-          setError(v);
-          return;
-        }
-      }
-      if (kind === 'todoist' && !formSpec) {
-        const v = validateTodoist();
-        if (v) {
-          setError(v);
-          return;
-        }
       }
       if (formSpec) {
         const v = validateSchemaForm();
@@ -485,22 +307,14 @@ export function AccountsPanel() {
           // two empty strings into the sign-in. Moving the whole flow onto
           // `connectAccount` — which already runs OAuth from the schema, as it
           // does for Webex — is the next step and wants a live test first.
-          const clientId = formSpec
-            ? String(formValues.client_id ?? '').trim()
-            : google.clientId.trim();
-          const clientSecret = formSpec
-            ? String(formValues.client_secret ?? '').trim()
-            : google.clientSecret.trim();
+          const clientId = String(formValues.client_id ?? '').trim();
+          const clientSecret = String(formValues.client_secret ?? '').trim();
           created = await connectGoogleAccount(clientId, clientSecret, name);
         } else if (kind === 'microsoft_graph') {
           // Same OAuth-then-persist flow as Google, minus the
           // client_secret (Microsoft honours PKCE for public clients).
-          const clientId = formSpec
-            ? String(formValues.client_id ?? '').trim()
-            : microsoft.clientId.trim();
-          const authority = formSpec
-            ? String(formValues.authority ?? '').trim()
-            : microsoft.authority.trim();
+          const clientId = String(formValues.client_id ?? '').trim();
+          const authority = String(formValues.authority ?? '').trim();
           created = await connectMicrosoftAccount(
             clientId,
             name,
@@ -517,48 +331,9 @@ export function AccountsPanel() {
             values: collectValues(formSpec, formValues),
           });
         } else {
-          const configJson =
-            kind === 'caldav'
-              ? JSON.stringify({
-                  server_url: caldav.serverUrl.trim(),
-                  username: caldav.username.trim(),
-                  auth_kind: 'basic',
-                })
-              : kind === 'ical'
-                ? JSON.stringify({
-                    feed_url: ical.feedUrl.trim(),
-                    username: ical.username.trim() || null,
-                  })
-                : kind === 'ews'
-                  ? JSON.stringify({
-                      endpoint: ews.endpoint.trim(),
-                      username: ews.username.trim(),
-                    })
-                  : kind === 'vikunja'
-                    ? JSON.stringify({
-                        server_url: vikunja.serverUrl.trim(),
-                      })
-                    : kind === 'todoist'
-                      ? '{}'
-                      : '{}';
-          const secret =
-            kind === 'caldav'
-              ? caldav.password
-              : kind === 'ical' && ical.password
-                ? ical.password
-                : kind === 'ews'
-                  ? ews.password
-                  : kind === 'vikunja'
-                    ? vikunja.apiToken.trim()
-                    : kind === 'todoist'
-                      ? todoist.apiToken.trim()
-                      : undefined;
-          created = await createAccount({
-            adapter_kind: kind,
-            display_name: name,
-            config_json: configJson,
-            secret,
-          });
+          // No schema means no plugin serves this kind, so there is nothing to
+          // connect TO. The picker does not offer it either.
+          throw new Error(`no plugin serves adapter kind ${kind}`);
         }
         announce(t('dialogs.accounts.created', { name: created.display_name }));
         // Phase 10k privacy notice (DESIGN.md §10.6): show the
@@ -587,13 +362,6 @@ export function AccountsPanel() {
           }
         }
         setDisplayName('');
-        setCaldav(EMPTY_CALDAV);
-        setIcal(EMPTY_ICAL);
-        setGoogle(EMPTY_GOOGLE);
-        setMicrosoft(EMPTY_MICROSOFT);
-        setEws(EMPTY_EWS);
-        setVikunja(EMPTY_VIKUNJA);
-        setTodoist(EMPTY_TODOIST);
         setFormValues({});
         refresh();
         // Re-fetch the calendar / task-list catalog so the sidebar
@@ -638,20 +406,6 @@ export function AccountsPanel() {
       formSpec,
       formValues,
       validateSchemaForm,
-      caldav,
-      ical,
-      google,
-      microsoft,
-      ews,
-      vikunja,
-      todoist,
-      validateCaldav,
-      validateIcal,
-      validateGoogle,
-      validateMicrosoft,
-      validateEws,
-      validateVikunja,
-      validateTodoist,
       announce,
       refresh,
       refreshAccounts,
@@ -687,89 +441,10 @@ export function AccountsPanel() {
       }
       return;
     }
-    // The older per-kind probes, for an adapter with no schema — the same
-    // fallback the connect path keeps.
-    const field = (_key: string, legacy: string) => legacy;
-    try {
-      if (kind === 'caldav') {
-        const v = validateCaldav();
-        if (v) {
-          setError(v);
-          return;
-        }
-        await testCaldavConnection(
-          field('server_url', caldav.serverUrl).trim(),
-          field('username', caldav.username).trim(),
-          field('secret', caldav.password),
-        );
-      } else if (kind === 'ical') {
-        const v = validateIcal();
-        if (v) {
-          setError(v);
-          return;
-        }
-        await testIcalFeed(
-          field('feed_url', ical.feedUrl).trim(),
-          field('username', ical.username).trim() || null,
-          field('password', ical.password) || null,
-        );
-      } else if (kind === 'ews') {
-        const v = validateEws();
-        if (v) {
-          setError(v);
-          return;
-        }
-        await testEwsConnection(
-          field('endpoint', ews.endpoint).trim(),
-          field('username', ews.username).trim(),
-          field('password', ews.password),
-        );
-      } else if (kind === 'vikunja') {
-        const v = validateVikunja();
-        if (v) {
-          setError(v);
-          return;
-        }
-        await testVikunjaConnection(
-          field('server_url', vikunja.serverUrl).trim(),
-          field('token', vikunja.apiToken).trim(),
-        );
-      } else if (kind === 'todoist') {
-        const v = validateTodoist();
-        if (v) {
-          setError(v);
-          return;
-        }
-        await testTodoistConnection(field('token', todoist.apiToken).trim());
-      } else {
-        return;
-      }
-      setTestMessage(t('dialogs.accounts.testOk'));
-      announce(t('dialogs.accounts.testOk'));
-    } catch (err) {
-      if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
-      else setError(String(err));
-    } finally {
-      setTesting(false);
-    }
-  }, [
-    kind,
-    caldav,
-    ical,
-    ews,
-    vikunja,
-    todoist,
-    validateCaldav,
-    validateIcal,
-    validateEws,
-    validateVikunja,
-    validateTodoist,
-    validateSchemaForm,
-    formSpec,
-    formValues,
-    announce,
-    t,
-  ]);
+    // No schema means no plugin serves this kind at all, so there is nothing
+    // to probe. The button is not offered in that state either.
+    setTesting(false);
+  }, [announce, formSpec, formValues, kind, t, validateSchemaForm]);
 
   /**
    * Run POX-Autodiscover for the e-mail in the username field and
@@ -815,62 +490,6 @@ export function AccountsPanel() {
     },
     [announce, formValues, kind],
   );
-
-  const onDiscover = useCallback(async () => {
-    setTestMessage(null);
-    setError(null);
-    // Autodiscover reads and writes the SAME two fields whichever form is on
-    // screen. Once EWS declares its own schema the generic form owns the
-    // values, and the legacy state is not being filled at all — reading it
-    // there would find empty strings and refuse a probe that would have worked.
-    // (Declaring this button in the manifest, so the host stops naming EWS at
-    // all, is the next piece of work.)
-    const onSchema = formSpec != null;
-    const username = (
-      onSchema ? String(formValues.username ?? '') : ews.username
-    ).trim();
-    const password = onSchema
-      ? String(formValues.password ?? '')
-      : ews.password;
-    if (!username) {
-      setError(t('dialogs.accounts.ewsDiscoverNeedsEmail'));
-      return;
-    }
-    if (!password) {
-      setError(t('dialogs.accounts.ewsDiscoverNeedsPassword'));
-      return;
-    }
-    setDiscovering(true);
-    try {
-      const result = await discoverEwsEndpoint(username, password);
-      // If autodiscover took us through a RedirectAddr step, the canonical
-      // login is the one we actually authenticated as — surface that to the
-      // user so the password they typed matches the username we stored.
-      if (onSchema) {
-        setFormValues((prev) => ({
-          ...prev,
-          endpoint: result.ews_url,
-          username: result.account_email,
-        }));
-      } else {
-        setEws((prev) => ({
-          ...prev,
-          endpoint: result.ews_url,
-          username: result.account_email,
-        }));
-      }
-      const okMsg = t('dialogs.accounts.ewsDiscoverOk', {
-        url: result.ews_url,
-      });
-      setTestMessage(okMsg);
-      announce(okMsg);
-    } catch (err) {
-      if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
-      else setError(String(err));
-    } finally {
-      setDiscovering(false);
-    }
-  }, [ews, formSpec, formValues.username, formValues.password, announce, t]);
 
   // Armed when the user triggers a delete from the listbox. The
   // post-refresh effect below sees the flag, moves focus back onto
@@ -1526,208 +1145,6 @@ export function AccountsPanel() {
               />
             </label>
 
-            {kind === 'caldav' && !formSpec && (
-              <>
-                <label className="form__field">
-                  <span className="form__label">
-                    {t('dialogs.accounts.serverUrlLabel')}
-                  </span>
-                  <input
-                    type="url"
-                    value={caldav.serverUrl}
-                    onChange={(e) =>
-                      setCaldav((prev) => ({
-                        ...prev,
-                        serverUrl: e.target.value,
-                      }))
-                    }
-                    placeholder={t('dialogs.accounts.serverUrlPlaceholder')}
-                    autoComplete="off"
-                    spellCheck={false}
-                    required
-                  />
-                  <span className="form__hint">
-                    {t('dialogs.accounts.serverUrlHint')}
-                  </span>
-                </label>
-                <label className="form__field">
-                  <span className="form__label">
-                    {t('dialogs.accounts.usernameLabel')}
-                  </span>
-                  <input
-                    type="text"
-                    value={caldav.username}
-                    onChange={(e) =>
-                      setCaldav((prev) => ({
-                        ...prev,
-                        username: e.target.value,
-                      }))
-                    }
-                    autoComplete="username"
-                    spellCheck={false}
-                    required
-                  />
-                </label>
-                <label className="form__field">
-                  <span className="form__label">
-                    {t('dialogs.accounts.passwordLabel')}
-                  </span>
-                  <input
-                    type="password"
-                    value={caldav.password}
-                    onChange={(e) =>
-                      setCaldav((prev) => ({
-                        ...prev,
-                        password: e.target.value,
-                      }))
-                    }
-                    autoComplete="new-password"
-                    required
-                  />
-                  <span className="form__hint">
-                    {t('dialogs.accounts.passwordHint')}
-                  </span>
-                </label>
-                {testMessage && kind === 'caldav' && !formSpec && (
-                  <p
-                    role="status"
-                    aria-live="polite"
-                    className="form__hint accounts-test-ok"
-                  >
-                    {testMessage}
-                  </p>
-                )}
-              </>
-            )}
-
-            {kind === 'ical' && !formSpec && (
-              <>
-                <label className="form__field">
-                  <span className="form__label">
-                    {t('dialogs.accounts.feedUrlLabel')}
-                  </span>
-                  <input
-                    type="url"
-                    value={ical.feedUrl}
-                    onChange={(e) =>
-                      setIcal((prev) => ({
-                        ...prev,
-                        feedUrl: e.target.value,
-                      }))
-                    }
-                    placeholder={t('dialogs.accounts.feedUrlPlaceholder')}
-                    autoComplete="off"
-                    spellCheck={false}
-                    required
-                  />
-                  <span className="form__hint">
-                    {t('dialogs.accounts.feedUrlHint')}
-                  </span>
-                </label>
-                <label className="form__field">
-                  <span className="form__label">
-                    {t('dialogs.accounts.icalUsernameLabel')}
-                  </span>
-                  <input
-                    type="text"
-                    value={ical.username}
-                    onChange={(e) =>
-                      setIcal((prev) => ({
-                        ...prev,
-                        username: e.target.value,
-                      }))
-                    }
-                    autoComplete="username"
-                    spellCheck={false}
-                  />
-                  <span className="form__hint">
-                    {t('dialogs.accounts.icalAuthHint')}
-                  </span>
-                </label>
-                <label className="form__field">
-                  <span className="form__label">
-                    {t('dialogs.accounts.icalPasswordLabel')}
-                  </span>
-                  <input
-                    type="password"
-                    value={ical.password}
-                    onChange={(e) =>
-                      setIcal((prev) => ({
-                        ...prev,
-                        password: e.target.value,
-                      }))
-                    }
-                    autoComplete="new-password"
-                  />
-                </label>
-                {testMessage && (
-                  <p
-                    role="status"
-                    aria-live="polite"
-                    className="form__hint accounts-test-ok"
-                  >
-                    {testMessage}
-                  </p>
-                )}
-              </>
-            )}
-
-            {kind === 'google' && !formSpec && (
-              <>
-                <label className="form__field">
-                  <span className="form__label">
-                    {t('dialogs.accounts.googleClientIdLabel')}
-                  </span>
-                  <input
-                    type="text"
-                    value={google.clientId}
-                    onChange={(e) =>
-                      setGoogle((prev) => ({
-                        ...prev,
-                        clientId: e.target.value,
-                      }))
-                    }
-                    placeholder={t(
-                      'dialogs.accounts.googleClientIdPlaceholder',
-                    )}
-                    autoComplete="off"
-                    spellCheck={false}
-                    required
-                  />
-                  <span className="form__hint">
-                    {t('dialogs.accounts.googleClientIdHint')}
-                  </span>
-                </label>
-                <label className="form__field">
-                  <span className="form__label">
-                    {t('dialogs.accounts.googleClientSecretLabel')}
-                  </span>
-                  <input
-                    type="text"
-                    value={google.clientSecret}
-                    onChange={(e) =>
-                      setGoogle((prev) => ({
-                        ...prev,
-                        clientSecret: e.target.value,
-                      }))
-                    }
-                    placeholder={t(
-                      'dialogs.accounts.googleClientSecretPlaceholder',
-                    )}
-                    autoComplete="off"
-                    spellCheck={false}
-                    required
-                  />
-                  <span className="form__hint">
-                    {t('dialogs.accounts.googleClientSecretHint')}
-                  </span>
-                </label>
-                <FocusableNote className="form__hint accounts-google-flow-hint">
-                  {t('dialogs.accounts.googleFlowHint')}
-                </FocusableNote>
-              </>
-            )}
-
             {/* Adapters that declare their own connect form render it
                 straight from the declaration — no branch here, and none needed
                 when the next adapter arrives. */}
@@ -1743,239 +1160,6 @@ export function AccountsPanel() {
                 {/* The per-kind blocks each carry their own copy of this; on
                     the schema path there is one, here, for every adapter. */}
                 {testMessage && (
-                  <p
-                    role="status"
-                    aria-live="polite"
-                    className="form__hint accounts-test-ok"
-                  >
-                    {testMessage}
-                  </p>
-                )}
-              </>
-            )}
-
-            {kind === 'microsoft_graph' && !formSpec && (
-              <>
-                <label className="form__field">
-                  <span className="form__label">
-                    {t('dialogs.accounts.microsoftClientIdLabel')}
-                  </span>
-                  <input
-                    type="text"
-                    value={microsoft.clientId}
-                    onChange={(e) =>
-                      setMicrosoft((prev) => ({
-                        ...prev,
-                        clientId: e.target.value,
-                      }))
-                    }
-                    placeholder={t(
-                      'dialogs.accounts.microsoftClientIdPlaceholder',
-                    )}
-                    autoComplete="off"
-                    spellCheck={false}
-                    required
-                  />
-                  <span className="form__hint">
-                    {t('dialogs.accounts.microsoftClientIdHint')}
-                  </span>
-                </label>
-                <label className="form__field">
-                  <span className="form__label">
-                    {t('dialogs.accounts.microsoftAuthorityLabel')}
-                  </span>
-                  <select
-                    value={microsoft.authority}
-                    onChange={(e) =>
-                      setMicrosoft((prev) => ({
-                        ...prev,
-                        authority: e.target.value,
-                      }))
-                    }
-                  >
-                    <option value="common">
-                      {t('dialogs.accounts.microsoftAuthorityCommon')}
-                    </option>
-                    <option value="consumers">
-                      {t('dialogs.accounts.microsoftAuthorityConsumers')}
-                    </option>
-                    <option value="organizations">
-                      {t('dialogs.accounts.microsoftAuthorityOrganizations')}
-                    </option>
-                  </select>
-                  <span className="form__hint">
-                    {t('dialogs.accounts.microsoftAuthorityHint')}
-                  </span>
-                </label>
-                <FocusableNote className="form__hint accounts-google-flow-hint">
-                  {t('dialogs.accounts.microsoftFlowHint')}
-                </FocusableNote>
-              </>
-            )}
-
-            {kind === 'ews' && !formSpec && (
-              <>
-                <label className="form__field">
-                  <span className="form__label">
-                    {t('dialogs.accounts.ewsEndpointLabel')}
-                  </span>
-                  <input
-                    type="url"
-                    value={ews.endpoint}
-                    onChange={(e) =>
-                      setEws((prev) => ({
-                        ...prev,
-                        endpoint: e.target.value,
-                      }))
-                    }
-                    placeholder={t('dialogs.accounts.ewsEndpointPlaceholder')}
-                    autoComplete="off"
-                    spellCheck={false}
-                    required
-                  />
-                  <span className="form__hint">
-                    {t('dialogs.accounts.ewsEndpointHint')}
-                  </span>
-                </label>
-                <label className="form__field">
-                  <span className="form__label">
-                    {t('dialogs.accounts.usernameLabel')}
-                  </span>
-                  <input
-                    type="text"
-                    value={ews.username}
-                    onChange={(e) =>
-                      setEws((prev) => ({
-                        ...prev,
-                        username: e.target.value,
-                      }))
-                    }
-                    autoComplete="username"
-                    spellCheck={false}
-                    required
-                  />
-                  <span className="form__hint">
-                    {t('dialogs.accounts.ewsUsernameHint')}
-                  </span>
-                </label>
-                <label className="form__field">
-                  <span className="form__label">
-                    {t('dialogs.accounts.passwordLabel')}
-                  </span>
-                  <input
-                    type="password"
-                    value={ews.password}
-                    onChange={(e) =>
-                      setEws((prev) => ({
-                        ...prev,
-                        password: e.target.value,
-                      }))
-                    }
-                    autoComplete="new-password"
-                    required
-                  />
-                  <span className="form__hint">
-                    {t('dialogs.accounts.passwordHint')}
-                  </span>
-                </label>
-                <FocusableNote className="form__hint accounts-google-flow-hint">
-                  {t('dialogs.accounts.ewsReadOnlyHint')}
-                </FocusableNote>
-                {testMessage && kind === 'ews' && !formSpec && (
-                  <p
-                    role="status"
-                    aria-live="polite"
-                    className="form__hint accounts-test-ok"
-                  >
-                    {testMessage}
-                  </p>
-                )}
-              </>
-            )}
-
-            {kind === 'vikunja' && !formSpec && (
-              <>
-                <label className="form__field">
-                  <span className="form__label">
-                    {t('dialogs.accounts.vikunjaServerUrlLabel')}
-                  </span>
-                  <input
-                    type="url"
-                    value={vikunja.serverUrl}
-                    onChange={(e) =>
-                      setVikunja((prev) => ({
-                        ...prev,
-                        serverUrl: e.target.value,
-                      }))
-                    }
-                    placeholder={t(
-                      'dialogs.accounts.vikunjaServerUrlPlaceholder',
-                    )}
-                    autoComplete="off"
-                    spellCheck={false}
-                    required
-                  />
-                  <span className="form__hint">
-                    {t('dialogs.accounts.vikunjaServerUrlHint')}
-                  </span>
-                </label>
-                <label className="form__field">
-                  <span className="form__label">
-                    {t('dialogs.accounts.vikunjaApiTokenLabel')}
-                  </span>
-                  <input
-                    type="password"
-                    value={vikunja.apiToken}
-                    onChange={(e) =>
-                      setVikunja((prev) => ({
-                        ...prev,
-                        apiToken: e.target.value,
-                      }))
-                    }
-                    autoComplete="new-password"
-                    spellCheck={false}
-                    required
-                  />
-                  <span className="form__hint">
-                    {t('dialogs.accounts.vikunjaApiTokenHint')}
-                  </span>
-                </label>
-                {testMessage && kind === 'vikunja' && !formSpec && (
-                  <p
-                    role="status"
-                    aria-live="polite"
-                    className="form__hint accounts-test-ok"
-                  >
-                    {testMessage}
-                  </p>
-                )}
-              </>
-            )}
-
-            {kind === 'todoist' && !formSpec && (
-              <>
-                <label className="form__field">
-                  <span className="form__label">
-                    {t('dialogs.accounts.todoistApiTokenLabel')}
-                  </span>
-                  <input
-                    type="password"
-                    value={todoist.apiToken}
-                    onChange={(e) =>
-                      setTodoist((prev) => ({
-                        ...prev,
-                        apiToken: e.target.value,
-                      }))
-                    }
-                    autoComplete="new-password"
-                    spellCheck={false}
-                    required
-                  />
-                  <span className="form__hint">
-                    {t('dialogs.accounts.todoistApiTokenHint')}
-                  </span>
-                </label>
-                {testMessage && kind === 'todoist' && !formSpec && (
                   <p
                     role="status"
                     aria-live="polite"
@@ -2009,22 +1193,7 @@ export function AccountsPanel() {
                     : action.label}
                 </button>
               ))}
-              {kind === 'ews' && !formSpec && (
-                <button
-                  type="button"
-                  className="form__action"
-                  onClick={onDiscover}
-                  aria-disabled={
-                    discovering || testing || submitting || undefined
-                  }
-                  aria-describedby={`${headingId}-discover-help`}
-                >
-                  {discovering
-                    ? t('dialogs.accounts.ewsDiscovering')
-                    : t('dialogs.accounts.ewsDiscover')}
-                </button>
-              )}
-              {/* Offered for any adapter that declares a schema — the host can
+                {/* Offered for any adapter that declares a schema — the host can
                   probe it generically — plus the shrinking list of kinds still
                   on the older path. No name here once that list is gone. */}
               {(formSpec ||
@@ -2071,14 +1240,6 @@ export function AccountsPanel() {
                   {action.hint}
                 </p>
               ))}
-            {kind === 'ews' && !formSpec && (
-              <p
-                id={`${headingId}-discover-help`}
-                className="sr-only"
-              >
-                {t('dialogs.accounts.ewsDiscoverSrHint')}
-              </p>
-            )}
           </form>
         </section>
 
