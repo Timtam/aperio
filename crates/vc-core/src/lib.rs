@@ -140,6 +140,28 @@ pub struct NewMeeting {
     /// Providers without a permanent room ignore it.
     #[serde(default)]
     pub use_personal_room: bool,
+
+    /// The event's attendees, so the provider knows who the meeting is for.
+    ///
+    /// Without this a provider has no idea who is coming: it can neither list
+    /// them back (the "who is actually invited" question) nor notify them.
+    /// These addresses LEAVE the device — that is the point of handing them to
+    /// a meeting service — so the host passes them only when it is creating a
+    /// meeting for an event that has them.
+    #[serde(default)]
+    pub attendees: Vec<String>,
+
+    /// Whether the provider should email [`Self::attendees`] itself.
+    ///
+    /// The host sets this only when it has no other way to reach them. A
+    /// calendar that can invite server-side already will, and a provider mail
+    /// on top of that puts a SECOND iCalendar attachment in every attendee's
+    /// mailbox — and so a duplicate entry in their calendar. When the calendar
+    /// cannot invite (a local calendar, a subscribed feed, a CalDAV server
+    /// without RFC 6638), the provider's mail is the only invitation there is,
+    /// and suppressing it means nobody is told at all.
+    #[serde(default)]
+    pub notify_attendees: bool,
 }
 
 /// Error variants every provider-specific adapter has to map

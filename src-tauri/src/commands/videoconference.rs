@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 use cal_adapter_local::LocalAdapter;
 use cal_core::Event;
-use host_core::meetings::{EventMeeting, MeetingsRepo};
+use host_core::meetings::{should_provider_notify, EventMeeting, MeetingsRepo};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use vc_core::{Meeting, MeetingId, NewMeeting};
@@ -33,7 +33,7 @@ use super::{CommandError, CommandResult};
 use crate::cache::CacheStore;
 use crate::db::DbHandle;
 use crate::event_log::EventLogWriter;
-use crate::registry::AdapterRegistry;
+use crate::registry::{AdapterRegistry, LOCAL_ID};
 use crate::reminders::SchedulerHandle;
 
 /// An event and the meeting now attached to it.
@@ -113,6 +113,11 @@ pub async fn attach_meeting(
         });
     }
 
+    // Who is coming, and whether the provider is the one who has to tell them.
+    let notify = should_provider_notify(
+        &event.attendees,
+        calendar_can_invite(&registry, &cache, &request.calendar_id),
+    );
     let meeting = vc
         .create_meeting(NewMeeting {
             title: event.title.clone(),
@@ -120,6 +125,8 @@ pub async fn attach_meeting(
             end_time: Some(event.end),
             description: event.description.clone(),
             use_personal_room: request.use_personal_room,
+            attendees: event.attendees.clone(),
+            notify_attendees: notify,
         })
         .await
         .map_err(CommandError::from)?;
@@ -433,6 +440,30 @@ fn meetings_error(err: host_core::meetings::MeetingsError) -> CommandError {
         code: "internal",
         message: err.to_string(),
     }
+}
+
+/// Whether the calendar holding an event can invite its attendees itself —
+/// send them an invitation server-side and collect their replies as RSVPs.
+///
+/// Read from the cached calendar listing, which the sidebar has populated long
+/// before anyone opens an event editor. An unknown or uncached id degrades to
+/// `false`: the worst that follows is one invitation too many, whereas the
+/// other direction is a meeting nobody was told about.
+fn calendar_can_invite(registry: &AdapterRegistry, cache: &CacheStore, calendar_id: &str) -> bool {
+    let Some(account) = registry.account_for_calendar(calendar_id) else {
+        // No route means a local calendar, which invites nobody.
+        return false;
+    };
+    if account == LOCAL_ID {
+        return false;
+    }
+    cache
+        .read_calendars(&account)
+        .ok()
+        .into_iter()
+        .flatten()
+        .find(|c| c.id == calendar_id)
+        .is_some_and(|c| c.supports_scheduling)
 }
 
 /// Resolve the VcAdapter for `account_id` or surface a clear

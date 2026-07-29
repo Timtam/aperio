@@ -44,6 +44,12 @@ const MAX_TAG: usize = 64;
 
 // ── wire types ───────────────────────────────────────────────────────────
 
+/// One address in `CreateMeetingBody::invitees`.
+#[derive(Debug, Serialize)]
+struct InviteeBody<'a> {
+    email: &'a str,
+}
+
 #[derive(Debug, Serialize)]
 struct CreateMeetingBody<'a> {
     title: &'a str,
@@ -68,6 +74,10 @@ struct CreateMeetingBody<'a> {
     /// reference: a meeting whose stored id was lost can still be found.
     #[serde(rename = "integrationTags", skip_serializing_if = "Vec::is_empty")]
     integration_tags: Vec<String>,
+    /// Who Webex should consider invited. Omitted entirely when the event has
+    /// no attendees, so a solo meeting sends no address anywhere.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    invitees: Vec<InviteeBody<'a>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -206,10 +216,20 @@ pub async fn create_meeting(
         timezone: "UTC",
         agenda: agenda.as_deref(),
         site_url,
-        send_email: send_webex_emails,
+        // The account setting is a ceiling, not a command: it can switch the
+        // provider's mail off entirely, but switching it ON per meeting is the
+        // host's call, made from whether the calendar can invite by itself.
+        send_email: send_webex_emails || spec.notify_attendees,
         integration_tags: event_tag
             .map(|t| vec![clamp(t, MAX_TAG, "integrationTag")])
             .unwrap_or_default(),
+        invitees: spec
+            .attendees
+            .iter()
+            .map(|email| email.trim())
+            .filter(|email| !email.is_empty())
+            .map(|email| InviteeBody { email })
+            .collect(),
     };
     let created: MeetingResponse = state.post_json("/meetings", &body).await?;
     to_meeting(created)
@@ -580,6 +600,8 @@ mod tests {
             end_time: end,
             description: None,
             use_personal_room: false,
+            attendees: Vec::new(),
+            notify_attendees: false,
         }
     }
 
@@ -783,6 +805,40 @@ mod tests {
         .expect("create");
         assert_eq!(meeting.join_url, "https://x.webex.com/j.php?MTID=a");
         assert_eq!(meeting.password.as_deref(), Some("pw"));
+        m.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn the_event_s_attendees_become_webex_invitees_and_can_be_mailed() {
+        // The other half of the mail question: before this, `sendEmail` had
+        // barely anything to act on, because the meeting carried no invitees at
+        // all. Whitespace is not an address and must not become one.
+        let mut server = mockito::Server::new_async().await;
+        let m = server
+            .mock("POST", "/meetings")
+            .match_body(mockito::Matcher::PartialJsonString(
+                r#"{"sendEmail":true,
+                    "invitees":[{"email":"a@example.test"},{"email":"b@example.test"}]}"#
+                    .to_string(),
+            ))
+            .with_status(200)
+            .with_body(
+                r#"{"id":"m1","title":"Weekly","webLink":"https://x.webex.com/j.php?MTID=a",
+                    "start":"2026-07-28T09:00:00Z","end":"2026-07-28T10:00:00Z"}"#,
+            )
+            .create_async()
+            .await;
+        let state = crate::api::tests_support::state(&server.url());
+        let mut spec = spec(Some(at(9, 0)), Some(at(10, 0)));
+        spec.attendees = vec![
+            "a@example.test".into(),
+            "   ".into(),
+            " b@example.test ".into(),
+        ];
+        spec.notify_attendees = true;
+        create_meeting(&state, &spec, Some("site.webex.com"), false, false, None)
+            .await
+            .expect("create");
         m.assert_async().await;
     }
 

@@ -37,6 +37,25 @@ pub struct EventMeeting {
     pub created_at: String,
 }
 
+/// Whether the videoconference provider should email an event's attendees.
+///
+/// Only when nothing else will. A calendar that can invite server-side is the
+/// channel that should carry the invitation — it is the one whose replies come
+/// back as RSVPs, and a provider mail alongside it delivers a SECOND iCalendar
+/// attachment, which lands as a duplicate entry in every attendee's calendar.
+///
+/// When the calendar cannot invite — a local calendar, a subscribed feed, a
+/// CalDAV server without RFC 6638 — the provider's mail is the only invitation
+/// that exists, and suppressing it means nobody is told at all. That was the
+/// state before this: the flag was an account checkbox, defaulted off for the
+/// duplicate risk, and so the case where it was the ONLY channel was off too.
+///
+/// No attendees means nobody to notify, whatever the calendar can do.
+pub fn should_provider_notify(attendees: &[String], calendar_supports_scheduling: bool) -> bool {
+    let has_guests = attendees.iter().any(|a| !a.trim().is_empty());
+    has_guests && !calendar_supports_scheduling
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum MeetingsError {
     #[error("sqlite error: {0}")]
@@ -195,5 +214,25 @@ mod tests {
         let repo = MeetingsRepo::new(&shared);
         assert_eq!(repo.get("never-had-one").unwrap(), None);
         assert_eq!(repo.unbind("never-had-one").unwrap(), None);
+    }
+
+    // ── should_provider_notify ──────────────────────────────────────────────
+
+    #[test]
+    fn the_provider_mails_only_when_the_calendar_cannot() {
+        let guests = vec!["a@example.test".to_string()];
+        // The calendar will invite: a provider mail on top is the duplicate.
+        assert!(!should_provider_notify(&guests, true));
+        // The calendar cannot: the provider's mail is the only invitation.
+        assert!(should_provider_notify(&guests, false));
+    }
+
+    #[test]
+    fn nobody_to_notify_means_no_mail_either_way() {
+        assert!(!should_provider_notify(&[], false));
+        assert!(!should_provider_notify(&[], true));
+        // Whitespace is not an attendee.
+        let blank = vec!["   ".to_string()];
+        assert!(!should_provider_notify(&blank, false));
     }
 }

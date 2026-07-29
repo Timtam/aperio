@@ -30,11 +30,10 @@ What you see next depends on the build you are running:
   carries none, and you register your own integration once. That takes about
   five minutes and is free; the next section walks through it.
 
-Two options are worth a moment:
-
-**Let Webex send its own invitations.** Off by default, and worth leaving off.
-Webex's mails carry a calendar attachment, so switching this on puts a *second*
-entry in every attendee's calendar next to the one Aperio already sent.
+Nothing else to decide here. Whether a meeting is a fresh one or your permanent
+room, and whether Webex should mail the attendees, are both answered per meeting
+— and Aperio answers the second one for you. See *Who tells the attendees*
+below.
 
 ## Registering your own integration
 
@@ -84,6 +83,7 @@ is a property of that meeting, and it is asked at the moment you know the
 answer. Either way, Aperio:
 
 - creates the meeting on Webex with the event's title and time,
+- hands Webex the event's attendees, so the meeting knows who it is for,
 - writes the join link into the event's location (if it was empty) and appends a
   short block with the link and password to the description,
 - and records that this meeting belongs to this event.
@@ -125,6 +125,18 @@ your calendar turns it into an event, that event has a meeting but Aperio did
 not create it. The editor offers **Take over the meeting**: it looks the meeting
 up by its join link, and from then on it can be removed like one Aperio made.
 Nothing is written to the event — the link is already there.
+
+**Who tells the attendees.** Webex can email everyone an invitation itself, and
+its mails carry a calendar attachment. That is a duplicate when your own
+calendar already invites people server-side — Exchange, Google and a CalDAV
+server with scheduling all do — because each attendee then gets two invitations
+and two entries. But on a calendar that cannot invite anyone at all (a local
+calendar, a subscribed feed, plain CalDAV), Webex's mail is the only invitation
+there will ever be, and suppressing it means nobody is told.
+
+So it is not a setting. When Aperio creates a meeting it looks at the event's
+own calendar and asks Webex to mail the attendees exactly when that calendar
+cannot. An event with no attendees mails nobody either way.
 
 **Who is really invited.** The attendees on such an event are whatever the
 invitation mail addressed, which is often just you and Webex's own sending

@@ -59,7 +59,15 @@ pub struct WebexAccountConfig {
     /// scheduling licence and has no daily cap.
     #[serde(default)]
     pub use_personal_room: bool,
-    /// Let Webex email its own invitations on top of Aperio's.
+    /// Always let Webex email its own invitations, whatever the request says.
+    ///
+    /// No longer a setup question — the host now decides per meeting, from
+    /// whether the event's own calendar can invite the attendees itself, and
+    /// asks for the mail exactly when it is the only one there will be. This
+    /// stays as the always-on override for an account that was configured back
+    /// when it *was* a question, and as the flag that still governs the
+    /// cancellation mail on [`VcAdapter::delete_meeting`] — which carries no
+    /// per-call notification choice.
     ///
     /// Off by default, and that default is load-bearing rather than tidy:
     /// Webex's own default is ON and its mails carry an iCalendar attachment,
@@ -200,6 +208,8 @@ impl WebexAdapter {
                 end_time: None,
                 description: None,
                 use_personal_room: true,
+                attendees: Vec::new(),
+                notify_attendees: false,
             },
             None,
             true,

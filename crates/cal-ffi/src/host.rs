@@ -62,7 +62,7 @@ use host_core::conflicts::{
 use host_core::contact_sync::{ContactSyncCore, ContactSyncObserver, ContactsSyncedPayload};
 use host_core::db::SharedConn;
 use host_core::event_log::OnboardingService;
-use host_core::meetings::MeetingsRepo;
+use host_core::meetings::{should_provider_notify, MeetingsRepo};
 use host_core::overrides::{
     apply_color_to_calendars, apply_color_to_contact_lists, apply_color_to_events,
     apply_color_to_sections, apply_color_to_task_lists, apply_to_calendars, apply_to_task_lists,
@@ -7148,6 +7148,10 @@ impl Host {
             });
         }
 
+        // Who is coming, and whether the provider is the one who has to tell
+        // them. Mirrors the desktop `attach_meeting`.
+        let notify =
+            should_provider_notify(&event.attendees, self.calendar_can_invite(&req.calendar_id));
         let meeting = self
             .runtime
             .block_on(vc.create_meeting(NewMeeting {
@@ -7156,6 +7160,8 @@ impl Host {
                 end_time: Some(event.end),
                 description: event.description.clone(),
                 use_personal_room: req.use_personal_room,
+                attendees: event.attendees.clone(),
+                notify_attendees: notify,
             }))
             .map_err(vc_err)?;
 
@@ -7571,6 +7577,30 @@ impl Host {
         }
         let event: Event = from_json("event", &json)?;
         Ok(Some(event))
+    }
+
+    /// Whether the calendar holding an event can invite its attendees itself —
+    /// send them an invitation server-side and collect their replies as RSVPs.
+    ///
+    /// Read from the cached calendar listing, which the calendar screens have
+    /// populated long before anyone opens an event editor. An unknown or
+    /// uncached id degrades to `false`: the worst that follows is one
+    /// invitation too many, whereas the other direction is a meeting nobody was
+    /// told about. Mirrors the desktop `calendar_can_invite`.
+    fn calendar_can_invite(&self, calendar_id: &str) -> bool {
+        let Some(account) = self.registry.account_for_calendar(calendar_id) else {
+            return false;
+        };
+        if account == LOCAL_ID {
+            return false;
+        }
+        self.cache
+            .read_calendars(&account)
+            .ok()
+            .into_iter()
+            .flatten()
+            .find(|c| c.id == calendar_id)
+            .is_some_and(|c| c.supports_scheduling)
     }
 
     /// Save an event edited by the meeting commands, through the same write

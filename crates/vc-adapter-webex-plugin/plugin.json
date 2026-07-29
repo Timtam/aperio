@@ -35,14 +35,6 @@
         "label_key": "dialogs.accounts.webexSiteLabel",
         "hint_key": "dialogs.accounts.webexSiteHint",
         "required": false
-      },
-      {
-        "key": "send_webex_emails",
-        "kind": "bool",
-        "label": "Let Webex send its own invitations",
-        "label_key": "dialogs.accounts.webexEmailsLabel",
-        "hint_key": "dialogs.accounts.webexEmailsHint",
-        "default": false
       }
     ],
     "oauth": {

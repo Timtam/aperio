@@ -1733,8 +1733,6 @@
       "webexClientSecretHint": "Wird im Schlüsselbund des Systems abgelegt, nie in der Kontodatenbank — Webex verlangt es auch bei PKCE.",
       "webexSiteLabel": "Webex-Site",
       "webexSiteHint": "Leer lassen. Aperio übernimmt beim ersten Meeting die Standard-Site deines Kontos; ein Eintrag lohnt nur, wenn deine Organisation mehrere hat.",
-      "webexEmailsLabel": "Webex eigene Einladungen senden lassen",
-      "webexEmailsHint": "Aus, weil Webex-Mails einen Kalenderanhang mitschicken — eingeschaltet landet bei allen Teilnehmern ein zweiter Termin im Kalender.",
       "clientIdRequired": "Bitte gib die Client-ID ein.",
       "fieldRequired": "Bitte fülle „{{field}}\" aus.",
       "clientSecretRequired": "Bitte gib das Client-Secret ein.",

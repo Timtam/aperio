@@ -32,12 +32,10 @@ Was danach kommt, hängt von der Version ab, die du benutzt:
   dauert etwa fünf Minuten und ist kostenlos; der nächste Abschnitt führt
   hindurch.
 
-Zwei Optionen lohnen einen Moment:
-
-**Webex eigene Einladungen senden lassen.** Aus als Voreinstellung, und das
-solltest du so lassen. Webex-Mails bringen einen Kalenderanhang mit;
-eingeschaltet landet bei allen Teilnehmern ein **zweiter** Termin neben dem,
-den Aperio schon verschickt hat.
+Mehr ist hier nicht zu entscheiden. Ob ein Meeting ein frisches ist oder dein
+dauerhafter Raum, und ob Webex die Teilnehmer anmailen soll, wird beides pro
+Meeting beantwortet — das zweite beantwortet Aperio für dich. Siehe *Wer die
+Teilnehmer benachrichtigt* weiter unten.
 
 ## Eigene Integration anlegen
 
@@ -87,6 +85,8 @@ Eigenschaft dieses Meetings, und gefragt wird in dem Moment, in dem du die
 Antwort kennst. In beiden Fällen
 
 - legt das Meeting bei Webex mit Titel und Zeit des Termins an,
+- übergibt Webex die Teilnehmer des Termins, damit das Meeting weiß, für wen
+  es ist,
 - schreibt den Beitrittslink in das Ortsfeld (falls es leer war) und hängt einen
   kurzen Block mit Link und Passwort an die Beschreibung,
 - und merkt sich, dass dieses Meeting zu diesem Termin gehört.
@@ -130,6 +130,19 @@ ein Meeting — nur hat Aperio es nicht angelegt. Der Editor bietet dann
 **Meeting übernehmen**: er schlägt das Meeting über seinen Beitrittslink nach,
 und danach lässt es sich entfernen wie ein selbst angelegtes. In den Termin wird
 nichts geschrieben — der Link steht ja schon drin.
+
+**Wer die Teilnehmer benachrichtigt.** Webex kann allen selbst eine Einladung
+mailen, und seine Mails bringen einen Kalenderanhang mit. Das ist eine Dublette,
+wenn dein eigener Kalender die Leute schon serverseitig einlädt — Exchange,
+Google und ein CalDAV-Server mit Scheduling tun das —, denn dann bekommt jeder
+zwei Einladungen und zwei Einträge. Auf einem Kalender, der überhaupt niemanden
+einladen kann (lokaler Kalender, abonnierter Feed, einfaches CalDAV), ist Webex'
+Mail dagegen die einzige Einladung, die es je geben wird, und sie zu unterdrücken
+heißt, dass niemand Bescheid weiß.
+
+Deshalb ist das keine Einstellung. Wenn Aperio ein Meeting anlegt, schaut es auf
+den Kalender des Termins und bittet Webex genau dann um die Mail, wenn dieser
+Kalender es nicht kann. Ein Termin ohne Teilnehmer mailt so oder so niemandem.
 
 **Wer wirklich eingeladen ist.** Die Teilnehmer eines solchen Termins sind das,
 was die Einladungsmail adressiert hat — oft nur du und Webex' eigene

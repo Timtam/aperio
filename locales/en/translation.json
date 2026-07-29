@@ -1733,8 +1733,6 @@
       "webexClientSecretHint": "Kept in the system keychain, never in the account database — Webex requires one even under PKCE.",
       "webexSiteLabel": "Webex site",
       "webexSiteHint": "Leave blank. Aperio picks up your account's default site with the first meeting; an entry only matters if your organisation has several.",
-      "webexEmailsLabel": "Let Webex send its own invitations",
-      "webexEmailsHint": "Off, because Webex's mails carry a calendar attachment — switched on, every attendee gets a second entry in their calendar.",
       "clientIdRequired": "Please enter the client ID.",
       "fieldRequired": "Please fill in \"{{field}}\".",
       "clientSecretRequired": "Please enter the client secret.",
