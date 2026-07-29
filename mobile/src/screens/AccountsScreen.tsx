@@ -19,17 +19,15 @@ import {
   AdapterKind,
   AdapterKindInfo,
   accountFormSpec,
-  listAdapterKinds,
   createAccount,
+  listAdapterKinds,
   deleteAccount,
-  discoverEwsEndpoint,
   listAccounts,
   listAccountsMissingCredentials,
   renameAccount,
   requestDeviceCalendarAccess,
   resetAccountSync,
   setAccountSecret,
-  testAccount,
 } from '../api/accounts';
 import { getUserPref, setUserPref } from '../api/prefs';
 import {
@@ -54,7 +52,7 @@ import OAuthConnectForm from './OAuthConnectForm';
 // Accounts management — list + add (credential kinds) + connect (OAuth kinds via
 // the browser sign-in flow) + delete, over the Rust Host (statically-embedded
 // adapter plugins + the keychain-bridged SecretStore). The non-OAuth kinds use
-// the inline credential form below; Google / Microsoft use the host-driven
+// the form the adapter itself declares; Google / Microsoft use the host-driven
 // native auth session (see OAuthConnectForm).
 //
 // Accessibility: every control is an addressable element with an explicit
@@ -62,62 +60,6 @@ import OAuthConnectForm from './OAuthConnectForm';
 // visible button and a custom accessibility action; results are announced and
 // screen-reader focus is moved to the new row after a create/connect.
 
-interface ConfigField {
-  jsonKey: string;
-  labelKey: string;
-  optional?: boolean;
-  autoCapitalizeNone?: boolean;
-}
-
-interface KindForm {
-  configFields: ConfigField[];
-  /** The credential field, when the kind needs one. */
-  secret?: { labelKey: string; optional?: boolean };
-  /** Non-secret config merged verbatim (e.g. CalDAV's auth_kind). */
-  fixedConfig?: Record<string, string>;
-}
-
-// The kinds with a non-OAuth construction path that use the credential form.
-// `device_calendar` is excluded too: it has no credentials — it's added through
-// the OS permission grant (the 'device' add mode), not a KindForm.
-const KIND_FORMS: Record<Exclude<AdapterKind, 'google' | 'microsoft_graph' | 'zoom' | 'teams' | 'meet' | 'webex' | 'device_calendar'>, KindForm> = {
-  local: { configFields: [] },
-  caldav: {
-    configFields: [
-      { jsonKey: 'server_url', labelKey: 'dialogs.accounts.serverUrlLabel', autoCapitalizeNone: true },
-      { jsonKey: 'username', labelKey: 'dialogs.accounts.usernameLabel', autoCapitalizeNone: true },
-    ],
-    secret: { labelKey: 'dialogs.accounts.passwordLabel' },
-    fixedConfig: { auth_kind: 'basic' },
-  },
-  ical: {
-    configFields: [
-      { jsonKey: 'feed_url', labelKey: 'dialogs.accounts.feedUrlLabel', autoCapitalizeNone: true },
-      { jsonKey: 'username', labelKey: 'dialogs.accounts.icalUsernameLabel', optional: true, autoCapitalizeNone: true },
-    ],
-    secret: { labelKey: 'dialogs.accounts.icalPasswordLabel', optional: true },
-  },
-  ews: {
-    configFields: [
-      { jsonKey: 'endpoint', labelKey: 'dialogs.accounts.ewsEndpointLabel', autoCapitalizeNone: true },
-      { jsonKey: 'username', labelKey: 'dialogs.accounts.usernameLabel', autoCapitalizeNone: true },
-    ],
-    secret: { labelKey: 'dialogs.accounts.passwordLabel' },
-  },
-  vikunja: {
-    configFields: [
-      { jsonKey: 'server_url', labelKey: 'dialogs.accounts.vikunjaServerUrlLabel', autoCapitalizeNone: true },
-    ],
-    secret: { labelKey: 'dialogs.accounts.vikunjaApiTokenLabel' },
-  },
-  todoist: {
-    configFields: [],
-    secret: { labelKey: 'dialogs.accounts.todoistApiTokenLabel' },
-  },
-};
-
-/** The providers the "Add account" picker offers — the credential kinds (minus
- *  the implicit local account, which is added automatically) + the OAuth kinds. */
 /** Kinds the host implements itself, so no plugin declares them. `local` is the
  *  built-in store (created at bootstrap, never offered); `device_calendar` is
  *  offered separately because it is added through an OS permission grant rather
@@ -199,13 +141,8 @@ export default function AccountsScreen() {
   const [privacyNoticeFor, setPrivacyNoticeFor] = useState<AdapterKind | null>(null);
 
   // Add-form state.
-  const [kind, setKind] = useState<keyof typeof KIND_FORMS>('caldav');
   const [displayName, setDisplayName] = useState('');
-  const [config, setConfig] = useState<Record<string, string>>({});
-  const [secret, setSecret] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [discovering, setDiscovering] = useState(false);
   // Add flow: 'list' shows the connected accounts + an "Add account" button;
   // 'picker' a provider menu; 'credential'/'oauth' the chosen provider's form —
   // replacing the old always-mounted credential + OAuth forms (one long view).
@@ -299,18 +236,9 @@ export default function AccountsScreen() {
     if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
   }, [accounts]);
 
-  const form = KIND_FORMS[kind];
-
   const resetForm = useCallback(() => {
     setDisplayName('');
-    setConfig({});
-    setSecret('');
-  }, []);
-
-  const onChangeKind = useCallback((next: keyof typeof KIND_FORMS) => {
-    setKind(next);
-    setConfig({});
-    setSecret('');
+    setFormValues({});
   }, []);
 
   // Picker → the chosen provider's form: OAuth kinds open the browser-sign-in
@@ -340,18 +268,17 @@ export default function AccountsScreen() {
             setFormValues({});
             setMode('schema');
           } else {
-            onChangeKind(picked as keyof typeof KIND_FORMS);
-            setMode('credential');
+            // No declaration means no plugin serves this kind, so there is
+            // nothing to connect to. Say so rather than opening a form that
+            // would fail on submit.
+            setError(t('dialogs.accounts.kindUnavailable'));
           }
         })
-        .catch(() => {
-          // A failed probe falls back to the older path rather than stranding
-          // the user on a picker that did nothing.
-          onChangeKind(picked as keyof typeof KIND_FORMS);
-          setMode('credential');
+        .catch((err) => {
+          setError(errorMessage(err));
         });
     },
-    [onChangeKind, i18n.language],
+    [i18n.language, t],
   );
 
   /** Connect an adapter that declared its own form. */
@@ -420,46 +347,6 @@ export default function AccountsScreen() {
     setMode('list');
   }, [resetForm]);
 
-  const add = useCallback(async () => {
-    const name = displayName.trim();
-    if (name.length === 0) {
-      setError(t('dialogs.accounts.nameRequired'));
-      announce(t('dialogs.accounts.nameRequired'));
-      return;
-    }
-    setError(null);
-    setSubmitting(true);
-    try {
-      const configObject: Record<string, string> = { ...(form.fixedConfig ?? {}) };
-      for (const field of form.configFields) {
-        const value = (config[field.jsonKey] ?? '').trim();
-        if (value.length > 0) configObject[field.jsonKey] = value;
-      }
-      const trimmedSecret = secret.trim();
-      const created = await createAccount({
-        adapter_kind: kind,
-        display_name: name,
-        config_json: JSON.stringify(configObject),
-        secret: form.secret && trimmedSecret.length > 0 ? trimmedSecret : null,
-      });
-      resetForm();
-      setMode('list');
-      await load();
-      pendingFocusId.current = created.id;
-      announce(t('dialogs.accounts.created', { name }));
-      // Pull the new account's calendars/lists into the cache now. The cal-ffi
-      // command intentionally no longer self-warms (a background warm there
-      // raced the Rust unit tests), so the UI kicks it. Fire-and-forget.
-      void refreshExternalCache().catch(() => undefined);
-      await maybeShowPrivacyNotice(kind);
-    } catch (err) {
-      const message = errorMessage(err);
-      setError(message);
-      announce(t('mobile.error', { message }));
-    } finally {
-      setSubmitting(false);
-    }
-  }, [announce, config, displayName, form, kind, load, maybeShowPrivacyNotice, resetForm, secret, t]);
 
   // Add the device-local calendar + reminders account: run the OS permission
   // prompt (the adapter's "auth"), then create the row on a grant. No name field
@@ -499,71 +386,6 @@ export default function AccountsScreen() {
       setSubmitting(false);
     }
   }, [announce, load, t]);
-
-  // Probe the entered credentials without saving — the same (kind, config,
-  // secret) add() assembles, but via testAccount (persists nothing). Surfaces a
-  // bad password / unreachable host before the user commits.
-  const testConnection = useCallback(async () => {
-    setError(null);
-    setTesting(true);
-    try {
-      const configObject: Record<string, string> = { ...(form.fixedConfig ?? {}) };
-      for (const field of form.configFields) {
-        const value = (config[field.jsonKey] ?? '').trim();
-        if (value.length > 0) configObject[field.jsonKey] = value;
-      }
-      const trimmedSecret = secret.trim();
-      await testAccount({
-        adapter_kind: kind,
-        display_name: displayName.trim(),
-        config_json: JSON.stringify(configObject),
-        secret: form.secret && trimmedSecret.length > 0 ? trimmedSecret : null,
-      });
-      announce(t('dialogs.accounts.testWorks'));
-    } catch (err) {
-      const message = errorMessage(err);
-      setError(message);
-      announce(t('mobile.error', { message }));
-    } finally {
-      setTesting(false);
-    }
-  }, [announce, config, displayName, form, kind, secret, t]);
-
-  // EWS Autodiscover: derive the endpoint from the email + password (the EWS
-  // form's username field holds the email) and pre-fill the endpoint + username,
-  // mirroring the desktop "Discover URL" button. Network call → the typed plugin
-  // message surfaces on failure so the user can enter the endpoint manually.
-  const discover = useCallback(async () => {
-    const email = (config.username ?? '').trim();
-    const password = secret.trim();
-    if (email.length === 0) {
-      setError(t('dialogs.accounts.ewsDiscoverNeedsEmail'));
-      announce(t('dialogs.accounts.ewsDiscoverNeedsEmail'));
-      return;
-    }
-    if (password.length === 0) {
-      setError(t('dialogs.accounts.ewsDiscoverNeedsPassword'));
-      announce(t('dialogs.accounts.ewsDiscoverNeedsPassword'));
-      return;
-    }
-    setError(null);
-    setDiscovering(true);
-    try {
-      const result = await discoverEwsEndpoint(email, password);
-      setConfig((c) => ({
-        ...c,
-        endpoint: result.ews_url,
-        username: result.account_email,
-      }));
-      announce(t('dialogs.accounts.ewsDiscoverOk', { url: result.ews_url }));
-    } catch (err) {
-      const message = errorMessage(err);
-      setError(message);
-      announce(t('mobile.error', { message }));
-    } finally {
-      setDiscovering(false);
-    }
-  }, [announce, config, secret, t]);
 
   const remove = useCallback(
     (account: Account) => {
@@ -1056,97 +878,6 @@ export default function AccountsScreen() {
           />
         )}
         {error != null && <Text style={styles.error}>{error}</Text>}
-      </AppDialog>
-
-      <AppDialog
-        visible={mode === 'credential'}
-        title={t(`dialogs.accounts.kindName.${kind}`)}
-        confirmLabel={t('dialogs.accounts.add')}
-        cancelLabel={t('mobile.cancel')}
-        onConfirm={() => void add()}
-        onCancel={cancelAdd}
-        busy={submitting}
-      >
-        <View style={styles.field}>
-          <Text style={styles.label}>{t('dialogs.accounts.nameLabel')}</Text>
-          <TextInput
-            style={styles.input}
-            value={displayName}
-            onChangeText={setDisplayName}
-            placeholder={t('dialogs.accounts.namePlaceholder')}
-            accessibilityLabel={t('dialogs.accounts.nameLabel')}
-          />
-        </View>
-
-        {form.configFields.map((field) => (
-          <View key={field.jsonKey} style={styles.field}>
-            <Text style={styles.label}>{t(field.labelKey)}</Text>
-            <TextInput
-              style={styles.input}
-              value={config[field.jsonKey] ?? ''}
-              onChangeText={(v) => setConfig((c) => ({ ...c, [field.jsonKey]: v }))}
-              accessibilityLabel={t(field.labelKey)}
-              autoCapitalize={field.autoCapitalizeNone ? 'none' : 'sentences'}
-              autoCorrect={!field.autoCapitalizeNone}
-            />
-          </View>
-        ))}
-
-        {form.secret != null && (
-          <View style={styles.field}>
-            <Text style={styles.label}>{t(form.secret.labelKey)}</Text>
-            <TextInput
-              style={styles.input}
-              value={secret}
-              onChangeText={setSecret}
-              accessibilityLabel={t(form.secret.labelKey)}
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-          </View>
-        )}
-
-        {kind === 'ews' && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ disabled: discovering, busy: discovering }}
-            accessibilityLabel={t('dialogs.accounts.ewsDiscover')}
-            accessibilityHint={t('dialogs.accounts.ewsDiscoverSrHint')}
-            disabled={discovering}
-            onPress={() => void discover()}
-            style={({ pressed }) => [
-              styles.discoverButton,
-              pressed && styles.pressed,
-              discovering && styles.discoverButtonDisabled,
-            ]}
-          >
-            <Text style={styles.discoverButtonText}>
-              {discovering
-                ? t('dialogs.accounts.ewsDiscovering')
-                : t('dialogs.accounts.ewsDiscover')}
-            </Text>
-          </Pressable>
-        )}
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ disabled: testing || submitting, busy: testing }}
-          accessibilityLabel={t('dialogs.accounts.testConnection')}
-          disabled={testing || submitting}
-          onPress={() => void testConnection()}
-          style={({ pressed }) => [
-            styles.discoverButton,
-            pressed && styles.pressed,
-            (testing || submitting) && styles.discoverButtonDisabled,
-          ]}
-        >
-          <Text style={styles.discoverButtonText}>
-            {testing
-              ? t('dialogs.accounts.testing')
-              : t('dialogs.accounts.testConnection')}
-          </Text>
-        </Pressable>
       </AppDialog>
 
       <AppDialog
