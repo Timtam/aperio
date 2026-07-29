@@ -20,9 +20,15 @@
     },
     "android": {
       "package": "com.aperio.mobile",
+      "allowBackup": false,
       "permissions": [
         "android.permission.READ_CALENDAR",
-        "android.permission.WRITE_CALENDAR"
+        "android.permission.WRITE_CALENDAR",
+        "android.permission.USE_EXACT_ALARM"
+      ],
+      "blockedPermissions": [
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.CAMERA"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -57,6 +63,13 @@
       ],
       "expo-web-browser",
       [
+        "expo-notifications",
+        {
+          "icon": "./assets/android-icon-monochrome.png",
+          "color": "#1d4ed8"
+        }
+      ],
+      [
         "expo-image-picker",
         {
           "photosPermission": "Aperio accesses your photo library so you can set a contact's photo."
@@ -65,6 +78,7 @@
       "expo-audio",
       "./plugins/withReminderSoundProvider",
       "./plugins/withoutPushEntitlement",
+      "./plugins/withAndroidAbis",
       [
         "expo-localization",
         {
