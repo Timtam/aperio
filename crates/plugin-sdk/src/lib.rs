@@ -117,6 +117,7 @@ pub mod open_instance;
 pub mod probe_host_key;
 pub mod response;
 pub mod runtime;
+pub mod strings;
 
 // Plugin authors import everything they need from the SDK so
 // they don't have to add plugin-core to their own Cargo.toml.

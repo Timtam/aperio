@@ -61,6 +61,7 @@ use crate::error::{PluginError, PluginResult};
 use crate::ffi::{PluginCallResult, PLUGIN_CALL_OK};
 use crate::manifest::{AdapterKindInfo, PluginManifest, MANIFEST_FILENAME};
 use crate::plugin_type::PluginType;
+use crate::strings::StringCatalogue;
 use crate::version::check_abi_version;
 
 /// Function-pointer type for the optional
@@ -95,6 +96,48 @@ pub type DiscoverFn =
 
 /// Canonical symbol name for the discover entry point.
 pub const SYMBOL_DISCOVER: &[u8] = b"aperio_plugin_discover";
+
+/// Function-pointer type for the optional `aperio_plugin_strings`
+/// symbol. A plugin whose translations do not fit a JSON block in
+/// its manifest — Fluent, gettext, plural rules, a catalogue it
+/// fetches — exports this and answers per language.
+///
+/// `args_ptr` / `args_len` carry `{"lang": "de"}`; the payload is a
+/// JSON object of key → string for that one language. The host
+/// calls it ONCE per language and caches the answer, so a label
+/// never costs an FFI call on a repaint, and merges it OVER the
+/// manifest catalogue.
+///
+/// Optional by design. A plugin that ships its strings in the
+/// manifest — the ordinary case, and the only one a translator can
+/// send a pull request against — exports nothing.
+pub type StringsFn = unsafe extern "C" fn(args_ptr: *const u8, args_len: usize) -> PluginCallResult;
+
+/// Canonical symbol name for the strings entry point.
+pub const SYMBOL_STRINGS: &[u8] = b"aperio_plugin_strings";
+
+/// The optional named exports a STATICALLY linked plugin hands over.
+///
+/// The dlopen path finds these by symbol name in the loaded library. A static
+/// consumer — the mobile build, where every adapter is compiled in — has no
+/// library to search, so it passes the crate-mangled typed twins
+/// (`<plugin>::__aperio_*_impl`) directly.
+///
+/// A struct rather than a parameter list because the list only ever grows, and
+/// a call site reading `None, None, Some(x), None` says nothing about which
+/// hook is which. Every field defaults to absent, so a caller names only what
+/// it has:
+///
+/// ```ignore
+/// StaticHooks { discover_fn: Some(my_plugin::__aperio_discover_impl), ..Default::default() }
+/// ```
+#[derive(Default)]
+pub struct StaticHooks {
+    pub interactive_auth_fn: Option<InteractiveAuthFn>,
+    pub discover_fn: Option<DiscoverFn>,
+    pub probe_host_key_fn: Option<ProbeHostKeyFn>,
+    pub strings_fn: Option<StringsFn>,
+}
 
 /// Function-pointer type for the optional
 /// `aperio_plugin_probe_host_key` symbol. Plugins that wrap a
@@ -190,6 +233,20 @@ pub struct LoadedPlugin {
     /// when the plugin doesn't wrap a TOFU transport — most
     /// don't (only SFTP today).
     probe_host_key_fn: Option<ProbeHostKeyFn>,
+
+    /// Cached `aperio_plugin_strings` fn-pointer. `None` for every
+    /// plugin whose strings live in its manifest, which is the
+    /// ordinary case.
+    strings_fn: Option<StringsFn>,
+
+    /// Per-language catalogues already resolved for this plugin.
+    ///
+    /// The manifest's block merged with whatever `strings_fn`
+    /// answered, computed once per language. This is what keeps the
+    /// escape hatch from putting a foreign code path on a repaint:
+    /// a label lookup is a map read, and the FFI call happened the
+    /// first time that language was asked for.
+    strings_cache: RwLock<HashMap<String, Arc<StringCatalogue>>>,
 
     /// Number of FFI calls currently in flight against this
     /// plugin. The shim wrappers' trait methods bracket each
@@ -782,6 +839,16 @@ impl PluginManager {
                 .map(|sym| *sym)
         };
 
+        // `aperio_plugin_strings` is optional too — only plugins whose
+        // translations do not fit a JSON block in the manifest export
+        // it. Same caching shape as the other named-symbol hooks.
+        let strings_fn: Option<StringsFn> = unsafe {
+            library
+                .get::<StringsFn>(SYMBOL_STRINGS)
+                .ok()
+                .map(|sym| *sym)
+        };
+
         // `aperio_plugin_probe_host_key` is optional too — only
         // adapters wrapping a TOFU transport (SFTP today) export
         // it. Same caching shape as the other named-symbol hooks.
@@ -838,6 +905,8 @@ impl PluginManager {
             interactive_auth_fn,
             discover_fn,
             probe_host_key_fn,
+            strings_fn,
+            strings_cache: RwLock::new(HashMap::new()),
             in_flight: Arc::new(AtomicUsize::new(0)),
             library: Some(library),
         };
@@ -851,16 +920,16 @@ impl PluginManager {
     /// come straight from the plugin crate that's part of the
     /// host binary — no `dlopen`, no [`Library`] to retain.
     ///
-    /// Register a statically-linked plugin with NO optional auth hooks — the
-    /// common case (most adapters need only lifecycle + `open_instance`).
-    /// Thin wrapper over [`PluginManager::register_static_with_auth`].
+    /// Register a statically-linked plugin with NO optional hooks — the common
+    /// case (most adapters need only lifecycle + `open_instance`).
+    /// Thin wrapper over [`PluginManager::register_static_with_hooks`].
     pub fn register_static(
         &self,
         manifest: PluginManifest,
         descriptor: *mut AperioPlugin,
         destroy_fn: AperioPluginDestroyFn,
     ) -> PluginResult<()> {
-        self.register_static_with_auth(manifest, descriptor, destroy_fn, None, None, None)
+        self.register_static_with_hooks(manifest, descriptor, destroy_fn, StaticHooks::default())
     }
 
     /// Register a statically-linked plugin, carrying its optional auth hooks
@@ -872,15 +941,19 @@ impl PluginManager {
     /// Autodiscover (`discover`) and TOFU (`probe_host_key`) adapters work when
     /// statically embedded (e.g. on mobile), with no behaviour change for the
     /// many adapters that pass `None`.
-    pub fn register_static_with_auth(
+    pub fn register_static_with_hooks(
         &self,
         manifest: PluginManifest,
         descriptor: *mut AperioPlugin,
         destroy_fn: AperioPluginDestroyFn,
-        interactive_auth_fn: Option<InteractiveAuthFn>,
-        discover_fn: Option<DiscoverFn>,
-        probe_host_key_fn: Option<ProbeHostKeyFn>,
+        hooks: StaticHooks,
     ) -> PluginResult<()> {
+        let StaticHooks {
+            interactive_auth_fn,
+            discover_fn,
+            probe_host_key_fn,
+            strings_fn,
+        } = hooks;
         manifest.compatible_with(&self.app_version)?;
         if descriptor.is_null() {
             return Err(PluginError::Manifest(format!(
@@ -895,12 +968,86 @@ impl PluginManager {
             interactive_auth_fn,
             discover_fn,
             probe_host_key_fn,
+            strings_fn,
+            strings_cache: RwLock::new(HashMap::new()),
             in_flight: Arc::new(AtomicUsize::new(0)),
             library: None,
         };
         let id = loaded.manifest.id.clone();
         info!(plugin_id = %id, "static plugin registered");
         self.insert(id, Arc::new(loaded))
+    }
+
+    /// This plugin's strings for `lang`, resolved once and cached.
+    ///
+    /// The manifest's catalogue is the base; anything an
+    /// `aperio_plugin_strings` export answers is merged OVER it, so a plugin
+    /// holding its translations in some other format can override key by key
+    /// without restating the ones it is happy with.
+    ///
+    /// Cached per language, which is what keeps the escape hatch honest: the
+    /// FFI call happens the first time a language is asked for, and every label
+    /// after that is a map read. A plugin that exports nothing — the ordinary
+    /// case — never calls across the boundary at all.
+    pub fn strings_for(plugin: &LoadedPlugin, lang: &str) -> Arc<StringCatalogue> {
+        let key = lang.to_ascii_lowercase();
+        if let Some(hit) = plugin
+            .strings_cache
+            .read()
+            .expect("strings cache poisoned")
+            .get(&key)
+        {
+            return Arc::clone(hit);
+        }
+        let mut catalogue = plugin.manifest.strings.clone();
+        if let Some(strings_fn) = plugin.strings_fn {
+            match Self::ask_plugin_for_strings(strings_fn, &key) {
+                Ok(extra) => {
+                    let slot = catalogue.0.entry(key.clone()).or_default();
+                    for (k, v) in extra {
+                        slot.insert(k, v);
+                    }
+                }
+                Err(err) => {
+                    // A plugin that cannot answer is not a plugin that cannot
+                    // work: its manifest strings, and failing those the verbatim
+                    // labels, still render. Worth a line, not an interruption.
+                    warn!(
+                        plugin_id = %plugin.manifest.id,
+                        lang = %key,
+                        %err,
+                        "plugin's strings export failed; falling back to its manifest",
+                    );
+                }
+            }
+        }
+        let resolved = Arc::new(catalogue);
+        plugin
+            .strings_cache
+            .write()
+            .expect("strings cache poisoned")
+            .insert(key, Arc::clone(&resolved));
+        resolved
+    }
+
+    /// One synchronous call across the boundary for one language.
+    fn ask_plugin_for_strings(
+        strings_fn: StringsFn,
+        lang: &str,
+    ) -> Result<std::collections::BTreeMap<String, String>, String> {
+        let args = format!(r#"{{"lang":"{lang}"}}"#).into_bytes();
+        // SAFETY: `args` is a Vec<u8> we own for the duration of the
+        // synchronous call, and `strings_fn` came out of the same library the
+        // LoadedPlugin holds open.
+        let result = unsafe { strings_fn(args.as_ptr(), args.len()) };
+        let bytes = unsafe { result.payload.as_slice().to_vec() };
+        let status = result.status;
+        let mut payload = result.payload;
+        unsafe { payload.free_in_place() };
+        if status != PLUGIN_OK {
+            return Err(format!("status {status}"));
+        }
+        serde_json::from_slice(&bytes).map_err(|e| e.to_string())
     }
 
     /// Open a per-account instance of `plugin` with the supplied
@@ -1221,6 +1368,8 @@ impl PluginManager {
             interactive_auth_fn: None,
             discover_fn: None,
             probe_host_key_fn: None,
+            strings_fn: None,
+            strings_cache: RwLock::new(HashMap::new()),
             in_flight: Arc::new(AtomicUsize::new(0)),
             library: None,
         };
@@ -1620,6 +1769,8 @@ pub mod test_support {
             interactive_auth_fn: None,
             discover_fn: None,
             probe_host_key_fn: None,
+            strings_fn: None,
+            strings_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
             in_flight: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             library: None,
         }
@@ -1697,6 +1848,78 @@ mod tests {
         let mgr = PluginManager::new("0.1.0");
         assert!(mgr.by_type(&PluginType::CalendarAdapter).is_empty());
         assert!(mgr.by_type(&PluginType::SyncAdapter).is_empty());
+    }
+
+    /// A `strings` export that answers German only, and overrides one key the
+    /// manifest also has.
+    unsafe extern "C" fn stub_strings(
+        args_ptr: *const u8,
+        args_len: usize,
+    ) -> crate::ffi::PluginCallResult {
+        let bytes = unsafe { std::slice::from_raw_parts(args_ptr, args_len) };
+        let lang: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+        let payload: Vec<u8> = if lang["lang"] == "de" {
+            br#"{"join":"AUS DEM EXPORT","only_export":"nur hier"}"#.to_vec()
+        } else {
+            b"{}".to_vec()
+        };
+        // Leak it: the host copies the bytes out and then calls `free`, which
+        // for a test buffer is a no-op — the same contract a real plugin
+        // upholds with its own allocator.
+        let boxed = payload.into_boxed_slice();
+        let len = boxed.len();
+        let data = Box::into_raw(boxed) as *mut u8;
+        unsafe extern "C" fn noop_free(_: *mut u8, _: usize) {}
+        crate::ffi::PluginCallResult {
+            status: PLUGIN_OK,
+            payload: crate::ffi::PluginBytes {
+                data,
+                len,
+                free: Some(noop_free),
+            },
+        }
+    }
+
+    #[test]
+    fn the_export_wins_over_the_manifest_key_by_key_and_is_asked_once() {
+        // The escape hatch's whole contract: a plugin holding its translations
+        // elsewhere overrides what it wants and inherits the rest, and the
+        // crossing happens once per language so a label never costs an FFI call
+        // on a repaint.
+        let mut manifest = stub_manifest("com.example.strings");
+        manifest.strings = serde_json::from_str(
+            r#"{"de": {"join": "aus dem Manifest", "only_manifest": "bleibt"},
+                "en": {"join": "from the manifest"}}"#,
+        )
+        .unwrap();
+        unsafe extern "C" fn noop_destroy(_: *mut AperioPlugin) {}
+        let descriptor = Box::into_raw(Box::new(crate::abi::AperioPlugin {
+            abi_version: crate::ABI_VERSION,
+            id: CString::new("com.example.strings").unwrap().into_raw(),
+            name: CString::new("Strings").unwrap().into_raw(),
+            version: CString::new("0.1.0").unwrap().into_raw(),
+            plugin_type: CString::new("calendar-adapter").unwrap().into_raw(),
+            open_instance: None,
+            close_instance: None,
+            vtable: std::ptr::null_mut(),
+        }));
+        let mut plugin = test_support::loaded_plugin_for_tests(manifest, descriptor, noop_destroy);
+        plugin.strings_fn = Some(stub_strings);
+
+        let de = PluginManager::strings_for(&plugin, "de");
+        assert_eq!(de.lookup("join", "de"), Some("AUS DEM EXPORT"));
+        assert_eq!(de.lookup("only_export", "de"), Some("nur hier"));
+        // Not restated by the export, so the manifest still answers.
+        assert_eq!(de.lookup("only_manifest", "de"), Some("bleibt"));
+
+        // Cached: the same Arc comes back, so nothing crossed the boundary the
+        // second time.
+        let again = PluginManager::strings_for(&plugin, "de");
+        assert!(Arc::ptr_eq(&de, &again));
+
+        // A language the export has nothing for degrades to the manifest.
+        let en = PluginManager::strings_for(&plugin, "en");
+        assert_eq!(en.lookup("join", "en"), Some("from the manifest"));
     }
 
     fn stub_manifest(id: &str) -> PluginManifest {

@@ -23,7 +23,11 @@
 //! deferred to the mobile OAuth phase.
 
 #[cfg(feature = "registry")]
-use plugin_core::{manager::PluginManager, manifest::PluginManifest, PluginResult};
+use plugin_core::{
+    manager::{PluginManager, StaticHooks},
+    manifest::PluginManifest,
+    PluginResult,
+};
 
 /// Register every bundled adapter plugin into `manager` via static
 /// linkage instead of `dlopen`.
@@ -45,7 +49,7 @@ pub fn register_all_static(manager: &PluginManager) -> PluginResult<()> {
     /// statically-linked descriptor. The optional third token wires the
     /// crate's auth hook (the crate-mangled typed twin `__aperio_*_impl`,
     /// which P0 left `pub` in each auth-capable `-plugin` crate) through
-    /// `register_static_with_auth`, so OAuth / Autodiscover / TOFU adapters
+    /// `register_static_with_hooks`, so OAuth / Autodiscover / TOFU adapters
     /// expose their handler when statically embedded:
     ///   `register!(crate, "path")`                    — no auth hook
     ///   `register!(crate, "path", interactive_auth)`  — OAuth (Google/MS/…)
@@ -63,37 +67,40 @@ pub fn register_all_static(manager: &PluginManager) -> PluginResult<()> {
         ($plugin_crate:ident, $manifest_path:literal, interactive_auth) => {{
             let manifest = PluginManifest::from_bytes(include_bytes!($manifest_path))?;
             let descriptor = unsafe { $plugin_crate::build_descriptor() };
-            manager.register_static_with_auth(
+            manager.register_static_with_hooks(
                 manifest,
                 descriptor,
                 $plugin_crate::DESTROY_FN,
-                Some($plugin_crate::__aperio_interactive_auth_impl),
-                None,
-                None,
+                StaticHooks {
+                    interactive_auth_fn: Some($plugin_crate::__aperio_interactive_auth_impl),
+                    ..Default::default()
+                },
             )?;
         }};
         ($plugin_crate:ident, $manifest_path:literal, discover) => {{
             let manifest = PluginManifest::from_bytes(include_bytes!($manifest_path))?;
             let descriptor = unsafe { $plugin_crate::build_descriptor() };
-            manager.register_static_with_auth(
+            manager.register_static_with_hooks(
                 manifest,
                 descriptor,
                 $plugin_crate::DESTROY_FN,
-                None,
-                Some($plugin_crate::__aperio_discover_impl),
-                None,
+                StaticHooks {
+                    discover_fn: Some($plugin_crate::__aperio_discover_impl),
+                    ..Default::default()
+                },
             )?;
         }};
         ($plugin_crate:ident, $manifest_path:literal, probe_host_key) => {{
             let manifest = PluginManifest::from_bytes(include_bytes!($manifest_path))?;
             let descriptor = unsafe { $plugin_crate::build_descriptor() };
-            manager.register_static_with_auth(
+            manager.register_static_with_hooks(
                 manifest,
                 descriptor,
                 $plugin_crate::DESTROY_FN,
-                None,
-                None,
-                Some($plugin_crate::__aperio_probe_host_key_impl),
+                StaticHooks {
+                    probe_host_key_fn: Some($plugin_crate::__aperio_probe_host_key_impl),
+                    ..Default::default()
+                },
             )?;
         }};
     }

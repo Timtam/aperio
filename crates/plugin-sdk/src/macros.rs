@@ -334,6 +334,45 @@ macro_rules! declare_discover {
     };
 }
 
+/// Emit the optional `aperio_plugin_strings` symbol — the escape hatch for a
+/// plugin whose translations do not fit a JSON block in its manifest.
+///
+/// The ordinary way to ship strings is the manifest's `strings` catalogue: it
+/// needs no code, a translator can send a pull request against it, and the host
+/// can read the language list without loading the library. This exists for the
+/// plugin that wants Fluent, gettext, plural rules, or a catalogue it fetches
+/// itself.
+///
+/// `handler` takes a BCP-47 language tag and returns that language's key →
+/// string map. The host calls it ONCE per language, caches the answer, and
+/// merges it OVER the manifest catalogue — so a plugin can override key by key
+/// without restating the ones it is happy with. A handler that has nothing for
+/// a language returns an empty map; the manifest and then the verbatim labels
+/// take over.
+///
+/// The manifest must still declare which languages exist, because a language
+/// picker has to be drawable before anyone decides which language to ask for.
+#[macro_export]
+macro_rules! declare_strings {
+    (handler: $handler:path $(,)?) => {
+        /// Typed twin of the `aperio_plugin_strings` C-ABI export.
+        /// Crate-mangled (static-link safe); the companion `*-cdylib` crate
+        /// re-exports it as `#[no_mangle]`.
+        ///
+        /// # Safety
+        ///
+        /// FFI shape. `args_ptr` + `args_len` must describe a valid byte buffer
+        /// the host owns for the duration of the call.
+        #[doc(hidden)]
+        pub unsafe extern "C" fn __aperio_strings_impl(
+            args_ptr: *const u8,
+            args_len: usize,
+        ) -> $crate::plugin_core::ffi::PluginCallResult {
+            $crate::strings::strings_with(args_ptr, args_len, $handler)
+        }
+    };
+}
+
 /// Emit the optional `aperio_plugin_probe_host_key` symbol —
 /// the TOFU-transport host-key probe entry point the host's
 /// [`plugin_core::PluginManager::probe_host_key`] looks up via
@@ -605,6 +644,7 @@ macro_rules! declare_cdylib_exports {
         $(, interactive_auth: $ia:tt)?
         $(, discover: $disc:tt)?
         $(, probe_host_key: $probe:tt)?
+        $(, strings: $strings:tt)?
         $(,)?
     ) => {
         /// `aperio_plugin_create` (DESIGN.md §20.3) — thin
@@ -674,6 +714,28 @@ macro_rules! declare_cdylib_exports {
         $($crate::declare_cdylib_exports!(@interactive_auth $plugin, $ia);)?
         $($crate::declare_cdylib_exports!(@discover $plugin, $disc);)?
         $($crate::declare_cdylib_exports!(@probe_host_key $plugin, $probe);)?
+        $($crate::declare_cdylib_exports!(@strings $plugin, $strings);)?
+    };
+
+    (@strings $plugin:ident, no) => {};
+    (@strings $plugin:ident, yes) => {
+        /// `aperio_plugin_strings` — this plugin's own text, per language.
+        ///
+        /// Opt-in: only a plugin that holds its translations somewhere other
+        /// than its manifest emits this. The manifest catalogue is the ordinary
+        /// way, and the one a translator can contribute to.
+        ///
+        /// # Safety
+        ///
+        /// FFI export. `args_ptr` + `args_len` must describe a valid
+        /// host-owned byte buffer for the duration of the call.
+        #[no_mangle]
+        pub unsafe extern "C" fn aperio_plugin_strings(
+            args_ptr: *const u8,
+            args_len: usize,
+        ) -> $crate::plugin_core::ffi::PluginCallResult {
+            $plugin::__aperio_strings_impl(args_ptr, args_len)
+        }
     };
 
     // ── Internal opt-in arms ─────────────────────────────────

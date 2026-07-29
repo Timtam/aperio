@@ -26,15 +26,19 @@
 //!
 //! ## The escape hatch
 //!
-//! NOT YET BUILT, and named here so the shape is agreed before anyone needs it:
-//! a plugin that wants Fluent, gettext, plural rules or a catalogue it fetches
-//! itself will export `aperio_plugin_strings`, answering per language, and that
-//! will take precedence over the manifest. An optional NAMED export rather than
-//! a vtable slot, so it costs no ABI revision — the same shape
-//! `aperio_plugin_discover` and `aperio_plugin_interactive_auth` already use.
-//! The host will call it once per language and cache the result, so a label
-//! still never costs an FFI call on a repaint. The manifest keeps declaring
-//! which languages exist regardless, for the circle above.
+//! A plugin that wants Fluent, gettext, plural rules or a catalogue it fetches
+//! itself exports [`crate::manager::SYMBOL_STRINGS`] and answers per language.
+//! Whatever it returns is merged OVER the manifest, key by key, so it overrides
+//! only what it means to and inherits the rest.
+//!
+//! An optional NAMED export rather than a vtable slot, so it costs no ABI
+//! revision — the same shape `aperio_plugin_discover` and
+//! `aperio_plugin_interactive_auth` already use. The host calls it once per
+//! language and caches the answer
+//! ([`crate::manager::PluginManager::strings_for`]), so a label still never
+//! costs an FFI call on a repaint, and a plugin that exports nothing never
+//! crosses the boundary at all. The manifest keeps declaring which languages
+//! exist regardless, for the circle above.
 //!
 //! ## Which language
 //!
