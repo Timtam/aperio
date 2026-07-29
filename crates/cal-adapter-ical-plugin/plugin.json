@@ -9,5 +9,52 @@
   "author": "Aperio Contributors",
   "description": "Bundled read-only calendar adapter for .ics-feed URLs — public calendars, hosted .ics files, share links from Google/Apple/iCloud.",
   "adapter_kind": "ical",
-  "signed": false
+  "signed": false,
+  "account": {
+    "fields": [
+      {
+        "key": "feed_url",
+        "kind": "url",
+        "label": "Feed URL",
+        "label_key": "account.feed_url.label",
+        "hint_key": "account.feed_url.hint",
+        "required": true
+      },
+      {
+        "key": "username",
+        "kind": "text",
+        "label": "Username (optional)",
+        "label_key": "account.username.label",
+        "hint_key": "account.username.hint",
+        "required": false
+      },
+      {
+        "key": "password",
+        "kind": "secret",
+        "secret_slot": "password",
+        "label": "Password (optional)",
+        "label_key": "account.password.label",
+        "hint_key": "account.password.hint",
+        "required": false
+      }
+    ]
+  },
+  "strings": {
+    "en": {
+      "account.feed_url.hint": "Public .ics URL. Read-only — events from this feed cannot be edited in Aperio.",
+      "account.feed_url.label": "Feed URL",
+      "account.password.hint": "Leave blank unless the feed asks for one. Stored only in your operating system's credential store.",
+      "account.password.label": "Password (optional)",
+      "account.username.hint": "Only fill in if the feed requires HTTP Basic auth. Public feeds stay anonymous.",
+      "account.username.label": "Username (optional)"
+    },
+    "de": {
+      "account.feed_url.hint": "Öffentliche .ics-Adresse. Lesezugriff — Termine aus diesem Feed können in Aperio nicht bearbeitet werden.",
+      "account.feed_url.label": "Feed-URL",
+      "account.password.hint": "Leer lassen, wenn der Feed keines verlangt. Das Passwort wird nur im Anmeldeinformations-Manager des Betriebssystems gespeichert.",
+      "account.password.label": "Passwort (optional)",
+      "account.username.hint": "Nur ausfüllen, wenn der Feed Basic-Auth verlangt. Öffentliche Feeds bleiben anonym.",
+      "account.username.label": "Benutzername (optional)"
+    }
+  }
 }

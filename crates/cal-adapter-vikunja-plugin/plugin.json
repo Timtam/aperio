@@ -30,5 +30,40 @@
       "count": false,
       "until": false
     }
+  },
+  "account": {
+    "fields": [
+      {
+        "key": "server_url",
+        "kind": "url",
+        "label": "Vikunja server URL",
+        "label_key": "account.server_url.label",
+        "hint_key": "account.server_url.hint",
+        "required": true
+      },
+      {
+        "key": "token",
+        "kind": "secret",
+        "secret_slot": "api_token",
+        "label": "API token",
+        "label_key": "account.token.label",
+        "hint_key": "account.token.hint",
+        "required": true
+      }
+    ]
+  },
+  "strings": {
+    "en": {
+      "account.server_url.hint": "The base URL of your Vikunja instance — just the server root, no path. Aperio appends \"/api/v1\" itself.",
+      "account.server_url.label": "Vikunja server URL",
+      "account.token.hint": "Create a token in Vikunja under Settings → API Tokens. The token never leaves your system keychain after you press \"Add\".",
+      "account.token.label": "API token"
+    },
+    "de": {
+      "account.server_url.hint": "Die Basis-URL deiner Vikunja-Instanz – nur der Server-Stamm, ohne Pfad. Aperio hängt „/api/v1“ selbst an.",
+      "account.server_url.label": "Vikunja-Server-URL",
+      "account.token.hint": "Erzeuge ein Token in Vikunja unter Einstellungen → API-Tokens. Das Token verlässt nach dem Drücken von „Hinzufügen“ nie den System-Schlüsselbund.",
+      "account.token.label": "API-Token"
+    }
   }
 }

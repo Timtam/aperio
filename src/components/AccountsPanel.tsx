@@ -409,49 +409,49 @@ export function AccountsPanel() {
         setError(t('dialogs.accounts.kindUnavailable'));
         return;
       }
-      if (kind === 'caldav') {
+      if (kind === 'caldav' && !formSpec) {
         const v = validateCaldav();
         if (v) {
           setError(v);
           return;
         }
       }
-      if (kind === 'ical') {
+      if (kind === 'ical' && !formSpec) {
         const v = validateIcal();
         if (v) {
           setError(v);
           return;
         }
       }
-      if (kind === 'google') {
+      if (kind === 'google' && !formSpec) {
         const v = validateGoogle();
         if (v) {
           setError(v);
           return;
         }
       }
-      if (kind === 'microsoft_graph') {
+      if (kind === 'microsoft_graph' && !formSpec) {
         const v = validateMicrosoft();
         if (v) {
           setError(v);
           return;
         }
       }
-      if (kind === 'ews') {
+      if (kind === 'ews' && !formSpec) {
         const v = validateEws();
         if (v) {
           setError(v);
           return;
         }
       }
-      if (kind === 'vikunja') {
+      if (kind === 'vikunja' && !formSpec) {
         const v = validateVikunja();
         if (v) {
           setError(v);
           return;
         }
       }
-      if (kind === 'todoist') {
+      if (kind === 'todoist' && !formSpec) {
         const v = validateTodoist();
         if (v) {
           setError(v);
@@ -474,18 +474,33 @@ export function AccountsPanel() {
           // browser, runs the PKCE dance and only then writes the
           // account row + secrets. Returns the same Account shape
           // as createAccount so the rest of the flow is identical.
-          created = await connectGoogleAccount(
-            google.clientId.trim(),
-            google.clientSecret.trim(),
-            name,
-          );
+          //
+          // The INPUTS come from whichever form is on screen. Google now
+          // declares a schema, so the generic form owns the two client fields
+          // and the legacy state is never filled; reading it here would send
+          // two empty strings into the sign-in. Moving the whole flow onto
+          // `connectAccount` — which already runs OAuth from the schema, as it
+          // does for Webex — is the next step and wants a live test first.
+          const clientId = formSpec
+            ? String(formValues.client_id ?? '').trim()
+            : google.clientId.trim();
+          const clientSecret = formSpec
+            ? String(formValues.client_secret ?? '').trim()
+            : google.clientSecret.trim();
+          created = await connectGoogleAccount(clientId, clientSecret, name);
         } else if (kind === 'microsoft_graph') {
           // Same OAuth-then-persist flow as Google, minus the
           // client_secret (Microsoft honours PKCE for public clients).
+          const clientId = formSpec
+            ? String(formValues.client_id ?? '').trim()
+            : microsoft.clientId.trim();
+          const authority = formSpec
+            ? String(formValues.authority ?? '').trim()
+            : microsoft.authority.trim();
           created = await connectMicrosoftAccount(
-            microsoft.clientId.trim(),
+            clientId,
             name,
-            microsoft.authority.trim() || undefined,
+            authority || undefined,
           );
         } else if (formSpec) {
           // The adapter declared its own form, so creating the account is one
@@ -647,57 +662,64 @@ export function AccountsPanel() {
     setTestMessage(null);
     setError(null);
     setTesting(true);
+    // Whichever form is on screen owns the values. Once an adapter declares its
+    // own schema the generic form fills `formValues` and the legacy state stays
+    // empty, so a probe that read the legacy state would refuse a connection
+    // that is perfectly well typed in. (Declaring this button in the manifest,
+    // so the host stops naming adapters here at all, is the next piece of work.)
+    const field = (key: string, legacy: string) =>
+      formSpec ? String(formValues[key] ?? '') : legacy;
     try {
       if (kind === 'caldav') {
-        const v = validateCaldav();
+        const v = formSpec ? validateSchemaForm() : validateCaldav();
         if (v) {
           setError(v);
           return;
         }
         await testCaldavConnection(
-          caldav.serverUrl.trim(),
-          caldav.username.trim(),
-          caldav.password,
+          field('server_url', caldav.serverUrl).trim(),
+          field('username', caldav.username).trim(),
+          field('secret', caldav.password),
         );
       } else if (kind === 'ical') {
-        const v = validateIcal();
+        const v = formSpec ? validateSchemaForm() : validateIcal();
         if (v) {
           setError(v);
           return;
         }
         await testIcalFeed(
-          ical.feedUrl.trim(),
-          ical.username.trim() || null,
-          ical.password || null,
+          field('feed_url', ical.feedUrl).trim(),
+          field('username', ical.username).trim() || null,
+          field('password', ical.password) || null,
         );
       } else if (kind === 'ews') {
-        const v = validateEws();
+        const v = formSpec ? validateSchemaForm() : validateEws();
         if (v) {
           setError(v);
           return;
         }
         await testEwsConnection(
-          ews.endpoint.trim(),
-          ews.username.trim(),
-          ews.password,
+          field('endpoint', ews.endpoint).trim(),
+          field('username', ews.username).trim(),
+          field('password', ews.password),
         );
       } else if (kind === 'vikunja') {
-        const v = validateVikunja();
+        const v = formSpec ? validateSchemaForm() : validateVikunja();
         if (v) {
           setError(v);
           return;
         }
         await testVikunjaConnection(
-          vikunja.serverUrl.trim(),
-          vikunja.apiToken.trim(),
+          field('server_url', vikunja.serverUrl).trim(),
+          field('token', vikunja.apiToken).trim(),
         );
       } else if (kind === 'todoist') {
-        const v = validateTodoist();
+        const v = formSpec ? validateSchemaForm() : validateTodoist();
         if (v) {
           setError(v);
           return;
         }
-        await testTodoistConnection(todoist.apiToken.trim());
+        await testTodoistConnection(field('token', todoist.apiToken).trim());
       } else {
         return;
       }
@@ -721,6 +743,9 @@ export function AccountsPanel() {
     validateEws,
     validateVikunja,
     validateTodoist,
+    validateSchemaForm,
+    formSpec,
+    formValues,
     announce,
     t,
   ]);
@@ -739,29 +764,46 @@ export function AccountsPanel() {
   const onDiscover = useCallback(async () => {
     setTestMessage(null);
     setError(null);
-    if (!ews.username.trim()) {
+    // Autodiscover reads and writes the SAME two fields whichever form is on
+    // screen. Once EWS declares its own schema the generic form owns the
+    // values, and the legacy state is not being filled at all — reading it
+    // there would find empty strings and refuse a probe that would have worked.
+    // (Declaring this button in the manifest, so the host stops naming EWS at
+    // all, is the next piece of work.)
+    const onSchema = formSpec != null;
+    const username = (
+      onSchema ? String(formValues.username ?? '') : ews.username
+    ).trim();
+    const password = onSchema
+      ? String(formValues.password ?? '')
+      : ews.password;
+    if (!username) {
       setError(t('dialogs.accounts.ewsDiscoverNeedsEmail'));
       return;
     }
-    if (!ews.password) {
+    if (!password) {
       setError(t('dialogs.accounts.ewsDiscoverNeedsPassword'));
       return;
     }
     setDiscovering(true);
     try {
-      const result = await discoverEwsEndpoint(
-        ews.username.trim(),
-        ews.password,
-      );
-      setEws((prev) => ({
-        ...prev,
-        endpoint: result.ews_url,
-        // If autodiscover took us through a RedirectAddr step, the
-        // canonical login is the one we actually authenticated as —
-        // surface that to the user so the password they typed
-        // matches the username we stored.
-        username: result.account_email,
-      }));
+      const result = await discoverEwsEndpoint(username, password);
+      // If autodiscover took us through a RedirectAddr step, the canonical
+      // login is the one we actually authenticated as — surface that to the
+      // user so the password they typed matches the username we stored.
+      if (onSchema) {
+        setFormValues((prev) => ({
+          ...prev,
+          endpoint: result.ews_url,
+          username: result.account_email,
+        }));
+      } else {
+        setEws((prev) => ({
+          ...prev,
+          endpoint: result.ews_url,
+          username: result.account_email,
+        }));
+      }
       const okMsg = t('dialogs.accounts.ewsDiscoverOk', {
         url: result.ews_url,
       });
@@ -773,7 +815,7 @@ export function AccountsPanel() {
     } finally {
       setDiscovering(false);
     }
-  }, [ews, announce, t]);
+  }, [ews, formSpec, formValues.username, formValues.password, announce, t]);
 
   // Armed when the user triggers a delete from the listbox. The
   // post-refresh effect below sees the flag, moves focus back onto
@@ -1429,7 +1471,7 @@ export function AccountsPanel() {
               />
             </label>
 
-            {kind === 'caldav' && (
+            {kind === 'caldav' && !formSpec && (
               <>
                 <label className="form__field">
                   <span className="form__label">
@@ -1503,7 +1545,7 @@ export function AccountsPanel() {
               </>
             )}
 
-            {kind === 'ical' && (
+            {kind === 'ical' && !formSpec && (
               <>
                 <label className="form__field">
                   <span className="form__label">
@@ -1575,7 +1617,7 @@ export function AccountsPanel() {
               </>
             )}
 
-            {kind === 'google' && (
+            {kind === 'google' && !formSpec && (
               <>
                 <label className="form__field">
                   <span className="form__label">
@@ -1644,7 +1686,7 @@ export function AccountsPanel() {
               />
             )}
 
-            {kind === 'microsoft_graph' && (
+            {kind === 'microsoft_graph' && !formSpec && (
               <>
                 <label className="form__field">
                   <span className="form__label">
@@ -1703,7 +1745,7 @@ export function AccountsPanel() {
               </>
             )}
 
-            {kind === 'ews' && (
+            {kind === 'ews' && !formSpec && (
               <>
                 <label className="form__field">
                   <span className="form__label">
@@ -1783,7 +1825,7 @@ export function AccountsPanel() {
               </>
             )}
 
-            {kind === 'vikunja' && (
+            {kind === 'vikunja' && !formSpec && (
               <>
                 <label className="form__field">
                   <span className="form__label">
@@ -1842,7 +1884,7 @@ export function AccountsPanel() {
               </>
             )}
 
-            {kind === 'todoist' && (
+            {kind === 'todoist' && !formSpec && (
               <>
                 <label className="form__field">
                   <span className="form__label">

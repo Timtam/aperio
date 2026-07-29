@@ -706,3 +706,114 @@ async fn plugin_discover(args_json: String) -> Result<Vec<u8>, String> {
 plugin_sdk::declare_discover! {
     handler: plugin_discover,
 }
+
+#[cfg(test)]
+mod tests {
+    use plugin_sdk::plugin_core::account_schema::{AccountFieldKind, AccountSecretSlot};
+
+    /// The manifest ships beside this crate and is the ONLY thing that tells
+    /// the host how to set up an EWS account. Parsing it here means a typo
+    /// fails the build rather than the first user who tries to connect.
+    fn manifest() -> plugin_sdk::plugin_core::manifest::PluginManifest {
+        plugin_sdk::plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
+            "../plugin.json"
+        ))
+        .expect("plugin.json parses and its account schema validates")
+    }
+
+    #[test]
+    fn every_schema_field_is_a_key_the_init_config_actually_reads() {
+        // The schema and `InitConfig` are two descriptions of the same thing,
+        // in two languages, and nothing but this test connects them. A field
+        // the host faithfully collects and merges under a name the plugin does
+        // not deserialise is silently dropped — the account connects, and then
+        // behaves as though the setting were never set.
+        let schema = manifest()
+            .account
+            .expect("the EWS adapter declares an account schema");
+        let known = ["endpoint", "username", "password", "state_dir"];
+        for field in &schema.fields {
+            assert!(
+                known.contains(&field.key.as_str()),
+                "schema field `{}` is not read by InitConfig",
+                field.key
+            );
+        }
+        // No OAuth: EWS authenticates with HTTP Basic on every request.
+        assert!(schema.oauth.is_none());
+    }
+
+    #[test]
+    fn the_state_directory_is_not_asked_of_the_user() {
+        // `state_dir` is a key `InitConfig` reads, but the host computes it off
+        // its own data dir — a field for it would ask the user to name a
+        // filesystem path they have no way to choose correctly, and one wrong
+        // answer would put the sync cookie cache outside the portable data
+        // layout.
+        assert!(manifest().account.unwrap().field("state_dir").is_none());
+    }
+
+    #[test]
+    fn only_the_password_leaves_the_account_row() {
+        let schema = manifest().account.unwrap();
+        assert_eq!(
+            schema.field("password").unwrap().secret_slot,
+            Some(AccountSecretSlot::Password)
+        );
+        // The endpoint and the user name are what the account row IS — the host
+        // shows them back to the user, and both are handed straight to
+        // `InitConfig` from `config_json`.
+        assert!(!schema.field("endpoint").unwrap().is_secret());
+        assert!(!schema.field("username").unwrap().is_secret());
+    }
+
+    #[test]
+    fn all_three_fields_are_required_because_basic_auth_has_no_anonymous_mode() {
+        // `plugin_open_instance` refuses an empty endpoint, username or
+        // password. A form that let any of them through would turn a mistake
+        // the user can still fix into an account that fails at open time.
+        let schema = manifest().account.unwrap();
+        for key in ["endpoint", "username", "password"] {
+            assert!(
+                schema.field(key).unwrap().required,
+                "`{key}` must be required"
+            );
+        }
+        // `url` rather than `text` so mobile offers the URL keyboard.
+        assert_eq!(
+            schema.field("endpoint").unwrap().kind,
+            AccountFieldKind::Url
+        );
+    }
+
+    #[test]
+    fn every_declared_label_and_hint_resolves_in_both_languages() {
+        // A `label_key` that no catalogue answers degrades to the verbatim
+        // English label — silently, and only for the reader whose language is
+        // missing. Checking both declared languages here is what keeps that
+        // from shipping.
+        let manifest = manifest();
+        let schema = manifest.account.as_ref().unwrap();
+        assert_eq!(
+            manifest.strings.languages(),
+            vec!["de".to_string(), "en".to_string()]
+        );
+        for field in &schema.fields {
+            for lang in ["en", "de"] {
+                // The map directly, NOT `lookup` — that one falls back to
+                // English, so it would answer for a German string that isn't
+                // there and this test would pass on a half-translated form.
+                let catalogue = manifest.strings.0.get(lang).expect("a declared language");
+                for key in [field.label_key.as_deref(), field.hint_key.as_deref()]
+                    .into_iter()
+                    .flatten()
+                {
+                    assert!(
+                        catalogue.contains_key(key),
+                        "`{key}` has no {lang} translation"
+                    );
+                }
+            }
+        }
+    }
+}

@@ -22,5 +22,28 @@
     "delete_lists": true,
     "manageable": true,
     "member_add_by": "email"
+  },
+  "account": {
+    "fields": [
+      {
+        "key": "token",
+        "kind": "secret",
+        "secret_slot": "api_token",
+        "label": "API token",
+        "label_key": "account.token.label",
+        "hint_key": "account.token.hint",
+        "required": true
+      }
+    ]
+  },
+  "strings": {
+    "en": {
+      "account.token.hint": "Find your token in Todoist under Settings → Integrations → Developer → API token. The token never leaves your system keychain after you press \"Add\".",
+      "account.token.label": "API token"
+    },
+    "de": {
+      "account.token.hint": "Du findest dein Token in Todoist unter Einstellungen → Integrationen → Entwickler → API-Token. Das Token verlässt nach dem Drücken von „Hinzufügen“ nie den System-Schlüsselbund.",
+      "account.token.label": "API-Token"
+    }
   }
 }

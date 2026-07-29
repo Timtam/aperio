@@ -17,5 +17,47 @@
     "supports_in_progress": false,
     "create_lists": true,
     "delete_lists": true
+  },
+  "account": {
+    "fields": [
+      {
+        "key": "client_id",
+        "kind": "text",
+        "label": "Google OAuth client ID",
+        "label_key": "account.client_id.label",
+        "hint_key": "account.client_id.hint",
+        "required": true
+      },
+      {
+        "key": "client_secret",
+        "kind": "secret",
+        "secret_slot": "oauth_client_secret",
+        "label": "Google OAuth client secret",
+        "label_key": "account.client_secret.label",
+        "hint_key": "account.client_secret.hint",
+        "required": true
+      }
+    ],
+    "oauth": {
+      "builtin_provider": "google",
+      "client_id_field": "client_id",
+      "client_secret_field": "client_secret",
+      "refresh_token_field": "refresh_token",
+      "access_token_field": "access_token"
+    }
+  },
+  "strings": {
+    "en": {
+      "account.client_id.hint": "From your Google Cloud Console (APIs & Services → Credentials → OAuth 2.0 Client ID, type \"Desktop App\"). Aperio needs your own client ID until it ships its own verified Google app registration.",
+      "account.client_id.label": "Google OAuth client ID",
+      "account.client_secret.hint": "Sits right under the client ID in the same Cloud Console entry. Despite the name, Google's own docs concede the secret isn't actually secret for Desktop apps — Aperio keeps it in the system keychain all the same.",
+      "account.client_secret.label": "Google OAuth client secret"
+    },
+    "de": {
+      "account.client_id.hint": "Aus deiner Google Cloud Console (APIs & Services → Credentials → OAuth 2.0 Client ID, Typ „Desktop App\"). Eine eigene Client-ID ist notwendig, weil Aperio noch keine verifizierte Google-App-Registrierung hat.",
+      "account.client_id.label": "Google OAuth Client-ID",
+      "account.client_secret.hint": "Direkt unter der Client-ID in der Cloud Console. Trotz „Secret\" laut Google für Desktop-Apps nicht wirklich geheim — wird trotzdem im Schlüsselbund des Systems abgelegt.",
+      "account.client_secret.label": "Google OAuth Client-Secret"
+    }
   }
 }

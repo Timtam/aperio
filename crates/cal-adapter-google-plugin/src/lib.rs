@@ -19,6 +19,15 @@
 //! [`TokenSet`] (plus the Cloud Console client id / secret) is
 //! threaded into the plugin via `config_json`. ABI v2 supports
 //! N independent Google accounts per loaded library.
+//!
+//! Of those keys the user types exactly two — `client_id` and `client_secret`,
+//! the only ones `plugin.json` declares as form fields. The three token keys
+//! are filled in by the host after the sign-in: `client_secret` comes back from
+//! the keychain (declared in the `oauth_client_secret` slot, so it never
+//! reaches the account row, which syncs unencrypted whenever end-to-end
+//! encryption is off), and `access_token` / `refresh_token` come from the slots
+//! the manifest's `oauth` block names. `expires_at` and `scope` are optional —
+//! see [`assume_expired`].
 
 use std::os::raw::{c_char, c_void};
 
@@ -44,9 +53,20 @@ struct InitConfig {
     access_token: String,
     #[serde(default)]
     refresh_token: Option<String>,
+    /// Absent means "assume stale". The schema-driven host merges the two
+    /// tokens by keychain slot and has nowhere to say when one expires, so
+    /// demanding this key would make a correctly declared account fail to open.
+    /// The epoch is also exactly what the older per-kind host path sends
+    /// verbatim — the API client refreshes lazily on a 401 either way, so the
+    /// persisted access token never has to be fresh across a restart.
+    #[serde(default = "assume_expired")]
     expires_at: DateTime<Utc>,
     #[serde(default)]
     scope: Option<String>,
+}
+
+fn assume_expired() -> DateTime<Utc> {
+    DateTime::UNIX_EPOCH
 }
 
 /// # Safety
@@ -768,4 +788,135 @@ async fn plugin_interactive_auth(args_json: String) -> Result<Vec<u8>, String> {
 
 plugin_sdk::declare_interactive_auth! {
     handler: plugin_interactive_auth,
+}
+
+#[cfg(test)]
+mod tests {
+
+    /// The manifest ships beside this crate and is the ONLY thing that tells
+    /// the host how to set up a Google account. Parsing it here means a typo
+    /// fails the build rather than the first user who tries to connect.
+    fn manifest() -> plugin_sdk::plugin_core::manifest::PluginManifest {
+        plugin_sdk::plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
+            "../plugin.json"
+        ))
+        .expect("plugin.json parses and its account schema validates")
+    }
+
+    #[test]
+    fn every_schema_field_is_a_key_the_init_config_actually_reads() {
+        // The schema and `InitConfig` are two descriptions of the same thing,
+        // in two languages, and nothing but this test connects them. A field
+        // the host faithfully collects and merges under a name the plugin does
+        // not deserialise is silently dropped — the account connects, and then
+        // behaves as though the setting were never set.
+        let schema = manifest()
+            .account
+            .expect("Google declares an account schema");
+        let known = [
+            "client_id",
+            "client_secret",
+            "access_token",
+            "refresh_token",
+            "expires_at",
+            "scope",
+        ];
+        for field in &schema.fields {
+            assert!(
+                known.contains(&field.key.as_str()),
+                "schema field `{}` is not read by InitConfig",
+                field.key
+            );
+        }
+        let oauth = schema.oauth.expect("Google signs in via OAuth");
+        for key in [
+            Some(oauth.client_id_field.as_str()),
+            oauth.client_secret_field.as_deref(),
+            oauth.refresh_token_field.as_deref(),
+            oauth.access_token_field.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            assert!(
+                known.contains(&key),
+                "oauth key `{key}` is not read by InitConfig"
+            );
+        }
+    }
+
+    #[test]
+    fn only_the_two_values_the_user_types_are_asked_for() {
+        // The three token keys `InitConfig` also reads are filled by the host
+        // after the sign-in dance. Declaring one as a form field would put an
+        // empty box on the connect form for something nobody can type.
+        let schema = manifest().account.unwrap();
+        let keys: Vec<&str> = schema.fields.iter().map(|f| f.key.as_str()).collect();
+        assert_eq!(keys, ["client_id", "client_secret"]);
+    }
+
+    #[test]
+    fn the_client_secret_is_routed_away_from_the_account_row() {
+        use plugin_sdk::plugin_core::account_schema::AccountSecretSlot;
+        let schema = manifest().account.unwrap();
+        assert_eq!(
+            schema.field("client_secret").unwrap().secret_slot,
+            Some(AccountSecretSlot::OauthClientSecret)
+        );
+        // The client id is NOT a secret: it travels in every authorization URL
+        // the user's own browser visits, and the host needs it in the row to
+        // record which registration an account belongs to.
+        assert!(!schema.field("client_id").unwrap().is_secret());
+    }
+
+    #[test]
+    fn an_access_token_is_requested_because_the_adapter_is_handed_one() {
+        // Unlike Webex, this adapter does not mint a token on first use — its
+        // `TokenSet` is built at open time and `access_token` must be there.
+        let oauth = manifest().account.unwrap().oauth.unwrap();
+        assert_eq!(oauth.access_token_field.as_deref(), Some("access_token"));
+        assert_eq!(oauth.refresh_token_field.as_deref(), Some("refresh_token"));
+        assert_eq!(oauth.builtin_provider.as_deref(), Some("google"));
+    }
+
+    #[test]
+    fn no_capability_token_is_asked_for() {
+        // This plugin exports nothing onto the host channel — it never reports
+        // a rotated credential back — so it has no use for the authority.
+        assert!(!manifest().account.unwrap().host_channel);
+    }
+
+    #[test]
+    fn an_init_config_without_an_expiry_still_opens() {
+        // What the schema-driven host sends: the two client values plus the
+        // tokens it merges by keychain slot, and nothing to say when the access
+        // token dies. Requiring `expires_at` would reject exactly that.
+        let cfg: super::InitConfig = serde_json::from_str(
+            r#"{"client_id":"id","client_secret":"s","access_token":"ya29.x",
+                "refresh_token":"1//r"}"#,
+        )
+        .expect("the host's declared merge is a valid init config");
+        assert_eq!(cfg.expires_at, super::assume_expired());
+        assert!(cfg.scope.is_none());
+    }
+
+    #[test]
+    fn both_form_labels_are_translated_in_both_languages() {
+        let m = manifest();
+        let schema = m.account.as_ref().unwrap();
+        for field in &schema.fields {
+            for lang in ["en", "de"] {
+                // The raw map, not `lookup` — that one falls back to English,
+                // so it would call a missing German string a success.
+                let catalogue = m.strings.0.get(lang).expect("declared language");
+                for key in [field.label_key.as_deref(), field.hint_key.as_deref()]
+                    .into_iter()
+                    .flatten()
+                {
+                    assert!(catalogue.contains_key(key), "`{key}` has no {lang} string");
+                }
+            }
+        }
+        assert!(m.strings.has_fallback());
+    }
 }

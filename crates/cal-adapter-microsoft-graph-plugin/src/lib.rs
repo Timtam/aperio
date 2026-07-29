@@ -12,6 +12,12 @@
 //!   "scope": null
 //! }
 //! ```
+//!
+//! `client_id` and `authority` are the two things the user is asked for; they
+//! come from the account row. The tokens come from the keychain, merged in at
+//! open time under the keys `plugin.json`'s `account.oauth` block names.
+//! `expires_at` and `scope` are neither — no host path has anything to say
+//! about them, so both are optional here.
 
 use std::os::raw::{c_char, c_void};
 
@@ -34,6 +40,19 @@ fn default_authority() -> String {
     DEFAULT_AUTHORITY.to_string()
 }
 
+/// When the host hands over no expiry.
+///
+/// The schema-driven open path merges the token slots the `account.oauth`
+/// block names — a refresh token and an access token — and there is no slot to
+/// name an expiry with, so the value has to come from here. The epoch is what
+/// the host's older per-kind path wrote for the same reason, and for the same
+/// reason it is harmless: the API client refreshes on a 401 rather than on a
+/// clock, so an expiry in the past costs one extra round trip on the first call
+/// after a restart and nothing else.
+fn already_expired() -> DateTime<Utc> {
+    DateTime::UNIX_EPOCH
+}
+
 #[derive(Debug, Deserialize)]
 struct InitConfig {
     client_id: String,
@@ -42,6 +61,7 @@ struct InitConfig {
     access_token: String,
     #[serde(default)]
     refresh_token: Option<String>,
+    #[serde(default = "already_expired")]
     expires_at: DateTime<Utc>,
     #[serde(default)]
     scope: Option<String>,
@@ -782,4 +802,140 @@ async fn plugin_interactive_auth(args_json: String) -> Result<Vec<u8>, String> {
 
 plugin_sdk::declare_interactive_auth! {
     handler: plugin_interactive_auth,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The manifest ships beside this crate and is the ONLY thing that tells
+    /// the host how to set up a Microsoft 365 account. Parsing it here means a
+    /// typo fails the build rather than the first user who tries to connect.
+    fn manifest() -> plugin_sdk::plugin_core::manifest::PluginManifest {
+        plugin_sdk::plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
+            "../plugin.json"
+        ))
+        .expect("plugin.json parses and its account schema validates")
+    }
+
+    #[test]
+    fn every_schema_field_is_a_key_the_init_config_actually_reads() {
+        // The schema and `InitConfig` are two descriptions of the same thing,
+        // in two languages, and nothing but this test connects them. A field
+        // the host faithfully collects and merges under a name the plugin does
+        // not deserialise is silently dropped — the account connects, and then
+        // behaves as though the setting were never set.
+        let schema = manifest()
+            .account
+            .expect("Microsoft 365 declares an account schema");
+        let known = [
+            "client_id",
+            "authority",
+            "access_token",
+            "refresh_token",
+            "expires_at",
+            "scope",
+        ];
+        for field in &schema.fields {
+            assert!(
+                known.contains(&field.key.as_str()),
+                "schema field `{}` is not read by InitConfig",
+                field.key
+            );
+        }
+        let oauth = schema.oauth.expect("Microsoft 365 signs in via OAuth");
+        for key in [
+            Some(oauth.client_id_field.as_str()),
+            oauth.client_secret_field.as_deref(),
+            oauth.refresh_token_field.as_deref(),
+            oauth.access_token_field.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            assert!(
+                known.contains(&key),
+                "oauth key `{key}` is not read by InitConfig"
+            );
+        }
+    }
+
+    #[test]
+    fn the_tenant_the_form_prefills_is_the_one_the_plugin_falls_back_to() {
+        // Two defaults for one setting: the manifest prefills the field, and
+        // `InitConfig` fills in for an account that never carried it. They
+        // disagree at the user's expense — the form would promise one tenant
+        // and a blanked field would quietly sign in against another.
+        use plugin_sdk::plugin_core::account_schema::AccountFieldDefault;
+        let schema = manifest().account.unwrap();
+        let authority = schema.field("authority").expect("the tenant is asked for");
+        assert_eq!(
+            authority.default,
+            Some(AccountFieldDefault::Text(DEFAULT_AUTHORITY.to_string()))
+        );
+        assert_eq!(default_authority(), DEFAULT_AUTHORITY);
+    }
+
+    #[test]
+    fn nothing_on_this_form_is_a_secret() {
+        // Microsoft registers Aperio as a PUBLIC client: the flow is PKCE and
+        // there is no client secret in any phase, so the form asks for none and
+        // the OAuth block names none. The client id is not a secret either — it
+        // travels in every authorization URL the user's own browser visits, and
+        // the host needs it in the row to record which registration an account
+        // belongs to.
+        let schema = manifest().account.unwrap();
+        assert_eq!(schema.oauth.as_ref().unwrap().client_secret_field, None);
+        assert!(schema.fields.iter().all(|f| !f.is_secret()));
+    }
+
+    #[test]
+    fn the_config_the_host_merges_is_one_the_plugin_can_open() {
+        // What `account_setup::init_config` produces: the row's non-secret
+        // fields under their own keys, plus the two tokens under the keys the
+        // OAuth block named. Nothing supplies an expiry or a scope, which is
+        // the whole reason both are optional.
+        let schema = manifest().account.unwrap();
+        let merged = serde_json::json!({
+            "client_id": "12345678-1234-1234-1234-123456789abc",
+            "authority": "organizations",
+            "refresh_token": "M.C5.test",
+            "access_token": "eyJ.test",
+        });
+        for field in &schema.fields {
+            assert!(
+                merged.get(&field.key).is_some(),
+                "the host would collect `{}`; this test should carry it too",
+                field.key
+            );
+        }
+        let cfg: InitConfig =
+            serde_json::from_str(&merged.to_string()).expect("the merged config deserialises");
+        assert_eq!(cfg.client_id, "12345678-1234-1234-1234-123456789abc");
+        assert_eq!(cfg.authority, "organizations");
+        assert_eq!(cfg.refresh_token.as_deref(), Some("M.C5.test"));
+        assert_eq!(cfg.expires_at, DateTime::UNIX_EPOCH);
+        assert_eq!(cfg.scope, None);
+    }
+
+    #[test]
+    fn the_form_speaks_both_languages_the_app_ships() {
+        let strings = manifest().strings;
+        assert_eq!(strings.languages(), vec!["de".to_string(), "en".into()]);
+        assert!(strings.has_fallback());
+        let schema = manifest().account.unwrap();
+        for field in &schema.fields {
+            for key in [field.label_key.as_deref(), field.hint_key.as_deref()]
+                .into_iter()
+                .flatten()
+            {
+                for lang in ["en", "de"] {
+                    assert!(
+                        strings.lookup(key, lang).is_some(),
+                        "`{key}` has no {lang} translation"
+                    );
+                }
+            }
+        }
+    }
 }

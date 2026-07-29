@@ -24,6 +24,26 @@
 //! `open_instance` calls so multiple CalDAV accounts on the same
 //! Aperio session each get their own independent adapter
 //! instance (DESIGN.md §6.4).
+//!
+//! ## What the account schema declares, and what it does not
+//!
+//! `plugin.json` declares three fields — `server_url`, `username`
+//! and `secret` — under exactly the keys this module
+//! deserialises. The credential field is called `secret` and not
+//! `password`: the *slot* it is kept in is `password`, but the
+//! key it is merged back under at open time is the schema field's
+//! own key, and this adapter reads `secret`.
+//!
+//! `auth_kind` is deliberately NOT a declared field. It is one of
+//! two magic tokens (`basic` / `bearer`), the schema has no way to
+//! present a choice between them, and a free-text box would let a
+//! typo turn into a `malformed init config` at connect time. There
+//! is also nothing to choose yet: every caller in the tree passes
+//! `basic`, and `bearer` exists only for a future OAuth flow. So
+//! the default lives where it belongs — in `InitConfig`'s
+//! `#[serde(default)]`, which yields [`AuthKind::Basic`] for the
+//! key's absence, exactly what the old host form's fixed
+//! `auth_kind: "basic"` produced.
 
 use std::os::raw::{c_char, c_void};
 
@@ -683,4 +703,112 @@ plugin_sdk::declare_lifecycle! {
     vtable: ADAPTER_VTABLE,
     open_instance: plugin_open_instance,
     close_instance: plugin_close_instance,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The manifest ships beside this crate and is the ONLY thing that tells
+    /// the host how to set up a CalDAV account. Parsing it here means a typo
+    /// fails the build rather than the first user who tries to connect.
+    fn manifest() -> plugin_sdk::plugin_core::manifest::PluginManifest {
+        plugin_sdk::plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
+            "../plugin.json"
+        ))
+        .expect("plugin.json parses and its account schema validates")
+    }
+
+    #[test]
+    fn every_schema_field_is_a_key_the_init_config_actually_reads() {
+        // The schema and `InitConfig` are two descriptions of the same thing,
+        // in two languages, and nothing but this test connects them. A field
+        // the host faithfully collects and merges under a name the plugin does
+        // not deserialise is silently dropped — the account connects, and then
+        // behaves as though the setting were never set.
+        let schema = manifest()
+            .account
+            .expect("CalDAV declares an account schema");
+        let known = ["server_url", "username", "auth_kind", "secret"];
+        for field in &schema.fields {
+            assert!(
+                known.contains(&field.key.as_str()),
+                "schema field `{}` is not read by InitConfig",
+                field.key
+            );
+        }
+        assert!(
+            schema.oauth.is_none(),
+            "CalDAV signs in with a password, so there is no OAuth key to check"
+        );
+    }
+
+    #[test]
+    fn the_credential_is_named_for_what_the_plugin_reads_not_for_the_slot() {
+        use plugin_sdk::plugin_core::account_schema::{AccountFieldKind, AccountSecretSlot};
+        // The old host form called this field `password` and the plugin has
+        // always deserialised `secret`. The schema keeps the two apart on
+        // purpose: the KEY is `secret`, because that is what `InitConfig`
+        // reads and what the host merges the keychain value back under; the
+        // SLOT is `password`, because that is where every existing CalDAV
+        // account's credential already sits.
+        let schema = manifest().account.unwrap();
+        let secret = schema.field("secret").expect("the credential field");
+        assert_eq!(secret.kind, AccountFieldKind::Secret);
+        assert_eq!(secret.secret_slot, Some(AccountSecretSlot::Password));
+        assert!(
+            schema.field("password").is_none(),
+            "a `password` key would be collected and then dropped on the floor"
+        );
+        // Neither of the other two may carry a slot: config_json syncs in the
+        // clear, and a server URL kept in the keychain would be unreadable.
+        assert!(!schema.field("server_url").unwrap().is_secret());
+        assert!(!schema.field("username").unwrap().is_secret());
+    }
+
+    #[test]
+    fn auth_kind_is_carried_by_the_default_rather_than_asked_for() {
+        // Not a field: it is a magic token with two values, the schema has no
+        // way to offer a choice, and a free-text box would let a typo become a
+        // parse failure at connect time. Absence has to mean exactly what the
+        // old host form's fixed `auth_kind: "basic"` meant.
+        let schema = manifest().account.unwrap();
+        assert!(schema.field("auth_kind").is_none());
+        let cfg: InitConfig = serde_json::from_str(
+            r#"{"server_url":"https://dav.test/","username":"toni","secret":"hunter2"}"#,
+        )
+        .expect("the three declared fields are a complete init config");
+        assert_eq!(cfg.auth_kind, AuthKind::Basic);
+    }
+
+    #[test]
+    fn every_declared_label_and_hint_key_has_a_string_in_both_languages() {
+        // Deliberately NOT `lookup`: that falls back to English, so a German
+        // string this catalogue never carried would still "resolve" and the
+        // gap would stay invisible until a German user opened the form. Read
+        // each language's map directly.
+        let m = manifest();
+        let schema = m.account.as_ref().expect("CalDAV declares a schema");
+        for field in &schema.fields {
+            assert!(
+                field.label_key.is_some(),
+                "field `{}` has no label_key",
+                field.key
+            );
+            for key in [field.label_key.as_deref(), field.hint_key.as_deref()]
+                .into_iter()
+                .flatten()
+            {
+                for lang in ["en", "de"] {
+                    let present = m
+                        .strings
+                        .0
+                        .get(lang)
+                        .and_then(|map| map.get(key))
+                        .is_some_and(|s| !s.trim().is_empty());
+                    assert!(present, "`{key}` has no `{lang}` string");
+                }
+            }
+        }
+    }
 }

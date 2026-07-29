@@ -14,5 +14,49 @@
     "subtasks": true,
     "create_lists": true,
     "delete_lists": true
+  },
+  "account": {
+    "fields": [
+      {
+        "key": "server_url",
+        "kind": "url",
+        "label": "Server URL",
+        "label_key": "account.server_url.label",
+        "hint_key": "account.server_url.hint",
+        "required": true
+      },
+      {
+        "key": "username",
+        "kind": "text",
+        "label": "Username",
+        "label_key": "account.username.label",
+        "required": true
+      },
+      {
+        "key": "secret",
+        "kind": "secret",
+        "secret_slot": "password",
+        "label": "Password",
+        "label_key": "account.secret.label",
+        "hint_key": "account.secret.hint",
+        "required": true
+      }
+    ]
+  },
+  "strings": {
+    "en": {
+      "account.secret.hint": "Use an app-specific password where the provider offers one (iCloud, Fastmail, …). Stored only in your operating system's credential store.",
+      "account.secret.label": "Password",
+      "account.server_url.hint": "Hostname or full URL. The app discovers the CalDAV root automatically (RFC 6764).",
+      "account.server_url.label": "Server URL",
+      "account.username.label": "Username"
+    },
+    "de": {
+      "account.secret.hint": "Verwende ein App-spezifisches Passwort, wo der Anbieter eines anbietet (iCloud, Fastmail, …). Das Passwort wird nur im Anmeldeinformations-Manager des Betriebssystems gespeichert.",
+      "account.secret.label": "Passwort",
+      "account.server_url.hint": "Hostname oder vollständige URL. Aperio findet das CalDAV-Stammverzeichnis automatisch (RFC 6764).",
+      "account.server_url.label": "Server-Adresse",
+      "account.username.label": "Benutzername"
+    }
   }
 }

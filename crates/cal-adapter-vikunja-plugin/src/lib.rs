@@ -406,3 +406,108 @@ plugin_sdk::declare_lifecycle! {
     open_instance: plugin_open_instance,
     close_instance: plugin_close_instance,
 }
+
+#[cfg(test)]
+mod tests {
+
+    /// The manifest ships beside this crate and is the ONLY thing that tells
+    /// the host how to set up a Vikunja account. Parsing it here means a typo
+    /// fails the build rather than the first user who tries to connect.
+    fn manifest() -> plugin_sdk::plugin_core::manifest::PluginManifest {
+        plugin_sdk::plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
+            "../plugin.json"
+        ))
+        .expect("plugin.json parses and its account schema validates")
+    }
+
+    #[test]
+    fn every_schema_field_is_a_key_the_init_config_actually_reads() {
+        // The schema and `InitConfig` are two descriptions of the same thing,
+        // in two languages, and nothing but this test connects them. A field
+        // the host faithfully collects and merges under a name the plugin does
+        // not deserialise is silently dropped — the account connects, and then
+        // behaves as though the setting were never set.
+        //
+        // Vikunja is where that is easiest to get wrong: the form has always
+        // called the credential an "API token", but the key `InitConfig`
+        // deserialises is `token`. The wording belongs in the label; the key
+        // has to be what the struct reads.
+        let schema = manifest()
+            .account
+            .expect("Vikunja declares an account schema");
+        let known = ["server_url", "token"];
+        for field in &schema.fields {
+            assert!(
+                known.contains(&field.key.as_str()),
+                "schema field `{}` is not read by InitConfig",
+                field.key
+            );
+        }
+        // Both keys are required by `InitConfig` — it has no `Option` and no
+        // `serde(default)`, so a missing one fails the whole parse and the
+        // instance never opens.
+        for key in known {
+            let field = schema
+                .field(key)
+                .unwrap_or_else(|| panic!("`{key}` must be declared — InitConfig has no default"));
+            assert!(field.required, "`{key}` is not optional to InitConfig");
+        }
+        // A long-lived token the user pastes in; there is no flow for the host
+        // to run, so declaring one would send it looking for an
+        // `aperio_plugin_interactive_auth` this crate does not export.
+        assert!(schema.oauth.is_none(), "Vikunja has no OAuth flow");
+    }
+
+    #[test]
+    fn the_token_is_routed_away_from_the_account_row_and_the_url_is_not() {
+        use plugin_sdk::plugin_core::account_schema::{AccountFieldKind, AccountSecretSlot};
+        let schema = manifest().account.unwrap();
+
+        let token = schema.field("token").expect("the credential");
+        assert_eq!(token.kind, AccountFieldKind::Secret);
+        // `api_token` rather than `password`: it is what the host's own slot
+        // selection has always used for Vikunja, and the keychain service
+        // suffix is derived from it — the wrong slot would write the token
+        // where nothing ever reads it back.
+        assert_eq!(token.secret_slot, Some(AccountSecretSlot::ApiToken));
+
+        // The server URL is NOT a secret. It has to stay in `config_json`:
+        // it is what tells an account which instance it belongs to, and the
+        // host shows it back to the user.
+        let url = schema.field("server_url").expect("the instance");
+        assert_eq!(url.kind, AccountFieldKind::Url);
+        assert!(!url.is_secret());
+
+        // Nothing else is collected, so nothing else can land in `config_json`.
+        assert_eq!(schema.fields.len(), 2);
+        // No rotating credential to report back, so no capability token.
+        assert!(!schema.host_channel);
+    }
+
+    #[test]
+    fn both_declared_languages_carry_every_key_the_schema_names() {
+        let manifest = manifest();
+        let schema = manifest.account.as_ref().unwrap();
+        assert_eq!(manifest.strings.languages(), vec!["de", "en"]);
+        for field in &schema.fields {
+            for key in [field.label_key.as_deref(), field.hint_key.as_deref()]
+                .into_iter()
+                .flatten()
+            {
+                for lang in ["en", "de"] {
+                    let resolved = manifest
+                        .strings
+                        .lookup(key, lang)
+                        .unwrap_or_else(|| panic!("`{key}` is missing in `{lang}`"));
+                    assert!(!resolved.trim().is_empty(), "`{key}` in `{lang}` is empty");
+                }
+                // A German reader must not silently get the English line back.
+                assert_ne!(
+                    manifest.strings.lookup(key, "de"),
+                    manifest.strings.lookup(key, "en"),
+                    "`{key}` falls through to English"
+                );
+            }
+        }
+    }
+}
