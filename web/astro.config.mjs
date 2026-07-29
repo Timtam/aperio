@@ -130,6 +130,7 @@ export default defineConfig({
             { label: 'Introduction', slug: 'plugins' },
             { label: 'Getting Started', slug: 'plugins/getting-started' },
             { label: 'The C ABI', slug: 'plugins/abi-reference' },
+            { label: 'ABI versions + migration', slug: 'plugins/abi-versions' },
             { label: 'The Rust SDK', slug: 'plugins/rust-sdk' },
             { label: 'The plugin.json manifest', slug: 'plugins/manifest' },
             {

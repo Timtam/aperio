@@ -14,7 +14,7 @@ reads it to discover the plugin before loading any code.
   "version": "0.1.0",
   "plugin_type": "calendar-adapter",
   "capabilities": ["tasks"],
-  "abi_version": 2,
+  "abi_version": 3,
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled tasks adapter for Todoist (REST API v2).",
@@ -42,7 +42,7 @@ reads it to discover the plugin before loading any code.
 | `version` | string | ✅ | Plugin version (semver). |
 | `plugin_type` | string | ✅ | `"calendar-adapter"`, `"sync-adapter"`, or `"videoconference-adapter"`. There is **no** separate `task-adapter` type — a tasks-only provider is a `calendar-adapter` with `capabilities: ["tasks"]`. |
 | `capabilities` | string[] | ✅ | Which feature surfaces the plugin fills: any of `"calendars"`, `"tasks"`, `"contacts"`. Drives which vtables the host expects to be non-null. |
-| `abi_version` | number | ✅ | The ABI the plugin was built against (current: `2`). |
+| `abi_version` | number | ✅ | The ABI the plugin was built against (current: `3`). Must equal the host's exactly — see [ABI versions and how to migrate](/plugins/abi-versions/). |
 | `min_app_version` | string | ✅ | Lowest app version that can load this plugin. |
 | `author` | string | ✅ | Author/maintainer. |
 | `description` | string | ✅ | One-line description shown in plugin settings. |

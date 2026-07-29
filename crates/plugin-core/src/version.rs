@@ -50,6 +50,25 @@ use crate::error::{PluginError, PluginResult};
 ///   the only reason an in-place wire change was permissible: no
 ///   plugin exists that speaks the earlier v3. Once v3 ships, the
 ///   next wire change to an existing slot takes v4.
+///
+///   Also in v3, and none of it breaking: `vtable_version` is now
+///   actually READ before the rest of a vtable is trusted
+///   ([`crate::vtables::vtable_layout_ok`]); the manifest gained the
+///   optional `adapter_kind`, `account` and `strings` blocks; the
+///   videoconference payloads gained `#[serde(default)]` fields
+///   (`NewMeeting`: `use_personal_room`, `attendees`,
+///   `notify_attendees`; `Meeting`: `invitees`, `join_details`).
+///
+///   Two optional named exports also arrived in the same development
+///   cycle — `aperio_plugin_set_host_channel` and
+///   `aperio_plugin_strings` — but neither is gated on v3, and
+///   `set_host_channel` in fact landed while the ABI was still 2. A
+///   named export never moves this number: the host looks it up by
+///   symbol and asks a plugin that lacks it to do less.
+///
+/// The plugin-facing mirror of this list is
+/// `web/src/content/docs/plugins/abi-versions.md`. THIS is the
+/// authoritative copy; if the two disagree, the page is the bug.
 pub const ABI_VERSION: u32 = 3;
 
 /// Three-component semantic version. Only the (major, minor, patch)

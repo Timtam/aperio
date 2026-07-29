@@ -119,19 +119,32 @@ the supplied function pointer for each line they want forwarded.
 
 ## Versioning & compatibility
 
-`vtable_version` is `ABI_VERSION`. The rules that keep old plugins working:
+`vtable_version` is `ABI_VERSION`, and the host reads it before it trusts the
+rest of a vtable's layout. The rules:
 
 - **Never reorder or remove** a vtable slot. New methods are **appended**
-  to the end of a vtable, so existing offsets are stable.
-- A method added as a new slot is `None` in plugins that predate it; the
-  host detects the null and uses the default behaviour — no recompile of
-  old plugins required.
+  to the end, so existing offsets stay stable.
+- **Appending a slot to an existing vtable requires an ABI bump.** The host
+  has no per-vtable length: it reads your vtable as a struct of the size IT
+  was compiled with, so a plugin built against the shorter layout would be
+  read past its end. Strict equality on `abi_version` is what prevents that.
+  (An earlier version of this page said such a plugin would simply see the
+  new slot as `None`. That was never true for an appended slot — only for a
+  slot a plugin chooses to leave `NULL` within the same revision.)
+- Adding a whole **new** vtable for a **new** plugin type needs no bump:
+  nothing reads it unless that type exists.
 - Because data is serde JSON, adding a `#[serde(default)]` field to a
   domain type is **ABI-transparent** — it doesn't touch the vtable at all.
   Only a brand-new *method* needs a vtable slot.
+- A new optional **named export** needs no bump either. It is looked up by
+  symbol at load time and its absence simply means the host asks you to do
+  less.
 
 `plugin-core` has a compile-time assertion that the vtable struct sizes
 match the C header, so the Rust and C views can't drift.
+
+See [ABI versions and how to migrate](/plugins/abi-versions/) for what each
+revision contains and what moving between them costs.
 
 ## Other plugin types
 
