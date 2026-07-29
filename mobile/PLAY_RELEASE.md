@@ -24,9 +24,10 @@ Papierkram fällig, und dort läuft auch die 14-Tage-Uhr für den
 Produktionszugang. Der Service-Account und `eas submit` sind der zweite Schritt,
 nicht der erste. Der GitHub-Workflow dafür existiert bereits.
 
-Ehrliche Zeitschätzung: interner Test auf dem Gerät in 1–3 Tagen (die erste
-Prüfung durch Google dauert), öffentliche Veröffentlichung frühestens in 4–5
-Wochen, falls dein Konto der Testpflicht unterliegt.
+Ehrliche Zeitschätzung, am 29.07.2026 tatsächlich durchlaufen: interner Test
+noch am selben Tag — der erste Rollout ging sofort live, ohne Prüfung (siehe
+5.5). Öffentliche Veröffentlichung frühestens in 4–5 Wochen, falls dein Konto
+der 12-Tester-Regel unterliegt; dort wird dann auch wirklich geprüft.
 
 ---
 
@@ -402,13 +403,18 @@ auszurollen — das ist die Fehlermeldung oben.
 Version: hochgeladen, aber nicht ausgeliefert. Niemand bekommt sie, sie wartet
 in der Console darauf, dass ein Mensch den Rollout startet.
 
-Die Auflösung: `eas submit` soll die Datei nur **hochladen**, nicht ausrollen.
-Dafür steht in `mobile/eas.json` unter `submit.production.android` seit dem
-29.07.2026:
+Die Auflösung war, `eas submit` nur **hochladen** zu lassen und nicht
+ausrollen. Dafür stand am 29.07.2026 kurzzeitig in `mobile/eas.json` unter
+`submit.production.android`:
 
 ```json
 "releaseStatus": "draft"
 ```
+
+Der Eintrag ist wieder entfernt, weil er seinen Zweck erfüllt hat: die App hat
+einmal veröffentlicht und ist keine „draft app" mehr. Künftige `eas submit`
+rollen direkt auf den internen Test aus. Brauchst du ihn je wieder — etwa für
+eine neue App unter neuem Paketnamen — steht hier, warum.
 
 Dann lädt EAS das `.aab` hoch, Play legt es als Entwurfsversion an, und du
 gehst einmal in die Console und startest den Rollout von Hand. Damit ist die
@@ -432,16 +438,31 @@ Live-Status da, nicht als `Entwurf` und nicht als `Angehalten`.
 
 Zwei Dinge, die beim ersten Mal irritieren und **keine** Fehler sind:
 
-- Die App heißt in Play bis zu **48 Stunden** anders (Platzhaltername), bis das
-  erste Review durch ist.
+- Die App heißt in Play bis zu **48 Stunden** anders (Platzhaltername), bis der
+  Store-Eintrag greift.
 - Der Opt-in-Link braucht nach der ersten Veröffentlichung **einige Stunden**,
   bis er funktioniert.
 
-Und einmal ausdrücklich: **auch der erste Rollout auf dem internen Test wird von
-Google geprüft.** Googles Wortlaut: "If your app's first release roll-out is on
-an Internal test track, the submission must be reviewed before it can be
-published." Bei einem neuen Entwicklerkonto nennt Google bis zu sieben Tage,
-in Ausnahmen länger. Jedes spätere interne Update geht dann in Minuten durch.
+**Zur Prüfung — hier stand vorher etwas Falsches.** Googles Hilfeseite sagt:
+"If your app's first release roll-out is on an Internal test track, the
+submission must be reviewed before it can be published." Daraus stand hier, der
+erste Rollout warte tage- bis wochenlang auf eine Prüfung.
+
+So war es nicht. Am 29.07.2026, erste Version dieser App, erstes Rollout auf
+dem internen Test: die Console meldete **„Nicht überprüft" und gleichzeitig
+„Veröffentlicht heute"**. Der Release ging also sofort live, ohne vorherige
+Prüfung — genau das, was Googles andere Aussage über den internen Test
+beschreibt ("Internal tests may not be subject to the usual Play policy or
+security reviews").
+
+„Nicht überprüft" ist demnach ein Vermerk, kein Hindernis. Er kann später
+verschwinden, wenn Google nachträglich prüft; Google behält sich
+retroaktive Prüfungen für den internen Test ausdrücklich vor. Für die
+Verteilung an interne Tester musst du auf nichts warten.
+
+Ein echtes Review kommt erst, wenn du auf eine öffentliche Spur gehst —
+geschlossener Test, offener Test oder Produktion. Dort gilt dann auch der
+Papierkram aus Abschnitt 7.
 
 Fehlermeldungen, die "lade einmal von Hand hoch" bedeuten:
 `rolloutNotPermittedOnDraftApp`, "The app is missing the required metadata to
