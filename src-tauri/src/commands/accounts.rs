@@ -1149,6 +1149,9 @@ pub struct ConnectMicrosoftRequest {
 pub struct AccountFormSpec {
     pub plugin_id: String,
     pub fields: Vec<AccountFormField>,
+    /// Buttons besides "add" that this adapter offers on its form.
+    #[serde(default)]
+    pub actions: Vec<AccountFormAction>,
     /// Present when connecting runs an OAuth sign-in.
     pub oauth: Option<AccountFormOauth>,
     /// Whether accounts of this adapter own calendars and task lists. Derived
@@ -1173,6 +1176,24 @@ pub struct AccountFormField {
     pub required: bool,
     pub default_bool: Option<bool>,
     pub default_text: Option<String>,
+}
+
+/// One button the connect form should offer, everything already in the
+/// reader's language.
+#[derive(Debug, Serialize)]
+pub struct AccountFormAction {
+    pub key: String,
+    pub label: String,
+    pub busy_label: Option<String>,
+    pub success: Option<String>,
+    pub hint: Option<String>,
+    pub requires: Vec<AccountFormRequirement>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AccountFormRequirement {
+    pub field: String,
+    pub message: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -1241,6 +1262,40 @@ pub fn account_form_spec(
                 },
             })
             .collect(),
+        actions: schema
+            .actions
+            .iter()
+            .map(|a| AccountFormAction {
+                key: a.key.clone(),
+                label: label_of(a.label_key.as_deref(), &a.label),
+                busy_label: a
+                    .busy_label
+                    .as_deref()
+                    .or(a.busy_label_key.as_deref().map(|_| ""))
+                    .map(|verbatim| label_of(a.busy_label_key.as_deref(), verbatim))
+                    .filter(|s| !s.is_empty()),
+                success: a
+                    .success
+                    .as_deref()
+                    .or(a.success_key.as_deref().map(|_| ""))
+                    .map(|verbatim| label_of(a.success_key.as_deref(), verbatim))
+                    .filter(|s| !s.is_empty()),
+                hint: a
+                    .hint
+                    .as_deref()
+                    .or(a.hint_key.as_deref().map(|_| ""))
+                    .map(|verbatim| label_of(a.hint_key.as_deref(), verbatim))
+                    .filter(|s| !s.is_empty()),
+                requires: a
+                    .requires
+                    .iter()
+                    .map(|r| AccountFormRequirement {
+                        field: r.field.clone(),
+                        message: label_of(r.message_key.as_deref(), &r.message),
+                    })
+                    .collect(),
+            })
+            .collect(),
         oauth: schema.oauth.as_ref().map(|o| AccountFormOauth {
             builtin: host_core::account_setup::has_builtin_client(o),
             client_id_field: o.client_id_field.clone(),
@@ -1276,6 +1331,97 @@ pub struct ConnectAccountRequest {
     /// than coerced.
     #[serde(default)]
     pub values: serde_json::Map<String, Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RunAccountActionRequest {
+    pub adapter_kind: AdapterKind,
+    /// Which declared action. Not a verb the host knows — the adapter named it.
+    pub action_key: String,
+    /// The form's values so far, keyed by the schema's field keys.
+    #[serde(default)]
+    pub values: serde_json::Map<String, Value>,
+}
+
+/// Run one action a plugin declared on its connect form, and hand back what the
+/// form should now contain.
+///
+/// The last place the host named an adapter was a `kind == "ews"` branch
+/// rendering an Autodiscover button, with its labels in the app's own
+/// translations. This is that button, generalised: the manifest says which entry
+/// point to drive, which fields must be filled first, which form values become
+/// which arguments, and which result keys land back in which fields. Nothing
+/// here knows what Autodiscover is.
+///
+/// The returned map is keyed by FIELD key, ready to merge into the form. A
+/// result the action did not produce is simply absent rather than blanking a
+/// field the user had already typed into.
+#[tauri::command]
+pub async fn run_account_action(
+    plugin_manager: State<'_, Arc<PluginManager>>,
+    request: RunAccountActionRequest,
+) -> CommandResult<serde_json::Map<String, Value>> {
+    let plugin = plugin_manager
+        .plugin_for_adapter_kind(request.adapter_kind.as_str())
+        .ok_or(CommandError {
+            code: "unsupported",
+            message: "no plugin serves this adapter kind".into(),
+        })?;
+    let schema = plugin.manifest.account.clone().ok_or(CommandError {
+        code: "unsupported",
+        message: "this adapter declares no account schema".into(),
+    })?;
+    let action = schema
+        .action(&request.action_key)
+        .cloned()
+        .ok_or(CommandError {
+            code: "not_found",
+            message: "this adapter declares no such action".into(),
+        })?;
+
+    // The requirements are checked HERE as well as in the frontend, because the
+    // frontend's copy is a courtesy that keeps the user from a pointless round
+    // trip and this one is the actual gate.
+    for requirement in &action.requires {
+        let filled = request
+            .values
+            .get(&requirement.field)
+            .and_then(Value::as_str)
+            .is_some_and(|v| !v.trim().is_empty());
+        if !filled {
+            return Err(CommandError {
+                code: "invalid_input",
+                message: requirement.message.clone(),
+            });
+        }
+    }
+
+    let mut args = serde_json::Map::new();
+    for (arg, field) in &action.inputs {
+        if let Some(value) = request.values.get(field) {
+            args.insert(arg.clone(), value.clone());
+        }
+    }
+
+    let payload = match action.entry {
+        plugin_core::account_schema::AccountActionEntry::Discover => {
+            run_plugin_discover::<serde_json::Map<String, Value>>(
+                plugin_manager.inner(),
+                &plugin.manifest.id,
+                Value::Object(args),
+            )
+            .await?
+        }
+    };
+
+    // Back into the form, under the FIELD keys the manifest paired them with.
+    let mut filled = serde_json::Map::new();
+    for (field, result_key) in &action.fills {
+        if let Some(value) = payload.get(result_key) {
+            filled.insert(field.clone(), value.clone());
+        }
+    }
+    Ok(filled)
 }
 
 #[derive(Debug, Deserialize)]

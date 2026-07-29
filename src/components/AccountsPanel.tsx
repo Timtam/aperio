@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import { collectValues, firstMissingField } from '@aperio/shared';
+import type { AccountFormAction } from '@aperio/shared';
 
 import { FocusableNote } from '../a11y/FocusableNote';
 import {
@@ -29,6 +30,7 @@ import {
   renameAccount,
   resetAccountSync,
   setUserPref,
+  runAccountAction,
   testAccount,
   testCaldavConnection,
   testEwsConnection,
@@ -210,6 +212,7 @@ export function AccountsPanel() {
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState(false);
   const [discovering, setDiscovering] = useState(false);
+  const [runningAction, setRunningAction] = useState<string | null>(null);
   const [testMessage, setTestMessage] = useState<string | null>(null);
   const [caldav, setCaldav] = useState<CaldavFields>(EMPTY_CALDAV);
   const [ical, setIcal] = useState<IcalFields>(EMPTY_ICAL);
@@ -779,6 +782,40 @@ export function AccountsPanel() {
    * surfaces it (with focus restored), and we leave the endpoint
    * field alone so the user can keep typing it manually.
    */
+  /**
+   * Run an action the adapter declared, and merge what it answers back into the
+   * form. The host checks the requirements too — this copy only saves a round
+   * trip and lets the message name the field the user is standing in.
+   */
+  const runDeclaredAction = useCallback(
+    async (action: AccountFormAction) => {
+      setTestMessage(null);
+      setError(null);
+      for (const requirement of action.requires) {
+        const value = formValues[requirement.field];
+        if (typeof value !== 'string' || !value.trim()) {
+          setError(requirement.message);
+          return;
+        }
+      }
+      setRunningAction(action.key);
+      try {
+        const filled = await runAccountAction(kind, action.key, formValues);
+        setFormValues((prev) => ({ ...prev, ...filled }));
+        if (action.success) {
+          setTestMessage(action.success);
+          announce(action.success);
+        }
+      } catch (err) {
+        if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
+        else setError(String(err));
+      } finally {
+        setRunningAction(null);
+      }
+    },
+    [announce, formValues, kind],
+  );
+
   const onDiscover = useCallback(async () => {
     setTestMessage(null);
     setError(null);
@@ -1951,7 +1988,28 @@ export function AccountsPanel() {
             )}
 
             <div className="form__actions">
-              {kind === 'ews' && (
+              {/* One button per action the adapter declared. No adapter is
+                  named here, and the next one with a lookup of its own gets a
+                  button by writing it into its own plugin.json. */}
+              {(formSpec?.actions ?? []).map((action) => (
+                <button
+                  key={action.key}
+                  type="button"
+                  className="form__action"
+                  onClick={() => void runDeclaredAction(action)}
+                  aria-disabled={
+                    runningAction != null || testing || submitting || undefined
+                  }
+                  aria-describedby={
+                    action.hint ? `${headingId}-action-${action.key}` : undefined
+                  }
+                >
+                  {runningAction === action.key && action.busy_label
+                    ? action.busy_label
+                    : action.label}
+                </button>
+              ))}
+              {kind === 'ews' && !formSpec && (
                 <button
                   type="button"
                   className="form__action"
@@ -2002,7 +2060,18 @@ export function AccountsPanel() {
                 {t('dialogs.accounts.add')}
               </button>
             </div>
-            {kind === 'ews' && (
+            {(formSpec?.actions ?? [])
+              .filter((action) => action.hint)
+              .map((action) => (
+                <p
+                  key={action.key}
+                  id={`${headingId}-action-${action.key}`}
+                  className="sr-only"
+                >
+                  {action.hint}
+                </p>
+              ))}
+            {kind === 'ews' && !formSpec && (
               <p
                 id={`${headingId}-discover-help`}
                 className="sr-only"

@@ -540,6 +540,7 @@ mod tests {
                 app_redirect_uri: "aperio://oauth-callback".into(),
             }),
             host_channel: true,
+            ..Default::default()
         }
     }
 
@@ -558,6 +559,7 @@ mod tests {
             ],
             oauth: None,
             host_channel: false,
+            ..Default::default()
         }
     }
 

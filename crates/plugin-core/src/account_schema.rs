@@ -206,6 +206,16 @@ pub struct AccountSchema {
     #[serde(default)]
     pub fields: Vec<AccountField>,
 
+    /// Buttons the connect form offers besides "add" — a lookup the adapter can
+    /// do for the user, so they do not have to find a server URL by hand.
+    ///
+    /// Declared rather than built in, because the alternative is what the host
+    /// did before: a `kind == "ews"` branch rendering one adapter's button, its
+    /// five labels living in the app's own translations, and the next adapter
+    /// with a discovery protocol needing an edit to the core to get one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<AccountAction>,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth: Option<AccountOauth>,
 
@@ -217,16 +227,141 @@ pub struct AccountSchema {
     pub host_channel: bool,
 }
 
+/// Which plugin entry point an action drives.
+///
+/// An enum rather than a free string: the host looks the symbol up at load time
+/// and there is no way to dispatch to one it does not know, so a manifest naming
+/// something else is a mistake worth catching at parse time rather than a button
+/// that does nothing when pressed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountActionEntry {
+    /// `aperio_plugin_discover` — the adapter works out its own endpoint from
+    /// what the user has typed so far.
+    Discover,
+}
+
+/// One button the connect form offers, and everything the host needs to render
+/// it, decide when it is usable, run it, and put the answer back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountAction {
+    /// Stable id, for the frontend's key and for logs.
+    pub key: String,
+
+    pub entry: AccountActionEntry,
+
+    /// Verbatim label, used when the catalogue cannot answer.
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label_key: Option<String>,
+
+    /// Shown while it runs. A button that changes its own name is how a screen
+    /// reader learns the thing is working without a separate live region.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub busy_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub busy_label_key: Option<String>,
+
+    /// Announced when it succeeds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub success: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub success_key: Option<String>,
+
+    /// A description the button points at with `aria-describedby`, for saying
+    /// what will happen before somebody presses it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint_key: Option<String>,
+
+    /// Fields that must be filled first, each with what to say when it is not.
+    ///
+    /// The message is per FIELD rather than one for the action, because "enter
+    /// your address first" and "enter your password first" are different
+    /// instructions and a single "fill in the form" helps nobody.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requires: Vec<AccountActionRequirement>,
+
+    /// Argument name → field key. What the host sends the plugin, built from
+    /// the form. The adapter names its own arguments; the host only carries
+    /// values between two things that both named them.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub inputs: std::collections::BTreeMap<String, String>,
+
+    /// Field key → result key. What the host writes back into the form from
+    /// what the plugin answered.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub fills: std::collections::BTreeMap<String, String>,
+}
+
+/// A field an action cannot run without.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountActionRequirement {
+    pub field: String,
+    /// What to say when it is empty. Verbatim, with the usual key beside it.
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_key: Option<String>,
+}
+
 impl AccountSchema {
     /// Find a declared field by key.
     pub fn field(&self, key: &str) -> Option<&AccountField> {
         self.fields.iter().find(|f| f.key == key)
     }
 
+    /// Find a declared action by key.
+    pub fn action(&self, key: &str) -> Option<&AccountAction> {
+        self.actions.iter().find(|a| a.key == key)
+    }
+
+    /// Every field an action names must be a field the schema declares.
+    ///
+    /// Checked at parse time because the failure otherwise arrives as a button
+    /// that quietly reads nothing and writes nowhere: a typo in `inputs` sends
+    /// the plugin an empty argument, and a typo in `fills` drops its answer on
+    /// the floor. Neither raises anything a user could act on.
+    fn validate_actions(&self) -> PluginResult<()> {
+        for action in &self.actions {
+            if action.key.trim().is_empty() {
+                return Err(PluginError::Manifest(
+                    "an account action has an empty key".into(),
+                ));
+            }
+            if self.actions.iter().filter(|a| a.key == action.key).count() > 1 {
+                return Err(PluginError::Manifest(format!(
+                    "account action `{}` is declared twice",
+                    action.key
+                )));
+            }
+            if action.label.trim().is_empty() {
+                return Err(PluginError::Manifest(format!(
+                    "account action `{}` has an empty label",
+                    action.key
+                )));
+            }
+            let mut named: Vec<&str> = action.requires.iter().map(|r| r.field.as_str()).collect();
+            named.extend(action.inputs.values().map(String::as_str));
+            named.extend(action.fills.keys().map(String::as_str));
+            for field in named {
+                if self.field(field).is_none() {
+                    return Err(PluginError::Manifest(format!(
+                        "account action `{}` names field `{field}`, which the schema \
+                         does not declare",
+                        action.key
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Check everything the host will later rely on, at parse time, so a
     /// malformed manifest fails while loading a plugin rather than halfway
     /// through creating an account.
     pub fn validate(&self) -> PluginResult<()> {
+        self.validate_actions()?;
         for (index, field) in self.fields.iter().enumerate() {
             if field.key.trim().is_empty() {
                 return Err(PluginError::Manifest(format!(
@@ -397,6 +532,71 @@ mod tests {
     }
 
     #[test]
+    fn an_action_may_only_name_fields_the_schema_declares() {
+        // The failure this catches never announces itself: a typo in `inputs`
+        // hands the plugin an empty argument, a typo in `fills` drops its answer
+        // on the floor, and the button looks like it worked.
+        let base = |action: AccountAction| AccountSchema {
+            fields: vec![
+                field("endpoint", AccountFieldKind::Url, None),
+                field("username", AccountFieldKind::Text, None),
+            ],
+            actions: vec![action],
+            ..Default::default()
+        };
+        let sound = AccountAction {
+            key: "discover".into(),
+            entry: AccountActionEntry::Discover,
+            label: "Discover URL".into(),
+            label_key: None,
+            busy_label: None,
+            busy_label_key: None,
+            success: None,
+            success_key: None,
+            hint: None,
+            hint_key: None,
+            requires: vec![AccountActionRequirement {
+                field: "username".into(),
+                message: "Enter your address first.".into(),
+                message_key: None,
+            }],
+            inputs: [("email".to_string(), "username".to_string())]
+                .into_iter()
+                .collect(),
+            fills: [("endpoint".to_string(), "ews_url".to_string())]
+                .into_iter()
+                .collect(),
+        };
+        base(sound.clone())
+            .validate()
+            .expect("a well-formed action");
+
+        // A requirement naming a field nobody declared.
+        let mut bad = sound.clone();
+        bad.requires[0].field = "nope".into();
+        assert!(base(bad).validate().is_err());
+
+        // An input reading a field nobody declared.
+        let mut bad = sound.clone();
+        bad.inputs.insert("email".into(), "nope".into());
+        assert!(base(bad).validate().is_err());
+
+        // A fill writing into a field nobody declared. Note the direction: the
+        // KEY is ours, the value is the plugin's own result name and is not
+        // ours to check.
+        let mut bad = sound.clone();
+        bad.fills.clear();
+        bad.fills.insert("nope".into(), "ews_url".into());
+        assert!(base(bad).validate().is_err());
+
+        // Two actions under one key would make "run the one called discover"
+        // ambiguous.
+        let mut twice = base(sound.clone());
+        twice.actions.push(sound);
+        assert!(twice.validate().is_err());
+    }
+
+    #[test]
     fn oauth_must_point_at_fields_that_exist_and_have_the_right_shape() {
         let mut schema = AccountSchema {
             fields: vec![
@@ -416,6 +616,7 @@ mod tests {
                 app_redirect_uri: default_app_redirect_uri(),
             }),
             host_channel: true,
+            ..Default::default()
         };
         schema.validate().expect("a well-formed schema");
 

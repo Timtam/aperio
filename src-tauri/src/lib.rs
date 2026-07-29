@@ -665,6 +665,7 @@ pub fn run() {
             commands::create_account,
             commands::delete_account,
             commands::rename_account,
+            commands::run_account_action,
             commands::test_account,
             commands::test_caldav_connection,
             commands::test_ical_feed,

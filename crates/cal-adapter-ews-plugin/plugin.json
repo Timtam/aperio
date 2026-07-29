@@ -3,7 +3,11 @@
   "name": "Aperio Exchange (EWS)",
   "version": "0.1.0",
   "plugin_type": "calendar-adapter",
-  "capabilities": ["calendar", "tasks", "contacts"],
+  "capabilities": [
+    "calendar",
+    "tasks",
+    "contacts"
+  ],
   "abi_version": 3,
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
@@ -11,14 +15,22 @@
   "adapter_kind": "ews",
   "signed": false,
   "recurrence": {
-    "interval_frequencies": ["daily", "weekly", "monthly"]
+    "interval_frequencies": [
+      "daily",
+      "weekly",
+      "monthly"
+    ]
   },
   "tasks": {
     "subtasks": false,
     "create_lists": true,
     "delete_lists": true,
     "recurrence": {
-      "interval_frequencies": ["daily", "weekly", "monthly"]
+      "interval_frequencies": [
+        "daily",
+        "weekly",
+        "monthly"
+      ]
     }
   },
   "account": {
@@ -48,10 +60,47 @@
         "hint_key": "account.password.hint",
         "required": true
       }
+    ],
+    "actions": [
+      {
+        "key": "discover",
+        "entry": "discover",
+        "label": "Discover URL",
+        "label_key": "account.action.discover.label",
+        "busy_label_key": "account.action.discover.busy",
+        "success_key": "account.action.discover.ok",
+        "hint_key": "account.action.discover.hint",
+        "requires": [
+          {
+            "field": "username",
+            "message": "Enter your e-mail address first.",
+            "message_key": "account.action.discover.needs_email"
+          },
+          {
+            "field": "password",
+            "message": "Enter your password first.",
+            "message_key": "account.action.discover.needs_password"
+          }
+        ],
+        "inputs": {
+          "email": "username",
+          "password": "password"
+        },
+        "fills": {
+          "endpoint": "ews_url",
+          "username": "account_email"
+        }
+      }
     ]
   },
   "strings": {
     "en": {
+      "account.action.discover.busy": "Discovering …",
+      "account.action.discover.hint": "Ask Microsoft Autodiscover for the EWS endpoint based on your e-mail address. Requires the e-mail and password fields above to be filled in.",
+      "account.action.discover.label": "Discover URL",
+      "account.action.discover.needs_email": "Please enter your e-mail address before running Discover — autodiscover uses it to figure out which server to ask.",
+      "account.action.discover.needs_password": "Please enter your password before running Discover — Microsoft's autodiscover endpoint requires Basic auth.",
+      "account.action.discover.ok": "Autodiscover found the endpoint.",
       "account.endpoint.hint": "The Exchange Web Services SOAP endpoint your server admin gave you. Always ends in \"/EWS/Exchange.asmx\". If you don't know the URL, fill in the e-mail + password fields below and press \"Discover URL\" — Aperio will ask Microsoft Autodiscover for you.",
       "account.endpoint.label": "EWS endpoint URL",
       "account.password.hint": "The password of your Exchange mailbox. EWS authenticates with HTTP Basic on every request; the password is stored only in your operating system's credential store.",
@@ -60,6 +109,12 @@
       "account.username.label": "Username"
     },
     "de": {
+      "account.action.discover.busy": "Suche …",
+      "account.action.discover.hint": "Microsoft Autodiscover anhand der E-Mail-Adresse nach der EWS-Endpunkt-URL fragen. Setzt voraus, dass E-Mail und Passwort oben ausgefüllt sind.",
+      "account.action.discover.label": "URL automatisch suchen",
+      "account.action.discover.needs_email": "Bitte zuerst die E-Mail-Adresse eintragen — Autodiscover braucht sie, um den richtigen Server zu finden.",
+      "account.action.discover.needs_password": "Bitte zuerst das Passwort eintragen — der Autodiscover-Endpunkt fordert Basic-Auth.",
+      "account.action.discover.ok": "Autodiscover hat die Endpunkt-URL gefunden.",
       "account.endpoint.hint": "Die SOAP-URL der Exchange Web Services, die dein Admin dir genannt hat. Endet immer auf „/EWS/Exchange.asmx\". Wenn du die URL nicht kennst: trage E-Mail und Passwort unten ein und drücke „URL automatisch suchen\" — Aperio fragt für dich bei Microsoft Autodiscover nach.",
       "account.endpoint.label": "EWS-Endpunkt-URL",
       "account.password.hint": "Das Passwort deines Exchange-Postfachs. EWS meldet sich bei jeder Anfrage per HTTP-Basic an; das Passwort wird nur im Anmeldeinformations-Manager des Betriebssystems gespeichert.",

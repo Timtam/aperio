@@ -485,6 +485,20 @@ export interface CaldavConfig {
  * split by the same schema on the Rust side — so a test and a connect cannot
  * disagree about what a field means.
  */
+/**
+ * Run one action the adapter declared on its connect form. Returns the values
+ * the form should now carry, keyed by FIELD key — a field the action did not
+ * produce is simply absent rather than blanked.
+ */
+export const runAccountAction = (
+  adapter_kind: AdapterKind,
+  action_key: string,
+  values: Record<string, string | boolean>,
+) =>
+  invoke<Record<string, string>>('run_account_action', {
+    request: { adapter_kind, action_key, values },
+  });
+
 export const testAccount = (
   adapter_kind: AdapterKind,
   values: Record<string, string | boolean>,

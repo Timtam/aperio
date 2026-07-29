@@ -27,6 +27,27 @@ export interface AccountFormField {
   default_text: string | null;
 }
 
+/**
+ * A button the adapter's form offers besides "add" — a lookup it can do for the
+ * user, like asking Autodiscover for an Exchange endpoint.
+ *
+ * Everything here arrives in the reader's language and names no adapter: the
+ * host resolved it from the manifest, and the frontend renders a button per
+ * entry without knowing what any of them do.
+ */
+export interface AccountFormAction {
+  key: string;
+  label: string;
+  /** Shown while it runs, so the button says it is working. */
+  busy_label: string | null;
+  /** Announced when it succeeds. */
+  success: string | null;
+  /** Description the button points at, for saying what will happen first. */
+  hint: string | null;
+  /** Fields that must be filled, each with what to say when it is not. */
+  requires: { field: string; message: string }[];
+}
+
 /** The OAuth half, when the adapter signs in that way. */
 export interface AccountFormOauth {
   /** True when this build carries credentials for the provider, so the two
@@ -40,6 +61,7 @@ export interface AccountFormOauth {
 export interface AccountFormSpec {
   plugin_id: string;
   fields: AccountFormField[];
+  actions?: AccountFormAction[];
   oauth: AccountFormOauth | null;
   /** Whether accounts of this adapter own calendars and task lists. False for a
    *  videoconference adapter, which owns neither — so a frontend can skip the
