@@ -330,7 +330,48 @@ Erfolgssignal: das Kommando endet mit einer Meldung, dass die Einreichung
 abgeschlossen ist, und nennt die Spur. In der Play Console taucht die Version
 dann unter `Interner Test` auf.
 
-### 5.2 Wenn `eas submit` an der Erstveröffentlichung scheitert
+### 5.2 „APKs are not allowed for this application"
+
+Am 29.07.2026 tatsächlich passiert, und die Ursache ist nicht die, die der Text
+nahelegt. In Fastlanes Zusammenfassung stand:
+
+```
+apk | /tmp/submissions/<id>/tWD5F7To….tar_gz.apk
+```
+
+EAS Submit lädt das Build-Artefakt herunter und muss entscheiden, was es ist.
+Weil das Artefakt hier ein `.tar.gz` war und kein nacktes `.aab`, hat es die
+Datei kurzerhand als APK behandelt und hochgeladen. Google lehnt ab, weil neue
+Apps ausschließlich App Bundles annehmen — die Meldung stimmt also, sie
+beschreibt nur nicht die Ursache.
+
+Warum das Artefakt ein Archiv war: das Gradle-Ausgabeverzeichnis enthielt
+**zwei** Dateien (siehe 4.4). Bei genau einer Ausgabedatei liefert EAS diese
+direkt, bei mehreren packt es alles in ein Archiv — und damit kann Submit nicht
+umgehen.
+
+Zwei Wege heraus:
+
+**Sofort, ohne neuen Build:** das bereits entpackte `.aab` direkt einreichen.
+
+```bash
+eas submit --platform android --profile production --path <PFAD>/app-release.aab --wait
+```
+
+`--path` umgeht die Artefakt-Erkennung vollständig, weil du die Datei selbst
+benennst.
+
+**Dauerhaft:** `mobile/android/` löschen (4.4) und neu bauen. Dann gibt es nur
+noch eine Ausgabedatei, das Artefakt ist ein nacktes `.aab`, und
+`eas submit --id …` funktioniert wie vorgesehen.
+
+Zu beachten, falls du dafür `.easignore` einsetzen willst: diese Datei
+**ersetzt** `.gitignore` für den Upload, sie ergänzt es nicht. Alles, was
+weiterhin draußen bleiben soll, muss dann dort erneut stehen — und
+`modules/cal-ffi/android/src/main/jniLibs/` darf gerade **nicht** hinein,
+sonst baut EAS ein Bundle ohne `libcal_ffi.so`.
+
+### 5.3 Wenn `eas submit` an der Erstveröffentlichung scheitert
 
 Hier widersprechen sich die Quellen, und du solltest das wissen statt zu raten.
 Expos Doku (21.07.2026) sagt, `eas submit` lege die erste Version problemlos
@@ -346,7 +387,7 @@ Hand hochladen":
 - `The app is missing the required metadata to submit the app`
 - `you will have to upload at least one APK through the Play Console`
 
-### 5.3 Was „draft" hier bedeutet
+### 5.4 Was „draft" hier bedeutet
 
 Zwei verschiedene Dinge heißen bei Google „Entwurf", und genau daran hängt die
 Verwirrung.
@@ -362,7 +403,8 @@ Version: hochgeladen, aber nicht ausgeliefert. Niemand bekommt sie, sie wartet
 in der Console darauf, dass ein Mensch den Rollout startet.
 
 Die Auflösung: `eas submit` soll die Datei nur **hochladen**, nicht ausrollen.
-Dafür trägst du in `mobile/eas.json` unter `submit.production.android` ein:
+Dafür steht in `mobile/eas.json` unter `submit.production.android` seit dem
+29.07.2026:
 
 ```json
 "releaseStatus": "draft"
@@ -375,7 +417,7 @@ App keine „draft app" mehr, und ab dem **nächsten** Mal funktioniert
 
 Kurz: `releaseStatus: "draft"` ist eine Krücke für genau eine Einreichung.
 
-### 5.4 Von Hand hochladen
+### 5.5 Von Hand hochladen
 
 Datei: das `bundle/release/app-release.aab` aus 4.2.
 
