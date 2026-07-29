@@ -1715,6 +1715,7 @@ mod tests {
             tasks: Default::default(),
             account: None,
             adapter_kind: None,
+            strings: Default::default(),
         }
     }
 

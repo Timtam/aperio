@@ -44,5 +44,25 @@
       "refresh_token_field": "refresh_token"
     },
     "host_channel": true
+  },
+  "strings": {
+    "en": {
+      "join.link": "Join the meeting",
+      "join.number": "Meeting number (access code)",
+      "join.password": "Meeting password",
+      "join.password.phone": "Password for phones and video systems",
+      "join.phone": "Join by phone",
+      "join.phone.more": "Global call-in numbers",
+      "join.video": "Join from a video system or application"
+    },
+    "de": {
+      "join.link": "Meeting beitreten",
+      "join.number": "Meeting-Kennnummer (Zugriffscode)",
+      "join.password": "Meeting-Passwort",
+      "join.password.phone": "Passwort für Telefon- und Videosysteme",
+      "join.phone": "Über Telefon beitreten",
+      "join.phone.more": "Globale Einwahlnummern",
+      "join.video": "Über Videogerät oder -anwendung beitreten"
+    }
   }
 }

@@ -36,6 +36,7 @@ pub mod manager;
 pub mod manifest;
 pub mod plugin_type;
 pub mod shim;
+pub mod strings;
 pub mod version;
 pub mod vtables;
 
@@ -69,6 +70,7 @@ pub use plugin_type::PluginType;
 pub use shim::{
     FfiCalendarAdapter, FfiContactsAdapter, FfiSyncAdapter, FfiTasksAdapter, FfiVcAdapter,
 };
+pub use strings::{resolve_label, StringCatalogue, FALLBACK_LANG};
 pub use version::{check_abi_version, check_min_app_version, Version, ABI_VERSION};
 pub use vtables::{
     CalendarAdapterVtable, CalendarVtable, ContactsVtable, SyncVtable, TasksVtable, VcVtable,

@@ -40,6 +40,7 @@ fn plugin_manifest() -> PluginManifest {
         tasks: Default::default(),
         account: None,
         adapter_kind: None,
+        strings: Default::default(),
     }
 }
 

@@ -44,6 +44,7 @@ use crate::account_schema::AccountSchema;
 use crate::capability::Capability;
 use crate::error::{PluginError, PluginResult};
 use crate::plugin_type::PluginType;
+use crate::strings::StringCatalogue;
 use crate::version::{check_abi_version, check_min_app_version};
 
 /// Filename the manager looks for next to a plugin's shared library.
@@ -373,6 +374,22 @@ pub struct PluginManifest {
     /// accounts at all).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adapter_kind: Option<String>,
+
+    /// This plugin's own text, in the languages it speaks — see
+    /// [`crate::strings`] for why it lives here rather than in the host's
+    /// locale files, and for the resolution order.
+    ///
+    /// Keys are referenced from wherever the plugin declares a label: the
+    /// `label_key` / `hint_key` of an [`AccountSchema`] field, and the
+    /// `label_key` of a join detail on a meeting. Absent is fine and common —
+    /// a plugin that writes only verbatim `label`s renders in whatever
+    /// language it wrote them.
+    ///
+    /// This is a DECLARATION as much as a catalogue: the host reads the
+    /// language list from it to build the invitation-language picker, and it
+    /// has to be able to do that without loading the shared library.
+    #[serde(default, skip_serializing_if = "StringCatalogue::is_empty")]
+    pub strings: StringCatalogue,
 }
 
 impl PluginManifest {
