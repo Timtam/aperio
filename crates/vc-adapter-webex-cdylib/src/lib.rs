@@ -6,4 +6,9 @@
 
 plugin_sdk::declare_cdylib_exports! {
     plugin_crate: vc_adapter_webex_plugin,
+    // Webex signs in interactively. The rlib declares the handler; without
+    // this line the shared library never exports the symbol, and the desktop's
+    // dlopen loader — which resolves it by name — reports the plugin as not
+    // supporting interactive auth at all.
+    interactive_auth: yes,
 }

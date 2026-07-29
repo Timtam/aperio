@@ -177,29 +177,100 @@ mod tests {
     /// `cargo test -p aperio` still passes — the workspace
     /// build is what populates the dir, and CI scripts run it
     /// before the test step.
-    #[test]
-    fn scan_bundled_loads_every_expected_plugin_when_staged() {
-        // bundled_dir() resolves relative to current_exe(). For
-        // a `cargo test -p aperio --lib` run, current_exe is
-        // `target/<profile>/deps/aperio-<hash>.exe`, so the
-        // bundled dir resolves to `target/<profile>/deps/
-        // plugins/bundled/` — which `build.rs` doesn't
-        // populate. The real workspace build stages plugins
-        // under `target/<profile>/plugins/bundled/` (one level
-        // up). Walk both to find whichever exists.
+    /// Where the workspace build actually staged the plugins, or `None` when it
+    /// has not been built yet.
+    ///
+    /// `bundled_dir()` resolves beside `current_exe`, which in a shipped app is
+    /// right. Under `cargo test` the exe is `target/<profile>/deps/…`, while
+    /// `build.rs` stages into `target/<profile>/plugins/bundled` — one level
+    /// further up.
+    ///
+    /// Getting that arithmetic wrong is not a harmless test-only slip: it makes
+    /// every test built on this silently SKIP, which reads as green. The
+    /// previous version went up two levels from the bundled dir and landed back
+    /// on the path it started from, so it always skipped — including the check
+    /// that all 17 plugins load.
+    fn staged_plugins_dir() -> Option<std::path::PathBuf> {
         let direct = bundled_dir().expect("current_exe");
-        let parent_alt = direct
+        if direct.is_dir() {
+            return Some(direct);
+        }
+        // …/deps/plugins/bundled → …/deps/plugins → …/deps → …/<profile>
+        direct
             .parent()
             .and_then(|p| p.parent())
-            .map(|p| p.join("plugins").join("bundled"));
-        let scan_dir = if direct.is_dir() {
-            direct
-        } else if let Some(p) = parent_alt.filter(|p| p.is_dir()) {
-            p
-        } else {
-            eprintln!(
-                "skipping: no staged plugins dir found — run `cargo build --workspace` first",
+            .and_then(|p| p.parent())
+            .map(|profile| profile.join("plugins").join("bundled"))
+            .filter(|p| p.is_dir())
+    }
+
+    /// A plugin whose manifest says it signs in interactively MUST export the
+    /// symbol that does it.
+    ///
+    /// This is a two-file invariant with nothing holding the halves together:
+    /// the handler is declared in the `-plugin` rlib, and the `#[no_mangle]`
+    /// export is emitted by the `-cdylib` shell, which has to opt in with
+    /// `interactive_auth: yes`. Forget that one line and everything still
+    /// compiles, every test passes, the plugin loads — and the first person to
+    /// press "Add account" gets "doesn't support interactive auth". That is
+    /// exactly how it shipped for Webex.
+    ///
+    /// The manifest is the right thing to check against, because it is where
+    /// the plugin already promises an OAuth flow: an `account.oauth` block IS
+    /// the claim that connecting runs an interactive sign-in.
+    #[test]
+    fn a_plugin_that_declares_oauth_actually_exports_its_auth_entry_point() {
+        let Some(scan_dir) = staged_plugins_dir() else {
+            eprintln!("skipping: no staged plugins dir — run `cargo build --workspace` first");
+            return;
+        };
+        let manager = PluginManager::new(env!("CARGO_PKG_VERSION"));
+        let errors = manager.scan_dir(&scan_dir);
+        assert!(errors.is_empty(), "scan_dir reported {errors:?}");
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+
+        let mut checked = 0usize;
+        for plugin in manager.all() {
+            let declares_oauth = plugin
+                .manifest
+                .account
+                .as_ref()
+                .is_some_and(|account| account.oauth.is_some());
+            if !declares_oauth {
+                continue;
+            }
+            checked += 1;
+            let id = plugin.manifest.id.clone();
+            // Deliberately malformed arguments: reaching the handler at all is
+            // the whole question. A plugin that IS wired rejects them with its
+            // own parse error; one that is not answers `Unsupported` before
+            // any argument is looked at.
+            let outcome = runtime.block_on(manager.interactive_auth(&id, "{}"));
+            assert!(
+                !matches!(
+                    outcome,
+                    Err(plugin_core::InteractiveAuthError::Unsupported(_))
+                ),
+                "{id} declares account.oauth but its cdylib does not export \
+                 aperio_plugin_interactive_auth — add `interactive_auth: yes` to its \
+                 declare_cdylib_exports!",
             );
+        }
+        assert!(
+            checked > 0,
+            "no plugin declared account.oauth, so this guard checked nothing — \
+             it has stopped testing what it was written for",
+        );
+    }
+
+    #[test]
+    fn scan_bundled_loads_every_expected_plugin_when_staged() {
+        let Some(scan_dir) = staged_plugins_dir() else {
+            eprintln!("skipping: no staged plugins dir — run `cargo build --workspace` first");
             return;
         };
 
