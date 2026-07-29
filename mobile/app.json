@@ -72,10 +72,19 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Aperio accesses your photo library so you can set a contact's photo."
+          "photosPermission": "Aperio accesses your photo library so you can set a contact's photo.",
+          "cameraPermission": false,
+          "microphonePermission": false
         }
       ],
-      "expo-audio",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": false
+        }
+      ],
       "./plugins/withReminderSoundProvider",
       "./plugins/withoutPushEntitlement",
       "./plugins/withAndroidAbis",
