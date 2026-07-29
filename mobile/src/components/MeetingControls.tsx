@@ -5,10 +5,11 @@ import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-nati
 import { listAccounts, type Account } from '../api/accounts';
 import type { CalendarEvent } from '../api/calendar';
 import {
+  adoptMeeting,
   attachMeeting,
   detachMeeting,
-  eventMeeting,
-  type EventMeetingBinding,
+  inspectEventMeeting,
+  type EventMeetingInspection,
 } from '../api/meetings';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -33,7 +34,7 @@ export function MeetingControls({
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [binding, setBinding] = useState<EventMeetingBinding | null>(null);
+  const [found, setFound] = useState<EventMeetingInspection | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,23 +55,25 @@ export function MeetingControls({
   }, []);
 
   const eventId = event?.id ?? null;
+  const calendarId = event?.calendar_id ?? null;
   useEffect(() => {
-    if (!eventId) {
-      setBinding(null);
+    if (!eventId || !calendarId) {
+      setFound(null);
       return;
     }
     let cancelled = false;
-    eventMeeting(eventId)
-      .then((found) => {
-        if (!cancelled) setBinding(found);
+    inspectEventMeeting({ event_id: eventId, calendar_id: calendarId })
+      .then((result) => {
+        if (!cancelled) setFound(result);
       })
       .catch(() => {
-        // Treated as "no meeting of ours", which only hides the Remove button.
+        // Treated as "nothing known", which offers Create — the same thing the
+        // editor did before any of this existed.
       });
     return () => {
       cancelled = true;
     };
-  }, [eventId]);
+  }, [eventId, calendarId]);
 
   const announce = (message: string) =>
     AccessibilityInfo.announceForAccessibility(message);
@@ -86,12 +89,16 @@ export function MeetingControls({
         calendar_id: event.calendar_id,
         account_id: account.id,
       });
-      setBinding({
-        event_id: event.id,
+      setFound({
+        binding: {
+          event_id: event.id,
+          account_id: account.id,
+          meeting_id: attached.meeting.id,
+          join_url: attached.meeting.join_url,
+          created_at: new Date().toISOString(),
+        },
+        meeting: attached.meeting,
         account_id: account.id,
-        meeting_id: attached.meeting.id,
-        join_url: attached.meeting.join_url,
-        created_at: new Date().toISOString(),
       });
       onEventChanged(attached.event);
       announce(t('conferencing.meetingCreated'));
@@ -113,7 +120,7 @@ export function MeetingControls({
         event_id: event.id,
         calendar_id: event.calendar_id,
       });
-      setBinding(null);
+      setFound(null);
       if (saved) onEventChanged(saved);
       announce(t('conferencing.meetingRemoved'));
     } catch (err) {
@@ -125,6 +132,29 @@ export function MeetingControls({
     }
   }, [event, onEventChanged, t]);
 
+  /** Take over a meeting that is on the event but not yet ours. */
+  const adopt = useCallback(async () => {
+    if (!event || !found?.meeting || !found.account_id) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const binding = await adoptMeeting({
+        event_id: event.id,
+        account_id: found.account_id,
+        meeting_id: found.meeting.id,
+        join_url: found.meeting.join_url,
+      });
+      setFound({ ...found, binding });
+      announce(t('conferencing.meetingAdopted'));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      announce(t('conferencing.meetingFailed', { message }));
+    } finally {
+      setBusy(false);
+    }
+  }, [event, found, t]);
+
   // No videoconference account, nothing to offer — and a disabled button
   // explaining an absence teaches nothing that Settings does not.
   if (accounts.length === 0) return null;
@@ -133,18 +163,57 @@ export function MeetingControls({
     return <Text style={styles.hint}>{t('conferencing.saveEventFirst')}</Text>;
   }
 
-  const label = binding
+  // Three states, and the middle one is the point: an event that ALREADY has a
+  // meeting must not be offered "create", which would mint a second one and
+  // write its link in alongside the first.
+  const owned = found?.binding != null;
+  const adoptable = !owned && found?.meeting != null;
+  const label = owned
     ? t('conferencing.removeMeeting')
-    : t('conferencing.createMeeting');
+    : adoptable
+      ? t('conferencing.adoptMeeting')
+      : t('conferencing.createMeeting');
+  const note = owned
+    ? t('conferencing.meetingOwned')
+    : adoptable
+      ? t('conferencing.meetingNotOwned')
+      : null;
+  const invitees = found?.meeting?.invitees ?? [];
 
   return (
     <View style={styles.group}>
-      {binding && <Text style={styles.hint}>{t('conferencing.meetingOwned')}</Text>}
+      {/* Who the PROVIDER says is invited, kept apart from the event's own
+          attendee list: an event auto-created from an invitation mail often
+          lists only the recipient and the provider's sending address. */}
+      {invitees.length > 0 && (
+        <>
+          <Text style={styles.label}>{t('conferencing.meetingInvitees')}</Text>
+          {invitees.map((invitee) => {
+            const line = invitee.co_host
+              ? t('conferencing.inviteeCoHost', {
+                  name: invitee.display_name ?? invitee.email,
+                  email: invitee.email,
+                })
+              : t('conferencing.invitee', {
+                  name: invitee.display_name ?? invitee.email,
+                  email: invitee.email,
+                });
+            return (
+              <Text key={invitee.email} style={styles.hint} accessibilityLabel={line}>
+                {line}
+              </Text>
+            );
+          })}
+        </>
+      )}
+      {note != null && <Text style={styles.hint}>{note}</Text>}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={label}
         accessibilityState={{ disabled: busy }}
-        onPress={() => void (binding ? remove() : create())}
+        onPress={() =>
+          void (owned ? remove() : adoptable ? adopt() : create())
+        }
         disabled={busy}
         style={({ pressed }) => [styles.button, pressed && styles.pressed]}
       >
@@ -158,6 +227,7 @@ export function MeetingControls({
 const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
     group: { gap: 8 },
+    label: { fontSize: 15, fontWeight: '600', color: c.textPrimary },
     hint: { fontSize: 13, color: c.textSecondary },
     button: {
       paddingVertical: 12,

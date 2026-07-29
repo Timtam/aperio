@@ -902,6 +902,8 @@ external fun uniffi_cal_ffi_checksum_method_host_add_event_exdate_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_adopt_local_dataset_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_adopt_meeting_json(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_attach_meeting_json(
@@ -1017,6 +1019,8 @@ external fun uniffi_cal_ffi_checksum_method_host_get_sync_adapter_summary_json(
 external fun uniffi_cal_ffi_checksum_method_host_get_user_pref(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_import_sound_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_inspect_event_meeting_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_is_device_account(
 ): Short
@@ -1288,6 +1292,8 @@ external fun uniffi_cal_ffi_fn_method_host_add_event_exdate_json(`ptr`: Long,`id
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_adopt_local_dataset_json(`ptr`: Long,`configJson`: RustBuffer.ByValue,`deviceName`: RustBuffer.ByValue,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_adopt_meeting_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_adopt_remote_encryption_json(`ptr`: Long,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_attach_meeting_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1403,6 +1409,8 @@ external fun uniffi_cal_ffi_fn_method_host_get_sync_adapter_summary_json(`ptr`: 
 external fun uniffi_cal_ffi_fn_method_host_get_user_pref(`ptr`: Long,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_import_sound_json(`ptr`: Long,`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_inspect_event_meeting_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_is_device_account(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
@@ -1799,6 +1807,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_adopt_local_dataset_json() != 28459.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_adopt_meeting_json() != 14491.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json() != 12036.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1971,6 +1982,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_import_sound_json() != 40673.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_inspect_event_meeting_json() != 41723.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_is_device_account() != 47677.toShort()) {
@@ -4131,6 +4145,12 @@ public interface HostInterface {
     fun `adoptLocalDatasetJson`(`configJson`: kotlin.String, `deviceName`: kotlin.String?, `passphrase`: kotlin.String?): kotlin.String
     
     /**
+     * Take responsibility for a meeting Aperio did not create, so it can also
+     * be removed. Writes nothing to the event — the link is already there.
+     */
+    fun `adoptMeetingJson`(`requestJson`: kotlin.String): kotlin.String
+    
+    /**
      * Adopt encryption a PEER turned on (§19.7): this device was syncing the
      * dataset in PLAINTEXT, a peer enabled E2E, and the next round failed with
      * `encryption_required` (the orchestrator's encryption gate). Pure unlock —
@@ -4637,6 +4657,16 @@ public interface HostInterface {
      * immediate preview). Validates format + size via the shared importer.
      */
     fun `importSoundJson`(`path`: kotlin.String): kotlin.String
+    
+    /**
+     * Everything known about the meeting on an event: whether it is ours, what
+     * the provider says about it, and who it says is invited. As JSON.
+     *
+     * The lookup goes through the JOIN LINK, the only identifier that reaches
+     * a calendar event, so this answers for meetings Aperio did not create.
+     * The desktop twin is `inspect_event_meeting`.
+     */
+    fun `inspectEventMeetingJson`(`requestJson`: kotlin.String): kotlin.String
     
     /**
      * Whether `account_id` belongs to a device-calendar/-reminder account (the
@@ -5399,6 +5429,24 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_adopt_local_dataset_json(
         it,
         FfiConverterString.lower(`configJson`),FfiConverterOptionalString.lower(`deviceName`),FfiConverterOptionalString.lower(`passphrase`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Take responsibility for a meeting Aperio did not create, so it can also
+     * be removed. Writes nothing to the event — the link is already there.
+     */
+    @Throws(StoreException::class)override fun `adoptMeetingJson`(`requestJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_adopt_meeting_json(
+        it,
+        FfiConverterString.lower(`requestJson`),_status)
 }
     }
     )
@@ -6583,6 +6631,28 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_import_sound_json(
         it,
         FfiConverterString.lower(`path`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Everything known about the meeting on an event: whether it is ours, what
+     * the provider says about it, and who it says is invited. As JSON.
+     *
+     * The lookup goes through the JOIN LINK, the only identifier that reaches
+     * a calendar event, so this answers for meetings Aperio did not create.
+     * The desktop twin is `inspect_event_meeting`.
+     */
+    @Throws(StoreException::class)override fun `inspectEventMeetingJson`(`requestJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_inspect_event_meeting_json(
+        it,
+        FfiConverterString.lower(`requestJson`),_status)
 }
     }
     )

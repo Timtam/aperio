@@ -61,3 +61,39 @@ export const eventMeeting = async (
   JSON.parse(
     await CalFfi.eventMeetingJson(eventId),
   ) as EventMeetingBinding | null;
+
+/** One person the provider lists on a meeting. */
+export interface MeetingInvitee {
+  email: string;
+  display_name: string | null;
+  co_host: boolean;
+}
+
+/** Everything known about an event's meeting, in one answer. */
+export interface EventMeetingInspection {
+  binding: EventMeetingBinding | null;
+  meeting: (Meeting & { invitees?: MeetingInvitee[] }) | null;
+  account_id: string | null;
+}
+
+/** Ask about the meeting on an event. Looks it up by the join link, so it
+ *  answers for meetings Aperio did not create. */
+export const inspectEventMeeting = async (request: {
+  event_id: string;
+  calendar_id: string;
+}): Promise<EventMeetingInspection> =>
+  JSON.parse(
+    await CalFfi.inspectEventMeetingJson(JSON.stringify(request)),
+  ) as EventMeetingInspection;
+
+/** Take responsibility for a meeting Aperio did not create, so it can also be
+ *  removed. Writes nothing to the event. */
+export const adoptMeeting = async (request: {
+  event_id: string;
+  account_id: string;
+  meeting_id: string;
+  join_url: string;
+}): Promise<EventMeetingBinding> =>
+  JSON.parse(
+    await CalFfi.adoptMeetingJson(JSON.stringify(request)),
+  ) as EventMeetingBinding;

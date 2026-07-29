@@ -572,6 +572,15 @@ public class CalFfiModule: Module {
       try self.host.detachMeetingJson(requestJson: requestJson)
     }.runOnQueue(slowQueue)
 
+    // Network: it asks the provider about the meeting.
+    AsyncFunction("inspectEventMeetingJson") { (requestJson: String) -> String in
+      try self.host.inspectEventMeetingJson(requestJson: requestJson)
+    }.runOnQueue(slowQueue)
+
+    AsyncFunction("adoptMeetingJson") { (requestJson: String) -> String in
+      try self.host.adoptMeetingJson(requestJson: requestJson)
+    }
+
     AsyncFunction("eventMeetingJson") { (eventId: String) -> String in
       try self.host.eventMeetingJson(eventId: eventId)
     }

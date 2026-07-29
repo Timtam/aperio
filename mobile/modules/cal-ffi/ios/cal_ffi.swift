@@ -1756,6 +1756,12 @@ public protocol HostProtocol: AnyObject, Sendable {
     func adoptLocalDatasetJson(configJson: String, deviceName: String?, passphrase: String?) throws  -> String
     
     /**
+     * Take responsibility for a meeting Aperio did not create, so it can also
+     * be removed. Writes nothing to the event — the link is already there.
+     */
+    func adoptMeetingJson(requestJson: String) throws  -> String
+    
+    /**
      * Adopt encryption a PEER turned on (§19.7): this device was syncing the
      * dataset in PLAINTEXT, a peer enabled E2E, and the next round failed with
      * `encryption_required` (the orchestrator's encryption gate). Pure unlock —
@@ -2262,6 +2268,16 @@ public protocol HostProtocol: AnyObject, Sendable {
      * immediate preview). Validates format + size via the shared importer.
      */
     func importSoundJson(path: String) throws  -> String
+    
+    /**
+     * Everything known about the meeting on an event: whether it is ours, what
+     * the provider says about it, and who it says is invited. As JSON.
+     *
+     * The lookup goes through the JOIN LINK, the only identifier that reaches
+     * a calendar event, so this answers for meetings Aperio did not create.
+     * The desktop twin is `inspect_event_meeting`.
+     */
+    func inspectEventMeetingJson(requestJson: String) throws  -> String
     
     /**
      * Whether `account_id` belongs to a device-calendar/-reminder account (the
@@ -2977,6 +2993,19 @@ open func adoptLocalDatasetJson(configJson: String, deviceName: String?, passphr
         FfiConverterString.lower(configJson),
         FfiConverterOptionString.lower(deviceName),
         FfiConverterOptionString.lower(passphrase),$0
+    )
+})
+}
+    
+    /**
+     * Take responsibility for a meeting Aperio did not create, so it can also
+     * be removed. Writes nothing to the event — the link is already there.
+     */
+open func adoptMeetingJson(requestJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_adopt_meeting_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(requestJson),$0
     )
 })
 }
@@ -3883,6 +3912,23 @@ open func importSoundJson(path: String)throws  -> String  {
     uniffi_cal_ffi_fn_method_host_import_sound_json(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(path),$0
+    )
+})
+}
+    
+    /**
+     * Everything known about the meeting on an event: whether it is ours, what
+     * the provider says about it, and who it says is invited. As JSON.
+     *
+     * The lookup goes through the JOIN LINK, the only identifier that reaches
+     * a calendar event, so this answers for meetings Aperio did not create.
+     * The desktop twin is `inspect_event_meeting`.
+     */
+open func inspectEventMeetingJson(requestJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_inspect_event_meeting_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(requestJson),$0
     )
 })
 }
@@ -8445,6 +8491,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_adopt_local_dataset_json() != 28459) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_adopt_meeting_json() != 14491) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json() != 12036) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -8617,6 +8666,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_import_sound_json() != 40673) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_inspect_event_meeting_json() != 41723) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_is_device_account() != 47677) {

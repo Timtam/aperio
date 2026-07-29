@@ -784,6 +784,8 @@ pub fn run() {
             commands::attach_meeting,
             commands::detach_meeting,
             commands::event_meeting,
+            commands::inspect_event_meeting,
+            commands::adopt_meeting,
             commands::get_meeting,
             commands::delete_meeting,
             // §20.10 Settings → Plugins panel. list_plugins

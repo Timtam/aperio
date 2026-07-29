@@ -7253,6 +7253,85 @@ impl Host {
         to_json(&saved)
     }
 
+    /// Everything known about the meeting on an event: whether it is ours, what
+    /// the provider says about it, and who it says is invited. As JSON.
+    ///
+    /// The lookup goes through the JOIN LINK, the only identifier that reaches
+    /// a calendar event, so this answers for meetings Aperio did not create.
+    /// The desktop twin is `inspect_event_meeting`.
+    pub fn inspect_event_meeting_json(&self, request_json: String) -> Result<String, StoreError> {
+        let req: AttachMeetingRequest = from_json("inspect meeting", &request_json)?;
+        let shared = self.db.shared();
+        let binding = MeetingsRepo::new(&shared)
+            .get(&req.event_id)
+            .map_err(meetings_err)?;
+
+        if let Some(binding) = &binding {
+            if let Some(vc) = self.registry.vc_adapter(&binding.account_id) {
+                let meeting = self
+                    .runtime
+                    .block_on(vc.get_meeting(&binding.meeting_id))
+                    .unwrap_or(None);
+                return to_json(&serde_json::json!({
+                    "binding": binding,
+                    "meeting": meeting,
+                    "account_id": binding.account_id,
+                }));
+            }
+        }
+
+        let none = serde_json::json!({
+            "binding": binding,
+            "meeting": serde_json::Value::Null,
+            "account_id": serde_json::Value::Null,
+        });
+        let Some(event) = self.read_event_for_meeting(&req.event_id, &req.calendar_id)? else {
+            return to_json(&none);
+        };
+        let Some(conference) =
+            cal_core::conferencing::detect_conference(&cal_core::conferencing::ConferenceSources {
+                location: event.location.as_deref(),
+                description: event.description.as_deref(),
+                ..Default::default()
+            })
+        else {
+            return to_json(&none);
+        };
+        for (account_id, vc) in self.registry.snapshot_vc_adapters() {
+            match self
+                .runtime
+                .block_on(vc.resolve_meeting(&conference.join_url))
+            {
+                Ok(Some(meeting)) => {
+                    return to_json(&serde_json::json!({
+                        "binding": binding,
+                        "meeting": meeting,
+                        "account_id": account_id,
+                    }))
+                }
+                // Not this account's, or this provider has no lookup by link.
+                Ok(None) | Err(_) => continue,
+            }
+        }
+        to_json(&none)
+    }
+
+    /// Take responsibility for a meeting Aperio did not create, so it can also
+    /// be removed. Writes nothing to the event — the link is already there.
+    pub fn adopt_meeting_json(&self, request_json: String) -> Result<String, StoreError> {
+        let req: AdoptMeetingRequest = from_json("adopt meeting", &request_json)?;
+        let shared = self.db.shared();
+        let bound = MeetingsRepo::new(&shared)
+            .bind(
+                &req.event_id,
+                &req.account_id,
+                &req.meeting_id,
+                &req.join_url,
+            )
+            .map_err(meetings_err)?;
+        to_json(&bound)
+    }
+
     /// The meeting Aperio created for this event, if any, as JSON.
     pub fn event_meeting_json(&self, event_id: String) -> Result<String, StoreError> {
         let shared = self.db.shared();
@@ -7616,6 +7695,15 @@ struct AttachMeetingRequest {
     calendar_id: String,
     #[serde(default)]
     account_id: String,
+}
+
+/// Request body for [`Host::adopt_meeting_json`].
+#[derive(serde::Deserialize)]
+struct AdoptMeetingRequest {
+    event_id: String,
+    account_id: String,
+    meeting_id: String,
+    join_url: String,
 }
 
 fn meetings_err(err: host_core::meetings::MeetingsError) -> StoreError {

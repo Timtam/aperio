@@ -182,6 +182,151 @@ pub async fn attach_meeting(
     })
 }
 
+/// What the event editor needs to know about an event's meeting, in one answer.
+#[derive(Debug, Serialize)]
+pub struct EventMeetingInspection {
+    /// Set when Aperio created this meeting and can therefore remove it.
+    pub binding: Option<EventMeeting>,
+    /// The meeting as the provider currently describes it — including who it
+    /// says is invited, which is often not what the calendar event says.
+    /// `None` when the event carries no meeting, or when no connected account
+    /// can see the one it carries.
+    pub meeting: Option<Meeting>,
+    /// The account that answered. Needed to adopt the meeting.
+    pub account_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InspectEventMeetingRequest {
+    pub event_id: String,
+    pub calendar_id: String,
+}
+
+/// Everything known about the meeting on an event: whether it is ours, what the
+/// provider says about it, and who is really invited.
+///
+/// One command rather than three, because the editor asks all three questions
+/// at the same moment and each answer changes what the others mean.
+///
+/// The lookup goes through the JOIN LINK, which is the only identifier that
+/// reaches a calendar event — the provider's meeting id travels nowhere. That
+/// is what lets this work for a meeting Aperio did not create: one made in the
+/// provider's web UI, one made on another device, one an invitation brought in.
+///
+/// Every connected videoconference account is asked in turn, and the first that
+/// recognises the link answers. A provider that does not know a link says so
+/// cheaply; a provider that cannot look up by link at all is skipped.
+#[tauri::command]
+pub async fn inspect_event_meeting(
+    adapter: State<'_, LocalAdapter>,
+    registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
+    db: State<'_, DbHandle>,
+    request: InspectEventMeetingRequest,
+) -> CommandResult<EventMeetingInspection> {
+    let shared = db.shared();
+    let binding = MeetingsRepo::new(&shared)
+        .get(&request.event_id)
+        .map_err(meetings_error)?;
+
+    // Ours: ask the account that made it, by id. Exact and one request.
+    if let Some(binding) = &binding {
+        if let Some(vc) = registry.vc_adapter(&binding.account_id) {
+            let meeting = vc.get_meeting(&binding.meeting_id).await.unwrap_or(None);
+            return Ok(EventMeetingInspection {
+                account_id: Some(binding.account_id.clone()),
+                meeting,
+                binding: Some(binding.clone()),
+            });
+        }
+    }
+
+    // Not ours (or its account is gone): go by the link in the event.
+    let Some(event) = super::calendars::read_event_for_meeting(
+        &adapter,
+        &registry,
+        &cache,
+        &db,
+        &request.event_id,
+        &request.calendar_id,
+    )
+    .await?
+    else {
+        return Ok(EventMeetingInspection {
+            binding,
+            meeting: None,
+            account_id: None,
+        });
+    };
+    let Some(conference) =
+        cal_core::conferencing::detect_conference(&cal_core::conferencing::ConferenceSources {
+            location: event.location.as_deref(),
+            description: event.description.as_deref(),
+            ..Default::default()
+        })
+    else {
+        return Ok(EventMeetingInspection {
+            binding,
+            meeting: None,
+            account_id: None,
+        });
+    };
+
+    for (account_id, vc) in registry.snapshot_vc_adapters() {
+        match vc.resolve_meeting(&conference.join_url).await {
+            Ok(Some(meeting)) => {
+                return Ok(EventMeetingInspection {
+                    binding,
+                    meeting: Some(meeting),
+                    account_id: Some(account_id),
+                })
+            }
+            // Not this account's meeting, or this provider cannot look up by
+            // link. Either way the next account gets its turn.
+            Ok(None) | Err(_) => continue,
+        }
+    }
+    Ok(EventMeetingInspection {
+        binding,
+        meeting: None,
+        account_id: None,
+    })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AdoptMeetingRequest {
+    pub event_id: String,
+    pub calendar_id: String,
+    /// The account that recognised the link — from [`inspect_event_meeting`].
+    pub account_id: String,
+    pub meeting_id: MeetingId,
+    pub join_url: String,
+}
+
+/// Take responsibility for a meeting Aperio did not create.
+///
+/// The event already carries the link and already offers Join; what adopting
+/// adds is the ability to REMOVE it — which needs the provider's own meeting
+/// id, and that is what the link lookup recovered.
+///
+/// Nothing is written to the event: it already says everything it needs to.
+/// This only records that this device now knows which meeting belongs here.
+#[tauri::command]
+pub fn adopt_meeting(
+    db: State<'_, DbHandle>,
+    request: AdoptMeetingRequest,
+) -> CommandResult<EventMeeting> {
+    let shared = db.shared();
+    MeetingsRepo::new(&shared)
+        .bind(
+            &request.event_id,
+            &request.account_id,
+            &request.meeting_id,
+            &request.join_url,
+        )
+        .map_err(meetings_error)
+}
+
 #[derive(Debug, Deserialize)]
 pub struct DetachMeetingRequest {
     pub event_id: String,

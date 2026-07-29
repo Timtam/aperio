@@ -4,12 +4,13 @@ import { useTranslation } from 'react-i18next';
 import { FocusableNote } from '../a11y/FocusableNote';
 import { useAnnouncer } from '../a11y/announcerContext';
 import {
+  adoptMeeting,
   attachMeeting,
   detachMeeting,
-  eventMeeting,
+  inspectEventMeeting,
   isCommandError,
   listAccounts,
-  type EventMeetingBinding,
+  type EventMeetingInspection,
 } from '../api/client';
 import type { Account, CalendarEvent } from '../api/types';
 
@@ -38,7 +39,7 @@ export function MeetingControls({
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [binding, setBinding] = useState<EventMeetingBinding | null>(null);
+  const [found, setFound] = useState<EventMeetingInspection | null>(null);
   const [accountId, setAccountId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,24 +68,25 @@ export function MeetingControls({
   }, []);
 
   const eventId = event?.id ?? null;
+  const calendarId = event?.calendar_id ?? null;
   useEffect(() => {
-    if (!eventId) {
-      setBinding(null);
+    if (!eventId || !calendarId) {
+      setFound(null);
       return;
     }
     let cancelled = false;
-    eventMeeting(eventId)
-      .then((found) => {
-        if (!cancelled) setBinding(found);
+    inspectEventMeeting({ event_id: eventId, calendar_id: calendarId })
+      .then((result) => {
+        if (!cancelled) setFound(result);
       })
       .catch((err) => {
         // eslint-disable-next-line no-console
-        console.warn('event_meeting failed', err);
+        console.warn('inspect_event_meeting failed', err);
       });
     return () => {
       cancelled = true;
     };
-  }, [eventId]);
+  }, [eventId, calendarId]);
 
   const create = useCallback(async () => {
     if (!event || !accountId) return;
@@ -96,12 +98,16 @@ export function MeetingControls({
         calendar_id: event.calendar_id,
         account_id: accountId,
       });
-      setBinding({
-        event_id: event.id,
+      setFound({
+        binding: {
+          event_id: event.id,
+          account_id: accountId,
+          meeting_id: attached.meeting.id,
+          join_url: attached.meeting.join_url,
+          created_at: new Date().toISOString(),
+        },
+        meeting: attached.meeting,
         account_id: accountId,
-        meeting_id: attached.meeting.id,
-        join_url: attached.meeting.join_url,
-        created_at: new Date().toISOString(),
       });
       onEventChanged(attached.event);
       announce(t('conferencing.meetingCreated'));
@@ -123,7 +129,7 @@ export function MeetingControls({
         event_id: event.id,
         calendar_id: event.calendar_id,
       });
-      setBinding(null);
+      setFound(null);
       if (saved) onEventChanged(saved);
       announce(t('conferencing.meetingRemoved'));
     } catch (err) {
@@ -134,6 +140,30 @@ export function MeetingControls({
       setBusy(false);
     }
   }, [announce, event, onEventChanged, t]);
+
+  /** Take over a meeting that is already on the event but not yet ours. */
+  const adopt = useCallback(async () => {
+    if (!event || !found?.meeting || !found.account_id) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const binding = await adoptMeeting({
+        event_id: event.id,
+        calendar_id: event.calendar_id,
+        account_id: found.account_id,
+        meeting_id: found.meeting.id,
+        join_url: found.meeting.join_url,
+      });
+      setFound({ ...found, binding });
+      announce(t('conferencing.meetingAdopted'));
+    } catch (err) {
+      const message = isCommandError(err) ? err.message : String(err);
+      setError(message);
+      announce(t('conferencing.meetingFailed', { message }));
+    } finally {
+      setBusy(false);
+    }
+  }, [announce, event, found, t]);
 
   // No videoconference account, nothing to offer. Silent rather than a
   // disabled control explaining an absence — Settings is where accounts are
@@ -150,7 +180,33 @@ export function MeetingControls({
 
   return (
     <div className="form__field">
-      {binding ? (
+      {/* Who the PROVIDER says is invited. Kept apart from the event's own
+          attendee list rather than merged into it: an event auto-created from
+          an invitation mail often lists only the recipient and the provider's
+          sending address, and quietly replacing one list with the other would
+          misstate what the calendar entry actually holds. */}
+      {found?.meeting?.invitees && found.meeting.invitees.length > 0 && (
+        <>
+          <FocusableNote className="form__label">
+            {t('conferencing.meetingInvitees')}
+          </FocusableNote>
+          {found.meeting.invitees.map((invitee) => (
+            <FocusableNote key={invitee.email} className="form__hint">
+              {invitee.co_host
+                ? t('conferencing.inviteeCoHost', {
+                    name: invitee.display_name ?? invitee.email,
+                    email: invitee.email,
+                  })
+                : t('conferencing.invitee', {
+                    name: invitee.display_name ?? invitee.email,
+                    email: invitee.email,
+                  })}
+            </FocusableNote>
+          ))}
+        </>
+      )}
+
+      {found?.binding ? (
         <>
           <FocusableNote className="form__hint">
             {t('conferencing.meetingOwned')}
@@ -162,6 +218,22 @@ export function MeetingControls({
             aria-disabled={busy || undefined}
           >
             {t('conferencing.removeMeeting')}
+          </button>
+        </>
+      ) : found?.meeting ? (
+        <>
+          {/* The event already has a meeting. Offering "create" here would mint
+              a SECOND one and write its link in alongside the first. */}
+          <FocusableNote className="form__hint">
+            {t('conferencing.meetingNotOwned')}
+          </FocusableNote>
+          <button
+            type="button"
+            className="form__action"
+            onClick={() => void adopt()}
+            aria-disabled={busy || undefined}
+          >
+            {t('conferencing.adoptMeeting')}
           </button>
         </>
       ) : (

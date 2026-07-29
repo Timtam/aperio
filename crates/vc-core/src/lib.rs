@@ -73,6 +73,34 @@ pub struct Meeting {
     /// native client. `None` when the meeting doesn't require
     /// one (Meet's default behaviour).
     pub password: Option<String>,
+
+    /// Who the PROVIDER has invited, when it can say.
+    ///
+    /// Not the same thing as the calendar event's attendees, and worth keeping
+    /// apart from them. An event auto-created from a provider's invitation mail
+    /// lists whatever that mail addressed — often just the recipient and the
+    /// provider's own sending address (`messenger@webex.com`), while the
+    /// people actually in the meeting are known only to the provider. Showing
+    /// the meeting's own list next to the event's is the difference between
+    /// "two attendees, one of them a robot" and the truth.
+    ///
+    /// Empty when the provider cannot say, or will not for this caller: reading
+    /// a meeting one is merely invited to is not something every provider
+    /// permits, and an empty list is the honest answer rather than a failure.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub invitees: Vec<MeetingInvitee>,
+}
+
+/// One person the provider lists on a meeting.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MeetingInvitee {
+    pub email: String,
+    /// The provider's display name, when it has one. Falls back to the address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    /// Whether this person can host in the organizer's absence.
+    #[serde(default)]
+    pub co_host: bool,
 }
 
 /// Inputs the host hands to [`VcAdapter::create_meeting`].

@@ -436,6 +436,13 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  out. Returns the saved event as JSON, or the literal `null` when the event
    *  had no meeting of ours — someone else's link is not ours to delete. */
   detachMeetingJson(requestJson: string): Promise<string>;
+  /** Everything known about the meeting on an event — ours or not, what the
+   *  provider says, and who it says is invited. `requestJson` carries
+   *  `{event_id, calendar_id}`. */
+  inspectEventMeetingJson(requestJson: string): Promise<string>;
+  /** Take responsibility for a meeting Aperio did not create. `requestJson`
+   *  carries `{event_id, account_id, meeting_id, join_url}`. */
+  adoptMeetingJson(requestJson: string): Promise<string>;
   /** The meeting Aperio created for this event, if any, as JSON. */
   eventMeetingJson(eventId: string): Promise<string>;
 

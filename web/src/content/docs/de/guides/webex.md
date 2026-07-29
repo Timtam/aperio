@@ -120,6 +120,21 @@ taucht ebenfalls nicht auf: er ist immer offen, und das ist gerade kein Termin.
 
 ## Was du wissen solltest
 
+**Ein Meeting, das die Einladung mitgebracht hat.** Wenn Webex dir eine
+Einladung mailt und dein Kalender daraus einen Termin macht, hat dieser Termin
+ein Meeting — nur hat Aperio es nicht angelegt. Der Editor bietet dann
+**Meeting übernehmen**: er schlägt das Meeting über seinen Beitrittslink nach,
+und danach lässt es sich entfernen wie ein selbst angelegtes. In den Termin wird
+nichts geschrieben — der Link steht ja schon drin.
+
+**Wer wirklich eingeladen ist.** Die Teilnehmer eines solchen Termins sind das,
+was die Einladungsmail adressiert hat — oft nur du und Webex' eigene
+Versandadresse (`messenger@webex.com`). Aperio zeigt zusätzlich Webex' eigene
+Eingeladenen-Liste unter „Beim Anbieter eingeladen", damit du siehst, wer
+tatsächlich kommt. Wenn Webex die Auskunft verweigert — die Eingeladenen eines
+Meetings zu lesen, an dem man nur teilnimmt, ist nicht immer erlaubt —, fehlt
+der Abschnitt einfach.
+
 **Ein Meeting pro Termin, auch bei Wiederholungen.** Eine Serie teilt sich ein
 Meeting, genau wie ein wiederkehrendes Meeting in Webex selbst.
 

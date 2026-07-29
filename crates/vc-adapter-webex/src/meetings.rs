@@ -18,7 +18,7 @@
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
-use vc_core::{Meeting, MeetingId, NewMeeting, VcError, VcResult};
+use vc_core::{Meeting, MeetingId, MeetingInvitee, NewMeeting, VcError, VcResult};
 
 use crate::api::{wire_time, ApiState};
 
@@ -217,7 +217,11 @@ pub async fn create_meeting(
 pub async fn get_meeting(state: &ApiState, id: &MeetingId) -> VcResult<Option<Meeting>> {
     let path = format!("/meetings/{}", urlencode(id));
     match state.get_json_opt::<MeetingResponse>(&path).await? {
-        Some(found) => to_meeting(found).map(Some),
+        Some(found) => {
+            let mut meeting = to_meeting(found)?;
+            meeting.invitees = invitees_for(state, &meeting.id).await;
+            Ok(Some(meeting))
+        }
         None => Ok(None),
     }
 }
@@ -247,7 +251,8 @@ pub async fn resolve_meeting(state: &ApiState, join_url: &str) -> VcResult<Optio
     // converts — a row without a web link is not a joinable meeting and
     // `to_meeting` rejects it.
     for raw in page.items {
-        if let Ok(meeting) = to_meeting(raw) {
+        if let Ok(mut meeting) = to_meeting(raw) {
+            meeting.invitees = invitees_for(state, &meeting.id).await;
             return Ok(Some(meeting));
         }
     }
@@ -364,6 +369,8 @@ async fn personal_room(state: &ApiState) -> VcResult<Meeting> {
         // Only a genuine attendee join code — never the host PIN. See the
         // struct field above for why that distinction is not cosmetic.
         password: room.password.filter(|p| !p.trim().is_empty()),
+        // A room has no invitee list — it is a door, not an appointment.
+        invitees: Vec::new(),
     })
     .inspect(|_| {
         if let Some(sip) = room.sip_address.as_deref() {
@@ -482,7 +489,59 @@ fn to_meeting(raw: MeetingResponse) -> VcResult<Meeting> {
         start_time: raw.start,
         end_time: raw.end,
         password: raw.password.filter(|p| !p.trim().is_empty()),
+        // Filled by the callers that read ONE meeting; a listing does not, since
+        // it would turn one calendar scroll into a request per meeting.
+        invitees: Vec::new(),
     })
+}
+
+/// Who Webex has invited to `meeting_id`.
+///
+/// Best effort on purpose. `GET /meetingInvitees` needs a scope the integration
+/// may not hold, and reading the invitee list of a meeting one is merely
+/// invited to may be refused outright — neither is a reason to fail the meeting
+/// read that asked for it. A refusal degrades to an empty list and one log
+/// line, because "we could not ask" and "nobody is invited" look the same to a
+/// user and only one of them is worth interrupting them about.
+async fn invitees_for(state: &ApiState, meeting_id: &MeetingId) -> Vec<MeetingInvitee> {
+    let path = format!("/meetingInvitees?meetingId={}", urlencode(meeting_id));
+    match state.get_json_opt::<InviteeListResponse>(&path).await {
+        Ok(Some(page)) => page
+            .items
+            .into_iter()
+            .filter(|raw| !raw.email.trim().is_empty())
+            .map(|raw| MeetingInvitee {
+                email: raw.email,
+                display_name: raw.display_name.filter(|n| !n.trim().is_empty()),
+                co_host: raw.co_host,
+            })
+            .collect(),
+        Ok(None) => Vec::new(),
+        Err(err) => {
+            tracing::debug!(
+                ?err,
+                "Webex did not return the invitee list; showing the event's own attendees only"
+            );
+            Vec::new()
+        }
+    }
+}
+
+/// One page of `GET /meetingInvitees`.
+#[derive(Debug, Deserialize)]
+struct InviteeListResponse {
+    #[serde(default)]
+    items: Vec<InviteeResponse>,
+}
+
+#[derive(Debug, Deserialize)]
+struct InviteeResponse {
+    #[serde(default)]
+    email: String,
+    #[serde(rename = "displayName", default)]
+    display_name: Option<String>,
+    #[serde(rename = "coHost", default)]
+    co_host: bool,
 }
 
 /// Everything Webex tells us about a meeting that does not fit [`Meeting`], in

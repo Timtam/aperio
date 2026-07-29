@@ -251,6 +251,7 @@ mod tests {
             start_time: timed.then(|| Utc.with_ymd_and_hms(2026, 7, 29, 9, 0, 0).unwrap()),
             end_time: timed.then(|| Utc.with_ymd_and_hms(2026, 7, 29, 9, 30, 0).unwrap()),
             password: Some("s3cr3t".into()),
+            invitees: Vec::new(),
         }
     }
 

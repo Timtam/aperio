@@ -707,6 +707,11 @@ void uniffi_cal_ffi_fn_method_host_add_event_exdate_json(uint64_t ptr, RustBuffe
 RustBuffer uniffi_cal_ffi_fn_method_host_adopt_local_dataset_json(uint64_t ptr, RustBuffer config_json, RustBuffer device_name, RustBuffer passphrase, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_ADOPT_MEETING_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_ADOPT_MEETING_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_adopt_meeting_json(uint64_t ptr, RustBuffer request_json, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_ADOPT_REMOTE_ENCRYPTION_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_ADOPT_REMOTE_ENCRYPTION_JSON
 void uniffi_cal_ffi_fn_method_host_adopt_remote_encryption_json(uint64_t ptr, RustBuffer passphrase, RustCallStatus *_Nonnull out_status
@@ -995,6 +1000,11 @@ RustBuffer uniffi_cal_ffi_fn_method_host_get_user_pref(uint64_t ptr, RustBuffer 
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_IMPORT_SOUND_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_IMPORT_SOUND_JSON
 RustBuffer uniffi_cal_ffi_fn_method_host_import_sound_json(uint64_t ptr, RustBuffer path, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_INSPECT_EVENT_MEETING_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_INSPECT_EVENT_MEETING_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_inspect_event_meeting_json(uint64_t ptr, RustBuffer request_json, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_IS_DEVICE_ACCOUNT
@@ -1881,6 +1891,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_adopt_local_dataset_json(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_ADOPT_MEETING_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_ADOPT_MEETING_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_adopt_meeting_json(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_ADOPT_REMOTE_ENCRYPTION_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_ADOPT_REMOTE_ENCRYPTION_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json(void
@@ -2226,6 +2242,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_get_user_pref(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_IMPORT_SOUND_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_IMPORT_SOUND_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_import_sound_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_INSPECT_EVENT_MEETING_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_INSPECT_EVENT_MEETING_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_inspect_event_meeting_json(void
     
 );
 #endif

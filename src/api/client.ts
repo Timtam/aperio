@@ -711,6 +711,42 @@ export const detachMeeting = (request: {
 export const eventMeeting = (event_id: string) =>
   invoke<EventMeetingBinding | null>('event_meeting', { eventId: event_id });
 
+/** One person the provider lists on a meeting. */
+export interface MeetingInvitee {
+  email: string;
+  display_name: string | null;
+  co_host: boolean;
+}
+
+/** Everything known about an event's meeting, in one answer. */
+export interface EventMeetingInspection {
+  /** Set when Aperio created it and can therefore remove it. */
+  binding: EventMeetingBinding | null;
+  /** The meeting as the provider currently describes it, including who IT says
+   *  is invited — which is often not what the calendar event says. */
+  meeting: (Meeting & { invitees?: MeetingInvitee[] }) | null;
+  /** The account that recognised the meeting; needed to adopt it. */
+  account_id: string | null;
+}
+
+/** Ask about the meeting on an event: is it ours, what does the provider say
+ *  about it, and who is really invited. Looks it up by the join link, so it
+ *  answers for meetings Aperio did not create. */
+export const inspectEventMeeting = (request: {
+  event_id: string;
+  calendar_id: string;
+}) => invoke<EventMeetingInspection>('inspect_event_meeting', { request });
+
+/** Take responsibility for a meeting Aperio did not create, so it can also be
+ *  removed. Writes nothing to the event — the link is already there. */
+export const adoptMeeting = (request: {
+  event_id: string;
+  calendar_id: string;
+  account_id: string;
+  meeting_id: string;
+  join_url: string;
+}) => invoke<EventMeetingBinding>('adopt_meeting', { request });
+
 /** Which container namespace an override applies to. Calendars and
  *  task lists have disjoint ids today but the backend keeps them
  *  separately namespaced so a future code-path can enforce kind. */

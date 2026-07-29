@@ -115,6 +115,19 @@ on, which is precisely not an appointment.
 
 ## Things worth knowing
 
+**A meeting the invitation brought in.** When Webex mails you an invitation and
+your calendar turns it into an event, that event has a meeting but Aperio did
+not create it. The editor offers **Take over the meeting**: it looks the meeting
+up by its join link, and from then on it can be removed like one Aperio made.
+Nothing is written to the event — the link is already there.
+
+**Who is really invited.** The attendees on such an event are whatever the
+invitation mail addressed, which is often just you and Webex's own sending
+address (`messenger@webex.com`). Aperio additionally shows Webex's own invitee
+list under "Invited at the provider", so you can see who is actually coming. If
+Webex declines to answer — reading the invitee list of a meeting you only
+attend is not always permitted — the section is simply absent.
+
 **One meeting per event, including recurring ones.** A recurring series shares
 one meeting, exactly as a recurring meeting does in Webex itself.
 
