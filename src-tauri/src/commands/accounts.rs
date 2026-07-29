@@ -1278,6 +1278,64 @@ pub struct ConnectAccountRequest {
     pub values: serde_json::Map<String, Value>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct TestAccountRequest {
+    pub adapter_kind: AdapterKind,
+    /// The form's values, keyed by the schema's field keys — the same shape
+    /// [`ConnectAccountRequest`] carries, so what is tested is what would be
+    /// connected.
+    #[serde(default)]
+    pub values: serde_json::Map<String, Value>,
+}
+
+/// Round-trip the entered credentials without persisting anything.
+///
+/// The one test path that does not grow a branch per adapter, and the desktop
+/// twin of the mobile `test_account_json`. It splits the form's values exactly
+/// as `connect_account` would — same schema, same code — and hands the result to
+/// the registry's probe. Testing and connecting can therefore not disagree about
+/// what a field means, which five separate per-kind commands could and did.
+///
+/// Nothing here names a provider. An adapter Aperio has never seen is testable
+/// the moment it declares a schema.
+#[tauri::command]
+pub async fn test_account(
+    registry: State<'_, Arc<AdapterRegistry>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
+    request: TestAccountRequest,
+) -> CommandResult<()> {
+    let plugin = plugin_manager
+        .plugin_for_adapter_kind(request.adapter_kind.as_str())
+        .ok_or(CommandError {
+            code: "unsupported",
+            message: "no plugin serves this adapter kind".into(),
+        })?;
+    let schema = plugin.manifest.account.clone().ok_or(CommandError {
+        code: "unsupported",
+        message: "this adapter declares no account schema".into(),
+    })?;
+    // No OAuth client choice: a probe never signs in. An adapter that can only
+    // be reached with a token the sign-in produces has nothing to test before
+    // the account exists, and says so by failing the probe rather than by a
+    // special case here.
+    let plan = host_core::account_setup::plan_new_account(&schema, &request.values, None).map_err(
+        |err| CommandError {
+            code: "invalid_input",
+            message: err.to_string(),
+        },
+    )?;
+    // At most one credential reaches a probe. A schema with several would need
+    // the registry to take them all, which no adapter has asked for yet.
+    let secret = plan.secrets.first().map(|(_, value)| value.as_str());
+    registry
+        .probe_account(&request.adapter_kind, &plan.config_json, secret)
+        .await
+        .map_err(|err| CommandError {
+            code: "probe_failed",
+            message: err.to_string(),
+        })
+}
+
 /// Create an account for any plugin that declares an account schema.
 ///
 /// The one connect path that does not grow a branch per adapter. It reads the

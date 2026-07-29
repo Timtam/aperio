@@ -29,6 +29,7 @@ import {
   renameAccount,
   resetAccountSync,
   setUserPref,
+  testAccount,
   testCaldavConnection,
   testEwsConnection,
   testIcalFeed,
@@ -662,16 +663,33 @@ export function AccountsPanel() {
     setTestMessage(null);
     setError(null);
     setTesting(true);
-    // Whichever form is on screen owns the values. Once an adapter declares its
-    // own schema the generic form fills `formValues` and the legacy state stays
-    // empty, so a probe that read the legacy state would refuse a connection
-    // that is perfectly well typed in. (Declaring this button in the manifest,
-    // so the host stops naming adapters here at all, is the next piece of work.)
-    const field = (key: string, legacy: string) =>
-      formSpec ? String(formValues[key] ?? '') : legacy;
+    // An adapter that declares a schema is tested generically: the host splits
+    // these values with that schema, exactly as the connect call would, and
+    // probes. No arm here, and none needed when the next adapter arrives.
+    if (formSpec) {
+      try {
+        const v = validateSchemaForm();
+        if (v) {
+          setError(v);
+          return;
+        }
+        await testAccount(kind, formValues);
+        setTestMessage(t('dialogs.accounts.testOk'));
+        announce(t('dialogs.accounts.testOk'));
+      } catch (err) {
+        if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
+        else setError(String(err));
+      } finally {
+        setTesting(false);
+      }
+      return;
+    }
+    // The older per-kind probes, for an adapter with no schema — the same
+    // fallback the connect path keeps.
+    const field = (_key: string, legacy: string) => legacy;
     try {
       if (kind === 'caldav') {
-        const v = formSpec ? validateSchemaForm() : validateCaldav();
+        const v = validateCaldav();
         if (v) {
           setError(v);
           return;
@@ -682,7 +700,7 @@ export function AccountsPanel() {
           field('secret', caldav.password),
         );
       } else if (kind === 'ical') {
-        const v = formSpec ? validateSchemaForm() : validateIcal();
+        const v = validateIcal();
         if (v) {
           setError(v);
           return;
@@ -693,7 +711,7 @@ export function AccountsPanel() {
           field('password', ical.password) || null,
         );
       } else if (kind === 'ews') {
-        const v = formSpec ? validateSchemaForm() : validateEws();
+        const v = validateEws();
         if (v) {
           setError(v);
           return;
@@ -704,7 +722,7 @@ export function AccountsPanel() {
           field('password', ews.password),
         );
       } else if (kind === 'vikunja') {
-        const v = formSpec ? validateSchemaForm() : validateVikunja();
+        const v = validateVikunja();
         if (v) {
           setError(v);
           return;
@@ -714,7 +732,7 @@ export function AccountsPanel() {
           field('token', vikunja.apiToken).trim(),
         );
       } else if (kind === 'todoist') {
-        const v = formSpec ? validateSchemaForm() : validateTodoist();
+        const v = validateTodoist();
         if (v) {
           setError(v);
           return;
@@ -1533,7 +1551,7 @@ export function AccountsPanel() {
                     {t('dialogs.accounts.passwordHint')}
                   </span>
                 </label>
-                {testMessage && kind === 'caldav' && (
+                {testMessage && kind === 'caldav' && !formSpec && (
                   <p
                     role="status"
                     aria-live="polite"
@@ -1677,13 +1695,26 @@ export function AccountsPanel() {
                 straight from the declaration — no branch here, and none needed
                 when the next adapter arrives. */}
             {formSpec && (
-              <AccountSchemaForm
-                spec={formSpec}
-                values={formValues}
-                onChange={(key, value) =>
-                  setFormValues((prev) => ({ ...prev, [key]: value }))
-                }
-              />
+              <>
+                <AccountSchemaForm
+                  spec={formSpec}
+                  values={formValues}
+                  onChange={(key, value) =>
+                    setFormValues((prev) => ({ ...prev, [key]: value }))
+                  }
+                />
+                {/* The per-kind blocks each carry their own copy of this; on
+                    the schema path there is one, here, for every adapter. */}
+                {testMessage && (
+                  <p
+                    role="status"
+                    aria-live="polite"
+                    className="form__hint accounts-test-ok"
+                  >
+                    {testMessage}
+                  </p>
+                )}
+              </>
             )}
 
             {kind === 'microsoft_graph' && !formSpec && (
@@ -1813,7 +1844,7 @@ export function AccountsPanel() {
                 <FocusableNote className="form__hint accounts-google-flow-hint">
                   {t('dialogs.accounts.ewsReadOnlyHint')}
                 </FocusableNote>
-                {testMessage && kind === 'ews' && (
+                {testMessage && kind === 'ews' && !formSpec && (
                   <p
                     role="status"
                     aria-live="polite"
@@ -1872,7 +1903,7 @@ export function AccountsPanel() {
                     {t('dialogs.accounts.vikunjaApiTokenHint')}
                   </span>
                 </label>
-                {testMessage && kind === 'vikunja' && (
+                {testMessage && kind === 'vikunja' && !formSpec && (
                   <p
                     role="status"
                     aria-live="polite"
@@ -1907,7 +1938,7 @@ export function AccountsPanel() {
                     {t('dialogs.accounts.todoistApiTokenHint')}
                   </span>
                 </label>
-                {testMessage && kind === 'todoist' && (
+                {testMessage && kind === 'todoist' && !formSpec && (
                   <p
                     role="status"
                     aria-live="polite"
@@ -1935,7 +1966,11 @@ export function AccountsPanel() {
                     : t('dialogs.accounts.ewsDiscover')}
                 </button>
               )}
-              {(kind === 'caldav' ||
+              {/* Offered for any adapter that declares a schema — the host can
+                  probe it generically — plus the shrinking list of kinds still
+                  on the older path. No name here once that list is gone. */}
+              {(formSpec ||
+                kind === 'caldav' ||
                 kind === 'ical' ||
                 kind === 'ews' ||
                 kind === 'vikunja' ||

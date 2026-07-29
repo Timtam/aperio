@@ -479,6 +479,17 @@ export interface CaldavConfig {
   auth_kind: 'basic' | 'bearer';
 }
 
+/**
+ * Round-trip the entered credentials without persisting anything, for ANY
+ * adapter that declares an account schema. Same values the connect call takes,
+ * split by the same schema on the Rust side — so a test and a connect cannot
+ * disagree about what a field means.
+ */
+export const testAccount = (
+  adapter_kind: AdapterKind,
+  values: Record<string, string | boolean>,
+) => invoke<void>('test_account', { request: { adapter_kind, values } });
+
 export const testCaldavConnection = (
   server_url: string,
   username: string,
