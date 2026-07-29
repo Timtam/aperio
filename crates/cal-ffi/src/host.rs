@@ -62,7 +62,9 @@ use host_core::conflicts::{
 use host_core::contact_sync::{ContactSyncCore, ContactSyncObserver, ContactsSyncedPayload};
 use host_core::db::SharedConn;
 use host_core::event_log::OnboardingService;
-use host_core::meetings::{should_provider_notify, MeetingsRepo};
+use host_core::meetings::{
+    attendee_addresses, should_provider_announce_removal, should_provider_notify, MeetingsRepo,
+};
 use host_core::overrides::{
     apply_color_to_calendars, apply_color_to_contact_lists, apply_color_to_events,
     apply_color_to_sections, apply_color_to_task_lists, apply_to_calendars, apply_to_task_lists,
@@ -7149,9 +7151,12 @@ impl Host {
         }
 
         // Who is coming, and whether the provider is the one who has to tell
-        // them. Mirrors the desktop `attach_meeting`.
-        let notify =
-            should_provider_notify(&event.attendees, self.calendar_can_invite(&req.calendar_id));
+        // them. Addresses, not the display strings the event carries: a
+        // provider validates this field as an email and refuses the meeting
+        // otherwise. Mirrors the desktop `attach_meeting`.
+        let can_invite = self.calendar_can_invite(&req.calendar_id);
+        let guests = attendee_addresses(&event.attendees);
+        let notify = should_provider_notify(&guests, can_invite);
         let meeting = self
             .runtime
             .block_on(vc.create_meeting(NewMeeting {
@@ -7160,7 +7165,7 @@ impl Host {
                 end_time: Some(event.end),
                 description: event.description.clone(),
                 use_personal_room: req.use_personal_room,
-                attendees: event.attendees.clone(),
+                attendees: guests.clone(),
                 notify_attendees: notify,
             }))
             .map_err(vc_err)?;
@@ -7180,13 +7185,26 @@ impl Host {
         {
             updated.location = Some(meeting.join_url.clone());
         }
+        // The complement of the provider decision, and the half that made the
+        // rule work at all: exactly ONE channel announces the meeting. When the
+        // calendar is the one that can, this write has to actually carry the
+        // link to the attendees — the default is `false`, which on Exchange
+        // means `SendToNone`, and then the provider stayed quiet AND the
+        // calendar said nothing, so the join link reached nobody.
+        updated.send_invitations = can_invite && !guests.is_empty();
 
         let saved = match self.save_event_for_meeting(updated) {
             Ok(saved) => saved,
             Err(err) => {
                 // Nowhere for the meeting to live — take it back down rather
                 // than leaving one behind that nothing on this device knows of.
-                if let Err(cleanup) = self.runtime.block_on(vc.delete_meeting(&meeting.id)) {
+                // The cancellation follows whatever the invitation did: if the
+                // provider was asked to mail everyone a moment ago, those mails
+                // are already out, and staying quiet now leaves people holding
+                // an invitation to a meeting that no longer exists.
+                if let Err(cleanup) = self.runtime.block_on(
+                    vc.delete_meeting(vc_core::MeetingRemoval::new(meeting.id.clone(), notify)),
+                ) {
                     tracing::warn!(
                         meeting_id = %meeting.id,
                         ?cleanup,
@@ -7235,6 +7253,15 @@ impl Host {
                     binding.account_id
                 ),
             })?;
+        // Whether the provider announces the cancellation. Deliberately not
+        // asked of the event's attendee list: an adopted meeting has invitees
+        // the event never knew, and by now the event may be gone or unreadable
+        // — where "nobody" and "could not read" look identical. The provider
+        // mails only the invitees it holds, so asking costs nothing when it
+        // holds none. Mirrors the desktop `detach_meeting`.
+        let can_invite = self.calendar_can_invite(&req.calendar_id);
+        let notify = should_provider_announce_removal(can_invite);
+
         // Provider first: forgetting the id before the delete succeeds would
         // strand the meeting for good.
         // A permanent room cannot be deleted — the adapter answers `Unsupported`
@@ -7243,8 +7270,10 @@ impl Host {
         // does exist would strand it.
         match self
             .runtime
-            .block_on(vc.delete_meeting(&binding.meeting_id))
-        {
+            .block_on(vc.delete_meeting(vc_core::MeetingRemoval::new(
+                binding.meeting_id.clone(),
+                notify,
+            ))) {
             Ok(()) => {}
             Err(vc_core::VcError::Unsupported(reason)) => {
                 tracing::info!(%reason, "unlinking a meeting the provider will not delete");
@@ -7267,6 +7296,10 @@ impl Host {
         if updated.location.as_deref().map(str::trim) == Some(binding.join_url.as_str()) {
             updated.location = None;
         }
+        // The complement again: when the calendar is the channel that
+        // announces, it has to announce that the link is gone too. Otherwise
+        // the attendees keep a join URL that now leads nowhere.
+        updated.send_invitations = can_invite && !attendee_addresses(&updated.attendees).is_empty();
         let saved = self.save_event_for_meeting(updated)?;
         to_json(&saved)
     }

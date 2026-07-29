@@ -20,7 +20,7 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use vc_core::{Meeting, MeetingId, NewMeeting, VcAdapter, VcError, VcResult};
+use vc_core::{Meeting, MeetingId, MeetingRemoval, NewMeeting, VcAdapter, VcError, VcResult};
 
 /// Non-secret half of the account config — what the user types
 /// into the AccountsDialog. Meet shares the cal-adapter-google
@@ -75,7 +75,7 @@ impl VcAdapter for MeetAdapter {
         ))
     }
 
-    async fn delete_meeting(&self, _id: &MeetingId) -> VcResult<()> {
+    async fn delete_meeting(&self, _removal: MeetingRemoval) -> VcResult<()> {
         Err(VcError::Unsupported(
             "Meet adapter stub — delete_meeting not yet implemented".to_string(),
         ))

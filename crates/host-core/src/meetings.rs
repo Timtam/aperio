@@ -37,7 +37,30 @@ pub struct EventMeeting {
     pub created_at: String,
 }
 
-/// Whether the videoconference provider should email an event's attendees.
+/// The bare email addresses in an event's attendee list.
+///
+/// Aperio's attendees are display strings — `"Alice Smith <alice@example.test>"`
+/// from the contact picker, and the same shape read back from Google, Graph,
+/// EWS and CalDAV. A meeting provider wants an address and nothing else, so the
+/// split has to happen before the list leaves the host: handing Webex the whole
+/// display string puts `"Alice Smith <alice@example.test>"` in a field the API
+/// validates as an address, and the meeting is refused outright.
+///
+/// Uses the same [`cal_core::attendee::parse`] every calendar adapter uses, so
+/// there is one parser rather than five. Entries that yield no address at all —
+/// a contact with only a name — are dropped: an address is what the provider
+/// can act on, and a name in an address field reaches nobody.
+pub fn attendee_addresses(attendees: &[String]) -> Vec<String> {
+    attendees
+        .iter()
+        .map(|entry| cal_core::attendee::parse(entry).1)
+        .map(|address| address.trim().to_string())
+        .filter(|address| address.contains('@'))
+        .collect()
+}
+
+/// Whether the videoconference provider should email the people invited to a
+/// NEW meeting. Takes the bare addresses from [`attendee_addresses`].
 ///
 /// Only when nothing else will. A calendar that can invite server-side is the
 /// channel that should carry the invitation — it is the one whose replies come
@@ -50,10 +73,36 @@ pub struct EventMeeting {
 /// state before this: the flag was an account checkbox, defaulted off for the
 /// duplicate risk, and so the case where it was the ONLY channel was off too.
 ///
-/// No attendees means nobody to notify, whatever the calendar can do.
-pub fn should_provider_notify(attendees: &[String], calendar_supports_scheduling: bool) -> bool {
-    let has_guests = attendees.iter().any(|a| !a.trim().is_empty());
-    has_guests && !calendar_supports_scheduling
+/// Nobody to notify means no mail, whatever the calendar can do. The caller
+/// owes the complement: when this answers `false` because the calendar CAN
+/// invite, the calendar write has to actually carry the invitation
+/// (`Event::send_invitations`), or the two channels agree on silence and the
+/// join link reaches nobody at all.
+pub fn should_provider_notify(addresses: &[String], calendar_supports_scheduling: bool) -> bool {
+    !addresses.is_empty() && !calendar_supports_scheduling
+}
+
+/// Whether the provider should email that a meeting is OFF.
+///
+/// The mirror of [`should_provider_notify`], and deliberately NOT conditioned
+/// on the event's attendees — because on the way out they are the wrong list to
+/// ask. Three reasons, each of which happens:
+///
+/// - The provider mails *its own* invitees, not the event's. A meeting adopted
+///   from the provider's own web interface has invitees the event never heard
+///   of, and telling them is the entire point.
+/// - By removal time the event may be gone, or unreadable. An empty answer from
+///   a failed cache read is indistinguishable from "nobody was invited", and
+///   guessing "nobody" there means silence for people who were told.
+/// - An empty invitee list costs nothing. Asking a provider to notify a meeting
+///   nobody was invited to sends no mail, so the risk is one-sided.
+///
+/// What remains is the one fact that matters: can the calendar carry the
+/// cancellation itself? If it can, it does, and a provider mail on top is the
+/// contradictory second message. If it cannot, the provider's mail is the only
+/// word the attendees will get, and without it they simply turn up.
+pub fn should_provider_announce_removal(calendar_supports_scheduling: bool) -> bool {
+    !calendar_supports_scheduling
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -231,8 +280,51 @@ mod tests {
     fn nobody_to_notify_means_no_mail_either_way() {
         assert!(!should_provider_notify(&[], false));
         assert!(!should_provider_notify(&[], true));
-        // Whitespace is not an attendee.
-        let blank = vec!["   ".to_string()];
-        assert!(!should_provider_notify(&blank, false));
+    }
+
+    // ── attendee_addresses ──────────────────────────────────────────────────
+
+    #[test]
+    fn a_display_name_never_reaches_the_provider_as_an_address() {
+        // The contact picker's own output. Handing this to a meeting provider
+        // verbatim puts a display string in a field the API validates as an
+        // address — Webex refuses the whole meeting.
+        let picked = vec![
+            "Alice Smith <alice@example.test>".to_string(),
+            "  bob@example.test  ".to_string(),
+            "\"Quoted Name\" <carol@example.test>".to_string(),
+        ];
+        assert_eq!(
+            attendee_addresses(&picked),
+            vec![
+                "alice@example.test".to_string(),
+                "bob@example.test".to_string(),
+                "carol@example.test".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_entry_with_no_address_is_dropped_rather_than_mailed_into_the_void() {
+        // A contact with a name and no address, and plain whitespace. Neither
+        // reaches anybody, so neither should count as a guest either.
+        let entries = vec!["Alice Smith".to_string(), "   ".to_string(), String::new()];
+        assert!(attendee_addresses(&entries).is_empty());
+        assert!(!should_provider_notify(
+            &attendee_addresses(&entries),
+            false
+        ));
+    }
+
+    // ── should_provider_announce_removal ────────────────────────────────────
+
+    #[test]
+    fn removal_asks_only_whether_the_calendar_can_cancel() {
+        // Deliberately not conditioned on the event's attendees: an adopted
+        // meeting has invitees the event never knew, and by removal time the
+        // event may be gone. The provider mails only who it holds, so asking
+        // costs nothing when it holds nobody.
+        assert!(should_provider_announce_removal(false));
+        assert!(!should_provider_announce_removal(true));
     }
 }

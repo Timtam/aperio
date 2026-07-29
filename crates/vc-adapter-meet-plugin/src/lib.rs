@@ -32,7 +32,7 @@ use plugin_sdk::plugin_core::vtables::VcVtable;
 use plugin_sdk::{decode_args, open_instance_with, PluginInstance};
 use serde::Deserialize;
 use vc_adapter_meet::{MeetAccountConfig, MeetAdapter};
-use vc_core::{MeetingId, NewMeeting, VcAdapter};
+use vc_core::{MeetingId, MeetingRemoval, NewMeeting, VcAdapter};
 
 plugin_sdk::vc_dispatch_helpers!(MeetAdapter);
 
@@ -104,11 +104,11 @@ unsafe extern "C" fn ffi_delete_meeting(
     a: *const u8,
     l: usize,
 ) -> PluginCallResult {
-    let id: MeetingId = match decode_args(a, l) {
+    let removal: MeetingRemoval = match decode_args(a, l) {
         Ok(v) => v,
         Err(r) => return r,
     };
-    dispatch_unit(h, move |p| async move { p.delete_meeting(&id).await })
+    dispatch_unit(h, move |p| async move { p.delete_meeting(removal).await })
 }
 
 pub static VC_VTABLE: VcVtable = VcVtable {

@@ -13,7 +13,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::Serialize;
 use tracing::warn;
-use vc_core::{Meeting, MeetingId, NewMeeting, VcAdapter, VcError, VcResult};
+use vc_core::{Meeting, MeetingId, MeetingRemoval, NewMeeting, VcAdapter, VcError, VcResult};
 
 use crate::ffi::*;
 use crate::manager::{InFlightGuard, LoadedInstance};
@@ -180,9 +180,9 @@ impl VcAdapter for FfiVcAdapter {
         call_then_decode(self.vtable.get_meeting, self.handle_addr, id).await
     }
 
-    async fn delete_meeting(&self, id: &MeetingId) -> VcResult<()> {
+    async fn delete_meeting(&self, removal: MeetingRemoval) -> VcResult<()> {
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
-        call_for_unit(self.vtable.delete_meeting, self.handle_addr, id).await
+        call_for_unit(self.vtable.delete_meeting, self.handle_addr, &removal).await
     }
 
     fn can_list_meetings(&self) -> bool {

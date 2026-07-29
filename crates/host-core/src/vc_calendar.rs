@@ -230,7 +230,7 @@ mod tests {
         ) -> vc_core::VcResult<Option<Meeting>> {
             Ok(None)
         }
-        async fn delete_meeting(&self, _id: &vc_core::MeetingId) -> vc_core::VcResult<()> {
+        async fn delete_meeting(&self, _removal: vc_core::MeetingRemoval) -> vc_core::VcResult<()> {
             unreachable!("read path only")
         }
         async fn list_meetings(

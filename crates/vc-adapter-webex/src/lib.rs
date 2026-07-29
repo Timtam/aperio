@@ -31,7 +31,7 @@ pub mod oauth;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
-use vc_core::{Meeting, MeetingId, NewMeeting, VcAdapter, VcError, VcResult};
+use vc_core::{Meeting, MeetingId, MeetingRemoval, NewMeeting, VcAdapter, VcError, VcResult};
 
 use crate::api::ApiState;
 use crate::oauth::TokenSet;
@@ -59,15 +59,18 @@ pub struct WebexAccountConfig {
     /// scheduling licence and has no daily cap.
     #[serde(default)]
     pub use_personal_room: bool,
-    /// Always let Webex email its own invitations, whatever the request says.
+    /// Always let Webex email, whatever the request says.
     ///
-    /// No longer a setup question — the host now decides per meeting, from
-    /// whether the event's own calendar can invite the attendees itself, and
-    /// asks for the mail exactly when it is the only one there will be. This
-    /// stays as the always-on override for an account that was configured back
-    /// when it *was* a question, and as the flag that still governs the
-    /// cancellation mail on [`VcAdapter::delete_meeting`] — which carries no
-    /// per-call notification choice.
+    /// No longer a setup question — the host decides per meeting, on both the
+    /// invitation and the cancellation, from whether the event's own calendar
+    /// can carry the message itself, and asks Webex exactly when it is the only
+    /// channel there will be. `NewMeeting::notify_attendees` and
+    /// `MeetingRemoval::notify_attendees` are where that decision arrives.
+    ///
+    /// This survives only as the always-on override for an account that was
+    /// configured back when it *was* a question: it can force the mail ON, and
+    /// it can never force it off, because the host asks only when silence would
+    /// mean nobody is told.
     ///
     /// Off by default, and that default is load-bearing rather than tidy:
     /// Webex's own default is ON and its mails carry an iCalendar attachment,
@@ -258,11 +261,11 @@ impl VcAdapter for WebexAdapter {
         meetings::get_meeting(state, id).await
     }
 
-    async fn delete_meeting(&self, id: &MeetingId) -> VcResult<()> {
+    async fn delete_meeting(&self, removal: MeetingRemoval) -> VcResult<()> {
         // Deleting the personal room is not something that can happen: it
         // belongs to the account, not to any event. Silently succeeding would
         // be a lie the caller acts on, so say what is true.
-        if meetings::is_personal_room(id) {
+        if meetings::is_personal_room(&removal.id) {
             return Err(VcError::Unsupported(
                 "The Personal Meeting Room belongs to the Webex account, not to this event, so \
                  it cannot be deleted. Remove the link from the event instead."
@@ -270,7 +273,16 @@ impl VcAdapter for WebexAdapter {
             ));
         }
         let state = self.state().await?;
-        meetings::delete_meeting(state, id, self.config.send_webex_emails).await
+        // Same ceiling as on create: the account setting can force the mail on
+        // for an account configured back when that was a question, but turning
+        // it on for THIS removal is the host's call, made from whether the
+        // event's own calendar can carry the cancellation itself.
+        meetings::delete_meeting(
+            state,
+            &removal.id,
+            self.config.send_webex_emails || removal.notify_attendees,
+        )
+        .await
     }
 
     fn can_list_meetings(&self) -> bool {
@@ -336,10 +348,10 @@ mod tests {
             },
             "RT",
         )
-        .delete_meeting(&format!(
+        .delete_meeting(MeetingRemoval::silent(format!(
             "{}https://x.webex.com/meet/toni",
             meetings::PERSONAL_ROOM_ID_PREFIX
-        ))
+        )))
         .await
         .expect_err("must refuse");
         assert!(matches!(err, VcError::Unsupported(_)), "got {err:?}");

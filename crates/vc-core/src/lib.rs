@@ -22,8 +22,8 @@
 //!     meeting + return its join URL so the calendar layer can
 //!     embed it in the event description.
 //!   - [`VcAdapter::delete_meeting`] — drop the meeting on the
-//!     provider side; called when the event is deleted or the
-//!     user removes the link via the event editor.
+//!     provider side; called when the user removes the meeting
+//!     via the event editor. Deleting the event does NOT cascade.
 //!   - [`VcAdapter::get_meeting`] — re-fetch a previously-
 //!     created meeting (status, join URL, password) so the
 //!     event-detail view can verify the meeting is still valid
@@ -42,9 +42,13 @@ use serde::{Deserialize, Serialize};
 /// Per-provider identifier for a created meeting. The string
 /// is opaque to the host — each provider uses its own format
 /// (Zoom's numeric meeting id, Teams's GUID, Meet's URL-safe
-/// id, …). The host stores it as part of the calendar event's
-/// `vc_meeting_id` column and threads it back into
-/// `get_meeting` / `delete_meeting` calls.
+/// id, …).
+///
+/// The host keeps it in a HOST-LOCAL binding table alongside the event id and
+/// the account that minted it (`host_core::meetings`), not on the event itself
+/// and not in anything that syncs: it is the provider's private handle, useless
+/// on another device, while the join URL in the event body is what every other
+/// client actually reads. Threaded back into `get_meeting` and `delete_meeting`.
 pub type MeetingId = String;
 
 /// A meeting that already exists on the provider side. The
@@ -143,6 +147,15 @@ pub struct NewMeeting {
 
     /// The event's attendees, so the provider knows who the meeting is for.
     ///
+    /// **Bare email addresses.** Aperio's own attendee entries are display
+    /// strings — `"Alice Smith <alice@example.test>"` from the contact picker,
+    /// and the same shape read back from Google, Graph, EWS and CalDAV — and a
+    /// provider validates this field as an address, so the host splits before
+    /// filling it (`host_core::meetings::attendee_addresses`). An entry that
+    /// yields no address is dropped rather than sent: a display name in an
+    /// address field reaches nobody, and on a strict provider it fails the
+    /// whole meeting.
+    ///
     /// Without this a provider has no idea who is coming: it can neither list
     /// them back (the "who is actually invited" question) nor notify them.
     /// These addresses LEAVE the device — that is the point of handing them to
@@ -162,6 +175,52 @@ pub struct NewMeeting {
     /// and suppressing it means nobody is told at all.
     #[serde(default)]
     pub notify_attendees: bool,
+}
+
+/// Inputs the host hands to [`VcAdapter::delete_meeting`].
+///
+/// A struct rather than a bare id, for the same reason [`NewMeeting`] is one:
+/// taking a meeting down is not only "which", it is also "and what do the
+/// people who were invited hear about it". A provider that can email them is
+/// the only channel some calendars have, and the answer belongs to the call,
+/// not to a setting somewhere.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeetingRemoval {
+    /// Which meeting. The provider's own identifier, opaque to the host,
+    /// exactly as it came back from [`VcAdapter::create_meeting`].
+    pub id: MeetingId,
+
+    /// Whether the provider should tell the attendees the meeting is off.
+    ///
+    /// The mirror of [`NewMeeting::notify_attendees`], and answered from the
+    /// same fact: a calendar that can invite server-side also cancels
+    /// server-side, so a provider cancellation on top of it is a second,
+    /// contradictory message. A calendar that cannot invite cannot cancel
+    /// either, and there the provider's mail is the only word the attendees
+    /// will ever get that the meeting is not happening.
+    #[serde(default)]
+    pub notify_attendees: bool,
+}
+
+impl MeetingRemoval {
+    /// Take a meeting down and let the provider tell the attendees, or not.
+    pub fn new(id: impl Into<MeetingId>, notify_attendees: bool) -> Self {
+        Self {
+            id: id.into(),
+            notify_attendees,
+        }
+    }
+
+    /// Take a meeting down without telling anybody.
+    ///
+    /// The honest answer whenever nobody was ever told the meeting existed —
+    /// rolling one back because the event it belonged to could not be saved —
+    /// and the safe default for a caller that has no event to answer the
+    /// question from. Silence cannot produce a contradictory message; the
+    /// worst it does is leave someone to find out from the calendar.
+    pub fn silent(id: impl Into<MeetingId>) -> Self {
+        Self::new(id, false)
+    }
 }
 
 /// Error variants every provider-specific adapter has to map
@@ -257,15 +316,21 @@ pub trait VcAdapter: Send + Sync {
     /// Re-fetch an existing meeting by its provider-side id.
     /// `None` means the meeting was deleted on the provider
     /// side between this call and whenever the host last knew
-    /// about it (treat as a soft delete + clear the cached
-    /// `vc_meeting_id` on the event).
+    /// about it (treat as a soft delete + drop the host's
+    /// binding for that event).
     async fn get_meeting(&self, id: &MeetingId) -> VcResult<Option<Meeting>>;
 
-    /// Drop the meeting on the provider side. Called when the
-    /// user explicitly removes the link from an event or
-    /// deletes the event itself with "also delete provider-
-    /// side meeting" confirmed.
-    async fn delete_meeting(&self, id: &MeetingId) -> VcResult<()>;
+    /// Drop the meeting on the provider side. Called when the user removes the
+    /// meeting from an event — there is no event-delete cascade; deleting an
+    /// event leaves its meeting standing, because the binding that names it is
+    /// host-local and the event may be deleted on a device that never had it.
+    ///
+    /// [`MeetingRemoval::notify_attendees`] says whether the provider should
+    /// email the people who were invited. The host answers it from the event's
+    /// own calendar — see [`NewMeeting::notify_attendees`] for the same
+    /// reasoning in the other direction — and an adapter whose provider cannot
+    /// notify simply ignores it.
+    async fn delete_meeting(&self, removal: MeetingRemoval) -> VcResult<()>;
 
     /// The meeting a join link belongs to, or `None` when the provider has
     /// none for it.

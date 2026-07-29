@@ -138,6 +138,18 @@ So it is not a setting. When Aperio creates a meeting it looks at the event's
 own calendar and asks Webex to mail the attendees exactly when that calendar
 cannot. An event with no attendees mails nobody either way.
 
+Removing a meeting follows the same principle with one simplification: it asks
+only whether the calendar can cancel, not who is on the event. A calendar that
+could invite also cancels, and Webex stays quiet; a calendar that could not gets
+Webex's cancellation, because otherwise the attendees are never told the meeting
+is off and simply turn up.
+
+The attendee question is dropped on the way out on purpose. A meeting you took
+over from Webex's own interface has invitees the event never knew about, and by
+the time you press remove the event may already be gone. Webex mails only the
+people it has, so asking it to tell them costs nothing when there is nobody to
+tell.
+
 **Who is really invited.** The attendees on such an event are whatever the
 invitation mail addressed, which is often just you and Webex's own sending
 address (`messenger@webex.com`). Aperio additionally shows Webex's own invitee
@@ -163,8 +175,10 @@ out of the event. The room itself stays — it belongs to your account, not to a
 one event, and Webex has no way to delete it.
 
 **A licence is needed for scheduling.** Creating a meeting per event requires a
-Webex account that may schedule meetings. If yours may not, switch **Use the
-Personal Meeting Room** on — that works without one.
+Webex account that may schedule meetings. If yours may not, use **Link the
+Personal Meeting Room** in the event editor instead — the room needs no
+scheduling licence. It is a button next to *Create a meeting*, not a setting:
+nothing to switch on beforehand, and the choice stays per event.
 
 ## If something goes wrong
 

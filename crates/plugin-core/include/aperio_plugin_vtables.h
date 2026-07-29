@@ -253,9 +253,15 @@ typedef struct AperioVcVtable {
     AperioVtableMethodFn test_connection;
     AperioVtableMethodFn create_meeting; /* NewMeeting -> Meeting */
     AperioVtableMethodFn get_meeting;    /* MeetingId -> Option<Meeting> */
-    AperioVtableMethodFn delete_meeting; /* MeetingId -> () */
+    AperioVtableMethodFn delete_meeting; /* {id,notify_attendees} -> () */
 
     /* ── ABI 3 ─────────────────────────────────────────────────────────
+     * delete_meeting's argument became an OBJECT in this revision — it
+     * was a bare MeetingId string. Taking a meeting down is also a
+     * question about the people who were invited: on a calendar that
+     * cannot cancel server-side, the provider's mail is the only word
+     * they get. notify_attendees defaults to false when absent.
+     *
      * resolve_meeting: {join_url} -> Option<Meeting>. The link is the
      * only identifier that reaches the calendar — the provider's meeting
      * id does not travel in an event. Without it the host can manage

@@ -144,6 +144,18 @@ Deshalb ist das keine Einstellung. Wenn Aperio ein Meeting anlegt, schaut es auf
 den Kalender des Termins und bittet Webex genau dann um die Mail, wenn dieser
 Kalender es nicht kann. Ein Termin ohne Teilnehmer mailt so oder so niemandem.
 
+Beim Entfernen gilt dasselbe Prinzip, mit einer Vereinfachung: Gefragt wird nur
+noch, ob der Kalender absagen kann, nicht wer auf dem Termin steht. Ein Kalender,
+der einladen konnte, sagt auch ab, und Webex bleibt still; einer, der es nicht
+konnte, bekommt Webex' Absage — sonst erfahren die Teilnehmer nie, dass das
+Meeting ausfällt, und stehen einfach da.
+
+Die Teilnehmerfrage entfällt auf dem Weg hinaus mit Absicht. Ein Meeting, das du
+aus Webex' eigener Oberfläche übernommen hast, hat Eingeladene, von denen der
+Termin nie wusste, und wenn du auf Entfernen drückst, kann der Termin längst weg
+sein. Webex mailt nur die Leute, die es hat — es zu bitten kostet also nichts,
+wenn da niemand ist.
+
 **Wer wirklich eingeladen ist.** Die Teilnehmer eines solchen Termins sind das,
 was die Einladungsmail adressiert hat — oft nur du und Webex' eigene
 Versandadresse (`messenger@webex.com`). Aperio zeigt zusätzlich Webex' eigene
@@ -172,7 +184,9 @@ nicht zu einem einzelnen Termin, und Webex kennt keinen Weg, ihn zu löschen.
 
 **Fürs Planen braucht es eine Lizenz.** Pro Termin ein Meeting anzulegen setzt
 ein Webex-Konto voraus, das Meetings planen darf. Wenn deines das nicht darf,
-schalte **Persönlichen Raum verwenden** ein — das funktioniert auch ohne.
+nimm im Termineditor **Persönlichen Raum verlinken** — der Raum braucht keine
+Planungslizenz. Das ist ein Knopf neben *Meeting erzeugen*, keine Einstellung:
+vorher ist nichts einzuschalten, und die Wahl bleibt pro Termin.
 
 ## Wenn etwas nicht klappt
 

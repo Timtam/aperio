@@ -37,8 +37,15 @@ pub struct VcVtable {
     /// host's cached id).
     pub get_meeting: Option<VtableMethodFn>,
 
-    /// `delete_meeting(MeetingId) -> ()` — drop the meeting on
-    /// the provider side.
+    /// `delete_meeting(MeetingRemoval) -> ()` — drop the meeting
+    /// on the provider side.
+    ///
+    /// The argument is an object, not a bare id, as of ABI 3:
+    /// `{id, notify_attendees}`. Taking a meeting down is also a
+    /// question about the people who were invited to it, and on a
+    /// calendar that cannot cancel server-side the provider's mail
+    /// is the only word they get. `notify_attendees` carries
+    /// `#[serde(default)]`, so a later field costs nothing.
     pub delete_meeting: Option<VtableMethodFn>,
 
     // ── ABI 3 ──────────────────────────────────────────────────
@@ -106,5 +113,25 @@ mod tests {
         assert!(v.delete_meeting.is_none());
         assert!(!v.has_minimum_surface());
         assert_eq!(v.vtable_version, crate::ABI_VERSION);
+    }
+
+    #[test]
+    fn a_removal_names_the_meeting_and_says_whether_to_tell_anyone() {
+        // The wire shape a plugin decodes on the delete slot. `id` is the key
+        // the adapter addresses the provider with; getting it wrong deletes
+        // nothing or, worse, something else.
+        let json = serde_json::to_value(vc_core::MeetingRemoval::new("m1", true)).unwrap();
+        assert_eq!(json["id"], "m1");
+        assert_eq!(json["notify_attendees"], true);
+    }
+
+    #[test]
+    fn an_older_removal_without_the_flag_still_decodes_as_silence() {
+        // `notify_attendees` carries `#[serde(default)]` so a caller that
+        // predates it — or a later field nobody sends yet — costs nothing. The
+        // absent answer is silence, which cannot contradict anything.
+        let removal: vc_core::MeetingRemoval = serde_json::from_str(r#"{"id":"m1"}"#).unwrap();
+        assert_eq!(removal.id, "m1");
+        assert!(!removal.notify_attendees);
     }
 }

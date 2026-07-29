@@ -24,7 +24,10 @@ use std::sync::Arc;
 
 use cal_adapter_local::LocalAdapter;
 use cal_core::Event;
-use host_core::meetings::{should_provider_notify, EventMeeting, MeetingsRepo};
+use host_core::meetings::{
+    attendee_addresses, should_provider_announce_removal, should_provider_notify, EventMeeting,
+    MeetingsRepo,
+};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use vc_core::{Meeting, MeetingId, NewMeeting};
@@ -114,10 +117,11 @@ pub async fn attach_meeting(
     }
 
     // Who is coming, and whether the provider is the one who has to tell them.
-    let notify = should_provider_notify(
-        &event.attendees,
-        calendar_can_invite(&registry, &cache, &request.calendar_id),
-    );
+    // Addresses, not the display strings the event carries: a provider
+    // validates this field as an email and refuses the meeting otherwise.
+    let can_invite = calendar_can_invite(&registry, &cache, &request.calendar_id);
+    let guests = attendee_addresses(&event.attendees);
+    let notify = should_provider_notify(&guests, can_invite);
     let meeting = vc
         .create_meeting(NewMeeting {
             title: event.title.clone(),
@@ -125,7 +129,7 @@ pub async fn attach_meeting(
             end_time: Some(event.end),
             description: event.description.clone(),
             use_personal_room: request.use_personal_room,
-            attendees: event.attendees.clone(),
+            attendees: guests.clone(),
             notify_attendees: notify,
         })
         .await
@@ -149,6 +153,13 @@ pub async fn attach_meeting(
     {
         updated.location = Some(meeting.join_url.clone());
     }
+    // The complement of the provider decision, and the half that made the rule
+    // work at all: exactly ONE channel announces the meeting. When the calendar
+    // is the one that can, this write has to actually carry the link to the
+    // attendees — the default is `false`, which on Exchange means
+    // `SendToNone`, and then the provider stayed quiet AND the calendar said
+    // nothing, so the join link reached nobody.
+    updated.send_invitations = can_invite && !guests.is_empty();
 
     let saved = super::calendars::update_event(
         adapter,
@@ -167,7 +178,15 @@ pub async fn attach_meeting(
             // The event could not be saved, so the meeting has nowhere to live.
             // Take it back down rather than leaving one behind on the provider
             // that nothing on this device knows about.
-            if let Err(cleanup) = vc.delete_meeting(&meeting.id).await {
+            //
+            // The cancellation follows whatever the invitation did: if the
+            // provider was asked to mail everyone a moment ago, those mails are
+            // already out, and staying quiet now leaves people holding an
+            // invitation to a meeting that no longer exists.
+            if let Err(cleanup) = vc
+                .delete_meeting(vc_core::MeetingRemoval::new(meeting.id.clone(), notify))
+                .await
+            {
                 tracing::warn!(
                     meeting_id = %meeting.id,
                     ?cleanup,
@@ -373,13 +392,28 @@ pub async fn detach_meeting(
     };
 
     let vc = require_vc_adapter(&registry, &binding.account_id)?;
+
+    // Whether the provider announces the cancellation. Deliberately not asked
+    // of the event's attendee list: an adopted meeting has invitees the event
+    // never knew, and by now the event may be gone or unreadable — where
+    // "nobody" and "could not read" look identical. The provider mails only the
+    // invitees it holds, so asking costs nothing when it holds none.
+    let can_invite = calendar_can_invite(&registry, &cache, &request.calendar_id);
+    let notify = should_provider_announce_removal(can_invite);
+
     // A permanent room cannot be deleted — it belongs to the account, not to
     // this event — and the adapter says so with `Unsupported`. Taking the link
     // out of the event is then the whole of what "remove" can mean, and doing
     // it is better than refusing an operation the user can reasonably expect.
     // Any other failure still aborts: forgetting the id of a meeting that DOES
     // exist would strand it for good.
-    match vc.delete_meeting(&binding.meeting_id).await {
+    match vc
+        .delete_meeting(vc_core::MeetingRemoval::new(
+            binding.meeting_id.clone(),
+            notify,
+        ))
+        .await
+    {
         Ok(()) => {}
         Err(vc_core::VcError::Unsupported(reason)) => {
             tracing::info!(%reason, "unlinking a meeting the provider will not delete");
@@ -415,6 +449,10 @@ pub async fn detach_meeting(
     if updated.location.as_deref().map(str::trim) == Some(binding.join_url.as_str()) {
         updated.location = None;
     }
+    // The complement again: when the calendar is the channel that announces,
+    // it has to announce that the link is gone too. Otherwise the attendees
+    // keep a join URL that now leads nowhere and nobody has said so.
+    updated.send_invitations = can_invite && !attendee_addresses(&updated.attendees).is_empty();
     let saved = super::calendars::update_event(
         adapter, registry, cache, scheduler, event_log, db, updated, None,
     )
@@ -536,6 +574,13 @@ pub async fn get_meeting(
 pub struct DeleteMeetingRequest {
     pub account_id: String,
     pub meeting_id: MeetingId,
+    /// Whether the provider should tell the attendees the meeting is off.
+    ///
+    /// Defaults to silence, because this thin verb knows only a meeting id —
+    /// no event, so no attendees and no calendar to weigh. `detach_meeting`
+    /// is the path that has all three and answers the question properly.
+    #[serde(default)]
+    pub notify_attendees: bool,
 }
 
 /// Drop the meeting on the provider side. Called when the user
@@ -549,7 +594,10 @@ pub async fn delete_meeting(
 ) -> CommandResult<()> {
     let adapter = require_vc_adapter(&registry, &request.account_id)?;
     adapter
-        .delete_meeting(&request.meeting_id)
+        .delete_meeting(vc_core::MeetingRemoval::new(
+            request.meeting_id,
+            request.notify_attendees,
+        ))
         .await
         .map_err(CommandError::from)
 }

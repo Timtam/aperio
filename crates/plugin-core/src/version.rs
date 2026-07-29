@@ -36,6 +36,20 @@ use crate::error::{PluginError, PluginResult};
 ///   The change unblocks DESIGN.md §6.4 (multiple accounts per
 ///   adapter type) — a single loaded library can now back N
 ///   independent adapter instances.
+/// - **v3** — videoconference reach. `VcVtable` gained two appended
+///   slots, `resolve_meeting` (find a meeting by its join link, the
+///   only identifier that reaches a calendar event) and
+///   `list_meetings` (surface meetings that have no calendar entry
+///   at all). Appending to an EXISTING vtable is what forces a bump:
+///   the host has no per-vtable length, so a plugin built against the
+///   shorter layout would be read past its end. In the same revision
+///   the `delete_meeting` slot's argument changed shape in place,
+///   from a bare `MeetingId` string to `{id, notify_attendees}` —
+///   taking a meeting down is also a question about the people
+///   invited to it. **UNRELEASED at the time of writing**, which is
+///   the only reason an in-place wire change was permissible: no
+///   plugin exists that speaks the earlier v3. Once v3 ships, the
+///   next wire change to an existing slot takes v4.
 pub const ABI_VERSION: u32 = 3;
 
 /// Three-component semantic version. Only the (major, minor, patch)

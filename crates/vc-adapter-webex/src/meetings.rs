@@ -928,4 +928,22 @@ mod tests {
             .expect("delete");
         m.assert_async().await;
     }
+
+    #[tokio::test]
+    async fn a_cancellation_the_calendar_cannot_send_goes_out_from_webex() {
+        // The other side of the same rule: on a calendar that cannot cancel
+        // server-side, Webex's mail is the only word the attendees get that the
+        // meeting is off. Silence there is not tidiness, it is nobody knowing.
+        let mut server = mockito::Server::new_async().await;
+        let m = server
+            .mock("DELETE", "/meetings/m1?sendEmail=true")
+            .with_status(204)
+            .create_async()
+            .await;
+        let state = crate::api::tests_support::state(&server.url());
+        delete_meeting(&state, &"m1".to_string(), true)
+            .await
+            .expect("delete");
+        m.assert_async().await;
+    }
 }

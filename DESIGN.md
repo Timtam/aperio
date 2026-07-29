@@ -3104,6 +3104,13 @@ Slots `test_connection`, `create_meeting`, `get_meeting`, `delete_meeting`
   Erst das macht Meetings **ohne Kalendereintrag** überhaupt sichtbar; der Host
   baut daraus einen schreibgeschützten Kalender (`host_core::vc_calendar`).
 
+Ebenfalls seit ABI 3 nimmt `delete_meeting` ein **Objekt** statt einer nackten
+Meeting-ID: `{id, notify_attendees}` (`vc_core::MeetingRemoval`). Ein Meeting
+abzuräumen ist auch eine Frage nach den Eingeladenen — auf einem Kalender, der
+nicht serverseitig absagen kann, ist die Mail des Anbieters das einzige Wort,
+das sie bekommen. `notify_attendees` trägt `#[serde(default)]`, fehlt es, gilt
+Schweigen.
+
 Beide Slots dürfen NULL sein — nicht jeder Anbieter kann das, und wer es nicht
 kann, ist nicht kaputt: der Host lässt die jeweilige Möglichkeit dann einfach
 weg. Das Anhängen dieser beiden Slots ist der Grund für die ABI-Erhöhung von 2
