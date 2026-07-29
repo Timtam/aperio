@@ -78,7 +78,8 @@ export function MeetingControls({
   const announce = (message: string) =>
     AccessibilityInfo.announceForAccessibility(message);
 
-  const create = useCallback(async () => {
+  const create = useCallback(
+    async (usePersonalRoom: boolean) => {
     const account = accounts[0];
     if (!event || !account) return;
     setBusy(true);
@@ -88,6 +89,7 @@ export function MeetingControls({
         event_id: event.id,
         calendar_id: event.calendar_id,
         account_id: account.id,
+        use_personal_room: usePersonalRoom,
       });
       setFound({
         binding: {
@@ -109,7 +111,9 @@ export function MeetingControls({
     } finally {
       setBusy(false);
     }
-  }, [accounts, event, onEventChanged, t]);
+    },
+    [accounts, event, onEventChanged, t],
+  );
 
   const remove = useCallback(async () => {
     if (!event) return;
@@ -212,13 +216,32 @@ export function MeetingControls({
         accessibilityLabel={label}
         accessibilityState={{ disabled: busy }}
         onPress={() =>
-          void (owned ? remove() : adoptable ? adopt() : create())
+          void (owned ? remove() : adoptable ? adopt() : create(false))
         }
         disabled={busy}
         style={({ pressed }) => [styles.button, pressed && styles.pressed]}
       >
         <Text style={styles.buttonText}>{label}</Text>
       </Pressable>
+      {/* The second kind of meeting, named rather than hidden behind a dialog:
+          one more stop instead of four, and each says what it does. */}
+      {!owned && !adoptable && (
+        <>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('conferencing.usePersonalRoom')}
+            accessibilityState={{ disabled: busy }}
+            onPress={() => void create(true)}
+            disabled={busy}
+            style={({ pressed }) => [styles.button, pressed && styles.pressed]}
+          >
+            <Text style={styles.buttonText}>
+              {t('conferencing.usePersonalRoom')}
+            </Text>
+          </Pressable>
+          <Text style={styles.hint}>{t('conferencing.personalRoomHint')}</Text>
+        </>
+      )}
       {error != null && <Text style={styles.error}>{error}</Text>}
     </View>
   );

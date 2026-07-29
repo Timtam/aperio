@@ -52,6 +52,10 @@ pub struct AttachMeetingRequest {
     pub calendar_id: String,
     /// Which videoconference account mints it.
     pub account_id: String,
+    /// Link the account's permanent room instead of minting a meeting. Asked
+    /// per meeting, because that is what it is a property of.
+    #[serde(default)]
+    pub use_personal_room: bool,
 }
 
 /// Create a meeting for an event, write its link into the event, and remember
@@ -115,6 +119,7 @@ pub async fn attach_meeting(
             start_time: Some(event.start),
             end_time: Some(event.end),
             description: event.description.clone(),
+            use_personal_room: request.use_personal_room,
         })
         .await
         .map_err(CommandError::from)?;
@@ -361,9 +366,19 @@ pub async fn detach_meeting(
     };
 
     let vc = require_vc_adapter(&registry, &binding.account_id)?;
-    vc.delete_meeting(&binding.meeting_id)
-        .await
-        .map_err(CommandError::from)?;
+    // A permanent room cannot be deleted — it belongs to the account, not to
+    // this event — and the adapter says so with `Unsupported`. Taking the link
+    // out of the event is then the whole of what "remove" can mean, and doing
+    // it is better than refusing an operation the user can reasonably expect.
+    // Any other failure still aborts: forgetting the id of a meeting that DOES
+    // exist would strand it for good.
+    match vc.delete_meeting(&binding.meeting_id).await {
+        Ok(()) => {}
+        Err(vc_core::VcError::Unsupported(reason)) => {
+            tracing::info!(%reason, "unlinking a meeting the provider will not delete");
+        }
+        Err(err) => return Err(CommandError::from(err)),
+    }
     MeetingsRepo::new(&shared)
         .unbind(&request.event_id)
         .map_err(meetings_error)?;

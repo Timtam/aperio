@@ -698,6 +698,8 @@ export const attachMeeting = (request: {
   event_id: string;
   calendar_id: string;
   account_id: string;
+  /** Link the account's permanent room instead of minting a meeting. */
+  use_personal_room?: boolean;
 }) => invoke<{ event: CalendarEvent; meeting: Meeting }>('attach_meeting', { request });
 
 /** Delete the meeting Aperio created for an event and take its link back out.

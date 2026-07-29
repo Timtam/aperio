@@ -179,7 +179,10 @@ pub async fn create_meeting(
     send_webex_emails: bool,
     event_tag: Option<&str>,
 ) -> VcResult<Meeting> {
-    if use_personal_room {
+    // The request decides; the account setting is only the fallback for a
+    // caller that expresses no preference. A meeting is one or the other, and
+    // that is not something a setup checkbox can know in advance.
+    if use_personal_room || spec.use_personal_room {
         return personal_room(state).await;
     }
     if spec.title.trim().is_empty() {
@@ -576,6 +579,7 @@ mod tests {
             start_time: start,
             end_time: end,
             description: None,
+            use_personal_room: false,
         }
     }
 

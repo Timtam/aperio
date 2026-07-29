@@ -88,7 +88,8 @@ export function MeetingControls({
     };
   }, [eventId, calendarId]);
 
-  const create = useCallback(async () => {
+  const create = useCallback(
+    async (usePersonalRoom: boolean) => {
     if (!event || !accountId) return;
     setBusy(true);
     setError(null);
@@ -97,6 +98,7 @@ export function MeetingControls({
         event_id: event.id,
         calendar_id: event.calendar_id,
         account_id: accountId,
+        use_personal_room: usePersonalRoom,
       });
       setFound({
         binding: {
@@ -118,7 +120,9 @@ export function MeetingControls({
     } finally {
       setBusy(false);
     }
-  }, [accountId, announce, event, onEventChanged, t]);
+    },
+    [accountId, announce, event, onEventChanged, t],
+  );
 
   const remove = useCallback(async () => {
     if (!event) return;
@@ -255,14 +259,29 @@ export function MeetingControls({
               </select>
             </label>
           )}
+          {/* Two buttons rather than one button and a dialog. Which kind of
+              meeting this should be is a real choice, but it is a choice
+              between two named things — so naming them IS the control, and it
+              costs one stop instead of four. */}
           <button
             type="button"
             className="form__action"
-            onClick={() => void create()}
+            onClick={() => void create(false)}
             aria-disabled={busy || !accountId || undefined}
           >
             {t('conferencing.createMeeting')}
           </button>
+          <button
+            type="button"
+            className="form__action"
+            onClick={() => void create(true)}
+            aria-disabled={busy || !accountId || undefined}
+          >
+            {t('conferencing.usePersonalRoom')}
+          </button>
+          <FocusableNote className="form__hint">
+            {t('conferencing.personalRoomHint')}
+          </FocusableNote>
         </>
       )}
       {error && (

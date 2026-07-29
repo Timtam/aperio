@@ -129,6 +129,17 @@ pub struct NewMeeting {
     /// their calendar invite alongside the join URL.
     #[serde(default)]
     pub description: Option<String>,
+
+    /// Use the account's permanent room instead of minting a meeting.
+    ///
+    /// Per REQUEST, not per account. Which of the two a meeting should be is a
+    /// property of the meeting — a quick one-to-one wants the room, something
+    /// scheduled with outsiders wants its own — and asking once at setup time
+    /// forces one answer onto everything that follows.
+    ///
+    /// Providers without a permanent room ignore it.
+    #[serde(default)]
+    pub use_personal_room: bool,
 }
 
 /// Error variants every provider-specific adapter has to map

@@ -37,14 +37,6 @@
         "required": false
       },
       {
-        "key": "use_personal_room",
-        "kind": "bool",
-        "label": "Use the Personal Meeting Room",
-        "label_key": "dialogs.accounts.webexPersonalRoomLabel",
-        "hint_key": "dialogs.accounts.webexPersonalRoomHint",
-        "default": false
-      },
-      {
         "key": "send_webex_emails",
         "kind": "bool",
         "label": "Let Webex send its own invitations",

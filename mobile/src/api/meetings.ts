@@ -38,6 +38,8 @@ export const attachMeeting = async (request: {
   event_id: string;
   calendar_id: string;
   account_id: string;
+  /** Link the account's permanent room instead of minting a meeting. */
+  use_personal_room?: boolean;
 }): Promise<{ event: CalendarEvent; meeting: Meeting }> =>
   JSON.parse(await CalFfi.attachMeetingJson(JSON.stringify(request))) as {
     event: CalendarEvent;

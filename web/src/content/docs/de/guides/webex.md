@@ -34,13 +34,6 @@ Was danach kommt, hängt von der Version ab, die du benutzt:
 
 Zwei Optionen lohnen einen Moment:
 
-**Persönlichen Raum verwenden.** Aus als Voreinstellung. Eingeschaltet verlinkt
-Aperio deinen dauerhaften persönlichen Raum, statt pro Termin ein neues Meeting
-anzulegen. Das braucht keine Planungslizenz und hat kein Tageslimit — aber alle
-Termine teilen sich denselben Link und denselben Raum, direkt aufeinander
-folgende Meetings können sich also begegnen. Ausgeschaltet bekommt jeder Termin
-sein eigenes Meeting.
-
 **Webex eigene Einladungen senden lassen.** Aus als Voreinstellung, und das
 solltest du so lassen. Webex-Mails bringen einen Kalenderanhang mit;
 eingeschaltet landet bei allen Teilnehmern ein **zweiter** Termin neben dem,
@@ -80,7 +73,18 @@ synchronisiert wird.
 
 ## Meeting für einen Termin anlegen
 
-Termin öffnen, bei einem neuen erst speichern, dann **Meeting erzeugen**. Aperio
+Termin öffnen, bei einem neuen erst speichern, dann eines von beiden wählen:
+
+- **Meeting erzeugen** legt bei Webex ein frisches Meeting mit eigenem Link und
+  eigenem Passwort an, nur für diesen Termin.
+- **Persönlichen Raum verlinken** zeigt stattdessen auf deinen dauerhaften Raum.
+  Der braucht keine Planungslizenz und hat kein Tageslimit, ist aber immer
+  derselbe Raum unter demselben Link — direkt aufeinander folgende Termine
+  können sich dort begegnen.
+
+Die Wahl gilt pro Termin, nicht pro Konto: was ein Meeting sein soll, ist eine
+Eigenschaft dieses Meetings, und gefragt wird in dem Moment, in dem du die
+Antwort kennst. In beiden Fällen
 
 - legt das Meeting bei Webex mit Titel und Zeit des Termins an,
 - schreibt den Beitrittslink in das Ortsfeld (falls es leer war) und hängt einen
@@ -148,6 +152,10 @@ Oberfläche entfernen kannst.
 **Einen Termin zu verschieben verschiebt das Meeting nicht.** Webex' API kennt
 in dem Satz, den Aperio nutzt, kein Ändern. Wenn sich eine Zeit wesentlich
 ändert: Meeting entfernen und neu anlegen.
+
+**Einen verlinkten persönlichen Raum entfernen.** *Meeting entfernen* nimmt den
+Link wieder aus dem Termin. Der Raum selbst bleibt — er gehört zu deinem Konto,
+nicht zu einem einzelnen Termin, und Webex kennt keinen Weg, ihn zu löschen.
 
 **Fürs Planen braucht es eine Lizenz.** Pro Termin ein Meeting anzulegen setzt
 ein Webex-Konto voraus, das Meetings planen darf. Wenn deines das nicht darf,

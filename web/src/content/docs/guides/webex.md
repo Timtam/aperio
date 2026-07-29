@@ -32,12 +32,6 @@ What you see next depends on the build you are running:
 
 Two options are worth a moment:
 
-**Use the Personal Meeting Room.** Off by default. With it on, Aperio links your
-permanent personal room instead of creating a new meeting per event. That needs
-no scheduling licence and has no daily cap — but every event shares the same
-link and the same room, so back-to-back meetings can walk into each other. With
-it off, each event gets its own meeting.
-
 **Let Webex send its own invitations.** Off by default, and worth leaving off.
 Webex's mails carry a calendar attachment, so switching this on puts a *second*
 entry in every attendee's calendar next to the one Aperio already sent.
@@ -76,7 +70,18 @@ devices.
 
 ## Creating a meeting for an event
 
-Open an event, save it if it is new, and press **Create a meeting**. Aperio:
+Open an event, save it if it is new, and choose one of two:
+
+- **Create a meeting** mints a fresh Webex meeting with its own link and
+  password, just for this event.
+- **Link the Personal Meeting Room** points the event at your permanent room
+  instead. That needs no scheduling licence and has no daily cap, but it is
+  always the same room behind the same link, so back-to-back events can walk
+  into each other there.
+
+The choice is per event, not per account: which of the two a meeting should be
+is a property of that meeting, and it is asked at the moment you know the
+answer. Either way, Aperio:
 
 - creates the meeting on Webex with the event's title and time,
 - writes the join link into the event's location (if it was empty) and appends a
@@ -140,6 +145,10 @@ stays on Webex, where you can remove it in Webex's own interface.
 **Moving an event does not move the meeting.** Webex's API has no update in the
 set Aperio uses. If a time changes materially, remove the meeting and create it
 again.
+
+**Removing a linked personal room.** *Remove the meeting* takes the link back
+out of the event. The room itself stays — it belongs to your account, not to any
+one event, and Webex has no way to delete it.
 
 **A licence is needed for scheduling.** Creating a meeting per event requires a
 Webex account that may schedule meetings. If yours may not, switch **Use the

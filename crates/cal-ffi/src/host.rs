@@ -7155,6 +7155,7 @@ impl Host {
                 start_time: Some(event.start),
                 end_time: Some(event.end),
                 description: event.description.clone(),
+                use_personal_room: req.use_personal_room,
             }))
             .map_err(vc_err)?;
 
@@ -7230,9 +7231,20 @@ impl Host {
             })?;
         // Provider first: forgetting the id before the delete succeeds would
         // strand the meeting for good.
-        self.runtime
+        // A permanent room cannot be deleted — the adapter answers `Unsupported`
+        // — and unlinking is then the whole of what "remove" can mean. Any
+        // other failure still aborts, since forgetting the id of a meeting that
+        // does exist would strand it.
+        match self
+            .runtime
             .block_on(vc.delete_meeting(&binding.meeting_id))
-            .map_err(vc_err)?;
+        {
+            Ok(()) => {}
+            Err(vc_core::VcError::Unsupported(reason)) => {
+                tracing::info!(%reason, "unlinking a meeting the provider will not delete");
+            }
+            Err(err) => return Err(vc_err(err)),
+        }
         MeetingsRepo::new(&shared)
             .unbind(&req.event_id)
             .map_err(meetings_err)?;
@@ -7695,6 +7707,9 @@ struct AttachMeetingRequest {
     calendar_id: String,
     #[serde(default)]
     account_id: String,
+    /// Link the account's permanent room instead of minting a meeting.
+    #[serde(default)]
+    use_personal_room: bool,
 }
 
 /// Request body for [`Host::adopt_meeting_json`].

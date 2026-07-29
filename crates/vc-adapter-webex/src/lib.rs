@@ -199,6 +199,7 @@ impl WebexAdapter {
                 start_time: None,
                 end_time: None,
                 description: None,
+                use_personal_room: true,
             },
             None,
             true,
