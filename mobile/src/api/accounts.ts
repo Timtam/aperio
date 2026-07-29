@@ -203,6 +203,34 @@ export const listAdapterKinds = async (): Promise<AdapterKindInfo[]> =>
 /** The connect form an adapter declares, or `null` when it declares none —
  *  which is the correct answer for the adapters still on the older per-kind
  *  path, and for plugins with no accounts at all. */
+/**
+ * Probe an adapter that declares a schema, from the form's own values. The
+ * host splits them with that schema — the same split the connect call uses, so
+ * a test and a connect cannot disagree about what a field means.
+ */
+export const testAccountValues = async (
+  adapter_kind: AdapterKind,
+  values: Record<string, string | boolean>,
+): Promise<void> => {
+  await CalFfi.testAccountValuesJson(JSON.stringify({ adapter_kind, values }));
+};
+
+/**
+ * Run one action the adapter declared on its connect form. Resolves to the
+ * values the form should now carry, keyed by FIELD key — a field the action did
+ * not produce is absent rather than blanked.
+ */
+export const runAccountAction = async (
+  adapter_kind: AdapterKind,
+  action_key: string,
+  values: Record<string, string | boolean>,
+): Promise<Record<string, string>> =>
+  JSON.parse(
+    await CalFfi.runAccountActionJson(
+      JSON.stringify({ adapter_kind, action_key, values }),
+    ),
+  ) as Record<string, string>;
+
 export const accountFormSpec = async (
   kind: AdapterKind,
   lang?: string,

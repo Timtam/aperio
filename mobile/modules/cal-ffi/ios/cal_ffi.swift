@@ -2487,6 +2487,17 @@ public protocol HostProtocol: AnyObject, Sendable {
     func resumeStaleDeviceJson() throws  -> String
     
     /**
+     * Run one action an adapter declared on its connect form, and return the
+     * values the form should now carry, keyed by FIELD key.
+     *
+     * The twin of the desktop `run_account_action`. Nothing here knows what any
+     * action does: the manifest says which entry point to drive, which fields
+     * must be filled first, which values become which arguments, and which
+     * results land back in which fields.
+     */
+    func runAccountActionJson(requestJson: String) throws  -> String
+    
+    /**
      * Cross-account contact search: local hits first, then external (each
      * adapter caps its own result; external errors are swallowed per-adapter).
      * Returns a JSON `Contact[]`. Mirrors the desktop `search_contacts` — for
@@ -2728,6 +2739,17 @@ public protocol HostProtocol: AnyObject, Sendable {
      * desktop `test_*_connection` commands.
      */
     func testAccountJson(requestJson: String) throws 
+    
+    /**
+     * Probe an adapter that declares a schema, from the form's own values.
+     *
+     * The twin of the desktop `test_account`, and the reason it exists rather
+     * than reusing [`Self::test_account_json`]: the values are split by the
+     * SAME `plan_new_account` the connect call uses, so a test and a connect
+     * cannot disagree about what a field means. The older entry point takes an
+     * already-split config, which puts that decision in the caller.
+     */
+    func testAccountValuesJson(requestJson: String) throws 
     
     /**
      * Pin a user-confirmed SFTP host-key fingerprint for `host_port` (§19.5 —
@@ -4304,6 +4326,24 @@ open func resumeStaleDeviceJson()throws  -> String  {
 }
     
     /**
+     * Run one action an adapter declared on its connect form, and return the
+     * values the form should now carry, keyed by FIELD key.
+     *
+     * The twin of the desktop `run_account_action`. Nothing here knows what any
+     * action does: the manifest says which entry point to drive, which fields
+     * must be filled first, which values become which arguments, and which
+     * results land back in which fields.
+     */
+open func runAccountActionJson(requestJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_run_account_action_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(requestJson),$0
+    )
+})
+}
+    
+    /**
      * Cross-account contact search: local hits first, then external (each
      * adapter caps its own result; external errors are swallowed per-adapter).
      * Returns a JSON `Contact[]`. Mirrors the desktop `search_contacts` — for
@@ -4749,6 +4789,23 @@ open func tasksJson(listId: String)throws  -> String  {
      */
 open func testAccountJson(requestJson: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_test_account_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(requestJson),$0
+    )
+}
+}
+    
+    /**
+     * Probe an adapter that declares a schema, from the form's own values.
+     *
+     * The twin of the desktop `test_account`, and the reason it exists rather
+     * than reusing [`Self::test_account_json`]: the values are split by the
+     * SAME `plan_new_account` the connect call uses, so a test and a connect
+     * cannot disagree about what a field means. The older entry point takes an
+     * already-split config, which puts that decision in the caller.
+     */
+open func testAccountValuesJson(requestJson: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_test_account_values_json(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(requestJson),$0
     )
@@ -8744,6 +8801,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_resume_stale_device_json() != 29568) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_run_account_action_json() != 25956) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_search_contacts_json() != 56276) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -8832,6 +8892,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_test_account_json() != 9266) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_test_account_values_json() != 62886) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_trust_sftp_host_key() != 43040) {

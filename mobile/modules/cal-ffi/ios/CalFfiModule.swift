@@ -188,6 +188,14 @@ public class CalFfiModule: Module {
       try self.host.testAccountJson(requestJson: requestJson)
     }.runOnQueue(slowQueue)
 
+    AsyncFunction("testAccountValuesJson") { (requestJson: String) in
+      try self.host.testAccountValuesJson(requestJson: requestJson)
+    }.runOnQueue(slowQueue)
+
+    AsyncFunction("runAccountActionJson") { (requestJson: String) -> String in
+      try self.host.runAccountActionJson(requestJson: requestJson)
+    }.runOnQueue(slowQueue)
+
     AsyncFunction("deleteAccount") { (accountId: String) in
       try self.host.deleteAccount(accountId: accountId)
     }

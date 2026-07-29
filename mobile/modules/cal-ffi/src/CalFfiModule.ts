@@ -89,6 +89,10 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  and runs the kind's read probe. Resolves if the creds work; rejects with
    *  the typed error otherwise. */
   testAccountJson(requestJson: string): Promise<void>;
+  /** Probe an adapter that declares a schema, from the form's own values. */
+  testAccountValuesJson(requestJson: string): Promise<void>;
+  /** Run a declared connect-form action; resolves to the fills as JSON. */
+  runAccountActionJson(requestJson: string): Promise<string>;
   /** Delete an account: unregister its adapter, clear its secrets, drop the
    *  row. Rejects when deleting the implicit local account. */
   deleteAccount(accountId: string): Promise<void>;

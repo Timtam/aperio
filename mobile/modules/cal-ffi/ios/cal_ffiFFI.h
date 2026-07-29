@@ -1127,6 +1127,11 @@ void uniffi_cal_ffi_fn_method_host_respond_to_event(uint64_t ptr, RustBuffer cal
 RustBuffer uniffi_cal_ffi_fn_method_host_resume_stale_device_json(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_RUN_ACCOUNT_ACTION_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_RUN_ACCOUNT_ACTION_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_run_account_action_json(uint64_t ptr, RustBuffer request_json, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SEARCH_CONTACTS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SEARCH_CONTACTS_JSON
 RustBuffer uniffi_cal_ffi_fn_method_host_search_contacts_json(uint64_t ptr, RustBuffer query, RustCallStatus *_Nonnull out_status
@@ -1275,6 +1280,11 @@ RustBuffer uniffi_cal_ffi_fn_method_host_tasks_json(uint64_t ptr, RustBuffer lis
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_TEST_ACCOUNT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_TEST_ACCOUNT_JSON
 void uniffi_cal_ffi_fn_method_host_test_account_json(uint64_t ptr, RustBuffer request_json, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_TEST_ACCOUNT_VALUES_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_TEST_ACCOUNT_VALUES_JSON
+void uniffi_cal_ffi_fn_method_host_test_account_values_json(uint64_t ptr, RustBuffer request_json, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_TRUST_SFTP_HOST_KEY
@@ -2395,6 +2405,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_resume_stale_device_json(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_RUN_ACCOUNT_ACTION_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_RUN_ACCOUNT_ACTION_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_run_account_action_json(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SEARCH_CONTACTS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SEARCH_CONTACTS_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_search_contacts_json(void
@@ -2572,6 +2588,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_tasks_json(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_TEST_ACCOUNT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_TEST_ACCOUNT_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_test_account_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_TEST_ACCOUNT_VALUES_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_TEST_ACCOUNT_VALUES_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_test_account_values_json(void
     
 );
 #endif

@@ -27,8 +27,11 @@ import {
   renameAccount,
   requestDeviceCalendarAccess,
   resetAccountSync,
+  runAccountAction,
   setAccountSecret,
+  testAccountValues,
 } from '../api/accounts';
+import type { AccountFormAction } from '@aperio/shared';
 import { getUserPref, setUserPref } from '../api/prefs';
 import {
   connectSchemaAccount,
@@ -44,6 +47,10 @@ import {
 } from '@aperio/shared';
 
 import { AccountSchemaForm } from '../components/AccountSchemaForm';
+
+/// Not an adapter's action — the probe every schema-declaring adapter gets, so
+/// it shares the one busy slot with the declared ones.
+const TEST_ACTION_KEY = '__test__';
 import { AppDialog } from '../components/AppDialog';
 import ContactsPrivacyNoticeModal from '../components/ContactsPrivacyNoticeModal';
 import { FormScrollView } from '../components/FormScrollView';
@@ -143,6 +150,10 @@ export default function AccountsScreen() {
   // Add-form state.
   const [displayName, setDisplayName] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // Which button is running, so exactly one can be busy and the busy one can
+  // rename itself. `null` when nothing is.
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [testMessage, setTestMessage] = useState<string | null>(null);
   // Add flow: 'list' shows the connected accounts + an "Add account" button;
   // 'picker' a provider menu; 'credential'/'oauth' the chosen provider's form —
   // replacing the old always-mounted credential + OAuth forms (one long view).
@@ -280,6 +291,71 @@ export default function AccountsScreen() {
     },
     [i18n.language, t],
   );
+
+  /**
+   * Run an action the adapter declared, and merge what it answers back into
+   * the form. The host checks the requirements too — this copy only saves a
+   * round trip and lets the message name the field the user is standing in.
+   */
+  const runDeclaredAction = useCallback(
+    async (action: AccountFormAction) => {
+      if (!schemaKind) return;
+      setError(null);
+      setTestMessage(null);
+      for (const requirement of action.requires) {
+        const value = formValues[requirement.field];
+        if (typeof value !== 'string' || !value.trim()) {
+          setError(requirement.message);
+          announce(requirement.message);
+          return;
+        }
+      }
+      setBusyAction(action.key);
+      try {
+        const filled = await runAccountAction(
+          schemaKind,
+          action.key,
+          formValues,
+        );
+        setFormValues((prev) => ({ ...prev, ...filled }));
+        if (action.success) {
+          setTestMessage(action.success);
+          announce(action.success);
+        }
+      } catch (err) {
+        const message = errorMessage(err);
+        setError(message);
+        announce(t('mobile.error', { message }));
+      } finally {
+        setBusyAction(null);
+      }
+    },
+    [announce, formValues, schemaKind, t],
+  );
+
+  /**
+   * Probe the entered credentials without saving. The host splits these values
+   * with the same schema the connect call uses, so a test and a connect cannot
+   * disagree about what a field means.
+   */
+  const testSchemaConnection = useCallback(async () => {
+    if (!schemaKind) return;
+    setError(null);
+    setTestMessage(null);
+    setBusyAction(TEST_ACTION_KEY);
+    try {
+      await testAccountValues(schemaKind, formValues);
+      const ok = t('dialogs.accounts.testWorks');
+      setTestMessage(ok);
+      announce(ok);
+    } catch (err) {
+      const message = errorMessage(err);
+      setError(message);
+      announce(t('mobile.error', { message }));
+    } finally {
+      setBusyAction(null);
+    }
+  }, [announce, formValues, schemaKind, t]);
 
   /** Connect an adapter that declared its own form. */
   const addFromSchema = useCallback(async () => {
@@ -876,6 +952,47 @@ export default function AccountsScreen() {
               setFormValues((prev) => ({ ...prev, [key]: value }))
             }
           />
+        )}
+        {/* One button per action the adapter declared, then the probe every
+            schema-declaring adapter gets. No adapter is named here. */}
+        {(formSpec?.actions ?? []).map((action) => (
+          <Pressable
+            key={action.key}
+            accessibilityRole="button"
+            accessibilityLabel={action.label}
+            accessibilityHint={action.hint ?? undefined}
+            accessibilityState={{ disabled: busyAction != null || submitting }}
+            disabled={busyAction != null || submitting}
+            onPress={() => void runDeclaredAction(action)}
+            style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.addButtonText}>
+              {busyAction === action.key && action.busy_label
+                ? action.busy_label
+                : action.label}
+            </Text>
+          </Pressable>
+        ))}
+        {formSpec != null && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('dialogs.accounts.testConnection')}
+            accessibilityState={{ disabled: busyAction != null || submitting }}
+            disabled={busyAction != null || submitting}
+            onPress={() => void testSchemaConnection()}
+            style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.addButtonText}>
+              {busyAction === TEST_ACTION_KEY
+                ? t('dialogs.accounts.testing')
+                : t('dialogs.accounts.testConnection')}
+            </Text>
+          </Pressable>
+        )}
+        {testMessage != null && (
+          <Text style={styles.hint} accessibilityLiveRegion="polite">
+            {testMessage}
+          </Text>
         )}
         {error != null && <Text style={styles.error}>{error}</Text>}
       </AppDialog>

@@ -2551,6 +2551,105 @@ impl Host {
         self.probe_account(&req.adapter_kind, &req.config_json, req.secret.as_deref())
     }
 
+    /// Probe an adapter that declares a schema, from the form's own values.
+    ///
+    /// The twin of the desktop `test_account`, and the reason it exists rather
+    /// than reusing [`Self::test_account_json`]: the values are split by the
+    /// SAME `plan_new_account` the connect call uses, so a test and a connect
+    /// cannot disagree about what a field means. The older entry point takes an
+    /// already-split config, which puts that decision in the caller.
+    pub fn test_account_values_json(&self, request_json: String) -> Result<(), StoreError> {
+        let req: SchemaFormRequest = from_json("test account", &request_json)?;
+        let (_, schema) = self.schema_for(&req.adapter_kind)?;
+        // No OAuth client choice: a probe never signs in, so an adapter
+        // reachable only with a token the sign-in produces has nothing to test
+        // before the account exists, and says so by failing the probe.
+        let plan = host_core::account_setup::plan_new_account(&schema, &req.values, None).map_err(
+            |err| StoreError::InvalidField {
+                field: "values".to_string(),
+                detail: err.to_string(),
+            },
+        )?;
+        // At most one credential reaches a probe; a schema with several would
+        // need the registry to take them all, which no adapter has asked for.
+        let secret = plan.secrets.first().map(|(_, value)| value.as_str());
+        self.probe_account(
+            &AdapterKind::new(&req.adapter_kind),
+            &plan.config_json,
+            secret,
+        )
+    }
+
+    /// Run one action an adapter declared on its connect form, and return the
+    /// values the form should now carry, keyed by FIELD key.
+    ///
+    /// The twin of the desktop `run_account_action`. Nothing here knows what any
+    /// action does: the manifest says which entry point to drive, which fields
+    /// must be filled first, which values become which arguments, and which
+    /// results land back in which fields.
+    pub fn run_account_action_json(&self, request_json: String) -> Result<String, StoreError> {
+        let req: AccountActionRequest = from_json("run account action", &request_json)?;
+        let (plugin_id, schema) = self.schema_for(&req.adapter_kind)?;
+        let action =
+            schema
+                .action(&req.action_key)
+                .cloned()
+                .ok_or_else(|| StoreError::InvalidField {
+                    field: "action_key".to_string(),
+                    detail: "this adapter declares no such action".to_string(),
+                })?;
+
+        // Checked here as well as in the frontend: that copy saves a pointless
+        // round trip, this one is the gate.
+        for requirement in &action.requires {
+            let filled = req
+                .values
+                .get(&requirement.field)
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|v| !v.trim().is_empty());
+            if !filled {
+                return Err(StoreError::InvalidField {
+                    field: requirement.field.clone(),
+                    detail: requirement.message.clone(),
+                });
+            }
+        }
+
+        let mut args = serde_json::Map::new();
+        for (arg, field) in &action.inputs {
+            if let Some(value) = req.values.get(field) {
+                args.insert(arg.clone(), value.clone());
+            }
+        }
+
+        let payload: serde_json::Map<String, serde_json::Value> = match action.entry {
+            plugin_core::account_schema::AccountActionEntry::Discover => {
+                let bytes = self
+                    .runtime
+                    .block_on(
+                        self.plugin_manager
+                            .discover(&plugin_id, &serde_json::Value::Object(args).to_string()),
+                    )
+                    .map_err(|err| StoreError::InvalidField {
+                        field: "action_key".to_string(),
+                        detail: err.to_string(),
+                    })?;
+                serde_json::from_slice(&bytes).map_err(|err| StoreError::InvalidField {
+                    field: "action_key".to_string(),
+                    detail: format!("the plugin's answer was not a JSON object: {err}"),
+                })?
+            }
+        };
+
+        let mut filled = serde_json::Map::new();
+        for (field, result_key) in &action.fills {
+            if let Some(value) = payload.get(result_key) {
+                filled.insert(field.clone(), value.clone());
+            }
+        }
+        to_json(&filled)
+    }
+
     /// Delete an account: unregister its adapter, clear its secrets, and
     /// remove the row. The local account cannot be deleted
     /// ([`StoreError::InvalidField`]).
@@ -7140,9 +7239,37 @@ impl Host {
                 })
             })
             .collect();
+        let resolve = |key: Option<&str>, verbatim: &str| {
+            plugin_core::resolve_label(Some(&strings), key, verbatim, lang).to_string()
+        };
+        let optional = |value: Option<&String>, key: Option<&str>| {
+            value
+                .map(String::as_str)
+                .or(key.map(|_| ""))
+                .map(|verbatim| resolve(key, verbatim))
+                .filter(|s| !s.is_empty())
+        };
+        let actions: Vec<serde_json::Value> = schema
+            .actions
+            .iter()
+            .map(|a| {
+                serde_json::json!({
+                    "key": a.key,
+                    "label": resolve(a.label_key.as_deref(), &a.label),
+                    "busy_label": optional(a.busy_label.as_ref(), a.busy_label_key.as_deref()),
+                    "success": optional(a.success.as_ref(), a.success_key.as_deref()),
+                    "hint": optional(a.hint.as_ref(), a.hint_key.as_deref()),
+                    "requires": a.requires.iter().map(|r| serde_json::json!({
+                        "field": r.field,
+                        "message": resolve(r.message_key.as_deref(), &r.message),
+                    })).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
         let spec = serde_json::json!({
             "plugin_id": plugin_id,
             "fields": fields,
+            "actions": actions,
             "oauth": schema.oauth.as_ref().map(|o| serde_json::json!({
                 "builtin": host_core::account_setup::has_builtin_client(o),
                 "client_id_field": o.client_id_field,
@@ -7804,6 +7931,24 @@ struct ConnectAccountRequest {
     state: String,
     #[serde(default)]
     returned_state: String,
+}
+
+/// The form's own values, for the calls that only need those.
+#[derive(serde::Deserialize)]
+struct SchemaFormRequest {
+    adapter_kind: String,
+    /// Keyed by the schema's field keys.
+    #[serde(default)]
+    values: serde_json::Map<String, serde_json::Value>,
+}
+
+/// …plus which declared action to run.
+#[derive(serde::Deserialize)]
+struct AccountActionRequest {
+    adapter_kind: String,
+    action_key: String,
+    #[serde(default)]
+    values: serde_json::Map<String, serde_json::Value>,
 }
 
 /// A form value as a trimmed string, or `None` when absent or not a string.

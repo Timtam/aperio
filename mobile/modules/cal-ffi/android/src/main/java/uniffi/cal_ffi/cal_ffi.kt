@@ -1070,6 +1070,8 @@ external fun uniffi_cal_ffi_checksum_method_host_respond_to_event(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_resume_stale_device_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_run_account_action_json(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_search_contacts_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_search_json(
@@ -1129,6 +1131,8 @@ external fun uniffi_cal_ffi_checksum_method_host_task_set_member_right(
 external fun uniffi_cal_ffi_checksum_method_host_tasks_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_test_account_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_test_account_values_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_trust_sftp_host_key(
 ): Short
@@ -1460,6 +1464,8 @@ external fun uniffi_cal_ffi_fn_method_host_respond_to_event(`ptr`: Long,`calenda
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_resume_stale_device_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_run_account_action_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_search_contacts_json(`ptr`: Long,`query`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_search_json(`ptr`: Long,`query`: RustBuffer.ByValue,`filtersJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1519,6 +1525,8 @@ external fun uniffi_cal_ffi_fn_method_host_task_set_member_right(`ptr`: Long,`li
 external fun uniffi_cal_ffi_fn_method_host_tasks_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_test_account_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_test_account_values_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_trust_sftp_host_key(`ptr`: Long,`hostPort`: RustBuffer.ByValue,`fingerprint`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -2059,6 +2067,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_resume_stale_device_json() != 29568.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_run_account_action_json() != 25956.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_search_contacts_json() != 56276.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2147,6 +2158,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_test_account_json() != 9266.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_test_account_values_json() != 62886.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_trust_sftp_host_key() != 43040.toShort()) {
@@ -4876,6 +4890,17 @@ public interface HostInterface {
     fun `resumeStaleDeviceJson`(): kotlin.String
     
     /**
+     * Run one action an adapter declared on its connect form, and return the
+     * values the form should now carry, keyed by FIELD key.
+     *
+     * The twin of the desktop `run_account_action`. Nothing here knows what any
+     * action does: the manifest says which entry point to drive, which fields
+     * must be filled first, which values become which arguments, and which
+     * results land back in which fields.
+     */
+    fun `runAccountActionJson`(`requestJson`: kotlin.String): kotlin.String
+    
+    /**
      * Cross-account contact search: local hits first, then external (each
      * adapter caps its own result; external errors are swallowed per-adapter).
      * Returns a JSON `Contact[]`. Mirrors the desktop `search_contacts` — for
@@ -5117,6 +5142,17 @@ public interface HostInterface {
      * desktop `test_*_connection` commands.
      */
     fun `testAccountJson`(`requestJson`: kotlin.String)
+    
+    /**
+     * Probe an adapter that declares a schema, from the form's own values.
+     *
+     * The twin of the desktop `test_account`, and the reason it exists rather
+     * than reusing [`Self::test_account_json`]: the values are split by the
+     * SAME `plan_new_account` the connect call uses, so a test and a connect
+     * cannot disagree about what a field means. The older entry point takes an
+     * already-split config, which puts that decision in the caller.
+     */
+    fun `testAccountValuesJson`(`requestJson`: kotlin.String)
     
     /**
      * Pin a user-confirmed SFTP host-key fingerprint for `host_port` (§19.5 —
@@ -7149,6 +7185,29 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Run one action an adapter declared on its connect form, and return the
+     * values the form should now carry, keyed by FIELD key.
+     *
+     * The twin of the desktop `run_account_action`. Nothing here knows what any
+     * action does: the manifest says which entry point to drive, which fields
+     * must be filled first, which values become which arguments, and which
+     * results land back in which fields.
+     */
+    @Throws(StoreException::class)override fun `runAccountActionJson`(`requestJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_run_account_action_json(
+        it,
+        FfiConverterString.lower(`requestJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Cross-account contact search: local hits first, then external (each
      * adapter caps its own result; external errors are swallowed per-adapter).
      * Returns a JSON `Contact[]`. Mirrors the desktop `search_contacts` — for
@@ -7725,6 +7784,28 @@ open class Host: Disposable, AutoCloseable, HostInterface
     callWithHandle {
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_method_host_test_account_json(
+        it,
+        FfiConverterString.lower(`requestJson`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Probe an adapter that declares a schema, from the form's own values.
+     *
+     * The twin of the desktop `test_account`, and the reason it exists rather
+     * than reusing [`Self::test_account_json`]: the values are split by the
+     * SAME `plan_new_account` the connect call uses, so a test and a connect
+     * cannot disagree about what a field means. The older entry point takes an
+     * already-split config, which puts that decision in the caller.
+     */
+    @Throws(StoreException::class)override fun `testAccountValuesJson`(`requestJson`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_test_account_values_json(
         it,
         FfiConverterString.lower(`requestJson`),_status)
 }
