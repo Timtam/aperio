@@ -40,6 +40,35 @@ pub struct VcVtable {
     /// `delete_meeting(MeetingId) -> ()` — drop the meeting on
     /// the provider side.
     pub delete_meeting: Option<VtableMethodFn>,
+
+    // ── ABI 3 ──────────────────────────────────────────────────
+    /// `resolve_meeting(join_url) -> Option<Meeting>` — the
+    /// meeting a join link belongs to.
+    ///
+    /// The link is the only identifier that reaches the calendar:
+    /// it travels in the event, where every client can read it,
+    /// while the provider's own meeting id does not. Without this
+    /// the host can only manage meetings it created ITSELF and
+    /// still remembers locally — not one made in the provider's
+    /// own UI, not one made by another device, not one an
+    /// invitation brought in.
+    ///
+    /// NULL when the provider has no lookup by link. Not every
+    /// one does, which is why this is a slot and not a
+    /// requirement.
+    pub resolve_meeting: Option<VtableMethodFn>,
+
+    /// `list_meetings(DateRange) -> Vec<Meeting>` — the account's
+    /// scheduled meetings in a window.
+    ///
+    /// Lets the host surface meetings that have no calendar entry
+    /// at all — the ones created straight in the provider's web
+    /// UI, which otherwise exist only there and are invisible in
+    /// a calendar app.
+    ///
+    /// NULL when the provider cannot enumerate; the host then
+    /// simply offers no such view.
+    pub list_meetings: Option<VtableMethodFn>,
 }
 
 impl VcVtable {
@@ -50,6 +79,8 @@ impl VcVtable {
             create_meeting: None,
             get_meeting: None,
             delete_meeting: None,
+            resolve_meeting: None,
+            list_meetings: None,
         }
     }
 

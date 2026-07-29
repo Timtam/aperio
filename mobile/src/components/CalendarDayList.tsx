@@ -25,7 +25,10 @@ import type {
   TaskList,
   TimedSpan,
 } from '@aperio/shared';
-import { eventInstanceKey } from '@aperio/shared';
+import {
+  eventInstanceKey,
+  withoutDuplicateMeetings,
+} from '@aperio/shared';
 import {
   assigneeSuffix,
   daysCoveredKeys,
@@ -662,7 +665,15 @@ export function CalendarDayList({
       setTaskLists(lists);
       // Expand recurring series across the whole window so an event recurring
       // mid-window isn't invisible after its first occurrence (rrule + EXDATE).
-      setEvents(expandAll(perCalendar.flat(), { start: range.start, end: range.end }));
+      // Meetings a videoconference account contributes are dropped when a real
+      // event already shows the same meeting, matched on the join URL. Same
+      // shared rule the desktop runs, and the same reason it lives here: this
+      // is where the whole window's events are in hand.
+      setEvents(
+        withoutDuplicateMeetings(
+          expandAll(perCalendar.flat(), { start: range.start, end: range.end }),
+        ),
+      );
       setTasks(perList.flat());
       setSections(perListSections.flat());
       hasLoadedRef.current = true;

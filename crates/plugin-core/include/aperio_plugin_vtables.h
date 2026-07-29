@@ -254,6 +254,21 @@ typedef struct AperioVcVtable {
     AperioVtableMethodFn create_meeting; /* NewMeeting -> Meeting */
     AperioVtableMethodFn get_meeting;    /* MeetingId -> Option<Meeting> */
     AperioVtableMethodFn delete_meeting; /* MeetingId -> () */
+
+    /* ── ABI 3 ─────────────────────────────────────────────────────────
+     * resolve_meeting: {join_url} -> Option<Meeting>. The link is the
+     * only identifier that reaches the calendar — the provider's meeting
+     * id does not travel in an event. Without it the host can manage
+     * only meetings it created itself and still remembers locally.
+     *
+     * list_meetings: {start,end} -> Meeting[]. Lets the host surface
+     * meetings that have no calendar entry at all, e.g. ones created in
+     * the provider's own web UI.
+     *
+     * Both are NULL when the provider cannot do it; the host then omits
+     * the corresponding affordance rather than failing. */
+    AperioVtableMethodFn resolve_meeting;
+    AperioVtableMethodFn list_meetings;
 } AperioVcVtable;
 
 #ifdef __cplusplus

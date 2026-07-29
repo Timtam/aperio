@@ -1139,6 +1139,25 @@ impl AdapterRegistry {
         match manifest.plugin_type {
             plugin_core::PluginType::VideoconferenceAdapter => {
                 self.insert_vc(&account.id, instance)?;
+                // An adapter that can enumerate its meetings also gets a
+                // read-only calendar built from them, so meetings created in
+                // the provider's own web UI — which have no calendar entry
+                // anywhere — become visible. Whether it can is decided by the
+                // adapter: `list_meetings` answers Unsupported when the slot is
+                // NULL, and then there is simply no such calendar.
+                if let Some(vc) = self.vc_adapter(&account.id) {
+                    if vc.can_list_meetings() {
+                        let calendar = crate::vc_calendar::VcCalendar::new(
+                            &account.id,
+                            &account.display_name,
+                            vc,
+                        );
+                        self.external_cal
+                            .write()
+                            .expect("registry cal poison")
+                            .insert(account.id.clone(), Arc::new(calendar));
+                    }
+                }
             }
             plugin_core::PluginType::CalendarAdapter => {
                 if manifest.has_capability(&plugin_core::Capability::Calendar) {

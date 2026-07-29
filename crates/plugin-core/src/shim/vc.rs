@@ -39,6 +39,8 @@ struct VtableSnapshot {
     create_meeting: Option<crate::vtables::VtableMethodFn>,
     get_meeting: Option<crate::vtables::VtableMethodFn>,
     delete_meeting: Option<crate::vtables::VtableMethodFn>,
+    resolve_meeting: Option<crate::vtables::VtableMethodFn>,
+    list_meetings: Option<crate::vtables::VtableMethodFn>,
 }
 
 impl FfiVcAdapter {
@@ -91,6 +93,8 @@ impl FfiVcAdapter {
             create_meeting: vtable_ref.create_meeting,
             get_meeting: vtable_ref.get_meeting,
             delete_meeting: vtable_ref.delete_meeting,
+            resolve_meeting: vtable_ref.resolve_meeting,
+            list_meetings: vtable_ref.list_meetings,
         };
         let handle_addr = instance.handle() as usize;
         let in_flight = Arc::clone(plugin.in_flight_handle());
@@ -179,5 +183,33 @@ impl VcAdapter for FfiVcAdapter {
     async fn delete_meeting(&self, id: &MeetingId) -> VcResult<()> {
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_for_unit(self.vtable.delete_meeting, self.handle_addr, id).await
+    }
+
+    fn can_list_meetings(&self) -> bool {
+        self.vtable.list_meetings.is_some()
+    }
+
+    async fn resolve_meeting(&self, join_url: &str) -> VcResult<Option<Meeting>> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
+        call_then_decode(
+            self.vtable.resolve_meeting,
+            self.handle_addr,
+            &serde_json::json!({ "join_url": join_url }),
+        )
+        .await
+    }
+
+    async fn list_meetings(
+        &self,
+        start: chrono::DateTime<chrono::Utc>,
+        end: chrono::DateTime<chrono::Utc>,
+    ) -> VcResult<Vec<Meeting>> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
+        call_then_decode(
+            self.vtable.list_meetings,
+            self.handle_addr,
+            &serde_json::json!({ "start": start, "end": end }),
+        )
+        .await
     }
 }

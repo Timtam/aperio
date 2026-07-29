@@ -36,7 +36,7 @@ use crate::error::{PluginError, PluginResult};
 ///   The change unblocks DESIGN.md §6.4 (multiple accounts per
 ///   adapter type) — a single loaded library can now back N
 ///   independent adapter instances.
-pub const ABI_VERSION: u32 = 2;
+pub const ABI_VERSION: u32 = 3;
 
 /// Three-component semantic version. Only the (major, minor, patch)
 /// tuple is preserved — pre-release / build metadata gets dropped

@@ -192,8 +192,27 @@ impl ApiState {
         path: &str,
         body: Option<&B>,
     ) -> VcResult<(reqwest::StatusCode, String)> {
+        self.request_paged(method, path, body)
+            .await
+            .map(|(status, text, _)| (status, text))
+    }
+
+    /// [`Self::request`], keeping the paging cursor. Takes a FULL url when the
+    /// caller is following a cursor, since Webex's `Link` header is absolute.
+    async fn request_paged<B: Serialize + ?Sized>(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&B>,
+    ) -> VcResult<(reqwest::StatusCode, String, Option<String>)> {
         let refreshed = self.refresh_if_needed().await?;
-        let url = format!("{}{path}", self.api_base);
+        // A cursor from the Link header is already absolute; a caller-built
+        // path is relative to the API base.
+        let url = if path.starts_with("http://") || path.starts_with("https://") {
+            path.to_string()
+        } else {
+            format!("{}{path}", self.api_base)
+        };
 
         let response = self.send_once(&method, &url, body).await?;
         // A 401 after a valid-looking token means it was revoked out of band —
@@ -216,12 +235,18 @@ impl ApiState {
         Ok(response)
     }
 
+    /// One attempt.
+    ///
+    /// The third element is the RFC 5988 `rel="next"` cursor, when the response
+    /// carried one. Webex pages its listings through a `Link` HEADER rather
+    /// than through the body, so a caller that only ever looks at the JSON
+    /// silently reads the first page and calls it the whole answer.
     async fn send_once<B: Serialize + ?Sized>(
         &self,
         method: &reqwest::Method,
         url: &str,
         body: Option<&B>,
-    ) -> VcResult<(reqwest::StatusCode, String)> {
+    ) -> VcResult<(reqwest::StatusCode, String, Option<String>)> {
         let mut req = self
             .http
             .request(method.clone(), url)
@@ -249,6 +274,11 @@ impl ApiState {
             .get("retry-after")
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned);
+        let next = response
+            .headers()
+            .get("link")
+            .and_then(|v| v.to_str().ok())
+            .and_then(next_link);
         let text = response
             .text()
             .await
@@ -257,7 +287,7 @@ impl ApiState {
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             return Err(rate_limited(&text, retry_after.as_deref()));
         }
-        Ok((status, text))
+        Ok((status, text, next))
     }
 
     /// GET a path and decode it, mapping the failure statuses.
@@ -279,6 +309,23 @@ impl ApiState {
             return Err(map_status(status, &text, path));
         }
         decode(&text, path).map(Some)
+    }
+
+    /// GET a path and decode it, returning the `rel="next"` cursor alongside.
+    ///
+    /// The cursor is an absolute URL and is handed straight back to this
+    /// method to fetch the following page.
+    pub async fn get_json_paged<T: DeserializeOwned>(
+        &self,
+        path: &str,
+    ) -> VcResult<(T, Option<String>)> {
+        let (status, text, next) = self
+            .request_paged::<()>(reqwest::Method::GET, path, None)
+            .await?;
+        if !status.is_success() {
+            return Err(map_status(status, &text, path));
+        }
+        Ok((decode(&text, path)?, next))
     }
 
     pub async fn post_json<B: Serialize, T: DeserializeOwned>(
@@ -355,6 +402,39 @@ fn map_status(status: reqwest::StatusCode, body: &str, path: &str) -> VcError {
             "Webex answered in a way Aperio did not expect. {detail}"
         )),
     }
+}
+
+/// The `rel="next"` URL out of an RFC 5988 `Link` header, if there is one.
+///
+/// Deliberately tolerant about spacing and quoting and strict about the
+/// relation: a `prev` cursor followed as if it were `next` would page
+/// backwards forever.
+fn next_link(header: &str) -> Option<String> {
+    for part in header.split(',') {
+        let mut segments = part.split(';');
+        let Some(target) = segments.next() else {
+            continue;
+        };
+        let target = target.trim();
+        let Some(url) = target
+            .strip_prefix('<')
+            .and_then(|rest| rest.strip_suffix('>'))
+        else {
+            continue;
+        };
+        let is_next = segments.any(|param| {
+            let param = param.trim();
+            let Some((key, value)) = param.split_once('=') else {
+                return false;
+            };
+            key.trim().eq_ignore_ascii_case("rel")
+                && value.trim().trim_matches('"').eq_ignore_ascii_case("next")
+        });
+        if is_next && !url.trim().is_empty() {
+            return Some(url.trim().to_string());
+        }
+    }
+    None
 }
 
 fn rate_limited(body: &str, retry_after: Option<&str>) -> VcError {

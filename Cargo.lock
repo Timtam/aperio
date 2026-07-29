@@ -1133,6 +1133,7 @@ dependencies = [
  "tracing-subscriber",
  "uniffi",
  "uuid",
+ "vc-core",
 ]
 
 [[package]]
@@ -7965,6 +7966,7 @@ name = "vc-adapter-webex-plugin"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "plugin-core",
  "plugin-sdk",
  "reqwest 0.12.28",

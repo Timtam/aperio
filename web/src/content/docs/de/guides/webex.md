@@ -97,6 +97,27 @@ Den Entfernen-Knopf siehst du nur bei Meetings, die **Aperio angelegt hat**. Ein
 Termin mit dem Webex-Link eines Kollegen bekommt einen Beitreten-Knopf und sonst
 nichts — dieses Meeting zu löschen steht dir nicht zu.
 
+## Meetings ohne Kalendereintrag
+
+Ein Meeting, das du direkt in Webex' eigener Weboberfläche anlegst, existiert
+nur dort. Es hat keinen Kalendereintrag, also hat es nie eine Kalender-App
+angezeigt — die erste Erinnerung ist der Beginn.
+
+Sobald ein Webex-Konto verbunden ist, legt Aperio einen **schreibgeschützten
+Kalender mit dem Namen dieses Kontos** an, in dem genau diese Meetings stehen.
+Er verhält sich wie jeder andere Kalender: in der Seitenleiste ein- und
+ausschalten, in Tages- und Wochenansicht sehen, aus dem Kontextmenü beitreten.
+
+Es erscheinen nur Meetings **ohne** Kalendereintrag. Eines, das schon einen hat
+— weil Aperio es angelegt hat oder eine Einladung es mitgebracht hat — steht
+nicht doppelt da. Die beiden werden über den Beitrittslink zusammengeführt, und
+der ist eindeutig.
+
+Der Kalender lässt sich nicht bearbeiten. Er zeigt, was bei Webex existiert; um
+ein Meeting anzulegen, trägst du einen Termin in einen deiner eigenen Kalender
+ein und benutzt dort **Meeting erzeugen**. Dein dauerhafter persönlicher Raum
+taucht ebenfalls nicht auf: er ist immer offen, und das ist gerade kein Termin.
+
 ## Was du wissen solltest
 
 **Ein Meeting pro Termin, auch bei Wiederholungen.** Eine Serie teilt sich ein

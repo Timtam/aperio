@@ -26,3 +26,4 @@ export * from './eventKey';
 export * from './eventDateTime';
 export * from './accountSchema';
 export * from './conferencing';
+export * from './meetingEvents';

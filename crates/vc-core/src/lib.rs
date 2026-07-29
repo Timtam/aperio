@@ -205,4 +205,56 @@ pub trait VcAdapter: Send + Sync {
     /// deletes the event itself with "also delete provider-
     /// side meeting" confirmed.
     async fn delete_meeting(&self, id: &MeetingId) -> VcResult<()>;
+
+    /// The meeting a join link belongs to, or `None` when the provider has
+    /// none for it.
+    ///
+    /// The link is the only identifier that reaches a calendar. It travels in
+    /// the event, where Outlook, a phone and a colleague's client all read it;
+    /// the provider's own meeting id travels nowhere. Without this the host can
+    /// manage only meetings it created *itself* and still has a local record
+    /// of — not one made in the provider's own web UI, not one made on the
+    /// user's other device, not one an invitation brought in.
+    ///
+    /// Defaults to [`VcError::Unsupported`]: not every provider offers a lookup
+    /// by link, and one that does not is not broken.
+    async fn resolve_meeting(&self, join_url: &str) -> VcResult<Option<Meeting>> {
+        let _ = join_url;
+        Err(VcError::Unsupported(
+            "this provider cannot look a meeting up by its join link".into(),
+        ))
+    }
+
+    /// Whether [`Self::list_meetings`] is actually wired.
+    ///
+    /// Synchronous and free, because the caller needs it while DECIDING
+    /// whether to offer a meetings calendar at all — a decision made on a
+    /// registration path that cannot await, and one that must not be made by
+    /// calling the provider.
+    ///
+    /// Behind the plugin ABI this is exactly "is the vtable slot non-NULL",
+    /// which is the ABI's own answer to the same question. A manifest flag
+    /// beside it would be a second source of one truth, free to disagree.
+    fn can_list_meetings(&self) -> bool {
+        false
+    }
+
+    /// The account's scheduled meetings between `start` and `end`.
+    ///
+    /// What makes meetings *without* a calendar entry visible at all — the ones
+    /// created straight in the provider's web UI, which otherwise exist only
+    /// there. The host surfaces them as read-only events.
+    ///
+    /// Defaults to [`VcError::Unsupported`]; a provider that cannot enumerate
+    /// simply gets no such view.
+    async fn list_meetings(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> VcResult<Vec<Meeting>> {
+        let _ = (start, end);
+        Err(VcError::Unsupported(
+            "this provider cannot list meetings".into(),
+        ))
+    }
 }

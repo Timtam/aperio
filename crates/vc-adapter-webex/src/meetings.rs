@@ -103,6 +103,13 @@ struct Site {
     default: bool,
 }
 
+/// One page of `GET /meetings`.
+#[derive(Debug, Deserialize)]
+struct MeetingListResponse {
+    #[serde(default)]
+    items: Vec<MeetingResponse>,
+}
+
 #[derive(Debug, Deserialize)]
 struct PersonalRoomResponse {
     #[serde(rename = "personalMeetingRoomLink", default)]
@@ -214,6 +221,99 @@ pub async fn get_meeting(state: &ApiState, id: &MeetingId) -> VcResult<Option<Me
         None => Ok(None),
     }
 }
+
+/// The meeting a join link belongs to.
+///
+/// `GET /meetings?webLink=…` is Webex's own reverse lookup, and it is the
+/// reason the host can manage a meeting it did not create: the link is what
+/// travels in a calendar event, the meeting id is not. Webex documents that
+/// `webLink` makes `from`, `to`, `meetingType`, `state` and `siteUrl`
+/// irrelevant, and that it cannot be combined with `meetingNumber` or `roomId`
+/// — so this sends the link and nothing else.
+///
+/// `None` when Webex knows no meeting for the link, which is the normal answer
+/// for a colleague's meeting on a site this account cannot see.
+pub async fn resolve_meeting(state: &ApiState, join_url: &str) -> VcResult<Option<Meeting>> {
+    let join_url = join_url.trim();
+    if join_url.is_empty() {
+        return Ok(None);
+    }
+    let path = format!("/meetings?webLink={}", urlencode(join_url));
+    let page: MeetingListResponse = match state.get_json_opt(&path).await? {
+        Some(page) => page,
+        None => return Ok(None),
+    };
+    // An array is documented even for a single link. Take the first that
+    // converts — a row without a web link is not a joinable meeting and
+    // `to_meeting` rejects it.
+    for raw in page.items {
+        if let Ok(meeting) = to_meeting(raw) {
+            return Ok(Some(meeting));
+        }
+    }
+    Ok(None)
+}
+
+/// The account's scheduled meetings between `start` and `end`.
+///
+/// What makes a meeting created in Webex's own web UI visible in a calendar at
+/// all: it has no calendar entry anywhere, so nothing else would ever surface
+/// it.
+///
+/// Both bounds are always sent. Webex's default when `from` is omitted is
+/// "`to` minus seven days", which is a different window than the caller asked
+/// for and would silently under-report.
+///
+/// Paging follows the `Link` header (RFC 5988), which Webex uses across its
+/// API. The page count is bounded — a runaway `next` chain would otherwise turn
+/// one calendar scroll into an unbounded walk, and a plugin call has no
+/// cancellation.
+pub async fn list_meetings(
+    state: &ApiState,
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+) -> VcResult<Vec<Meeting>> {
+    if end < start {
+        return Err(VcError::InvalidInput(
+            "the end of the window is before its start".into(),
+        ));
+    }
+    let mut path = format!(
+        "/meetings?from={}&to={}&max={MAX_PER_PAGE}",
+        urlencode(&wire_time(start)),
+        urlencode(&wire_time(end)),
+    );
+    let mut out = Vec::new();
+    for _ in 0..MAX_PAGES {
+        let (page, next): (MeetingListResponse, Option<String>) =
+            state.get_json_paged(&path).await?;
+        // A row Webex returns that carries no join link is not something a user
+        // can be sent to, so it is dropped rather than surfaced as an event
+        // that does nothing when activated.
+        out.extend(
+            page.items
+                .into_iter()
+                .filter_map(|raw| to_meeting(raw).ok()),
+        );
+        match next {
+            Some(next) => path = next,
+            None => return Ok(out),
+        }
+    }
+    // Stopping is better than walking forever, but saying nothing about it
+    // would make a truncated calendar look like an empty one.
+    tracing::warn!(
+        pages = MAX_PAGES,
+        "stopped paging Webex meetings at the page cap; the window may be incomplete"
+    );
+    Ok(out)
+}
+
+/// Webex's per-page ceiling for meeting listings.
+const MAX_PER_PAGE: u32 = 100;
+/// How many pages one listing may walk. 100 × 100 meetings is far past any
+/// real calendar window; beyond it something is wrong with the cursor.
+const MAX_PAGES: usize = 100;
 
 /// Drop a meeting on Webex's side.
 ///

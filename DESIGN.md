@@ -3091,7 +3091,23 @@ optionale Sub-Vtables je Fähigkeit enthält:
 Die anderen Typen zeigen direkt auf ihre Vtable: `sync-adapter` auf
 `AperioSyncVtable`, `videoconference-adapter` auf `AperioVcVtable` mit den
 Slots `test_connection`, `create_meeting`, `get_meeting`, `delete_meeting`
-(Spiegel von `vc_core::VcAdapter`, siehe Abschnitt 11).
+(Spiegel von `vc_core::VcAdapter`, siehe Abschnitt 11). Seit **ABI 3** kommen
+`resolve_meeting` und `list_meetings` hinzu:
+
+- `resolve_meeting(join_url)` löst den Beitrittslink exakt zu seinem Meeting auf.
+  Der Link ist die einzige Kennung, die im Kalendertermin ankommt — die
+  Meeting-ID des Anbieters reist nirgendwohin. Ohne diesen Slot kann der Host
+  nur Meetings verwalten, die er selbst angelegt hat und lokal noch erinnert:
+  nicht eines aus der Weboberfläche des Anbieters, nicht eines vom Zweitgerät,
+  nicht eines aus einer Einladung.
+- `list_meetings(start, end)` zählt die geplanten Meetings eines Zeitraums auf.
+  Erst das macht Meetings **ohne Kalendereintrag** überhaupt sichtbar; der Host
+  baut daraus einen schreibgeschützten Kalender (`host_core::vc_calendar`).
+
+Beide Slots dürfen NULL sein — nicht jeder Anbieter kann das, und wer es nicht
+kann, ist nicht kaputt: der Host lässt die jeweilige Möglichkeit dann einfach
+weg. Das Anhängen dieser beiden Slots ist der Grund für die ABI-Erhöhung von 2
+auf 3 (siehe den Kasten unten).
 
 > **Slots anhängen ist derzeit nur zusammen mit einer ABI-Erhöhung sicher.**
 > Das Feld `vtable_version` wird von jedem Plugin gesetzt, vom Host aber noch

@@ -3,7 +3,7 @@
   "name": "Aperio WebDAV",
   "version": "0.1.0",
   "plugin_type": "sync-adapter",
-  "abi_version": 2,
+  "abi_version": 3,
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled sync adapter for WebDAV servers — Nextcloud, ownCloud, Apache mod_dav, IIS WebDAV, …",

@@ -149,11 +149,52 @@ unsafe extern "C" fn ffi_delete_meeting(
     dispatch_unit(h, move |p| async move { p.delete_meeting(&id).await })
 }
 
+unsafe extern "C" fn ffi_resolve_meeting(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: ResolveMeetingArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.resolve_meeting(&args.join_url).await
+    })
+}
+
+unsafe extern "C" fn ffi_list_meetings(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let args: ListMeetingsArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.list_meetings(args.start, args.end).await
+    })
+}
+
+/// Argument shapes for the two ABI-3 slots. The keys mirror the Rust parameter
+/// names, as every other vtable call does.
+#[derive(Debug, Deserialize)]
+struct ResolveMeetingArgs {
+    join_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ListMeetingsArgs {
+    start: chrono::DateTime<chrono::Utc>,
+    end: chrono::DateTime<chrono::Utc>,
+}
+
 pub static VC_VTABLE: VcVtable = VcVtable {
     test_connection: Some(ffi_test_connection),
     create_meeting: Some(ffi_create_meeting),
     get_meeting: Some(ffi_get_meeting),
     delete_meeting: Some(ffi_delete_meeting),
+    // ABI 3: the link→meeting lookup that lets the host manage a meeting it did
+    // not create, and the listing that surfaces meetings with no calendar entry.
+    resolve_meeting: Some(ffi_resolve_meeting),
+    list_meetings: Some(ffi_list_meetings),
     ..VcVtable::empty()
 };
 

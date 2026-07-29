@@ -1790,7 +1790,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_account_form_spec_json() != 41169.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_accounts_json() != 21992.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_accounts_json() != 39337.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_add_event_exdate_json() != 38156.toShort()) {
@@ -4095,7 +4095,14 @@ public interface HostInterface {
     fun `accountFormSpecJson`(`adapterKind`: kotlin.String): kotlin.String
     
     /**
-     * All persisted accounts as JSON (the `cal_core`/desktop wire shape).
+     * All persisted accounts as JSON (the `cal_core`/desktop wire shape),
+     * each with the derived flags the desktop listing also carries.
+     *
+     * `is_videoconference` comes from the plugin's declared TYPE rather than
+     * from a list of provider names, so an adapter added later is offered by
+     * the editor's "create meeting" control without a change here or in the
+     * UI. `plugin_loaded` mirrors the desktop's, so a missing plugin reads the
+     * same on both platforms.
      */
     fun `accountsJson`(): kotlin.String
     
@@ -5329,7 +5336,14 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
-     * All persisted accounts as JSON (the `cal_core`/desktop wire shape).
+     * All persisted accounts as JSON (the `cal_core`/desktop wire shape),
+     * each with the derived flags the desktop listing also carries.
+     *
+     * `is_videoconference` comes from the plugin's declared TYPE rather than
+     * from a list of provider names, so an adapter added later is offered by
+     * the editor's "create meeting" control without a change here or in the
+     * UI. `plugin_loaded` mirrors the desktop's, so a missing plugin reads the
+     * same on both platforms.
      */
     @Throws(StoreException::class)override fun `accountsJson`(): kotlin.String {
             return FfiConverterString.lift(

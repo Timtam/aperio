@@ -1720,7 +1720,14 @@ public protocol HostProtocol: AnyObject, Sendable {
     func accountFormSpecJson(adapterKind: String) throws  -> String
     
     /**
-     * All persisted accounts as JSON (the `cal_core`/desktop wire shape).
+     * All persisted accounts as JSON (the `cal_core`/desktop wire shape),
+     * each with the derived flags the desktop listing also carries.
+     *
+     * `is_videoconference` comes from the plugin's declared TYPE rather than
+     * from a list of provider names, so an adapter added later is offered by
+     * the editor's "create meeting" control without a change here or in the
+     * UI. `plugin_loaded` mirrors the desktop's, so a missing plugin reads the
+     * same on both platforms.
      */
     func accountsJson() throws  -> String
     
@@ -2915,7 +2922,14 @@ open func accountFormSpecJson(adapterKind: String)throws  -> String  {
 }
     
     /**
-     * All persisted accounts as JSON (the `cal_core`/desktop wire shape).
+     * All persisted accounts as JSON (the `cal_core`/desktop wire shape),
+     * each with the derived flags the desktop listing also carries.
+     *
+     * `is_videoconference` comes from the plugin's declared TYPE rather than
+     * from a list of provider names, so an adapter added later is offered by
+     * the editor's "create meeting" control without a change here or in the
+     * UI. `plugin_loaded` mirrors the desktop's, so a missing plugin reads the
+     * same on both platforms.
      */
 open func accountsJson()throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
@@ -8422,7 +8436,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_account_form_spec_json() != 41169) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_accounts_json() != 21992) {
+    if (uniffi_cal_ffi_checksum_method_host_accounts_json() != 39337) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_add_event_exdate_json() != 38156) {

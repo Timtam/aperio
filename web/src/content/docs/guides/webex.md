@@ -93,6 +93,26 @@ You will see the remove button only for meetings **Aperio created**. An event
 carrying a colleague's Webex link gets a Join button and nothing else — that
 meeting is not yours to delete.
 
+## Meetings that have no calendar entry
+
+A meeting you create straight in Webex's own web interface exists only there. It
+has no calendar entry, so no calendar app has ever shown it — the first reminder
+you get is the meeting starting.
+
+Once a Webex account is connected, Aperio adds a **read-only calendar named
+after that account**, holding exactly those meetings. It behaves like any other
+calendar: toggle it in the sidebar, see the meetings in the day and week views,
+join them from the context menu.
+
+It shows only meetings with **no** calendar entry. A meeting that already has
+one — because Aperio created it, or because an invitation brought it in — is not
+listed twice. The two are matched by their join link, which is exact.
+
+The calendar cannot be edited. It shows what exists at Webex; to create a
+meeting, add an event to one of your own calendars and use **Create a meeting**
+on it. Your permanent Personal Meeting Room does not appear either: it is always
+on, which is precisely not an appointment.
+
 ## Things worth knowing
 
 **One meeting per event, including recurring ones.** A recurring series shares

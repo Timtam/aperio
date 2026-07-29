@@ -60,7 +60,7 @@ extern "C" {
  *       `open_instance` / `close_instance`. Every vtable method now
  *       takes the opaque instance handle as its first argument.
  */
-#define APERIO_PLUGIN_ABI_VERSION 2u
+#define APERIO_PLUGIN_ABI_VERSION 3u
 
 /*
  * Lifecycle return codes.

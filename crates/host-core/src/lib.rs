@@ -37,6 +37,7 @@ pub mod sync;
 pub mod sync_log;
 pub mod tasks;
 pub mod user_prefs;
+pub mod vc_calendar;
 
 pub use db::{DbError, DbHandle, DbResult, SharedConn, CURRENT_SCHEMA_VERSION};
 pub use paths::{resolve_data_dir, DataDirKind, DataDirResolution};

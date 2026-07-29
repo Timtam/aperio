@@ -260,8 +260,12 @@ mod tests {
         assert_eq!(size_of::<ContactsVtable>(), 8 + 14 * 8);
         // 10 method slots.
         assert_eq!(size_of::<SyncVtable>(), 8 + 10 * 8);
-        // 4 method slots.
-        assert_eq!(size_of::<VcVtable>(), 8 + 4 * 8);
+        // 6 method slots: the original 4 plus ABI 3's resolve_meeting +
+        // list_meetings. Appending to an existing vtable is what forced the ABI
+        // bump — the host has no per-vtable length, so strict equality on the
+        // manifest is the only thing that keeps a plugin built against the
+        // shorter layout from being read past its end.
+        assert_eq!(size_of::<VcVtable>(), 8 + 6 * 8);
         // u32 + 3 sub-vtable pointers.
         assert_eq!(size_of::<CalendarAdapterVtable>(), 8 + 3 * 8);
     }

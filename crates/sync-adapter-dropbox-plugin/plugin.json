@@ -3,7 +3,7 @@
   "name": "Aperio Dropbox",
   "version": "0.1.0",
   "plugin_type": "sync-adapter",
-  "abi_version": 2,
+  "abi_version": 3,
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled sync adapter for Dropbox (API v2 + OAuth2 PKCE).",

@@ -261,6 +261,24 @@ impl VcAdapter for WebexAdapter {
         let state = self.state().await?;
         meetings::delete_meeting(state, id, self.config.send_webex_emails).await
     }
+
+    fn can_list_meetings(&self) -> bool {
+        true
+    }
+
+    async fn resolve_meeting(&self, join_url: &str) -> VcResult<Option<Meeting>> {
+        let state = self.state().await?;
+        meetings::resolve_meeting(state, join_url).await
+    }
+
+    async fn list_meetings(
+        &self,
+        start: chrono::DateTime<chrono::Utc>,
+        end: chrono::DateTime<chrono::Utc>,
+    ) -> VcResult<Vec<Meeting>> {
+        let state = self.state().await?;
+        meetings::list_meetings(state, start, end).await
+    }
 }
 
 #[cfg(test)]

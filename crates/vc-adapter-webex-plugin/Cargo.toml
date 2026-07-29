@@ -16,6 +16,7 @@ plugin-sdk.workspace = true
 vc-adapter-webex = { path = "../vc-adapter-webex" }
 vc-core.workspace = true
 
+chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true
