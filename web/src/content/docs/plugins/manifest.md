@@ -12,7 +12,7 @@ reads it to discover the plugin before loading any code.
   "id": "com.aperio.cal-adapter-todoist",
   "name": "Aperio Todoist",
   "version": "0.1.0",
-  "plugin_type": "calendar-adapter",
+  "plugin_type": "adapter",
   "capabilities": ["tasks"],
   "abi_version": 3,
   "min_app_version": "0.1.0",
@@ -40,8 +40,8 @@ reads it to discover the plugin before loading any code.
 | `id` | string | ✅ | Stable reverse-DNS identifier, e.g. `com.example.my-plugin`. The primary key — two plugins can't share it. |
 | `name` | string | ✅ | Human-readable display name. |
 | `version` | string | ✅ | Plugin version (semver). |
-| `plugin_type` | string | ✅ | `"calendar-adapter"`, `"sync-adapter"`, or `"videoconference-adapter"`. There is **no** separate `task-adapter` type — a tasks-only provider is a `calendar-adapter` with `capabilities: ["tasks"]`. |
-| `capabilities` | string[] | ✅ | Which feature surfaces the plugin fills: any of `"calendars"`, `"tasks"`, `"contacts"`. Drives which vtables the host expects to be non-null. |
+| `plugin_type` | string | ✅ | `"adapter"` for every provider surface, or `"notification"`. There is no per-surface type — what a plugin does is its `capabilities`. |
+| `capabilities` | string[] | ✅ | Which feature surfaces the plugin fills: any combination of `"calendar"`, `"tasks"`, `"contacts"`, `"sync"`, `"videoconference"`. Must match the non-null pointers in the vtable exactly; the host checks at load time. An adapter that declares none is rejected. |
 | `abi_version` | number | ✅ | The ABI the plugin was built against (current: `3`). Must equal the host's exactly — see [ABI versions and how to migrate](/plugins/abi-versions/). |
 | `min_app_version` | string | ✅ | Lowest app version that can load this plugin. |
 | `author` | string | ✅ | Author/maintainer. |
@@ -185,6 +185,7 @@ authority nobody requested is authority nobody audited.
 ## Where the host looks
 
 The bundled plugins keep their manifest at
-`crates/cal-adapter-*-plugin/plugin.json` (and `vc-adapter-*-plugin`,
-`sync-adapter-*-plugin` for the other types). A distributed plugin ships the
+`crates/cal-adapter-*-plugin/plugin.json`, `crates/vc-adapter-*-plugin/` and
+`crates/sync-adapter-*-plugin/` — the crate names still say what each one is
+for, even though the manifests no longer do. A distributed plugin ships the
 manifest inside its `.aperio` archive alongside the shared library.

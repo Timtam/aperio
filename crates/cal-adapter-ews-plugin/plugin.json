@@ -2,7 +2,7 @@
   "id": "com.aperio.cal-adapter-ews",
   "name": "Aperio Exchange (EWS)",
   "version": "0.1.0",
-  "plugin_type": "calendar-adapter",
+  "plugin_type": "adapter",
   "capabilities": [
     "calendar",
     "tasks",

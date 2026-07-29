@@ -52,6 +52,48 @@ fn register_all_static_loads_every_bundled_plugin() {
     }
 }
 
+/// Every bundled plugin says what it is, and every family is represented.
+///
+/// `register_all_static` already fails if a manifest promises a capability its
+/// vtable does not have — that check lives in `check_declared_surfaces` and this
+/// test being green is the proof for all 17. What it adds is the other
+/// direction: that the manifests still NAME their families after the type tag
+/// stopped doing it. A dropped `capabilities` entry is now an adapter that
+/// loads, registers against nothing, and looks installed.
+#[test]
+fn every_bundled_plugin_declares_the_family_it_serves() {
+    use plugin_core::Capability;
+
+    let manager = PluginManager::new("0.1.0");
+    host_plugins::register_all_static(&manager).expect("all bundled plugins register");
+
+    let mut sync = 0;
+    let mut vc = 0;
+    let mut data = 0;
+    for id in EXPECTED_IDS {
+        let plugin = manager.get(id).expect("registered above");
+        let caps = &plugin.manifest.capabilities;
+        assert!(!caps.is_empty(), "{id} declares no capability");
+        assert_eq!(
+            plugin.manifest.plugin_type,
+            plugin_core::PluginType::Adapter,
+            "{id} should be a plain adapter",
+        );
+        if plugin.manifest.has_capability(&Capability::Sync) {
+            sync += 1;
+        }
+        if plugin.manifest.has_capability(&Capability::Videoconference) {
+            vc += 1;
+        }
+        if plugin.manifest.has_data_family() {
+            data += 1;
+        }
+    }
+    assert_eq!(sync, 6, "six bundled sync backends");
+    assert_eq!(vc, 4, "four bundled meeting providers");
+    assert_eq!(data, 7, "seven bundled calendar/task/contact adapters");
+}
+
 #[test]
 fn register_all_static_is_idempotent_safe_to_inspect() {
     // A second manager from scratch must register cleanly too —

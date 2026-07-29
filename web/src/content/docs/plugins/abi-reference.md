@@ -31,17 +31,24 @@ these for you (including the metadata and log exports).
 ## Vtables: one table per capability
 
 The host talks to an instance through `#[repr(C)]` **vtables** — structs of
-nullable function pointers (`Option<VtableMethodFn>`). The top-level
-`CalendarAdapterVtable` carries:
+nullable function pointers (`Option<VtableMethodFn>`). Every plugin points its
+single vtable slot at the same outer struct, `AdapterVtable`, with one pointer
+per feature family:
 
 ```text
-CalendarAdapterVtable {
+AdapterVtable {
     vtable_version: u32,          // = ABI_VERSION
-    calendar: *const CalendarVtable,   // null if unsupported
-    tasks:    *const TasksVtable,      // null if unsupported
-    contacts: *const ContactsVtable,   // null if unsupported
+    calendar:        *const CalendarVtable,   // null if unsupported
+    tasks:           *const TasksVtable,      // null if unsupported
+    contacts:        *const ContactsVtable,   // null if unsupported
+    sync:            *const SyncVtable,       // null if unsupported
+    videoconference: *const VcVtable,         // null if unsupported
 }
 ```
+
+Fill in the families you serve; leave the rest null. The manifest's
+`capabilities` array must name exactly the non-null ones — the host checks at
+load time and refuses a plugin that promises a surface it does not ship.
 
 A capability you don't support is a **null pointer**. Within a vtable, a
 method you don't implement is a **`None` slot** — the host treats it as
@@ -146,8 +153,9 @@ match the C header, so the Rust and C views can't drift.
 See [ABI versions and how to migrate](/plugins/abi-versions/) for what each
 revision contains and what moving between them costs.
 
-## Other plugin types
+## Other surfaces
 
-`sync-adapter` and `videoconference-adapter` plugins use the same lifecycle and
-JSON-over-FFI mechanics with their own vtables. The patterns below
-generalise.
+Sync backends and videoconference providers use the same lifecycle, the same
+JSON-over-FFI mechanics and the same outer vtable — they fill `sync` or
+`videoconference` instead of `calendar`. The patterns below generalise, and
+one plugin may fill several.

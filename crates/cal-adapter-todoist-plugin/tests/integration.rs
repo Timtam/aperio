@@ -23,7 +23,7 @@ fn manifest() -> PluginManifest {
         id: "com.aperio.cal-adapter-todoist".into(),
         name: "Aperio Todoist".into(),
         version: "0.1.0".into(),
-        plugin_type: PluginType::CalendarAdapter,
+        plugin_type: PluginType::Adapter,
         capabilities: vec![Capability::Tasks],
         abi_version: ABI_VERSION,
         min_app_version: "0.1.0".into(),

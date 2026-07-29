@@ -1466,7 +1466,7 @@ Das Plugin-Manifest (Abschnitt 20.4) deklariert, welche Features ein Adapter unt
 ```json
 {
   "id": "com.aperio.app.adapter.caldav",
-  "plugin_type": "calendar-adapter",
+  "plugin_type": "adapter",
   "capabilities": ["calendar", "tasks", "contacts"]
 }
 ```
@@ -1474,7 +1474,7 @@ Das Plugin-Manifest (Abschnitt 20.4) deklariert, welche Features ein Adapter unt
 ```json
 {
   "id": "com.aperio.app.adapter.google",
-  "plugin_type": "calendar-adapter",
+  "plugin_type": "adapter",
   "capabilities": ["calendar", "tasks", "contacts"]
 }
 ```
@@ -1482,14 +1482,14 @@ Das Plugin-Manifest (Abschnitt 20.4) deklariert, welche Features ein Adapter unt
 ```json
 {
   "id": "com.aperio.app.adapter.vikunja",
-  "plugin_type": "calendar-adapter",
+  "plugin_type": "adapter",
   "capabilities": ["tasks"]
 }
 ```
 
-Capabilities benennen **Features**, nicht Protokolle. Die möglichen Werte sind: `calendar`, `tasks`, `contacts` (und können in zukünftigen Versionen erweitert werden). Welches Protokoll der Adapter intern nutzt (CalDAV, CardDAV, Graph API, REST etc.) ist Implementierungsdetail des Adapters und in den Capabilities nicht sichtbar.
+Capabilities benennen **Features**, nicht Protokolle. Die möglichen Werte sind: `calendar`, `tasks`, `contacts`, `sync`, `videoconference` (und können in zukünftigen Versionen erweitert werden). Welches Protokoll der Adapter intern nutzt (CalDAV, CardDAV, Graph API, REST etc.) ist Implementierungsdetail des Adapters und in den Capabilities nicht sichtbar.
 
-Ein Adapter kann jede beliebige Kombination der drei Capabilities deklarieren – auch nur eine einzelne. Reine Aufgabenlisten-Adapter wie Todoist oder Vikunja deklarieren `["tasks"]` und stellen keine Kalender oder Kontakte bereit. Der Plugin-Typ bleibt einheitlich `calendar-adapter`, da das Plugin dasselbe `Adapter`-Basistrait implementiert; welche Feature-Traits zusätzlich implementiert werden (`CalendarFeature`, `TasksFeature`, `ContactsFeature`), regeln die deklarierten `capabilities`.
+Ein Adapter kann jede beliebige Kombination deklarieren – auch nur eine einzelne. Reine Aufgabenlisten-Adapter wie Todoist oder Vikunja deklarieren `["tasks"]` und stellen keine Kalender oder Kontakte bereit. Der Plugin-Typ ist einheitlich `adapter`; was ein Plugin tatsächlich kann, sagen ausschließlich die `capabilities`, und der Host prüft sie beim Laden gegen die tatsächlich gefüllten Vtable-Zeiger. Ein Anbieter, der Kalender **und** Sync-Ziel ist, ist damit ein einziges Plugin mit einer einzigen Anmeldung — vorher waren es zwei Bibliotheken mit zwei Kopien derselben Zugangsdaten.
 
 Der Plugin-Manager zeigt im Einrichtungsdialog nur die Capabilities an, die der jeweilige Adapter unterstützt. Der Nutzer aktiviert nur, was er benötigt.
 
@@ -1579,7 +1579,7 @@ Beim ersten Verbinden eines Kontaktbuchs wird der Nutzer darauf hingewiesen, das
 
 ### 11.3 Technische Umsetzung
 
-Jeder Anbieter wird als eigenständiges `videoconference-adapter`-Plugin (Plugin-Typ siehe Abschnitt 20.2) implementiert:
+Jeder Anbieter wird als Plugin mit der Capability `videoconference` implementiert (Plugin-Typ siehe Abschnitt 20.2):
 
 | Crate | API-Basis | Besonderheit |
 |---|---|---|
@@ -2994,14 +2994,12 @@ Das Plugin-System ist die architektonische Grundlage für alle Adapter (Kalender
 
 | Typ | Beschreibung | Beispiele |
 |---|---|---|
-| `calendar-adapter` | Datenquelle für Kalender, Aufgabenlisten und/oder Kontakte (je nach deklarierten Capabilities) | Google, CalDAV, Microsoft Graph, Vikunja, Todoist |
-| `sync-adapter` | Geräteübergreifende DB-Synchronisation | WebDAV, Dropbox, SFTP |
-| `videoconference-adapter` | Videokonferenz-Integration (Link-Generierung + Raumverwaltung) | Zoom, Microsoft Teams, Google Meet, Cisco WebEx |
+| `adapter` | Jede Anbieter-Oberfläche. **Welche**, sagen die `capabilities`: `calendar`, `tasks`, `contacts`, `sync`, `videoconference` — beliebig kombinierbar | Google (Kalender + Kontakte + Aufgaben), CalDAV, WebDAV (Sync), Cisco WebEx (Videokonferenz) |
 | `notification` | Benachrichtigungs-Kanal | System, E-Mail, Webhook |
 
 Neue Plugin-Typen können in zukünftigen Versionen hinzugefügt werden, ohne bestehende Plugins zu brechen.
 
-> **Hinweis:** Es gibt **keinen** separaten `task-adapter`-Plugin-Typ. Reine Aufgabenlisten-Anbieter (Vikunja, Todoist, Google Tasks etc.) werden als `calendar-adapter` mit `"capabilities": ["tasks"]` implementiert – siehe Abschnitt 10.2 zur Capability-Trennung. Das hält die Plugin-ABI einfach und vermeidet Doppelimplementierungen für Adapter, die sowohl Kalender als auch Aufgaben anbieten (Google, Microsoft, CalDAV).
+> **Hinweis:** Es gibt **keine** Plugin-Typen pro Oberfläche. Reine Aufgabenlisten-Anbieter (Vikunja, Todoist, Google Tasks etc.) sind ein `adapter` mit `"capabilities": ["tasks"]`, ein Sync-Backend eines mit `["sync"]` – siehe Abschnitt 10.2. Die früheren Tags `calendar-adapter`, `sync-adapter` und `videoconference-adapter` sind entfallen: sie beantworteten eine Frage, die den `capabilities` gehört, und ließen pro Plugin genau **eine** Oberfläche zu.
 
 > **Hinweis:** Der **lokale Kalender-Adapter** (`cal-adapter-local`) ist bewusst **kein** Plugin. Er teilt sich die SQLite-Datenbank des Hosts (Termine, Aufgaben, Kontakte, Einstellungen) und gehört damit zur Identität der App selbst, nicht zur austauschbaren Plugin-Schicht. Ein Plugin lebt in einer separaten shared library und kann die `Arc<Mutex<Connection>>` des Hosts nicht über die FFI-Grenze hinweg teilen; gleichzeitig ergäben "Lokal deaktivieren" / "Lokal deinstallieren" im Plugin-Manager-UI keinen sinnvollen Use Case (es ist die Heimat der lokal angelegten Daten des Nutzers). Der `LocalAdapter` wird daher direkt von src-tauri als gewöhnlicher Rust-Trait-Impl konstruiert und über alle Stellen gereicht, die ihn brauchen. Das Plugin-System (`PluginManager`, `plugins/bundled/`, Settings → Plugins) bedient ausschließlich **externe Datenquellen**.
 
@@ -3037,7 +3035,7 @@ typedef struct AperioPlugin {
     const char* id;           // z.B. "com.example.myplugin"
     const char* name;         // Anzeigename
     const char* version;      // SemVer
-    const char* plugin_type;  // "calendar-adapter" | "sync-adapter" | ...
+    const char* plugin_type;  // "adapter" | "notification"
 
     // Lebenszyklus je KONTO. Ein Plugin bedient beliebig viele Instanzen.
     OpenInstanceResult (*open_instance)(const char* config_json);
@@ -3081,16 +3079,23 @@ mit, sodass kein Allokator geteilt wird. Fehler reisen als `int32`-Status aus
 einer festen Tabelle (`APERIO_PLUGIN_CALL_ERR_*`) plus UTF-8-Meldung. Es gibt
 **kein Timeout und keinen Abbruch** — der Host wartet unbegrenzt.
 
-Ein `calendar-adapter` zeigt auf eine `AperioCalendarPluginVtable`, die
-optionale Sub-Vtables je Fähigkeit enthält:
+Jedes Plugin zeigt auf **dieselbe** äußere Vtable, `AperioAdapterVtable` — ein
+Zeiger je Feature-Familie, null für jede nicht bediente:
 
-- `calendar_vtable` (nicht-null, wenn `"calendar"` in `capabilities`)
-- `tasks_vtable` (nicht-null, wenn `"tasks"` in `capabilities`)
-- `contacts_vtable` (nicht-null, wenn `"contacts"` in `capabilities`)
+- `calendar` (nicht-null, wenn `"calendar"` in `capabilities`)
+- `tasks` (nicht-null, wenn `"tasks"` in `capabilities`)
+- `contacts` (nicht-null, wenn `"contacts"` in `capabilities`)
+- `sync` (nicht-null, wenn `"sync"` in `capabilities`)
+- `videoconference` (nicht-null, wenn `"videoconference"` in `capabilities`)
 
-Die anderen Typen zeigen direkt auf ihre Vtable: `sync-adapter` auf
-`AperioSyncVtable`, `videoconference-adapter` auf `AperioVcVtable` mit den
-Slots `test_connection`, `create_meeting`, `get_meeting`, `delete_meeting`
+Vorher hing der Cast am `plugin_type` — womit der Tag für die
+Speichersicherheit tragend war und ein Plugin genau eine Oberfläche haben
+konnte. Der Host prüft die deklarierten Capabilities beim Laden gegen die
+tatsächlich gefüllten Zeiger und lehnt ein Plugin ab, das mehr verspricht als
+es mitbringt.
+
+`AperioVcVtable` hinter dem `videoconference`-Zeiger trägt die Slots
+`test_connection`, `create_meeting`, `get_meeting`, `delete_meeting`
 (Spiegel von `vc_core::VcAdapter`, siehe Abschnitt 11). Seit **ABI 3** kommen
 `resolve_meeting` und `list_meetings` hinzu:
 
@@ -3142,9 +3147,9 @@ myplugin/
   "id": "com.example.myplugin",
   "name": "Mein Kalender-Plugin",
   "version": "1.0.0",
-  "plugin_type": "calendar-adapter",
+  "plugin_type": "adapter",
   "capabilities": ["calendar"],
-  "abi_version": 2,
+  "abi_version": 3,
   "min_app_version": "1.0.0",
   "author": "Max Mustermann",
   "description": "Verbindet sich mit XY-Kalender",
@@ -3382,7 +3387,7 @@ Wenn ein Gerät ein neues Plugin installiert, wird dies über das Event Log an a
     "id": "com.example.myplugin",
     "name": "Mein Kalender-Plugin",
     "version": "1.0.0",
-    "plugin_type": "calendar-adapter"
+    "plugin_type": "adapter"
   }
 }
 ```
@@ -3449,7 +3454,7 @@ Für Entwickler, die Plugins in Rust schreiben möchten, wird ein `plugin-sdk`-C
 use aperio_plugin_sdk::prelude::*;
 
 #[aperio_plugin(
-    type = "calendar-adapter",
+    type = "adapter",
     capabilities = ["calendar"]
 )]
 struct MyCalendarPlugin;

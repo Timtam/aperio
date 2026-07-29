@@ -187,7 +187,8 @@ mod tests {
             "id": "com.example.test-plugin",
             "name": "Test Plugin",
             "version": "1.0.0",
-            "plugin_type": "calendar-adapter",
+            "plugin_type": "adapter",
+            "capabilities": ["calendar"],
             "abi_version": 1,
             "min_app_version": "0.1.0",
             "author": "Tester"

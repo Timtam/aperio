@@ -73,5 +73,5 @@ pub use shim::{
 pub use strings::{resolve_label, StringCatalogue, FALLBACK_LANG};
 pub use version::{check_abi_version, check_min_app_version, Version, ABI_VERSION};
 pub use vtables::{
-    CalendarAdapterVtable, CalendarVtable, ContactsVtable, SyncVtable, TasksVtable, VcVtable,
+    AdapterVtable, CalendarVtable, ContactsVtable, SyncVtable, TasksVtable, VcVtable,
 };

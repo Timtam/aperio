@@ -104,8 +104,8 @@ impl ContactsFeature for MyAdapter {
 Follow [The Rust SDK](/plugins/examples/rust-sdk/): a `cal_dispatch_helpers!(MyAdapter)`,
 one `ffi_*` wrapper per method you implemented, a `CalendarVtable` /
 `TasksVtable` / `ContactsVtable` filled with `Some(ffi_*)` (and
-`..Vtable::empty()`), the `CalendarAdapterVtable` pointing at the three
-(null for any capability you don't provide), and `declare_lifecycle!`.
+`..Vtable::empty()`), the `AdapterVtable` pointing at the families you serve
+(`..AdapterVtable::empty()` nulls the rest), and `declare_lifecycle!`.
 
 ## Tips
 

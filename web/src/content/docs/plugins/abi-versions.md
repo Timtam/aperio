@@ -13,18 +13,82 @@ mismatch, that constant is what it compared against.
 
 ## If you only do one thing
 
-Bump `"abi_version": 3` in your `plugin.json` and rebuild. For most plugins that
-is the whole migration: the two new vtable slots are optional, the new manifest
-blocks are optional, and every new payload field carries a serde default.
+Three edits, and they apply to every plugin:
 
-You must do more only if your plugin is a **videoconference adapter**, because
-one existing method changed the shape of its argument. That is the next section.
+1. `"plugin_type": "adapter"` in your `plugin.json` — the per-surface tags are
+   gone.
+2. `"capabilities": [...]` naming every family you serve, including `"sync"` or
+   `"videoconference"` if that is what you are.
+3. `"abi_version": 3`.
+
+Then point your vtable at an `AdapterVtable` (section 1 below). Videoconference
+adapters have one more thing to do, because an existing method changed the shape
+of its argument — section 2.
 
 ## v2 → v3
 
-### 1. `delete_meeting` takes an object, not a bare id
+### 1. One vtable for every plugin
 
-The only breaking change for existing code, and it affects videoconference
+`AperioPlugin.vtable` used to point at a different struct depending on
+`plugin_type`: a three-pointer wrapper for a calendar adapter, a bare
+`AperioSyncVtable` for a sync adapter, a bare `AperioVcVtable` for a
+videoconference one. It now always points at one struct:
+
+```c
+typedef struct AperioAdapterVtable {
+    uint32_t                       vtable_version;
+    const AperioCalendarVtable    *calendar;
+    const AperioTasksVtable       *tasks;
+    const AperioContactsVtable    *contacts;
+    const AperioSyncVtable        *sync;
+    const AperioVcVtable          *videoconference;
+} AperioAdapterVtable;
+```
+
+Fill the families you serve, leave the rest `NULL`. In Rust:
+
+```rust
+pub static ADAPTER_VTABLE: AdapterVtable = AdapterVtable {
+    calendar: &CALENDAR_VTABLE,
+    ..AdapterVtable::empty()   // nulls the rest, stamps vtable_version
+};
+```
+
+A sync adapter that shipped `vtable: SYNC_VTABLE` now ships the wrapper with
+`sync: &SYNC_VTABLE`; a videoconference adapter the same with
+`videoconference: &VC_VTABLE`. The inner vtables did not change.
+
+Two things this buys, and they are why it was worth breaking:
+
+**One plugin can serve several families.** A provider is not a feature. Google
+is a calendar, an address book, a task list, a file store to sync into and a
+meeting service. Under the old shape that was four plugins, four OAuth
+registrations and four sign-ins to the same account, with four refresh tokens in
+the keychain that were the same credential. Now it is one library that declares
+what it does.
+
+**The type tag stops being load-bearing for memory safety.** It decided which
+struct the host cast a `void*` to. Get that wrong — a hand-edited manifest, a
+copied `plugin.json` — and the host reads one layout as another and calls
+whatever function pointer lands at the offset.
+
+Which brings the second half: **`plugin_type` is now `"adapter"` for every
+provider surface.** `"calendar-adapter"`, `"sync-adapter"` and
+`"videoconference-adapter"` are retired; a manifest still carrying one is listed
+as unsupported rather than quietly loaded. What your plugin does is its
+`capabilities`, which now takes `"sync"` and `"videoconference"` alongside
+`"calendar"`, `"tasks"` and `"contacts"`.
+
+The host checks that list against your vtable at load time: every capability you
+declare must have a non-null pointer, or the plugin is refused with a message
+naming the family. The reverse — a pointer you did not declare — is left alone.
+An adapter that declares no capability at all is a manifest error, because it
+would load, register against nothing, and appear installed while doing nothing.
+
+
+### 2. `delete_meeting` takes an object, not a bare id
+
+The only method whose wire shape changed, and it affects videoconference
 adapters alone.
 
 It used to receive a JSON string — the meeting id. It now receives
@@ -71,7 +135,7 @@ and doing exactly what you did before is a complete migration.
 > only because ABI 3 has never shipped, so no plugin exists that speaks the
 > earlier v3 shape. Once v3 is released, the next such change takes v4.
 
-### 2. `VcVtable` gained two slots
+### 3. `VcVtable` gained two slots
 
 `resolve_meeting` and `list_meetings`, appended after `delete_meeting`:
 
@@ -112,7 +176,7 @@ between that and calling whatever memory follows.
 since the ABI existed. Set it to the ABI version you build against; the SDK's
 `VcVtable::empty()` and friends already do.
 
-### 3. New manifest blocks, all optional
+### 4. New manifest blocks, all optional
 
 None of these break an existing manifest. Omitting them leaves your plugin on
 exactly the path it was on.
@@ -137,7 +201,7 @@ the base of a regional tag (`de-AT` → `de`), English, then the verbatim `label
 you wrote. A plugin with no catalogue renders its literals, which is a perfectly
 good answer.
 
-### 4. New payload fields, all serde-defaulted
+### 5. New payload fields, all serde-defaulted
 
 `NewMeeting` gained `use_personal_room`, `attendees` and `notify_attendees`;
 `Meeting` gained `invitees` and `join_details`. Every one carries
@@ -150,7 +214,7 @@ One thing to know if you are a videoconference adapter that fills them:
 `NewMeeting::attendees` is **bare email addresses**. The host splits its own
 display strings (`"Alice Smith <alice@example.test>"`) before handing them over.
 
-### 5. Two new optional named exports
+### 6. Two new optional named exports
 
 `aperio_plugin_strings` answers one language's strings, for a plugin whose
 translations do not fit a JSON block in its manifest. The host calls it once per
@@ -172,8 +236,9 @@ than writing a plugin, this is the checklist.
 
 **Bump required:**
 
-- Appending a slot to an **existing** vtable. The host has no per-vtable length,
-  so an older plugin would be read past its end.
+- Appending a slot to an **existing** vtable — including a family pointer on
+  `AdapterVtable`. The host has no per-vtable length, so an older plugin would be
+  read past its end.
 - Changing an existing slot's argument or return shape, once the current
   revision has shipped.
 - Any change to a struct's C layout.
@@ -188,8 +253,6 @@ than writing a plugin, this is the checklist.
   handle; a host that predates one never looks it up, and a plugin that lacks one
   is simply asked to do less.
 - Adding a `#[serde(default)]` field to a JSON payload.
-- Adding a whole **new** vtable for a **new** plugin type. Nothing reads it
-  unless that type exists.
 - Adding an optional manifest block.
 
 ## Where the authoritative list lives

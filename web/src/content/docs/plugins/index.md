@@ -8,18 +8,22 @@ recompiling the app.
 
 ## What a plugin can be
 
-A plugin declares one or more **capabilities**:
+Every plugin is an **adapter**, and what it actually does is its
+**capabilities** list:
 
-- **calendar-adapter** — a data source for calendars, task lists, and/or
-  contacts (any combination). Google, iCloud (CalDAV), Microsoft Graph,
-  Vikunja, Todoist, … are all calendar-adapter plugins. A tasks-only
-  provider simply declares `["tasks"]`.
-- **sync-adapter** — a storage backend for cross-device sync (WebDAV,
-  Dropbox, SFTP, …).
-- **videoconference-adapter** — a video-conferencing integration (Meet, Zoom, …).
+- **calendar** — events (Google, iCloud via CalDAV, Microsoft Graph, …).
+- **tasks** — task lists and tasks (Vikunja, Todoist, …).
+- **contacts** — address books.
+- **sync** — a storage backend for cross-device sync (WebDAV, Dropbox, SFTP, …).
+- **videoconference** — meeting links and rooms (Meet, Zoom, WebEx, …).
 
-This book focuses on calendar-adapter plugins (the most common kind); the
-ABI shape is the same for the others.
+Declare any combination. A tasks-only provider declares `["tasks"]`; a provider
+that is both a calendar and a place to sync into declares both, ships one
+library, and signs in once — which is the reason capabilities, rather than the
+plugin type, decide what a plugin is.
+
+This book uses calendar adapters for its examples (the most common kind); the
+ABI shape is identical for every other surface.
 
 ## How it works, briefly
 
@@ -41,7 +45,7 @@ and the ABI is versioned for forward compatibility.
 | [The C ABI](/plugins/abi-reference/) | The full contract: structs, lifecycle, vtables, memory rules, versioning. |
 | [The Rust SDK](/plugins/rust-sdk/) | The macros and helpers that hide the FFI. |
 | [The manifest](/plugins/manifest/) | Every `plugin.json` field. |
-| [Examples](/plugins/examples/) | `hello-world` and a full calendar-adapter template. |
+| [Examples](/plugins/examples/) | `hello-world` and a full calendar adapter template. |
 
 > The contributor-facing docs for the app itself are the
 > [Developer Documentation](/developers/).

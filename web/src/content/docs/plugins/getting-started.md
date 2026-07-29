@@ -79,8 +79,8 @@ generated with `cal_dispatch_helpers!`, and the static `*_VTABLE`).
   "id": "com.example.my-plugin",
   "name": "My Plugin",
   "version": "0.1.0",
-  "plugin_type": "calendar-adapter",
-  "capabilities": ["calendars"],
+  "plugin_type": "adapter",
+  "capabilities": ["calendar"],
   "abi_version": 3,
   "min_app_version": "0.1.0",
   "author": "You",
@@ -106,6 +106,6 @@ archive, then install it from the app's plugin settings and try it. The
 - Don't want to hand-write each `ffi_*` wrapper? That's what the
   [Rust SDK](/plugins/rust-sdk/) macros are for.
 - Building a *real* calendar adapter? Start from the
-  [calendar-adapter-template](/plugins/examples/calendar-adapter-template/).
+  [calendar adapter template](/plugins/examples/calendar-adapter-template/).
 - Curious what crosses the boundary and why it stays compatible? Read
   [The C ABI](/plugins/abi-reference/).

@@ -893,6 +893,11 @@ impl PluginManager {
             )));
         }
 
+        // What the manifest promises must be in the vtable the library
+        // actually shipped. Catching it here names the plugin; catching it
+        // later names nothing, because the surface is simply absent.
+        crate::vtables::check_declared_surfaces(&manifest, descriptor.vtable)?;
+
         // Note: ABI v2 no longer fires a per-load `init` here.
         // Per-account state belongs in `open_instance`, which
         // the host calls once per registered account from the
@@ -973,6 +978,13 @@ impl PluginManager {
             in_flight: Arc::new(AtomicUsize::new(0)),
             library: None,
         };
+        // Same gate the dlopen path runs: what the manifest promises has to be
+        // in the vtable. A statically embedded plugin is built from the same
+        // source as its manifest, so this fires on a genuine authoring slip —
+        // which is exactly when it is worth hearing about. Asked of the built
+        // `LoadedPlugin` rather than the bare pointer, so the descriptor read
+        // goes through the type that owns the invariant.
+        crate::vtables::check_declared_surfaces(&loaded.manifest, loaded.vtable_ptr())?;
         let id = loaded.manifest.id.clone();
         info!(plugin_id = %id, "static plugin registered");
         self.insert(id, Arc::new(loaded))
@@ -1193,7 +1205,7 @@ impl PluginManager {
                     kind,
                     name: p.manifest.name.clone(),
                     plugin_id: p.manifest.id.clone(),
-                    owns_containers: p.manifest.plugin_type == PluginType::CalendarAdapter,
+                    owns_containers: p.manifest.has_data_family(),
                     declares_account_schema: p.manifest.account.is_some(),
                 })
             })
@@ -1846,8 +1858,8 @@ mod tests {
     #[test]
     fn by_type_empty_when_no_plugins() {
         let mgr = PluginManager::new("0.1.0");
-        assert!(mgr.by_type(&PluginType::CalendarAdapter).is_empty());
-        assert!(mgr.by_type(&PluginType::SyncAdapter).is_empty());
+        assert!(mgr.by_type(&PluginType::Adapter).is_empty());
+        assert!(mgr.by_type(&PluginType::Notification).is_empty());
     }
 
     /// A `strings` export that answers German only, and overrides one key the
@@ -1898,7 +1910,7 @@ mod tests {
             id: CString::new("com.example.strings").unwrap().into_raw(),
             name: CString::new("Strings").unwrap().into_raw(),
             version: CString::new("0.1.0").unwrap().into_raw(),
-            plugin_type: CString::new("calendar-adapter").unwrap().into_raw(),
+            plugin_type: CString::new("adapter").unwrap().into_raw(),
             open_instance: None,
             close_instance: None,
             vtable: std::ptr::null_mut(),
@@ -1927,7 +1939,7 @@ mod tests {
             id: id.to_string(),
             name: "Stub".to_string(),
             version: "0.1.0".to_string(),
-            plugin_type: PluginType::CalendarAdapter,
+            plugin_type: PluginType::Adapter,
             capabilities: vec![crate::Capability::Calendar],
             abi_version: crate::ABI_VERSION,
             min_app_version: "0.1.0".to_string(),
@@ -2089,7 +2101,8 @@ mod tests {
                 "id": "com.example.wrong-abi",
                 "name": "Wrong ABI",
                 "version": "1.0.0",
-                "plugin_type": "calendar-adapter",
+                "plugin_type": "adapter",
+                "capabilities": ["calendar"],
                 "abi_version": 999,
                 "min_app_version": "0.1.0"
             }"#,

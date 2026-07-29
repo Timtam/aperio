@@ -24,13 +24,11 @@
 //! boilerplate ever gets painful we add a dedicated proc-macro
 //! crate in its own phase.
 //!
-//! The vtable is parameter-typed: any of
-//! [`plugin_core::CalendarVtable`], [`plugin_core::TasksVtable`],
-//! [`plugin_core::ContactsVtable`], [`plugin_core::SyncVtable`],
-//! or the outer [`plugin_core::CalendarAdapterVtable`] wrapper
-//! works as long as the `&'static` reference outlives the
-//! plugin (which is trivially true when it's a `static` in the
-//! plugin crate).
+//! The vtable is parameter-typed, but in practice it is always
+//! the outer [`plugin_core::AdapterVtable`] — that is what the
+//! host casts `AperioPlugin.vtable` to, whatever the plugin
+//! serves. Any `&'static` reference that outlives the plugin
+//! works (trivially true for a `static` in the plugin crate).
 
 /// Emit the crate-mangled descriptor accessors (`build_descriptor`
 /// + `DESTROY_FN`) over a `static AperioPlugin` descriptor that the

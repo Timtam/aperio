@@ -13,23 +13,20 @@
 //! pair) and returns a [`super::PluginCallResult`]. See
 //! [`super::ffi`] for the full ownership + threading rules.
 //!
-//! ## Vtable layout by plugin_type
+//! ## One outer vtable
 //!
-//! The single `AperioPlugin.vtable: *mut c_void` slot is cast
-//! based on `plugin_type`:
+//! The single `AperioPlugin.vtable: *mut c_void` slot always points at an
+//! [`AdapterVtable`] — one struct, one per-family pointer each, `null` for
+//! every family the plugin does not serve. There is nothing to cast on:
+//! whatever the plugin is for, the host reads the same shape.
 //!
-//! - `"calendar-adapter"` → [`CalendarAdapterVtable`] (the multi-
-//!   capability wrapper that bundles up to three sub-vtables).
-//! - `"sync-adapter"` → [`SyncVtable`] directly (sync plugins
-//!   are single-capability by definition).
-//! - Other plugin types: reserved for future phases (vc-adapter,
-//!   notification).
-//!
-//! Pure-calendar / pure-tasks / pure-contacts plugins still go
-//! through [`CalendarAdapterVtable`] — they just leave the
-//! sub-vtable slots they don't implement at `null`. That keeps
-//! the host's casting logic uniform: every calendar-adapter
-//! plugin has the same outer shape.
+//! It used to depend on `plugin_type`: a calendar adapter pointed at a
+//! three-pointer wrapper, a sync adapter at a bare `SyncVtable`, a
+//! videoconference adapter at a bare `VcVtable`. That made the tag load-bearing
+//! for memory safety — read the pointer as the wrong struct and the host calls
+//! whatever `.rodata` follows — and it made "this provider does calendars AND
+//! sync" unrepresentable, because a plugin only gets one vtable slot. Both
+//! problems have the same fix, and it is this one.
 
 use crate::ffi::PluginCallResult;
 
@@ -67,81 +64,113 @@ pub use sync::SyncVtable;
 pub use tasks::TasksVtable;
 pub use vc::VcVtable;
 
-/// Multi-capability outer vtable for `plugin_type = "calendar-adapter"`.
+/// The outer vtable every plugin points at — one provider, however many
+/// surfaces.
 ///
-/// Aperio's calendar-adapter trait split (DESIGN.md §10.2) puts
-/// calendar / tasks / contacts on three separate traits, and the
-/// big real-world adapters (CalDAV+CardDAV, Google, Microsoft
-/// Graph, EWS) all implement at least two of them on the same
-/// adapter instance. The plugin ABI has a single
-/// `AperioPlugin.vtable: *mut c_void`, so we wrap the three
-/// sub-vtable pointers inside this one struct.
+/// One pointer per feature family, `null` for each family this plugin does not
+/// serve. A calendar-only adapter fills `calendar` and leaves the other four
+/// null; a sync backend fills `sync`; a provider that does both fills both, out
+/// of ONE library, which is the whole point — a Google account is a calendar,
+/// an address book, a task list, a file store to sync into and a meeting
+/// service, and splitting that across four plugins means four OAuth
+/// registrations and four sign-ins for one credential.
 ///
-/// `null` for any of the three sub-vtable pointers means
-/// "capability not provided" — the host's
-/// [`super::shim::FfiCalendarAdapter::new`] / `FfiTasksAdapter::new`
-/// / `FfiContactsAdapter::new` returns `None` for those, and the
-/// registry skips them. The plugin's manifest `capabilities`
-/// array MUST match the non-null pointers here; the host
-/// cross-checks at load time so a mismatch surfaces as a clear
-/// plugin-author error.
+/// The manifest's `capabilities` array MUST match the non-null pointers here.
+/// The host cross-checks at load time, so a mismatch surfaces as a plugin-author
+/// error rather than a surface that silently answers `Unsupported`.
 ///
-/// Layout MUST stay binary-compatible across plugin-core 0.x
-/// patch versions — adding a new sub-vtable slot is an ABI bump.
+/// Several surfaces does NOT mean one instance serving them all: the host still
+/// calls `open_instance` per role, because a calendar account and a sync target
+/// are configured differently and neither is the other's business.
+///
+/// Layout is frozen for an ABI revision. Appending a family pointer is an ABI
+/// bump — the host has no per-vtable length, so a plugin built against a shorter
+/// layout has to be kept out entirely rather than read past its end.
 #[repr(C)]
-pub struct CalendarAdapterVtable {
-    /// Conventional bump indicator — same value as
-    /// [`crate::ABI_VERSION`]. Detects a misaligned partial
-    /// header revision before any cast goes wrong.
+pub struct AdapterVtable {
+    /// Same value as [`crate::ABI_VERSION`], read before the rest of the layout
+    /// is trusted. Detects a plugin built against a different revision of this
+    /// struct before any pointer in it is followed.
     pub vtable_version: u32,
-    /// Calendar surface. Null when the plugin doesn't declare
-    /// `Capability::Calendar`.
+    /// Calendar surface. Null unless `capabilities` names `calendar`.
     pub calendar: *const CalendarVtable,
-    /// Tasks surface. Null when the plugin doesn't declare
-    /// `Capability::Tasks`.
+    /// Tasks surface. Null unless `capabilities` names `tasks`.
     pub tasks: *const TasksVtable,
-    /// Contacts surface. Null when the plugin doesn't declare
-    /// `Capability::Contacts`.
+    /// Contacts surface. Null unless `capabilities` names `contacts`.
     pub contacts: *const ContactsVtable,
+    /// Sync backend. Null unless `capabilities` names `sync`.
+    pub sync: *const SyncVtable,
+    /// Videoconference surface. Null unless `capabilities` names
+    /// `videoconference`.
+    pub videoconference: *const VcVtable,
 }
 
-// SAFETY: all three sub-vtable pointers point at `static`
-// instances in the plugin's library data segment. They live for
-// the lifetime of the loaded library and contain only fn-pointer
-// fields (themselves into the library's code segment). Concurrent
-// reads across threads are safe; we never write through these
-// pointers.
-unsafe impl Send for CalendarAdapterVtable {}
-unsafe impl Sync for CalendarAdapterVtable {}
+// SAFETY: every family pointer points at a `static` in the plugin's library data
+// segment. They live for the lifetime of the loaded library and contain only
+// fn-pointer fields (themselves into the library's code segment). Concurrent
+// reads across threads are safe; we never write through these pointers.
+unsafe impl Send for AdapterVtable {}
+unsafe impl Sync for AdapterVtable {}
 
-impl CalendarAdapterVtable {
-    /// All-null wrapper. Plugin authors construct one of these
-    /// as a `static` + fill in only the sub-vtables they actually
-    /// implement, leaving the rest at `null`.
+impl AdapterVtable {
+    /// All-null. Plugin authors write one of these as a `static` and fill in
+    /// only the families they serve:
+    ///
+    /// ```ignore
+    /// pub static ADAPTER_VTABLE: AdapterVtable = AdapterVtable {
+    ///     calendar: &CALENDAR_VTABLE,
+    ///     ..AdapterVtable::empty()
+    /// };
+    /// ```
     pub const fn empty() -> Self {
         Self {
             vtable_version: crate::ABI_VERSION,
             calendar: std::ptr::null(),
             tasks: std::ptr::null(),
             contacts: std::ptr::null(),
+            sync: std::ptr::null(),
+            videoconference: std::ptr::null(),
         }
     }
 
-    /// True iff at least one sub-vtable is provided. A plugin
-    /// where all three are null is degenerate — the host refuses
-    /// to wrap it.
+    /// True iff it serves at least one family. All-null is degenerate and the
+    /// host refuses to wrap it.
     pub fn has_any_surface(&self) -> bool {
-        !self.calendar.is_null() || !self.tasks.is_null() || !self.contacts.is_null()
+        !self.calendar.is_null()
+            || !self.tasks.is_null()
+            || !self.contacts.is_null()
+            || !self.sync.is_null()
+            || !self.videoconference.is_null()
+    }
+
+    /// Copy the pointers out, so a caller can hold them without holding a
+    /// borrow of the plugin's library data segment.
+    ///
+    /// Not `Clone`: copying raw pointers is exactly the thing worth spelling
+    /// out at the call site, and they stay valid only as long as the library is
+    /// loaded — which the caller guarantees by keeping its `LoadedInstance`
+    /// alive.
+    pub fn clone_shallow(&self) -> Self {
+        Self {
+            vtable_version: self.vtable_version,
+            calendar: self.calendar,
+            tasks: self.tasks,
+            contacts: self.contacts,
+            sync: self.sync,
+            videoconference: self.videoconference,
+        }
     }
 }
 
-impl std::fmt::Debug for CalendarAdapterVtable {
+impl std::fmt::Debug for AdapterVtable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CalendarAdapterVtable")
+        f.debug_struct("AdapterVtable")
             .field("vtable_version", &self.vtable_version)
             .field("calendar_present", &!self.calendar.is_null())
             .field("tasks_present", &!self.tasks.is_null())
             .field("contacts_present", &!self.contacts.is_null())
+            .field("sync_present", &!self.sync.is_null())
+            .field("videoconference_present", &!self.videoconference.is_null())
             .finish()
     }
 }
@@ -164,11 +193,10 @@ impl std::fmt::Debug for CalendarAdapterVtable {
 ///
 /// # The rule for the next slot append
 ///
-/// Appending a slot to an EXISTING vtable requires bumping
-/// [`crate::ABI_VERSION`]. Strict equality on the manifest then keeps an older
-/// plugin out entirely, which is the only safe answer while the host has no
-/// per-vtable length. Adding a WHOLE NEW vtable for a new plugin kind is
-/// unaffected: nothing reads it unless that kind exists.
+/// Appending a slot to any vtable — including a family pointer on
+/// [`AdapterVtable`] — requires bumping [`crate::ABI_VERSION`]. Strict equality
+/// on the manifest then keeps an older plugin out entirely, which is the only
+/// safe answer while the host has no per-vtable length.
 ///
 /// A future revision may put a `u32 struct_size` in the four bytes of padding
 /// that follow this field on 64-bit targets, at which point a host could read a
@@ -181,30 +209,195 @@ pub fn vtable_layout_ok(vtable_version: u32) -> bool {
     vtable_version == crate::ABI_VERSION
 }
 
+/// Every capability the manifest declares must have a non-null pointer behind
+/// it in the vtable the plugin actually ships.
+///
+/// Run at load time so a plugin that promises more than it implements is
+/// refused with its own name on the message. Without it the mismatch surfaces
+/// much later and much worse: the account registers, the surface silently
+/// isn't there, and the user sees an account with no task lists and nothing
+/// anywhere saying why. That failure got easier to hit the moment one plugin
+/// could declare five families instead of one.
+///
+/// The reverse — a pointer with no capability declared — is left alone. It
+/// means the plugin implements something it does not offer, which costs the
+/// user nothing and may be a surface being staged before its manifest entry.
+///
+/// Unknown (forward-compat) capabilities are skipped: this host has no slot to
+/// look for, and a plugin built for a later Aperio is allowed to name one.
+pub fn check_declared_surfaces(
+    manifest: &crate::PluginManifest,
+    vtable: *const std::os::raw::c_void,
+) -> crate::PluginResult<()> {
+    let declared: Vec<&crate::Capability> = manifest
+        .capabilities
+        .iter()
+        .filter(|c| c.is_known())
+        .collect();
+    if declared.is_empty() {
+        return Ok(());
+    }
+    if vtable.is_null() {
+        return Err(crate::PluginError::Manifest(format!(
+            "{} declares capabilities {:?} but ships no vtable",
+            manifest.id,
+            declared.iter().map(|c| c.as_str()).collect::<Vec<_>>()
+        )));
+    }
+    // SAFETY: `vtable_version` is at offset 0 of every vtable in every
+    // revision — the one field readable before the layout is known.
+    let version = unsafe { *(vtable as *const u32) };
+    if !vtable_layout_ok(version) {
+        return Err(crate::PluginError::Manifest(format!(
+            "{} ships a vtable of layout revision {version}, but this host reads {}",
+            manifest.id,
+            crate::ABI_VERSION
+        )));
+    }
+    // SAFETY: the revision matches, so the struct has this host's layout, and
+    // the ABI contract makes every plugin's vtable an `AdapterVtable`.
+    let table = unsafe { &*(vtable as *const AdapterVtable) };
+    for cap in declared {
+        let present = match cap {
+            crate::Capability::Calendar => !table.calendar.is_null(),
+            crate::Capability::Tasks => !table.tasks.is_null(),
+            crate::Capability::Contacts => !table.contacts.is_null(),
+            crate::Capability::Sync => !table.sync.is_null(),
+            crate::Capability::Videoconference => !table.videoconference.is_null(),
+            crate::Capability::Unknown(_) => true,
+        };
+        if !present {
+            return Err(crate::PluginError::Manifest(format!(
+                "{} declares capability `{}` but its vtable slot is null",
+                manifest.id,
+                cap.as_str()
+            )));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn empty_outer_vtable_has_no_surface() {
-        let v = CalendarAdapterVtable::empty();
+        let v = AdapterVtable::empty();
         assert!(!v.has_any_surface());
         assert!(v.calendar.is_null());
         assert!(v.tasks.is_null());
         assert!(v.contacts.is_null());
+        assert!(v.sync.is_null());
+        assert!(v.videoconference.is_null());
         assert_eq!(v.vtable_version, crate::ABI_VERSION);
     }
 
     #[test]
     fn populated_outer_vtable_reports_surface() {
         static CAL: CalendarVtable = CalendarVtable::empty();
-        let v = CalendarAdapterVtable {
-            vtable_version: crate::ABI_VERSION,
+        let v = AdapterVtable {
             calendar: &CAL,
-            tasks: std::ptr::null(),
-            contacts: std::ptr::null(),
+            ..AdapterVtable::empty()
         };
         assert!(v.has_any_surface());
+    }
+
+    /// One library behind two families — the shape that was unrepresentable
+    /// while each plugin type had its own outer struct.
+    #[test]
+    fn one_vtable_can_carry_a_data_family_and_a_sync_backend() {
+        static CAL: CalendarVtable = CalendarVtable::empty();
+        static SYNC: SyncVtable = SyncVtable::empty();
+        let v = AdapterVtable {
+            calendar: &CAL,
+            sync: &SYNC,
+            ..AdapterVtable::empty()
+        };
+        assert!(v.has_any_surface());
+        assert!(!v.calendar.is_null());
+        assert!(!v.sync.is_null());
+        assert!(v.tasks.is_null());
+    }
+
+    fn manifest_with(caps: Vec<crate::Capability>) -> crate::PluginManifest {
+        crate::PluginManifest {
+            id: "com.example.two-families".to_string(),
+            name: "Two Families".to_string(),
+            version: "0.1.0".to_string(),
+            plugin_type: crate::PluginType::Adapter,
+            capabilities: caps,
+            abi_version: crate::ABI_VERSION,
+            min_app_version: "0.1.0".to_string(),
+            author: None,
+            description: None,
+            signed: false,
+            recurrence: Default::default(),
+            tasks: Default::default(),
+            account: None,
+            adapter_kind: None,
+            strings: Default::default(),
+        }
+    }
+
+    #[test]
+    fn a_promise_without_a_pointer_is_refused_by_name() {
+        static CAL: CalendarVtable = CalendarVtable::empty();
+        let table = AdapterVtable {
+            calendar: &CAL,
+            ..AdapterVtable::empty()
+        };
+        let ptr = &table as *const AdapterVtable as *const std::os::raw::c_void;
+
+        // What it ships is what it declared.
+        check_declared_surfaces(&manifest_with(vec![crate::Capability::Calendar]), ptr)
+            .expect("calendar is there");
+
+        // …and one it did not: the message has to carry both the plugin and
+        // the missing family, because the user-visible symptom is an absence.
+        let err = check_declared_surfaces(
+            &manifest_with(vec![crate::Capability::Calendar, crate::Capability::Tasks]),
+            ptr,
+        )
+        .expect_err("tasks is null");
+        let msg = err.to_string();
+        assert!(msg.contains("com.example.two-families"), "{msg}");
+        assert!(msg.contains("tasks"), "{msg}");
+    }
+
+    #[test]
+    fn a_pointer_without_a_promise_is_left_alone() {
+        // The reverse mismatch costs the user nothing — the surface is simply
+        // never asked for — so it is not an error.
+        static CAL: CalendarVtable = CalendarVtable::empty();
+        static SYNC: SyncVtable = SyncVtable::empty();
+        let table = AdapterVtable {
+            calendar: &CAL,
+            sync: &SYNC,
+            ..AdapterVtable::empty()
+        };
+        check_declared_surfaces(
+            &manifest_with(vec![crate::Capability::Calendar]),
+            &table as *const AdapterVtable as *const std::os::raw::c_void,
+        )
+        .expect("undeclared sync slot is not an error");
+    }
+
+    #[test]
+    fn a_capability_from_a_future_aperio_is_skipped_not_refused() {
+        static CAL: CalendarVtable = CalendarVtable::empty();
+        let table = AdapterVtable {
+            calendar: &CAL,
+            ..AdapterVtable::empty()
+        };
+        check_declared_surfaces(
+            &manifest_with(vec![
+                crate::Capability::Calendar,
+                crate::Capability::Unknown("holograms".into()),
+            ]),
+            &table as *const AdapterVtable as *const std::os::raw::c_void,
+        )
+        .expect("this host has no slot to look for, so it cannot judge");
     }
 
     /// ABI sync tripwire (64-bit).
@@ -238,9 +431,7 @@ mod tests {
         assert!(vtable_layout_ok(ContactsVtable::empty().vtable_version));
         assert!(vtable_layout_ok(SyncVtable::empty().vtable_version));
         assert!(vtable_layout_ok(VcVtable::empty().vtable_version));
-        assert!(vtable_layout_ok(
-            CalendarAdapterVtable::empty().vtable_version
-        ));
+        assert!(vtable_layout_ok(AdapterVtable::empty().vtable_version));
     }
 
     #[cfg(target_pointer_width = "64")]
@@ -266,7 +457,8 @@ mod tests {
         // manifest is the only thing that keeps a plugin built against the
         // shorter layout from being read past its end.
         assert_eq!(size_of::<VcVtable>(), 8 + 6 * 8);
-        // u32 + 3 sub-vtable pointers.
-        assert_eq!(size_of::<CalendarAdapterVtable>(), 8 + 3 * 8);
+        // u32 + one pointer per feature family: calendar, tasks, contacts,
+        // sync, videoconference.
+        assert_eq!(size_of::<AdapterVtable>(), 8 + 5 * 8);
     }
 }

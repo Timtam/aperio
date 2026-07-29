@@ -1,7 +1,7 @@
 //! Todoist tasks adapter packaged as a plugin (DESIGN.md §20).
 //!
 //! Single-capability tasks adapter — fills only the
-//! `tasks` slot in [`CalendarAdapterVtable`].
+//! `tasks` slot in [`AdapterVtable`].
 //!
 //! ## Init config
 //!
@@ -21,7 +21,7 @@ use cal_core::types::{MemberRight, NewTask};
 use cal_core::TasksFeature;
 use plugin_sdk::plugin_core::abi::OpenInstanceResult;
 use plugin_sdk::plugin_core::ffi::PluginCallResult;
-use plugin_sdk::plugin_core::vtables::{CalendarAdapterVtable, TasksVtable};
+use plugin_sdk::plugin_core::vtables::{AdapterVtable, TasksVtable};
 use plugin_sdk::{decode_args, ok_response, open_instance_with, PluginInstance};
 use serde::Deserialize;
 
@@ -353,18 +353,16 @@ pub static TASKS_VTABLE: TasksVtable = TasksVtable {
     ..TasksVtable::empty()
 };
 
-pub static ADAPTER_VTABLE: CalendarAdapterVtable = CalendarAdapterVtable {
-    vtable_version: plugin_sdk::plugin_core::ABI_VERSION,
-    calendar: std::ptr::null(),
+pub static ADAPTER_VTABLE: AdapterVtable = AdapterVtable {
     tasks: &TASKS_VTABLE,
-    contacts: std::ptr::null(),
+    ..AdapterVtable::empty()
 };
 
 plugin_sdk::declare_lifecycle! {
     id: "com.aperio.cal-adapter-todoist",
     name: "Aperio Todoist",
     version: "0.1.0",
-    plugin_type: "calendar-adapter",
+    plugin_type: "adapter",
     vtable: ADAPTER_VTABLE,
     open_instance: plugin_open_instance,
     close_instance: plugin_close_instance,

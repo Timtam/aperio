@@ -51,7 +51,23 @@ use crate::error::{PluginError, PluginResult};
 ///   plugin exists that speaks the earlier v3. Once v3 ships, the
 ///   next wire change to an existing slot takes v4.
 ///
-///   Also in v3, and none of it breaking: `vtable_version` is now
+///   Also in v3, and this one touches every plugin: there is now ONE
+///   outer vtable, [`crate::vtables::AdapterVtable`], with a pointer
+///   per feature family (calendar, tasks, contacts, sync,
+///   videoconference) and null for the rest. It replaces the old
+///   arrangement where the cast depended on `plugin_type` — a
+///   three-pointer wrapper for a calendar adapter, a bare
+///   `SyncVtable` for a sync adapter, a bare `VcVtable` for a
+///   videoconference one. That made the type tag load-bearing for
+///   memory safety, and it made "this provider is a calendar AND a
+///   place to sync into" unrepresentable, since a plugin has exactly
+///   one vtable slot. The four per-surface `plugin_type` tags
+///   collapsed into `"adapter"` in the same move: what a plugin does
+///   is its `capabilities` list, which the host now cross-checks
+///   against the non-null pointers at load time
+///   ([`crate::vtables::check_declared_surfaces`]).
+///
+///   And, none of it breaking: `vtable_version` is now
 ///   actually READ before the rest of a vtable is trusted
 ///   ([`crate::vtables::vtable_layout_ok`]); the manifest gained the
 ///   optional `adapter_kind`, `account` and `strings` blocks; the

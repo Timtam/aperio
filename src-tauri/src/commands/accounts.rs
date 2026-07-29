@@ -150,7 +150,8 @@ pub async fn list_accounts(
             let is_videoconference = plugin_manager
                 .plugin_for_adapter_kind(account.adapter_kind.as_str())
                 .is_some_and(|p| {
-                    p.manifest.plugin_type == plugin_core::PluginType::VideoconferenceAdapter
+                    p.manifest
+                        .has_capability(&plugin_core::Capability::Videoconference)
                 });
             AccountListEntry {
                 account,
@@ -1301,7 +1302,7 @@ pub fn account_form_spec(
             client_id_field: o.client_id_field.clone(),
             client_secret_field: o.client_secret_field.clone(),
         }),
-        owns_containers: plugin.manifest.plugin_type == plugin_core::PluginType::CalendarAdapter,
+        owns_containers: plugin.manifest.has_data_family(),
     }))
 }
 
@@ -1626,7 +1627,7 @@ pub async fn connect_account(
     // A warm pass only has something to fetch when the account owns containers.
     // A videoconference account owns none, and the catalog calls have a
     // blocking cold path.
-    let owns_containers = plugin.manifest.plugin_type == plugin_core::PluginType::CalendarAdapter;
+    let owns_containers = plugin.manifest.has_data_family();
     if owns_containers {
         refresher.trigger();
     }

@@ -41,6 +41,37 @@ pub use vc::FfiVcAdapter;
 /// future Aperio) are dropped — the host doesn't know how to
 /// dispatch to them, and the trait's `capabilities()` slot is a
 /// list, not an error channel.
+/// The outer vtable of a loaded plugin, once it is safe to read.
+///
+/// Every plugin points its single vtable slot at an
+/// [`crate::vtables::AdapterVtable`], so there is nothing to decide here: one
+/// null check, one layout check, one cast. Which families the plugin actually
+/// serves is then a question about the pointers inside, and every shim asks it
+/// the same way.
+///
+/// `None` when the pointer is null or the layout revision is not this host's.
+/// Both mean the same thing to a caller — this plugin cannot be called — and
+/// neither is worth a distinct error, because the loader has already rejected
+/// the version mismatch loudly and this is the belt to that's braces.
+pub(super) fn adapter_vtable(
+    plugin: &crate::LoadedPlugin,
+) -> Option<crate::vtables::AdapterVtable> {
+    let raw = plugin.vtable_ptr();
+    if raw.is_null() {
+        return None;
+    }
+    // SAFETY: `vtable_version` sits at offset 0 of every vtable in every
+    // revision, so it is the one field readable before the layout is known.
+    // Everything past it is read only once the revision matches this host's.
+    let version = unsafe { *(raw as *const u32) };
+    if !crate::vtables::vtable_layout_ok(version) {
+        return None;
+    }
+    // SAFETY: the revision matches, so the struct behind the pointer has this
+    // host's layout, and the ABI contract makes it an `AdapterVtable`.
+    Some(unsafe { &*(raw as *const crate::vtables::AdapterVtable) }.clone_shallow())
+}
+
 pub(super) fn manifest_capabilities(
     raw: &[crate::Capability],
 ) -> Vec<cal_core::adapter::Capability> {
@@ -49,7 +80,12 @@ pub(super) fn manifest_capabilities(
             crate::Capability::Calendar => Some(cal_core::adapter::Capability::Calendar),
             crate::Capability::Tasks => Some(cal_core::adapter::Capability::Tasks),
             crate::Capability::Contacts => Some(cal_core::adapter::Capability::Contacts),
-            crate::Capability::Unknown(_) => None,
+            // Not data families: `cal_core::Capability` describes what a
+            // CALENDAR adapter offers, and a sync backend or a meeting service
+            // is neither. They reach the host through their own vtables.
+            crate::Capability::Sync
+            | crate::Capability::Videoconference
+            | crate::Capability::Unknown(_) => None,
         })
         .collect()
 }

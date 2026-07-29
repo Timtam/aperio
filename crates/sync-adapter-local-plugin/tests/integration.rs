@@ -29,8 +29,8 @@ fn plugin_manifest() -> PluginManifest {
         id: "com.aperio.sync-adapter-local".into(),
         name: "Aperio Local Filesystem".into(),
         version: "0.1.0".into(),
-        plugin_type: PluginType::SyncAdapter,
-        capabilities: vec![],
+        plugin_type: PluginType::Adapter,
+        capabilities: vec![Capability::Sync],
         abi_version: ABI_VERSION,
         min_app_version: "0.1.0".into(),
         author: Some("Aperio Contributors".into()),
@@ -195,10 +195,13 @@ async fn two_instances_have_independent_remote_roots() {
 }
 
 #[test]
-fn manifest_declares_no_capabilities_for_sync_adapter() {
+fn manifest_declares_sync_and_nothing_else() {
     let m = plugin_manifest();
-    assert_eq!(m.plugin_type, PluginType::SyncAdapter);
-    assert!(m.capabilities.is_empty());
+    assert_eq!(m.plugin_type, PluginType::Adapter);
+    assert!(m.has_capability(&Capability::Sync));
+    // A sync backend owns no calendars, task lists or address books, and the
+    // host decides where to register an account from exactly this.
+    assert!(!m.has_data_family());
     assert!(!m.has_capability(&Capability::Calendar));
     assert!(!m.has_capability(&Capability::Tasks));
     assert!(!m.has_capability(&Capability::Contacts));

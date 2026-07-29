@@ -22,7 +22,7 @@ use std::os::raw::{c_char, c_void};
 use base64::Engine as _;
 use plugin_sdk::plugin_core::abi::OpenInstanceResult;
 use plugin_sdk::plugin_core::ffi::PluginCallResult;
-use plugin_sdk::plugin_core::vtables::SyncVtable;
+use plugin_sdk::plugin_core::vtables::{AdapterVtable, SyncVtable};
 use plugin_sdk::{
     decode_args, error_response, ok_response, open_instance_with, sync_error_to_response,
     PluginInstance,
@@ -218,12 +218,19 @@ pub static SYNC_VTABLE: SyncVtable = SyncVtable {
     ..SyncVtable::empty()
 };
 
+/// The outer vtable the host reads. One pointer per feature family;
+/// this plugin serves sync and leaves the rest null.
+pub static ADAPTER_VTABLE: AdapterVtable = AdapterVtable {
+    sync: &SYNC_VTABLE,
+    ..AdapterVtable::empty()
+};
+
 plugin_sdk::declare_lifecycle! {
     id: "com.aperio.sync-adapter-googledrive",
     name: "Aperio Google Drive",
     version: "0.1.0",
-    plugin_type: "sync-adapter",
-    vtable: SYNC_VTABLE,
+    plugin_type: "adapter",
+    vtable: ADAPTER_VTABLE,
     open_instance: plugin_open_instance,
     close_instance: plugin_close_instance,
 }

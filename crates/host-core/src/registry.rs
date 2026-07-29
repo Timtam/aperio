@@ -971,54 +971,66 @@ impl AdapterRegistry {
         }
 
         // Which maps the instance lands in follows from the plugin's declared
-        // type and capabilities — the same source the per-kind path consults,
-        // read generically.
+        // capabilities, and from nothing else. One plugin can name several, so
+        // these are independent `if`s rather than arms of a match — the shape
+        // that lets one library be a provider's calendar AND its meetings.
         let manifest = self
             .plugin_manager
             .get(plugin_id)
             .ok_or_else(|| RegistryError::PluginMissing(plugin_id.to_string()))?
             .manifest
             .clone();
-        match manifest.plugin_type {
-            plugin_core::PluginType::VideoconferenceAdapter => {
-                self.insert_vc(&account.id, instance)?;
-                // An adapter that can enumerate its meetings also gets a
-                // read-only calendar built from them, so meetings created in
-                // the provider's own web UI — which have no calendar entry
-                // anywhere — become visible. Whether it can is decided by the
-                // adapter: `list_meetings` answers Unsupported when the slot is
-                // NULL, and then there is simply no such calendar.
-                if let Some(vc) = self.vc_adapter(&account.id) {
-                    if vc.can_list_meetings() {
-                        let calendar = crate::vc_calendar::VcCalendar::new(
-                            &account.id,
-                            &account.display_name,
-                            vc,
-                        );
-                        self.external_cal
-                            .write()
-                            .expect("registry cal poison")
-                            .insert(account.id.clone(), Arc::new(calendar));
-                    }
+        let mut registered = false;
+        if manifest.has_capability(&plugin_core::Capability::Calendar) {
+            self.insert_calendar(&account.id, instance.clone())?;
+            registered = true;
+        }
+        if manifest.has_capability(&plugin_core::Capability::Tasks) {
+            self.insert_tasks(&account.id, instance.clone())?;
+            registered = true;
+        }
+        if manifest.has_capability(&plugin_core::Capability::Contacts) {
+            self.insert_contacts(&account.id, instance.clone())?;
+            registered = true;
+        }
+        if manifest.has_capability(&plugin_core::Capability::Videoconference) {
+            self.insert_vc(&account.id, instance.clone())?;
+            registered = true;
+            // An adapter that can enumerate its meetings also gets a read-only
+            // calendar built from them, so meetings created in the provider's
+            // own web UI — which have no calendar entry anywhere — become
+            // visible. Whether it can is decided by the adapter: `list_meetings`
+            // answers Unsupported when the slot is NULL, and then there is
+            // simply no such calendar.
+            //
+            // A plugin that serves BOTH families keeps its real calendar: the
+            // meeting-backed one is only inserted when nothing else claimed the
+            // slot, because an adapter that already lists calendars has no use
+            // for a synthetic one.
+            if let Some(vc) = self.vc_adapter(&account.id) {
+                if vc.can_list_meetings()
+                    && !manifest.has_capability(&plugin_core::Capability::Calendar)
+                {
+                    let calendar =
+                        crate::vc_calendar::VcCalendar::new(&account.id, &account.display_name, vc);
+                    self.external_cal
+                        .write()
+                        .expect("registry cal poison")
+                        .insert(account.id.clone(), Arc::new(calendar));
                 }
-            }
-            plugin_core::PluginType::CalendarAdapter => {
-                if manifest.has_capability(&plugin_core::Capability::Calendar) {
-                    self.insert_calendar(&account.id, instance.clone())?;
-                }
-                if manifest.has_capability(&plugin_core::Capability::Tasks) {
-                    self.insert_tasks(&account.id, instance.clone())?;
-                }
-                if manifest.has_capability(&plugin_core::Capability::Contacts) {
-                    self.insert_contacts(&account.id, instance)?;
-                }
-            }
-            other => {
-                return Err(RegistryError::Construct(format!(
-                    "plugin type {other:?} has no account-backed adapter surface"
-                )))
             }
         }
+        // `sync` is registered by the sync orchestrator against its own target
+        // config, not against a calendar account, so it is not a surface this
+        // path can place. A plugin that declares ONLY sync therefore lands
+        // here — and saying so beats registering nothing in silence.
+        if !registered {
+            return Err(RegistryError::Construct(format!(
+                "plugin `{plugin_id}` declares no capability this account can use: {:?}",
+                manifest.capabilities
+            )));
+        }
+        drop(instance);
         Ok(())
     }
 }

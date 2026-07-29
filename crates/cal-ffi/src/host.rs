@@ -2395,7 +2395,8 @@ impl Host {
                     .plugin_manager
                     .plugin_for_adapter_kind(account.adapter_kind.as_str());
                 let is_videoconference = plugin.as_ref().is_some_and(|p| {
-                    p.manifest.plugin_type == plugin_core::PluginType::VideoconferenceAdapter
+                    p.manifest
+                        .has_capability(&plugin_core::Capability::Videoconference)
                 });
                 let plugin_loaded = account.adapter_kind.is_host_internal() || plugin.is_some();
                 let mut value = serde_json::to_value(&account).unwrap_or(serde_json::Value::Null);
@@ -7280,7 +7281,7 @@ impl Host {
             // the catalog refresh for an adapter that owns no containers
             // without keeping its own list of which adapters those are.
             "owns_containers":
-                plugin.manifest.plugin_type == plugin_core::PluginType::CalendarAdapter,
+                plugin.manifest.has_data_family(),
         });
         Ok(spec.to_string())
     }

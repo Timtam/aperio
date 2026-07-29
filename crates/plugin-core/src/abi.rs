@@ -55,10 +55,9 @@ pub const PLUGIN_ERR_INTERNAL: c_int = 3;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AperioPluginType {
     Unknown = 0,
-    CalendarAdapter = 1,
-    SyncAdapter = 2,
-    VideoconferenceAdapter = 3,
-    Notification = 4,
+    /// Any provider surface — what it actually serves is its `capabilities`.
+    Adapter = 1,
+    Notification = 2,
 }
 
 /// Return value of [`AperioPlugin::open_instance`]. Either carries a
@@ -320,10 +319,8 @@ mod tests {
     #[test]
     fn plugin_type_enum_matches_c_header_values() {
         assert_eq!(AperioPluginType::Unknown as u32, 0);
-        assert_eq!(AperioPluginType::CalendarAdapter as u32, 1);
-        assert_eq!(AperioPluginType::SyncAdapter as u32, 2);
-        assert_eq!(AperioPluginType::VideoconferenceAdapter as u32, 3);
-        assert_eq!(AperioPluginType::Notification as u32, 4);
+        assert_eq!(AperioPluginType::Adapter as u32, 1);
+        assert_eq!(AperioPluginType::Notification as u32, 2);
     }
 
     #[test]

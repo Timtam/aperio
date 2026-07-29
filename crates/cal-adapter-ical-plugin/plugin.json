@@ -2,7 +2,7 @@
   "id": "com.aperio.cal-adapter-ical",
   "name": "Aperio iCal Feed",
   "version": "0.1.0",
-  "plugin_type": "calendar-adapter",
+  "plugin_type": "adapter",
   "capabilities": ["calendar"],
   "abi_version": 3,
   "min_app_version": "0.1.0",

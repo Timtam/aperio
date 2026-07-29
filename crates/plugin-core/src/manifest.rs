@@ -13,7 +13,7 @@
 //!   "id": "com.example.myplugin",
 //!   "name": "Mein Kalender-Plugin",
 //!   "version": "1.0.0",
-//!   "plugin_type": "calendar-adapter",
+//!   "plugin_type": "adapter",
 //!   "capabilities": ["calendar"],
 //!   "abi_version": 1,
 //!   "min_app_version": "1.0.0",
@@ -434,6 +434,16 @@ impl PluginManifest {
         // compare on first use.
         crate::Version::parse(&self.version)?;
         crate::Version::parse(&self.min_app_version)?;
+        // An adapter that declares nothing does nothing. The tag says only
+        // "this is a provider surface"; `capabilities` says which, and an
+        // empty list means the host would load the library, open no instance
+        // and register the account against no map — a plugin that appears
+        // installed and is inert. Cheaper to reject at parse time.
+        if self.plugin_type == PluginType::Adapter && self.capabilities.is_empty() {
+            return Err(PluginError::Manifest(
+                "an adapter must declare at least one capability".into(),
+            ));
+        }
         // A malformed account schema fails HERE, while the plugin is loading,
         // rather than halfway through creating an account with secrets already
         // written to the keychain.
@@ -460,6 +470,16 @@ impl PluginManifest {
     pub fn has_capability(&self, cap: &Capability) -> bool {
         self.capabilities.iter().any(|c| c == cap)
     }
+
+    /// True iff the plugin serves at least one family that owns containers —
+    /// calendars, task lists or address books.
+    ///
+    /// What "is this a calendar adapter" used to mean, asked of the capability
+    /// list instead of the type tag, so a plugin that serves a calendar AND
+    /// something else still answers yes.
+    pub fn has_data_family(&self) -> bool {
+        self.capabilities.iter().any(Capability::is_data_family)
+    }
 }
 
 #[cfg(test)]
@@ -473,7 +493,7 @@ mod tests {
                 "id": "com.aperio.cal-adapter-local",
                 "name": "Aperio Local",
                 "version": "0.1.0",
-                "plugin_type": "calendar-adapter",
+                "plugin_type": "adapter",
                 "capabilities": ["calendar", "tasks", "contacts"],
                 "abi_version": {ABI_VERSION},
                 "min_app_version": "0.1.0",
@@ -489,7 +509,7 @@ mod tests {
         assert_eq!(m.id, "com.aperio.cal-adapter-local");
         assert_eq!(m.name, "Aperio Local");
         assert_eq!(m.version, "0.1.0");
-        assert_eq!(m.plugin_type, PluginType::CalendarAdapter);
+        assert_eq!(m.plugin_type, PluginType::Adapter);
         assert_eq!(
             m.capabilities,
             vec![
@@ -539,6 +559,34 @@ mod tests {
             PluginError::Manifest(msg) => assert!(msg.contains("id")),
             other => panic!("expected Manifest, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn rejects_an_adapter_that_declares_no_capability() {
+        // An adapter is only its capability list now. An empty one would load,
+        // open nothing and register against no map — installed and inert.
+        let json = format!(
+            r#"{{
+                "id": "com.example.inert",
+                "name": "X",
+                "version": "1.0.0",
+                "plugin_type": "adapter",
+                "abi_version": {ABI_VERSION},
+                "min_app_version": "1.0.0"
+            }}"#
+        );
+        let err = PluginManifest::from_bytes(json.as_bytes()).unwrap_err();
+        match err {
+            PluginError::Manifest(msg) => assert!(msg.contains("capability"), "{msg}"),
+            other => panic!("expected Manifest, got {other:?}"),
+        }
+        // A notification channel has no capability list by design, so the same
+        // gate must not catch it.
+        let notification = json.replace(
+            r#""plugin_type": "adapter""#,
+            r#""plugin_type": "notification""#,
+        );
+        PluginManifest::from_bytes(notification.as_bytes()).expect("notification needs no caps");
     }
 
     #[test]
@@ -665,7 +713,8 @@ mod tests {
                 "id": "x.y",
                 "name": "X",
                 "version": "1.0.0",
-                "plugin_type": "calendar-adapter",
+                "plugin_type": "adapter",
+                "capabilities": ["calendar"],
                 "abi_version": {ABI_VERSION},
                 "min_app_version": "1.0.0",
                 "tasks": {{
@@ -695,7 +744,8 @@ mod tests {
                 "id": "x.y",
                 "name": "X",
                 "version": "1.0.0",
-                "plugin_type": "calendar-adapter",
+                "plugin_type": "adapter",
+                "capabilities": ["calendar"],
                 "abi_version": {ABI_VERSION},
                 "min_app_version": "1.0.0",
                 "recurrence": {{

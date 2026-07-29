@@ -2,9 +2,9 @@
 title: "Example: hello-world"
 ---
 
-The smallest plugin that loads and is recognised by the host: a
-calendar-adapter that supports the `calendars` capability and returns an
-empty calendar list. Copy this, then grow it.
+The smallest plugin that loads and is recognised by the host: an adapter that
+declares the `calendar` capability and returns an empty calendar list. Copy
+this, then grow it.
 
 ## Layout
 
@@ -23,9 +23,9 @@ hello-world/
   "id": "com.example.hello-world",
   "name": "Hello World",
   "version": "0.1.0",
-  "plugin_type": "calendar-adapter",
-  "capabilities": ["calendars"],
-  "abi_version": 2,
+  "plugin_type": "adapter",
+  "capabilities": ["calendar"],
+  "abi_version": 3,
   "min_app_version": "0.1.0",
   "author": "You",
   "description": "Minimal example calendar adapter.",
@@ -64,7 +64,7 @@ use cal_core::{
 };
 use plugin_sdk::plugin_core::abi::OpenInstanceResult;
 use plugin_sdk::plugin_core::ffi::PluginCallResult;
-use plugin_sdk::plugin_core::vtables::{CalendarAdapterVtable, CalendarVtable};
+use plugin_sdk::plugin_core::vtables::{AdapterVtable, CalendarVtable};
 use plugin_sdk::{ok_response, open_instance_with, PluginInstance};
 
 plugin_sdk::cal_dispatch_helpers!(HelloAdapter);
@@ -132,18 +132,16 @@ pub static CALENDAR_VTABLE: CalendarVtable = CalendarVtable {
     ..CalendarVtable::empty()
 };
 
-pub static ADAPTER_VTABLE: CalendarAdapterVtable = CalendarAdapterVtable {
-    vtable_version: plugin_sdk::plugin_core::ABI_VERSION,
+pub static ADAPTER_VTABLE: AdapterVtable = AdapterVtable {
     calendar: &CALENDAR_VTABLE,
-    tasks: std::ptr::null(),
-    contacts: std::ptr::null(),
+    ..AdapterVtable::empty()
 };
 
 plugin_sdk::declare_lifecycle! {
     id: "com.example.hello-world",
     name: "Hello World",
     version: "0.1.0",
-    plugin_type: "calendar-adapter",
+    plugin_type: "adapter",
     vtable: ADAPTER_VTABLE,
     open_instance: plugin_open_instance,
     close_instance: plugin_close_instance,

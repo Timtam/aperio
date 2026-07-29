@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use plugin_core::{
     abi::AperioPlugin, manager::PluginManager, manifest::PluginManifest, shim::FfiSyncAdapter,
-    PluginType, ABI_VERSION,
+    Capability, PluginType, ABI_VERSION,
 };
 
 fn manifest() -> PluginManifest {
@@ -12,8 +12,8 @@ fn manifest() -> PluginManifest {
         id: "com.aperio.sync-adapter-ftp".into(),
         name: "Aperio FTPS".into(),
         version: "0.1.0".into(),
-        plugin_type: PluginType::SyncAdapter,
-        capabilities: vec![],
+        plugin_type: PluginType::Adapter,
+        capabilities: vec![Capability::Sync],
         abi_version: ABI_VERSION,
         min_app_version: "0.1.0".into(),
         author: Some("Aperio Contributors".into()),

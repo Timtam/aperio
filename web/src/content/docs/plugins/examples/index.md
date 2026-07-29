@@ -5,7 +5,7 @@ title: "Examples"
 Two worked examples, from smallest to a realistic starting point:
 
 - **[hello-world](/plugins/examples/hello-world/)** — the absolute minimum: a
-  calendar-adapter plugin that exposes one capability method and returns an
+  calendar adapter that exposes one capability method and returns an
   empty list. The thing to copy when you just want *something* the host
   loads and recognises.
 - **[calendar-adapter-template](/plugins/examples/calendar-adapter-template/)** — a full

@@ -20,7 +20,7 @@ use tracing::warn;
 
 use crate::ffi::*;
 use crate::manager::{InFlightGuard, LoadedInstance};
-use crate::vtables::{CalendarAdapterVtable, CalendarVtable};
+use crate::vtables::CalendarVtable;
 
 use super::call::{call_method, call_method_sync, decode_payload, encode_args, CallOutcome};
 
@@ -89,7 +89,7 @@ impl FfiCalendarAdapter {
     /// be handed to the rest of the host as
     /// `Arc<dyn CalendarFeature>`. Returns `None` when the
     /// plugin doesn't actually provide the calendar capability
-    /// (its [`CalendarAdapterVtable::calendar`] slot is null) or
+    /// (its [`crate::vtables::AdapterVtable::calendar`] slot is null) or
     /// fails the minimum-surface check.
     ///
     /// Multi-capability plugins (e.g. CalDAV providing
@@ -98,35 +98,17 @@ impl FfiCalendarAdapter {
     /// shims — they all share the same per-account handle.
     pub fn new(instance: Arc<LoadedInstance>) -> Option<Self> {
         let plugin = instance.plugin().clone();
-        let raw = plugin.vtable_ptr();
-        if raw.is_null() {
+        // Null pointer, or a layout this host cannot read — either way the
+        // plugin is not callable. `adapter_vtable` reads `vtable_version` before
+        // it trusts anything else in the struct.
+        let Some(outer) = super::adapter_vtable(&plugin) else {
             warn!(
                 plugin_id = %plugin.manifest.id,
-                "calendar plugin has NULL vtable; refusing to wrap",
+                host_abi = crate::ABI_VERSION,
+                "calendar plugin has no vtable this host can read; refusing to wrap",
             );
             return None;
-        }
-        // SAFETY: the manifest's plugin_type field told us this
-        // is a calendar-adapter, so the vtable pointer points at
-        // a CalendarAdapterVtable per the ABI contract.
-        let outer: &CalendarAdapterVtable = unsafe { &*(raw as *const CalendarAdapterVtable) };
-        // Read `vtable_version` BEFORE trusting the rest of the layout. It is at
-        // offset 0 in every vtable in every revision, so it is the one field
-        // that is safe to read before the layout is known — and until this
-        // check existed, a plugin built against a shorter revision passed the
-        // loader on `abi_version` alone and the host read past the end of its
-        // struct. See `vtables::vtable_layout_ok`.
-        if !crate::vtables::vtable_layout_ok(outer.vtable_version) {
-            {
-                warn!(
-                    plugin_id = %plugin.manifest.id,
-                    vtable_version = outer.vtable_version,
-                    host_abi = crate::ABI_VERSION,
-                    "calendar plugin's vtable declares an unknown layout revision; refusing to wrap",
-                );
-                return None;
-            }
-        }
+        };
         if outer.calendar.is_null() {
             // Plugin didn't declare Capability::Calendar — not an
             // error, just means the registry should skip the
@@ -547,18 +529,16 @@ mod tests {
             ..CalendarVtable::empty()
         });
         let cal_ptr: *const CalendarVtable = Box::into_raw(cal_vtable);
-        let outer = Box::new(CalendarAdapterVtable {
-            vtable_version: crate::ABI_VERSION,
+        let outer = Box::new(crate::vtables::AdapterVtable {
             calendar: cal_ptr,
-            tasks: std::ptr::null(),
-            contacts: std::ptr::null(),
+            ..crate::vtables::AdapterVtable::empty()
         });
         let vtable_ptr = Box::into_raw(outer) as *mut c_void;
 
         let id_cstr = std::ffi::CString::new("test.calendar").unwrap();
         let name_cstr = std::ffi::CString::new("Test Calendar").unwrap();
         let version_cstr = std::ffi::CString::new("0.1.0").unwrap();
-        let type_cstr = std::ffi::CString::new("calendar-adapter").unwrap();
+        let type_cstr = std::ffi::CString::new("adapter").unwrap();
         let descriptor = Box::new(crate::abi::AperioPlugin {
             abi_version: crate::ABI_VERSION,
             id: id_cstr.into_raw(),
@@ -577,7 +557,7 @@ mod tests {
                 id: "test.calendar".to_string(),
                 name: "Test".to_string(),
                 version: "0.1.0".to_string(),
-                plugin_type: crate::PluginType::CalendarAdapter,
+                plugin_type: crate::PluginType::Adapter,
                 capabilities: vec![crate::Capability::Calendar],
                 abi_version: crate::ABI_VERSION,
                 min_app_version: "0.1.0".to_string(),

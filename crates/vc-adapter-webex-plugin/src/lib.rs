@@ -30,7 +30,7 @@ use std::os::raw::{c_char, c_void};
 
 use plugin_sdk::plugin_core::abi::OpenInstanceResult;
 use plugin_sdk::plugin_core::ffi::PluginCallResult;
-use plugin_sdk::plugin_core::vtables::VcVtable;
+use plugin_sdk::plugin_core::vtables::{AdapterVtable, VcVtable};
 use plugin_sdk::{decode_args, open_instance_with, PluginInstance};
 use serde::Deserialize;
 use vc_adapter_webex::{oauth, WebexAccountConfig, WebexAdapter};
@@ -343,12 +343,19 @@ plugin_sdk::declare_interactive_auth! {
     handler: plugin_interactive_auth,
 }
 
+/// The outer vtable the host reads. One pointer per feature family;
+/// this plugin serves videoconference and leaves the rest null.
+pub static ADAPTER_VTABLE: AdapterVtable = AdapterVtable {
+    videoconference: &VC_VTABLE,
+    ..AdapterVtable::empty()
+};
+
 plugin_sdk::declare_lifecycle! {
     id: "com.aperio.vc-adapter-webex",
     name: "Aperio Cisco WebEx",
     version: "0.1.0",
-    plugin_type: "videoconference-adapter",
-    vtable: VC_VTABLE,
+    plugin_type: "adapter",
+    vtable: ADAPTER_VTABLE,
     open_instance: plugin_open_instance,
     close_instance: plugin_close_instance,
 }

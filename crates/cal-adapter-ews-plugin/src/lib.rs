@@ -26,7 +26,7 @@ use chrono::{DateTime, Utc};
 use plugin_sdk::plugin_core::abi::OpenInstanceResult;
 use plugin_sdk::plugin_core::ffi::PluginCallResult;
 use plugin_sdk::plugin_core::vtables::{
-    CalendarAdapterVtable, CalendarVtable, ContactsVtable, TasksVtable,
+    AdapterVtable, CalendarVtable, ContactsVtable, TasksVtable,
 };
 use plugin_sdk::{decode_args, ok_response, open_instance_with, PluginInstance};
 use serde::Deserialize;
@@ -657,18 +657,18 @@ pub static CONTACTS_VTABLE: ContactsVtable = ContactsVtable {
     ..ContactsVtable::empty()
 };
 
-pub static ADAPTER_VTABLE: CalendarAdapterVtable = CalendarAdapterVtable {
-    vtable_version: plugin_sdk::plugin_core::ABI_VERSION,
+pub static ADAPTER_VTABLE: AdapterVtable = AdapterVtable {
     calendar: &CALENDAR_VTABLE,
     tasks: &TASKS_VTABLE,
     contacts: &CONTACTS_VTABLE,
+    ..AdapterVtable::empty()
 };
 
 plugin_sdk::declare_lifecycle! {
     id: "com.aperio.cal-adapter-ews",
     name: "Aperio Exchange (EWS)",
     version: "0.1.0",
-    plugin_type: "calendar-adapter",
+    plugin_type: "adapter",
     vtable: ADAPTER_VTABLE,
     open_instance: plugin_open_instance,
     close_instance: plugin_close_instance,

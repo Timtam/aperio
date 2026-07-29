@@ -2,7 +2,7 @@
   "id": "com.aperio.cal-adapter-vikunja",
   "name": "Aperio Vikunja",
   "version": "0.1.0",
-  "plugin_type": "calendar-adapter",
+  "plugin_type": "adapter",
   "capabilities": ["tasks"],
   "abi_version": 3,
   "min_app_version": "0.1.0",

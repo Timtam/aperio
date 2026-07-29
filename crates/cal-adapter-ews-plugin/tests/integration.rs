@@ -15,7 +15,7 @@ fn manifest() -> PluginManifest {
         id: "com.aperio.cal-adapter-ews".into(),
         name: "Aperio Exchange (EWS)".into(),
         version: "0.1.0".into(),
-        plugin_type: PluginType::CalendarAdapter,
+        plugin_type: PluginType::Adapter,
         capabilities: vec![
             Capability::Calendar,
             Capability::Tasks,

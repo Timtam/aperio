@@ -1,10 +1,16 @@
 //! Plugin-type tag — DESIGN.md §20.2.
 //!
-//! Four entries: `calendar-adapter`, `sync-adapter`,
-//! `videoconference-adapter`, `notification`. The wire string is
-//! kebab-case to match the rest of the manifest; the Rust enum is
-//! `CalendarAdapter` etc. Mirror of the `AperioPluginType` enum in
-//! `aperio_plugin.h` (in numeric form there for C consumers).
+//! Two entries: `adapter` and `notification`. Mirror of the
+//! `AperioPluginType` enum in `aperio_plugin.h` (in numeric form
+//! there for C consumers).
+//!
+//! There used to be four, one per surface — `calendar-adapter`,
+//! `sync-adapter`, `videoconference-adapter`. They are gone
+//! because the tag was answering a question that belongs to
+//! `capabilities`, and answering it worse: it allowed exactly one
+//! surface per plugin, so a provider that is a calendar AND a
+//! place to sync into had to ship as two libraries with two
+//! sign-ins to the same account.
 //!
 //! Forward-compat: an unknown tag deserialises to
 //! [`PluginType::Unknown`] with the original string preserved, so a
@@ -15,17 +21,19 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PluginType {
-    /// Calendar / tasks / contacts data source. The detailed
-    /// surface is governed by the `capabilities` field in the
-    /// manifest; a single calendar-adapter can declare any subset
-    /// of `["calendar", "tasks", "contacts"]`.
-    CalendarAdapter,
-    /// Cross-device sync backend (DESIGN.md §19).
-    SyncAdapter,
-    /// Videoconference link generation + room listing (Zoom,
-    /// Teams, Meet, WebEx). VC adapters land in a phase after the
-    /// plugin one — declaring the tag now keeps the manifest stable.
-    VideoconferenceAdapter,
+    /// One provider, however many surfaces — `"adapter"`.
+    ///
+    /// What a plugin actually does is its `capabilities` list: any subset of
+    /// `calendar`, `tasks`, `contacts`, `sync`, `videoconference`. The vtable
+    /// mirrors it — an [`crate::vtables::AdapterVtable`] with one pointer per
+    /// family, null for the ones it does not serve.
+    ///
+    /// One tag rather than one per surface, because one PROVIDER is not one
+    /// feature. Google is a calendar, an address book, a task list, a file
+    /// store to sync into and a meeting service; four plugins for that means
+    /// four OAuth registrations and four sign-ins to the same account, with
+    /// four refresh tokens in the keychain that are all the same credential.
+    Adapter,
     /// Notification channel (system, e-mail, webhook). Not yet
     /// wired into the app; declared for forward-compat with
     /// DESIGN.md §20.2.
@@ -40,9 +48,7 @@ impl PluginType {
     /// Canonical kebab-case wire string.
     pub fn as_str(&self) -> &str {
         match self {
-            Self::CalendarAdapter => "calendar-adapter",
-            Self::SyncAdapter => "sync-adapter",
-            Self::VideoconferenceAdapter => "videoconference-adapter",
+            Self::Adapter => "adapter",
             Self::Notification => "notification",
             Self::Unknown(s) => s.as_str(),
         }
@@ -52,9 +58,7 @@ impl PluginType {
     /// through [`Self::Unknown`] rather than erroring.
     pub fn from_wire(s: &str) -> Self {
         match s {
-            "calendar-adapter" => Self::CalendarAdapter,
-            "sync-adapter" => Self::SyncAdapter,
-            "videoconference-adapter" => Self::VideoconferenceAdapter,
+            "adapter" => Self::Adapter,
             "notification" => Self::Notification,
             other => Self::Unknown(other.to_string()),
         }
@@ -88,12 +92,7 @@ mod tests {
 
     #[test]
     fn known_tags_round_trip() {
-        for tag in [
-            PluginType::CalendarAdapter,
-            PluginType::SyncAdapter,
-            PluginType::VideoconferenceAdapter,
-            PluginType::Notification,
-        ] {
+        for tag in [PluginType::Adapter, PluginType::Notification] {
             let json = serde_json::to_string(&tag).expect("serialise");
             let back: PluginType = serde_json::from_str(&json).expect("deserialise");
             assert_eq!(tag, back, "round trip for {}", tag.as_str());
@@ -110,8 +109,26 @@ mod tests {
 
     #[test]
     fn known_tags_are_marked_known() {
-        assert!(PluginType::CalendarAdapter.is_known());
-        assert!(PluginType::SyncAdapter.is_known());
+        assert!(PluginType::Adapter.is_known());
         assert!(PluginType::Notification.is_known());
+    }
+
+    /// The retired per-surface tags are not silently accepted as `adapter`.
+    ///
+    /// They land in `Unknown`, so a plugin still carrying one is listed as
+    /// unsupported instead of being loaded with an empty capability list and
+    /// then wondered about.
+    #[test]
+    fn the_retired_per_surface_tags_are_unknown() {
+        for old in [
+            "calendar-adapter",
+            "sync-adapter",
+            "videoconference-adapter",
+        ] {
+            assert_eq!(
+                PluginType::from_wire(old),
+                PluginType::Unknown(old.to_string())
+            );
+        }
     }
 }

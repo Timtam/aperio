@@ -78,16 +78,18 @@ extern "C" {
  * Plugin-type tag. Mirrors DESIGN.md §20.2.
  *
  * The `plugin_type` field on AperioPlugin carries the lowercase
- * string form ("calendar-adapter", "sync-adapter", …) — these
- * enum values exist purely as a convenience for C consumers
- * doing strcmp-free dispatch.
+ * string form ("adapter", "notification") — these enum values
+ * exist purely as a convenience for C consumers doing
+ * strcmp-free dispatch.
  */
 typedef enum AperioPluginType {
-    APERIO_PLUGIN_TYPE_UNKNOWN              = 0,
-    APERIO_PLUGIN_TYPE_CALENDAR_ADAPTER     = 1,
-    APERIO_PLUGIN_TYPE_SYNC_ADAPTER         = 2,
-    APERIO_PLUGIN_TYPE_VIDEOCONFERENCE_ADAPTER = 3,
-    APERIO_PLUGIN_TYPE_NOTIFICATION         = 4
+    APERIO_PLUGIN_TYPE_UNKNOWN      = 0,
+    /* Any provider surface. WHICH surfaces is the manifest's
+     * `capabilities` array — "calendar", "tasks", "contacts",
+     * "sync", "videoconference" — and the matching non-NULL
+     * pointers in AperioAdapterVtable. */
+    APERIO_PLUGIN_TYPE_ADAPTER      = 1,
+    APERIO_PLUGIN_TYPE_NOTIFICATION = 2
 } AperioPluginType;
 
 /*
@@ -206,8 +208,8 @@ typedef struct AperioPlugin {
     /* SemVer string. */
     const char *version;
 
-    /* Plugin-type tag string ("calendar-adapter", "sync-adapter",
-       …). The enum above mirrors the canonical set.
+    /* Plugin-type tag string ("adapter", "notification"). The
+       enum above mirrors the canonical set.
 
        Adding a future tag does not require an ABI bump — but note
        what a host that predates the tag actually does today: it

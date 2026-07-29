@@ -20,7 +20,7 @@ use tracing::warn;
 
 use crate::ffi::*;
 use crate::manager::{InFlightGuard, LoadedInstance};
-use crate::vtables::{CalendarAdapterVtable, ContactsVtable};
+use crate::vtables::ContactsVtable;
 
 use super::call::{call_method, decode_payload, encode_args, CallOutcome};
 
@@ -57,39 +57,22 @@ struct VtableSnapshot {
 impl FfiContactsAdapter {
     /// Wrap a loaded plugin instance's contacts surface. Returns
     /// `None` if the plugin doesn't declare the contacts
-    /// capability (the [`CalendarAdapterVtable::contacts`] slot
+    /// capability (the [`crate::vtables::AdapterVtable::contacts`] slot
     /// is null) or the sub-vtable fails the minimum-surface
     /// check.
     pub fn new(instance: Arc<LoadedInstance>) -> Option<Self> {
         let plugin = instance.plugin().clone();
-        let raw = plugin.vtable_ptr();
-        if raw.is_null() {
+        // Null pointer, or a layout this host cannot read — either way the
+        // plugin is not callable. `adapter_vtable` reads `vtable_version` before
+        // it trusts anything else in the struct.
+        let Some(outer) = super::adapter_vtable(&plugin) else {
             warn!(
                 plugin_id = %plugin.manifest.id,
-                "contacts plugin has NULL vtable; refusing to wrap",
+                host_abi = crate::ABI_VERSION,
+                "contacts plugin has no vtable this host can read; refusing to wrap",
             );
             return None;
-        }
-        // SAFETY: manifest plugin_type = "calendar-adapter" so
-        // the vtable is a CalendarAdapterVtable.
-        let outer: &CalendarAdapterVtable = unsafe { &*(raw as *const CalendarAdapterVtable) };
-        // Read `vtable_version` BEFORE trusting the rest of the layout. It is at
-        // offset 0 in every vtable in every revision, so it is the one field
-        // that is safe to read before the layout is known — and until this
-        // check existed, a plugin built against a shorter revision passed the
-        // loader on `abi_version` alone and the host read past the end of its
-        // struct. See `vtables::vtable_layout_ok`.
-        if !crate::vtables::vtable_layout_ok(outer.vtable_version) {
-            {
-                warn!(
-                    plugin_id = %plugin.manifest.id,
-                    vtable_version = outer.vtable_version,
-                    host_abi = crate::ABI_VERSION,
-                    "contacts plugin's vtable declares an unknown layout revision; refusing to wrap",
-                );
-                return None;
-            }
-        }
+        };
         if outer.contacts.is_null() {
             return None;
         }

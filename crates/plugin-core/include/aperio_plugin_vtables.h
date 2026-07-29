@@ -4,15 +4,13 @@
  *
  * This header is the C mirror of the Rust vtable structs in
  * `crates/plugin-core/src/vtables/*.rs`. `aperio_plugin.h` defines the
- * descriptor (`AperioPlugin`) whose `vtable` field points at one of the
- * structs below, selected by `plugin_type`:
+ * descriptor (`AperioPlugin`) whose `vtable` field ALWAYS points at an
+ * `AperioAdapterVtable` — one pointer per feature family, NULL for each
+ * family the plugin does not serve. There is nothing to select on: a
+ * calendar adapter, a sync backend and a plugin that is both have the
+ * same outer shape.
  *
- *   - "calendar-adapter"        → AperioCalendarAdapterVtable (the
- *                                 multi-capability wrapper bundling up to
- *                                 three sub-vtables)
- *   - "sync-adapter"            → AperioSyncVtable (directly)
- *   - "videoconference-adapter" → AperioVcVtable (directly)
- *   - "notification"            → reserved (no vtable yet)
+ * ("notification" plugins are reserved and carry no vtable yet.)
  *
  * Every slot is a function pointer of type `AperioVtableMethodFn`. A
  * plugin that doesn't implement a method leaves the slot NULL; the host
@@ -206,25 +204,10 @@ typedef struct AperioContactsVtable {
 } AperioContactsVtable;
 
 /*
- * ── CalendarAdapterVtable (outer wrapper) ─────────────────────────────
- * The `AperioPlugin.vtable` pointer for a "calendar-adapter" plugin
- * points at one of these. Each sub-vtable pointer is NULL when the
- * plugin doesn't declare the matching capability; the manifest's
- * `capabilities` array MUST match the non-NULL pointers (the host
- * cross-checks at load time). At least one sub-vtable must be non-NULL.
- */
-typedef struct AperioCalendarAdapterVtable {
-    uint32_t                       vtable_version;
-    const AperioCalendarVtable    *calendar; /* NULL ⇒ no Calendar cap */
-    const AperioTasksVtable       *tasks;    /* NULL ⇒ no Tasks cap */
-    const AperioContactsVtable    *contacts; /* NULL ⇒ no Contacts cap */
-} AperioCalendarAdapterVtable;
-
-/*
  * ── SyncVtable ────────────────────────────────────────────────────────
- * Mirrors `sync_core::SyncAdapter`. The `AperioPlugin.vtable` pointer
- * for a "sync-adapter" plugin points directly at one of these. Minimum
- * surface: fetch_meta + push_meta + fetch_new_logs + push_log.
+ * Mirrors `sync_core::SyncAdapter`. Reached through the `sync` slot of
+ * AperioAdapterVtable. Minimum surface: fetch_meta + push_meta +
+ * fetch_new_logs + push_log.
  */
 typedef struct AperioSyncVtable {
     uint32_t vtable_version;
@@ -243,9 +226,9 @@ typedef struct AperioSyncVtable {
 
 /*
  * ── VcVtable ──────────────────────────────────────────────────────────
- * Mirrors `vc_core::VcAdapter`. The `AperioPlugin.vtable` pointer for a
- * "videoconference-adapter" plugin points directly at one of these.
- * Minimum surface: create_meeting + delete_meeting.
+ * Mirrors `vc_core::VcAdapter`. Reached through the `videoconference`
+ * slot of AperioAdapterVtable. Minimum surface: create_meeting +
+ * delete_meeting.
  */
 typedef struct AperioVcVtable {
     uint32_t vtable_version;
@@ -276,6 +259,25 @@ typedef struct AperioVcVtable {
     AperioVtableMethodFn resolve_meeting;
     AperioVtableMethodFn list_meetings;
 } AperioVcVtable;
+
+/*
+ * ── AdapterVtable (the outer struct, always) ──────────────────────────
+ * `AperioPlugin.vtable` points at one of these. Each family pointer is
+ * NULL when the plugin doesn't declare the matching capability; the
+ * manifest's `capabilities` array MUST match the non-NULL pointers (the
+ * host cross-checks at load time). At least one must be non-NULL.
+ *
+ * Declared AFTER the family structs it points at, so the definitions are
+ * complete — which is why it sits down here rather than at the top.
+ */
+typedef struct AperioAdapterVtable {
+    uint32_t                       vtable_version;
+    const AperioCalendarVtable    *calendar; /* NULL ⇒ no Calendar cap */
+    const AperioTasksVtable       *tasks;    /* NULL ⇒ no Tasks cap */
+    const AperioContactsVtable    *contacts; /* NULL ⇒ no Contacts cap */
+    const AperioSyncVtable        *sync;     /* NULL ⇒ no Sync cap */
+    const AperioVcVtable          *videoconference; /* NULL ⇒ no VC cap */
+} AperioAdapterVtable;
 
 #ifdef __cplusplus
 } /* extern "C" */
