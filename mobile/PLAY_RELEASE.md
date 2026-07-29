@@ -69,6 +69,11 @@ OAuth-Verifizierung **jetzt parallel**, nicht später.
 
 ## 2. Was im Repo vor dem ersten Build zu ändern ist
 
+> **Erledigt** in `249be2a5` und `e5f3d195`. Dieser Abschnitt bleibt als
+> Begründung stehen, damit niemand die Änderungen später „aufräumt". Am
+> fertigen Bundle vom 29.07.2026 nachgeprüft: zwei ABIs statt vier, beide mit
+> `libcal_ffi.so`, alle 42 nativen Bibliotheken 16 KB-ausgerichtet. Siehe 4.3.
+
 Vier Funde aus der Prüfung, zwei davon würden den Upload oder die App auf dem
 Gerät kaputtmachen.
 
@@ -204,37 +209,186 @@ eas build:run --platform android --latest
 
 ---
 
-## 4. Erster Upload
+## 4. Welche Datei überhaupt hochgeht, und woher du sie bekommst
 
-Hier widersprechen sich die Quellen, und du solltest das wissen statt es zu
-raten.
+EAS baut auf seinen Servern. Das Ergebnis liegt dort als **Artefakt** und wird
+nirgends automatisch auf deine Platte gelegt. Bevor du irgendetwas hochlädst,
+musst du wissen, welche Datei du willst — und in diesem Projekt liegen **zwei**
+Dateien im selben Archiv.
 
-Expos Doku (Stand 21.07.2026) sagt, `eas submit` lege die erste Version einer
-App problemlos an. Googles eigene Publishing-API-Doku (Stand 18.12.2025) sagt
-weiterhin, man müsse mindestens ein Artefakt über die Console hochladen, bevor
-die API nutzbar ist. Zwei offene eas-cli-Tickets (#3171, #3675) berichten
-genau diesen Fehler bei wirklich leeren Apps.
+### 4.1 Den richtigen Build finden
 
-Praktisch: **versuch es zuerst automatisch.** Wenn es scheitert, dann mit der
-konkreten Fehlermeldung, nicht ins Blaue.
+```bash
+eas build:list --platform android --limit 5 --json --non-interactive
+```
 
-Der zuverlässige Weg für die allererste Einreichung ist `releaseStatus:
-"draft"` im Submit-Profil — die Play-API weigert sich, auf einer App ohne jede
-Veröffentlichung eine nicht-Entwurfs-Version anzulegen ("Only releases with
-status draft may be created on draft app"). Den Rollout schließt du dann in der
-Console ab.
+Interessant sind vier Felder pro Eintrag:
 
-Fehlermeldungen, die "lade einmal von Hand hoch" bedeuten:
-`rolloutNotPermittedOnDraftApp`, "The app is missing the required metadata to
-submit the app", "you will have to upload at least one APK through the Play
-Console".
+- `buildProfile` — muss `production` sein.
+- `distribution` — muss `STORE` sein.
+- `status` — muss `FINISHED` sein.
+- `id` — die Build-ID, die du gleich brauchst.
+- `artifacts.applicationArchiveUrl` — die Download-Adresse.
 
-Von Hand hochladen geht so: Play Console → App öffnen → `Testen und
-veröffentlichen` → `Testen` → `Interner Test` → Reiter `Releases` →
-`Neuen Release erstellen` → `.aab` hochladen → Release-Name und
-Versionshinweise → `Weiter` → `Rollout für Internen Test starten`.
+**Achtung, häufigste Verwechslung:** ein `preview`-Build hat
+`distribution: INTERNAL` und liefert ein **APK**. Das ist zum Installieren auf
+dem eigenen Gerät da und kann **nicht** zu Play. Nur der `production`-Build
+liefert das `.aab`, und nur das nimmt Play für eine neue App an.
 
-Zwei Dinge, die beim ersten Mal irritieren und **keine Fehler** sind:
+### 4.2 Herunterladen und auspacken
+
+Die Adresse aus `applicationArchiveUrl` liefert ein `.tar.gz`, kein fertiges
+`.aab`. In diesem Projekt enthält es zwei Dateien:
+
+- `bundle/release/app-release.aab` — **das ist die Datei für Play.**
+- `apk/debug/app-debug.apk` — Beifang, siehe 4.4.
+
+Herunterladen (URL aus Schritt 4.1 einsetzen):
+
+```bash
+curl -L "<applicationArchiveUrl>" -o build.tar.gz
+```
+
+Auspacken, nur das Bundle:
+
+```bash
+tar xzf build.tar.gz bundle/release/app-release.aab
+```
+
+Danach liegt `bundle/release/app-release.aab` im aktuellen Verzeichnis. Das ist
+die Datei, die in die Play Console geht.
+
+Erfolgssignal: `ls -l bundle/release/app-release.aab` zeigt eine Größe im
+dreistelligen Megabyte-Bereich (beim Stand vom 29.07.2026: 128 MB).
+
+Alternativ ohne Terminal: die Build-Seite im Browser,
+`https://expo.dev/accounts/tonirbarth/projects/aperio/builds/<BUILD_ID>`, hat
+einen Download-Link. Sie liefert dasselbe Archiv, also musst du auch dort
+auspacken.
+
+### 4.3 Vor dem Hochladen prüfen (optional, aber billig)
+
+Ob die beiden Play-Fallstricke wirklich erledigt sind, steht im `.aab` selbst.
+Ein `.aab` ist ein ZIP:
+
+```bash
+python3 -c "import zipfile,collections; z=zipfile.ZipFile('bundle/release/app-release.aab'); c=collections.Counter(n.split('/lib/')[1].split('/')[0] for n in z.namelist() if '/lib/' in n and n.endswith('.so')); print(dict(c))"
+```
+
+Erwartet: `{'arm64-v8a': 21, 'x86_64': 21}` — zwei Architekturen, gleiche
+Anzahl Bibliotheken. Stünde dort `armeabi-v7a` oder `x86`, wäre das
+ABI-Problem aus Abschnitt 2.2 zurück.
+
+Das Ergebnis vom 29.07.2026, geprüft am tatsächlichen Artefakt: zwei ABIs,
+beide mit `libcal_ffi.so`, und alle 42 nativen Bibliotheken 16 KB-ausgerichtet.
+Beide Blocker aus Abschnitt 2 sind damit im Bundle nachweislich erledigt.
+
+### 4.4 Der Beifang im Archiv
+
+Das Archiv enthält zusätzlich ein `apk/debug/app-debug.apk` mit 196 MB und
+Datum **17.06.2026** — also eine alte Debug-Ausgabe von der Entwicklermaschine,
+nicht vom Build-Server. Sie stammt aus `mobile/android/app/build/outputs/`, dem
+Prebuild-Verzeichnis, das lokal noch herumliegt.
+
+Das ist kein Fehler im Bundle, aber es verdoppelt jede Übertragung in beide
+Richtungen. `mobile/android/` ist gitignoriert und wird von
+`npx expo prebuild -p android` jederzeit neu erzeugt; der Stand von Juni ist
+ohnehin veraltet, weil `app.json` sich seitdem geändert hat. Löschen:
+
+```bash
+rm -rf C:/scripts/aperio/mobile/android
+```
+
+---
+
+## 5. Hochladen
+
+### 5.1 Automatisch mit `eas submit`
+
+**Voraussetzung, die noch fehlt:** `mobile/google-service-account.json`. Ohne
+diese Datei kann `eas submit` sich nicht bei Google anmelden und bricht ab. Wie
+du sie erzeugst, steht in Abschnitt 8 — das ist der erste Schritt, nicht der
+letzte.
+
+Wenn sie liegt:
+
+```bash
+eas submit --platform android --profile production --id <BUILD_ID> --wait
+```
+
+**Benutze hier nicht `--latest`.** Der Schalter nimmt den zeitlich letzten
+Android-Build, und wenn du danach noch einen `preview`-Build gemacht hast, ist
+das ein APK — Play lehnt es ab oder du lädst das Falsche hoch. Die Build-ID
+aus 4.1 ist eindeutig.
+
+`--profile production` wählt den Submit-Abschnitt aus `eas.json`, also
+Service-Account-Pfad und Spur `internal`. Wichtig: der Pfad
+`./google-service-account.json` wird gegen das **Arbeitsverzeichnis** aufgelöst
+— du musst aus `mobile` heraus starten.
+
+Erfolgssignal: das Kommando endet mit einer Meldung, dass die Einreichung
+abgeschlossen ist, und nennt die Spur. In der Play Console taucht die Version
+dann unter `Interner Test` auf.
+
+### 5.2 Wenn `eas submit` an der Erstveröffentlichung scheitert
+
+Hier widersprechen sich die Quellen, und du solltest das wissen statt zu raten.
+Expos Doku (21.07.2026) sagt, `eas submit` lege die erste Version problemlos
+an. Googles Publishing-API-Doku (18.12.2025) sagt weiterhin, man müsse
+mindestens ein Artefakt über die Console hochladen, bevor die API nutzbar ist.
+Zwei offene eas-cli-Tickets (#3171, #3675) berichten genau diesen Fehler.
+
+Deshalb: erst versuchen, dann reagieren. Diese Fehlertexte bedeuten „einmal von
+Hand hochladen":
+
+- `Only releases with status draft may be created on draft app`
+- `rolloutNotPermittedOnDraftApp`
+- `The app is missing the required metadata to submit the app`
+- `you will have to upload at least one APK through the Play Console`
+
+### 5.3 Was „draft" hier bedeutet
+
+Zwei verschiedene Dinge heißen bei Google „Entwurf", und genau daran hängt die
+Verwirrung.
+
+**Draft app** ist ein Zustand der ganzen App: das Console-Eintrag existiert,
+aber es wurde noch nie irgendeine Version auf irgendeiner Spur veröffentlicht.
+In diesem Zustand ist deine App gerade. Googles API lässt auf einer solchen App
+**nur** Versionen mit Status `draft` anlegen und weigert sich, direkt etwas
+auszurollen — das ist die Fehlermeldung oben.
+
+**Release status `draft`** ist eine Eigenschaft einer einzelnen hochgeladenen
+Version: hochgeladen, aber nicht ausgeliefert. Niemand bekommt sie, sie wartet
+in der Console darauf, dass ein Mensch den Rollout startet.
+
+Die Auflösung: `eas submit` soll die Datei nur **hochladen**, nicht ausrollen.
+Dafür trägst du in `mobile/eas.json` unter `submit.production.android` ein:
+
+```json
+"releaseStatus": "draft"
+```
+
+Dann lädt EAS das `.aab` hoch, Play legt es als Entwurfsversion an, und du
+gehst einmal in die Console und startest den Rollout von Hand. Damit ist die
+App keine „draft app" mehr, und ab dem **nächsten** Mal funktioniert
+`eas submit` ohne diesen Umweg — dann kannst du die Zeile wieder entfernen.
+
+Kurz: `releaseStatus: "draft"` ist eine Krücke für genau eine Einreichung.
+
+### 5.4 Von Hand hochladen
+
+Datei: das `bundle/release/app-release.aab` aus 4.2.
+
+Play Console → App öffnen → `Testen und veröffentlichen` → `Testen` →
+`Interner Test` → Reiter `Releases` → `Neuen Release erstellen` → im Bereich
+`App-Bundles` die Datei hochladen → Release-Name (wird aus der Version
+vorbelegt) → `Versionshinweise` ausfüllen → `Weiter` → auf der Prüfseite die
+Meldungen lesen → `Rollout für Internen Test starten`.
+
+Erfolgssignal: der Release steht mit einem Versionscode (hier: 2) und einem
+Live-Status da, nicht als `Entwurf` und nicht als `Angehalten`.
+
+Zwei Dinge, die beim ersten Mal irritieren und **keine** Fehler sind:
 
 - Die App heißt in Play bis zu **48 Stunden** anders (Platzhaltername), bis das
   erste Review durch ist.
@@ -247,9 +401,14 @@ an Internal test track, the submission must be reviewed before it can be
 published." Bei einem neuen Entwicklerkonto nennt Google bis zu sieben Tage,
 in Ausnahmen länger. Jedes spätere interne Update geht dann in Minuten durch.
 
+Fehlermeldungen, die "lade einmal von Hand hoch" bedeuten:
+`rolloutNotPermittedOnDraftApp`, "The app is missing the required metadata to
+submit the app", "you will have to upload at least one APK through the Play
+Console".
+
 ---
 
-## 5. Tester eintragen
+## 6. Tester eintragen
 
 Alles auf der Spur `Interner Test`, Reiter `Tester`.
 
@@ -290,7 +449,7 @@ auswählen → `Release hochstufen` → Zielspur.
 
 ---
 
-## 6. Pflichtangaben in der Console
+## 7. Pflichtangaben in der Console
 
 Für den **internen Test** kannst du fast alles auslassen — Google sagt
 ausdrücklich, man könne einen internen Test starten, bevor die App fertig
@@ -331,7 +490,7 @@ Nicht nötig: der Kontolösch-Pfad. Der gilt nur für Apps, in denen man ein Kon
 
 ---
 
-## 7. Automatisierung
+## 8. Automatisierung
 
 Der GitHub-Workflow existiert bereits:
 `.github/workflows/mobile-android-play.yml` (Commit `4666cf73`), auf `main` und
@@ -385,7 +544,7 @@ Der Spurname ist zugleich der API-Bezeichner, exakt und mit Groß-/Kleinschreibu
 
 ---
 
-## 8. Prüfrezepte
+## 9. Prüfrezepte
 
 Berechtigungen im tatsächlich ausgelieferten Manifest, textbasiert:
 
@@ -419,7 +578,7 @@ Nachsehen nach dem ersten Upload unter `App-Bundle-Explorer` → `Downloads`.
 
 ---
 
-## 9. Wenn ein Tester "Diese App ist nicht verfügbar" sieht
+## 10. Wenn ein Tester "Diese App ist nicht verfügbar" sieht
 
 In dieser Reihenfolge prüfen, dauert zwei Minuten:
 
@@ -440,7 +599,7 @@ Opt-in-Zähler in der Console laufen 24–48 Stunden hinterher.
 
 ---
 
-## 10. Was ich nicht prüfen konnte
+## 11. Was ich nicht prüfen konnte
 
 - **Kontotyp und Anlagedatum** deines Play-Kontos. Davon hängt ab, ob die
   Produktion drei Tage oder fünf Wochen entfernt ist.
