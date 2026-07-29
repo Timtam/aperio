@@ -652,9 +652,10 @@ export const listAdapterKinds = () =>
 /** The connect form an adapter declares, or `null` when it declares none —
  *  which is the correct answer for the adapters still on the older per-kind
  *  connect path, and for plugins that have no accounts at all. */
-export const accountFormSpec = (adapter_kind: AdapterKind) =>
+export const accountFormSpec = (adapter_kind: AdapterKind, lang?: string) =>
   invoke<AccountFormSpec | null>('account_form_spec', {
     adapterKind: adapter_kind,
+    lang,
   });
 
 /** Create an account for any adapter that declares a schema.

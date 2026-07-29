@@ -667,8 +667,8 @@ class CalFfiModule : Module() {
       host.listAdapterKindsJson()
     }
 
-    AsyncFunction("accountFormSpecJson") { adapterKind: String ->
-      host.accountFormSpecJson(adapterKind)
+    AsyncFunction("accountFormSpecJson") { adapterKind: String, lang: String? ->
+      host.accountFormSpecJson(adapterKind, lang)
     }
 
     // Pure (no network): builds the consent URL + PKCE verifier + state.

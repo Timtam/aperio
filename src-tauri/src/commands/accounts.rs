@@ -1164,10 +1164,12 @@ pub struct AccountFormField {
     pub key: String,
     /// `text` | `url` | `secret` | `bool`.
     pub kind: String,
+    /// Already in the caller's language. The adapter names the field and its
+    /// own catalogue supplies the words; the frontend renders what it is given
+    /// and never looks a plugin's key up in the app's translations, because
+    /// the app has no business carrying a word about somebody else's provider.
     pub label: String,
-    pub label_key: Option<String>,
     pub hint: Option<String>,
-    pub hint_key: Option<String>,
     pub required: bool,
     pub default_bool: Option<bool>,
     pub default_text: Option<String>,
@@ -1190,6 +1192,9 @@ pub struct AccountFormOauth {
 pub fn account_form_spec(
     plugin_manager: State<'_, Arc<PluginManager>>,
     adapter_kind: AdapterKind,
+    // The language to render the form's labels in — the UI's, since the person
+    // reading them is the one at the keyboard. Absent means English.
+    lang: Option<String>,
 ) -> CommandResult<Option<AccountFormSpec>> {
     use plugin_core::account_schema::{AccountFieldDefault, AccountFieldKind};
     let Some(plugin) = plugin_manager.plugin_for_adapter_kind(adapter_kind.as_str()) else {
@@ -1199,6 +1204,11 @@ pub fn account_form_spec(
         return Ok(None);
     };
     let plugin_id = plugin.manifest.id.clone();
+    let lang = lang.as_deref().unwrap_or(plugin_core::FALLBACK_LANG);
+    let strings = PluginManager::strings_for(&plugin, lang);
+    let label_of = |key: Option<&str>, verbatim: &str| {
+        plugin_core::resolve_label(Some(&strings), key, verbatim, lang).to_string()
+    };
     Ok(Some(AccountFormSpec {
         plugin_id,
         fields: schema
@@ -1213,10 +1223,13 @@ pub fn account_form_spec(
                     AccountFieldKind::Bool => "bool",
                 }
                 .to_string(),
-                label: f.label.clone(),
-                label_key: f.label_key.clone(),
-                hint: f.hint.clone(),
-                hint_key: f.hint_key.clone(),
+                label: label_of(f.label_key.as_deref(), &f.label),
+                hint: f
+                    .hint
+                    .as_deref()
+                    .or(f.hint_key.as_deref().map(|_| ""))
+                    .map(|verbatim| label_of(f.hint_key.as_deref(), verbatim))
+                    .filter(|hint| !hint.is_empty()),
                 required: f.required,
                 default_bool: match &f.default {
                     Some(AccountFieldDefault::Bool(b)) => Some(*b),

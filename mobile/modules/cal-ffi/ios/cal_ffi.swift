@@ -1717,7 +1717,7 @@ public protocol HostProtocol: AnyObject, Sendable {
      * in the UI: it is a question about what this build carries, which the
      * frontend cannot see and should never be handed.
      */
-    func accountFormSpecJson(adapterKind: String) throws  -> String
+    func accountFormSpecJson(adapterKind: String, lang: String?) throws  -> String
     
     /**
      * All persisted accounts as JSON (the `cal_core`/desktop wire shape),
@@ -2928,11 +2928,12 @@ open func acceptRemoteDatasetJson(configJson: String, deviceName: String?, passp
      * in the UI: it is a question about what this build carries, which the
      * frontend cannot see and should never be handed.
      */
-open func accountFormSpecJson(adapterKind: String)throws  -> String  {
+open func accountFormSpecJson(adapterKind: String, lang: String?)throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_account_form_spec_json(
             self.uniffiCloneHandle(),
-        FfiConverterString.lower(adapterKind),$0
+        FfiConverterString.lower(adapterKind),
+        FfiConverterOptionString.lower(lang),$0
     )
 })
 }
@@ -8479,7 +8480,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json() != 45743) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_account_form_spec_json() != 41169) {
+    if (uniffi_cal_ffi_checksum_method_host_account_form_spec_json() != 15758) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_accounts_json() != 39337) {

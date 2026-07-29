@@ -447,7 +447,7 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   eventMeetingJson(eventId: string): Promise<string>;
 
   listAdapterKindsJson(): Promise<string>;
-  accountFormSpecJson(adapterKind: string): Promise<string>;
+  accountFormSpecJson(adapterKind: string, lang: string | null): Promise<string>;
   /** Begin a schema-driven OAuth sign-in. `valuesJson` is the form as filled so
    *  far, keyed by the schema's field keys; the host reads the credential pair
    *  out of it and returns `{authorize_url, pkce_verifier, state}`. */

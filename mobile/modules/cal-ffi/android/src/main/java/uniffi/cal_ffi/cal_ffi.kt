@@ -1284,7 +1284,7 @@ external fun uniffi_cal_ffi_fn_constructor_host_open(`dbPath`: RustBuffer.ByValu
 ): Long
 external fun uniffi_cal_ffi_fn_method_host_accept_remote_dataset_json(`ptr`: Long,`configJson`: RustBuffer.ByValue,`deviceName`: RustBuffer.ByValue,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-external fun uniffi_cal_ffi_fn_method_host_account_form_spec_json(`ptr`: Long,`adapterKind`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_cal_ffi_fn_method_host_account_form_spec_json(`ptr`: Long,`adapterKind`: RustBuffer.ByValue,`lang`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_accounts_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1795,7 +1795,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json() != 45743.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_account_form_spec_json() != 41169.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_account_form_spec_json() != 15758.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_accounts_json() != 39337.toShort()) {
@@ -4106,7 +4106,7 @@ public interface HostInterface {
      * in the UI: it is a question about what this build carries, which the
      * frontend cannot see and should never be handed.
      */
-    fun `accountFormSpecJson`(`adapterKind`: kotlin.String): kotlin.String
+    fun `accountFormSpecJson`(`adapterKind`: kotlin.String, `lang`: kotlin.String?): kotlin.String
     
     /**
      * All persisted accounts as JSON (the `cal_core`/desktop wire shape),
@@ -5351,13 +5351,13 @@ open class Host: Disposable, AutoCloseable, HostInterface
      * in the UI: it is a question about what this build carries, which the
      * frontend cannot see and should never be handed.
      */
-    @Throws(StoreException::class)override fun `accountFormSpecJson`(`adapterKind`: kotlin.String): kotlin.String {
+    @Throws(StoreException::class)override fun `accountFormSpecJson`(`adapterKind`: kotlin.String, `lang`: kotlin.String?): kotlin.String {
             return FfiConverterString.lift(
     callWithHandle {
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_method_host_account_form_spec_json(
         it,
-        FfiConverterString.lower(`adapterKind`),_status)
+        FfiConverterString.lower(`adapterKind`),FfiConverterOptionalString.lower(`lang`),_status)
 }
     }
     )

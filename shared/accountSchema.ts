@@ -12,14 +12,16 @@
 export interface AccountFormField {
   key: string;
   kind: 'text' | 'url' | 'secret' | 'bool';
-  /** The plugin author's own string. */
+  /**
+   * Already in the reader's language.
+   *
+   * The host resolved it against the PLUGIN's own catalogue before sending it,
+   * so there is nothing here to translate: the app carries no word about
+   * somebody else's provider, and a third-party adapter with no catalogue
+   * arrives as the literal its author wrote — which beats a missing-key marker.
+   */
   label: string;
-  /** A translation key the app resolves in the user's language, which takes
-   *  precedence. Bundled adapters set it; a third-party adapter without one
-   *  falls back to its literal, which beats a missing-key marker. */
-  label_key: string | null;
   hint: string | null;
-  hint_key: string | null;
   required: boolean;
   default_bool: boolean | null;
   default_text: string | null;

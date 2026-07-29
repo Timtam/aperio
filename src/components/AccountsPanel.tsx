@@ -298,7 +298,7 @@ export function AccountsPanel() {
     let cancelled = false;
     setFormSpec(null);
     setFormValues({});
-    accountFormSpec(kind)
+    accountFormSpec(kind, i18n.language)
       .then((spec) => {
         if (!cancelled) setFormSpec(spec);
       })
@@ -309,7 +309,7 @@ export function AccountsPanel() {
     return () => {
       cancelled = true;
     };
-  }, [kind]);
+  }, [kind, i18n.language]);
 
   // Closing the reconnect wizard bumps `dataVersion`. Re-probe so
   // rows that just got their credentials drop off the banner
@@ -363,10 +363,8 @@ export function AccountsPanel() {
     if (!formSpec) return null;
     const missing = firstMissingField(formSpec, formValues);
     if (!missing) return null;
-    const label = missing.label_key
-      ? t(missing.label_key, { defaultValue: missing.label })
-      : missing.label;
-    return t('dialogs.accounts.fieldRequired', { field: label });
+    // Already resolved by the host, in the plugin's own words.
+    return t('dialogs.accounts.fieldRequired', { field: missing.label });
   }, [formSpec, formValues, t]);
 
   const validateMicrosoft = useCallback((): string | null => {

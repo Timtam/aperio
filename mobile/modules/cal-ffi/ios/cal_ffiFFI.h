@@ -689,7 +689,7 @@ RustBuffer uniffi_cal_ffi_fn_method_host_accept_remote_dataset_json(uint64_t ptr
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_ACCOUNT_FORM_SPEC_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_ACCOUNT_FORM_SPEC_JSON
-RustBuffer uniffi_cal_ffi_fn_method_host_account_form_spec_json(uint64_t ptr, RustBuffer adapter_kind, RustCallStatus *_Nonnull out_status
+RustBuffer uniffi_cal_ffi_fn_method_host_account_form_spec_json(uint64_t ptr, RustBuffer adapter_kind, RustBuffer lang, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_ACCOUNTS_JSON

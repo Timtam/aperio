@@ -7084,7 +7084,11 @@ impl Host {
     /// The `builtin` flag inside the OAuth block is resolved HERE rather than
     /// in the UI: it is a question about what this build carries, which the
     /// frontend cannot see and should never be handed.
-    pub fn account_form_spec_json(&self, adapter_kind: String) -> Result<String, StoreError> {
+    pub fn account_form_spec_json(
+        &self,
+        adapter_kind: String,
+        lang: Option<String>,
+    ) -> Result<String, StoreError> {
         // No "unknown kind" branch: which kinds exist is a fact about which
         // plugins are loaded, so an unrecognised one is simply a plugin that
         // declares no form — the same answer as an adapter still on the older
@@ -7096,9 +7100,49 @@ impl Host {
         let Some(schema) = plugin.manifest.account.clone() else {
             return Ok("null".to_string());
         };
+        // Labels resolved HERE, in the language the caller named, against the
+        // plugin's own catalogue. The frontend renders what it is given and
+        // never looks a plugin's key up in the app's translations — the app
+        // carries no word about somebody else's provider.
+        let lang = lang.as_deref().unwrap_or(plugin_core::FALLBACK_LANG);
+        let strings = plugin_core::manager::PluginManager::strings_for(&plugin, lang);
+        let fields: Vec<serde_json::Value> = schema
+            .fields
+            .iter()
+            .map(|f| {
+                let label = plugin_core::resolve_label(
+                    Some(&strings),
+                    f.label_key.as_deref(),
+                    &f.label,
+                    lang,
+                );
+                let hint = f
+                    .hint
+                    .as_deref()
+                    .or(f.hint_key.as_deref().map(|_| ""))
+                    .map(|verbatim| {
+                        plugin_core::resolve_label(
+                            Some(&strings),
+                            f.hint_key.as_deref(),
+                            verbatim,
+                            lang,
+                        )
+                    })
+                    .filter(|hint| !hint.is_empty());
+                serde_json::json!({
+                    "key": f.key,
+                    "kind": f.kind,
+                    "label": label,
+                    "hint": hint,
+                    "required": f.required,
+                    "secret_slot": f.secret_slot,
+                    "default": f.default,
+                })
+            })
+            .collect();
         let spec = serde_json::json!({
             "plugin_id": plugin_id,
-            "fields": schema.fields,
+            "fields": fields,
             "oauth": schema.oauth.as_ref().map(|o| serde_json::json!({
                 "builtin": host_core::account_setup::has_builtin_client(o),
                 "client_id_field": o.client_id_field,

@@ -15,8 +15,8 @@
         "key": "client_id",
         "kind": "text",
         "label": "Client ID",
-        "label_key": "dialogs.accounts.webexClientIdLabel",
-        "hint_key": "dialogs.accounts.webexClientIdHint",
+        "label_key": "account.client_id.label",
+        "hint_key": "account.client_id.hint",
         "required": true
       },
       {
@@ -24,16 +24,16 @@
         "kind": "secret",
         "secret_slot": "oauth_client_secret",
         "label": "Client secret",
-        "label_key": "dialogs.accounts.webexClientSecretLabel",
-        "hint_key": "dialogs.accounts.webexClientSecretHint",
+        "label_key": "account.client_secret.label",
+        "hint_key": "account.client_secret.hint",
         "required": true
       },
       {
         "key": "site_url",
         "kind": "text",
         "label": "Webex site",
-        "label_key": "dialogs.accounts.webexSiteLabel",
-        "hint_key": "dialogs.accounts.webexSiteHint",
+        "label_key": "account.site_url.label",
+        "hint_key": "account.site_url.hint",
         "required": false
       }
     ],
@@ -47,6 +47,12 @@
   },
   "strings": {
     "en": {
+      "account.client_id.hint": "From your integration on developer.webex.com. Its redirect URI must be http://127.0.0.1:8080/oauth/webex.",
+      "account.client_id.label": "Client ID",
+      "account.client_secret.hint": "Kept in the system keychain, never in the account database — Webex requires one even under PKCE.",
+      "account.client_secret.label": "Client secret",
+      "account.site_url.hint": "Leave blank. Aperio picks up your account's default site with the first meeting; an entry only matters if your organisation has several.",
+      "account.site_url.label": "Webex site",
       "join.link": "Join the meeting",
       "join.number": "Meeting number (access code)",
       "join.password": "Meeting password",
@@ -56,6 +62,12 @@
       "join.video": "Join from a video system or application"
     },
     "de": {
+      "account.client_id.hint": "Aus deiner Integration auf developer.webex.com. Als Redirect-URI muss dort http://127.0.0.1:8080/oauth/webex hinterlegt sein.",
+      "account.client_id.label": "Client-ID",
+      "account.client_secret.hint": "Wird im Schlüsselbund des Systems abgelegt, nie in der Kontodatenbank — Webex verlangt es auch bei PKCE.",
+      "account.client_secret.label": "Client-Secret",
+      "account.site_url.hint": "Leer lassen. Aperio übernimmt beim ersten Meeting die Standard-Site deines Kontos; ein Eintrag lohnt nur, wenn deine Organisation mehrere hat.",
+      "account.site_url.label": "Webex-Site",
       "join.link": "Meeting beitreten",
       "join.number": "Meeting-Kennnummer (Zugriffscode)",
       "join.password": "Meeting-Passwort",

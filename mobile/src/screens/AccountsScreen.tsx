@@ -174,7 +174,7 @@ function errorMessage(err: unknown): string {
 }
 
 export default function AccountsScreen() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   // Per-account refresh errors: an auth-suspected account gets the same
   // Reconnect affordance as a missing-credential one (a present-but-wrong
@@ -332,7 +332,7 @@ export default function AccountsScreen() {
       // from the declaration and connected through the generic path; if not it
       // falls back to the older per-kind table above. Asking the host is what
       // keeps this screen free of per-adapter knowledge.
-      void accountFormSpec(picked)
+      void accountFormSpec(picked, i18n.language)
         .then((spec) => {
           if (spec) {
             setSchemaKind(picked);
@@ -351,7 +351,7 @@ export default function AccountsScreen() {
           setMode('credential');
         });
     },
-    [onChangeKind],
+    [onChangeKind, i18n.language],
   );
 
   /** Connect an adapter that declared its own form. */
@@ -365,10 +365,10 @@ export default function AccountsScreen() {
     if (!formSpec || !schemaKind) return;
     const missing = firstMissingField(formSpec, formValues);
     if (missing) {
-      const label = missing.label_key
-        ? t(missing.label_key, { defaultValue: missing.label })
-        : missing.label;
-      const message = t('dialogs.accounts.fieldRequired', { field: label });
+      // Already resolved by the host, in the plugin's own words.
+      const message = t('dialogs.accounts.fieldRequired', {
+        field: missing.label,
+      });
       setError(message);
       announce(message);
       return;

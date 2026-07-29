@@ -13,7 +13,7 @@ import { useThemedStyles, type ThemeColors } from '../theme';
  * `plugin.json` and renders it, which is the whole point: adding an adapter
  * must not mean editing either frontend.
  *
- * Labels come from the adapter's `label_key` when the app has that translation,
+ * Labels arrive resolved by the host from the adapter's own catalogue,
  * and from its literal `label` otherwise — so a bundled adapter follows the
  * user's language while a third-party one still reads sensibly.
  *
@@ -42,12 +42,11 @@ export function AccountSchemaForm({
     }
   }
 
-  const resolve = (literal: string, key: string | null) =>
-    key ? t(key, { defaultValue: literal }) : literal;
-  const label = (field: AccountFormField) =>
-    resolve(field.label, field.label_key);
-  const hint = (field: AccountFormField) =>
-    field.hint || field.hint_key ? resolve(field.hint ?? '', field.hint_key) : null;
+  // Labels arrive already in the reader's language: the host resolved them
+  // against the PLUGIN's own catalogue. Nothing to translate here, and nothing
+  // about somebody else's provider in the app's own strings.
+  const label = (field: AccountFormField) => field.label;
+  const hint = (field: AccountFormField) => field.hint;
 
   return (
     <View style={styles.group}>

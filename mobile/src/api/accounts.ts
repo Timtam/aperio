@@ -205,8 +205,11 @@ export const listAdapterKinds = async (): Promise<AdapterKindInfo[]> =>
  *  path, and for plugins with no accounts at all. */
 export const accountFormSpec = async (
   kind: AdapterKind,
+  lang?: string,
 ): Promise<AccountFormSpec | null> =>
-  JSON.parse(await CalFfi.accountFormSpecJson(kind)) as AccountFormSpec | null;
+  JSON.parse(
+    await CalFfi.accountFormSpecJson(kind, lang ?? null),
+  ) as AccountFormSpec | null;
 
 /** Begin a schema-driven OAuth sign-in. The host reads the credential pair out
  *  of the form's values, decides whether this is the build's own registration

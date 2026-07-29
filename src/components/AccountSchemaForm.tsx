@@ -48,13 +48,11 @@ export function AccountSchemaForm({
     }
   }
 
-  /** A declared string wins when the app has a translation for it. */
-  const text = (literal: string, key: string | null) =>
-    key ? t(key, { defaultValue: literal }) : literal;
-
-  const label = (field: AccountFormField) => text(field.label, field.label_key);
-  const hint = (field: AccountFormField) =>
-    field.hint || field.hint_key ? text(field.hint ?? '', field.hint_key) : null;
+  // Labels arrive already in the reader's language: the host resolved them
+  // against the PLUGIN's own catalogue. There is nothing to translate here, and
+  // nothing about somebody else's provider in the app's own strings.
+  const label = (field: AccountFormField) => field.label;
+  const hint = (field: AccountFormField) => field.hint;
 
   const visible = spec.fields.filter((f) => !hidden.has(f.key));
 
