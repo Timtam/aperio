@@ -703,102 +703,61 @@ impl AdapterRegistry {
         config_json: &str,
         secret: Option<&str>,
     ) -> Result<(), RegistryError> {
-        enum ProbeFeature {
-            Calendar,
-            Tasks,
-        }
-        let (plugin_id, feature, config) = match adapter_kind.as_str() {
-            "caldav" => {
-                let secret =
-                    secret.ok_or_else(|| RegistryError::Secret("missing password".into()))?;
-                (
-                    PLUGIN_ID_CALDAV,
-                    ProbeFeature::Calendar,
-                    merge_account_config(
-                        config_json,
-                        &[("secret", Value::String(secret.to_string()))],
-                    )?,
-                )
-            }
-            "ical" => {
-                // An iCal feed may be public — an empty password stays null,
-                // mirroring register_ical.
-                let password = secret
-                    .filter(|s| !s.is_empty())
-                    .map(|s| Value::String(s.to_string()))
-                    .unwrap_or(Value::Null);
-                (
-                    PLUGIN_ID_ICAL,
-                    ProbeFeature::Calendar,
-                    merge_account_config(config_json, &[("password", password)])?,
-                )
-            }
-            "ews" => {
-                let secret =
-                    secret.ok_or_else(|| RegistryError::Secret("missing password".into()))?;
-                // No state_dir here (unlike register_ews) — a probe never
-                // persists; EwsAccountConfig fills it from a serde default.
-                (
-                    PLUGIN_ID_EWS,
-                    ProbeFeature::Calendar,
-                    merge_account_config(
-                        config_json,
-                        &[("password", Value::String(secret.to_string()))],
-                    )?,
-                )
-            }
-            "vikunja" => {
-                let secret =
-                    secret.ok_or_else(|| RegistryError::Secret("missing API token".into()))?;
-                (
-                    PLUGIN_ID_VIKUNJA,
-                    ProbeFeature::Tasks,
-                    merge_account_config(
-                        config_json,
-                        &[("token", Value::String(secret.to_string()))],
-                    )?,
-                )
-            }
-            "todoist" => {
-                let secret =
-                    secret.ok_or_else(|| RegistryError::Secret("missing API token".into()))?;
-                (
-                    PLUGIN_ID_TODOIST,
-                    ProbeFeature::Tasks,
-                    merge_account_config(
-                        config_json,
-                        &[("token", Value::String(secret.to_string()))],
-                    )?,
-                )
-            }
-            other => return Err(RegistryError::Unsupported(other.to_string())),
-        };
-        let instance = self.open_plugin_instance(plugin_id, config)?;
-        match feature {
-            ProbeFeature::Calendar => {
-                let adapter = FfiCalendarAdapter::new(instance).ok_or_else(|| {
-                    RegistryError::Construct(
-                        "plugin doesn't expose the CalendarFeature surface".into(),
-                    )
-                })?;
-                adapter
-                    .list_calendars()
-                    .await
-                    .map(|_| ())
-                    .map_err(|err| RegistryError::Probe(err.to_string()))
-            }
-            ProbeFeature::Tasks => {
-                let adapter = FfiTasksAdapter::new(instance).ok_or_else(|| {
-                    RegistryError::Construct(
-                        "plugin doesn't expose the TasksFeature surface".into(),
-                    )
-                })?;
-                adapter
-                    .list_task_lists()
-                    .await
-                    .map(|_| ())
-                    .map_err(|err| RegistryError::Probe(err.to_string()))
-            }
+        // Everything this needs is declared. Which plugin serves the kind, which
+        // field is the credential and under which key it belongs in the config,
+        // and whether the probe should list calendars or task lists — the
+        // manifest answers all three, so there is no per-kind arm here any more
+        // and a new adapter needs no edit to this file.
+        let plugin = self
+            .plugin_manager
+            .plugin_for_adapter_kind(adapter_kind.as_str())
+            .ok_or_else(|| RegistryError::Unsupported(adapter_kind.as_str().to_string()))?;
+        let schema = plugin
+            .manifest
+            .account
+            .clone()
+            .ok_or_else(|| RegistryError::Unsupported(adapter_kind.as_str().to_string()))?;
+
+        // A probe never persists, so it reads the secret straight from the
+        // caller rather than from the keychain: the account does not exist yet.
+        // An adapter whose credential is genuinely optional — a public iCal
+        // feed — gets `None` and says so through its own schema rather than
+        // through a special case here.
+        let config = crate::account_setup::init_config(&schema, config_json, |_slot| {
+            secret
+                .map(str::to_string)
+                .ok_or(sync_engine::SecretError::NotFound)
+        })
+        .map_err(|err| RegistryError::Construct(err.to_string()))?;
+
+        let instance = self.open_plugin_instance(&plugin.manifest.id, config)?;
+
+        // Prefer the calendar surface when the plugin has one: it is the
+        // cheaper listing on every adapter that offers both.
+        let caps = &plugin.manifest.capabilities;
+        if caps.contains(&plugin_core::Capability::Calendar) {
+            let adapter = FfiCalendarAdapter::new(instance).ok_or_else(|| {
+                RegistryError::Construct("plugin doesn't expose the CalendarFeature surface".into())
+            })?;
+            adapter
+                .list_calendars()
+                .await
+                .map(|_| ())
+                .map_err(|err| RegistryError::Probe(err.to_string()))
+        } else if caps.contains(&plugin_core::Capability::Tasks) {
+            let adapter = FfiTasksAdapter::new(instance).ok_or_else(|| {
+                RegistryError::Construct("plugin doesn't expose the TasksFeature surface".into())
+            })?;
+            adapter
+                .list_task_lists()
+                .await
+                .map(|_| ())
+                .map_err(|err| RegistryError::Probe(err.to_string()))
+        } else {
+            // Nothing cheap to list. Opening the instance already exercised the
+            // config, which is most of what a probe is for, so this is a pass
+            // rather than a failure.
+            Ok(())
         }
     }
 
