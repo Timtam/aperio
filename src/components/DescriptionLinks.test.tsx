@@ -57,3 +57,34 @@ describe('DescriptionLinks', () => {
     expect(screen.getByText('mailto:user@example.com')).toBeTruthy();
   });
 });
+
+describe('DescriptionLinks keyboard shape', () => {
+  it('is one tab stop however many links there are', () => {
+    renderWith(
+      [
+        'Join the meeting: https://a.test/one',
+        'Global call-in numbers: https://a.test/two',
+        'Notes: https://a.test/three',
+      ].join('\n'),
+    );
+    const items = screen.getAllByRole('button');
+    expect(items).toHaveLength(3);
+    // Exactly one child is reachable by Tab; the rest are reached with the
+    // arrow keys, which is what makes three links cost one stop and not three.
+    expect(items.filter((el) => el.tabIndex === 0)).toHaveLength(1);
+    expect(items[0].tabIndex).toBe(0);
+  });
+
+  it('groups the links as a toolbar, because they are actions not a selection', () => {
+    renderWith('Join the meeting: https://a.test/one');
+    expect(screen.getByRole('toolbar')).toBeTruthy();
+  });
+
+  it('names a link by what the description calls it', () => {
+    renderWith('Join the meeting: https://a.test/one');
+    // The label leads; the URL still follows, so it can be read out or dictated.
+    expect(
+      screen.getByRole('button', { name: /Join the meeting/ }),
+    ).toBeTruthy();
+  });
+});

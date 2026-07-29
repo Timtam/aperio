@@ -104,6 +104,7 @@
   "descriptionLinks": {
     "label": "Links in this description",
     "open": "Open link: {{url}}",
+    "openNamed": "{{label}}, open link: {{url}}",
     "openFailed": "Could not open the link: {{message}}"
   },
   "conferencing": {

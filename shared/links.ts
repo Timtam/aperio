@@ -21,6 +21,20 @@ export interface DetectedLink {
   /** The raw text as it appears in the description — used as the accessible
    *  label / fallback display when slightly friendlier than the normalised URL. */
   text: string;
+  /**
+   * What the description itself calls this link, when it says.
+   *
+   * Real invitations — Aperio's own join block, and the ones Outlook, eM Client
+   * and Webex write — put each fact on a `Label: value` line. When a link is
+   * the whole value of such a line, that label is what the link IS, and it is
+   * what a reader should hear: "Join the meeting" rather than ninety
+   * characters of query string. Treated as data, exactly as `cal_core`'s
+   * conference detection treats the same labels, so it works in whatever
+   * language the invitation arrived in.
+   *
+   * Absent for a link written mid-sentence, which has no name to take.
+   */
+  label?: string;
 }
 
 /** Schemes allowed to reach the OS handler. Mirrors the desktop allowlist in
@@ -68,7 +82,42 @@ export function detectLinks(text: string | null | undefined): DetectedLink[] {
     if (!scheme || !ALLOWED_LINK_SCHEMES.has(scheme)) continue;
     if (seen.has(url)) continue;
     seen.add(url);
-    out.push({ url, text: m.text });
+    out.push({ url, text: m.text, label: labelOf(text, m.index, m.lastIndex) });
   }
   return out;
+}
+
+/** How long a run of text before the colon may be and still be a label. */
+const MAX_LABEL = 40;
+
+/**
+ * The label naming the link that starts at `index`, if its line is
+ * `Label: <link>` and the link is the whole of the value.
+ *
+ * Deliberately narrow. A line that merely happens to contain a colon before a
+ * link — "See also, details here: https://…" reads fine, but "Bring these to
+ * the meeting: https://…" would name the link "Bring these to the meeting" —
+ * is still a fair name for it, so the only real guards are length and that
+ * nothing follows the link on the line. A label that turns out unhelpful costs
+ * a reader one wrong-sounding item; the URL is still on the tile beside it.
+ */
+function labelOf(text: string, start: number, end: number): string | undefined {
+  const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+  const lineEndRaw = text.indexOf('\n', start);
+  const lineEnd = lineEndRaw === -1 ? text.length : lineEndRaw;
+  // Anything after the link on its line means the link sits inside a sentence
+  // rather than being the whole value of a labelled field.
+  if (text.slice(end, lineEnd).trim() !== '') return undefined;
+  const before = text.slice(lineStart, start);
+  const colon = before.lastIndexOf(':');
+  if (colon <= 0) return undefined;
+  // Only whitespace may sit between the colon and the link.
+  if (before.slice(colon + 1).trim() !== '') return undefined;
+  const label = before.slice(0, colon).trim();
+  if (!label || label.length > MAX_LABEL) return undefined;
+  // A bare URL splits into `https` + `//host`; that is a scheme, not a label.
+  if (label.includes('://') || /^[a-z][a-z0-9+.-]*$/i.test(label)) {
+    return undefined;
+  }
+  return label;
 }

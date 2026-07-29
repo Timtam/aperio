@@ -70,3 +70,44 @@ describe('detectLinks', () => {
     expect(links.map((l) => l.url)).toEqual(['https://ok.com']);
   });
 });
+
+describe('detectLinks labels', () => {
+  it('takes the label from a Label: url line, which is what an invitation writes', () => {
+    const text = [
+      'Join the meeting: https://x.webex.com/j.php?MTID=m1',
+      'Meeting number (access code): 2731 234 5678',
+      'Global call-in numbers: https://x.webex.com/globalcallin.php?MTID=m1',
+    ].join('\n');
+    const links = detectLinks(text);
+    expect(links.map((l) => l.label)).toEqual([
+      'Join the meeting',
+      'Global call-in numbers',
+    ]);
+  });
+
+  it('leaves a link written inside a sentence unnamed', () => {
+    // Nothing here names the link; inventing a name from the words before the
+    // colon would read worse than the URL.
+    const links = detectLinks('see https://example.com for the agenda');
+    expect(links[0].label).toBeUndefined();
+  });
+
+  it('does not mistake a bare link for label plus value', () => {
+    // `https://example.com` splits into `https` and `//example.com`. That is a
+    // scheme, not a label.
+    const links = detectLinks('https://example.com');
+    expect(links[0].label).toBeUndefined();
+  });
+
+  it('will not name a link when text follows it on the same line', () => {
+    const links = detectLinks('Notes: https://example.com and bring coffee');
+    expect(links[0].label).toBeUndefined();
+  });
+
+  it('names a link in whatever language the invitation arrived in', () => {
+    // The labels are data, not vocabulary — the same reason cal_core reads
+    // them rather than matching on them.
+    const links = detectLinks('Meeting beitreten: https://x.webex.com/j.php');
+    expect(links[0].label).toBe('Meeting beitreten');
+  });
+});

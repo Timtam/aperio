@@ -20,13 +20,27 @@ import { useThemedStyles, type ThemeColors } from '../theme';
  * in the OS browser / mail client. The field above stays the editable source of
  * truth; the links update live as the text changes.
  *
- * Opening re-validates the scheme (http/https/mailto only) before
+ * Opening re-validates the scheme (http/https/mailto/tel/sip) before
  * `Linking.openURL` — descriptions can come from untrusted external invitations,
  * so this is the mobile analogue of the desktop `open_external_url` gate (the
  * shared `detectLinks` already filtered, but we re-check defensively).
  *
  * Renders nothing when the text has no openable links, so callers drop it in
  * unconditionally.
+ *
+ * ## Where this deliberately differs from the desktop
+ *
+ * The desktop wraps these in a `role="toolbar"` with a roving tabindex, so Tab
+ * reaches the group once instead of once per link. That fixes a keyboard
+ * problem which does not exist here: there is no Tab key, and VoiceOver and
+ * TalkBack swipe through every element either way. Imposing a toolbar would add
+ * a container to swipe past and change nothing.
+ *
+ * What DOES carry over is the naming. A real invitation labels its links —
+ * `Join the meeting: https://…` — and where the description says so, that
+ * label is the item's name and the URL is detail. Swiping past "Join the
+ * meeting" and "Global call-in numbers" is a different experience from swiping
+ * past two ninety-character URLs read out character by character.
  */
 export function DescriptionLinks({ text }: { text: string | null | undefined }) {
   const { t } = useTranslation();
@@ -59,12 +73,19 @@ export function DescriptionLinks({ text }: { text: string | null | undefined }) 
         <Pressable
           key={link.url}
           accessibilityRole="link"
-          accessibilityLabel={t('descriptionLinks.open', { url: link.url })}
+          accessibilityLabel={
+            link.label != null
+              ? t('descriptionLinks.openNamed', {
+                  label: link.label,
+                  url: link.url,
+                })
+              : t('descriptionLinks.open', { url: link.url })
+          }
           onPress={() => void open(link.url)}
           style={({ pressed }) => [styles.item, pressed && styles.pressed]}
         >
           <Text style={styles.itemText} numberOfLines={1}>
-            {link.text}
+            {link.label ?? link.text}
           </Text>
         </Pressable>
       ))}
