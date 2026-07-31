@@ -61,9 +61,9 @@ pub const SYNC_WHITELIST: &[&str] = &[
     // `window.` prefix, so any future device-local window state stays local.
     "window.closeToTray",
     "window.minimizeToTray",
-    // Which sync adapter is active. Note: adapter *credentials*
-    // stay local (keychain), only the choice itself syncs.
-    "sync.adapter",
+    // How often to sync. The only sync key that crosses devices — which
+    // adapter a device uses, and where it points, is that device's own
+    // business and must stay off this list. See the module doc.
     "sync.intervalMinutes",
 ];
 
@@ -145,5 +145,36 @@ mod tests {
         assert!(!is_synced_key("sync.cursor.lastSeenLog"));
         assert!(!is_synced_key("contacts.lastSyncedAt"));
         assert!(!is_synced_key("foo.bar.baz"));
+    }
+
+    /// Where a device syncs TO is that device's own business, and every key
+    /// that expresses it must stay off the list.
+    ///
+    /// This is a trap with history. The list used to carry a bare
+    /// `"sync.adapter"` entry, commented "only the choice itself syncs" — but
+    /// entries without a trailing dot match exactly, and the key actually
+    /// written is `sync.adapter.kind`, so it never matched and the choice never
+    /// synced. The comment described an intention the code did not implement.
+    ///
+    /// Had anyone "fixed" it by adding the dot, every device would have been
+    /// dragged to one target: one machine's SFTP host, another machine's local
+    /// folder path. These assertions exist so that edit fails here instead.
+    #[test]
+    fn no_key_that_names_this_devices_sync_target_ever_syncs() {
+        for key in [
+            "sync.adapter",
+            "sync.adapter.kind",
+            "sync.adapter.webdav.url",
+            "sync.adapter.sftp.host",
+            "sync.adapter.sftp.keyPath",
+            "sync.adapter.local.path",
+            "sync.adapter.e2eEnabled",
+            "sync.target.accountId",
+        ] {
+            assert!(
+                !is_synced_key(key),
+                "{key} must stay device-local — see this test's doc comment",
+            );
+        }
     }
 }

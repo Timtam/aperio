@@ -105,11 +105,39 @@ fn main() -> Result<()> {
     let prefs = load_sync_prefs(&db)?;
 
     // Sync targets are not accounts. They live in device-local prefs under
-    // `sync.adapter.<name>.*` and keep their token in a keychain pseudo-account
-    // of the same name — deliberately divorced from any account row, so nothing
-    // in the accounts table points at them. Derive the ids from the pref keys,
-    // which is the only place they are recorded.
-    let mut pseudo: BTreeSet<String> = BTreeSet::new();
+    // `sync.adapter.<name>.*` and keep their credential in a keychain
+    // pseudo-account — deliberately divorced from any account row, so nothing
+    // in the accounts table points at them.
+    //
+    // These ids are listed rather than derived from the pref keys, because
+    // deriving them silently missed the two that matter most. `sync.adapter.e2e`
+    // holds the SYNC ENCRYPTION KEY, and its only pref is `sync.adapter.e2e` +
+    // "Enabled" — no dot, so splitting on the dot never produced the id. Losing
+    // that key means losing the ability to rejoin an existing sync at all, which
+    // is precisely the workflow this tool exists to make safe.
+    // `sync.adapter.sftp.key` is a level deeper than the split produced.
+    //
+    // Mirrors the *_SECRET_ACCOUNT constants in src-tauri/src/commands/sync.rs.
+    const SYNC_SECRET_ACCOUNTS: &[&str] = &[
+        "sync.adapter.webdav",
+        "sync.adapter.sftp",
+        // The SSH key passphrase, kept apart from the password slot.
+        "sync.adapter.sftp.key",
+        "sync.adapter.ftp",
+        "sync.adapter.dropbox",
+        "sync.adapter.googledrive",
+        // The E2E data key. Without this, a wiped install can start a NEW sync
+        // but can never rejoin the existing one.
+        "sync.adapter.e2e",
+    ];
+
+    let mut pseudo: BTreeSet<String> = SYNC_SECRET_ACCOUNTS
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
+
+    // Keep the derivation too, as a net for an adapter added after this list was
+    // written: a pref key it left behind still gets its slots probed.
     for (key, _) in &prefs {
         if let Some(rest) = key.strip_prefix("sync.adapter.") {
             if let Some((name, _)) = rest.split_once('.') {
@@ -117,8 +145,8 @@ fn main() -> Result<()> {
             }
         }
     }
-    // The sync encryption key hangs off the local account in some builds and a
-    // fixed pseudo-id in others; probe both rather than guess.
+    // Older builds hung the encryption key off a bare `sync` id. Probing costs
+    // one lookup and answering "(keine)" is cheaper than a lost key.
     pseudo.insert("sync".to_string());
 
     let mut report = String::new();
