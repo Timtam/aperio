@@ -283,7 +283,12 @@ mod tests {
 
         // Every plugin the workspace produces should be present.
         // Mirrors the list in build.rs::PLUGINS.
-        for id in [
+        //
+        // The count below is derived from this list rather than written out
+        // again. It used to be a separate literal, which is how it came to say
+        // 17 while the list said 14: unplugging an adapter edits the list, and
+        // a number somewhere underneath it does not follow.
+        const EXPECTED: &[&str] = &[
             "com.aperio.cal-adapter-caldav",
             "com.aperio.cal-adapter-ical",
             "com.aperio.cal-adapter-google",
@@ -298,12 +303,17 @@ mod tests {
             "com.aperio.sync-adapter-dropbox",
             "com.aperio.sync-adapter-googledrive",
             "com.aperio.vc-adapter-webex",
-        ] {
+        ];
+        for id in EXPECTED {
             assert!(
                 manager.get(id).is_some(),
                 "plugin {id} not loaded — check that build.rs staged it",
             );
         }
-        assert_eq!(manager.len(), 17);
+        assert_eq!(
+            manager.len(),
+            EXPECTED.len(),
+            "a staged plugin nobody expected, or an expected one missing",
+        );
     }
 }
