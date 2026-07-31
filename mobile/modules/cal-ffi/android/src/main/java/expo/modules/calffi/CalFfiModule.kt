@@ -52,6 +52,26 @@ class CalFfiModule : Module() {
   // background threads `AsyncFunction` dispatches on share one Host safely; the
   // Rust engine serialises its own SQLite access behind a mutex.
   private val host: Host by lazy {
+    // Every failure below is routed through NativeBridgeDiagnosis, because this
+    // is the first thing in the process to touch the UniFFI bindings — and the
+    // first touch is the only one that carries a usable error. If `UniffiLib`'s
+    // static initialiser throws here, the JVM reports it once and then answers
+    // every later attempt with a bare `NoClassDefFoundError` that names nothing.
+    // `by lazy` re-runs on failure, so without this the second call is already
+    // the uninformative one.
+    try {
+      openHost()
+    } catch (error: Throwable) {
+      // Only a bindings failure is recorded. A first attempt that fails for an
+      // unrelated reason — a corrupt database, a missing Android context — must
+      // travel on untouched, or its text would be pinned as THE diagnosis and
+      // the retry's real cause would never be seen.
+      if (!NativeBridgeDiagnosis.isBridgeFailure(error)) throw error
+      throw IllegalStateException(NativeBridgeDiagnosis.record(error), error)
+    }
+  }
+
+  private fun openHost(): Host {
     val context = appContext.reactContext?.applicationContext
       ?: throw IllegalStateException(
         "CalFfi: no Android application context to resolve the data directory",
@@ -73,7 +93,7 @@ class CalFfiModule : Module() {
     // Host registers any persisted device-calendar account against it. Mirrors
     // the iOS module's IosDeviceEventStore injection.
     opened.setDeviceEventStore(AndroidDeviceCalendar(context))
-    opened
+    return opened
   }
 
   /// Adapts the UniFFI `CacheObserverBridge` callback to Expo events. Fired on a
@@ -116,6 +136,11 @@ class CalFfiModule : Module() {
     OnCreate {
       slowScope.launch {
         runCatching { host }.onFailure {
+          // Do not widen this into a rethrow: the retry on the first real call
+          // is the point of the eager open. The reason is not lost by swallowing
+          // it here — NativeBridgeDiagnosis has already recorded and logged it,
+          // and the retry will surface that same recorded text to the caller
+          // rather than the `NoClassDefFoundError` the JVM would otherwise give.
           Log.w("CalFfi", "eager host open failed; first call will retry", it)
         }
       }
