@@ -662,7 +662,6 @@ pub fn run() {
             commands::set_account_secret,
             commands::reconnect_google_account,
             commands::reconnect_microsoft_account,
-            commands::create_account,
             commands::delete_account,
             commands::rename_account,
             commands::run_account_action,

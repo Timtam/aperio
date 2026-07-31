@@ -190,6 +190,10 @@ export interface AdapterKindInfo {
   plugin_id: string;
   owns_containers: boolean;
   declares_account_schema: boolean;
+  /** Whether connecting it means a provider sign-in rather than a typed
+   *  credential. Lets a list of accounts decide how to offer a repair
+   *  without fetching each adapter's form spec. */
+  declares_oauth: boolean;
 }
 
 /** Every adapter this build can connect an account for.

@@ -1207,6 +1207,11 @@ impl PluginManager {
                     plugin_id: p.manifest.id.clone(),
                     owns_containers: p.manifest.has_data_family(),
                     declares_account_schema: p.manifest.account.is_some(),
+                    declares_oauth: p
+                        .manifest
+                        .account
+                        .as_ref()
+                        .is_some_and(|a| a.oauth.is_some()),
                 })
             })
             .collect();

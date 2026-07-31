@@ -2424,21 +2424,36 @@ impl Host {
     pub fn create_account_json(&self, request_json: String) -> Result<String, StoreError> {
         let req: NewAccountRequest = from_json("account", &request_json)?;
 
-        // Only the kinds with a non-OAuth construction path. Google /
-        // Microsoft Graph / the VC kinds need the interactive OAuth flow
-        // (a later phase); reject them here rather than persisting a row
-        // that can never authenticate.
-        if !matches!(
+        // This path builds a row from values the caller already has. Two kinds
+        // of account cannot come through it, and neither is decided by name:
+        // one whose adapter is not loaded (nothing would register), and one
+        // whose adapter signs in through the provider (the row would persist
+        // without the grant that makes it work). Everything else — including a
+        // host-internal kind like the device calendar, whose "auth" is the OS
+        // permission prompt — is fine.
+        let schema = host_core::account_setup::schema_for_kind(
+            &self.plugin_manager,
             req.adapter_kind.as_str(),
-            "local" | "caldav" | "ical" | "ews" | "vikunja" | "todoist" | "device_calendar"
-        ) {
-            return Err(StoreError::InvalidField {
-                field: "adapter_kind".to_string(),
-                detail: format!(
-                    "adapter '{}' needs the interactive OAuth flow (a later phase)",
-                    req.adapter_kind.as_str()
-                ),
-            });
+        );
+        if !req.adapter_kind.is_host_internal() {
+            let Some(schema) = schema.as_ref() else {
+                return Err(StoreError::InvalidField {
+                    field: "adapter_kind".to_string(),
+                    detail: format!(
+                        "no loaded adapter declares accounts of kind {}",
+                        req.adapter_kind.as_str()
+                    ),
+                });
+            };
+            if host_core::account_setup::signs_in_with_oauth(schema) {
+                return Err(StoreError::InvalidField {
+                    field: "adapter_kind".to_string(),
+                    detail: format!(
+                        "adapter '{}' signs in through its provider; use the connect flow",
+                        req.adapter_kind.as_str()
+                    ),
+                });
+            }
         }
 
         // The device-calendar account is host-internal: it carries no remote
@@ -2485,14 +2500,23 @@ impl Host {
             )
             .map_err(acc_err)?;
 
-        // Persist the secret right after the row so the keychain and DB
-        // stay aligned. The slot mirrors what the registry's register_*
-        // path reads back: API token for Vikunja/Todoist, password
-        // otherwise. A write failure is fatal — tear the row down.
+        // Persist the secret right after the row so the keychain and DB stay
+        // aligned. Which slot is the adapter's own statement — the same one the
+        // registry reads back at open time, so the two cannot disagree. A write
+        // failure is fatal: tear the row down.
         if let Some(secret) = req.secret {
-            let slot = match req.adapter_kind.as_str() {
-                "vikunja" | "todoist" => SecretSlot::ApiToken,
-                _ => SecretSlot::Password,
+            let Some(slot) = schema
+                .as_ref()
+                .and_then(host_core::account_setup::repair_slot)
+            else {
+                let _ = repo.delete(&created.id);
+                return Err(StoreError::InvalidField {
+                    field: "secret".to_string(),
+                    detail: format!(
+                        "adapter kind {} declares no single credential field",
+                        req.adapter_kind.as_str()
+                    ),
+                });
             };
             if let Err(err) = self.secret_store.store(&created.id, slot, &secret) {
                 let _ = repo.delete(&created.id);
@@ -2715,10 +2739,19 @@ impl Host {
             if acc.id == "local" || acc.adapter_kind == "local" {
                 continue;
             }
-            let Some(slot) = required_secret_slot(&acc.adapter_kind) else {
-                continue;
-            };
-            if self.secret_store.retrieve(&acc.id, slot).is_err() {
+            // What "connected" means is the ADAPTER's own statement — the
+            // required secret fields of the schema it declares, plus a refresh
+            // token when it keeps one. Asking the manifest is what keeps this
+            // from being a table of kind names that has to be edited (and, as
+            // it turned out, forgotten) every time an adapter arrives.
+            let slots = host_core::account_setup::required_slots_for_kind(
+                &self.plugin_manager,
+                acc.adapter_kind.as_str(),
+            );
+            if slots
+                .iter()
+                .any(|slot| self.secret_store.retrieve(&acc.id, *slot).is_err())
+            {
                 out.push(acc);
             }
         }
@@ -2746,7 +2779,24 @@ impl Host {
                 detail: "the local account has no credential slot".to_string(),
             });
         }
-        if matches!(account.adapter_kind.as_str(), "google" | "microsoft_graph") {
+        // Where a pasted credential goes, and whether pasting one is even the
+        // right repair, are both the adapter's own statement. The two `match`es
+        // this replaces named six adapters between them and answered `Password`
+        // for everything they had not heard of — so a new OAuth adapter got a
+        // password written into a slot its plugin never reads.
+        let Some(schema) = host_core::account_setup::schema_for_kind(
+            &self.plugin_manager,
+            account.adapter_kind.as_str(),
+        ) else {
+            return Err(StoreError::InvalidField {
+                field: "account_id".to_string(),
+                detail: format!(
+                    "no loaded adapter declares accounts of kind {}",
+                    account.adapter_kind.as_str()
+                ),
+            });
+        };
+        if host_core::account_setup::signs_in_with_oauth(&schema) {
             return Err(StoreError::InvalidField {
                 field: "account_id".to_string(),
                 detail: format!(
@@ -2755,9 +2805,14 @@ impl Host {
                 ),
             });
         }
-        let slot = match account.adapter_kind.as_str() {
-            "vikunja" | "todoist" => SecretSlot::ApiToken,
-            _ => SecretSlot::Password,
+        let Some(slot) = host_core::account_setup::repair_slot(&schema) else {
+            return Err(StoreError::InvalidField {
+                field: "account_id".to_string(),
+                detail: format!(
+                    "adapter kind {} declares no single credential to replace",
+                    account.adapter_kind.as_str()
+                ),
+            });
         };
         self.secret_store
             .store(&account_id, slot, &secret)
@@ -8055,31 +8110,6 @@ struct CompleteSyncOAuthRequest {
     redirect_uri: String,
 }
 
-/// Map an accounts-repo error to the FFI store error, preserving the
-/// NotFound / forbidden-local-delete distinctions for the UI.
-/// Which keychain slot a fully-configured account of this kind must have
-/// populated, or `None` when the kind needs no secret (iCal feeds are usually
-/// public; an optional Basic-auth password fails open as a 401 on first fetch).
-/// Mirrors the desktop `required_secret_slot` — the credential-repair wizard
-/// uses it to decide which accounts to flag and which slot to rewrite.
-fn required_secret_slot(kind: &host_core::accounts::AdapterKind) -> Option<SecretSlot> {
-    match kind.as_str() {
-        // No stored credential: local + iCal feeds need none, and the
-        // device-calendar account authenticates via the OS permission grant
-        // (EventKit / CalendarProvider), not a keychain secret — so it must NOT
-        // surface in the "credentials missing" repair banner.
-        "ical" | "local" | "device_calendar" => None,
-        "vikunja" | "todoist" => Some(SecretSlot::ApiToken),
-        "google" | "microsoft_graph" => Some(SecretSlot::RefreshToken),
-        "caldav" | "ews" => Some(SecretSlot::Password),
-        // A kind this build has no entry for. `None` rather than a guess —
-        // the desktop twin says the same, and for the same reason: assuming
-        // `Password` reported every account of an unrecognised OAuth kind as
-        // needing to be reconnected.
-        _ => None,
-    }
-}
-
 /// Parse a full-round trigger wire string → `SyncTrigger`. Unknown ⇒ `Manual`
 /// (the user-initiated default; the Settings "Sync now" button sends "manual").
 fn parse_sync_trigger(s: &str) -> SyncTrigger {
@@ -8104,6 +8134,8 @@ fn parse_push_trigger(s: &str) -> SyncTrigger {
     }
 }
 
+/// Map an accounts-repo error to the FFI store error, preserving the
+/// NotFound / forbidden-local-delete distinctions for the UI.
 fn acc_err(e: host_core::accounts::AccountsError) -> StoreError {
     use host_core::accounts::AccountsError;
     match e {

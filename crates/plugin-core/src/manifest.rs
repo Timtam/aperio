@@ -280,6 +280,16 @@ pub struct AdapterKindInfo {
     /// Whether it can be connected through the generic schema-driven flow.
     /// False for the adapters still on the host's older per-kind path.
     pub declares_account_schema: bool,
+    /// Whether connecting it involves a provider sign-in rather than a
+    /// credential the user can type.
+    ///
+    /// The connect form gets this from the schema it already fetched. This
+    /// field is for the places that must decide WITHOUT fetching one — an
+    /// account list rendering a row per account, where the question is "can
+    /// this account be repaired by pasting a new password, or does it have to
+    /// go back through the browser?". Asking the manifest is what keeps that
+    /// decision from being a list of provider names in the UI.
+    pub declares_oauth: bool,
 }
 
 /// Parsed `plugin.json`. All fields are owned strings so the

@@ -33,6 +33,12 @@ vc-adapter-teams-plugin = { path = "../vc-adapter-teams-plugin", optional = true
 vc-adapter-meet-plugin = { path = "../vc-adapter-meet-plugin", optional = true }
 vc-adapter-webex-plugin = { path = "../vc-adapter-webex-plugin", optional = true }
 
+[dev-dependencies]
+# The credential-layer tests assert what the SHIPPED manifests imply about
+# keychain slots, which is host-core's derivation, not this crate's.
+host-core.workspace = true
+sync-engine.workspace = true
+
 [features]
 default = ["static"]
 

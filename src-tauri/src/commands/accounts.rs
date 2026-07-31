@@ -203,63 +203,19 @@ pub async fn list_accounts_missing_credentials(
         if acc.id == "local" || acc.adapter_kind == "local" {
             continue;
         }
-        // What "connected" means is the ADAPTER's statement when it makes one:
-        // the required secret fields of its schema. The per-kind table below is
-        // the fallback for the adapters that have not declared one yet.
-        let slots: Vec<SecretSlot> = plugin_manager
-            .plugin_for_adapter_kind(acc.adapter_kind.as_str())
-            .and_then(|p| p.manifest.account.clone())
-            .map(|schema| host_core::account_setup::required_slots(&schema))
-            .unwrap_or_else(|| {
-                required_secret_slot(&acc.adapter_kind)
-                    .into_iter()
-                    .collect()
-            });
+        // What "connected" means is the ADAPTER's own statement: the required
+        // secret fields of the schema it declares. A kind no loaded plugin
+        // claims — the local store, the device calendar — needs nothing, which
+        // is why the empty answer is the right one rather than a guess.
+        let slots = host_core::account_setup::required_slots_for_kind(
+            &plugin_manager,
+            acc.adapter_kind.as_str(),
+        );
         if slots.iter().any(|slot| !secret_present(&acc.id, *slot)) {
             out.push(acc);
         }
     }
     Ok(out)
-}
-
-/// Which keychain slot a fully-configured account of this kind must have
-/// populated — the FALLBACK for adapters that declare no account schema.
-///
-/// An adapter that declares one answers this question itself, in its
-/// `plugin.json`, and never reaches this table; see
-/// `host_core::account_setup::required_slots`. This stays for the seven
-/// adapters still on the older per-kind path.
-///
-/// `None` means the adapter has no required secret — iCal feeds are typically
-/// public URLs, and an optional Basic-auth password fails open and surfaces as
-/// a 401 on the first fetch.
-fn required_secret_slot(kind: &AdapterKind) -> Option<SecretSlot> {
-    // Exhaustive on purpose. The catch-all this replaces answered `Password`
-    // for every kind it had not heard of, so a new OAuth kind was silently
-    // probed for a password it never has — and every working account of that
-    // kind was then reported as needing to be reconnected. A missing arm should
-    // fail the build, not the user.
-    match kind.as_str() {
-        // No stored credential: iCal feeds are public, Local is host-internal,
-        // and the mobile-only device-calendar account authenticates via the OS
-        // permission grant (never reaches desktop, but the kind is shared).
-        "ical" | "local" | "device_calendar" => None,
-        "vikunja" | "todoist" => Some(SecretSlot::ApiToken),
-        "google" | "microsoft_graph" => Some(SecretSlot::RefreshToken),
-        "caldav" | "ews" => Some(SecretSlot::Password),
-        // Video conferencing is OAuth throughout. Teams and Meet ride the token
-        // of their calendar sibling, but each still has its own account row and
-        // its own refresh token in its own slot.
-        "zoom" | "teams" | "meet" | "webex" => Some(SecretSlot::RefreshToken),
-        // A kind this build has no entry for. `None` rather than a guess: the
-        // catch-all this replaces answered `Password`, so a new OAuth kind was
-        // probed for a password it never has and every working account of that
-        // kind was reported as needing to be reconnected. Saying nothing is
-        // required is the harmless direction — the adapter surfaces a real auth
-        // error on first use if it does need one. An adapter that declares an
-        // account schema never reaches here at all.
-        _ => None,
-    }
 }
 
 /// Best-effort check for a keychain entry's presence. Treats any
@@ -268,220 +224,6 @@ fn required_secret_slot(kind: &AdapterKind) -> Option<SecretSlot> {
 /// re-authenticate.
 fn secret_present(account_id: &str, slot: SecretSlot) -> bool {
     secrets::retrieve(account_id, slot).is_ok()
-}
-
-/// Request payload for creating an account. `config_json` is the
-/// adapter-specific non-secret configuration; the shape is owned by
-/// each adapter and validated at adapter construction time.
-#[derive(Debug, serde::Deserialize)]
-pub struct CreateAccountRequest {
-    pub adapter_kind: AdapterKind,
-    pub display_name: String,
-    #[serde(default = "default_config_json")]
-    pub config_json: String,
-    /// The secret half of the credentials (CalDAV password,
-    /// OAuth refresh token, …). Optional because the local
-    /// adapter doesn't need any. Stored only in the platform
-    /// keychain, never in the SQLite store.
-    #[serde(default)]
-    pub secret: Option<String>,
-}
-
-fn default_config_json() -> String {
-    "{}".into()
-}
-
-#[tauri::command]
-pub async fn create_account(
-    db: State<'_, DbHandle>,
-    registry: State<'_, Arc<AdapterRegistry>>,
-    plugin_manager: State<'_, Arc<PluginManager>>,
-    event_log: State<'_, Arc<EventLogWriter>>,
-    refresher: State<'_, Arc<CacheRefresher>>,
-    request: CreateAccountRequest,
-) -> CommandResult<Account> {
-    // Reject adapter kinds we have no construction path for yet.
-    // Local, CalDAV, iCal and EWS go through the `create_account`
-    // dispatch (each with a password-style credential); Google and
-    // Microsoft Graph have their own OAuth-shaped entry points. The
-    // remaining kinds surface as an actionable "coming soon" envelope
-    // rather than a half-broken row in the database.
-    if !matches!(
-        request.adapter_kind.as_str(),
-        "local" | "caldav" | "ical" | "ews" | "vikunja" | "todoist"
-    ) {
-        return Err(CommandError {
-            code: "unsupported",
-            message: format!(
-                "Adapter '{}' will be supported in a later phase.",
-                request.adapter_kind.as_str()
-            ),
-        });
-    }
-
-    // Smoke-test credentials BEFORE writing anything so the user
-    // sees auth / network errors instantly instead of "saved, but
-    // doesn't work". Each smoke runs against an ephemeral plugin
-    // instance built from the request payload + closes it
-    // immediately; the persisted account gets a fresh instance
-    // opened by the registry on the way in.
-    //
-    // The request's `config_json` is the same shape the registry
-    // persists — pulling fields out of it via `Value::get` keeps
-    // the host adapter-crate-agnostic. Any required field that's
-    // missing surfaces as "invalid_input" from the plugin's own
-    // InitConfig deserialiser, so we don't pre-validate here.
-    let plugin_manager_ref: &PluginManager = plugin_manager.inner();
-    let request_config: Value =
-        serde_json::from_str(&request.config_json).map_err(|e| CommandError {
-            code: "invalid_input",
-            message: format!("invalid config JSON: {e}"),
-        })?;
-    let str_field = |key: &str| -> &str {
-        request_config
-            .get(key)
-            .and_then(Value::as_str)
-            .unwrap_or("")
-    };
-
-    if request.adapter_kind == "caldav" {
-        let Some(secret) = request.secret.as_deref() else {
-            return Err(CommandError {
-                code: "invalid_input",
-                message: "CalDAV needs a password to authenticate.".into(),
-            });
-        };
-        // Persisted CaldavAccountConfig serialises `auth_kind`
-        // as `"basic"` / `"bearer"`; the plugin's InitConfig
-        // expects the same snake-case wire form. Default to
-        // basic when the field is missing (older accounts
-        // pre-AuthKind).
-        let auth_kind = request_config
-            .get("auth_kind")
-            .and_then(Value::as_str)
-            .unwrap_or("basic");
-        smoke_test_caldav(
-            plugin_manager_ref,
-            str_field("server_url"),
-            str_field("username"),
-            auth_kind,
-            secret,
-        )
-        .await?;
-    }
-
-    if request.adapter_kind == "ical" {
-        smoke_test_ical(
-            plugin_manager_ref,
-            str_field("feed_url"),
-            request_config.get("username").and_then(Value::as_str),
-            request.secret.as_deref(),
-        )
-        .await?;
-    }
-
-    if request.adapter_kind == "ews" {
-        let Some(secret) = request.secret.as_deref() else {
-            return Err(CommandError {
-                code: "invalid_input",
-                message: "EWS needs a password to authenticate.".into(),
-            });
-        };
-        smoke_test_ews(
-            plugin_manager_ref,
-            str_field("endpoint"),
-            str_field("username"),
-            secret,
-        )
-        .await?;
-    }
-
-    if request.adapter_kind == "vikunja" {
-        let Some(secret) = request.secret.as_deref() else {
-            return Err(CommandError {
-                code: "invalid_input",
-                message: "Vikunja needs an API token to authenticate.".into(),
-            });
-        };
-        smoke_test_vikunja(plugin_manager_ref, str_field("server_url"), secret).await?;
-    }
-
-    if request.adapter_kind == "todoist" {
-        let Some(secret) = request.secret.as_deref() else {
-            return Err(CommandError {
-                code: "invalid_input",
-                message: "Todoist needs an API token to authenticate.".into(),
-            });
-        };
-        smoke_test_todoist(plugin_manager_ref, secret).await?;
-    }
-
-    let shared = db.shared();
-    let repo = AccountsRepo::new(&shared);
-    let created = repo.create(
-        request.adapter_kind.clone(),
-        request.display_name.trim(),
-        &request.config_json,
-    )?;
-
-    // Persist the secret right after the account row so the keychain
-    // and the DB stay aligned. A keychain write that fails is fatal
-    // — we tear the row down again so the user doesn't end up with
-    // an external account that can never authenticate.
-    //
-    // The slot depends on the adapter kind: Vikunja (and any future
-    // adapter that authenticates with a long-lived API token) lives
-    // in `SecretSlot::ApiToken`, everyone else's Basic-auth-style
-    // credential lives in `SecretSlot::Password`. The slot name is
-    // what the registry's `register_*` paths look for, so the two
-    // sides have to stay in step.
-    if let Some(secret) = request.secret {
-        let slot = match request.adapter_kind.as_str() {
-            "vikunja" | "todoist" => SecretSlot::ApiToken,
-            _ => SecretSlot::Password,
-        };
-        if let Err(err) = secrets::store(&created.id, slot, &secret) {
-            let _ = repo.delete(&created.id);
-            return Err(CommandError {
-                code: "internal",
-                message: format!("failed to store credential: {err}"),
-            });
-        }
-        // E2E only: also push the secret to the user's other devices via
-        // the encrypted log so the account works there without re-entry.
-        // A no-op when E2E is off (credentials then stay device-local).
-        crate::credential_sync::emit_credential_set(
-            &event_log,
-            &shared,
-            &created.id,
-            slot,
-            &secret,
-        );
-    }
-
-    // Register the freshly created external adapter so subsequent
-    // reads/writes route through it. We already smoke-tested for
-    // CalDAV; treating a registration failure here as fatal keeps
-    // the keychain + DB + registry strictly in sync.
-    if request.adapter_kind != "local" {
-        if let Err(err) = registry.register(&created) {
-            let _ = secrets::delete_all(&created.id);
-            let _ = repo.delete(&created.id);
-            return Err(CommandError {
-                code: "internal",
-                message: format!("adapter registration failed: {err}"),
-            });
-        }
-    }
-    // Sync the new account row to other devices. Secrets stay in
-    // this device's keychain — `AccountPayload` carries only the
-    // non-secret metadata, and the receiver surfaces the
-    // "credentials missing" wizard for the device-local secret.
-    event_log.append(SyncEvent::AccountCreated(account_payload(&created)));
-    // The boot warm pass may already have run; kick a warm so the new account's
-    // calendars/lists load now instead of only after the next pass / restart.
-    refresher.trigger();
-    Ok(created)
 }
 
 /// Discover + list calendars against the supplied CalDAV
@@ -1676,8 +1418,8 @@ fn account_setup_error(err: host_core::account_setup::AccountSetupError) -> Comm
 /// snapshots populate it; this command only fills in the
 /// missing keychain slot.
 ///
-/// Slot selection mirrors `create_account` + `required_secret_slot`:
-/// Vikunja / Todoist get `ApiToken`, everyone else `Password`.
+/// Which slot the secret lands in comes from the adapter's declared schema, so
+/// this and the registry's read-back cannot disagree.
 ///
 /// After the secret lands we register the adapter so subsequent
 /// reads / writes route through it without an app restart.
@@ -1686,6 +1428,7 @@ pub async fn set_account_secret(
     db: State<'_, DbHandle>,
     registry: State<'_, Arc<AdapterRegistry>>,
     event_log: State<'_, Arc<EventLogWriter>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
     account_id: String,
     secret: String,
 ) -> CommandResult<()> {
@@ -1701,7 +1444,24 @@ pub async fn set_account_secret(
             message: "the local account has no credential slot".into(),
         });
     }
-    if matches!(account.adapter_kind.as_str(), "google" | "microsoft_graph") {
+    // Whether pasting a credential is the right repair at all, and where it
+    // goes, are both the adapter's own statement. The two `match`es this
+    // replaces named six adapters between them and answered `Password` for
+    // anything else — so a new OAuth adapter got a password written into a slot
+    // its plugin never reads. The mobile half asks the same two questions of
+    // the same helpers.
+    let Some(schema) =
+        host_core::account_setup::schema_for_kind(&plugin_manager, account.adapter_kind.as_str())
+    else {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: format!(
+                "no loaded adapter declares accounts of kind {}",
+                account.adapter_kind.as_str(),
+            ),
+        });
+    };
+    if host_core::account_setup::signs_in_with_oauth(&schema) {
         return Err(CommandError {
             code: "invalid_input",
             message: format!(
@@ -1710,9 +1470,14 @@ pub async fn set_account_secret(
             ),
         });
     }
-    let slot = match account.adapter_kind.as_str() {
-        "vikunja" | "todoist" => SecretSlot::ApiToken,
-        _ => SecretSlot::Password,
+    let Some(slot) = host_core::account_setup::repair_slot(&schema) else {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: format!(
+                "adapter kind {} declares no single credential to replace",
+                account.adapter_kind.as_str(),
+            ),
+        });
     };
     secrets::store(&account_id, slot, &secret).map_err(|err| CommandError {
         code: "internal",
@@ -1876,54 +1641,4 @@ where
         });
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// §19.11.8 — the missing-credentials check picks the right
-    /// keychain slot per `AdapterKind`. Drives the dialog's
-    /// password vs API-token vs OAuth branching. iCal + Local
-    /// return `None` because they have no required secret —
-    /// iCal feeds are typically public URLs.
-    #[test]
-    fn required_secret_slot_maps_each_kind() {
-        // Password-based providers.
-        assert!(matches!(
-            required_secret_slot(&AdapterKind::new("caldav")),
-            Some(SecretSlot::Password)
-        ));
-        assert!(matches!(
-            required_secret_slot(&AdapterKind::new("ews")),
-            Some(SecretSlot::Password)
-        ));
-        // No-secret providers — iCal feeds are public; Local
-        // is host-internal; the device-calendar account uses the OS
-        // permission grant, not a stored secret (so it must never show
-        // the "credentials missing" repair banner).
-        assert!(required_secret_slot(&AdapterKind::new("ical")).is_none());
-        assert!(required_secret_slot(&AdapterKind::new("local")).is_none());
-        assert!(required_secret_slot(&AdapterKind::new("device_calendar")).is_none());
-        // API-token providers — surfaced as "API token" in the UI.
-        assert!(matches!(
-            required_secret_slot(&AdapterKind::new("vikunja")),
-            Some(SecretSlot::ApiToken)
-        ));
-        assert!(matches!(
-            required_secret_slot(&AdapterKind::new("todoist")),
-            Some(SecretSlot::ApiToken)
-        ));
-        // OAuth providers — slot we probe for "is the user
-        // signed in" is the refresh token, since the access
-        // token rotates on its own.
-        assert!(matches!(
-            required_secret_slot(&AdapterKind::new("google")),
-            Some(SecretSlot::RefreshToken)
-        ));
-        assert!(matches!(
-            required_secret_slot(&AdapterKind::new("microsoft_graph")),
-            Some(SecretSlot::RefreshToken)
-        ));
-    }
 }

@@ -234,6 +234,109 @@ pub fn required_slots(schema: &AccountSchema) -> Vec<SecretSlot> {
     slots
 }
 
+/// The account schema of the adapter that owns this kind, when a loaded plugin
+/// declares one.
+///
+/// `None` covers two cases that both mean "no adapter holds a credential for
+/// this": a host-internal kind (the local store, the device calendar, whose auth
+/// is an OS permission grant), and a kind whose plugin is absent or disabled.
+pub fn schema_for_kind(manager: &plugin_core::PluginManager, kind: &str) -> Option<AccountSchema> {
+    manager
+        .plugin_for_adapter_kind(kind)
+        .and_then(|p| p.manifest.account.clone())
+}
+
+/// The keychain slots an account of this kind must have populated to count as
+/// connected — [`required_slots`], resolved through the plugin that owns the
+/// kind.
+///
+/// Empty for a kind no loaded plugin claims, which is the honest answer: a
+/// credential-repair banner cannot ask the user to fix a credential that no
+/// adapter wants.
+///
+/// Both hosts call this. They used to keep a `match` on kind names each, which
+/// drifted exactly as one would expect — the desktop's table listed the four
+/// videoconference kinds and the mobile one did not, so a Webex account with no
+/// refresh token was flagged for repair on one platform and silently ignored on
+/// the other.
+pub fn required_slots_for_kind(
+    manager: &plugin_core::PluginManager,
+    kind: &str,
+) -> Vec<SecretSlot> {
+    if let Some(schema) = schema_for_kind(manager, kind) {
+        return required_slots(&schema);
+    }
+    unmigrated_slots(kind)
+}
+
+/// The three adapters that have not declared an account schema yet, and what
+/// their accounts need until they do.
+///
+/// This is the whole remaining name list, and it is deliberately in one place
+/// rather than one per host. Zoom, Teams and Meet are still registered through
+/// the registry's per-kind `register_*` arms; Teams and Meet in particular read
+/// the token of the calendar account they are linked to, which is not something
+/// today's `account` schema can express. Migrating them is its own piece of
+/// work — see the videoconference arms in `registry.rs`.
+///
+/// Everything else answers `None`, and that is the right answer rather than a
+/// guess: a kind no loaded plugin claims is either host-internal (the local
+/// store, the device calendar, whose auth is an OS permission grant) or absent,
+/// and neither has a credential a repair banner could ask the user to fix. The
+/// tables this replaces defaulted to `Password`, so an unrecognised OAuth kind
+/// was probed for a password it never had and every working account of that
+/// kind was reported as needing to be reconnected.
+fn unmigrated_slots(kind: &str) -> Vec<SecretSlot> {
+    match kind {
+        "zoom" | "teams" | "meet" => vec![SecretSlot::RefreshToken],
+        _ => Vec::new(),
+    }
+}
+
+/// Whether connecting this adapter means a provider sign-in rather than a
+/// credential the user can type.
+///
+/// The question every repair affordance has to answer first, and the one the
+/// host used to answer with `matches!(kind, "google" | "microsoft_graph")` — in
+/// five places, in two binaries, which is four opportunities to disagree and one
+/// to forget the next provider. A schema that declares an `oauth` block is
+/// saying exactly this about itself.
+pub fn signs_in_with_oauth(schema: &AccountSchema) -> bool {
+    schema.oauth.is_some()
+}
+
+/// The keychain slot a pasted credential goes into when repairing an account of
+/// this schema, or `None` when there is no such thing.
+///
+/// `None` has two quite different causes and the caller should say which:
+///
+/// - The adapter signs in via OAuth. There is no credential to paste; the fix is
+///   to re-run the sign-in. Check [`signs_in_with_oauth`] first if the message
+///   matters, which it does — "this account cannot be repaired that way" is
+///   useless next to "sign in again".
+/// - The adapter declares no secret field at all, or declares more than one. One
+///   secret field is what a single paste can serve; two would need the user to
+///   be asked which, and no bundled adapter has two, so this refuses rather than
+///   guessing and writing a password into a token slot.
+///
+/// The OAuth client secret never counts. It is part of the client registration
+/// the user configured, not a credential that expires and needs re-entering.
+pub fn repair_slot(schema: &AccountSchema) -> Option<SecretSlot> {
+    if signs_in_with_oauth(schema) {
+        return None;
+    }
+    let mut secrets = schema
+        .fields
+        .iter()
+        .filter_map(|f| f.secret_slot)
+        .filter(|s| *s != AccountSecretSlot::OauthClientSecret);
+    let first = secrets.next()?;
+    if secrets.next().is_some() {
+        return None;
+    }
+    Some(host_slot(first))
+}
+
 // ── 2. Creating an account ───────────────────────────────────────────────────
 
 /// What to write when creating an account.
@@ -876,6 +979,55 @@ mod tests {
         assert_eq!(parsed["client_secret"], "s3cr3t");
         assert_eq!(parsed["refresh_token"], "r3fresh");
         assert_eq!(parsed["use_personal_room"], true);
+    }
+
+    #[test]
+    fn a_repair_writes_where_the_schema_says_and_nowhere_else() {
+        // The password adapter: one secret field, and its declared slot is the
+        // answer. This used to be `matches!(kind, "vikunja" | "todoist")` and
+        // everything else fell through to Password — which is right until an
+        // adapter arrives whose credential is neither.
+        assert_eq!(repair_slot(&basic_schema()), Some(SecretSlot::Password));
+        assert!(!signs_in_with_oauth(&basic_schema()));
+
+        // A token adapter says so itself.
+        let mut token = basic_schema();
+        token.fields = vec![
+            field("server_url", AccountFieldKind::Url, None, true),
+            field(
+                "api_token",
+                AccountFieldKind::Secret,
+                Some(AccountSecretSlot::ApiToken),
+                true,
+            ),
+        ];
+        assert_eq!(repair_slot(&token), Some(SecretSlot::ApiToken));
+    }
+
+    #[test]
+    fn an_oauth_account_is_never_offered_a_paste() {
+        let schema = oauth_schema();
+        assert!(signs_in_with_oauth(&schema));
+        // None even though the schema HAS a secret field — the client secret is
+        // part of the registration the user configured, not a credential that
+        // expires. Offering to paste it as a repair would write the wrong thing
+        // into the wrong slot and leave the expired grant untouched.
+        assert_eq!(repair_slot(&schema), None);
+    }
+
+    #[test]
+    fn two_secret_fields_refuse_rather_than_guess() {
+        let mut two = basic_schema();
+        two.fields.push(field(
+            "second_password",
+            AccountFieldKind::Secret,
+            Some(AccountSecretSlot::ApiToken),
+            true,
+        ));
+        // No bundled adapter is shaped this way. If one ever is, the user has to
+        // be asked which credential they are replacing; silently taking the
+        // first would write a password into a token slot.
+        assert_eq!(repair_slot(&two), None);
     }
 
     #[test]

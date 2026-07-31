@@ -94,6 +94,84 @@ fn every_bundled_plugin_declares_the_family_it_serves() {
     assert_eq!(data, 7, "seven bundled calendar/task/contact adapters");
 }
 
+/// What the SHIPPED manifests say about credentials, asserted end to end.
+///
+/// This replaces a pair of hand-written `match kind { … }` tables — one per
+/// host — that answered the same three questions and had already drifted apart:
+/// the desktop's listed the four videoconference kinds and the mobile one did
+/// not, so a Webex account with no refresh token was flagged for repair on one
+/// platform and silently ignored on the other. Deriving the answer from the
+/// manifest means there is one statement per adapter, made by the adapter.
+#[test]
+fn every_bundled_adapter_says_where_its_credential_lives() {
+    use host_core::account_setup::{repair_slot, required_slots_for_kind, schema_for_kind};
+    use sync_engine::SecretSlot;
+
+    let manager = PluginManager::new("0.1.0");
+    host_plugins::register_all_static(&manager).expect("all bundled plugins register");
+
+    // Typed credentials: the slot is the one the schema names, and a repair can
+    // replace it by pasting.
+    for (kind, slot) in [
+        ("caldav", SecretSlot::Password),
+        ("ews", SecretSlot::Password),
+        ("vikunja", SecretSlot::ApiToken),
+        ("todoist", SecretSlot::ApiToken),
+    ] {
+        let schema = schema_for_kind(&manager, kind).unwrap_or_else(|| panic!("{kind} schema"));
+        assert_eq!(repair_slot(&schema), Some(slot), "{kind} repair slot");
+        assert!(
+            required_slots_for_kind(&manager, kind).contains(&slot),
+            "{kind} must require {slot:?}",
+        );
+    }
+
+    // Sign-in adapters: a refresh token is required, and there is nothing to
+    // paste — offering a credential field for these is the bug this prevents.
+    for kind in ["google", "microsoft_graph", "webex"] {
+        let schema = schema_for_kind(&manager, kind).unwrap_or_else(|| panic!("{kind} schema"));
+        assert!(
+            host_core::account_setup::signs_in_with_oauth(&schema),
+            "{kind} signs in through its provider",
+        );
+        assert_eq!(repair_slot(&schema), None, "{kind} has nothing to paste");
+        assert!(
+            required_slots_for_kind(&manager, kind).contains(&SecretSlot::RefreshToken),
+            "{kind} must require a refresh token",
+        );
+    }
+
+    // Zoom, Teams and Meet have not declared a schema yet and are answered by
+    // the single remaining fallback. When they are migrated this loop moves up
+    // into the one above and the fallback goes away; until then, asserting it
+    // here is what stops the migration from silently dropping their accounts
+    // out of the credential-repair banner.
+    for kind in ["zoom", "teams", "meet"] {
+        assert!(
+            schema_for_kind(&manager, kind).is_none(),
+            "{kind} still has no declared schema — update this test when it does",
+        );
+        assert!(
+            required_slots_for_kind(&manager, kind).contains(&SecretSlot::RefreshToken),
+            "{kind} must still require a refresh token",
+        );
+    }
+
+    // An iCal feed is a URL. Requiring a secret here reported every working
+    // feed as needing to be reconnected, which is how the old table failed.
+    assert!(
+        required_slots_for_kind(&manager, "ical").is_empty(),
+        "an iCal feed needs no credential",
+    );
+
+    // Host-internal kinds have no plugin at all, and the empty answer is the
+    // right one rather than a guess: their auth is an OS permission grant.
+    for kind in ["local", "device_calendar"] {
+        assert!(schema_for_kind(&manager, kind).is_none(), "{kind}");
+        assert!(required_slots_for_kind(&manager, kind).is_empty(), "{kind}");
+    }
+}
+
 #[test]
 fn register_all_static_is_idempotent_safe_to_inspect() {
     // A second manager from scratch must register cleanly too —
