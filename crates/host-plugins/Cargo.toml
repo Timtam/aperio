@@ -29,8 +29,6 @@ sync-adapter-sftp-plugin = { path = "../sync-adapter-sftp-plugin", optional = tr
 sync-adapter-dropbox-plugin = { path = "../sync-adapter-dropbox-plugin", optional = true }
 sync-adapter-googledrive-plugin = { path = "../sync-adapter-googledrive-plugin", optional = true }
 vc-adapter-zoom-plugin = { path = "../vc-adapter-zoom-plugin", optional = true }
-vc-adapter-teams-plugin = { path = "../vc-adapter-teams-plugin", optional = true }
-vc-adapter-meet-plugin = { path = "../vc-adapter-meet-plugin", optional = true }
 vc-adapter-webex-plugin = { path = "../vc-adapter-webex-plugin", optional = true }
 
 [dev-dependencies]
@@ -66,8 +64,6 @@ sync-sftp = ["registry", "dep:sync-adapter-sftp-plugin"]
 sync-dropbox = ["registry", "dep:sync-adapter-dropbox-plugin"]
 sync-googledrive = ["registry", "dep:sync-adapter-googledrive-plugin"]
 vc-zoom = ["registry", "dep:vc-adapter-zoom-plugin"]
-vc-teams = ["registry", "dep:vc-adapter-teams-plugin"]
-vc-meet = ["registry", "dep:vc-adapter-meet-plugin"]
 vc-webex = ["registry", "dep:vc-adapter-webex-plugin"]
 
 # Convenience: link + register ALL 17 bundled adapter plugins (the default).
@@ -86,8 +82,6 @@ static = [
     "sync-dropbox",
     "sync-googledrive",
     "vc-zoom",
-    "vc-teams",
-    "vc-meet",
     "vc-webex",
 ]
 

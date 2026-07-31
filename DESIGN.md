@@ -447,8 +447,6 @@ Aperio/
 │   ├── sync-adapter-googledrive/     # Google Drive API v3 (nativ gebundelt)
 │   ├── sync-adapter-local/           # Lokales Dateisystem / NAS (nativ gebundelt)
 │   ├── vc-adapter-zoom/              # Zoom (nativ gebundelt)
-│   ├── vc-adapter-teams/             # Microsoft Teams (nativ gebundelt)
-│   ├── vc-adapter-meet/              # Google Meet (nativ gebundelt)
 │   └── vc-adapter-webex/             # Cisco WebEx (nativ gebundelt)
 └── src-tauri/                        # Tauri-App
 ```
@@ -565,8 +563,6 @@ Ein Adapter implementiert immer das `Adapter`-Basis-Trait plus eine beliebige Ko
 | `cal-adapter-vikunja` | `reqwest`, `oauth2` |
 | `cal-adapter-todoist` | `reqwest`, `oauth2` |
 | `vc-adapter-zoom` | `reqwest`, `oauth2` |
-| `vc-adapter-teams` | `graph-rs-sdk`, `oauth2` |
-| `vc-adapter-meet` | `google-apis-rs`, `oauth2` |
 | `vc-adapter-webex` | `reqwest`, `oauth2` |
 
 ### 6.2 Geplante Adapter (v1.0)
@@ -1584,8 +1580,8 @@ Jeder Anbieter wird als Plugin mit der Capability `videoconference` implementier
 | Crate | API-Basis | Besonderheit |
 |---|---|---|
 | `vc-adapter-zoom` | Zoom Meeting API v2 | Eigener OAuth2-Flow |
-| `vc-adapter-teams` | Microsoft Graph API (Online Meetings) | Teilt OAuth2-Token mit `cal-adapter-microsoft-graph` |
-| `vc-adapter-meet` | Google Calendar API (conferenceData) | Teilt OAuth2-Token mit `cal-adapter-google` |
+| `cal-adapter-microsoft-graph` (Capability `videoconference`) | Microsoft Graph API (Online Meetings) | Dasselbe Konto, dasselbe Token — kein eigener Adapter |
+| `cal-adapter-google` (Capability `videoconference`) | Google Calendar API (conferenceData) | Dasselbe Konto, dasselbe Token — kein eigener Adapter |
 | `vc-adapter-webex` | Cisco WebEx Meetings REST API | Eigener OAuth2-Flow |
 
 Teams und Meet teilen das OAuth2-Token des jeweiligen Kalender-Adapters – es ist keine separate Anmeldung nötig, wenn der Nutzer bereits Google Calendar oder Outlook verbunden hat.
@@ -3331,8 +3327,6 @@ static-plugins  = [           # Mobile: statisch einkompilieren
     "sync-adapter-googledrive",
     "sync-adapter-local",
     "vc-adapter-zoom",
-    "vc-adapter-teams",
-    "vc-adapter-meet",
     "vc-adapter-webex",
 ]
 ```
@@ -3627,8 +3621,6 @@ Aperio-[VERSION]-[PLATFORM].zip
 │       ├── sync-adapter-googledrive.[ext]
 │       ├── sync-adapter-local.[ext]
 │       ├── vc-adapter-zoom.[ext]
-│       ├── vc-adapter-teams.[ext]
-│       ├── vc-adapter-meet.[ext]
 │       └── vc-adapter-webex.[ext]
 └── README.txt              # Kurzanleitung, WebView2-Hinweis (Windows)
 ```
@@ -3753,9 +3745,7 @@ Aperio/
 │   │── # Videokonferenz-Adapter (nativ gebundelt)
 │   ├── vc-adapter-zoom/                   # Zoom API
 │   │   └── src/lib.rs
-│   ├── vc-adapter-teams/                  # Microsoft Teams (via Graph API)
 │   │   └── src/lib.rs
-│   ├── vc-adapter-meet/                   # Google Meet (via Calendar API)
 │   │   └── src/lib.rs
 │   └── vc-adapter-webex/                  # Cisco WebEx API
 │       └── src/lib.rs

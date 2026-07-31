@@ -72,9 +72,7 @@ host-plugins = { workspace = true, features = [
     "sync-dropbox",
     "sync-googledrive",
     "vc-zoom",
-    "vc-teams",
-    "vc-meet",
-    "vc-webex",
+            "vc-webex",
 ] }
 plugin-core.workspace = true
 sync-core.workspace = true

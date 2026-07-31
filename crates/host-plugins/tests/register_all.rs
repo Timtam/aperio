@@ -27,8 +27,6 @@ const EXPECTED_IDS: &[&str] = &[
     "com.aperio.sync-adapter-dropbox",
     "com.aperio.sync-adapter-googledrive",
     "com.aperio.vc-adapter-zoom",
-    "com.aperio.vc-adapter-teams",
-    "com.aperio.vc-adapter-meet",
     "com.aperio.vc-adapter-webex",
 ];
 
@@ -90,7 +88,7 @@ fn every_bundled_plugin_declares_the_family_it_serves() {
         }
     }
     assert_eq!(sync, 6, "six bundled sync backends");
-    assert_eq!(vc, 4, "four bundled meeting providers");
+    assert_eq!(vc, 2, "two bundled meeting providers");
     assert_eq!(data, 7, "seven bundled calendar/task/contact adapters");
 }
 
@@ -141,21 +139,19 @@ fn every_bundled_adapter_says_where_its_credential_lives() {
         );
     }
 
-    // Zoom, Teams and Meet have not declared a schema yet and are answered by
-    // the single remaining fallback. When they are migrated this loop moves up
-    // into the one above and the fallback goes away; until then, asserting it
-    // here is what stops the migration from silently dropping their accounts
-    // out of the credential-repair banner.
-    for kind in ["zoom", "teams", "meet"] {
-        assert!(
-            schema_for_kind(&manager, kind).is_none(),
-            "{kind} still has no declared schema — update this test when it does",
-        );
-        assert!(
-            required_slots_for_kind(&manager, kind).contains(&SecretSlot::RefreshToken),
-            "{kind} must still require a refresh token",
-        );
-    }
+    // Zoom is the last adapter without a declared schema, answered by the one
+    // remaining fallback. When it declares one this moves up into the loop
+    // above and the fallback goes away entirely; until then, asserting it here
+    // is what stops that migration from silently dropping Zoom accounts out of
+    // the credential-repair banner.
+    assert!(
+        schema_for_kind(&manager, "zoom").is_none(),
+        "zoom still has no declared schema — update this test when it does",
+    );
+    assert!(
+        required_slots_for_kind(&manager, "zoom").contains(&SecretSlot::RefreshToken),
+        "zoom must still require a refresh token",
+    );
 
     // An iCal feed is a URL. Requiring a secret here reported every working
     // feed as needing to be reconnected, which is how the old table failed.

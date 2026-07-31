@@ -288,7 +288,7 @@ pub fn required_slots_for_kind(
 /// kind was reported as needing to be reconnected.
 fn unmigrated_slots(kind: &str) -> Vec<SecretSlot> {
     match kind {
-        "zoom" | "teams" | "meet" => vec![SecretSlot::RefreshToken],
+        "zoom" => vec![SecretSlot::RefreshToken],
         _ => Vec::new(),
     }
 }

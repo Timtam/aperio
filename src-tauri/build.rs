@@ -120,16 +120,6 @@ const PLUGINS: &[(&str, &str, &str)] = &[
         "com.aperio.vc-adapter-zoom",
     ),
     (
-        "vc-adapter-teams-cdylib",
-        "vc-adapter-teams-plugin",
-        "com.aperio.vc-adapter-teams",
-    ),
-    (
-        "vc-adapter-meet-cdylib",
-        "vc-adapter-meet-plugin",
-        "com.aperio.vc-adapter-meet",
-    ),
-    (
         "vc-adapter-webex-cdylib",
         "vc-adapter-webex-plugin",
         "com.aperio.vc-adapter-webex",

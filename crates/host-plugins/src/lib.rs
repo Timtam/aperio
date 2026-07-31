@@ -186,16 +186,6 @@ pub fn register_all_static(manager: &PluginManager) -> PluginResult<()> {
         vc_adapter_zoom_plugin,
         "../../vc-adapter-zoom-plugin/plugin.json"
     );
-    #[cfg(feature = "vc-teams")]
-    register!(
-        vc_adapter_teams_plugin,
-        "../../vc-adapter-teams-plugin/plugin.json"
-    );
-    #[cfg(feature = "vc-meet")]
-    register!(
-        vc_adapter_meet_plugin,
-        "../../vc-adapter-meet-plugin/plugin.json"
-    );
     // Webex runs its own OAuth against the Meetings API rather than sharing a
     // calendar adapter's tokens, so the auth hook has to be wired for the
     // statically-embedded build too — without it a mobile sign-in has nothing
@@ -228,6 +218,4 @@ pub const BUNDLED_PLUGIN_COUNT: usize = cfg!(feature = "caldav") as usize
     + cfg!(feature = "sync-dropbox") as usize
     + cfg!(feature = "sync-googledrive") as usize
     + cfg!(feature = "vc-zoom") as usize
-    + cfg!(feature = "vc-teams") as usize
-    + cfg!(feature = "vc-meet") as usize
     + cfg!(feature = "vc-webex") as usize;

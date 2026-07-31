@@ -59,13 +59,10 @@ pub const LOCAL_ID: &str = LOCAL_ACCOUNT_ID;
 /// path below.
 ///
 /// NOT the kind→plugin map any more — that comes from the manifests, via
-/// [`plugin_core::PluginManager::plugin_for_adapter_kind`]. What remains is only
-/// what the three videoconference stubs open — they declare no account schema
-/// yet, so nothing routes them. Each disappears with its `register_*` function
-/// as its adapter declares one.
+/// [`plugin_core::PluginManager::plugin_for_adapter_kind`]. One entry is left:
+/// Zoom declares no account schema yet, so nothing routes it. It disappears
+/// with its `register_*` function the day it declares one.
 const PLUGIN_ID_ZOOM: &str = "com.aperio.vc-adapter-zoom";
-const PLUGIN_ID_TEAMS: &str = "com.aperio.vc-adapter-teams";
-const PLUGIN_ID_MEET: &str = "com.aperio.vc-adapter-meet";
 
 /// Tracks which account a calendar / task-list came from so writes
 /// can find their way home. Filled lazily during the first
@@ -89,13 +86,12 @@ pub struct AdapterRegistry {
     external_tasks: RwLock<HashMap<String, Arc<dyn TasksFeature>>>,
     /// External adapters with ContactsFeature, keyed by account_id.
     external_contacts: RwLock<HashMap<String, Arc<dyn ContactsFeature>>>,
-    /// Videoconference adapters, keyed by account_id. Separate
-    /// map (rather than a slot on the cal/tasks/contacts shape)
-    /// because vc-adapters don't share their account row with
-    /// the calendar adapters they accompany — Teams + Meet
-    /// share OAuth tokens with their cal-adapter siblings but
-    /// each lives on its own `accounts` row with its own
-    /// adapter_kind.
+    /// Videoconference adapters, keyed by account_id. A separate map rather
+    /// than a slot on the cal/tasks/contacts shape because a meeting provider
+    /// need not be a calendar: Zoom and Webex have their own accounts and their
+    /// own sign-ins. An adapter that is BOTH — a provider whose calendar and
+    /// meetings share one account — lands here and in `external_cal` from the
+    /// same instance, which is what the capability list is for.
     external_vc: RwLock<HashMap<String, Arc<dyn VcAdapter>>>,
     /// Reverse lookup for routing writes back to the right adapter.
     routes: Mutex<Routes>,
@@ -842,14 +838,13 @@ impl AdapterRegistry {
             }
         }
 
-        // The older per-kind path, for the adapters that have not declared a
-        // schema yet — the three videoconference stubs. Each leaves this list by
-        // adding the block to its own `plugin.json`; nothing here changes when
-        // it does, and when the last one goes the match goes with it.
+        // The older per-kind path, for the one adapter that has not declared a
+        // schema yet. Zoom leaves this list by adding the block to its own
+        // `plugin.json`, and the match goes with it — Teams and Meet left by a
+        // shorter route, having turned out to be stubs whose APIs belong to the
+        // calendar adapter they borrowed their token from.
         match account.adapter_kind.as_str() {
             "zoom" => self.register_zoom(account),
-            "teams" => self.register_teams(account),
-            "meet" => self.register_meet(account),
             // Not host-internal, no plugin loaded for it, and not one of the
             // kinds this build still knows by name. That is a plugin that is
             // missing or switched off — including an account synced from a
@@ -868,40 +863,6 @@ impl AdapterRegistry {
             &account.config_json,
         )?;
         let instance = self.open_plugin_instance(PLUGIN_ID_ZOOM, plugin_config)?;
-        self.insert_vc(&account.id, instance)?;
-        Ok(())
-    }
-
-    fn register_teams(&self, account: &Account) -> Result<(), RegistryError> {
-        // Teams shares the cal-adapter-microsoft-graph access
-        // token (same keychain slot it already has). The
-        // account row's `config_json` carries just `client_id`;
-        // we pull the access token from whichever Graph account
-        // is registered + thread it in as `access_token`.
-        let access_token = teams_shared_access_token(self.secret_store.as_ref(), &account.id)?;
-        let plugin_config = merge_account_config(
-            &account.config_json,
-            &[("access_token", Value::String(access_token))],
-        )?;
-        let instance = self.open_plugin_instance(PLUGIN_ID_TEAMS, plugin_config)?;
-        self.insert_vc(&account.id, instance)?;
-        Ok(())
-    }
-
-    fn register_meet(&self, account: &Account) -> Result<(), RegistryError> {
-        // Meet shares the cal-adapter-google refresh token
-        // (same keychain slot). The account row's `config_json`
-        // carries `client_id` + `client_secret`; we pull the
-        // refresh token from the linked Google account.
-        let refresh_token = self
-            .secret_store
-            .retrieve(&account.id, SecretSlot::RefreshToken)
-            .map_err(|e| RegistryError::Secret(format!("missing refresh token: {e}")))?;
-        let plugin_config = merge_account_config(
-            &account.config_json,
-            &[("refresh_token", Value::String(refresh_token))],
-        )?;
-        let instance = self.open_plugin_instance(PLUGIN_ID_MEET, plugin_config)?;
         self.insert_vc(&account.id, instance)?;
         Ok(())
     }
@@ -1083,27 +1044,6 @@ fn oauth_refresh_plugin_config(
         account_config_json,
         &[("refresh_token", Value::String(refresh))],
     )
-}
-
-/// Pull the cal-adapter-microsoft-graph access token that the
-/// Teams adapter piggybacks on. v1 reads it from the SAME
-/// account-id's `AccessToken` slot — the AccountsDialog wizard
-/// will create a Teams account whose id maps to its linked
-/// Graph calendar account. A later iteration can swap this for
-/// a "find the linked Graph account by config_json
-/// cross-reference" lookup once the wizard's data model is
-/// firm.
-fn teams_shared_access_token(
-    secret_store: &dyn SecretStore,
-    account_id: &str,
-) -> Result<String, RegistryError> {
-    secret_store
-        .retrieve(account_id, SecretSlot::AccessToken)
-        .map_err(|e| {
-            RegistryError::Secret(format!(
-                "missing Microsoft Graph access token (Teams shares it): {e}",
-            ))
-        })
 }
 
 #[derive(Debug, thiserror::Error)]

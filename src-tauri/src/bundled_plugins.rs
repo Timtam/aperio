@@ -298,8 +298,6 @@ mod tests {
             "com.aperio.sync-adapter-dropbox",
             "com.aperio.sync-adapter-googledrive",
             "com.aperio.vc-adapter-zoom",
-            "com.aperio.vc-adapter-teams",
-            "com.aperio.vc-adapter-meet",
             "com.aperio.vc-adapter-webex",
         ] {
             assert!(

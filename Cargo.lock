@@ -2941,8 +2941,6 @@ dependencies = [
  "sync-adapter-sftp-plugin",
  "sync-adapter-webdav-plugin",
  "sync-engine",
- "vc-adapter-meet-plugin",
- "vc-adapter-teams-plugin",
  "vc-adapter-webex-plugin",
  "vc-adapter-zoom-plugin",
 ]
@@ -7868,70 +7866,6 @@ name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
-
-[[package]]
-name = "vc-adapter-meet"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "serde",
- "vc-core",
-]
-
-[[package]]
-name = "vc-adapter-meet-cdylib"
-version = "0.1.0"
-dependencies = [
- "plugin-sdk",
- "vc-adapter-meet-plugin",
-]
-
-[[package]]
-name = "vc-adapter-meet-plugin"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "plugin-core",
- "plugin-sdk",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "vc-adapter-meet",
- "vc-core",
-]
-
-[[package]]
-name = "vc-adapter-teams"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "serde",
- "vc-core",
-]
-
-[[package]]
-name = "vc-adapter-teams-cdylib"
-version = "0.1.0"
-dependencies = [
- "plugin-sdk",
- "vc-adapter-teams-plugin",
-]
-
-[[package]]
-name = "vc-adapter-teams-plugin"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "plugin-core",
- "plugin-sdk",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "vc-adapter-teams",
- "vc-core",
-]
 
 [[package]]
 name = "vc-adapter-webex"
