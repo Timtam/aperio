@@ -9,7 +9,14 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import type { SFSymbol } from 'sf-symbols-typescript';
+
+import calendarIcon from '../assets/tabs/calendar.png';
+import contactsIcon from '../assets/tabs/contacts.png';
+import settingsIcon from '../assets/tabs/settings.png';
+import tasksIcon from '../assets/tabs/tasks.png';
 
 // Activate the app-wide VoiceOver gesture host (window-level magic tap +
 // three-finger swipe routing) from app start, independent of which screen loads
@@ -78,6 +85,28 @@ import { TaskStoreProvider } from './state/taskStore';
 // the shared Rust core via the cal-ffi bridge.
 
 const Tab = createNativeBottomTabNavigator<RootTabParamList>();
+
+const TAB_IMAGES = {
+  tasks: tasksIcon,
+  calendar: calendarIcon,
+  contacts: contactsIcon,
+  settings: settingsIcon,
+};
+
+/// One icon per platform, because the two tab bars take different things.
+///
+/// iOS gets an SF Symbol, which is what a UITabBarController wants and what
+/// scales with the user's Dynamic Type setting. Android's side of the library
+/// resolves icons through Coil from an image URI and has no notion of SF
+/// Symbols at all — handing it `{ sfSymbol }` is not an error, it simply
+/// produces no icon, which is how three of these tabs came to render as blank
+/// space. The PNGs are flat silhouettes on transparency: Material tints
+/// menu-item icons from its own active/inactive colour list, so one asset
+/// serves both the light and the dark theme.
+function tabIcon(key: keyof typeof TAB_IMAGES, sfSymbol: SFSymbol) {
+  return Platform.OS === 'ios' ? { sfSymbol } : TAB_IMAGES[key];
+}
+
 const TasksStack = createNativeStackNavigator<RootStackParamList>();
 const CalendarStack = createNativeStackNavigator<RootStackParamList>();
 const ContactsStack = createNativeStackNavigator<RootStackParamList>();
@@ -535,13 +564,24 @@ function AppContent() {
   const tabBadge = sync.badge != null ? String(sync.badge) : undefined;
   const tabs = useMemo(
     () => (
-      <Tab.Navigator initialRouteName="TasksTab" tabBarHidden={tabBarHidden}>
+      <Tab.Navigator
+        initialRouteName="TasksTab"
+        tabBarHidden={tabBarHidden}
+        // Android only, and not cosmetic. TabView defaults this to
+        // `Platform.OS !== 'android' ? true : undefined`, and on Android
+        // undefined means Material's LABEL_VISIBILITY_AUTO — which from FOUR
+        // items on shows the label of the SELECTED item only. With four tabs
+        // that hid three of the four labels, and together with icons that
+        // existed for iOS alone it left three tabs as blank space, appearing
+        // only once tapped. iOS already defaults to true; this just says so.
+        labeled
+      >
         <Tab.Screen
           name="TasksTab"
           component={TasksStackNav}
           options={{
             title: t('views.tasks.title'),
-            tabBarIcon: () => ({ sfSymbol: 'checklist' }),
+            tabBarIcon: () => tabIcon('tasks', 'checklist'),
           }}
         />
         <Tab.Screen
@@ -549,7 +589,7 @@ function AppContent() {
           component={CalendarStackNav}
           options={{
             title: t('mobile.eventsButtonLabel'),
-            tabBarIcon: () => ({ sfSymbol: 'calendar' }),
+            tabBarIcon: () => tabIcon('calendar', 'calendar'),
           }}
         />
         <Tab.Screen
@@ -557,7 +597,7 @@ function AppContent() {
           component={ContactsStackNav}
           options={{
             title: t('sidebar.contactLists'),
-            tabBarIcon: () => ({ sfSymbol: 'person.2' }),
+            tabBarIcon: () => tabIcon('contacts', 'person.2'),
           }}
         />
         <Tab.Screen
@@ -565,7 +605,7 @@ function AppContent() {
           component={SettingsStackNav}
           options={{
             title: t('dialogs.settings.title'),
-            tabBarIcon: () => ({ sfSymbol: 'gearshape' }),
+            tabBarIcon: () => tabIcon('settings', 'gearshape'),
             // Flag sync issues on the Settings tab (Sync lives under it) with a
             // badge. The native tab bar has no per-tab slot for an EXTRA custom
             // accessibility announcement (the tab's own title is announced, but
