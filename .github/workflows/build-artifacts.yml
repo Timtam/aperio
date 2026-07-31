@@ -40,7 +40,7 @@ jobs:
   # ── Native single-arch builds ────────────────────────────
   # Each target builds on a runner whose host arch matches the
   # artefact arch, so `cargo build --workspace` produces the
-  # aperio binary AND all 17 plugin cdylibs for that arch in
+  # aperio binary AND every plugin cdylib for that arch in
   # one pass, and src-tauri/build.rs stages them under
   # target/release/plugins/bundled/. macOS is handled by the
   # separate `build-macos` job below (universal = two arches
@@ -66,7 +66,7 @@ jobs:
             binary: aperio.exe
           # GitHub-hosted ARM64 Windows runner (GA 2025). The
           # host is aarch64, so the standard flow builds the
-          # ARM64 binary + all 17 plugin cdylibs natively — no
+          # ARM64 binary + every plugin cdylib natively — no
           # cross-compile. macOS is the separate universal job.
           - os: windows-11-arm
             label: windows-arm64
@@ -109,7 +109,7 @@ jobs:
       # member, so cargo writes to the WORKSPACE target dir
       # (repo-root `target/`, not `src-tauri/target/`). The
       # beforeBuildCommand chains `cargo build --workspace
-      # --release` so all 17 plugin cdylibs land in
+      # --release` so every plugin cdylib lands in
       # target/release/ + src-tauri/build.rs stages them under
       # target/release/plugins/bundled/<id>/.
       - name: tauri build
@@ -117,13 +117,19 @@ jobs:
 
       # Sanity-check the staging step worked: the release zip is
       # useless without the plugin cdylibs. Counts immediate
-      # subdirectories of plugins/bundled/ and asserts == 17 (the
-      # canonical set from build.rs's PLUGINS table). `shell:
-      # bash` keeps the find-based count portable across Windows.
-      - name: Verify 17 bundled plugins staged
+      # subdirectories of plugins/bundled/ and compares against
+      # build.rs's PLUGINS table. `shell: bash` keeps the
+      # find-based count portable across Windows.
+      - name: Verify every bundled plugin is staged
         shell: bash
         run: |
           set -euo pipefail
+          # The expected number is DERIVED from build.rs, which is the table that
+          # decides what gets staged. It used to be the literal 17, written out at
+          # three places in this file plus once more in a Rust test — so unplugging
+          # an adapter turned a correct build into a red one.
+          expected=$(grep -c '"com\.aperio\.' src-tauri/build.rs)
+          echo "build.rs stages $expected plugins"
           STAGED_DIR="target/release/plugins/bundled"
           if [ ! -d "$STAGED_DIR" ]; then
             echo "::error::Staged plugins dir missing: $STAGED_DIR"
@@ -131,8 +137,8 @@ jobs:
           fi
           count=$(find "$STAGED_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
           echo "Staged plugin count: $count"
-          if [ "$count" -ne 17 ]; then
-            echo "::error::Expected 17 staged plugins, found $count"
+          if [ "$count" -ne "$expected" ]; then
+            echo "::error::Expected $expected staged plugins, found $count"
             echo "Contents of $STAGED_DIR:"
             ls -la "$STAGED_DIR" || true
             exit 1
@@ -231,7 +237,7 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      # Build aperio + all 17 plugin cdylibs for both arches.
+      # Build aperio + every plugin cdylib for both arches.
       # TWO passes per arch (mirrors the CI `rust` job + tauri's
       # beforeBuildCommand): the first builds aperio and the cdylibs
       # in parallel, but aperio's build.rs runs before the cdylibs
@@ -246,16 +252,22 @@ jobs:
           cargo build --workspace --release --target aarch64-apple-darwin
           cargo build -p aperio --release --target aarch64-apple-darwin
 
-      - name: Verify 17 plugins staged per arch
+      - name: Verify every plugin is staged, per arch
         shell: bash
         run: |
           set -euo pipefail
+          # The expected number is DERIVED from build.rs, which is the table that
+          # decides what gets staged. It used to be the literal 17, written out at
+          # three places in this file plus once more in a Rust test — so unplugging
+          # an adapter turned a correct build into a red one.
+          expected=$(grep -c '"com\.aperio\.' src-tauri/build.rs)
+          echo "build.rs stages $expected plugins"
           for triple in x86_64-apple-darwin aarch64-apple-darwin; do
             d="target/$triple/release/plugins/bundled"
             count=$(find "$d" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
             echo "$triple: $count plugins staged"
-            if [ "$count" -ne 17 ]; then
-              echo "::error::$triple staged $count plugins, expected 17"
+            if [ "$count" -ne "$expected" ]; then
+              echo "::error::$triple staged $count plugins, expected $expected"
               exit 1
             fi
           done
@@ -302,9 +314,10 @@ jobs:
             cp "$ARM/plugins/bundled/$id/plugin.json" "$out/plugin.json"
           done
 
+          expected=$(grep -c '"com\.aperio\.' src-tauri/build.rs)
           count=$(find "$STAGE_DIR/plugins/bundled" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
-          if [ "$count" -ne 17 ]; then
-            echo "::error::universal layout has $count plugins, expected 17"
+          if [ "$count" -ne "$expected" ]; then
+            echo "::error::universal layout has $count plugins, expected $expected"
             exit 1
           fi
 
