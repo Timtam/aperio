@@ -5,7 +5,7 @@
 //!   1. The usual [`tauri_build::build`] hook that wires up the
 //!      Tauri command surface, icon resources, etc.
 //!   2. Plugin staging (DESIGN.md §20.6 + §22.2). After `cargo
-//!      build` produces the 17 bundled plugins' cdylibs in
+//!      build` produces the 14 bundled plugins' cdylibs in
 //!      `target/<profile>/`, this script copies each one + its
 //!      sibling `plugin.json` into
 //!      `target/<profile>/plugins/bundled/<plugin-id>/` so the
@@ -21,7 +21,7 @@
 //! dlopen loader resolves. Only the cdylib shells produce the
 //! loadable libraries staged here. Neither is a cargo dep of
 //! `aperio` — depending on the cdylibs would force the host to
-//! link 17 copies of `aperio_plugin_create` and collide at link
+//! link 14 copies of `aperio_plugin_create` and collide at link
 //! time. Cargo therefore only builds the cdylibs when something
 //! else (a `--workspace` build) triggers it.
 //!
@@ -113,11 +113,6 @@ const PLUGINS: &[(&str, &str, &str)] = &[
         "sync-adapter-googledrive-cdylib",
         "sync-adapter-googledrive-plugin",
         "com.aperio.sync-adapter-googledrive",
-    ),
-    (
-        "vc-adapter-zoom-cdylib",
-        "vc-adapter-zoom-plugin",
-        "com.aperio.vc-adapter-zoom",
     ),
     (
         "vc-adapter-webex-cdylib",

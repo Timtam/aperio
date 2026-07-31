@@ -3,7 +3,7 @@
 //!
 //! Where [`crate::LocalStore`] serves only the local SQLite task store,
 //! `Host` owns the full account + adapter surface: it opens the same
-//! migrated database, statically links + registers all 17 bundled
+//! migrated database, statically links + registers all 14 bundled
 //! adapter plugins (no dlopen — iOS forbids it; see `host-plugins`),
 //! and drives the same [`host_core::registry::AdapterRegistry`] the
 //! desktop uses to route per-account reads/writes through external

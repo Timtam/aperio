@@ -15,7 +15,7 @@ Every plugin is an **adapter**, and what it actually does is its
 - **tasks** — task lists and tasks (Vikunja, Todoist, …).
 - **contacts** — address books.
 - **sync** — a storage backend for cross-device sync (WebDAV, Dropbox, SFTP, …).
-- **videoconference** — meeting links and rooms (Meet, Zoom, WebEx, …).
+- **videoconference** — meeting links and rooms (WebEx, …).
 
 Declare any combination. A tasks-only provider declares `["tasks"]`; a provider
 that is both a calendar and a place to sync into declares both, ships one

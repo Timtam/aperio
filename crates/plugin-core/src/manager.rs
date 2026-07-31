@@ -641,7 +641,7 @@ impl PluginManager {
         // final register (`insert`) and the failed-loads push take the
         // manager's `RwLock`, which serialises them. On a cold launch
         // this overlaps the per-library page-in instead of paying it for
-        // all ~17 bundled plugins strictly back-to-back. A bounded pool
+        // all ~14 bundled plugins strictly back-to-back. A bounded pool
         // of scoped threads (≤ CPU count) pulls dirs off a shared index,
         // so we don't oversubscribe the disk with one thread per plugin.
         let next = AtomicUsize::new(0);

@@ -361,8 +361,8 @@ Alle Ansichten müssen vollständig per Tastatur navigierbar sein. Die vollstän
 └────────────────────────────────────────────────────────────────────┘
          │ Kalender-Adapter         │ Sync-Adapter       │ VC-Adapter
          ▼                          ▼                    ▼
- Google / MS / CalDAV    WebDAV / Dropbox / SFTP   Zoom / Teams /
- EWS / iCal / Lokal      Google Drive / Lokal      Meet / WebEx
+ Google / MS / CalDAV    WebDAV / Dropbox / SFTP   WebEx
+ EWS / iCal / Lokal      Google Drive / Lokal
  Vikunja / Todoist
 ```
 
@@ -446,7 +446,7 @@ Aperio/
 │   ├── sync-adapter-dropbox/         # Dropbox API v2 (nativ gebundelt)
 │   ├── sync-adapter-googledrive/     # Google Drive API v3 (nativ gebundelt)
 │   ├── sync-adapter-local/           # Lokales Dateisystem / NAS (nativ gebundelt)
-│   ├── vc-adapter-zoom/              # Zoom (nativ gebundelt)
+│   ├── vc-adapter-zoom/              # Zoom (Rumpf, NICHT gebundelt)
 │   └── vc-adapter-webex/             # Cisco WebEx (nativ gebundelt)
 └── src-tauri/                        # Tauri-App
 ```
@@ -1561,10 +1561,10 @@ Beim ersten Verbinden eines Kontaktbuchs wird der Nutzer darauf hingewiesen, das
 
 | Anbieter | Funktion | Auth |
 |---|---|---|
-| **Zoom** | Link generieren + Raum buchen | Zoom OAuth2 |
-| **Microsoft Teams** | Link generieren + Raum buchen | Microsoft Graph OAuth2 |
-| **Google Meet** | Link generieren + Raum buchen | Google OAuth2 |
 | **Cisco WebEx** | Link generieren + Raum buchen | WebEx OAuth2 |
+| **Zoom** | geplant — Adapter ist ein Rumpf und wird nicht gebundelt | Zoom OAuth2 |
+| **Microsoft Teams** | geplant, als Capability von `cal-adapter-microsoft-graph` | dasselbe Konto |
+| **Google Meet** | geplant, als Capability von `cal-adapter-google` | dasselbe Konto |
 
 ### 11.2 Funktionsumfang
 
@@ -1579,7 +1579,7 @@ Jeder Anbieter wird als Plugin mit der Capability `videoconference` implementier
 
 | Crate | API-Basis | Besonderheit |
 |---|---|---|
-| `vc-adapter-zoom` | Zoom Meeting API v2 | Eigener OAuth2-Flow |
+| `vc-adapter-zoom` | Zoom Meeting API v2 | Eigener OAuth2-Flow — Rumpf, nicht gebundelt |
 | `cal-adapter-microsoft-graph` (Capability `videoconference`) | Microsoft Graph API (Online Meetings) | Dasselbe Konto, dasselbe Token — kein eigener Adapter |
 | `cal-adapter-google` (Capability `videoconference`) | Google Calendar API (conferenceData) | Dasselbe Konto, dasselbe Token — kein eigener Adapter |
 | `vc-adapter-webex` | Cisco WebEx Meetings REST API | Eigener OAuth2-Flow |
@@ -3326,7 +3326,6 @@ static-plugins  = [           # Mobile: statisch einkompilieren
     "sync-adapter-dropbox",
     "sync-adapter-googledrive",
     "sync-adapter-local",
-    "vc-adapter-zoom",
     "vc-adapter-webex",
 ]
 ```
@@ -3620,7 +3619,6 @@ Aperio-[VERSION]-[PLATFORM].zip
 │       ├── sync-adapter-dropbox.[ext]
 │       ├── sync-adapter-googledrive.[ext]
 │       ├── sync-adapter-local.[ext]
-│       ├── vc-adapter-zoom.[ext]
 │       └── vc-adapter-webex.[ext]
 └── README.txt              # Kurzanleitung, WebView2-Hinweis (Windows)
 ```
@@ -3743,7 +3741,7 @@ Aperio/
 │   │   └── src/lib.rs
 │   │
 │   │── # Videokonferenz-Adapter (nativ gebundelt)
-│   ├── vc-adapter-zoom/                   # Zoom API
+│   ├── vc-adapter-zoom/                   # Zoom API (Rumpf, NICHT gebundelt)
 │   │   └── src/lib.rs
 │   │   └── src/lib.rs
 │   │   └── src/lib.rs

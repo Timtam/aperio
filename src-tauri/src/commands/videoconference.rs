@@ -17,8 +17,10 @@
 //! step — because doing those three things separately is how an event ends up
 //! carrying a link to a meeting nobody can delete any more.
 //!
-//! Zoom, Teams and Meet are still stubs returning
-//! [`vc_core::VcError::Unsupported`]; Webex is real.
+//! Webex is the only meeting provider this build carries. The Zoom adapter
+//! exists but is unplugged — every method still returns
+//! [`vc_core::VcError::Unsupported`], so bundling it would offer a sign-in that
+//! leads nowhere.
 
 use std::sync::Arc;
 

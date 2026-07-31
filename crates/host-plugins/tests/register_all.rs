@@ -26,7 +26,6 @@ const EXPECTED_IDS: &[&str] = &[
     "com.aperio.sync-adapter-sftp",
     "com.aperio.sync-adapter-dropbox",
     "com.aperio.sync-adapter-googledrive",
-    "com.aperio.vc-adapter-zoom",
     "com.aperio.vc-adapter-webex",
 ];
 
@@ -88,7 +87,7 @@ fn every_bundled_plugin_declares_the_family_it_serves() {
         }
     }
     assert_eq!(sync, 6, "six bundled sync backends");
-    assert_eq!(vc, 2, "two bundled meeting providers");
+    assert_eq!(vc, 1, "one bundled meeting provider");
     assert_eq!(data, 7, "seven bundled calendar/task/contact adapters");
 }
 
@@ -139,18 +138,19 @@ fn every_bundled_adapter_says_where_its_credential_lives() {
         );
     }
 
-    // Zoom is the last adapter without a declared schema, answered by the one
-    // remaining fallback. When it declares one this moves up into the loop
-    // above and the fallback goes away entirely; until then, asserting it here
-    // is what stops that migration from silently dropping Zoom accounts out of
-    // the credential-repair banner.
+    // There is no fallback left. A kind no bundled plugin claims answers
+    // nothing — not a guessed `Password`, not a remembered refresh token — and
+    // that is what keeps the credential-repair banner from asking the user to
+    // fix a credential no adapter wants. "zoom" is the case that proves it: the
+    // adapter exists in the tree but is unplugged, so this build genuinely does
+    // not serve the kind. Any future name list would break this assert.
     assert!(
         schema_for_kind(&manager, "zoom").is_none(),
-        "zoom still has no declared schema — update this test when it does",
+        "zoom is not bundled, so no schema can be found for it",
     );
     assert!(
-        required_slots_for_kind(&manager, "zoom").contains(&SecretSlot::RefreshToken),
-        "zoom must still require a refresh token",
+        required_slots_for_kind(&manager, "zoom").is_empty(),
+        "an unserved kind must answer nothing rather than a guess",
     );
 
     // An iCal feed is a URL. Requiring a secret here reported every working

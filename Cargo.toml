@@ -76,7 +76,7 @@ members = [
     # UniFFI host (SQLite handle, paths, accounts, secrets, registry, …).
     "crates/host-core",
 
-    # Static plugin registry: links the 17 -plugin rlibs + registers them into
+    # Static plugin registry: links the 14 -plugin rlibs + registers them into
     # a PluginManager without dlopen (the mobile/iOS path).
     "crates/host-plugins",
 

@@ -181,11 +181,7 @@ pub fn register_all_static(manager: &PluginManager) -> PluginResult<()> {
     );
 
     // Video-conferencing adapters.
-    #[cfg(feature = "vc-zoom")]
-    register!(
-        vc_adapter_zoom_plugin,
-        "../../vc-adapter-zoom-plugin/plugin.json"
-    );
+    //
     // Webex runs its own OAuth against the Meetings API rather than sharing a
     // calendar adapter's tokens, so the auth hook has to be wired for the
     // statically-embedded build too — without it a mobile sign-in has nothing
@@ -217,5 +213,4 @@ pub const BUNDLED_PLUGIN_COUNT: usize = cfg!(feature = "caldav") as usize
     + cfg!(feature = "sync-sftp") as usize
     + cfg!(feature = "sync-dropbox") as usize
     + cfg!(feature = "sync-googledrive") as usize
-    + cfg!(feature = "vc-zoom") as usize
     + cfg!(feature = "vc-webex") as usize;

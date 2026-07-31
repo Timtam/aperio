@@ -2942,7 +2942,6 @@ dependencies = [
  "sync-adapter-webdav-plugin",
  "sync-engine",
  "vc-adapter-webex-plugin",
- "vc-adapter-zoom-plugin",
 ]
 
 [[package]]

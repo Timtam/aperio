@@ -45,7 +45,7 @@ use cal_core::{CalendarFeature, ContactsFeature, TasksFeature};
 use plugin_core::shim::{FfiCalendarAdapter, FfiContactsAdapter, FfiTasksAdapter, FfiVcAdapter};
 use plugin_core::{LoadedInstance, LoadedPlugin, PluginManager};
 use serde_json::Value;
-use sync_engine::{SecretSlot, SecretStore};
+use sync_engine::SecretStore;
 use tracing::warn;
 use vc_core::VcAdapter;
 
@@ -54,15 +54,6 @@ use crate::accounts::{Account, AccountsRepo, AdapterKind, LOCAL_ACCOUNT_ID};
 /// Account-id used for the implicit local adapter. Mirrors the value
 /// the `accounts` table seeds during migration 0003.
 pub const LOCAL_ID: &str = LOCAL_ACCOUNT_ID;
-
-/// Plugin-id constants for the adapters still on the per-kind registration
-/// path below.
-///
-/// NOT the kind→plugin map any more — that comes from the manifests, via
-/// [`plugin_core::PluginManager::plugin_for_adapter_kind`]. One entry is left:
-/// Zoom declares no account schema yet, so nothing routes it. It disappears
-/// with its `register_*` function the day it declares one.
-const PLUGIN_ID_ZOOM: &str = "com.aperio.vc-adapter-zoom";
 
 /// Tracks which account a calendar / task-list came from so writes
 /// can find their way home. Filled lazily during the first
@@ -838,33 +829,16 @@ impl AdapterRegistry {
             }
         }
 
-        // The older per-kind path, for the one adapter that has not declared a
-        // schema yet. Zoom leaves this list by adding the block to its own
-        // `plugin.json`, and the match goes with it — Teams and Meet left by a
-        // shorter route, having turned out to be stubs whose APIs belong to the
-        // calendar adapter they borrowed their token from.
-        match account.adapter_kind.as_str() {
-            "zoom" => self.register_zoom(account),
-            // Not host-internal, no plugin loaded for it, and not one of the
-            // kinds this build still knows by name. That is a plugin that is
-            // missing or switched off — including an account synced from a
-            // device with an adapter this build does not have — and the
-            // Accounts panel already renders exactly that. The row is kept.
-            other => Err(RegistryError::PluginMissing(format!(
-                "no plugin serves adapter kind `{other}`"
-            ))),
-        }
-    }
-
-    fn register_zoom(&self, account: &Account) -> Result<(), RegistryError> {
-        let plugin_config = oauth_refresh_plugin_config(
-            self.secret_store.as_ref(),
-            &account.id,
-            &account.config_json,
-        )?;
-        let instance = self.open_plugin_instance(PLUGIN_ID_ZOOM, plugin_config)?;
-        self.insert_vc(&account.id, instance)?;
-        Ok(())
+        // Nothing else to try. Host-internal kinds returned above, and every
+        // adapter reaches its account through the schema it declares — there is
+        // no second route and no list of names to fall back on. So this is a
+        // plugin that is missing or switched off, including an account synced
+        // from a device carrying an adapter this build does not have, and the
+        // Accounts panel already renders exactly that. The row is kept.
+        Err(RegistryError::PluginMissing(format!(
+            "no plugin serves adapter kind `{}`",
+            account.adapter_kind.as_str()
+        )))
     }
 
     /// Open an instance for any plugin that declared an [`AccountSchema`].
@@ -1025,25 +999,6 @@ fn merge_account_config(
         obj.insert((*key).to_string(), val.clone());
     }
     Ok(parsed.to_string())
-}
-
-/// Build the plugin init config for a refresh-token-only OAuth
-/// videoconference adapter (Zoom, WebEx). The persisted
-/// `config_json` already carries `client_id` + `client_secret`;
-/// we just need to merge in the keychain-sourced
-/// `refresh_token`.
-fn oauth_refresh_plugin_config(
-    secret_store: &dyn SecretStore,
-    account_id: &str,
-    account_config_json: &str,
-) -> Result<String, RegistryError> {
-    let refresh = secret_store
-        .retrieve(account_id, SecretSlot::RefreshToken)
-        .map_err(|e| RegistryError::Secret(format!("missing refresh token: {e}")))?;
-    merge_account_config(
-        account_config_json,
-        &[("refresh_token", Value::String(refresh))],
-    )
 }
 
 #[derive(Debug, thiserror::Error)]

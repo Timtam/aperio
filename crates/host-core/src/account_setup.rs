@@ -258,39 +258,17 @@ pub fn schema_for_kind(manager: &plugin_core::PluginManager, kind: &str) -> Opti
 /// drifted exactly as one would expect — the desktop's table listed the four
 /// videoconference kinds and the mobile one did not, so a Webex account with no
 /// refresh token was flagged for repair on one platform and silently ignored on
-/// the other.
+/// the other. Those tables defaulted to `Password`, so an unrecognised OAuth
+/// kind was probed for a password it never had and every working account of
+/// that kind was reported as needing to be reconnected. Answering nothing is
+/// the honest answer and no longer a guess.
 pub fn required_slots_for_kind(
     manager: &plugin_core::PluginManager,
     kind: &str,
 ) -> Vec<SecretSlot> {
-    if let Some(schema) = schema_for_kind(manager, kind) {
-        return required_slots(&schema);
-    }
-    unmigrated_slots(kind)
-}
-
-/// The three adapters that have not declared an account schema yet, and what
-/// their accounts need until they do.
-///
-/// This is the whole remaining name list, and it is deliberately in one place
-/// rather than one per host. Zoom, Teams and Meet are still registered through
-/// the registry's per-kind `register_*` arms; Teams and Meet in particular read
-/// the token of the calendar account they are linked to, which is not something
-/// today's `account` schema can express. Migrating them is its own piece of
-/// work — see the videoconference arms in `registry.rs`.
-///
-/// Everything else answers `None`, and that is the right answer rather than a
-/// guess: a kind no loaded plugin claims is either host-internal (the local
-/// store, the device calendar, whose auth is an OS permission grant) or absent,
-/// and neither has a credential a repair banner could ask the user to fix. The
-/// tables this replaces defaulted to `Password`, so an unrecognised OAuth kind
-/// was probed for a password it never had and every working account of that
-/// kind was reported as needing to be reconnected.
-fn unmigrated_slots(kind: &str) -> Vec<SecretSlot> {
-    match kind {
-        "zoom" => vec![SecretSlot::RefreshToken],
-        _ => Vec::new(),
-    }
+    schema_for_kind(manager, kind)
+        .map(|schema| required_slots(&schema))
+        .unwrap_or_default()
 }
 
 /// Whether connecting this adapter means a provider sign-in rather than a
