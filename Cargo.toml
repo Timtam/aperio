@@ -83,6 +83,10 @@ members = [
     # Mobile engine-reuse: UniFFI wrapper exposing cal-core to Swift/Kotlin.
     "crates/cal-ffi",
 
+    # Developer tool: dump this machine's own account credentials so the
+    # first-run path can be walked again without regenerating them.
+    "crates/dev-secret-export",
+
     # Tauri-App
     "src-tauri",
 ]

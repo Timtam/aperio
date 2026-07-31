@@ -1,0 +1,17 @@
+[package]
+name = "dev-secret-export"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "dev-secret-export"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+host-core = { path = "../host-core" }
+keyring = { workspace = true }
+rusqlite = { workspace = true }
+serde_json = { workspace = true }
+sync-engine = { path = "../sync-engine" }

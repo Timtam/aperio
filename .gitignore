@@ -58,3 +58,6 @@ desktop.ini
 
 # Aperio mobile — generated UniFFI bindings (regenerated from cal-ffi)
 /crates/cal-ffi/bindings/
+
+# Credential dumps from dev-secret-export. Never commit these.
+aperio-credentials*.txt
