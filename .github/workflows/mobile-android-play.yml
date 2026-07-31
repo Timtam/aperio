@@ -69,11 +69,29 @@ jobs:
 
       - name: Ephemeral commit so EAS captures the fresh .so
         run: |
-          AUTHOR="-c user.email=ci@aperio.local -c user.name=Aperio CI"
+          # Set the identity on the repo rather than passing it per command.
+          # It used to live in a plain variable expanded unquoted, which split
+          # "Aperio CI" on the space and handed git `CI` as its subcommand —
+          # the step failed, no commit was made, and EAS then packaged the
+          # PREVIOUS .so and Kotlin bindings. That is a silent version skew
+          # that only shows up on the device, as a NoClassDefFoundError on the
+          # first UniFFI call, so it must fail loudly here instead.
+          git config user.email "ci@aperio.local"
+          git config user.name "Aperio CI"
           # -f past the .gitignore on jniLibs; the Kotlin bindings are tracked.
-          git $AUTHOR add -f mobile/modules/cal-ffi/android/src/main/jniLibs
-          git $AUTHOR add mobile/modules/cal-ffi/android/src/main/java/uniffi
-          git $AUTHOR commit -m "ci: vendor fresh cal-ffi .so [not pushed]" || echo "nothing to commit"
+          git add -f mobile/modules/cal-ffi/android/src/main/jniLibs
+          git add mobile/modules/cal-ffi/android/src/main/java/uniffi
+          git commit -m "ci: vendor fresh cal-ffi .so [not pushed]" || echo "nothing to commit"
+          # Prove the artefacts are actually in the tree EAS will archive. A
+          # missing .so here means the build would ship without the native
+          # library and fail at runtime rather than at build time.
+          # Both ABIs cargo-ndk was asked for. An AAB that carries only one of
+          # them installs fine and then dies on the devices built for the
+          # other, which is not something a store listing tells you about.
+          git ls-files --error-unmatch \
+            mobile/modules/cal-ffi/android/src/main/jniLibs/arm64-v8a/libcal_ffi.so \
+            mobile/modules/cal-ffi/android/src/main/jniLibs/x86_64/libcal_ffi.so \
+            > /dev/null
 
       - uses: actions/setup-node@v4
         with:
