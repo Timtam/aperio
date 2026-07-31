@@ -777,16 +777,6 @@ RustBuffer uniffi_cal_ffi_fn_method_host_compact_now_json(uint64_t ptr, RustCall
 RustBuffer uniffi_cal_ffi_fn_method_host_complete_account_reconnect_json(uint64_t ptr, RustBuffer account_id, RustBuffer request_json, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_COMPLETE_OAUTH_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_COMPLETE_OAUTH_JSON
-RustBuffer uniffi_cal_ffi_fn_method_host_complete_oauth_json(uint64_t ptr, RustBuffer plugin_id, RustBuffer request_json, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_COMPLETE_OAUTH_RECONNECT_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_COMPLETE_OAUTH_RECONNECT_JSON
-RustBuffer uniffi_cal_ffi_fn_method_host_complete_oauth_reconnect_json(uint64_t ptr, RustBuffer plugin_id, RustBuffer account_id, RustBuffer request_json, RustCallStatus *_Nonnull out_status
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_COMPLETE_SYNC_OAUTH_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_COMPLETE_SYNC_OAUTH_JSON
 void uniffi_cal_ffi_fn_method_host_complete_sync_oauth_json(uint64_t ptr, RustBuffer plugin_id, RustBuffer request_json, RustCallStatus *_Nonnull out_status
@@ -1992,18 +1982,6 @@ uint16_t uniffi_cal_ffi_checksum_method_host_compact_now_json(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_COMPLETE_ACCOUNT_RECONNECT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_COMPLETE_ACCOUNT_RECONNECT_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_complete_account_reconnect_json(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_COMPLETE_OAUTH_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_COMPLETE_OAUTH_JSON
-uint16_t uniffi_cal_ffi_checksum_method_host_complete_oauth_json(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_COMPLETE_OAUTH_RECONNECT_JSON
-#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_COMPLETE_OAUTH_RECONNECT_JSON
-uint16_t uniffi_cal_ffi_checksum_method_host_complete_oauth_reconnect_json(void
     
 );
 #endif

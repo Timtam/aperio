@@ -147,6 +147,16 @@ export function AccountsPanel() {
   // the first answer arrives; the picker simply has nothing to offer until then,
   // which is honest — it does not yet know.
   const [availableKinds, setAvailableKinds] = useState<AdapterKindInfo[]>([]);
+
+  // Whether an account is repaired by signing in again or by pasting a
+  // credential is the ADAPTER's statement, carried on the kind listing. Naming
+  // google and microsoft_graph here labelled a Webex account's button
+  // "Re-enter password" for what is now a browser sign-in.
+  const signsInWithProvider = useCallback(
+    (kind: string): boolean =>
+      availableKinds.find((k) => k.kind === kind)?.declares_oauth === true,
+    [availableKinds],
+  );
   const [formSpec, setFormSpec] = useState<AccountFormSpec | null>(null);
   const [formValues, setFormValues] = useState<
     Record<string, string | boolean>
@@ -1004,8 +1014,7 @@ export function AccountsPanel() {
                   ?.auth_suspected && (
                   <FocusableNote className="accounts-refresh-errors__auth-hint">
                     {t(
-                      accounts[focusIndex].adapter_kind === 'google' ||
-                        accounts[focusIndex].adapter_kind === 'microsoft_graph'
+                      signsInWithProvider(accounts[focusIndex].adapter_kind)
                         ? 'dialogs.accounts.refreshErrors.authHintOauth'
                         : 'dialogs.accounts.refreshErrors.authHint',
                     )}
@@ -1059,8 +1068,7 @@ export function AccountsPanel() {
                     }
                   >
                     {t(
-                      accounts[focusIndex].adapter_kind === 'google' ||
-                        accounts[focusIndex].adapter_kind === 'microsoft_graph'
+                      signsInWithProvider(accounts[focusIndex].adapter_kind)
                         ? 'dialogs.accounts.refreshErrors.signInAgain'
                         : 'dialogs.accounts.refreshErrors.reenterPassword',
                     )}

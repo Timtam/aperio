@@ -930,10 +930,6 @@ external fun uniffi_cal_ffi_checksum_method_host_compact_now_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_complete_account_reconnect_json(
 ): Short
-external fun uniffi_cal_ffi_checksum_method_host_complete_oauth_json(
-): Short
-external fun uniffi_cal_ffi_checksum_method_host_complete_oauth_reconnect_json(
-): Short
 external fun uniffi_cal_ffi_checksum_method_host_complete_sync_oauth_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json(
@@ -1327,10 +1323,6 @@ external fun uniffi_cal_ffi_fn_method_host_collect_logs(`ptr`: Long,`redact`: Ru
 external fun uniffi_cal_ffi_fn_method_host_compact_now_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_complete_account_reconnect_json(`ptr`: Long,`accountId`: RustBuffer.ByValue,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_cal_ffi_fn_method_host_complete_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_cal_ffi_fn_method_host_complete_oauth_reconnect_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`accountId`: RustBuffer.ByValue,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_complete_sync_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -1863,12 +1855,6 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_complete_account_reconnect_json() != 24704.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_cal_ffi_checksum_method_host_complete_oauth_json() != 7847.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_cal_ffi_checksum_method_host_complete_oauth_reconnect_json() != 31188.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_complete_sync_oauth_json() != 1805.toShort()) {
@@ -4311,33 +4297,6 @@ public interface HostInterface {
     fun `completeAccountReconnectJson`(`accountId`: kotlin.String, `requestJson`: kotlin.String): kotlin.String
     
     /**
-     * Complete a host-driven OAuth flow: exchange the redirect's `code` (+ the
-     * `pkce_verifier`/`state` from [`Self::begin_oauth_json`]) for tokens via
-     * the plugin (`phase:"exchange"`, the network step), then create the
-     * account — persist the row (with the non-secret `config_json`), store the
-     * access + refresh tokens via the keychain bridge (refresh is the durable,
-     * cross-device-syncable credential), register the adapter, and append
-     * `AccountCreated`. Mirrors the desktop `connect_*_account` tail + the
-     * `create_account_json` row/secret/registry/teardown discipline. Returns the
-     * created account as JSON. (The exchange itself is verified on-device — it
-     * hits the provider's token endpoint.)
-     */
-    fun `completeOauthJson`(`pluginId`: kotlin.String, `requestJson`: kotlin.String): kotlin.String
-    
-    /**
-     * Re-run the OAuth flow for an EXISTING account whose token expired / was
-     * lost: exchange the code, write FRESH tokens under the existing account id,
-     * and re-register so reads route through the new credentials without an app
-     * restart. Keeps the account row + every downstream calendar/task/override
-     * reference (unlike remove+re-add). NO new row, NO `AccountCreated`. The
-     * `request_json` is a `CompleteOAuthRequest`; only its exchange fields are
-     * used — `adapter_kind` is taken from the existing account (and must be
-     * Google / Microsoft Graph). Mirrors the desktop `reconnect_*_account`,
-     * adapted to the mobile two-phase flow. (The exchange is verified on-device.)
-     */
-    fun `completeOauthReconnectJson`(`pluginId`: kotlin.String, `accountId`: kotlin.String, `requestJson`: kotlin.String): kotlin.String
-    
-    /**
      * Complete a host-driven OAuth flow for a SYNC adapter (`plugin_id` =
      * `com.aperio.sync-adapter-dropbox` / `…-googledrive`): exchange the
      * redirect's `code` (+ the `pkce_verifier`/`state` from
@@ -5803,57 +5762,6 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_complete_account_reconnect_json(
         it,
         FfiConverterString.lower(`accountId`),FfiConverterString.lower(`requestJson`),_status)
-}
-    }
-    )
-    }
-    
-
-    
-    /**
-     * Complete a host-driven OAuth flow: exchange the redirect's `code` (+ the
-     * `pkce_verifier`/`state` from [`Self::begin_oauth_json`]) for tokens via
-     * the plugin (`phase:"exchange"`, the network step), then create the
-     * account — persist the row (with the non-secret `config_json`), store the
-     * access + refresh tokens via the keychain bridge (refresh is the durable,
-     * cross-device-syncable credential), register the adapter, and append
-     * `AccountCreated`. Mirrors the desktop `connect_*_account` tail + the
-     * `create_account_json` row/secret/registry/teardown discipline. Returns the
-     * created account as JSON. (The exchange itself is verified on-device — it
-     * hits the provider's token endpoint.)
-     */
-    @Throws(StoreException::class)override fun `completeOauthJson`(`pluginId`: kotlin.String, `requestJson`: kotlin.String): kotlin.String {
-            return FfiConverterString.lift(
-    callWithHandle {
-    uniffiRustCallWithError(StoreException) { _status ->
-    UniffiLib.uniffi_cal_ffi_fn_method_host_complete_oauth_json(
-        it,
-        FfiConverterString.lower(`pluginId`),FfiConverterString.lower(`requestJson`),_status)
-}
-    }
-    )
-    }
-    
-
-    
-    /**
-     * Re-run the OAuth flow for an EXISTING account whose token expired / was
-     * lost: exchange the code, write FRESH tokens under the existing account id,
-     * and re-register so reads route through the new credentials without an app
-     * restart. Keeps the account row + every downstream calendar/task/override
-     * reference (unlike remove+re-add). NO new row, NO `AccountCreated`. The
-     * `request_json` is a `CompleteOAuthRequest`; only its exchange fields are
-     * used — `adapter_kind` is taken from the existing account (and must be
-     * Google / Microsoft Graph). Mirrors the desktop `reconnect_*_account`,
-     * adapted to the mobile two-phase flow. (The exchange is verified on-device.)
-     */
-    @Throws(StoreException::class)override fun `completeOauthReconnectJson`(`pluginId`: kotlin.String, `accountId`: kotlin.String, `requestJson`: kotlin.String): kotlin.String {
-            return FfiConverterString.lift(
-    callWithHandle {
-    uniffiRustCallWithError(StoreException) { _status ->
-    UniffiLib.uniffi_cal_ffi_fn_method_host_complete_oauth_reconnect_json(
-        it,
-        FfiConverterString.lower(`pluginId`),FfiConverterString.lower(`accountId`),FfiConverterString.lower(`requestJson`),_status)
 }
     }
     )

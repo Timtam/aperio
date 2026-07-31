@@ -482,22 +482,7 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  phase (no network). The caller opens `authorize_url` in a native auth
    *  session and keeps the verifier/state for the matching exchange. */
   beginOauthJson(pluginId: string, argsJson: string): Promise<string>;
-  /** Complete OAuth: exchange the redirect's code (+ pkce_verifier/state from
-   *  begin) for tokens, then create + register the account. `requestJson` carries
-   *  `{adapter_kind, display_name, config_json, client_id, client_secret?, code,
-   *  pkce_verifier, state, returned_state, redirect_uri}`. Returns the created
-   *  `Account` as JSON. */
-  completeOauthJson(pluginId: string, requestJson: string): Promise<string>;
-  /** Re-run OAuth for an EXISTING account (expired/lost token): exchange the
-   *  code + write fresh tokens under `accountId` + re-register — no new row.
-   *  `requestJson` is the same shape as completeOauthJson (its exchange fields
-   *  are used; the kind comes from the account). Returns the account as JSON. */
-  completeOauthReconnectJson(
-    pluginId: string,
-    accountId: string,
-    requestJson: string,
-  ): Promise<string>;
-
+    
   // ── Discovery (EWS Autodiscover; host-driven) ──
   /** Run a plugin's endpoint discovery. `argsJson` carries `{email, password}`
    *  (EWS); returns the discovered endpoints as JSON (`{ews_url, account_email}`

@@ -1566,7 +1566,10 @@ pub async fn reconnect_account(
             values.insert(field.to_string(), Value::String(secret));
         }
     }
-    let client = host_core::account_setup::choose_oauth_client(
+    // The whole choice, not just the client: `config` records WHICH
+    // registration the account is linked to, and a reconnect that drops it
+    // cannot clear a stale one. See the write after the exchange.
+    let choice = host_core::account_setup::choose_oauth_client(
         oauth,
         values.get(&oauth.client_id_field).and_then(Value::as_str),
         oauth
@@ -1575,11 +1578,11 @@ pub async fn reconnect_account(
             .and_then(|k| values.get(k))
             .and_then(Value::as_str),
     )
-    .map(|choice| choice.client)
     .map_err(|err| CommandError {
         code: "invalid_input",
         message: err.to_string(),
     })?;
+    let client = &choice.client;
 
     // Everything else the account was configured with rides along — the tenant
     // for Graph, the site for Webex. The per-provider closures this replaces
@@ -1594,16 +1597,11 @@ pub async fn reconnect_account(
     }
     let tokens = run_plugin_auth(&plugin_manager, &plugin_id, Value::Object(args)).await?;
 
-    if oauth.access_token_field.is_some() {
-        if let Some(access) = tokens.get("access_token").and_then(Value::as_str) {
-            secrets::store(&account.id, SecretSlot::AccessToken, access).map_err(|err| {
-                CommandError {
-                    code: "internal",
-                    message: format!("failed to store access token: {err}"),
-                }
-            })?;
-        }
-    }
+    // Collect the writes BEFORE performing any of them. A provider that returns
+    // no refresh token has left the account no better off, and writing the new
+    // access token first would leave the keychain half-updated on an exchange
+    // that is about to be rejected. The mobile twin already worked this way.
+    let mut writes: Vec<(SecretSlot, String)> = Vec::new();
     if oauth.refresh_token_field.is_some() {
         let refresh = tokens
             .get("refresh_token")
@@ -1612,24 +1610,56 @@ pub async fn reconnect_account(
             .filter(|s| !s.is_empty())
             .ok_or(CommandError {
                 code: "protocol",
-                message: "the provider returned no refresh token — the account could not be kept                           signed in"
+                message: "the provider returned no refresh token — the account could not \
+                          be kept signed in"
                     .into(),
             })?;
-        secrets::store(&account.id, SecretSlot::RefreshToken, refresh).map_err(|err| {
-            CommandError {
-                code: "internal",
-                message: format!("failed to store refresh token: {err}"),
-            }
-        })?;
-        // E2E only: propagate the refreshed durable token to other devices.
-        crate::credential_sync::emit_credential_set(
-            &event_log,
-            &shared,
-            &account.id,
-            SecretSlot::RefreshToken,
-            refresh,
-        );
+        writes.push((SecretSlot::RefreshToken, refresh.to_string()));
     }
+    if oauth.access_token_field.is_some() {
+        if let Some(access) = tokens.get("access_token").and_then(Value::as_str) {
+            writes.push((SecretSlot::AccessToken, access.to_string()));
+        }
+    }
+    for (slot, value) in &writes {
+        secrets::store(&account.id, *slot, value).map_err(|err| CommandError {
+            code: "internal",
+            message: format!("failed to store {}: {err}", slot.wire_name()),
+        })?;
+        if *slot == SecretSlot::RefreshToken {
+            // E2E only: propagate the refreshed durable token to other devices.
+            crate::credential_sync::emit_credential_set(
+                &event_log,
+                &shared,
+                &account.id,
+                SecretSlot::RefreshToken,
+                value,
+            );
+        }
+    }
+
+    // Record which registration the account is linked to NOW — same reason as
+    // the mobile twin. Without it a built-in-posture account whose build
+    // rotated its client is told to sign in again, does so, and is told again.
+    let mut config = values.clone();
+    for (key, value) in &choice.config {
+        config.insert(key.clone(), value.clone());
+    }
+    if choice.config.iter().any(|(k, _)| k == "client_source") {
+        config.remove(&oauth.client_id_field);
+    }
+    // The client secret was merged in for the sign-in and must NOT be written
+    // back: config_json is appended to the sync log unencrypted without E2E.
+    if let Some(field) = oauth.client_secret_field.as_deref() {
+        config.remove(field);
+    }
+    let account = repo
+        .set_config(&account.id, &Value::Object(config).to_string())
+        .map_err(|err| CommandError {
+            code: "internal",
+            message: format!("failed to record the OAuth client: {err}"),
+        })?;
+
     if let Err(err) = registry.register(&account) {
         return Err(CommandError {
             code: "internal",

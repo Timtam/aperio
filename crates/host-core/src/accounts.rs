@@ -268,6 +268,35 @@ impl<'a> AccountsRepo<'a> {
             .ok_or_else(|| AccountsError::NotFound(id.to_string()))
     }
 
+    /// Replace an account's non-secret configuration.
+    ///
+    /// Exists for one caller: a re-sign-in, which has to record WHICH OAuth
+    /// client the account is now linked to. Without it a built-in-posture
+    /// account whose build rotated its registration is stuck — the stored
+    /// fingerprint no longer matches, the host refuses to open the adapter and
+    /// says "sign in again", and signing in again writes fresh tokens while
+    /// leaving the fingerprint exactly as it was.
+    ///
+    /// Secrets must never be passed here: this column is appended to the sync
+    /// event log unencrypted when end-to-end encryption is off. Callers build
+    /// the value with `account_setup::plan_new_account`, which is what keeps
+    /// the two halves apart.
+    pub fn set_config(&self, id: &str, config_json: &str) -> Result<Account, AccountsError> {
+        let now = Utc::now().to_rfc3339();
+        {
+            let conn = self.db.lock().expect("db mutex poisoned");
+            let changed = conn.execute(
+                "UPDATE accounts SET config_json = ?, updated_at = ? WHERE id = ?",
+                params![config_json, now, id],
+            )?;
+            if changed == 0 {
+                return Err(AccountsError::NotFound(id.to_string()));
+            }
+        }
+        self.get(id)?
+            .ok_or_else(|| AccountsError::NotFound(id.to_string()))
+    }
+
     pub fn delete(&self, id: &str) -> Result<(), AccountsError> {
         if id == LOCAL_ACCOUNT_ID {
             return Err(AccountsError::DeleteLocalForbidden);

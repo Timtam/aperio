@@ -1894,33 +1894,6 @@ public protocol HostProtocol: AnyObject, Sendable {
     func completeAccountReconnectJson(accountId: String, requestJson: String) throws  -> String
     
     /**
-     * Complete a host-driven OAuth flow: exchange the redirect's `code` (+ the
-     * `pkce_verifier`/`state` from [`Self::begin_oauth_json`]) for tokens via
-     * the plugin (`phase:"exchange"`, the network step), then create the
-     * account — persist the row (with the non-secret `config_json`), store the
-     * access + refresh tokens via the keychain bridge (refresh is the durable,
-     * cross-device-syncable credential), register the adapter, and append
-     * `AccountCreated`. Mirrors the desktop `connect_*_account` tail + the
-     * `create_account_json` row/secret/registry/teardown discipline. Returns the
-     * created account as JSON. (The exchange itself is verified on-device — it
-     * hits the provider's token endpoint.)
-     */
-    func completeOauthJson(pluginId: String, requestJson: String) throws  -> String
-    
-    /**
-     * Re-run the OAuth flow for an EXISTING account whose token expired / was
-     * lost: exchange the code, write FRESH tokens under the existing account id,
-     * and re-register so reads route through the new credentials without an app
-     * restart. Keeps the account row + every downstream calendar/task/override
-     * reference (unlike remove+re-add). NO new row, NO `AccountCreated`. The
-     * `request_json` is a `CompleteOAuthRequest`; only its exchange fields are
-     * used — `adapter_kind` is taken from the existing account (and must be
-     * Google / Microsoft Graph). Mirrors the desktop `reconnect_*_account`,
-     * adapted to the mobile two-phase flow. (The exchange is verified on-device.)
-     */
-    func completeOauthReconnectJson(pluginId: String, accountId: String, requestJson: String) throws  -> String
-    
-    /**
      * Complete a host-driven OAuth flow for a SYNC adapter (`plugin_id` =
      * `com.aperio.sync-adapter-dropbox` / `…-googledrive`): exchange the
      * redirect's `code` (+ the `pkce_verifier`/`state` from
@@ -3268,50 +3241,6 @@ open func completeAccountReconnectJson(accountId: String, requestJson: String)th
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_complete_account_reconnect_json(
             self.uniffiCloneHandle(),
-        FfiConverterString.lower(accountId),
-        FfiConverterString.lower(requestJson),$0
-    )
-})
-}
-    
-    /**
-     * Complete a host-driven OAuth flow: exchange the redirect's `code` (+ the
-     * `pkce_verifier`/`state` from [`Self::begin_oauth_json`]) for tokens via
-     * the plugin (`phase:"exchange"`, the network step), then create the
-     * account — persist the row (with the non-secret `config_json`), store the
-     * access + refresh tokens via the keychain bridge (refresh is the durable,
-     * cross-device-syncable credential), register the adapter, and append
-     * `AccountCreated`. Mirrors the desktop `connect_*_account` tail + the
-     * `create_account_json` row/secret/registry/teardown discipline. Returns the
-     * created account as JSON. (The exchange itself is verified on-device — it
-     * hits the provider's token endpoint.)
-     */
-open func completeOauthJson(pluginId: String, requestJson: String)throws  -> String  {
-    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
-    uniffi_cal_ffi_fn_method_host_complete_oauth_json(
-            self.uniffiCloneHandle(),
-        FfiConverterString.lower(pluginId),
-        FfiConverterString.lower(requestJson),$0
-    )
-})
-}
-    
-    /**
-     * Re-run the OAuth flow for an EXISTING account whose token expired / was
-     * lost: exchange the code, write FRESH tokens under the existing account id,
-     * and re-register so reads route through the new credentials without an app
-     * restart. Keeps the account row + every downstream calendar/task/override
-     * reference (unlike remove+re-add). NO new row, NO `AccountCreated`. The
-     * `request_json` is a `CompleteOAuthRequest`; only its exchange fields are
-     * used — `adapter_kind` is taken from the existing account (and must be
-     * Google / Microsoft Graph). Mirrors the desktop `reconnect_*_account`,
-     * adapted to the mobile two-phase flow. (The exchange is verified on-device.)
-     */
-open func completeOauthReconnectJson(pluginId: String, accountId: String, requestJson: String)throws  -> String  {
-    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
-    uniffi_cal_ffi_fn_method_host_complete_oauth_reconnect_json(
-            self.uniffiCloneHandle(),
-        FfiConverterString.lower(pluginId),
         FfiConverterString.lower(accountId),
         FfiConverterString.lower(requestJson),$0
     )
@@ -8648,12 +8577,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_complete_account_reconnect_json() != 24704) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_cal_ffi_checksum_method_host_complete_oauth_json() != 7847) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_cal_ffi_checksum_method_host_complete_oauth_reconnect_json() != 31188) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_complete_sync_oauth_json() != 1805) {

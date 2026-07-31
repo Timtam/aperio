@@ -365,13 +365,21 @@ export default function AccountsScreen() {
     setError(null);
     setSubmitting(true);
     try {
+      // A browser sign-in hands the screen to a native auth session, which is a
+      // silent hand-off for a screen reader unless we say so.
+      if (formSpec.oauth != null) announce(t('mobile.oauthConnecting'));
       const result = await connectSchemaAccount({
         kind: schemaKind,
         displayName: name,
         values: collectValues(formSpec, formValues),
         hasOauth: formSpec.oauth != null,
       });
-      if (result.kind === 'cancelled') return;
+      if (result.kind === 'cancelled') {
+        // Dismissing the session leaves RN screen-reader focus undefined, so
+        // say what happened rather than returning into silence.
+        announce(t('mobile.oauthCancelled'));
+        return;
+      }
       resetForm();
       setFormValues({});
       setMode('list');
@@ -381,7 +389,12 @@ export default function AccountsScreen() {
       void refreshExternalCache().catch(() => undefined);
       await maybeShowPrivacyNotice(schemaKind);
     } catch (err) {
-      const message = errorMessage(err);
+      // OAUTH_NO_CODE is a typed sentinel, not a sentence — the deleted form
+      // used to map it and nothing did afterwards, so the user was shown the
+      // token itself.
+      const raw = errorMessage(err);
+      const message =
+        raw === 'OAUTH_NO_CODE' ? t('mobile.oauthNoCode') : raw;
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
@@ -533,8 +546,12 @@ export default function AccountsScreen() {
     async (account: Account) => {
       setError(null);
       try {
+        announce(t('mobile.oauthConnecting'));
         const result = await reconnectOAuthAccount(account);
-        if (result.kind === 'cancelled') return;
+        if (result.kind === 'cancelled') {
+          announce(t('mobile.oauthCancelled'));
+          return;
+        }
         pendingFocusId.current = account.id;
         await load();
         announce(
@@ -545,7 +562,9 @@ export default function AccountsScreen() {
         // otherwise outlive the repair until the next scheduled pass.
         void refreshExternalCache().catch(() => undefined);
       } catch (err) {
-        const message = errorMessage(err);
+        const raw = errorMessage(err);
+        const message =
+          raw === 'OAUTH_NO_CODE' ? t('mobile.oauthNoCode') : raw;
         setError(message);
         announce(t('mobile.error', { message }));
       }

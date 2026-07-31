@@ -709,13 +709,7 @@ class CalFfiModule : Module() {
       host.beginOauthJson(pluginId, argsJson)
     }
 
-    AsyncFunction("completeOauthJson") { pluginId: String, requestJson: String ->
-      host.completeOauthJson(pluginId, requestJson)
-    }.runOnQueue(slowScope)
 
-    AsyncFunction("completeOauthReconnectJson") { pluginId: String, accountId: String, requestJson: String ->
-      host.completeOauthReconnectJson(pluginId, accountId, requestJson)
-    }.runOnQueue(slowScope)
 
     // ─── Discovery (EWS Autodiscover; host-driven, like the desktop) ──────────
     // discoverJson runs a plugin's endpoint discovery (EWS: {email, password} →

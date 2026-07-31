@@ -168,11 +168,6 @@ export const discoverEwsEndpoint = async (
 // `connect_microsoft_account` tail (the Host's complete step does the exchange +
 // row + keychain + adapter registration). See `./oauth.ts` for the orchestrator.
 
-/** The statically-embedded plugin ids the Host drives the OAuth flow for. */
-export const OAUTH_PLUGIN_IDS: Record<'google' | 'microsoft_graph', string> = {
-  google: 'com.aperio.cal-adapter-google',
-  microsoft_graph: 'com.aperio.cal-adapter-microsoft-graph',
-};
 
 // ── Schema-driven accounts ──────────────────────────────────────────────────
 //
@@ -323,9 +318,13 @@ export interface OAuthAuthorize {
   state: string;
 }
 
-/** Begin a host-driven OAuth flow. `args` carries the provider's begin inputs —
- *  `{client_id, redirect_uri}` (Google) / `{client_id, authority, redirect_uri}`
- *  (Microsoft). Pure (no network): returns the authorize URL + PKCE/state. */
+/** Begin a host-driven OAuth flow for a SYNC target (Dropbox, Google Drive).
+ *
+ *  Accounts do not come through here: they go through
+ *  {@link beginAccountOauth} or {@link beginAccountReconnect}, which take the
+ *  adapter kind or the account id and read the client out of its declaration.
+ *  `args` carries the begin inputs the sync plugin expects. Pure (no network):
+ *  returns the authorize URL plus the PKCE verifier and state. */
 export const beginOauth = async (
   pluginId: string,
   args: Record<string, string>,
@@ -333,55 +332,3 @@ export const beginOauth = async (
   JSON.parse(
     await CalFfi.beginOauthJson(pluginId, JSON.stringify(args)),
   ) as OAuthAuthorize;
-
-/** The exchange + account-creation inputs for {@link completeOauth} — the desktop
- *  `complete_oauth_json` request shape. `config_json` is the non-secret adapter
- *  config persisted in the row: `{client_id, client_secret}` (Google) /
- *  `{client_id, authority}` (Microsoft). */
-export interface CompleteOauthRequest {
-  adapter_kind: AdapterKind;
-  display_name: string;
-  config_json: string;
-  client_id: string;
-  /** Google only (PKCE public clients like Microsoft omit it). */
-  client_secret?: string | null;
-  /** Microsoft only — its v2.0 tenant slug; carried through both phases. */
-  authority?: string | null;
-  code: string;
-  pkce_verifier: string;
-  state: string;
-  returned_state: string;
-  redirect_uri: string;
-}
-
-/** Complete a host-driven OAuth flow: exchange the redirect's `code` for tokens,
- *  then create + register the account (row + keychain tokens + adapter
- *  registration, all Rust-side). Returns the created `Account`. The exchange hits
- *  the provider's token endpoint. */
-export const completeOauth = async (
-  pluginId: string,
-  request: CompleteOauthRequest,
-): Promise<Account> => {
-  const created = JSON.parse(
-    await CalFfi.completeOauthJson(pluginId, JSON.stringify(request)),
-  ) as Account;
-  scheduleBackgroundPush();
-  return created;
-};
-
-/** Re-run OAuth for an EXISTING account (an expired / lost token): exchange the
- *  redirect's `code` for fresh tokens, write them under `accountId`, and
- *  re-register — keeps the account row + its downstream calendar/task/override
- *  references (no remove-and-re-add). `request`'s exchange fields are used; the
- *  kind comes from the existing account. Returns the (unchanged) account. */
-export const completeOauthReconnect = async (
-  pluginId: string,
-  accountId: string,
-  request: CompleteOauthRequest,
-): Promise<Account> => {
-  const account = JSON.parse(
-    await CalFfi.completeOauthReconnectJson(pluginId, accountId, JSON.stringify(request)),
-  ) as Account;
-  scheduleBackgroundPush();
-  return account;
-};

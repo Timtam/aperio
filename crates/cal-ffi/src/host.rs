@@ -6977,253 +6977,6 @@ impl Host {
         })
     }
 
-    /// Complete a host-driven OAuth flow: exchange the redirect's `code` (+ the
-    /// `pkce_verifier`/`state` from [`Self::begin_oauth_json`]) for tokens via
-    /// the plugin (`phase:"exchange"`, the network step), then create the
-    /// account — persist the row (with the non-secret `config_json`), store the
-    /// access + refresh tokens via the keychain bridge (refresh is the durable,
-    /// cross-device-syncable credential), register the adapter, and append
-    /// `AccountCreated`. Mirrors the desktop `connect_*_account` tail + the
-    /// `create_account_json` row/secret/registry/teardown discipline. Returns the
-    /// created account as JSON. (The exchange itself is verified on-device — it
-    /// hits the provider's token endpoint.)
-    pub fn complete_oauth_json(
-        &self,
-        plugin_id: String,
-        request_json: String,
-    ) -> Result<String, StoreError> {
-        let req: CompleteOAuthRequest = from_json("oauth complete", &request_json)?;
-
-        // 0. Enforce the same non-empty invariants the desktop connect_* commands
-        //    check server-side, so the engine boundary holds regardless of caller
-        //    (not only when the UI form happens to validate first).
-        if req.display_name.trim().is_empty() {
-            return Err(StoreError::InvalidField {
-                field: "display_name".to_string(),
-                detail: "display name must not be empty".to_string(),
-            });
-        }
-        if req.client_id.trim().is_empty() {
-            return Err(StoreError::InvalidField {
-                field: "client_id".to_string(),
-                detail: "client_id must not be empty".to_string(),
-            });
-        }
-        // Google's token endpoint requires the secret; Microsoft (a PKCE public
-        // client) carries none, so only gate it for Google.
-        if req.adapter_kind == "google"
-            && req
-                .client_secret
-                .as_deref()
-                .map(str::trim)
-                .unwrap_or("")
-                .is_empty()
-        {
-            return Err(StoreError::InvalidField {
-                field: "client_secret".to_string(),
-                detail: "client_secret must not be empty".to_string(),
-            });
-        }
-
-        // 1. Exchange the code for tokens FIRST — so a failed exchange never
-        //    leaves an orphaned account row. The plugin's exchange phase does
-        //    the CSRF (state) check.
-        let exchange_args = serde_json::json!({
-            "phase": "exchange",
-            "client_id": req.client_id,
-            // Google needs the secret; Microsoft is a PKCE public client and
-            // ignores it. authority selects Microsoft's v2.0 tenant (null for
-            // Google, which ignores the field).
-            "client_secret": req.client_secret,
-            "authority": req.authority,
-            "code": req.code,
-            "pkce_verifier": req.pkce_verifier,
-            "state": req.state,
-            "returned_state": req.returned_state,
-            "redirect_uri": req.redirect_uri,
-        });
-        let bytes = self
-            .runtime
-            .block_on(async {
-                self.plugin_manager
-                    .interactive_auth(&plugin_id, &exchange_args.to_string())
-                    .await
-            })
-            .map_err(|e| StoreError::Auth {
-                detail: e.to_string(),
-            })?;
-        let tokens: OAuthTokenJson =
-            serde_json::from_slice(&bytes).map_err(|e| StoreError::Protocol {
-                detail: format!("token blob: {e}"),
-            })?;
-
-        // 2. Persist the account row with the non-secret adapter config.
-        let shared = self.db.shared();
-        let repo = AccountsRepo::new(&shared);
-        let created = repo
-            .create(req.adapter_kind, req.display_name.trim(), &req.config_json)
-            .map_err(acc_err)?;
-
-        // 3. Store the tokens (device-local keychain). The access token is
-        //    ephemeral (re-minted from the refresh token) so it's NOT synced;
-        //    the refresh token IS the durable credential, pushed to the user's
-        //    other devices via the E2E credential log. Tear the row down on a
-        //    keychain failure so DB/keychain/registry never drift.
-        if let Err(err) =
-            self.secret_store
-                .store(&created.id, SecretSlot::AccessToken, &tokens.access_token)
-        {
-            let _ = repo.delete(&created.id);
-            return Err(StoreError::Storage {
-                detail: format!("store access token: {err}"),
-            });
-        }
-        if let Some(refresh) = tokens.refresh_token.as_deref() {
-            if let Err(err) =
-                self.secret_store
-                    .store(&created.id, SecretSlot::RefreshToken, refresh)
-            {
-                let _ = self.secret_store.delete_all(&created.id);
-                let _ = repo.delete(&created.id);
-                return Err(StoreError::Storage {
-                    detail: format!("store refresh token: {err}"),
-                });
-            }
-            host_core::credential_sync::emit_credential_set(
-                &self.writer,
-                &shared,
-                &created.id,
-                SecretSlot::RefreshToken,
-                refresh,
-            );
-        }
-
-        // 4. Register the freshly-created adapter. Fatal on failure — drop
-        //    secrets + row.
-        if let Err(err) = self.registry.register(&created) {
-            let _ = self.secret_store.delete_all(&created.id);
-            let _ = repo.delete(&created.id);
-            return Err(StoreError::Storage {
-                detail: format!("adapter registration failed: {err}"),
-            });
-        }
-
-        // 5. Sync the new account row (non-secret metadata) to other devices.
-        self.writer
-            .append(SyncEvent::AccountCreated(account_payload(&created)));
-
-        to_json(&created)
-    }
-
-    /// Re-run the OAuth flow for an EXISTING account whose token expired / was
-    /// lost: exchange the code, write FRESH tokens under the existing account id,
-    /// and re-register so reads route through the new credentials without an app
-    /// restart. Keeps the account row + every downstream calendar/task/override
-    /// reference (unlike remove+re-add). NO new row, NO `AccountCreated`. The
-    /// `request_json` is a `CompleteOAuthRequest`; only its exchange fields are
-    /// used — `adapter_kind` is taken from the existing account (and must be
-    /// Google / Microsoft Graph). Mirrors the desktop `reconnect_*_account`,
-    /// adapted to the mobile two-phase flow. (The exchange is verified on-device.)
-    pub fn complete_oauth_reconnect_json(
-        &self,
-        plugin_id: String,
-        account_id: String,
-        request_json: String,
-    ) -> Result<String, StoreError> {
-        let req: CompleteOAuthRequest = from_json("oauth reconnect", &request_json)?;
-        let shared = self.db.shared();
-        let repo = AccountsRepo::new(&shared);
-        let account = repo
-            .get(&account_id)
-            .map_err(acc_err)?
-            .ok_or(StoreError::NotFound)?;
-        if !matches!(account.adapter_kind.as_str(), "google" | "microsoft_graph") {
-            return Err(StoreError::InvalidField {
-                field: "account_id".to_string(),
-                detail: format!(
-                    "account kind {} does not use the OAuth reconnect flow",
-                    account.adapter_kind.as_str()
-                ),
-            });
-        }
-        if req.client_id.trim().is_empty() {
-            return Err(StoreError::InvalidField {
-                field: "client_id".to_string(),
-                detail: "client_id must not be empty".to_string(),
-            });
-        }
-        if account.adapter_kind == "google"
-            && req
-                .client_secret
-                .as_deref()
-                .map(str::trim)
-                .unwrap_or("")
-                .is_empty()
-        {
-            return Err(StoreError::InvalidField {
-                field: "client_secret".to_string(),
-                detail: "client_secret must not be empty".to_string(),
-            });
-        }
-
-        // Exchange the code for fresh tokens (the plugin checks CSRF/state).
-        let exchange_args = serde_json::json!({
-            "phase": "exchange",
-            "client_id": req.client_id,
-            "client_secret": req.client_secret,
-            "authority": req.authority,
-            "code": req.code,
-            "pkce_verifier": req.pkce_verifier,
-            "state": req.state,
-            "returned_state": req.returned_state,
-            "redirect_uri": req.redirect_uri,
-        });
-        let bytes = self
-            .runtime
-            .block_on(async {
-                self.plugin_manager
-                    .interactive_auth(&plugin_id, &exchange_args.to_string())
-                    .await
-            })
-            .map_err(|e| StoreError::Auth {
-                detail: e.to_string(),
-            })?;
-        let tokens: OAuthTokenJson =
-            serde_json::from_slice(&bytes).map_err(|e| StoreError::Protocol {
-                detail: format!("token blob: {e}"),
-            })?;
-
-        // Write the fresh tokens under the EXISTING id (overwriting the stale
-        // ones). On a store failure the row + old tokens stay put — the user can
-        // retry without losing the account. The refresh token is the durable
-        // credential, synced via the E2E log; the access token is ephemeral.
-        self.secret_store
-            .store(&account.id, SecretSlot::AccessToken, &tokens.access_token)
-            .map_err(|err| StoreError::Storage {
-                detail: format!("store access token: {err}"),
-            })?;
-        if let Some(refresh) = tokens.refresh_token.as_deref() {
-            self.secret_store
-                .store(&account.id, SecretSlot::RefreshToken, refresh)
-                .map_err(|err| StoreError::Storage {
-                    detail: format!("store refresh token: {err}"),
-                })?;
-            host_core::credential_sync::emit_credential_set(
-                &self.writer,
-                &shared,
-                &account.id,
-                SecretSlot::RefreshToken,
-                refresh,
-            );
-        }
-        self.registry
-            .register(&account)
-            .map_err(|err| StoreError::Storage {
-                detail: format!("adapter registration failed: {err}"),
-            })?;
-        to_json(&account)
-    }
-
     // ── Schema-driven accounts ───────────────────────────────────────────────
     //
     // The generic path: an adapter publishes an account schema in its
@@ -7666,11 +7419,7 @@ impl Host {
             })?;
         let values: serde_json::Map<String, serde_json::Value> = from_json("values", &values_json)?;
         let client = self.oauth_client_for(oauth, &values)?;
-        let args = serde_json::json!({
-            "phase": "authorize",
-            "client_id": client.id,
-            "redirect_uri": oauth.app_redirect_uri,
-        });
+        let args = Self::auth_args(oauth, &values, &client, "authorize", &[]);
         let bytes = self
             .runtime
             .block_on(async {
@@ -7699,11 +7448,7 @@ impl Host {
         let oauth = schema.oauth.as_ref().expect("checked in oauth_account");
         let values = self.reconnect_values(&account, oauth);
         let client = self.oauth_client_for(oauth, &values)?;
-        let args = serde_json::json!({
-            "phase": "authorize",
-            "client_id": client.id,
-            "redirect_uri": oauth.app_redirect_uri,
-        });
+        let args = Self::auth_args(oauth, &values, &client, "authorize", &[]);
         let bytes = self
             .runtime
             .block_on(async {
@@ -7734,18 +7479,39 @@ impl Host {
         let (account, plugin_id, schema) = self.oauth_account(&account_id)?;
         let oauth = schema.oauth.as_ref().expect("checked in oauth_account");
         let values = self.reconnect_values(&account, oauth);
-        let client = self.oauth_client_for(oauth, &values)?;
+        // The whole choice, not just the client: `config` records WHICH
+        // registration this account is now linked to, and a reconnect that
+        // drops it cannot clear a stale one. See the write below.
+        let choice = host_core::account_setup::choose_oauth_client(
+            oauth,
+            supplied_value(&values, &oauth.client_id_field).as_deref(),
+            oauth
+                .client_secret_field
+                .as_deref()
+                .and_then(|k| supplied_value(&values, k))
+                .as_deref(),
+        )
+        .map_err(setup_err)?;
+        let client = &choice.client;
 
-        let exchange = serde_json::json!({
-            "phase": "exchange",
-            "client_id": client.id,
-            "client_secret": client.secret,
-            "code": req.code,
-            "pkce_verifier": req.pkce_verifier,
-            "state": req.state,
-            "returned_state": req.returned_state,
-            "redirect_uri": oauth.app_redirect_uri,
-        });
+        let exchange = Self::auth_args(
+            oauth,
+            &values,
+            client,
+            "exchange",
+            &[
+                ("code", serde_json::Value::String(req.code.clone())),
+                (
+                    "pkce_verifier",
+                    serde_json::Value::String(req.pkce_verifier.clone()),
+                ),
+                ("state", serde_json::Value::String(req.state.clone())),
+                (
+                    "returned_state",
+                    serde_json::Value::String(req.returned_state.clone()),
+                ),
+            ],
+        );
         let bytes = self
             .runtime
             .block_on(async {
@@ -7804,6 +7570,26 @@ impl Host {
                 value,
             );
         }
+        // Record which registration the account is linked to NOW. Without this
+        // a built-in-posture account survives a build whose OAuth client was
+        // rotated only until the next open: the stored fingerprint no longer
+        // matches, `resolve_oauth_client` refuses with "sign in again", and
+        // signing in again wrote tokens while leaving the fingerprint stale —
+        // an instruction that could never be carried out.
+        let mut config: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(&account.config_json).unwrap_or_default();
+        for (key, value) in &choice.config {
+            config.insert(key.clone(), value.clone());
+        }
+        // A bring-your-own account keeps its own id in the row; a built-in one
+        // must NOT, or it would be pinned to whatever the build carried today.
+        if choice.config.iter().any(|(k, _)| k == "client_source") {
+            config.remove(&oauth.client_id_field);
+        }
+        let account = AccountsRepo::new(&shared)
+            .set_config(&account.id, &serde_json::Value::Object(config).to_string())
+            .map_err(acc_err)?;
+
         // Live for the rest of the session without a restart. A failure leaves
         // the fresh tokens in place — retrying costs no second sign-in.
         self.registry
@@ -7837,16 +7623,24 @@ impl Host {
         let mut tokens = None;
         if let Some(oauth) = &schema.oauth {
             let client = self.oauth_client_for(oauth, &req.values)?;
-            let exchange = serde_json::json!({
-                "phase": "exchange",
-                "client_id": client.id,
-                "client_secret": client.secret,
-                "code": req.code,
-                "pkce_verifier": req.pkce_verifier,
-                "state": req.state,
-                "returned_state": req.returned_state,
-                "redirect_uri": oauth.app_redirect_uri,
-            });
+            let exchange = Self::auth_args(
+                oauth,
+                &req.values,
+                &client,
+                "exchange",
+                &[
+                    ("code", serde_json::Value::String(req.code.clone())),
+                    (
+                        "pkce_verifier",
+                        serde_json::Value::String(req.pkce_verifier.clone()),
+                    ),
+                    ("state", serde_json::Value::String(req.state.clone())),
+                    (
+                        "returned_state",
+                        serde_json::Value::String(req.returned_state.clone()),
+                    ),
+                ],
+            );
             let bytes = self
                 .runtime
                 .block_on(async {
@@ -8029,6 +7823,55 @@ impl Host {
     }
 
     /// The plugin id + account schema for an adapter kind, or a typed error.
+    /// The argument object a plugin's auth phase receives.
+    ///
+    /// Starts from the values the account or the form actually holds, so
+    /// EVERYTHING the adapter declared travels — Microsoft's tenant, Webex's
+    /// site — and overwrites only the client, which the host resolved and the
+    /// caller may not know (a built-in-posture account has no client id of its
+    /// own). The hand-written objects this replaces listed two or three fields
+    /// each and silently dropped the rest, which is invisible right up until a
+    /// single-tenant Azure registration is rejected for being asked at
+    /// `/common`.
+    fn auth_args(
+        oauth: &plugin_core::account_schema::AccountOauth,
+        values: &serde_json::Map<String, serde_json::Value>,
+        client: &host_core::account_setup::OauthClient,
+        phase: &str,
+        extra: &[(&str, serde_json::Value)],
+    ) -> serde_json::Value {
+        let mut args = values.clone();
+        // Under the name the SCHEMA gave the field, and under the protocol's
+        // own, so an adapter that calls it something else is still understood.
+        for key in [oauth.client_id_field.as_str(), "client_id"] {
+            args.insert(
+                key.to_string(),
+                serde_json::Value::String(client.id.clone()),
+            );
+        }
+        let secret = client
+            .secret
+            .clone()
+            .map(serde_json::Value::String)
+            .unwrap_or(serde_json::Value::Null);
+        if let Some(field) = oauth.client_secret_field.as_deref() {
+            args.insert(field.to_string(), secret.clone());
+        }
+        args.insert("client_secret".to_string(), secret);
+        args.insert(
+            "phase".to_string(),
+            serde_json::Value::String(phase.to_string()),
+        );
+        args.insert(
+            "redirect_uri".to_string(),
+            serde_json::Value::String(oauth.app_redirect_uri.clone()),
+        );
+        for (key, value) in extra {
+            args.insert((*key).to_string(), value.clone());
+        }
+        serde_json::Value::Object(args)
+    }
+
     /// The values a RECONNECT signs in with.
     ///
     /// A reconnect needs no form: the account already holds everything the
@@ -8127,40 +7970,6 @@ impl Host {
         .map(|choice| choice.client)
         .map_err(setup_err)
     }
-}
-
-/// Request body for [`Host::complete_oauth_json`]. The `config_json` is the
-/// non-secret adapter config the registry reads back (`{client_id, client_secret}`
-/// for Google, `{client_id, authority}` for Microsoft); the remaining fields are
-/// the token-exchange inputs forwarded to the plugin's `phase:"exchange"`.
-/// What a re-sign-in sends back. No client fields: the account already holds
-/// them, and asking the caller to resend a client secret it had to read out of
-/// the keychain first is a round trip that can only go wrong.
-#[derive(serde::Deserialize)]
-struct AccountReconnectRequest {
-    code: String,
-    pkce_verifier: String,
-    state: String,
-    returned_state: String,
-}
-
-#[derive(serde::Deserialize)]
-struct CompleteOAuthRequest {
-    adapter_kind: AdapterKind,
-    display_name: String,
-    config_json: String,
-    client_id: String,
-    #[serde(default)]
-    client_secret: Option<String>,
-    /// Microsoft's v2.0 tenant slug (`common` / `organizations` / a GUID).
-    /// Absent for Google (which has no authority concept).
-    #[serde(default)]
-    authority: Option<String>,
-    code: String,
-    pkce_verifier: String,
-    state: String,
-    returned_state: String,
-    redirect_uri: String,
 }
 
 /// Request body for [`Host::connect_account_json`] — the form's values plus,
@@ -8284,9 +8093,15 @@ fn vc_err(err: vc_core::VcError) -> StoreError {
 }
 
 /// The bits of the plugin's token response the host needs to persist.
+///
+/// Only the refresh token is read: the one remaining caller is the SYNC
+/// adapter path, which re-mints access tokens from it. The access token stays
+/// declared so a payload carrying one still deserialises, and named with a
+/// leading underscore so it is clear that is deliberate rather than forgotten.
 #[derive(serde::Deserialize)]
 struct OAuthTokenJson {
-    access_token: String,
+    #[serde(rename = "access_token")]
+    _access_token: String,
     #[serde(default)]
     refresh_token: Option<String>,
 }
@@ -8294,6 +8109,17 @@ struct OAuthTokenJson {
 /// Request body for [`Host::complete_sync_oauth_json`] — the token-exchange
 /// inputs forwarded to the sync plugin's `phase:"exchange"`. No account fields
 /// (sync OAuth stores only the refresh token in the adapter's keychain slot).
+/// What a re-sign-in sends back. No client fields: the account already holds
+/// them, and asking the caller to resend a client secret it had to read out of
+/// the keychain first is a round trip that can only go wrong.
+#[derive(serde::Deserialize)]
+struct AccountReconnectRequest {
+    code: String,
+    pkce_verifier: String,
+    state: String,
+    returned_state: String,
+}
+
 #[derive(serde::Deserialize)]
 struct CompleteSyncOAuthRequest {
     client_id: String,
@@ -8618,20 +8444,18 @@ mod tests {
     }
 
     #[test]
-    fn oauth_reconnect_rejects_unknown_and_non_oauth_accounts() {
+    fn a_reconnect_refuses_an_unknown_account_and_one_that_types_its_credential() {
         let (_dir, host, _kc) = open_host();
-        let req = r#"{"adapter_kind":"google","display_name":"x","config_json":"{}","client_id":"a","code":"c","pkce_verifier":"v","state":"s","returned_state":"s","redirect_uri":"aperio://oauth-callback"}"#;
-        // Unknown account → NotFound (before any exchange).
+        let req = r#"{"code":"c","pkce_verifier":"v","state":"s","returned_state":"s"}"#;
+        // Unknown account, refused before any exchange is attempted.
         assert!(matches!(
-            host.complete_oauth_reconnect_json(
-                "com.aperio.cal-adapter-google".to_string(),
-                "nope".to_string(),
-                req.to_string(),
-            )
-            .unwrap_err(),
+            host.complete_account_reconnect_json("nope".to_string(), req.to_string())
+                .unwrap_err(),
             StoreError::NotFound
         ));
-        // A non-OAuth (CalDAV) account → InvalidField (it uses set_account_secret).
+        // A CalDAV account signs in with a password, so the sign-in path must
+        // send it back to set_account_secret rather than open a browser. This
+        // is now decided by the adapter's schema, not by its name.
         let caldav = r#"{
             "adapter_kind": "caldav",
             "display_name": "Work",
@@ -8646,12 +8470,14 @@ mod tests {
             .unwrap()
             .to_string();
         assert!(matches!(
-            host.complete_oauth_reconnect_json(
-                "com.aperio.cal-adapter-google".to_string(),
-                id,
-                req.to_string(),
-            )
-            .unwrap_err(),
+            host.complete_account_reconnect_json(id.clone(), req.to_string())
+                .unwrap_err(),
+            StoreError::InvalidField { .. }
+        ));
+        // And the begin half agrees, so the UI cannot open a session it would
+        // then be unable to finish.
+        assert!(matches!(
+            host.begin_account_reconnect_json(id).unwrap_err(),
             StoreError::InvalidField { .. }
         ));
     }
@@ -11091,25 +10917,6 @@ mod tests {
     }
 
     #[test]
-    fn complete_oauth_unknown_plugin_errors_without_creating_an_account() {
-        // The exchange runs FIRST and fails fast (PluginMissing → Auth) with no
-        // network, so no orphan account row is left behind. (The happy path —
-        // a real token exchange — is verified on-device.)
-        let (_dir, host, _kc) = open_host();
-        let before = host.accounts_json().unwrap();
-        let req = r#"{"adapter_kind":"google","display_name":"G","config_json":"{}","client_id":"x","client_secret":"y","code":"c","pkce_verifier":"v","state":"s","returned_state":"s","redirect_uri":"aperio://oauth-callback"}"#;
-        let err = host
-            .complete_oauth_json("com.aperio.nonexistent-plugin".to_string(), req.to_string())
-            .unwrap_err();
-        assert!(matches!(err, StoreError::Auth { .. }), "got: {err:?}");
-        assert_eq!(
-            host.accounts_json().unwrap(),
-            before,
-            "a failed exchange must not create an account",
-        );
-    }
-
-    #[test]
     fn begin_dropbox_oauth_returns_an_authorize_url() {
         // The sync-adapter plugins' interactive_auth is also wired into
         // host-plugins, so begin_oauth_json drives the Dropbox plugin's authorize
@@ -11244,43 +11051,6 @@ mod tests {
             .unwrap_err();
         assert!(
             matches!(err, StoreError::Unsupported { .. }),
-            "got: {err:?}"
-        );
-    }
-
-    #[test]
-    fn complete_oauth_rejects_a_csrf_state_mismatch_without_creating_an_account() {
-        // The plugin's exchange phase runs the CSRF (state) check BEFORE the
-        // network token POST, so a mismatched issued-vs-returned state aborts with
-        // no network and no orphan account row. Guards the fail-closed check.
-        let (_dir, host, _kc) = open_host();
-        let before = host.accounts_json().unwrap();
-        let req = r#"{"adapter_kind":"google","display_name":"G","config_json":"{}","client_id":"x","client_secret":"y","code":"c","pkce_verifier":"v","state":"AAAA","returned_state":"BBBB","redirect_uri":"aperio://oauth-callback"}"#;
-        let err = host
-            .complete_oauth_json("com.aperio.cal-adapter-google".to_string(), req.to_string())
-            .unwrap_err();
-        assert!(matches!(err, StoreError::Auth { .. }), "got: {err:?}");
-        assert!(
-            err.to_string().contains("CSRF") || err.to_string().contains("state mismatch"),
-            "expected a CSRF state-mismatch error, got: {err}"
-        );
-        assert_eq!(
-            host.accounts_json().unwrap(),
-            before,
-            "a CSRF-rejected exchange must not create an account",
-        );
-    }
-
-    #[test]
-    fn complete_oauth_rejects_an_empty_display_name() {
-        // The host enforces the desktop's non-empty guards regardless of caller.
-        let (_dir, host, _kc) = open_host();
-        let req = r#"{"adapter_kind":"google","display_name":"  ","config_json":"{}","client_id":"x","client_secret":"y","code":"c","pkce_verifier":"v","state":"s","returned_state":"s","redirect_uri":"aperio://oauth-callback"}"#;
-        let err = host
-            .complete_oauth_json("com.aperio.cal-adapter-google".to_string(), req.to_string())
-            .unwrap_err();
-        assert!(
-            matches!(err, StoreError::InvalidField { ref field, .. } if field == "display_name"),
             "got: {err:?}"
         );
     }
