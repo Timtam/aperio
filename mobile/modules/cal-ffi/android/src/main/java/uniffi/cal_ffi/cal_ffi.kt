@@ -910,6 +910,8 @@ external fun uniffi_cal_ffi_checksum_method_host_attach_meeting_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_begin_account_oauth_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_begin_account_reconnect_json(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_begin_oauth_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_calendar_current_user_email(
@@ -925,6 +927,8 @@ external fun uniffi_cal_ffi_checksum_method_host_clear_sync_log(
 external fun uniffi_cal_ffi_checksum_method_host_collect_logs(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_compact_now_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_complete_account_reconnect_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_complete_oauth_json(
 ): Short
@@ -1304,6 +1308,8 @@ external fun uniffi_cal_ffi_fn_method_host_attach_meeting_json(`ptr`: Long,`requ
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_begin_account_oauth_json(`ptr`: Long,`adapterKind`: RustBuffer.ByValue,`valuesJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_begin_account_reconnect_json(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_begin_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_calendar_current_user_email(`ptr`: Long,`calendarId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1319,6 +1325,8 @@ external fun uniffi_cal_ffi_fn_method_host_clear_sync_log(`ptr`: Long,uniffi_out
 external fun uniffi_cal_ffi_fn_method_host_collect_logs(`ptr`: Long,`redact`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_compact_now_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_complete_account_reconnect_json(`ptr`: Long,`accountId`: RustBuffer.ByValue,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_complete_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1827,6 +1835,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_begin_account_oauth_json() != 37389.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_begin_account_reconnect_json() != 47380.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_begin_oauth_json() != 10684.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1849,6 +1860,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_compact_now_json() != 57819.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_complete_account_reconnect_json() != 24704.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_complete_oauth_json() != 7847.toShort()) {
@@ -4200,6 +4214,18 @@ public interface HostInterface {
     fun `beginAccountOauthJson`(`adapterKind`: kotlin.String, `valuesJson`: kotlin.String): kotlin.String
     
     /**
+     * Start a re-sign-in for an EXISTING account: the authorize URL, PKCE
+     * verifier and state, exactly as [`Self::begin_account_oauth_json`] but
+     * with the values taken from the account rather than a form.
+     *
+     * Works for any adapter that declares an `oauth` block. The pair it
+     * replaces took a plugin id and provider-shaped arguments and refused
+     * anything that was not Google or Microsoft Graph — so a Webex account
+     * whose grant expired could be created but never repaired.
+     */
+    fun `beginAccountReconnectJson`(`accountId`: kotlin.String): kotlin.String
+    
+    /**
      * Begin a host-driven OAuth flow for `plugin_id` (e.g.
      * `com.aperio.cal-adapter-google`). `args_json` carries the provider's
      * begin inputs — `{client_id, redirect_uri}` (Google) /
@@ -4273,6 +4299,16 @@ public interface HostInterface {
      * deleted-log count and the Protokoll renders "N old logs removed".
      */
     fun `compactNowJson`(): kotlin.String
+    
+    /**
+     * Finish a re-sign-in: exchange the code and write the fresh tokens under
+     * the EXISTING account id, so its calendars, colours and overrides survive.
+     *
+     * The row itself is untouched. Only the keychain moves, which is what makes
+     * this safe to retry: a failed exchange leaves the old (expired) tokens
+     * exactly where they were.
+     */
+    fun `completeAccountReconnectJson`(`accountId`: kotlin.String, `requestJson`: kotlin.String): kotlin.String
     
     /**
      * Complete a host-driven OAuth flow: exchange the redirect's `code` (+ the
@@ -5561,6 +5597,30 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Start a re-sign-in for an EXISTING account: the authorize URL, PKCE
+     * verifier and state, exactly as [`Self::begin_account_oauth_json`] but
+     * with the values taken from the account rather than a form.
+     *
+     * Works for any adapter that declares an `oauth` block. The pair it
+     * replaces took a plugin id and provider-shaped arguments and refused
+     * anything that was not Google or Microsoft Graph — so a Webex account
+     * whose grant expired could be created but never repaired.
+     */
+    @Throws(StoreException::class)override fun `beginAccountReconnectJson`(`accountId`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_begin_account_reconnect_json(
+        it,
+        FfiConverterString.lower(`accountId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Begin a host-driven OAuth flow for `plugin_id` (e.g.
      * `com.aperio.cal-adapter-google`). `args_json` carries the provider's
      * begin inputs — `{client_id, redirect_uri}` (Google) /
@@ -5721,6 +5781,28 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_compact_now_json(
         it,
         _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Finish a re-sign-in: exchange the code and write the fresh tokens under
+     * the EXISTING account id, so its calendars, colours and overrides survive.
+     *
+     * The row itself is untouched. Only the keychain moves, which is what makes
+     * this safe to retry: a failed exchange leaves the old (expired) tokens
+     * exactly where they were.
+     */
+    @Throws(StoreException::class)override fun `completeAccountReconnectJson`(`accountId`: kotlin.String, `requestJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_complete_account_reconnect_json(
+        it,
+        FfiConverterString.lower(`accountId`),FfiConverterString.lower(`requestJson`),_status)
 }
     }
     )

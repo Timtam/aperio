@@ -438,29 +438,14 @@ export const listAccountsMissingCredentials = () =>
 export const setAccountSecret = (accountId: string, secret: string) =>
   invoke<void>('set_account_secret', { accountId, secret });
 
-/** Re-run the Google OAuth flow against an existing account
- *  row. Opens the system browser. Tokens land in the keychain
- *  under the existing account id, preserving downstream
- *  references. */
-export const reconnectGoogleAccount = (accountId: string) =>
-  invoke<void>('reconnect_google_account', { accountId });
+/** Re-run the provider sign-in for an existing account. Opens the system
+ *  browser. Works for every adapter that declares an OAuth block — the client,
+ *  the tenant and anything else the account was configured with come off the
+ *  row and its adapter's schema, host-side. Tokens land in the keychain under
+ *  the existing account id, preserving downstream references. */
+export const reconnectAccount = (accountId: string) =>
+  invoke<void>('reconnect_account', { accountId });
 
-/** Microsoft equivalent of `reconnectGoogleAccount`. */
-export const reconnectMicrosoftAccount = (accountId: string) =>
-  invoke<void>('reconnect_microsoft_account', { accountId });
-
-export interface CreateAccountRequest {
-  adapter_kind: AdapterKind;
-  display_name: string;
-  /** Optional adapter-specific config; defaults to "{}" backend-side. */
-  config_json?: string;
-  /** Secret half of the credentials (CalDAV password etc.).
-   *  Stored only in the platform keychain, never in SQLite. */
-  secret?: string;
-}
-
-export const createAccount = (request: CreateAccountRequest) =>
-  invoke<Account>('create_account', { request });
 
 export const deleteAccount = (id: string) =>
   invoke<void>('delete_account', { id });

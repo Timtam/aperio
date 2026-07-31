@@ -36,7 +36,6 @@ import { getUserPref, setUserPref } from '../api/prefs';
 import {
   connectSchemaAccount,
   reconnectOAuthAccount,
-  type OAuthProvider,
 } from '../api/oauth';
 import { refreshExternalCache } from '../api/sync';
 import { useRefreshErrors } from '../state/useRefreshErrors';
@@ -54,7 +53,6 @@ const TEST_ACTION_KEY = '__test__';
 import { AppDialog } from '../components/AppDialog';
 import ContactsPrivacyNoticeModal from '../components/ContactsPrivacyNoticeModal';
 import { FormScrollView } from '../components/FormScrollView';
-import OAuthConnectForm from './OAuthConnectForm';
 
 // Accounts management — list + add (credential kinds) + connect (OAuth kinds via
 // the browser sign-in flow) + delete, over the Rust Host (statically-embedded
@@ -75,12 +73,6 @@ const HOST_INTERNAL_KINDS: ReadonlySet<AdapterKind> = new Set([
   'local',
   'device_calendar',
 ]);
-
-/** OAuth kinds can't be repaired with a pasted secret — they re-run the
- *  provider sign-in (a separate reconnect flow), so the inline credential field
- *  is offered only for the password/token kinds. */
-const isOAuthKind = (kind: AdapterKind): boolean =>
-  kind === 'google' || kind === 'microsoft_graph';
 
 /** The device-local calendar adapter ships on both phone platforms — iOS
  *  (EventKit: calendars + reminders) and Android (CalendarProvider: calendars
@@ -158,9 +150,8 @@ export default function AccountsScreen() {
   // 'picker' a provider menu; 'credential'/'oauth' the chosen provider's form —
   // replacing the old always-mounted credential + OAuth forms (one long view).
   const [mode, setMode] = useState<
-    'list' | 'picker' | 'credential' | 'oauth' | 'device' | 'schema'
+    'list' | 'picker' | 'credential' | 'device' | 'schema'
   >('list');
-  const [pickedOAuth, setPickedOAuth] = useState<OAuthProvider | null>(null);
   // The connect form for a schema-declaring adapter, as that ADAPTER declares
   // it — plus the values collected for it. Nothing in this screen knows what
   // any of the fields mean.
@@ -260,11 +251,6 @@ export default function AccountsScreen() {
       if (picked === 'device_calendar') {
         // No credentials — the OS permission prompt IS the auth step.
         setMode('device');
-        return;
-      }
-      if (isOAuthKind(picked)) {
-        setPickedOAuth(picked as OAuthProvider);
-        setMode('oauth');
         return;
       }
       // Does this adapter declare its own connect form? If so it is rendered
@@ -416,7 +402,6 @@ export default function AccountsScreen() {
   const cancelAdd = useCallback(() => {
     resetForm();
     setError(null);
-    setPickedOAuth(null);
     setFormSpec(null);
     setFormValues({});
     setSchemaKind(null);
@@ -622,22 +607,6 @@ export default function AccountsScreen() {
     [announce, load, repairSecret, t],
   );
 
-  // OAuth (browser sign-in) success — the form owns the begin/exchange dance, its
-  // own validation/error region, and the cancel announcement; the screen only
-  // reloads the list, moves SR focus to the new row, and announces the result.
-  const onOAuthConnected = useCallback(
-    async (account: Account) => {
-      setError(null);
-      setMode('list');
-      setPickedOAuth(null);
-      await load();
-      pendingFocusId.current = account.id;
-      announce(t('dialogs.accounts.created', { name: account.display_name }));
-      await maybeShowPrivacyNotice(account.adapter_kind);
-    },
-    [announce, load, maybeShowPrivacyNotice, t],
-  );
-
   return (
     <>
     <FormScrollView style={styles.screen} contentContainerStyle={styles.content}>
@@ -666,7 +635,14 @@ export default function AccountsScreen() {
             const isLocal = account.adapter_kind === 'local';
             const kindName = t(`dialogs.accounts.kindName.${account.adapter_kind}`);
             const missing = missingIds.has(account.id);
-            const oauth = isOAuthKind(account.adapter_kind);
+            // Whether a repair is a paste or a sign-in is the ADAPTER's
+            // statement, carried on the kind listing. Unknown kinds (a plugin
+            // that was disabled since the account was made) fall to the paste
+            // path, which fails visibly rather than opening a browser at
+            // nothing.
+            const oauth =
+              availableKinds.find((k) => k.kind === account.adapter_kind)
+                ?.declares_oauth === true;
             // A present-but-WRONG credential (revoked app password, expired
             // OAuth grant) never lands in `missing` — the refresh-error
             // surface flags it, and the same Reconnect affordance is the fix.
@@ -995,20 +971,6 @@ export default function AccountsScreen() {
           </Text>
         )}
         {error != null && <Text style={styles.error}>{error}</Text>}
-      </AppDialog>
-
-      <AppDialog
-        visible={mode === 'oauth' && pickedOAuth != null}
-        title={t('dialogs.accounts.addHeading')}
-        cancelLabel={t('mobile.cancel')}
-        onCancel={cancelAdd}
-      >
-        {pickedOAuth != null && (
-          <OAuthConnectForm
-            lockedProvider={pickedOAuth}
-            onConnected={(account) => void onOAuthConnected(account)}
-          />
-        )}
       </AppDialog>
 
       <AppDialog

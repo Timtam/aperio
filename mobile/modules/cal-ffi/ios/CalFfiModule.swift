@@ -611,6 +611,17 @@ public class CalFfiModule: Module {
       try self.host.connectAccountJson(requestJson: requestJson)
     }.runOnQueue(slowQueue)
 
+    // Re-sign-in for an EXISTING account. Both halves take only the account id:
+    // everything else — which client, which redirect, whether there is a client
+    // secret at all — the host reads off the account and its adapter's schema.
+    AsyncFunction("beginAccountReconnectJson") { (accountId: String) -> String in
+      try self.host.beginAccountReconnectJson(accountId: accountId)
+    }
+
+    AsyncFunction("completeAccountReconnectJson") { (accountId: String, requestJson: String) -> String in
+      try self.host.completeAccountReconnectJson(accountId: accountId, requestJson: requestJson)
+    }.runOnQueue(slowQueue)
+
     // ─── OAuth (host-driven; mobile opens authorize_url in a native session) ──
 
     AsyncFunction("beginOauthJson") { (pluginId: String, argsJson: String) -> String in

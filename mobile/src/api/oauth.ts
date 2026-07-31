@@ -15,11 +15,10 @@ import * as WebBrowser from 'expo-web-browser';
 import {
   Account,
   AdapterKind,
-  OAUTH_PLUGIN_IDS,
   beginAccountOauth,
+  beginAccountReconnect,
   beginOauth,
-  completeOauth,
-  completeOauthReconnect,
+  completeAccountReconnect,
   connectAccount,
 } from './accounts';
 import { SYNC_OAUTH_PLUGIN_IDS, completeSyncOauth } from './sync';
@@ -30,19 +29,6 @@ import { SYNC_OAUTH_PLUGIN_IDS, completeSyncOauth } from './sync';
  *  providers require the exchange redirect to equal the authorize one. */
 export const OAUTH_REDIRECT_URI = 'aperio://oauth-callback';
 
-export type OAuthProvider = 'google' | 'microsoft_graph';
-
-/** Normalised connect inputs the user supplies (BYO client-id). */
-export interface OAuthConnectInput {
-  provider: OAuthProvider;
-  displayName: string;
-  clientId: string;
-  /** Google only — its token endpoint requires the secret even under PKCE. */
-  clientSecret?: string;
-  /** Microsoft only — the v2.0 tenant slug (`common` / … / a GUID). */
-  authority?: string;
-}
-
 /** Outcome of {@link connectOAuthAccount}. `cancelled` is the user dismissing the
  *  browser (not an error); failures (bad code, exchange/registration error)
  *  reject so the caller surfaces the message. */
@@ -50,105 +36,21 @@ export type OAuthConnectResult =
   | { kind: 'connected'; account: Account }
   | { kind: 'cancelled' };
 
-/** Run the full host-driven OAuth connect: begin → native auth session → parse
- *  the redirect → complete (exchange + create the account). The created account
- *  matches the desktop row exactly (same `adapter_kind` + `config_json` shape). */
-export async function connectOAuthAccount(
-  input: OAuthConnectInput,
-): Promise<OAuthConnectResult> {
-  const pluginId = OAUTH_PLUGIN_IDS[input.provider];
-  const isMicrosoft = input.provider === 'microsoft_graph';
-  const authority = input.authority ?? 'common';
-
-  // 1. begin — pure: the Host builds the consent URL + PKCE verifier + state.
-  const beginArgs: Record<string, string> = {
-    client_id: input.clientId,
-    redirect_uri: OAUTH_REDIRECT_URI,
-  };
-  if (isMicrosoft) beginArgs.authority = authority;
-  const authz = await beginOauth(pluginId, beginArgs);
-
-  // 2. open the consent URL in a native auth session; it resolves once the
-  //    provider redirects back to our custom scheme.
-  const result = await WebBrowser.openAuthSessionAsync(
-    authz.authorize_url,
-    OAUTH_REDIRECT_URI,
-  );
-  if (result.type !== 'success') {
-    return { kind: 'cancelled' };
-  }
-
-  // 3. parse `code` + `state` (or a provider `error`) from the redirect.
-  const params = Linking.parse(result.url).queryParams ?? {};
-  const errorParam = firstString(params.error);
-  if (errorParam != null) {
-    // The user declining consent is a cancellation, not a failure — surface it
-    // like a browser dismiss (gentle + localised), not a raw English error token.
-    // (consent_required/interaction_required are prompt=none signals, not used
-    // here, so they stay genuine errors.)
-    if (errorParam === 'access_denied' || errorParam === 'user_cancelled') {
-      return { kind: 'cancelled' };
-    }
-    throw new Error(errorParam);
-  }
-  const code = firstString(params.code);
-  const returnedState = firstString(params.state) ?? '';
-  if (code == null || code.length === 0) {
-    // A typed sentinel the caller maps to the localised `oauthNoCode` message.
-    throw new Error('OAUTH_NO_CODE');
-  }
-
-  // 4. complete — exchange the code for tokens, then create + register the
-  //    account. config_json is the non-secret row config the registry reads back
-  //    (merged with the keychain tokens at registration time, Rust-side).
-  const config = isMicrosoft
-    ? { client_id: input.clientId, authority }
-    : { client_id: input.clientId, client_secret: input.clientSecret ?? '' };
-
-  const account = await completeOauth(pluginId, {
-    adapter_kind: input.provider as AdapterKind,
-    display_name: input.displayName,
-    config_json: JSON.stringify(config),
-    client_id: input.clientId,
-    client_secret: isMicrosoft ? null : (input.clientSecret ?? ''),
-    authority: isMicrosoft ? authority : null,
-    code,
-    pkce_verifier: authz.pkce_verifier,
-    state: authz.state,
-    returned_state: returnedState,
-    redirect_uri: OAUTH_REDIRECT_URI,
-  });
-  return { kind: 'connected', account };
-}
-
-/** Re-run OAuth for an EXISTING account whose token expired / was lost. Reads the
- *  persisted client_id / client_secret / authority off the account row, runs the
- *  same begin → native auth session → exchange dance, and writes fresh tokens
- *  under the existing account id (keeping its row + downstream references). A
- *  browser dismiss / declined consent is `cancelled`, not an error. */
+/** Re-run the provider sign-in for an EXISTING account whose grant expired.
+ *
+ *  Nothing here names a provider. The host reads the account's own stored
+ *  client — including the secret it kept in the keychain, or the build's own
+ *  registration when the account was connected that way — builds the consent
+ *  URL, and writes the fresh tokens back under the same account id, so its
+ *  calendars, colours and overrides survive.
+ *
+ *  The version this replaces derived the provider from the adapter kind with a
+ *  two-way branch that fell back to Google, so a Webex account whose grant
+ *  expired would have been sent to Google's endpoint. */
 export async function reconnectOAuthAccount(
   account: Account,
 ): Promise<OAuthConnectResult> {
-  const provider: OAuthProvider =
-    account.adapter_kind === 'microsoft_graph' ? 'microsoft_graph' : 'google';
-  const pluginId = OAUTH_PLUGIN_IDS[provider];
-  const isMicrosoft = provider === 'microsoft_graph';
-  // The non-secret OAuth config the account was created with.
-  const config = JSON.parse(account.config_json || '{}') as {
-    client_id?: string;
-    client_secret?: string;
-    authority?: string;
-  };
-  const clientId = config.client_id ?? '';
-  const authority = config.authority ?? 'common';
-
-  const beginArgs: Record<string, string> = {
-    client_id: clientId,
-    redirect_uri: OAUTH_REDIRECT_URI,
-  };
-  if (isMicrosoft) beginArgs.authority = authority;
-  const authz = await beginOauth(pluginId, beginArgs);
-
+  const authz = await beginAccountReconnect(account.id);
   const result = await WebBrowser.openAuthSessionAsync(
     authz.authorize_url,
     OAUTH_REDIRECT_URI,
@@ -166,25 +68,17 @@ export async function reconnectOAuthAccount(
     throw new Error(errorParam);
   }
   const code = firstString(params.code);
-  const returnedState = firstString(params.state) ?? '';
   if (code == null || code.length === 0) {
     throw new Error('OAUTH_NO_CODE');
   }
 
-  const account2 = await completeOauthReconnect(pluginId, account.id, {
-    adapter_kind: account.adapter_kind,
-    display_name: account.display_name,
-    config_json: account.config_json,
-    client_id: clientId,
-    client_secret: isMicrosoft ? null : (config.client_secret ?? ''),
-    authority: isMicrosoft ? authority : null,
+  const reconnected = await completeAccountReconnect(account.id, {
     code,
     pkce_verifier: authz.pkce_verifier,
     state: authz.state,
-    returned_state: returnedState,
-    redirect_uri: OAUTH_REDIRECT_URI,
+    returned_state: firstString(params.state) ?? '',
   });
-  return { kind: 'connected', account: account2 };
+  return { kind: 'connected', account: reconnected };
 }
 
 // ── Sync-target OAuth (Dropbox / Google Drive) ───────────────────────────────

@@ -727,6 +727,11 @@ RustBuffer uniffi_cal_ffi_fn_method_host_attach_meeting_json(uint64_t ptr, RustB
 RustBuffer uniffi_cal_ffi_fn_method_host_begin_account_oauth_json(uint64_t ptr, RustBuffer adapter_kind, RustBuffer values_json, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_BEGIN_ACCOUNT_RECONNECT_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_BEGIN_ACCOUNT_RECONNECT_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_begin_account_reconnect_json(uint64_t ptr, RustBuffer account_id, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_BEGIN_OAUTH_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_BEGIN_OAUTH_JSON
 RustBuffer uniffi_cal_ffi_fn_method_host_begin_oauth_json(uint64_t ptr, RustBuffer plugin_id, RustBuffer args_json, RustCallStatus *_Nonnull out_status
@@ -765,6 +770,11 @@ RustBuffer uniffi_cal_ffi_fn_method_host_collect_logs(uint64_t ptr, RustBuffer r
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_COMPACT_NOW_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_COMPACT_NOW_JSON
 RustBuffer uniffi_cal_ffi_fn_method_host_compact_now_json(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_COMPLETE_ACCOUNT_RECONNECT_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_COMPLETE_ACCOUNT_RECONNECT_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_complete_account_reconnect_json(uint64_t ptr, RustBuffer account_id, RustBuffer request_json, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_COMPLETE_OAUTH_JSON
@@ -1925,6 +1935,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_begin_account_oauth_json(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_BEGIN_ACCOUNT_RECONNECT_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_BEGIN_ACCOUNT_RECONNECT_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_begin_account_reconnect_json(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_BEGIN_OAUTH_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_BEGIN_OAUTH_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_begin_oauth_json(void
@@ -1970,6 +1986,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_collect_logs(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_COMPACT_NOW_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_COMPACT_NOW_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_compact_now_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_COMPLETE_ACCOUNT_RECONNECT_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_COMPLETE_ACCOUNT_RECONNECT_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_complete_account_reconnect_json(void
     
 );
 #endif

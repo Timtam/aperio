@@ -12,8 +12,8 @@ import { useAnnouncer } from '../a11y/announcerContext';
 import { FocusableNote } from '../a11y/FocusableNote';
 import {
   isCommandError,
-  reconnectGoogleAccount,
-  reconnectMicrosoftAccount,
+  listAdapterKinds,
+  reconnectAccount,
   refreshExternalCache,
   setAccountSecret,
 } from '../api/client';
@@ -38,7 +38,7 @@ import { Modal } from './Modal';
  *     reuses the per-kind label ("API token" / "password") so the
  *     placeholder copy stays accurate.
  *   - **OAuth** (Google, Microsoft Graph): a single "Sign in"
- *     button → `reconnectGoogleAccount` / `reconnectMicrosoftAccount`.
+ *     button → `reconnectAccount`.
  *     Both commands open the system browser and block until the
  *     callback round-trips.
  *
@@ -70,11 +70,35 @@ type RowStatus =
   | { kind: 'busy' }
   | { kind: 'error'; message: string };
 
-/** OAuth kinds use a dedicated reconnect command (no inline
- *  password input). Everything else falls through to the generic
- *  `setAccountSecret` path. */
-function isOAuthKind(kind: AdapterKind): boolean {
-  return kind === 'google' || kind === 'microsoft_graph';
+/** Which adapters sign in through a provider — asked of the host, which reads
+ *  it off each adapter's declared schema, rather than named here. An adapter
+ *  that signs in cannot be repaired with a pasted password, so this decides
+ *  which of the two affordances a row offers. */
+function useOAuthKinds(): { kinds: Set<AdapterKind>; ready: boolean } {
+  const [state, setState] = useState<{
+    kinds: Set<AdapterKind>;
+    ready: boolean;
+  }>({ kinds: new Set(), ready: false });
+  useEffect(() => {
+    let cancelled = false;
+    void listAdapterKinds()
+      .then((list) => {
+        if (cancelled) return;
+        setState({
+          kinds: new Set(
+            list.filter((k) => k.declares_oauth).map((k) => k.kind),
+          ),
+          ready: true,
+        });
+      })
+      // A failure leaves `ready` false, so the rows stay unrendered rather than
+      // offering a password field to an account that cannot take one.
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return state;
 }
 
 export function SyncAccountsConnectDialog({
@@ -91,6 +115,11 @@ export function SyncAccountsConnectDialog({
   // the state when it was opened, not a live view.
   const [pending, setPending] = useState<Account[]>(initialAccounts);
   const [rowStatus, setRowStatus] = useState<Record<string, RowStatus>>({});
+  // Which of these accounts sign in through a provider. Until the host answers,
+  // the rows are not rendered at all: a row drawn on the assumption "not OAuth"
+  // offers a password field, and a password typed into it for a Google account
+  // is a wasted attempt that ends in an error message.
+  const { kinds: oauthKinds, ready: kindsReady } = useOAuthKinds();
   // Per-row password input state. Keyed by account id so each
   // row keeps its own value while the user types.
   const [passwordInputs, setPasswordInputs] = useState<Record<string, string>>(
@@ -220,13 +249,7 @@ export function SyncAccountsConnectDialog({
     async (account: Account) => {
       setStatus(account.id, { kind: 'busy' });
       try {
-        if (account.adapter_kind === 'google') {
-          await reconnectGoogleAccount(account.id);
-        } else if (account.adapter_kind === 'microsoft_graph') {
-          await reconnectMicrosoftAccount(account.id);
-        } else {
-          throw new Error(`unexpected OAuth kind: ${account.adapter_kind}`);
-        }
+        await reconnectAccount(account.id);
         announce(
           t('syncAccountsConnect.connectedAnnouncement', {
             name: account.display_name,
@@ -274,7 +297,7 @@ export function SyncAccountsConnectDialog({
             : 'syncAccountsConnect.hint',
         )}
       </FocusableNote>
-      {pending.length === 0 ? (
+      {!kindsReady ? null : pending.length === 0 ? (
         <FocusableNote className="sync-accounts-connect__empty">
           {t('syncAccountsConnect.empty')}
         </FocusableNote>
@@ -299,6 +322,7 @@ export function SyncAccountsConnectDialog({
               }
               onSavePassword={() => void onSavePassword(account)}
               onOAuthSignIn={() => void onOAuthSignIn(account)}
+              isOAuth={oauthKinds.has(account.adapter_kind)}
             />
           ))}
         </ul>
@@ -321,6 +345,9 @@ interface RowProps {
   onPasswordChange: (value: string) => void;
   onSavePassword: () => void;
   onOAuthSignIn: () => void;
+  /** Whether this account signs in through its provider, decided by the host
+   *  from the adapter's declaration rather than by this component. */
+  isOAuth: boolean;
 }
 
 function SyncAccountsConnectRow({
@@ -330,11 +357,11 @@ function SyncAccountsConnectRow({
   onPasswordChange,
   onSavePassword,
   onOAuthSignIn,
+  isOAuth,
 }: RowProps) {
   const { t } = useTranslation();
   const inputId = useId();
   const isBusy = status.kind === 'busy';
-  const isOAuth = isOAuthKind(account.adapter_kind);
 
   const kindLabel = useMemo(() => {
     return t(`syncAccountsConnect.kind.${account.adapter_kind}`, {

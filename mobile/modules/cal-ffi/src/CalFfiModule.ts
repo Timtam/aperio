@@ -461,6 +461,19 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  `{adapter_kind, display_name, values[, code, pkce_verifier, state,
    *  returned_state]}`. Returns the created `Account` as JSON. */
   connectAccountJson(requestJson: string): Promise<string>;
+  /** Begin a re-sign-in for an EXISTING account. Takes only the account id: the
+   *  client, the redirect and whether there is a client secret all come off the
+   *  account and its adapter's schema, so nothing has to be re-typed or carried
+   *  back through the caller. Returns `{authorize_url, pkce_verifier, state}`. */
+  beginAccountReconnectJson(accountId: string): Promise<string>;
+  /** Finish a re-sign-in: exchange the code and write fresh tokens under the
+   *  EXISTING account id, leaving its calendars, colours and overrides in place.
+   *  `requestJson` carries `{code, pkce_verifier, state, returned_state}`.
+   *  Returns the account as JSON. */
+  completeAccountReconnectJson(
+    accountId: string,
+    requestJson: string,
+  ): Promise<string>;
 
   // ── OAuth (host-driven; mobile opens authorize_url in a native session) ──
   /** Begin OAuth for an account plugin (e.g. `com.aperio.cal-adapter-google`).

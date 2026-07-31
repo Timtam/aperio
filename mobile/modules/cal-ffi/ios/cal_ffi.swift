@@ -1797,6 +1797,18 @@ public protocol HostProtocol: AnyObject, Sendable {
     func beginAccountOauthJson(adapterKind: String, valuesJson: String) throws  -> String
     
     /**
+     * Start a re-sign-in for an EXISTING account: the authorize URL, PKCE
+     * verifier and state, exactly as [`Self::begin_account_oauth_json`] but
+     * with the values taken from the account rather than a form.
+     *
+     * Works for any adapter that declares an `oauth` block. The pair it
+     * replaces took a plugin id and provider-shaped arguments and refused
+     * anything that was not Google or Microsoft Graph — so a Webex account
+     * whose grant expired could be created but never repaired.
+     */
+    func beginAccountReconnectJson(accountId: String) throws  -> String
+    
+    /**
      * Begin a host-driven OAuth flow for `plugin_id` (e.g.
      * `com.aperio.cal-adapter-google`). `args_json` carries the provider's
      * begin inputs — `{client_id, redirect_uri}` (Google) /
@@ -1870,6 +1882,16 @@ public protocol HostProtocol: AnyObject, Sendable {
      * deleted-log count and the Protokoll renders "N old logs removed".
      */
     func compactNowJson() throws  -> String
+    
+    /**
+     * Finish a re-sign-in: exchange the code and write the fresh tokens under
+     * the EXISTING account id, so its calendars, colours and overrides survive.
+     *
+     * The row itself is untouched. Only the keychain moves, which is what makes
+     * this safe to retry: a failed exchange leaves the old (expired) tokens
+     * exactly where they were.
+     */
+    func completeAccountReconnectJson(accountId: String, requestJson: String) throws  -> String
     
     /**
      * Complete a host-driven OAuth flow: exchange the redirect's `code` (+ the
@@ -3090,6 +3112,25 @@ open func beginAccountOauthJson(adapterKind: String, valuesJson: String)throws  
 }
     
     /**
+     * Start a re-sign-in for an EXISTING account: the authorize URL, PKCE
+     * verifier and state, exactly as [`Self::begin_account_oauth_json`] but
+     * with the values taken from the account rather than a form.
+     *
+     * Works for any adapter that declares an `oauth` block. The pair it
+     * replaces took a plugin id and provider-shaped arguments and refused
+     * anything that was not Google or Microsoft Graph — so a Webex account
+     * whose grant expired could be created but never repaired.
+     */
+open func beginAccountReconnectJson(accountId: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_begin_account_reconnect_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(accountId),$0
+    )
+})
+}
+    
+    /**
      * Begin a host-driven OAuth flow for `plugin_id` (e.g.
      * `com.aperio.cal-adapter-google`). `args_json` carries the provider's
      * begin inputs — `{client_id, redirect_uri}` (Google) /
@@ -3211,6 +3252,24 @@ open func compactNowJson()throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_compact_now_json(
             self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Finish a re-sign-in: exchange the code and write the fresh tokens under
+     * the EXISTING account id, so its calendars, colours and overrides survive.
+     *
+     * The row itself is untouched. Only the keychain moves, which is what makes
+     * this safe to retry: a failed exchange leaves the old (expired) tokens
+     * exactly where they were.
+     */
+open func completeAccountReconnectJson(accountId: String, requestJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_complete_account_reconnect_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(accountId),
+        FfiConverterString.lower(requestJson),$0
     )
 })
 }
@@ -8561,6 +8620,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_begin_account_oauth_json() != 37389) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_begin_account_reconnect_json() != 47380) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_begin_oauth_json() != 10684) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -8583,6 +8645,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_compact_now_json() != 57819) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_complete_account_reconnect_json() != 24704) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_complete_oauth_json() != 7847) {

@@ -1497,128 +1497,124 @@ pub async fn set_account_secret(
     Ok(())
 }
 
-/// Re-run the Google OAuth flow against an existing account row.
-/// Reads the persisted `client_id` / `client_secret` from
-/// `config_json`, opens the system browser, and writes the fresh
-/// tokens under the EXISTING account id — preserving the
-/// downstream calendar / task list / event rows that reference
-/// it. Subsequent reads / writes route through the
-/// freshly-registered adapter without an app restart.
+/// Re-run the provider sign-in for an existing account whose grant expired.
+///
+/// Nothing here names a provider. The account already holds everything the
+/// original sign-in settled — the non-secret half in `config_json`, the client
+/// secret (if it brought its own registration) in the keychain — so a reconnect
+/// needs no form and no per-provider command. Fresh tokens are written under
+/// the EXISTING account id, preserving the calendars, task lists and event rows
+/// that reference it, and the adapter is re-registered so reads and writes
+/// route through it without a restart.
+///
+/// This replaces `reconnect_google_account` and `reconnect_microsoft_account`,
+/// which differed only in a hard-coded kind, plugin id and a closure that built
+/// two or three provider-shaped fields — and which meant an adapter added later
+/// (Webex) could be connected but never repaired.
 #[tauri::command]
-pub async fn reconnect_google_account(
+pub async fn reconnect_account(
     db: State<'_, DbHandle>,
     registry: State<'_, Arc<AdapterRegistry>>,
     event_log: State<'_, Arc<EventLogWriter>>,
     plugin_manager: State<'_, Arc<PluginManager>>,
     account_id: String,
 ) -> CommandResult<()> {
-    reconnect_oauth_account(
-        db.inner(),
-        registry.inner(),
-        event_log.inner(),
-        plugin_manager.inner(),
-        &account_id,
-        AdapterKind::new("google"),
-        PLUGIN_ID_GOOGLE,
-        "Google",
-        |config| {
-            json!({
-                "client_id": config.get("client_id").cloned().unwrap_or(Value::Null),
-                "client_secret": config
-                    .get("client_secret")
-                    .cloned()
-                    .unwrap_or(Value::Null),
-            })
-        },
-    )
-    .await
-}
-
-/// Microsoft equivalent of [`reconnect_google_account`].
-/// Re-runs the PKCE-only public-client OAuth flow with the
-/// persisted `client_id` / `authority` and writes fresh tokens
-/// against the existing account row.
-#[tauri::command]
-pub async fn reconnect_microsoft_account(
-    db: State<'_, DbHandle>,
-    registry: State<'_, Arc<AdapterRegistry>>,
-    event_log: State<'_, Arc<EventLogWriter>>,
-    plugin_manager: State<'_, Arc<PluginManager>>,
-    account_id: String,
-) -> CommandResult<()> {
-    reconnect_oauth_account(
-        db.inner(),
-        registry.inner(),
-        event_log.inner(),
-        plugin_manager.inner(),
-        &account_id,
-        AdapterKind::new("microsoft_graph"),
-        PLUGIN_ID_GRAPH,
-        "Microsoft Graph",
-        |config| {
-            json!({
-                "client_id": config.get("client_id").cloned().unwrap_or(Value::Null),
-                "authority": config
-                    .get("authority")
-                    .cloned()
-                    .unwrap_or(Value::String("common".into())),
-            })
-        },
-    )
-    .await
-}
-
-/// Shared re-OAuth flow for Google + Microsoft Graph accounts.
-/// Pulls the persisted config off the row, hands the plugin the
-/// just-the-OAuth-inputs subset (via `build_args`), persists
-/// the fresh tokens under the existing account id, and
-/// re-registers the adapter so subsequent reads route through
-/// the new credentials without an app restart.
-async fn reconnect_oauth_account<F>(
-    db: &DbHandle,
-    registry: &AdapterRegistry,
-    event_log: &EventLogWriter,
-    plugin_manager: &PluginManager,
-    account_id: &str,
-    expected_kind: AdapterKind,
-    plugin_id: &str,
-    plugin_label: &str,
-    build_args: F,
-) -> CommandResult<()>
-where
-    F: FnOnce(&Value) -> Value,
-{
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
-    let account = repo.get(account_id)?.ok_or(CommandError {
+    let account = repo.get(&account_id)?.ok_or(CommandError {
         code: "not_found",
         message: format!("account {account_id} not found"),
     })?;
-    if account.adapter_kind != expected_kind {
-        return Err(CommandError {
+    let plugin = plugin_manager
+        .plugin_for_adapter_kind(account.adapter_kind.as_str())
+        .ok_or_else(|| CommandError {
             code: "invalid_input",
-            message: format!("account is not a {plugin_label} account",),
-        });
-    }
-    let config: Value = serde_json::from_str(&account.config_json).map_err(|err| CommandError {
-        code: "internal",
-        message: format!("parse {plugin_label} config: {err}"),
-    })?;
-    let args = build_args(&config);
-    let tokens = run_plugin_auth(plugin_manager, plugin_id, args).await?;
-
-    let access = tokens
-        .get("access_token")
-        .and_then(Value::as_str)
-        .ok_or(CommandError {
-            code: "protocol",
-            message: format!("{plugin_label} plugin returned no access_token"),
+            message: format!(
+                "no loaded adapter declares accounts of kind {}",
+                account.adapter_kind.as_str()
+            ),
         })?;
-    secrets::store(&account.id, SecretSlot::AccessToken, access).map_err(|err| CommandError {
-        code: "internal",
-        message: format!("failed to store access token: {err}"),
+    let plugin_id = plugin.manifest.id.clone();
+    let schema = plugin
+        .manifest
+        .account
+        .clone()
+        .ok_or_else(|| CommandError {
+            code: "invalid_input",
+            message: "this adapter declares no account schema".into(),
+        })?;
+    let oauth = schema.oauth.as_ref().ok_or_else(|| CommandError {
+        code: "invalid_input",
+        message: format!(
+            "account kind {} does not sign in through a provider",
+            account.adapter_kind.as_str()
+        ),
     })?;
-    if let Some(refresh) = tokens.get("refresh_token").and_then(Value::as_str) {
+
+    // The account's own values: its stored config, plus the client secret it
+    // kept in the keychain when the user supplied their own registration. An
+    // account on the build's own client has neither, which `choose_oauth_client`
+    // reads as "use whatever this build carries" — the same answer it gave the
+    // first time.
+    let mut values: serde_json::Map<String, Value> = serde_json::from_str(&account.config_json)
+        .map_err(|err| CommandError {
+            code: "internal",
+            message: format!("parse account config: {err}"),
+        })?;
+    if let Some(field) = oauth.client_secret_field.as_deref() {
+        if let Ok(secret) = secrets::retrieve(&account.id, SecretSlot::OauthClientSecret) {
+            values.insert(field.to_string(), Value::String(secret));
+        }
+    }
+    let client = host_core::account_setup::choose_oauth_client(
+        oauth,
+        values.get(&oauth.client_id_field).and_then(Value::as_str),
+        oauth
+            .client_secret_field
+            .as_deref()
+            .and_then(|k| values.get(k))
+            .and_then(Value::as_str),
+    )
+    .map(|choice| choice.client)
+    .map_err(|err| CommandError {
+        code: "invalid_input",
+        message: err.to_string(),
+    })?;
+
+    // Everything else the account was configured with rides along — the tenant
+    // for Graph, the site for Webex. The per-provider closures this replaces
+    // each rebuilt two or three fields by hand and dropped the rest.
+    let mut args = values.clone();
+    args.insert(
+        oauth.client_id_field.clone(),
+        Value::String(client.id.clone()),
+    );
+    if let (Some(field), Some(secret)) = (oauth.client_secret_field.as_deref(), &client.secret) {
+        args.insert(field.to_string(), Value::String(secret.clone()));
+    }
+    let tokens = run_plugin_auth(&plugin_manager, &plugin_id, Value::Object(args)).await?;
+
+    if oauth.access_token_field.is_some() {
+        if let Some(access) = tokens.get("access_token").and_then(Value::as_str) {
+            secrets::store(&account.id, SecretSlot::AccessToken, access).map_err(|err| {
+                CommandError {
+                    code: "internal",
+                    message: format!("failed to store access token: {err}"),
+                }
+            })?;
+        }
+    }
+    if oauth.refresh_token_field.is_some() {
+        let refresh = tokens
+            .get("refresh_token")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or(CommandError {
+                code: "protocol",
+                message: "the provider returned no refresh token — the account could not be kept                           signed in"
+                    .into(),
+            })?;
         secrets::store(&account.id, SecretSlot::RefreshToken, refresh).map_err(|err| {
             CommandError {
                 code: "internal",
@@ -1627,7 +1623,7 @@ where
         })?;
         // E2E only: propagate the refreshed durable token to other devices.
         crate::credential_sync::emit_credential_set(
-            event_log,
+            &event_log,
             &shared,
             &account.id,
             SecretSlot::RefreshToken,

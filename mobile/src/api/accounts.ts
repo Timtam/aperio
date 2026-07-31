@@ -284,6 +284,35 @@ export const connectAccount = async (
   return created;
 };
 
+/** Begin a re-sign-in for an EXISTING account.
+ *
+ *  Takes only the id. The client, the redirect and whether there is a client
+ *  secret at all come off the account row and its adapter's schema, host-side —
+ *  so a reconnect needs no form and the caller carries no credential. */
+export const beginAccountReconnect = async (
+  accountId: string,
+): Promise<OAuthAuthorize> =>
+  JSON.parse(
+    await CalFfi.beginAccountReconnectJson(accountId),
+  ) as OAuthAuthorize;
+
+/** Finish a re-sign-in: fresh tokens land under the EXISTING account id, so its
+ *  calendars, colours and overrides survive. Works for every adapter that
+ *  declares an OAuth block — the pair it replaces knew only Google and
+ *  Microsoft Graph by name. */
+export const completeAccountReconnect = async (
+  accountId: string,
+  request: {
+    code: string;
+    pkce_verifier: string;
+    state: string;
+    returned_state: string;
+  },
+): Promise<Account> =>
+  JSON.parse(
+    await CalFfi.completeAccountReconnectJson(accountId, JSON.stringify(request)),
+  ) as Account;
+
 /** The authorize-phase result from {@link beginOauth}: the Host built the consent
  *  URL + PKCE verifier + CSRF state (pure, no network). The caller opens
  *  `authorize_url` in a native auth session and replays `pkce_verifier`/`state`

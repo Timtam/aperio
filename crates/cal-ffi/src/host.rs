@@ -7686,6 +7686,134 @@ impl Host {
         })
     }
 
+    /// Start a re-sign-in for an EXISTING account: the authorize URL, PKCE
+    /// verifier and state, exactly as [`Self::begin_account_oauth_json`] but
+    /// with the values taken from the account rather than a form.
+    ///
+    /// Works for any adapter that declares an `oauth` block. The pair it
+    /// replaces took a plugin id and provider-shaped arguments and refused
+    /// anything that was not Google or Microsoft Graph — so a Webex account
+    /// whose grant expired could be created but never repaired.
+    pub fn begin_account_reconnect_json(&self, account_id: String) -> Result<String, StoreError> {
+        let (account, plugin_id, schema) = self.oauth_account(&account_id)?;
+        let oauth = schema.oauth.as_ref().expect("checked in oauth_account");
+        let values = self.reconnect_values(&account, oauth);
+        let client = self.oauth_client_for(oauth, &values)?;
+        let args = serde_json::json!({
+            "phase": "authorize",
+            "client_id": client.id,
+            "redirect_uri": oauth.app_redirect_uri,
+        });
+        let bytes = self
+            .runtime
+            .block_on(async {
+                self.plugin_manager
+                    .interactive_auth(&plugin_id, &args.to_string())
+                    .await
+            })
+            .map_err(|e| StoreError::Auth {
+                detail: e.to_string(),
+            })?;
+        String::from_utf8(bytes).map_err(|e| StoreError::Protocol {
+            detail: format!("authorize blob: {e}"),
+        })
+    }
+
+    /// Finish a re-sign-in: exchange the code and write the fresh tokens under
+    /// the EXISTING account id, so its calendars, colours and overrides survive.
+    ///
+    /// The row itself is untouched. Only the keychain moves, which is what makes
+    /// this safe to retry: a failed exchange leaves the old (expired) tokens
+    /// exactly where they were.
+    pub fn complete_account_reconnect_json(
+        &self,
+        account_id: String,
+        request_json: String,
+    ) -> Result<String, StoreError> {
+        let req: AccountReconnectRequest = from_json("account reconnect", &request_json)?;
+        let (account, plugin_id, schema) = self.oauth_account(&account_id)?;
+        let oauth = schema.oauth.as_ref().expect("checked in oauth_account");
+        let values = self.reconnect_values(&account, oauth);
+        let client = self.oauth_client_for(oauth, &values)?;
+
+        let exchange = serde_json::json!({
+            "phase": "exchange",
+            "client_id": client.id,
+            "client_secret": client.secret,
+            "code": req.code,
+            "pkce_verifier": req.pkce_verifier,
+            "state": req.state,
+            "returned_state": req.returned_state,
+            "redirect_uri": oauth.app_redirect_uri,
+        });
+        let bytes = self
+            .runtime
+            .block_on(async {
+                self.plugin_manager
+                    .interactive_auth(&plugin_id, &exchange.to_string())
+                    .await
+            })
+            .map_err(|e| StoreError::Auth {
+                detail: e.to_string(),
+            })?;
+        let tokens: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|e| StoreError::Protocol {
+                detail: format!("token blob: {e}"),
+            })?;
+
+        // Only the tokens the plugin asked to be handed back. A provider that
+        // returns no refresh token on a re-consent has left the account no
+        // better off, so that is an error rather than a silent half-repair.
+        let mut writes: Vec<(SecretSlot, String)> = Vec::new();
+        if oauth.refresh_token_field.is_some() {
+            let refresh = tokens
+                .get("refresh_token")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| StoreError::Protocol {
+                    detail: "the provider returned no refresh token — the account could not be \
+                             kept signed in"
+                        .to_string(),
+                })?
+                .to_string();
+            writes.push((SecretSlot::RefreshToken, refresh));
+        }
+        if oauth.access_token_field.is_some() {
+            if let Some(access) = tokens
+                .get("access_token")
+                .and_then(serde_json::Value::as_str)
+            {
+                writes.push((SecretSlot::AccessToken, access.to_string()));
+            }
+        }
+
+        let shared = self.db.shared();
+        for (slot, value) in &writes {
+            self.secret_store
+                .store(&account.id, *slot, value)
+                .map_err(|err| StoreError::Storage {
+                    detail: format!("store {}: {err}", slot.wire_name()),
+                })?;
+            // E2E only: the user's other devices get the refreshed grant too.
+            host_core::credential_sync::emit_credential_set(
+                &self.writer,
+                &shared,
+                &account.id,
+                *slot,
+                value,
+            );
+        }
+        // Live for the rest of the session without a restart. A failure leaves
+        // the fresh tokens in place — retrying costs no second sign-in.
+        self.registry
+            .register(&account)
+            .map_err(|err| StoreError::Storage {
+                detail: format!("adapter registration failed: {err}"),
+            })?;
+        to_json(&account)
+    }
+
     /// Finish a schema-driven connect: exchange the code if there is an OAuth
     /// block, then create the account.
     ///
@@ -7901,6 +8029,64 @@ impl Host {
     }
 
     /// The plugin id + account schema for an adapter kind, or a typed error.
+    /// The values a RECONNECT signs in with.
+    ///
+    /// A reconnect needs no form: the account already holds everything the
+    /// original sign-in settled. The non-secret half is its `config_json`; the
+    /// client secret, if this account brought its own registration, is in the
+    /// keychain. An account on the build's own registration has neither — and
+    /// that is the point, because `choose_oauth_client` reads the empty pair as
+    /// "use whatever this build carries", which is exactly what it did the first
+    /// time.
+    fn reconnect_values(
+        &self,
+        account: &host_core::accounts::Account,
+        oauth: &plugin_core::account_schema::AccountOauth,
+    ) -> serde_json::Map<String, serde_json::Value> {
+        let mut values: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(&account.config_json).unwrap_or_default();
+        if let Some(field) = oauth.client_secret_field.as_deref() {
+            if let Ok(secret) = self
+                .secret_store
+                .retrieve(&account.id, SecretSlot::OauthClientSecret)
+            {
+                values.insert(field.to_string(), serde_json::Value::String(secret));
+            }
+        }
+        values
+    }
+
+    /// Look an account up and resolve the schema its adapter declares, refusing
+    /// early when that adapter does not sign in through a provider.
+    fn oauth_account(
+        &self,
+        account_id: &str,
+    ) -> Result<
+        (
+            host_core::accounts::Account,
+            String,
+            plugin_core::account_schema::AccountSchema,
+        ),
+        StoreError,
+    > {
+        let shared = self.db.shared();
+        let account = AccountsRepo::new(&shared)
+            .get(account_id)
+            .map_err(acc_err)?
+            .ok_or(StoreError::NotFound)?;
+        let (plugin_id, schema) = self.schema_for(account.adapter_kind.as_str())?;
+        if schema.oauth.is_none() {
+            return Err(StoreError::InvalidField {
+                field: "account_id".to_string(),
+                detail: format!(
+                    "account kind {} does not sign in through a provider",
+                    account.adapter_kind.as_str()
+                ),
+            });
+        }
+        Ok((account, plugin_id, schema))
+    }
+
     fn schema_for(
         &self,
         adapter_kind: &str,
@@ -7947,6 +8133,17 @@ impl Host {
 /// non-secret adapter config the registry reads back (`{client_id, client_secret}`
 /// for Google, `{client_id, authority}` for Microsoft); the remaining fields are
 /// the token-exchange inputs forwarded to the plugin's `phase:"exchange"`.
+/// What a re-sign-in sends back. No client fields: the account already holds
+/// them, and asking the caller to resend a client secret it had to read out of
+/// the keychain first is a round trip that can only go wrong.
+#[derive(serde::Deserialize)]
+struct AccountReconnectRequest {
+    code: String,
+    pkce_verifier: String,
+    state: String,
+    returned_state: String,
+}
+
 #[derive(serde::Deserialize)]
 struct CompleteOAuthRequest {
     adapter_kind: AdapterKind,
