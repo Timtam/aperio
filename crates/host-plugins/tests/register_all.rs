@@ -207,14 +207,16 @@ fn every_bundled_adapter_answers_both_picker_questions() {
         );
     }
 
-    // Every adapter that is currently bundled offers data. When a sync adapter
-    // is published this stops being true, and the assertion below it is the one
-    // that still has to hold.
-    for info in &kinds {
-        assert!(
-            info.holds_data,
-            "{} is sync-only and now published — check that the sync settings              offer it, since the Add-account picker deliberately will not",
-            info.kind,
-        );
-    }
+    // Exactly one adapter answers `can_sync` today, and it is none of them:
+    // the sync plugins declare no `adapter_kind` yet. When they do, this counts
+    // what the sync settings will offer.
+    let syncable: Vec<&str> = kinds
+        .iter()
+        .filter(|i| i.can_sync)
+        .map(|i| i.kind.as_str())
+        .collect();
+    assert!(
+        syncable.is_empty(),
+        "sync adapters became selectable as targets: {syncable:?} — the sync          settings must offer them, and the restore path must read the account",
+    );
 }

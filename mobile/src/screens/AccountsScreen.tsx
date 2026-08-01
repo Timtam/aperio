@@ -217,11 +217,8 @@ export default function AccountsScreen() {
     listAdapterKinds()
       .then((kinds) => {
         if (!cancelled) {
-          // See the desktop twin: `holds_data` keeps sync-only adapters out
-          // of this picker. They are offered in the sync settings instead.
-          setAvailableKinds(
-            kinds.filter((k) => !HOST_INTERNAL_KINDS.has(k.kind) && k.holds_data),
-          );
+          // Storage backends belong here too — see the desktop twin.
+          setAvailableKinds(kinds.filter((k) => !HOST_INTERNAL_KINDS.has(k.kind)));
         }
       })
       .catch(() => {
