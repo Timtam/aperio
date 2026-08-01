@@ -471,6 +471,26 @@ pub fn plan_new_account(
 pub fn init_config(
     schema: &AccountSchema,
     config_json: &str,
+    read_secret: impl FnMut(SecretSlot) -> std::result::Result<String, SecretError>,
+) -> Result<String> {
+    init_config_with_local(schema, config_json, &Map::new(), read_secret)
+}
+
+/// [`init_config`], plus this device's half of the account.
+///
+/// An adapter sees ONE configuration. It never learns that some of its fields
+/// travelled with the account row and some were read out of this machine's own
+/// store — which is the point: `device_local` is a statement about where a value
+/// is kept, not about what the adapter does with it.
+///
+/// The local half wins where both carry a key. That only happens after a
+/// migration, when a value that used to travel has been marked device-local and
+/// the old copy is still sitting in `config_json`; the local one is this
+/// machine's answer and the row's is some other machine's.
+pub fn init_config_with_local(
+    schema: &AccountSchema,
+    config_json: &str,
+    device_local: &Map<String, Value>,
     mut read_secret: impl FnMut(SecretSlot) -> std::result::Result<String, SecretError>,
 ) -> Result<String> {
     let mut cfg: Value = serde_json::from_str(config_json)
@@ -480,6 +500,11 @@ pub fn init_config(
     })?;
     for key in HOST_KEYS {
         obj.remove(key);
+    }
+    // This device's half, merged in before anything reads the map, so the rest
+    // of this function cannot tell the two apart.
+    for (key, value) in device_local {
+        obj.insert(key.clone(), value.clone());
     }
 
     let (id_field, secret_field) = match schema.oauth.as_ref() {
@@ -597,6 +622,87 @@ fn resolve_oauth_client(
 
 #[cfg(test)]
 mod tests {
+    /// The adapter must see one configuration, not two halves.
+    #[test]
+    fn the_local_half_arrives_alongside_the_travelling_one() {
+        let mut key_path = field("key_path", AccountFieldKind::File, None, false);
+        key_path.device_local = true;
+        let schema = AccountSchema {
+            fields: vec![field("host", AccountFieldKind::Text, None, false), key_path],
+            ..Default::default()
+        };
+        let mut local = Map::new();
+        local.insert(
+            "key_path".into(),
+            Value::String("/home/anna/.ssh/id_ed25519".into()),
+        );
+
+        let json =
+            init_config_with_local(&schema, r#"{"host":"backup.example.test"}"#, &local, |_| {
+                Err(SecretError::NotFound)
+            })
+            .unwrap();
+        let cfg: Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(
+            cfg.get("host").and_then(|v| v.as_str()),
+            Some("backup.example.test"),
+        );
+        assert_eq!(
+            cfg.get("key_path").and_then(|v| v.as_str()),
+            Some("/home/anna/.ssh/id_ed25519"),
+        );
+    }
+
+    /// After a field is newly marked device-local, the row may still carry the
+    /// old shared value. This machine's answer is the right one — the row's is
+    /// whichever device wrote last.
+    #[test]
+    fn the_local_half_wins_over_a_leftover_in_the_row() {
+        let mut key_path = field("key_path", AccountFieldKind::File, None, false);
+        key_path.device_local = true;
+        let schema = AccountSchema {
+            fields: vec![key_path],
+            ..Default::default()
+        };
+        let mut local = Map::new();
+        local.insert("key_path".into(), Value::String("/home/anna/mine".into()));
+
+        let json = init_config_with_local(
+            &schema,
+            r#"{"key_path":"/home/someone-else/theirs"}"#,
+            &local,
+            |_| Err(SecretError::NotFound),
+        )
+        .unwrap();
+        let cfg: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            cfg.get("key_path").and_then(|v| v.as_str()),
+            Some("/home/anna/mine"),
+        );
+    }
+
+    /// The overwhelming majority of accounts have no local half at all.
+    #[test]
+    fn no_local_half_changes_nothing() {
+        let schema = AccountSchema {
+            fields: vec![field("url", AccountFieldKind::Url, None, false)],
+            ..Default::default()
+        };
+        let with = init_config_with_local(
+            &schema,
+            r#"{"url":"https://example.test/"}"#,
+            &Map::new(),
+            |_| Err(SecretError::NotFound),
+        )
+        .unwrap();
+        let without = init_config(&schema, r#"{"url":"https://example.test/"}"#, |_| {
+            Err(SecretError::NotFound)
+        })
+        .unwrap();
+        assert_eq!(with, without);
+    }
+
     /// The rule from the schema, exercised where it takes effect.
     ///
     /// A marked field must not reach `config_json`, because that column is what
