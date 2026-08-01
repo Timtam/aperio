@@ -194,11 +194,22 @@ pub fn travels_between_devices(manager: &plugin_core::PluginManager, adapter_kin
     if AdapterKind::new(adapter_kind).is_host_internal() {
         return false;
     }
+    // `all()` rather than `adapter_kinds()`, on purpose: that one hides
+    // disabled plugins, and whether an adapter is sync-only is a fact about the
+    // adapter, not about whether the user has it switched on today. Reading it
+    // through the filtered view would make a disabled sync target answer
+    // "unknown kind" and start travelling — the one thing this rule exists to
+    // stop, reachable by a toggle in the settings.
     manager
-        .adapter_kinds()
+        .all()
         .into_iter()
-        .find(|info| info.kind == adapter_kind)
-        .is_none_or(|info| info.holds_data)
+        .find(|p| p.manifest.adapter_kind.as_deref() == Some(adapter_kind))
+        .is_none_or(|p| {
+            p.manifest
+                .capabilities
+                .iter()
+                .any(|c| *c != plugin_core::capability::Capability::Sync)
+        })
 }
 
 #[derive(Debug, Error)]
@@ -629,6 +640,35 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Switching a plugin off in the settings must not change where its
+    /// accounts go.
+    ///
+    /// The obvious implementation asks `adapter_kinds()`, which hides disabled
+    /// plugins — so a disabled sync target would read as an unknown kind and
+    /// start travelling, the exact thing this rule prevents, reachable by a
+    /// toggle. Whether an adapter is sync-only is a fact about the adapter, not
+    /// about whether the user has it switched on today.
+    #[test]
+    fn disabling_a_plugin_does_not_send_its_accounts_travelling() {
+        let manager = manager_with_sync_only();
+        assert!(!travels_between_devices(&manager, SYNC_ONLY_KIND));
+
+        let plugin_id = manager
+            .all()
+            .into_iter()
+            .find(|p| p.manifest.adapter_kind.as_deref() == Some(SYNC_ONLY_KIND))
+            .expect("the fixture plugin is loaded")
+            .manifest
+            .id
+            .clone();
+        manager.set_enabled(&plugin_id, false);
+
+        assert!(
+            !travels_between_devices(&manager, SYNC_ONLY_KIND),
+            "a disabled sync target started travelling",
+        );
     }
 
     #[test]

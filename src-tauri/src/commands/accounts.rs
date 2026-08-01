@@ -797,6 +797,7 @@ pub async fn connect_google_account(
         crate::credential_sync::emit_credential_set(
             &event_log,
             &shared,
+            &plugin_manager,
             &created.id,
             SecretSlot::RefreshToken,
             refresh,
@@ -915,6 +916,7 @@ pub async fn connect_microsoft_account(
         crate::credential_sync::emit_credential_set(
             &event_log,
             &shared,
+            &plugin_manager,
             &created.id,
             SecretSlot::RefreshToken,
             refresh,
@@ -1464,6 +1466,7 @@ pub async fn connect_account(
         crate::credential_sync::emit_credential_set(
             &event_log,
             &shared,
+            &plugin_manager,
             &created.id,
             SecretSlot::RefreshToken,
             &refresh,
@@ -1602,7 +1605,14 @@ pub async fn set_account_secret(
         message: format!("failed to store credential: {err}"),
     })?;
     // E2E only: propagate the (re-)entered secret to other devices.
-    crate::credential_sync::emit_credential_set(&event_log, &shared, &account_id, slot, &secret);
+    crate::credential_sync::emit_credential_set(
+        &event_log,
+        &shared,
+        &plugin_manager,
+        &account_id,
+        slot,
+        &secret,
+    );
     // Register so the adapter is live for the rest of this
     // session. A registration failure leaves the secret in place
     // — the user can retry without re-typing the password.
@@ -1749,6 +1759,7 @@ pub async fn reconnect_account(
             crate::credential_sync::emit_credential_set(
                 &event_log,
                 &shared,
+                &plugin_manager,
                 &account.id,
                 SecretSlot::RefreshToken,
                 value,

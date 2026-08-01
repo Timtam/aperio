@@ -7,7 +7,7 @@
 //! the *only* place that turns a stored secret into a `credential.*`
 //! event, so the E2E gate lives in exactly one auditable spot.
 //!
-//! The gate is doubled up on purpose:
+//! The gate is stacked on purpose:
 //!
 //!   1. **E2E must be on.** Checked against `PREF_E2E_ENABLED`, the local
 //!      mirror of `meta.json.e2e_enabled` (the same flag
@@ -18,6 +18,12 @@
 //!      `api_token` may travel; the short-lived `access_token` (re-derived
 //!      per device) and the E2E key itself are refused even if a caller
 //!      passes them. (See [`SecretSlot::syncable_from_wire`].)
+//!   3. **The account must travel.** A credential is keyed to an account id,
+//!      and an account that belongs to the device that made it never puts that
+//!      id on the wire — so its secret would arrive keyed to a row the other
+//!      device does not have, for an adapter it does not run. The kind's own
+//!      declared capabilities answer; see
+//!      [`crate::accounts::travels_between_devices`].
 //!
 //! The matching purge side — making sure these events never survive an
 //! E2E *downgrade* — lives in the `disable_sync_encryption` flow.
@@ -28,7 +34,7 @@ use sync_core::{
 };
 use sync_engine::{EventLogWriter, SecretSlot, SecretStore};
 
-use crate::accounts::AccountsRepo;
+use crate::accounts::{AccountsRepo, AdapterKind};
 use crate::db::SharedConn;
 use crate::user_prefs::UserPrefsRepo;
 
@@ -49,26 +55,59 @@ pub fn e2e_enabled(conn: &SharedConn) -> bool {
         == Some("true")
 }
 
+/// The kind stored for this account id, or `None` when this device holds no
+/// row under it.
+///
+/// The two emitters below take an account id and need a kind; they already hold
+/// the connection the row lives in, so they read it rather than making nine call
+/// sites each derive an answer that only has to be wrong once. A read that fails
+/// is `None` for the same reason a missing row is: nothing on this device can
+/// say what kind that id names. The callers decide what to do about it — and
+/// they decide differently, see each one.
+fn stored_adapter_kind(conn: &SharedConn, account_id: &str) -> Option<AdapterKind> {
+    match AccountsRepo::new(conn).get(account_id) {
+        Ok(account) => account.map(|account| account.adapter_kind),
+        Err(err) => {
+            tracing::warn!(?err, account_id, "credential emit: account lookup failed");
+            None
+        }
+    }
+}
+
 /// Emit a `credential.set` event for one account secret — but ONLY when
-/// E2E is on *and* the slot is on the syncable allowlist. Otherwise it is
-/// a no-op and the secret stays device-local (keychain only). Call this
-/// right after a successful secret-store write.
+/// E2E is on, the slot is on the syncable allowlist *and* the account is one
+/// that travels between devices. Otherwise it is a no-op and the secret stays
+/// device-local (keychain only). Call this right after a successful
+/// secret-store write.
 pub fn emit_credential_set(
     event_log: &EventLogWriter,
     conn: &SharedConn,
+    manager: &plugin_core::PluginManager,
     account_id: &str,
     slot: SecretSlot,
     secret: &str,
 ) {
-    if account_id == "local" {
-        return;
-    }
     // Defense in depth: refuse non-syncable slots (access_token / the E2E
     // key) before the secret can ever reach an event.
     if SecretSlot::syncable_from_wire(slot.wire_name()).is_none() {
         return;
     }
     if !e2e_enabled(conn) {
+        return;
+    }
+    // The hand-written `local` skip that used to stand here is subsumed by the
+    // predicate: `local` is host-internal, as is every other kind that belongs
+    // to the device that made it.
+    let Some(kind) = stored_adapter_kind(conn, account_id) else {
+        // A secret is the one thing that must never go out on a guess, so an id
+        // this device cannot resolve stays home. Every caller writes the secret
+        // against a row it has just created or just read, which makes this a
+        // can't-happen — logged rather than silent, because reaching it means a
+        // caller emitted for an account that was already gone.
+        tracing::warn!(account_id, "credential.set: no account row; not emitting");
+        return;
+    };
+    if !crate::accounts::travels_between_devices(manager, kind.as_str()) {
         return;
     }
     event_log.append(SyncEvent::CredentialSet(CredentialPayload {
@@ -85,17 +124,31 @@ pub fn emit_credential_set(
 pub fn emit_credential_cleared(
     event_log: &EventLogWriter,
     conn: &SharedConn,
+    manager: &plugin_core::PluginManager,
     account_id: &str,
     slot: SecretSlot,
 ) {
-    if account_id == "local" {
-        return;
-    }
     if SecretSlot::syncable_from_wire(slot.wire_name()).is_none() {
         return;
     }
     if !e2e_enabled(conn) {
         return;
+    }
+    match stored_adapter_kind(conn, account_id) {
+        // The ordinary case: the row is here and its kind answers.
+        Some(kind) if !crate::accounts::travels_between_devices(manager, kind.as_str()) => return,
+        Some(_) => {}
+        // No row — which a caller clearing a slot as part of tearing an account
+        // down would see, since the row may already be gone. This one goes the
+        // OTHER way from `emit_credential_set` above, and deliberately: the
+        // event carries no secret, so sending one that turns out to be
+        // unnecessary costs an id and a slot name inside an already-encrypted
+        // log, while dropping it leaves a revoked credential alive in another
+        // device's keychain with nothing left to say so.
+        None => tracing::debug!(
+            account_id,
+            "credential.cleared: no account row; emitting anyway (a clear must not be lost)",
+        ),
     }
     event_log.append(SyncEvent::CredentialCleared(CredentialSlotPayload {
         account_id: account_id.to_string(),
@@ -134,6 +187,8 @@ pub fn emit_all_local_credentials(
         }
     };
     for account in accounts {
+        // [`emit_credential_set`] asks the same question per secret; skipping
+        // the whole account here saves the keychain reads for one that stays.
         if !crate::accounts::travels_between_devices(manager, account.adapter_kind.as_str()) {
             continue;
         }
@@ -145,7 +200,7 @@ pub fn emit_all_local_credentials(
             // Read through the injected platform secret store (the desktop
             // keyring; the mobile keychain bridge) — never a hard-coded backend.
             if let Ok(secret) = secrets.retrieve(&account.id, slot) {
-                emit_credential_set(event_log, conn, &account.id, slot, &secret);
+                emit_credential_set(event_log, conn, manager, &account.id, slot, &secret);
             }
         }
     }
@@ -210,7 +265,10 @@ pub fn downgrade_log_to_plaintext(dek: &[u8; sync_core::KEY_LEN], raw: LogFile) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::DbHandle;
+    use std::sync::Arc;
     use sync_core::{DeviceId, EventPayload, IdPayload};
+    use tempfile::TempDir;
 
     fn ts() -> chrono::DateTime<chrono::Utc> {
         chrono::DateTime::parse_from_rfc3339("2026-06-08T09:14:22Z")
@@ -307,5 +365,207 @@ mod tests {
         };
         let out2 = downgrade_log_to_plaintext(&dek, encrypted_log);
         assert_eq!(out2.bytes, plaintext_log.bytes);
+    }
+
+    // ── whose credentials may leave this device ───────────────────────────
+
+    /// The secret every emit test offers. Distinctive enough that finding it
+    /// anywhere in the log bytes means it really was written.
+    const SECRET: &str = "s3cr3t-p4ss";
+
+    /// Appended last by [`flush_and_read`] — see there.
+    const SENTINEL: &str = "sentinel-after-the-emits";
+
+    /// A manager holding exactly one real DATA adapter, so the "it travels"
+    /// case is answered by a shipped `plugin.json` and not by this test. iCal
+    /// is the cheapest one: no keychain secret, no network on register. The
+    /// predicate's own tests use the same fixture, next to the predicate.
+    fn manager_with_ical() -> plugin_core::PluginManager {
+        let manager = plugin_core::PluginManager::new("0.1.0");
+        let manifest = plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
+            "../../cal-adapter-ical-plugin/plugin.json"
+        ))
+        .expect("the shipped iCal manifest parses");
+        let descriptor = unsafe { cal_adapter_ical_plugin::build_descriptor() };
+        manager
+            .register_static(manifest, descriptor, cal_adapter_ical_plugin::DESTROY_FN)
+            .expect("register the static iCal plugin");
+        manager
+    }
+
+    /// A device with E2E on, i.e. gate 1 open — so what the tests below observe
+    /// is the account gate and nothing else.
+    fn e2e_device() -> (TempDir, DbHandle) {
+        let dir = TempDir::new().unwrap();
+        let db = DbHandle::open(dir.path().join("test.sqlite")).unwrap();
+        UserPrefsRepo::new(&db.shared())
+            .set(PREF_E2E_ENABLED, "true")
+            .expect("turn E2E on");
+        (dir, db)
+    }
+
+    /// Everything the writer actually put on disk, once it is certainly done.
+    ///
+    /// The drain task is asynchronous, so "nothing was emitted" cannot be
+    /// asserted by sleeping and hoping. This appends a sentinel event LAST and
+    /// waits for THAT line: the queue is ordered, so once the sentinel is on
+    /// disk anything the emitters appended before it is too — and whatever is
+    /// missing was never appended at all.
+    async fn flush_and_read(tmp: &TempDir, writer: Arc<EventLogWriter>) -> String {
+        writer.append(SyncEvent::EventDeleted(IdPayload {
+            id: SENTINEL.to_string(),
+        }));
+        drop(writer);
+        let pending = tmp.path().join("sync").join("log").join("pending");
+        for _ in 0..100 {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            let Ok(mut entries) = tokio::fs::read_dir(&pending).await else {
+                continue;
+            };
+            let Ok(Some(entry)) = entries.next_entry().await else {
+                continue;
+            };
+            let Ok(bytes) = tokio::fs::read(entry.path()).await else {
+                continue;
+            };
+            let text = String::from_utf8_lossy(&bytes).into_owned();
+            if text.contains(SENTINEL) {
+                return text;
+            }
+        }
+        panic!("the event-log writer never flushed the sentinel within 2 s");
+    }
+
+    #[tokio::test]
+    async fn a_credential_for_an_account_that_travels_is_emitted() {
+        // The ordinary case: connect a feed on the laptop with E2E on, and the
+        // phone can use it without the password being typed again.
+        let (tmp, db) = e2e_device();
+        let shared = db.shared();
+        let manager = manager_with_ical();
+        let account = AccountsRepo::new(&shared)
+            .create(AdapterKind::new("ical"), "Team feed", "{}")
+            .unwrap();
+        let writer = EventLogWriter::spawn(
+            tmp.path().to_path_buf(),
+            DeviceId::from_string("dev-travels".into()),
+        );
+
+        emit_credential_set(
+            &writer,
+            &shared,
+            &manager,
+            &account.id,
+            SecretSlot::Password,
+            SECRET,
+        );
+        emit_credential_cleared(
+            &writer,
+            &shared,
+            &manager,
+            &account.id,
+            SecretSlot::Password,
+        );
+
+        let text = flush_and_read(&tmp, writer).await;
+        assert!(text.contains("credential.set"), "got: {text}");
+        assert!(text.contains("credential.cleared"), "got: {text}");
+        assert!(text.contains(&account.id));
+        assert!(
+            text.contains(SECRET),
+            "carrying the secret is the whole point of the event",
+        );
+    }
+
+    #[tokio::test]
+    async fn a_credential_for_a_host_internal_account_is_not_emitted() {
+        // The device's own calendar is backed by an OS permission grant on THIS
+        // phone. Its row never crosses the wire, so a secret keyed to its id
+        // would land on a device that has no such row and no such adapter —
+        // exposure bought for nothing.
+        let (tmp, db) = e2e_device();
+        let shared = db.shared();
+        let manager = manager_with_ical();
+        let account = AccountsRepo::new(&shared)
+            .create(
+                AdapterKind::new(AdapterKind::DEVICE_CALENDAR),
+                "This phone",
+                "{}",
+            )
+            .unwrap();
+        let writer = EventLogWriter::spawn(
+            tmp.path().to_path_buf(),
+            DeviceId::from_string("dev-stays".into()),
+        );
+
+        emit_credential_set(
+            &writer,
+            &shared,
+            &manager,
+            &account.id,
+            SecretSlot::Password,
+            SECRET,
+        );
+        emit_credential_cleared(
+            &writer,
+            &shared,
+            &manager,
+            &account.id,
+            SecretSlot::Password,
+        );
+
+        let text = flush_and_read(&tmp, writer).await;
+        assert!(!text.contains("credential.set"), "got: {text}");
+        assert!(!text.contains("credential.cleared"), "got: {text}");
+        assert!(!text.contains(&account.id));
+        assert!(
+            !text.contains(SECRET),
+            "a secret for an account that stays on this device reached the log",
+        );
+    }
+
+    #[tokio::test]
+    async fn a_clear_still_travels_when_the_account_row_is_already_gone() {
+        // The two emitters answer the missing row in opposite directions, which
+        // is the decision this test pins down. A `set` carries a secret and must
+        // never send one on a guess about a kind nothing here can name. A
+        // `cleared` carries none: dropping it would leave a revoked credential
+        // alive in another device's keychain with nothing left to say so, while
+        // sending one that turns out to be unnecessary is a delete of a slot the
+        // receiver does not have.
+        let (tmp, db) = e2e_device();
+        let shared = db.shared();
+        let manager = manager_with_ical();
+        let writer = EventLogWriter::spawn(
+            tmp.path().to_path_buf(),
+            DeviceId::from_string("dev-gone".into()),
+        );
+
+        emit_credential_set(
+            &writer,
+            &shared,
+            &manager,
+            "already-deleted",
+            SecretSlot::Password,
+            SECRET,
+        );
+        emit_credential_cleared(
+            &writer,
+            &shared,
+            &manager,
+            "already-deleted",
+            SecretSlot::Password,
+        );
+
+        let text = flush_and_read(&tmp, writer).await;
+        assert!(
+            text.contains("credential.cleared"),
+            "a revocation must not be lost because the row it names is gone: {text}",
+        );
+        assert!(!text.contains("credential.set"), "got: {text}");
+        assert!(
+            !text.contains(SECRET),
+            "a secret went out for an id this device cannot resolve",
+        );
     }
 }

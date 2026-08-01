@@ -2271,6 +2271,7 @@ impl Host {
             host_core::credential_sync::emit_credential_set(
                 &self.writer,
                 &shared,
+                &self.plugin_manager,
                 &created.id,
                 slot,
                 &secret,
@@ -2576,6 +2577,7 @@ impl Host {
         host_core::credential_sync::emit_credential_set(
             &self.writer,
             &shared,
+            &self.plugin_manager,
             &account_id,
             slot,
             &secret,
@@ -7328,6 +7330,7 @@ impl Host {
             host_core::credential_sync::emit_credential_set(
                 &self.writer,
                 &shared,
+                &self.plugin_manager,
                 &account.id,
                 *slot,
                 value,
@@ -7503,6 +7506,7 @@ impl Host {
             host_core::credential_sync::emit_credential_set(
                 &self.writer,
                 &shared,
+                &self.plugin_manager,
                 &created.id,
                 SecretSlot::RefreshToken,
                 &refresh,
