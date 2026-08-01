@@ -99,6 +99,19 @@ impl UserPrefsHostKeyVerifier {
     }
 }
 
+/// The registry's [`crate::registry::HostKeyPins`], backed by the same prefs the
+/// confirmation dialog writes to.
+///
+/// Deliberately the same store and the same key shape as the path this
+/// replaces. A user who already confirmed a fingerprint must not be asked
+/// again just because the account layer changed underneath them — the pin
+/// belongs to the machine they are talking to, not to how Aperio models it.
+impl crate::registry::HostKeyPins for UserPrefsHostKeyVerifier {
+    fn peek(&self, host_port: &str) -> Option<String> {
+        UserPrefsHostKeyVerifier::peek(self, host_port)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

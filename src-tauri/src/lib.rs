@@ -155,6 +155,12 @@ pub fn run() {
     registry.set_device_local_store(Arc::new(host_core::account_local::PrefsDeviceLocal::new(
         db.shared(),
     )));
+    // Same moment, same reason. An adapter that pins host keys cannot be
+    // opened at all until this is set, which is the safe direction to fail
+    // in: refusing to connect is recoverable, connecting unverified is not.
+    registry.set_host_key_pins(Arc::new(
+        host_core::sftp_host_keys::UserPrefsHostKeyVerifier::new(db.shared()),
+    ));
     {
         let shared = db.shared();
         let repo = accounts::AccountsRepo::new(&shared);

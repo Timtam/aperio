@@ -148,6 +148,35 @@ pub struct AccountFieldOption {
     pub label_key: Option<String>,
 }
 
+/// Where a host-key pin comes from, and where it goes.
+///
+/// An adapter speaking a protocol with trust-on-first-use — SSH is the one in
+/// the tree — cannot ask the user to type a fingerprint. It has to be shown one
+/// the host probed, confirmed, and remembered, and it must refuse to connect
+/// until that has happened.
+///
+/// The plugin cannot do that itself. Confirming a fingerprint is a dialog, the
+/// remembering is per device and belongs to the host, and a plugin left to its
+/// own devices with an empty pin does the one thing that must not happen: it
+/// accepts whatever key the network presents and remembers that. There is no
+/// error anywhere, and the first connection after that is indistinguishable
+/// from a machine-in-the-middle.
+///
+/// So the adapter declares the three keys and the host does the rest — the same
+/// arrangement as [`AccountSchema::state_dir_field`], which is also a value the
+/// plugin needs and only the host can produce.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountHostKeyPin {
+    /// The init-config key the confirmed fingerprint is written to.
+    pub field: String,
+    /// The field holding the host name, used to look the pin up.
+    pub host_field: String,
+    /// The field holding the port. A pin is per host AND port: the same machine
+    /// on two ports can present two keys, and treating them as one would accept
+    /// a key nobody confirmed.
+    pub port_field: String,
+}
+
 /// A field's starting value.
 ///
 /// Deliberately not arbitrary JSON: a default is a checkbox state or a piece of
@@ -225,6 +254,9 @@ pub struct AccountField {
     pub max: Option<i64>,
 
     /// Whether this value is meaningful only on the machine that entered it.
+    ///
+    /// Set on a path, a device-specific choice, or anything else that would be
+    /// wrong on another machine.
     ///
     /// An account row travels between a user's devices. Most of what it carries
     /// travels well — a server address, a user name, a client id, the name of a
@@ -350,6 +382,12 @@ pub struct AccountSchema {
     /// refusing to open.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state_dir_field: Option<String>,
+
+    /// Declared by an adapter whose protocol pins host keys. See
+    /// [`AccountHostKeyPin`] for why the host has to supply this and the plugin
+    /// cannot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_key_pin: Option<AccountHostKeyPin>,
 
     /// Whether instances of this plugin get a host-channel capability token, so
     /// they can report a rotated credential back and have the host persist it.
@@ -638,6 +676,28 @@ impl AccountSchema {
                     )))
                 }
                 _ => {}
+            }
+        }
+
+        if let Some(pin) = &self.host_key_pin {
+            // `field` is deliberately NOT required to be declared: it is a key
+            // the host writes into the init config, not something the user is
+            // asked for. The two it reads FROM must exist, or the lookup would
+            // silently produce `":"` and pin nothing.
+            for (role, key) in [
+                ("host_field", &pin.host_field),
+                ("port_field", &pin.port_field),
+            ] {
+                if self.field(key).is_none() {
+                    return Err(PluginError::Manifest(format!(
+                        "host_key_pin.{role} names `{key}`, which the schema does not declare"
+                    )));
+                }
+            }
+            if pin.field.trim().is_empty() {
+                return Err(PluginError::Manifest(
+                    "host_key_pin.field is empty, so the pin would go nowhere".into(),
+                ));
             }
         }
 

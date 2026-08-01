@@ -69,6 +69,20 @@ struct Routes {
     contact_list_to_account: HashMap<String, String>,
 }
 
+/// Reads this device's confirmed host-key pins.
+///
+/// A second small trait rather than a method on [`DeviceLocalRead`], because
+/// the two answer different questions: one is keyed by account and follows the
+/// schema, the other is keyed by `host:port` and is shared by every account
+/// that talks to the same machine. Merging them would make the second look like
+/// per-account state, which it is not — reconnecting a target you already
+/// trusted must not ask you to confirm its fingerprint again.
+pub trait HostKeyPins: Send + Sync {
+    /// The confirmed fingerprint for `host_port`, or `None` if the user has not
+    /// been shown one yet.
+    fn peek(&self, host_port: &str) -> Option<String>;
+}
+
 /// Reads the values an adapter marked `device_local` for one account.
 ///
 /// A seam rather than a concrete store, for the same reason `SecretStore` is
@@ -141,6 +155,11 @@ pub struct AdapterRegistry {
     /// exactly today's behaviour — a host that has not wired it is unchanged,
     /// not degraded.
     device_local: RwLock<Option<Arc<dyn DeviceLocalRead>>>,
+
+    /// Set alongside [`Self::device_local`]. Absent means no adapter that
+    /// declares a pin can be opened at all — which is the safe direction: a
+    /// host that has not wired this refuses rather than connects unverified.
+    host_key_pins: RwLock<Option<Arc<dyn HostKeyPins>>>,
     /// Host-channel capability tokens, keyed by account id.
     ///
     /// A token retires the moment it is dropped, so it has to outlive the
@@ -166,6 +185,57 @@ impl AdapterRegistry {
     /// follows too.
     pub fn set_device_local_store(&self, store: Arc<dyn DeviceLocalRead>) {
         *self.device_local.write().expect("registry poisoned") = Some(store);
+    }
+
+    /// Give the registry this device's confirmed host-key pins.
+    pub fn set_host_key_pins(&self, pins: Arc<dyn HostKeyPins>) {
+        *self.host_key_pins.write().expect("registry poisoned") = Some(pins);
+    }
+
+    /// Write the confirmed fingerprint into the config, or refuse.
+    ///
+    /// Refusing is the whole point, and it cannot become a warning. An adapter
+    /// handed an empty pin does not fail — it builds a verifier that accepts
+    /// whatever key the network presents and remembers it, with nothing logged.
+    /// The user would see a working connection.
+    fn apply_host_key_pin(
+        &self,
+        schema: &plugin_core::account_schema::AccountSchema,
+        config: &str,
+    ) -> Result<Option<(String, String)>, RegistryError> {
+        let Some(pin) = schema.host_key_pin.as_ref() else {
+            return Ok(None);
+        };
+        let parsed: serde_json::Value = serde_json::from_str(config)
+            .map_err(|e| RegistryError::Config(format!("malformed account config: {e}")))?;
+        // Rendered rather than formatted from a JSON value, so a port that
+        // arrives as a number and one that arrives as a string produce the same
+        // lookup key — otherwise a pin confirmed under one shape would be
+        // invisible under the other.
+        let text_of = |key: &str| match parsed.get(key) {
+            Some(serde_json::Value::String(s)) => s.trim().to_string(),
+            Some(serde_json::Value::Number(n)) => n.to_string(),
+            _ => String::new(),
+        };
+        let host = text_of(&pin.host_field);
+        let port = text_of(&pin.port_field);
+        if host.is_empty() || port.is_empty() {
+            return Err(RegistryError::Config(format!(
+                "`{}` and `{}` are needed before this host's key can be verified",
+                pin.host_field, pin.port_field
+            )));
+        }
+        let host_port = format!("{host}:{port}");
+
+        let pins = self.host_key_pins.read().expect("registry poisoned");
+        let fingerprint = pins
+            .as_ref()
+            .and_then(|store| store.peek(&host_port))
+            .unwrap_or_default();
+        if fingerprint.trim().is_empty() {
+            return Err(RegistryError::HostKeyNotTrusted { host_port });
+        }
+        Ok(Some((pin.field.clone(), fingerprint)))
     }
 
     /// This account's device-local values, or an empty map when nothing is
@@ -214,6 +284,7 @@ impl AdapterRegistry {
     ) -> Self {
         Self {
             device_local: RwLock::new(None),
+            host_key_pins: RwLock::new(None),
             external_cal: RwLock::new(HashMap::new()),
             external_tasks: RwLock::new(HashMap::new()),
             external_contacts: RwLock::new(HashMap::new()),
@@ -954,6 +1025,14 @@ impl AdapterRegistry {
             }
         }
 
+        // A confirmed host key, for an adapter whose protocol pins one. Beside
+        // the state dir because it is the same kind of value: one the plugin
+        // needs, only the host can produce, and the manifest names the key for.
+        if let Some((key, fingerprint)) = self.apply_host_key_pin(schema, &plugin_config)? {
+            plugin_config =
+                merge_account_config(&plugin_config, &[(&key, Value::String(fingerprint))])?;
+        }
+
         // The capability token rides the TRANSIENT merged config only — never
         // the persisted row — and must outlive the instance, since dropping it
         // retires the scope. Parking it beside the registration ties the two
@@ -1094,6 +1173,11 @@ pub enum RegistryError {
     /// as a "Plugin fehlt" affordance.
     #[error("plugin not installed: {0}")]
     PluginMissing(String),
+    /// The adapter pins host keys and this device has not confirmed one for
+    /// this host yet. The frontends turn this into the fingerprint dialog; it
+    /// is a step in the flow, not a fault.
+    #[error("the host key for {host_port} has not been confirmed on this device")]
+    HostKeyNotTrusted { host_port: String },
 }
 
 #[cfg(test)]
@@ -1147,6 +1231,101 @@ mod tests {
             .into_iter()
             .find(|(id, _)| id == account_id)
             .map(|(_, adapter)| adapter)
+    }
+
+    // ── host-key pins ──────────────────────────────────────────────────────
+
+    fn pin_schema() -> plugin_core::account_schema::AccountSchema {
+        use plugin_core::account_schema::*;
+        AccountSchema {
+            fields: vec![
+                AccountField {
+                    key: "host".into(),
+                    label: "Host".into(),
+                    ..Default::default()
+                },
+                AccountField {
+                    key: "port".into(),
+                    kind: AccountFieldKind::Number,
+                    label: "Port".into(),
+                    ..Default::default()
+                },
+            ],
+            host_key_pin: Some(AccountHostKeyPin {
+                field: "pinned_fingerprint".into(),
+                host_field: "host".into(),
+                port_field: "port".into(),
+            }),
+            ..Default::default()
+        }
+    }
+
+    struct Pins(Option<String>);
+    impl HostKeyPins for Pins {
+        fn peek(&self, _host_port: &str) -> Option<String> {
+            self.0.clone()
+        }
+    }
+
+    /// The whole reason this exists. An adapter handed an empty pin does not
+    /// fail — it accepts whatever key the network presents and remembers it,
+    /// with nothing logged. So the refusal has to happen here, before the
+    /// plugin is opened.
+    #[test]
+    fn an_unconfirmed_host_key_refuses_to_open() {
+        let registry = ical_registry();
+        registry.set_host_key_pins(Arc::new(Pins(None)));
+        let err = registry
+            .apply_host_key_pin(&pin_schema(), r#"{"host":"files.example.com","port":22}"#)
+            .expect_err("must refuse");
+        match err {
+            RegistryError::HostKeyNotTrusted { host_port } => {
+                assert_eq!(host_port, "files.example.com:22");
+            }
+            other => panic!("wrong refusal: {other}"),
+        }
+    }
+
+    /// A host that has never wired the store is in the same position as one
+    /// with no pin: refusing, not connecting.
+    #[test]
+    fn no_pin_store_at_all_refuses_too() {
+        let registry = ical_registry();
+        registry
+            .apply_host_key_pin(&pin_schema(), r#"{"host":"h","port":22}"#)
+            .expect_err("must refuse");
+    }
+
+    /// The port arrives as a JSON number now that it is a `number` field, and
+    /// as a string on any path that predates that. Both must produce the same
+    /// lookup key, or a pin confirmed under one shape is invisible under the
+    /// other and the user is asked to confirm a host they already trusted.
+    #[test]
+    fn a_numeric_and_a_textual_port_look_up_the_same_pin() {
+        let registry = ical_registry();
+        registry.set_host_key_pins(Arc::new(Pins(Some("SHA256:abc".into()))));
+        for config in [
+            r#"{"host":"files.example.com","port":22}"#,
+            r#"{"host":"files.example.com","port":"22"}"#,
+        ] {
+            let (key, fingerprint) = registry
+                .apply_host_key_pin(&pin_schema(), config)
+                .expect("must resolve")
+                .expect("must produce a pin");
+            assert_eq!(key, "pinned_fingerprint");
+            assert_eq!(fingerprint, "SHA256:abc");
+        }
+    }
+
+    /// A schema that declares no pin is untouched — most adapters.
+    #[test]
+    fn an_adapter_without_a_pin_is_left_alone() {
+        let registry = ical_registry();
+        let schema = plugin_core::account_schema::AccountSchema::default();
+        assert!(registry
+            .apply_host_key_pin(&schema, "{}")
+            .expect("no pin declared, no refusal")
+            .is_none());
     }
 
     #[test]
