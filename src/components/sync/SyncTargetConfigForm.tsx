@@ -344,8 +344,13 @@ export function SyncTargetConfigForm({
       setBusyAdapter(true);
       setAdapterFeedback(null);
       const priorPreview = preview;
+      // What THIS attempt established about the target, so the failure path can
+      // tell "we never got that far" from "the target is fine, the passphrase
+      // was not".
+      let previewedNow: typeof preview = null;
       try {
         const p = await previewSyncTarget(config);
+        previewedNow = p;
         setPreview(p);
         const device = deviceNameDraft.trim() || null;
         let joined = false;
@@ -428,7 +433,23 @@ export function SyncTargetConfigForm({
           kind: 'error',
           message: `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
         });
-        setPreview(null);
+        // Keep what this attempt learned. Clearing it unconditionally threw
+        // away the passphrase field along with it: that field only renders
+        // while a preview says the target is encrypted, so a wrong passphrase
+        // removed the one input the user needed in order to correct it. The
+        // target has not changed — only the passphrase was wrong.
+        //
+        // A failure BEFORE the preview lands still clears, because then nothing
+        // is known about this target and the previous preview would describe
+        // somewhere the user is no longer pointing at.
+        setPreview(previewedNow);
+        // Put focus where the correction happens. The reveal effect will not
+        // fire this time — the field never unmounted — so it is done here.
+        if (previewedNow?.kind === 'existing' && previewedNow.e2e_enabled) {
+          requestAnimationFrame(() => {
+            e2ePassphraseRef.current?.focus({ preventScroll: true });
+          });
+        }
       } finally {
         setBusyAdapter(false);
       }

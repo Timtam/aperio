@@ -886,7 +886,7 @@
         "errorNotFound": "Kein Datensatz am Pfad gefunden.",
         "errorSchemaTooOld": "Sync-Datensatz benötigt eine neuere Aperio-Version.",
         "errorEncryption": "Verschlüsselter Datensatz, aber kein Passwort konfiguriert.",
-        "errorDecryption": "Die Sync-Passphrase öffnet diesen Datensatz nicht. Die Verbindung zum Server steht — prüfe die Passphrase, nicht das Kontopasswort.",
+        "errorDecryption": "Falsche Sync-Passphrase.",
         "e2eActive": "🔒 Ende-zu-Ende-Verschlüsselung aktiv",
         "e2eInactive": "Ende-zu-Ende-Verschlüsselung deaktiviert",
         "credentialsSyncedNote": "Account-Zugangsdaten (Passwörter und Tokens) werden Ende-zu-Ende-verschlüsselt synchronisiert, damit deine Accounts auf jedem Gerät ohne erneute Eingabe funktionieren.",
