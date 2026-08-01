@@ -68,6 +68,22 @@ export function useSync() {
   // Initial status pull. `getSyncStatus` is cheap (no IO), so the
   // status indicator can render the correct icon before the first
   // event arrives.
+  // Re-read the status on demand.
+  //
+  // Everything after the initial pull arrives as an event, which covers the
+  // things the ENGINE does — rounds starting, finishing, failing. It does not
+  // cover the things the USER does to the configuration: disconnecting emits
+  // nothing, so the status kept reporting a configured, encrypted target, and
+  // the panel kept offering the buttons that act on one.
+  const refreshStatus = useCallback(async () => {
+    try {
+      setStatus(await getSyncStatus());
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('get_sync_status failed', err);
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     getSyncStatus()
@@ -291,6 +307,9 @@ export function useSync() {
     /** Latest snapshot or `null` while the initial fetch is in
      *  flight. */
     status,
+    /** Re-read the status after changing the configuration — connecting or
+     *  disconnecting a target emits no event, so nothing else would. */
+    refreshStatus,
     /** Counters from the most-recent completed round (manual or
      *  scheduled). `null` until the first round finishes. */
     lastReport,

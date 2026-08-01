@@ -48,6 +48,7 @@ export function SyncPanel() {
   const { openSyncConflicts, openSyncAccountsConnect } = useDialogState();
   const {
     status,
+    refreshStatus,
     lastReport,
     lastError,
     conflictCount,
@@ -125,13 +126,22 @@ export function SyncPanel() {
     try {
       await configureSyncAdapter({ kind: 'none' });
       setAdapterSummary(null);
+      // The summary is only half of what this panel renders. "Encrypted
+      // dataset", "Sync now" and "Compact now" all hang off the sync STATUS,
+      // which is pulled once on mount and refreshed only by engine events —
+      // and disconnecting emits none. Without this the panel opened the
+      // configure form for a new target while still describing the old one as
+      // connected and encrypted, with both action buttons live; pressing "Sync
+      // now" then failed, because it was acting on a target that no longer
+      // existed.
+      await refreshStatus();
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('configure_sync_adapter(none) failed', err);
     } finally {
       setBusyDisconnect(false);
     }
-  }, []);
+  }, [refreshStatus]);
 
   const onCompact = useCallback(async () => {
     setBusyCompact(true);
