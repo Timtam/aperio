@@ -87,6 +87,9 @@ export function SyncTargetConfigForm({
   // The encryption checkbox that the empty-target "press Verbinden again" step
   // reveals — focused when it appears so it self-announces and anchors focus.
   const e2eCheckboxRef = useRef<HTMLInputElement>(null);
+  // The passphrase field revealed when the target turns out to be an EXISTING
+  // encrypted dataset — the twin of the checkbox above, and it was missing.
+  const e2ePassphraseRef = useRef<HTMLInputElement>(null);
   // The SFTP host field: focus lands here after "Pin vergessen" removes the
   // pinned-fingerprint block that held the pressed button.
   const sftpHostRef = useRef<HTMLInputElement>(null);
@@ -175,11 +178,30 @@ export function SyncTargetConfigForm({
   // aktivieren, Kontrollkästchen") instead of appearing silently under the
   // still-focused Verbinden button — a one-shot, irreversible choice the user
   // would otherwise skip past unaware.
+  // Extracted so the dependency list can be statically checked: a preview can
+  // go from unencrypted to encrypted without `kind` changing, so the reveal has
+  // to be watched on its own.
+  const needsJoinPassphrase =
+    preview?.kind === 'existing' && preview.e2e_enabled;
   useEffect(() => {
     if (preview?.kind === 'empty') {
       e2eCheckboxRef.current?.focus({ preventScroll: true });
+      return;
     }
-  }, [preview?.kind]);
+    // The other half of the same idea, and the half that was missing: joining an
+    // EXISTING encrypted dataset reveals a passphrase field, and focus stayed on
+    // the Verbinden button. Nothing announced the new field, so the next thing
+    // typed went into whichever box focus was still near — which is how an
+    // encryption passphrase ends up in the account-password field, and then
+    // looks like a rejected password rather than a mistyped passphrase.
+    //
+    // `e2eEnabled` is in the dependency list because a preview can go from
+    // unencrypted to encrypted without `kind` changing, and the reveal has to
+    // pull focus each time it actually appears.
+    if (needsJoinPassphrase) {
+      e2ePassphraseRef.current?.focus({ preventScroll: true });
+    }
+  }, [preview?.kind, needsJoinPassphrase]);
   // SFTP host-key trust dialog state.
   const [trustPreview, setTrustPreview] = useState<HostKeyPreview | null>(null);
   const [pendingSftpConfig, setPendingSftpConfig] =
@@ -1300,6 +1322,7 @@ export function SyncTargetConfigForm({
             <E2ePassphrasePrompt
               passphrase={passphraseDraft}
               onPassphraseChange={setPassphraseDraft}
+              inputRef={e2ePassphraseRef}
               t={t}
             />
           )}
@@ -1465,10 +1488,12 @@ function E2eEnableInput({
 function E2ePassphrasePrompt({
   passphrase,
   onPassphraseChange,
+  inputRef,
   t,
 }: {
   passphrase: string;
   onPassphraseChange: (next: string) => void;
+  inputRef?: RefObject<HTMLInputElement>;
   t: ReturnType<typeof useTranslation>['t'];
 }) {
   return (
@@ -1480,6 +1505,7 @@ function E2ePassphrasePrompt({
         <label>
           {t('dialogs.settings.sync.e2ePassphrase')}
           <input
+            ref={inputRef}
             type="password"
             value={passphrase}
             onChange={(e) => onPassphraseChange(e.target.value)}
