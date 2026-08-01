@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/announcerContext';
@@ -62,6 +62,13 @@ export function SyncPanel() {
 
   const stateHeadingId = useId();
   const adapterHeadingId = useId();
+  // Where focus lands after Disconnect. The button that triggers it lives
+  // inside the connected-summary block, which the same action unmounts, so
+  // focus would otherwise drop to <body> — outside the settings dialog's
+  // role="application", where a screen reader has nothing to read and no
+  // anchor to arrow from. The section heading is the one node that survives
+  // the swap, and it names what replaced the summary.
+  const adapterHeadingRef = useRef<HTMLHeadingElement>(null);
   const intervalHeadingId = useId();
   const protocolHeadingId = useId();
   const passphraseHeadingId = useId();
@@ -135,6 +142,11 @@ export function SyncPanel() {
       // now" then failed, because it was acting on a target that no longer
       // existed.
       await refreshStatus();
+      // React swaps the summary for the config form on the state change above;
+      // land focus once that has committed.
+      requestAnimationFrame(() => {
+        adapterHeadingRef.current?.focus({ preventScroll: true });
+      });
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('configure_sync_adapter(none) failed', err);
@@ -467,7 +479,9 @@ export function SyncPanel() {
       </section>
 
       <section aria-labelledby={adapterHeadingId}>
-        <h3 id={adapterHeadingId}>{t('dialogs.settings.sync.adapterTitle')}</h3>
+        <h3 id={adapterHeadingId} ref={adapterHeadingRef} tabIndex={-1}>
+          {t('dialogs.settings.sync.adapterTitle')}
+        </h3>
         {/* When configured: a non-editable summary + Disconnect. To swap
             adapters, the user disconnects first. Otherwise: the shared config
             form. */}
