@@ -106,11 +106,12 @@ use host_core::sync_target::{
     PREF_FTP_PORT, PREF_FTP_USER, PREF_GOOGLEDRIVE_FOLDER_NAME, PREF_LOCAL_PATH, PREF_SFTP_HOST,
     PREF_SFTP_PATH, PREF_SFTP_PORT, PREF_SFTP_USER, PREF_WEBDAV_URL, PREF_WEBDAV_USER,
     SECRET_ACCOUNT_DROPBOX as DROPBOX_SECRET_ACCOUNT, SECRET_ACCOUNT_E2E as E2E_SECRET_ACCOUNT,
-    SECRET_ACCOUNT_FTP as FTP_SECRET_ACCOUNT,
     SECRET_ACCOUNT_GOOGLEDRIVE as GOOGLEDRIVE_SECRET_ACCOUNT,
-    SECRET_ACCOUNT_SFTP as SFTP_SECRET_ACCOUNT, SECRET_ACCOUNT_SFTP_KEY as SFTP_KEY_SECRET_ACCOUNT,
-    SECRET_ACCOUNT_WEBDAV as WEBDAV_SECRET_ACCOUNT,
 };
+// The four per-kind credential pseudo-accounts are gone from this file. Nothing
+// here reads a credential by its legacy address any more: `stored_secret` knows
+// where it lives, and only the OAuth completion still WRITES to one — it runs
+// before there is an account row to write to.
 
 // Imported below with the other five rather than declared here. It was the
 // one this host still spelled out for itself — the same string today, and a
@@ -1160,6 +1161,21 @@ impl Host {
         &self,
         req: &ConfigureSyncRequest,
     ) -> Result<Arc<dyn SyncAdapter>, StoreError> {
+        // "The stored keychain secret" is no longer one fixed pseudo-account per
+        // kind. Once this device syncs through an account row the credential
+        // lives under that row's id, so the lookup goes through
+        // `sync_target::stored_secret`, which knows both places and which of
+        // them is the newer answer.
+        let shared = self.db.shared();
+        let held = |kind: &str, slot: SecretSlot| {
+            host_core::sync_target::stored_secret(
+                &UserPrefsRepo::new(&shared),
+                &AccountsRepo::new(&shared),
+                self.secret_store.as_ref(),
+                kind,
+                slot,
+            )
+        };
         match req.kind.as_str() {
             "local" => {
                 let path = req.path.as_deref().unwrap_or_default().trim();
@@ -1187,10 +1203,7 @@ impl Host {
                 // Empty == "no auth" (the desktop `build_adapter` contract).
                 let resolved_password = match req.password.as_deref().map(str::trim) {
                     Some(p) if !p.is_empty() => Some(p.to_string()),
-                    _ => self
-                        .secret_store
-                        .retrieve(WEBDAV_SECRET_ACCOUNT, SecretSlot::Password)
-                        .ok(),
+                    _ => held("webdav", SecretSlot::Password),
                 };
                 let cfg = serde_json::json!({
                     "url": url,
@@ -1230,12 +1243,9 @@ impl Host {
                 // in our model: a missing keychain secret is an auth error.
                 let resolved_password = match req.password.as_deref().map(str::trim) {
                     Some(p) if !p.is_empty() => p.to_string(),
-                    _ => self
-                        .secret_store
-                        .retrieve(FTP_SECRET_ACCOUNT, SecretSlot::Password)
-                        .map_err(|_| StoreError::Auth {
-                            detail: "no FTP password configured".to_string(),
-                        })?,
+                    _ => held("ftp", SecretSlot::Password).ok_or_else(|| StoreError::Auth {
+                        detail: "no FTP password configured".to_string(),
+                    })?,
                 };
                 let cfg = serde_json::json!({
                     "host": host,
@@ -1261,10 +1271,8 @@ impl Host {
                 // The refresh token must already be in the keychain from a prior
                 // `complete_sync_oauth_json` (the native auth session) — Dropbox
                 // sync owns one managed slot, divorced from any account row.
-                let refresh_token = self
-                    .secret_store
-                    .retrieve(DROPBOX_SECRET_ACCOUNT, SecretSlot::RefreshToken)
-                    .map_err(|_| StoreError::Auth {
+                let refresh_token =
+                    held("dropbox", SecretSlot::RefreshToken).ok_or_else(|| StoreError::Auth {
                         detail: "Dropbox sign-in required — no refresh token stored".to_string(),
                     })?;
                 let cfg = serde_json::json!({
@@ -1294,12 +1302,12 @@ impl Host {
                     });
                 }
                 let folder_name = req.folder_name.as_deref().unwrap_or_default().trim();
-                let refresh_token = self
-                    .secret_store
-                    .retrieve(GOOGLEDRIVE_SECRET_ACCOUNT, SecretSlot::RefreshToken)
-                    .map_err(|_| StoreError::Auth {
-                        detail: "Google Drive sign-in required — no refresh token stored"
-                            .to_string(),
+                let refresh_token =
+                    held("googledrive", SecretSlot::RefreshToken).ok_or_else(|| {
+                        StoreError::Auth {
+                            detail: "Google Drive sign-in required — no refresh token stored"
+                                .to_string(),
+                        }
                     })?;
                 let cfg = serde_json::json!({
                     "client_id": client_id,
@@ -1342,12 +1350,11 @@ impl Host {
                         "password" => {
                             let pw = match req.password.as_deref().map(str::trim) {
                                 Some(p) if !p.is_empty() => p.to_string(),
-                                _ => self
-                                    .secret_store
-                                    .retrieve(SFTP_SECRET_ACCOUNT, SecretSlot::Password)
-                                    .map_err(|_| StoreError::Auth {
+                                _ => held("sftp", SecretSlot::Password).ok_or_else(|| {
+                                    StoreError::Auth {
                                         detail: "no SFTP password configured".to_string(),
-                                    })?,
+                                    }
+                                })?,
                             };
                             (pw, String::new(), String::new())
                         }
@@ -1364,11 +1371,9 @@ impl Host {
                                 .to_string();
                             let pass = match req.key_passphrase.as_deref().map(str::trim) {
                                 Some(p) if !p.is_empty() => p.to_string(),
-                                _ => self
-                                    .secret_store
-                                    .retrieve(SFTP_KEY_SECRET_ACCOUNT, SecretSlot::Password)
-                                    .ok()
-                                    .unwrap_or_default(),
+                                // Its own slot, kept apart from the password so
+                                // switching method never clobbers the other.
+                                _ => held("sftp", SecretSlot::KeyPassphrase).unwrap_or_default(),
                             };
                             (String::new(), kp, pass)
                         }
@@ -1454,26 +1459,22 @@ impl Host {
         }
     }
 
-    /// Persist the device-local `sync.adapter.*` prefs + keychain secrets for a
-    /// configured/joined target. The persist half of the old configure arms,
-    /// split out so [`Self::configure_sync_adapter_json`] +
-    /// [`Self::accept_remote_dataset_json`] persist identically. Re-derives the
-    /// trimmed field values from `req` (cheap; the matching
-    /// [`Self::build_plain_sync_adapter`] already validated them). Only a
-    /// non-empty inline secret is written — an omitted/empty one keeps the
-    /// stored keychain entry (the reuse contract). The `_` arm is unreachable
-    /// (the builder rejects unknown kinds before this runs).
-    /// Write the chosen target down, through the table shared with the desktop
-    /// host (`host_core::sync_target`), which owns the per-kind knowledge and
-    /// the tests that cover it.
+    /// Write the chosen target down as the account row this device syncs
+    /// through, via `host_core::sync_target`, which owns the per-kind knowledge
+    /// and the tests that cover it — and which retires the `sync.adapter.*`
+    /// preferences and keychain pseudo-accounts this used to write, so the two
+    /// records cannot disagree.
     ///
-    /// All this does is flatten the typed request into the value map that table
+    /// All this does is flatten the typed request into the value map that module
     /// takes. There is no branching on kind here, on purpose: this host and the
     /// desktop each used to carry their own six-arm match, and the two had
     /// drifted — one storing credentials for an authentication method the user
     /// had not chosen, the other writing a sentinel most readers never
-    /// recognised. Both were repaired before this moved, so the move itself
-    /// changes no behaviour.
+    /// recognised.
+    ///
+    /// Only a non-empty value is put in the map, which is what keeps the reuse
+    /// contract: an omitted secret is inherited from what this device already
+    /// holds rather than cleared.
     fn persist_sync_config(&self, req: &ConfigureSyncRequest) -> Result<(), StoreError> {
         let shared = self.db.shared();
         let prefs = UserPrefsRepo::new(&shared);
@@ -1500,8 +1501,16 @@ impl Host {
             values.insert("port".to_string(), serde_json::Value::from(port));
         }
 
-        host_core::sync_target::persist(&prefs, self.secret_store.as_ref(), &req.kind, &values)
-            .map_err(storage_err)
+        host_core::sync_target::connect(
+            &prefs,
+            &AccountsRepo::new(&shared),
+            self.secret_store.as_ref(),
+            &HostSyncPlugins(&self.plugin_manager),
+            &req.kind,
+            &values,
+        )
+        .map(|_| ())
+        .map_err(storage_err)
     }
 
     /// Task-list twin of [`Host::route`]: `None` is the local branch (the
@@ -1779,35 +1788,84 @@ fn open_sync_plugin(
     Ok(Arc::new(adapter))
 }
 
-/// Reconstruct the configured sync adapter from `user_prefs` — the mobile twin
-/// of the desktop `build_adapter_from_prefs`. Runs in [`Host::open`] before
-/// `Self` exists, so it takes the plugin manager + secret store by reference.
-/// Best-effort: a missing/blank field or an open failure yields `None`, leaving
-/// sync unconfigured until the user re-configures from the Sync screen. Restores
-/// every kind this host can configure (`local`/`webdav`/`ftp`/`dropbox`/
-/// `googledrive`/`sftp`). `shared` is taken alongside `prefs` so the `sftp` arm
-/// can read the pinned host-key fingerprint via the shared verifier.
-fn restore_adapter_from_prefs(
-    // `shared` is no longer read here — the shared builder reaches the
-    // host-key store through the prefs repo it already has — but the parameter
-    // stays so the two call sites keep compiling unchanged.
-    _shared: &SharedConn,
+/// How this host answers `host_core`'s two questions about a sync plugin: which
+/// one serves a kind and what its account schema says, and how to open an
+/// instance of it.
+///
+/// A free struct rather than a method, because the restore below runs in
+/// [`Host::open`] before `Self` exists.
+struct HostSyncPlugins<'a>(&'a PluginManager);
+
+impl host_core::sync_target::SyncPlugins for HostSyncPlugins<'_> {
+    fn resolve(
+        &self,
+        adapter_kind: &str,
+    ) -> Option<(String, plugin_core::account_schema::AccountSchema)> {
+        let plugin = self.0.plugin_for_adapter_kind(adapter_kind)?;
+        let schema = plugin.manifest.account.clone()?;
+        Some((plugin.manifest.id.clone(), schema))
+    }
+
+    fn open(&self, plugin_id: &str, config_json: String) -> Result<Arc<dyn SyncAdapter>, String> {
+        open_sync_plugin(self.0, plugin_id, config_json).map_err(|err| err.to_string())
+    }
+}
+
+/// Restore what this device syncs through, for [`Host::open`] on app start —
+/// the mobile twin of the desktop `restore_sync_adapter`.
+///
+/// The migration, the choice of reader and the log line are
+/// `host_core::sync_target`'s, shared with the desktop and tested there; this
+/// host contributes the four arguments only it can produce — its database, its
+/// keychain bridge, its host-key pin store, and [`HostSyncPlugins`]. Runs before
+/// `Self` exists, so it takes the plugin manager and the secret store by
+/// reference.
+///
+/// The returned adapter is already wrapped for encryption where this device
+/// encrypts, so the caller configures it exactly as it stands.
+fn restore_sync_adapter(
+    shared: &SharedConn,
     prefs: &UserPrefsRepo,
     plugin_manager: &PluginManager,
     secret_store: &dyn SecretStore,
 ) -> Option<Arc<dyn SyncAdapter>> {
-    struct Opener<'a>(&'a PluginManager);
-    impl host_core::sync_target::PluginOpener for Opener<'_> {
-        fn open(
-            &self,
-            plugin_id: &str,
-            config_json: String,
-        ) -> Result<Arc<dyn SyncAdapter>, String> {
-            open_sync_plugin(self.0, plugin_id, config_json).map_err(|err| err.to_string())
-        }
-    }
+    host_core::sync_target::restore_sync_target(
+        prefs,
+        &AccountsRepo::new(shared),
+        secret_store,
+        &UserPrefsHostKeyVerifier::new(shared.clone()),
+        &HostSyncPlugins(plugin_manager),
+    )
+}
 
-    match host_core::sync_target::build_configured(prefs, secret_store, &Opener(plugin_manager)) {
+/// Reconstruct the sync adapter this device is configured to open, WITHOUT the
+/// migration and without the start-up log line — the mobile twin of the desktop
+/// `build_adapter_from_prefs`. Best-effort: a missing/blank field or an open
+/// failure yields `None`, leaving sync unconfigured until the user
+/// re-configures from the Sync screen.
+///
+/// Which of the two records answers is `build_for_device`'s decision: the
+/// account row when this device points at one, and only then the
+/// `sync.adapter.*` preferences it has not moved off yet.
+///
+/// Start-up does not come through here any more — it calls
+/// [`restore_sync_adapter`]. What is left are the two encryption paths, which
+/// need a second handle to the target the orchestrator already holds, at a
+/// moment where the migration has long since run and a second "restored the
+/// sync target" line would be a lie about what just happened.
+fn restore_adapter_from_prefs(
+    shared: &SharedConn,
+    prefs: &UserPrefsRepo,
+    plugin_manager: &PluginManager,
+    secret_store: &dyn SecretStore,
+) -> Option<Arc<dyn SyncAdapter>> {
+    match host_core::sync_target::build_for_device(
+        prefs,
+        &AccountsRepo::new(shared),
+        secret_store,
+        &UserPrefsHostKeyVerifier::new(shared.clone()),
+        &HostSyncPlugins(plugin_manager),
+    ) {
         Ok(adapter) => Some(adapter),
         Err(host_core::sync_target::Unbuildable::NotConfigured) => None,
         Err(err) => {
@@ -2012,31 +2070,38 @@ impl Host {
             )
         });
 
-        // Restore a previously-configured sync adapter so `sync_now` works
-        // without a re-configure step (the desktop's build_adapter_from_prefs).
-        // Best-effort: a missing/unbuildable adapter just leaves sync
+        // Restore a previously-configured sync target so `sync_now` works
+        // without a re-configure step (the desktop's restore_sync_adapter, and
+        // the same shared decision underneath): the one-way migration off this
+        // device's old `sync.adapter.*` preferences runs first, then the account
+        // row this device points at is read, and a device the migration has not
+        // reached still comes up on its preferences. Which record answered, and
+        // through which account id, is logged there.
+        //
+        // Best-effort: a missing/unbuildable target just leaves sync
         // unconfigured (the user re-configures from the Sync screen).
+        //
+        // After `registry.bootstrap` above, deliberately — the same ordering as
+        // the desktop, for the same two reasons: a sync target holds no
+        // calendars, no task lists and no contacts, so the registry skips the
+        // row the migration creates (`is_sync_only`) and an earlier run would
+        // buy nothing; and the account path asks the loaded manifests which
+        // plugin serves the kind, so it cannot run before registration.
+        //
+        // §19.7's encryption wrap is NOT applied here any more. It lives in the
+        // shared reader, which is the only place that can decide it once —
+        // wrapping again on top of an already-wrapped adapter encrypted every
+        // upload twice, which no other device could read. The refusal that used
+        // to live here is still there, in that same reader: the flag set with
+        // the key gone (keychain wiped / fresh OS install on the same data dir)
+        // refuses rather than pushing plaintext to an encrypted dataset.
         {
             let shared = db.shared();
             let prefs = UserPrefsRepo::new(&shared);
-            if let Some(plain) =
-                restore_adapter_from_prefs(&shared, &prefs, &plugin_manager, secret_store.as_ref())
+            if let Some(adapter) =
+                restore_sync_adapter(&shared, &prefs, &plugin_manager, secret_store.as_ref())
             {
-                // §19.7: if the dataset is E2E, wrap with the device-local key.
-                // When the flag is set but the key is missing (keychain wiped /
-                // fresh OS install with the same data dir), DON'T configure — we
-                // must never push plaintext to an encrypted target; the user
-                // re-enters the passphrase to re-establish the key.
-                let configured: Option<Arc<dyn SyncAdapter>> =
-                    if host_core::credential_sync::e2e_enabled(&shared) {
-                        load_e2e_key(secret_store.as_ref())
-                            .map(|key| wrap_if_encrypted(plain, Some(key)))
-                    } else {
-                        Some(plain)
-                    };
-                if let Some(adapter) = configured {
-                    graph.orchestrator.configure(adapter);
-                }
+                graph.orchestrator.configure(adapter);
             }
         }
 
@@ -2437,6 +2502,18 @@ impl Host {
             .map_err(acc_err)?
             .map(|account| account.adapter_kind)
             .ok_or(StoreError::NotFound)?;
+        // See the desktop twin: deleting the row this device syncs through
+        // strands the pointer and leaves the orchestrator pushing to a target
+        // the user thinks is gone.
+        if host_core::sync_target::selected_account_id(&UserPrefsRepo::new(&shared)).as_deref()
+            == Some(account_id.as_str())
+        {
+            return Err(StoreError::InvalidField {
+                field: "account_id".to_string(),
+                detail: "this account is the sync target for this device; disconnect it in                          the sync settings before deleting it"
+                    .to_string(),
+            });
+        }
         repo.delete(&account_id).map_err(acc_err)?;
         // This device's half goes with it. The row's removal syncs and this
         // does not — another device deleting the account cannot tell this one
@@ -4937,20 +5014,25 @@ impl Host {
     }
 
     /// Disconnect the configured sync target: deconfigure the orchestrator and
-    /// mark the adapter kind "none" so the summary reports nothing. The per-kind
-    /// field prefs + keychain secrets are KEPT, so reconnecting is one tap (no
-    /// re-typing) — mirrors the desktop `configure_sync_adapter({kind:"none"})`.
+    /// remove everything a restore path could act on — the account row, its
+    /// credentials and device-local half, the pointer, and the legacy
+    /// preferences and keychain pseudo-accounts. The dataset's encryption key
+    /// stays; it is not a property of the target.
+    ///
+    /// Keeping the fields "so reconnecting is one tap" is what this used to do,
+    /// and it is why a disconnected phone came back up on the next launch
+    /// uploading to the target it had been told to stop using. Reconnecting now
+    /// means re-entering the target. Mirrors the desktop
+    /// `configure_sync_adapter({kind:"none"})`.
     pub fn disconnect_sync(&self) -> Result<(), StoreError> {
         self.orchestrator.deconfigure();
         let shared = self.db.shared();
-        let prefs = UserPrefsRepo::new(&shared);
-        // Delete rather than write "none". The sentinel was this host's own
-        // invention and only one reader on either platform ever tested for it,
-        // so a disconnected phone kept reporting its old target in the sync
-        // view. Readers stay tolerant of it — it is on real devices — but
-        // nothing writes it any more.
-        prefs.delete(PREF_ADAPTER_KIND).map_err(storage_err)?;
-        Ok(())
+        host_core::sync_target::disconnect(
+            &UserPrefsRepo::new(&shared),
+            &AccountsRepo::new(&shared),
+            self.secret_store.as_ref(),
+        )
+        .map_err(storage_err)
     }
 
     /// Non-secret summary of the configured sync target as JSON — `null` when
@@ -4960,6 +5042,15 @@ impl Host {
     pub fn get_sync_adapter_summary_json(&self) -> Result<String, StoreError> {
         let shared = self.db.shared();
         let prefs = UserPrefsRepo::new(&shared);
+        // The account this device syncs through answers first, and answers
+        // alone: once the pointer is set the preferences below are a record
+        // nothing maintains, and a card built from them would name the target
+        // the user moved off.
+        if let Some((kind, detail)) =
+            host_core::sync_target::summary(&prefs, &AccountsRepo::new(&shared))
+        {
+            return to_json(&Some(SyncAdapterSummary { kind, detail }));
+        }
         let kind = prefs
             .get(PREF_ADAPTER_KIND)
             .map_err(storage_err)?

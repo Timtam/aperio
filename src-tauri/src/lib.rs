@@ -543,13 +543,23 @@ pub fn run() {
     let sounds_dir = crate::sound_assets::sounds_dir_under(&data_dir.path);
     let sounds_dir_for_scheduler = sounds_dir.clone();
     let sounds_dir_for_commands = sounds_dir;
-    // If the user had previously configured a sync adapter,
-    // reconstruct it now so `sync_now` works without a
-    // re-configure step. Adapter credentials are device-local
-    // (per §19.2.1) and never propagate, so the user_prefs
-    // lookup is the single source of truth.
-    if let Some(adapter) = commands::build_adapter_from_prefs(&db.shared(), &plugin_manager) {
-        info!("restoring previously-configured sync adapter");
+    // If the user had previously configured a sync target, reconstruct it now
+    // so `sync_now` works without a re-configure step. WHICH target a device
+    // syncs through stays device-local (per §19.2.1) and never propagates; what
+    // moved is where it is read FROM — the account row this device points at,
+    // with the one-way migration off the old `sync.adapter.*` preferences
+    // running first, and those preferences still answering for a device the
+    // migration has not reached. `host_core::sync_target::restore_sync_target`
+    // decides all of that, identically here and on mobile, and logs which
+    // record answered and through which account id.
+    //
+    // After `registry.bootstrap` above, deliberately: the account the migration
+    // creates is a sync target, and a sync target holds no calendars, no task
+    // lists and no contacts — the registry skips it (`is_sync_only`), so there
+    // is nothing for an earlier run to register. Running it before the plugin
+    // manager exists is not an option either: the account path asks the loaded
+    // manifests which plugin serves the kind.
+    if let Some(adapter) = commands::restore_sync_adapter(&db.shared(), &plugin_manager) {
         sync_orchestrator.configure(adapter);
     }
     // Phase Se: hold a separate clone for the app-exit hook below.

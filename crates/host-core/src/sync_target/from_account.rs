@@ -224,14 +224,20 @@ pub fn build_selected(
     plugins: &dyn SyncPlugins,
 ) -> Result<Arc<dyn SyncAdapter>, Unbuildable> {
     let id = selected_account_id(prefs).ok_or(Unbuildable::NotConfigured)?;
-    // A chosen account that no longer exists reads as "not configured" rather
-    // than as an error. It means the account was deleted, which is a decision
-    // the user made; the pointer is simply stale.
+    // A chosen account that no longer exists is REPORTED, not read as "this
+    // device has not configured anything". The two used to be the same answer,
+    // and that is what let a caller fall through to the legacy preferences: a
+    // user who disconnected, whose account row was deleted and whose old
+    // `sync.adapter.*` values were still on disk, came back up on the target
+    // they had just moved off. The pointer is not stale here — it is a choice
+    // whose subject was deleted, which is a fault worth naming.
     let account = accounts
         .get(&id)
         .ok()
         .flatten()
-        .ok_or(Unbuildable::NotConfigured)?;
+        .ok_or_else(|| Unbuildable::AccountMissing {
+            account_id: id.clone(),
+        })?;
 
     let plain = from_account(&account, prefs, secrets, pins, plugins)?;
     if !super::e2e_enabled(prefs) {
@@ -476,10 +482,13 @@ mod tests {
         ));
     }
 
-    /// A stale pointer reads as "not configured" — the account was deleted,
-    /// which is a decision, not a fault.
+    /// A pointer at a deleted account is its own answer.
+    ///
+    /// It must not read as "nothing configured": that is the answer a caller
+    /// falls back to the legacy preferences on, and this device chose an
+    /// account precisely to stop consulting them.
     #[test]
-    fn a_pointer_to_a_deleted_account_is_simply_unconfigured() {
+    fn a_pointer_to_a_deleted_account_reports_rather_than_reading_as_unconfigured() {
         let db = DbHandle::open_in_memory().unwrap();
         let shared = db.shared();
         let prefs = UserPrefsRepo::new(&shared);
@@ -494,6 +503,9 @@ mod tests {
         )
         .err()
         .expect("must not build");
-        assert!(matches!(err, Unbuildable::NotConfigured), "{err}");
+        assert!(
+            matches!(err, Unbuildable::AccountMissing { ref account_id } if account_id == "gone"),
+            "{err}",
+        );
     }
 }

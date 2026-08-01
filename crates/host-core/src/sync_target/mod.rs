@@ -23,11 +23,20 @@
 //! fails that test rather than quietly appearing on someone's other device.
 
 mod build;
+mod connect;
 mod from_account;
 mod migrate;
 mod persist;
+mod restore;
 
-pub use build::{build, build_configured, e2e_enabled, PluginOpener, Unbuildable};
+pub use build::{
+    build, build_configured, build_for_device, e2e_enabled, PluginOpener, Unbuildable,
+};
+
+/// What the two hosts call when the user connects or disconnects: the account
+/// row, its credentials, the pointer, and the retirement of the record they
+/// replace.
+pub use connect::{connect, disconnect, stored_secret, summary, ConnectError};
 
 pub use from_account::{
     build_selected, from_account, select_account, selected_account_id, SyncPlugins,
@@ -36,8 +45,19 @@ pub use from_account::{
 
 pub use migrate::{migrate_to_account, MigrateError, PREF_MIGRATED_ACCOUNT};
 
-/// What both hosts call at start-up: the migration, then whichever reader can
-/// answer. Each host supplies only how it opens a plugin.
+/// What both hosts call once at start-up: migrate this device's old sync
+/// preferences into an account if that has not happened yet, then open whatever
+/// this device syncs through — and say in the log which of the two records
+/// answered.
+pub use restore::restore_sync_target;
+
+/// The legacy per-kind field table.
+///
+/// Neither host WRITES through `persist` any more — [`connect`] writes an
+/// account row, and this table is what tells it which preferences and keychain
+/// entries that row replaces. `persist`/`restore` stay because the table is
+/// theirs and their round-trip tests are what pin it; nothing in either host
+/// calls them.
 pub use persist::{all_pref_keys, fields_for, persist, restore, FieldSpec, PersistError};
 
 use sync_engine::SecretSlot;

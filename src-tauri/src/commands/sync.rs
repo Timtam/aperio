@@ -25,8 +25,11 @@
 //!     the destructive-action confirmation prompt.
 //!
 //! Adapter configuration values DO NOT propagate via the event log
-//! (per §19.2.1) — they're device-local. The user_prefs whitelist
-//! already excludes everything under `sync.adapter.*`.
+//! (per §19.2.1) — they're device-local. The target is an account row
+//! now, and a sync-only account is excluded from both the event path
+//! and the snapshot (`accounts::travels_between_devices`); the pointer
+//! naming it, and everything still under `sync.adapter.*`, is excluded
+//! by the user_prefs whitelist.
 
 use std::sync::Arc;
 
@@ -177,7 +180,7 @@ pub use host_core::credential_sync::PREF_E2E_ENABLED;
 /// Future adapter kinds (`sftp`, `dropbox`, `googledrive`, …) will
 /// add their own branches as new struct variants.
 // `Serialize` is here for one internal purpose: turning this into the
-// `{kind, values}` map `host_core::sync_target::persist` takes. Writing that
+// `{kind, values}` map `host_core::sync_target::connect` takes. Writing that
 // conversion by hand would mean keeping the six-arm match this change removes.
 //
 // It carries passwords, so it must never be logged, returned to the frontend,
@@ -332,6 +335,19 @@ fn build_adapter(
     db: &SharedConn,
     plugin_manager: &PluginManager,
 ) -> CommandResult<Arc<dyn SyncAdapter>> {
+    // "The keychain" below is no longer one fixed pseudo-account per kind. Once
+    // this device syncs through an account row the credential lives under that
+    // row's id, so the lookup goes through `sync_target::stored_secret`, which
+    // knows both places and which of them is the newer answer.
+    let held = |kind: &str, slot: SecretSlot| {
+        host_core::sync_target::stored_secret(
+            &UserPrefsRepo::new(db),
+            &AccountsRepo::new(db),
+            &crate::secrets::KeyringSecretStore,
+            kind,
+            slot,
+        )
+    };
     match config {
         SyncAdapterConfig::Local { path } => {
             let trimmed = path.trim();
@@ -360,11 +376,11 @@ fn build_adapter(
             // Resolve the password from one of two sources:
             //   - the request body (set on a fresh connect / when
             //     the user re-types it in Settings)
-            //   - the keychain (set on a URL-only edit, or on app
-            //     start when restoring from prefs)
+            //   - what this device already holds (set on a URL-only
+            //     edit, or on app start when restoring)
             let resolved_password = match password.as_deref().map(str::trim) {
                 Some(p) if !p.is_empty() => Some(p.to_string()),
-                _ => secrets::retrieve(WEBDAV_SECRET_ACCOUNT, SecretSlot::Password).ok(),
+                _ => held("webdav", SecretSlot::Password),
             };
             let cfg = serde_json::json!({
                 "url": trimmed_url,
@@ -417,11 +433,10 @@ fn build_adapter(
                     "password" => {
                         let pw = match password.as_deref().map(str::trim) {
                             Some(p) if !p.is_empty() => p.to_string(),
-                            _ => secrets::retrieve(SFTP_SECRET_ACCOUNT, SecretSlot::Password)
-                                .map_err(|err| CommandError {
-                                    code: "auth",
-                                    message: format!("no SFTP password configured: {err}",),
-                                })?,
+                            _ => held("sftp", SecretSlot::Password).ok_or(CommandError {
+                                code: "auth",
+                                message: "no SFTP password configured".into(),
+                            })?,
                         };
                         (pw, String::new(), String::new())
                     }
@@ -437,9 +452,9 @@ fn build_adapter(
                             .to_string();
                         let pass = match key_passphrase.as_deref().map(str::trim) {
                             Some(p) if !p.is_empty() => p.to_string(),
-                            _ => secrets::retrieve(SFTP_KEY_SECRET_ACCOUNT, SecretSlot::Password)
-                                .ok()
-                                .unwrap_or_default(),
+                            // Its own slot, kept apart from the password so
+                            // switching auth method never clobbers the other.
+                            _ => held("sftp", SecretSlot::KeyPassphrase).unwrap_or_default(),
                         };
                         (String::new(), kp, pass)
                     }
@@ -495,13 +510,12 @@ fn build_adapter(
             }
             // OAuth must have completed before this build path
             // runs — the refresh token is the entry credential
-            // we need to mint access tokens. Missing keychain
-            // entry → user hasn't signed in yet.
-            let refresh_token = secrets::retrieve(DROPBOX_SECRET_ACCOUNT, SecretSlot::RefreshToken)
-                .map_err(|err| CommandError {
-                    code: "auth",
-                    message: format!("Dropbox sign-in required — no refresh token: {err}",),
-                })?;
+            // we need to mint access tokens. Nothing stored →
+            // user hasn't signed in yet.
+            let refresh_token = held("dropbox", SecretSlot::RefreshToken).ok_or(CommandError {
+                code: "auth",
+                message: "Dropbox sign-in required — no refresh token".into(),
+            })?;
             let cfg = serde_json::json!({
                 "client_id": trimmed_client_id,
                 "client_secret": client_secret.trim(),
@@ -530,14 +544,11 @@ fn build_adapter(
                     message: "Google Drive client_secret must not be empty".into(),
                 });
             }
-            let refresh_token = secrets::retrieve(
-                GOOGLEDRIVE_SECRET_ACCOUNT,
-                SecretSlot::RefreshToken,
-            )
-            .map_err(|err| CommandError {
-                code: "auth",
-                message: format!("Google Drive sign-in required — no refresh token: {err}",),
-            })?;
+            let refresh_token =
+                held("googledrive", SecretSlot::RefreshToken).ok_or(CommandError {
+                    code: "auth",
+                    message: "Google Drive sign-in required — no refresh token".into(),
+                })?;
             let cfg = serde_json::json!({
                 "client_id": trimmed_id,
                 "client_secret": trimmed_secret,
@@ -574,16 +585,13 @@ fn build_adapter(
             // SFTP: Some+non-empty → use the supplied value;
             // None or empty → re-fetch the keychain secret so
             // host/user edits don't require re-typing.
-            let resolved_password =
-                match password.as_deref().map(str::trim) {
-                    Some(p) if !p.is_empty() => p.to_string(),
-                    _ => secrets::retrieve(FTP_SECRET_ACCOUNT, SecretSlot::Password).map_err(
-                        |err| CommandError {
-                            code: "auth",
-                            message: format!("no FTP password configured: {err}",),
-                        },
-                    )?,
-                };
+            let resolved_password = match password.as_deref().map(str::trim) {
+                Some(p) if !p.is_empty() => p.to_string(),
+                _ => held("ftp", SecretSlot::Password).ok_or(CommandError {
+                    code: "auth",
+                    message: "no FTP password configured".into(),
+                })?,
+            };
             // Plugin validates the `mode` string itself + falls
             // back to "explicit" on unknown values, but we still
             // catch the obviously-wrong cases here so the user
@@ -613,26 +621,74 @@ fn build_adapter(
     }
 }
 
-/// Persist the (already-validated) adapter config into `user_prefs`
-/// so the next app start restores the same adapter. Mirrors what
-/// `build_adapter_from_prefs` will read back.
-/// Write the chosen target down, or clear the choice.
+/// How this host answers `host_core`'s two questions about a sync plugin:
+/// which one serves a kind and what its account schema says, and how to open an
+/// instance of it.
+///
+/// One trait rather than the bare opener the restore path used to take, because
+/// the account path needs the schema — which of the form's values are secret,
+/// which stay on this device — and a host should have to supply one thing.
+struct HostSyncPlugins<'a>(&'a PluginManager);
+
+impl host_core::sync_target::SyncPlugins for HostSyncPlugins<'_> {
+    fn resolve(
+        &self,
+        adapter_kind: &str,
+    ) -> Option<(String, plugin_core::account_schema::AccountSchema)> {
+        let plugin = self.0.plugin_for_adapter_kind(adapter_kind)?;
+        let schema = plugin.manifest.account.clone()?;
+        Some((plugin.manifest.id.clone(), schema))
+    }
+
+    fn open(&self, plugin_id: &str, config_json: String) -> Result<Arc<dyn SyncAdapter>, String> {
+        open_sync_plugin(self.0, plugin_id, config_json).map_err(|err| err.message)
+    }
+}
+
+fn connect_err(err: host_core::sync_target::ConnectError) -> CommandError {
+    use host_core::sync_target::ConnectError as E;
+    match err {
+        E::UnknownKind(_) | E::NoPlugin(_) | E::Invalid(_) => CommandError {
+            code: "invalid_input",
+            message: err.to_string(),
+        },
+        E::Prefs(_) | E::Accounts(_) | E::Secret(_) => CommandError {
+            code: "internal",
+            message: err.to_string(),
+        },
+    }
+}
+
+/// Write the chosen target down as the account row this device syncs through,
+/// or disconnect from it.
 ///
 /// The per-kind knowledge lives in `host_core::sync_target`, shared with the
-/// mobile host, along with the tests that cover it. This function is the
-/// adapter between the desktop's typed request and that table: it serialises
-/// the request — which is internally tagged, so it already produces
-/// `{"kind": …, <fields>}` — splits the tag off, and hands the rest over.
+/// mobile host, along with the tests that cover it. This function is the adapter
+/// between the desktop's typed request and that module: it serialises the
+/// request — which is internally tagged, so it already produces `{"kind": …,
+/// <fields>}` — splits the tag off, and hands the rest over.
 ///
 /// It writes nothing itself, which is the point. The two hosts used to carry a
 /// six-arm match each, and those two copies had drifted.
-fn persist_adapter_config(prefs: &UserPrefsRepo, config: &SyncAdapterConfig) -> CommandResult<()> {
+fn persist_adapter_config(
+    shared: &SharedConn,
+    plugin_manager: &PluginManager,
+    config: &SyncAdapterConfig,
+) -> CommandResult<()> {
+    let prefs = UserPrefsRepo::new(shared);
+    let accounts = AccountsRepo::new(shared);
     if matches!(config, SyncAdapterConfig::None) {
-        // Disconnect deletes the choice and deliberately leaves the fields and
-        // the keychain entries in place, so reconnecting to the same target
-        // does not mean retyping everything.
-        prefs.delete(PREF_ADAPTER_KIND).map_err(internal)?;
-        return Ok(());
+        // Disconnect no longer means "delete the kind and leave everything
+        // else": that is precisely why a disconnected device came back up
+        // uploading to the target it had been told to stop using. Everything a
+        // restore path could act on goes — except the dataset's encryption key,
+        // which is not a property of the target.
+        return host_core::sync_target::disconnect(
+            &prefs,
+            &accounts,
+            &crate::secrets::KeyringSecretStore,
+        )
+        .map_err(connect_err);
     }
 
     let mut value = serde_json::to_value(config).map_err(|err| CommandError {
@@ -651,17 +707,16 @@ fn persist_adapter_config(prefs: &UserPrefsRepo, config: &SyncAdapterConfig) -> 
             message: "sync config carried no kind".into(),
         })?;
 
-    host_core::sync_target::persist(prefs, &crate::secrets::KeyringSecretStore, &kind, object)
-        .map_err(|err| match err {
-            host_core::sync_target::PersistError::UnknownKind(k) => CommandError {
-                code: "invalid_input",
-                message: format!("unknown sync adapter kind: {k}"),
-            },
-            other => CommandError {
-                code: "internal",
-                message: other.to_string(),
-            },
-        })
+    host_core::sync_target::connect(
+        &prefs,
+        &accounts,
+        &crate::secrets::KeyringSecretStore,
+        &HostSyncPlugins(plugin_manager),
+        &kind,
+        object,
+    )
+    .map(|_| ())
+    .map_err(connect_err)
 }
 
 /// Translate a [`sync_core::SyncError`] into a [`CommandError`]
@@ -826,7 +881,7 @@ pub async fn configure_sync_adapter(
             orchestrator.configure(adapter);
             // Now it is real: probed, wrapped and active. Writing here means a
             // rejected target leaves nothing behind.
-            persist_adapter_config(&prefs, &config)?;
+            persist_adapter_config(&shared, plugin_manager.inner(), &config)?;
             // Keep PREF_E2E_ENABLED in sync with what we just
             // discovered on the target meta. The keychain key
             // stays either way; the flag is the source of truth
@@ -845,12 +900,11 @@ pub async fn configure_sync_adapter(
         }
         SyncAdapterConfig::None => {
             orchestrator.deconfigure();
-            persist_adapter_config(&prefs, &config)?;
-            // Keep PREF_LOCAL_PATH / PREF_WEBDAV_* around so re-
-            // enabling the same backend is one click away. The
-            // keychain password also stays — it's never synced and
-            // a user reconnecting to the same dataset wouldn't
-            // want to re-type it.
+            // A disconnect that leaves the address and the password behind is a
+            // disconnect the next launch can undo by itself, which is what used
+            // to happen. Reconnecting now means re-entering the target — the
+            // price of "stopped means stopped".
+            persist_adapter_config(&shared, plugin_manager.inner(), &config)?;
         }
     }
     Ok(())
@@ -988,6 +1042,15 @@ pub fn get_sync_adapter_summary(
 ) -> CommandResult<Option<SyncAdapterSummary>> {
     let shared = db.shared();
     let prefs = UserPrefsRepo::new(&shared);
+    // The account this device syncs through answers first, and answers alone:
+    // once the pointer is set the preferences below are a record nothing
+    // maintains, and rendering a card from them would show the target the user
+    // moved off.
+    if let Some((kind, detail)) =
+        host_core::sync_target::summary(&prefs, &AccountsRepo::new(&shared))
+    {
+        return Ok(Some(SyncAdapterSummary { kind, detail }));
+    }
     let kind = prefs
         .get(PREF_ADAPTER_KIND)
         .map_err(internal)?
@@ -1266,7 +1329,7 @@ pub async fn accept_remote_dataset(
 
     // Commit the rest of the choice now that onboarding has succeeded.
     orchestrator.configure(Arc::clone(&adapter));
-    persist_adapter_config(&prefs, &config)?;
+    persist_adapter_config(&shared, plugin_manager.inner(), &config)?;
     // E2E key for the restore-on-boot path; `PREF_E2E_ENABLED` was set above.
     if let Some(k) = key {
         store_e2e_key(&k)?;
@@ -1347,7 +1410,7 @@ pub async fn adopt_local_dataset(
 
     orchestrator.configure(Arc::clone(&adapter));
     let prefs = UserPrefsRepo::new(&shared);
-    persist_adapter_config(&prefs, &config)?;
+    persist_adapter_config(&shared, plugin_manager.inner(), &config)?;
     if let Some(k) = key {
         store_e2e_key(&k)?;
         prefs.set(PREF_E2E_ENABLED, "true").map_err(internal)?;
@@ -1919,46 +1982,61 @@ pub async fn adopt_remote_encryption(
     Ok(())
 }
 
-/// Helper used by `lib.rs::setup` to reconstruct the adapter
-/// from the persisted prefs on app start. Returns `Ok(None)`
-/// when no adapter was configured before — the orchestrator
-/// stays in its initial unconfigured state.
+/// Restore what this device syncs through, for `lib.rs::setup` on app start.
 ///
-/// Same plugin-routing shape as [`build_adapter`]: the persisted
-/// pref values become a JSON config that's handed to the
-/// matching sync plugin via `open_instance`.
-/// Rebuild the configured adapter from this device's preferences, for
-/// `lib.rs::setup` on app start.
+/// The migration, the choice of reader and the log line are
+/// `host_core::sync_target`'s, shared with the mobile host and tested there;
+/// this host contributes the four arguments only it can produce — its database,
+/// its keyring, its host-key pin store, and [`HostSyncPlugins`].
+///
+/// The returned adapter is already wrapped for encryption where this device
+/// encrypts, so the caller configures it exactly as it stands.
+pub fn restore_sync_adapter(
+    db: &SharedConn,
+    plugin_manager: &PluginManager,
+) -> Option<Arc<dyn SyncAdapter>> {
+    host_core::sync_target::restore_sync_target(
+        &UserPrefsRepo::new(db),
+        &AccountsRepo::new(db),
+        &crate::secrets::KeyringSecretStore,
+        &UserPrefsHostKeyVerifier::new(db.clone()),
+        &HostSyncPlugins(plugin_manager),
+    )
+}
+
+/// Rebuild the sync adapter this device is configured to open, WITHOUT the
+/// migration and without the start-up log line.
 ///
 /// Everything this used to do — the per-kind preference reads, the keychain
 /// lookups, assembling the plugin's init config, the SFTP host-key refusal, and
 /// the encryption wrap — now lives in `host_core::sync_target`, shared with the
 /// mobile host and tested there. What remains here is how THIS host opens a
-/// plugin.
+/// plugin and where it keeps its host-key pins.
 ///
-/// The reason it returns `None` rather than the reason it failed is that the
-/// caller has nowhere to put one at start-up; the reason is logged instead,
-/// which is more than either host did before.
+/// Which of the two records answers is `build_for_device`'s decision, not this
+/// function's: the account row when this device points at one, and only then
+/// the `sync.adapter.*` preferences it has not moved off yet.
+///
+/// Start-up does not come through here any more — it calls
+/// [`restore_sync_adapter`]. What is left is the encryption downgrade, which
+/// needs a second handle to the target the orchestrator already holds, at a
+/// moment where the migration has long since run and a second "restored the
+/// sync target" line would be a lie about what just happened.
+///
+/// The reason it returns `None` rather than the reason it failed is that its
+/// caller has nowhere to put one; the reason is logged instead, which is more
+/// than either host did before.
 pub fn build_adapter_from_prefs(
     db: &SharedConn,
     plugin_manager: &PluginManager,
 ) -> Option<Arc<dyn SyncAdapter>> {
-    struct Opener<'a>(&'a PluginManager);
-    impl host_core::sync_target::PluginOpener for Opener<'_> {
-        fn open(
-            &self,
-            plugin_id: &str,
-            config_json: String,
-        ) -> Result<Arc<dyn SyncAdapter>, String> {
-            open_sync_plugin(self.0, plugin_id, config_json).map_err(|err| err.message)
-        }
-    }
-
     let prefs = UserPrefsRepo::new(db);
-    match host_core::sync_target::build_configured(
+    match host_core::sync_target::build_for_device(
         &prefs,
+        &AccountsRepo::new(db),
         &crate::secrets::KeyringSecretStore,
-        &Opener(plugin_manager),
+        &UserPrefsHostKeyVerifier::new(db.clone()),
+        &HostSyncPlugins(plugin_manager),
     ) {
         Ok(adapter) => Some(adapter),
         Err(host_core::sync_target::Unbuildable::NotConfigured) => None,
@@ -2039,9 +2117,21 @@ pub async fn connect_dropbox_oauth(
 /// Returns `true` when a Dropbox refresh token is on file —
 /// drives the "signed in" indicator next to the OAuth button
 /// in the SyncPanel.
+///
+/// Asked through `stored_secret` rather than of the pseudo-account directly:
+/// once this device syncs through an account row the token lives under that
+/// row's id, and a connected user would otherwise be told to sign in again.
 #[tauri::command]
-pub async fn has_dropbox_refresh_token() -> CommandResult<bool> {
-    Ok(secrets::retrieve(DROPBOX_SECRET_ACCOUNT, SecretSlot::RefreshToken).is_ok())
+pub async fn has_dropbox_refresh_token(db: State<'_, DbHandle>) -> CommandResult<bool> {
+    let shared = db.shared();
+    Ok(host_core::sync_target::stored_secret(
+        &UserPrefsRepo::new(&shared),
+        &AccountsRepo::new(&shared),
+        &crate::secrets::KeyringSecretStore,
+        "dropbox",
+        SecretSlot::RefreshToken,
+    )
+    .is_some())
 }
 
 // ---------------------------------------------------------------------------
@@ -2117,10 +2207,19 @@ pub async fn connect_googledrive_oauth(
 
 /// Returns `true` when a Google Drive refresh token is on
 /// file — drives the "signed in" indicator next to the OAuth
-/// button in the SyncPanel.
+/// button in the SyncPanel. See [`has_dropbox_refresh_token`] for why it asks
+/// `stored_secret` rather than the pseudo-account.
 #[tauri::command]
-pub async fn has_googledrive_refresh_token() -> CommandResult<bool> {
-    Ok(secrets::retrieve(GOOGLEDRIVE_SECRET_ACCOUNT, SecretSlot::RefreshToken).is_ok())
+pub async fn has_googledrive_refresh_token(db: State<'_, DbHandle>) -> CommandResult<bool> {
+    let shared = db.shared();
+    Ok(host_core::sync_target::stored_secret(
+        &UserPrefsRepo::new(&shared),
+        &AccountsRepo::new(&shared),
+        &crate::secrets::KeyringSecretStore,
+        "googledrive",
+        SecretSlot::RefreshToken,
+    )
+    .is_some())
 }
 
 // ---------------------------------------------------------------------------
@@ -2390,8 +2489,10 @@ use host_core::sync_target::{
     PREF_FTP_PATH, PREF_FTP_PORT, PREF_FTP_USER, PREF_GOOGLEDRIVE_FOLDER_NAME, PREF_LOCAL_PATH,
     PREF_SFTP_HOST, PREF_SFTP_PATH, PREF_SFTP_PORT, PREF_SFTP_USER, PREF_WEBDAV_URL,
     PREF_WEBDAV_USER, SECRET_ACCOUNT_DROPBOX as DROPBOX_SECRET_ACCOUNT,
-    SECRET_ACCOUNT_E2E as E2E_SECRET_ACCOUNT, SECRET_ACCOUNT_FTP as FTP_SECRET_ACCOUNT,
+    SECRET_ACCOUNT_E2E as E2E_SECRET_ACCOUNT,
     SECRET_ACCOUNT_GOOGLEDRIVE as GOOGLEDRIVE_SECRET_ACCOUNT,
-    SECRET_ACCOUNT_SFTP as SFTP_SECRET_ACCOUNT, SECRET_ACCOUNT_SFTP_KEY as SFTP_KEY_SECRET_ACCOUNT,
-    SECRET_ACCOUNT_WEBDAV as WEBDAV_SECRET_ACCOUNT,
 };
+// The four per-kind credential pseudo-accounts are gone from this file. Nothing
+// here reads a credential by its legacy address any more: `stored_secret` knows
+// where it lives, and only the two OAuth dances still WRITE to one — they run
+// before there is an account row to write to.

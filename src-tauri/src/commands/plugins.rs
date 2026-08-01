@@ -64,20 +64,43 @@ fn adapter_kind_for_plugin(plugin_id: &str, plugin_manager: &PluginManager) -> O
         .map(AdapterKind::new)
 }
 
-/// Map a sync-adapter plugin id to the `sync.adapter.kind`
-/// wire string the SyncPanel persists. Returns `None` for
-/// plugins that aren't sync adapters — the active-sync guard
-/// only fires when there's a real match risk.
-fn sync_kind_for_plugin(plugin_id: &str) -> Option<&'static str> {
-    match plugin_id {
-        "com.aperio.sync-adapter-local" => Some("local"),
-        "com.aperio.sync-adapter-webdav" => Some("webdav"),
-        "com.aperio.sync-adapter-ftp" => Some("ftp"),
-        "com.aperio.sync-adapter-sftp" => Some("sftp"),
-        "com.aperio.sync-adapter-dropbox" => Some("dropbox"),
-        "com.aperio.sync-adapter-googledrive" => Some("googledrive"),
-        _ => None,
+/// The adapter kind this plugin serves, read off its own manifest.
+///
+/// Was a hand-written table of plugin ids. The six sync backends declare their
+/// kind now, so a seventh needs no edit here to be protected — and a calendar
+/// adapter answers its own kind, which simply never matches an active SYNC
+/// target, so the guard still fires only where there is a real match risk.
+fn sync_kind_for_plugin(manager: &plugin_core::PluginManager, plugin_id: &str) -> Option<String> {
+    manager
+        .all()
+        .into_iter()
+        .find(|p| p.manifest.id == plugin_id)
+        .and_then(|p| p.manifest.adapter_kind.clone())
+}
+
+/// The sync target this device is actually using, as an adapter kind.
+///
+/// Asks the account first, because that is where the answer now lives, and
+/// falls back to the legacy preference for a device that has not connected
+/// since. Reading only the preference is what silently disarmed this guard:
+/// connecting retires that key, so on any device that had connected, the kind
+/// read as "nothing configured" and the user could disable, upgrade or
+/// uninstall the very plugin their sync depends on. The next launch would come
+/// up not syncing, with a log line and nothing else.
+fn active_sync_kind(db: &host_core::db::SharedConn) -> Option<String> {
+    let prefs = host_core::user_prefs::UserPrefsRepo::new(db);
+    if let Some(id) = host_core::sync_target::selected_account_id(&prefs) {
+        return host_core::accounts::AccountsRepo::new(db)
+            .get(&id)
+            .ok()
+            .flatten()
+            .map(|account| account.adapter_kind.as_str().to_string());
     }
+    prefs
+        .get(PREF_ADAPTER_KIND)
+        .ok()
+        .flatten()
+        .filter(|s| !s.is_empty())
 }
 
 /// `user_prefs` key naming the currently-configured sync
@@ -267,15 +290,8 @@ pub async fn set_plugin_enabled(
     // frontend surfaces this as a "switch sync first" hint
     // pointing the user at the Sync tab.
     if !request.enabled {
-        if let Some(plugin_sync_kind) = sync_kind_for_plugin(&request.plugin_id) {
-            let active_kind = prefs
-                .get(PREF_ADAPTER_KIND)
-                .map_err(|e| CommandError {
-                    code: "internal",
-                    message: format!("read sync.adapter.kind: {e}"),
-                })?
-                .filter(|s| !s.is_empty());
-            if active_kind.as_deref() == Some(plugin_sync_kind) {
+        if let Some(plugin_sync_kind) = sync_kind_for_plugin(&plugin_manager, &request.plugin_id) {
+            if active_sync_kind(&shared).as_deref() == Some(plugin_sync_kind.as_str()) {
                 return Err(CommandError {
                     code: "active_sync_conflict",
                     message: format!(
@@ -459,16 +475,8 @@ pub async fn install_plugin_archive(
     // adapters first.
     let is_upgrade = plugin_manager.get_including_disabled(&plugin_id).is_some();
     if is_upgrade {
-        if let Some(plugin_sync_kind) = sync_kind_for_plugin(&plugin_id) {
-            let prefs = UserPrefsRepo::new(&shared);
-            let active_kind = prefs
-                .get(PREF_ADAPTER_KIND)
-                .map_err(|e| CommandError {
-                    code: "internal",
-                    message: format!("read sync.adapter.kind: {e}"),
-                })?
-                .filter(|s| !s.is_empty());
-            if active_kind.as_deref() == Some(plugin_sync_kind) {
+        if let Some(plugin_sync_kind) = sync_kind_for_plugin(&plugin_manager, &plugin_id) {
+            if active_sync_kind(&shared).as_deref() == Some(plugin_sync_kind.as_str()) {
                 return Err(CommandError {
                     code: "active_sync_conflict",
                     message: format!(
@@ -914,16 +922,8 @@ pub async fn uninstall_plugin(
     //    subsequent sync round; same posture as iterations
     //    14 + 17.
     let shared = db.shared();
-    if let Some(plugin_sync_kind) = sync_kind_for_plugin(&plugin_id) {
-        let prefs = UserPrefsRepo::new(&shared);
-        let active_kind = prefs
-            .get(PREF_ADAPTER_KIND)
-            .map_err(|e| CommandError {
-                code: "internal",
-                message: format!("read sync.adapter.kind: {e}"),
-            })?
-            .filter(|s| !s.is_empty());
-        if active_kind.as_deref() == Some(plugin_sync_kind) {
+    if let Some(plugin_sync_kind) = sync_kind_for_plugin(&plugin_manager, &plugin_id) {
+        if active_sync_kind(&shared).as_deref() == Some(plugin_sync_kind.as_str()) {
             return Err(CommandError {
                 code: "active_sync_conflict",
                 message: format!(

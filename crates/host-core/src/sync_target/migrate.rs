@@ -319,6 +319,85 @@ fn table_for(stored_kind: &str) -> Option<(&'static str, &'static [Move])> {
         .map(|(_, account_kind, moves)| (*account_kind, *moves))
 }
 
+// ── what the connect path reads out of the same table ────────────────────────
+//
+// [`super::connect`] writes an account from a CONNECT FORM rather than from
+// this device's old preferences, but it has to reach the same row the migration
+// would have written: same account kind, same field keys, same keychain slots.
+// Everything below hands it one column of the table above, so the two paths
+// cannot disagree about a rename or a slot — which is the one class of mistake
+// here that produces an account nobody can open, silently.
+
+/// The account kind a target of `stored_kind` takes.
+///
+/// The one the PLUGIN declares, which is the same string in five cases and not
+/// in the sixth: the local filesystem adapter answers to `local_folder`,
+/// because `local` is [`AdapterKind::LOCAL`], the host's own store.
+pub(super) fn account_kind_for(stored_kind: &str) -> Option<&'static str> {
+    table_for(stored_kind).map(|(account_kind, _)| account_kind)
+}
+
+/// The reverse, for a caller that has a row and needs the stored spelling.
+///
+/// Both frontends switch on `local`, not on `local_folder`, and the settings
+/// card is rendered from that string.
+pub(super) fn stored_kind_for(account_kind: &str) -> Option<&'static str> {
+    KIND_TABLE
+        .iter()
+        .find(|(_, kind, _)| *kind == account_kind)
+        .map(|(stored, _, _)| *stored)
+}
+
+/// The plugin's own field key for one of `stored_kind`'s FORM values, or `None`
+/// where the form and the plugin already agree on the name.
+///
+/// Composed from the two tables that already state it — [`super::persist`] maps
+/// a form key onto the preference it is written under, and [`KIND_TABLE`] maps
+/// that preference onto the field the plugin declares — rather than restated. A
+/// third copy of `path` → `remote_root` / `base_path` is a third thing to keep
+/// in step, and the failure when it drifts is an adapter opened with a field it
+/// ignores, which no plugin reports because none of them set
+/// `deny_unknown_fields`.
+pub(super) fn schema_field_for(stored_kind: &str, form_key: &str) -> Option<&'static str> {
+    let pref = fields_for(stored_kind)?
+        .iter()
+        .find(|spec| spec.key == form_key)?
+        .pref?;
+    let (_, moves) = table_for(stored_kind)?;
+    moves.iter().find_map(|step| match (step.from, step.to) {
+        (Source::Pref(key), Dest::Config(field) | Dest::Local(field) | Dest::Port(field, _))
+            if key == pref =>
+        {
+            Some(field)
+        }
+        _ => None,
+    })
+}
+
+/// Every credential a target of `stored_kind` can hold, as `(legacy
+/// pseudo-account, the slot it sits in there, the slot it takes on a row)`.
+///
+/// Three uses, all of them the connect path's: inheriting a credential the form
+/// left out, carrying the OAuth refresh token onto the row the sign-in had no
+/// way to write to, and deleting what is left behind afterwards. The two slots
+/// differ exactly once — SFTP's key passphrase lives in a pseudo-account of its
+/// own in the `Password` slot and belongs in `KeyPassphrase` on a row that holds
+/// both credentials at the same time.
+pub(super) fn credential_routes(stored_kind: &str) -> Vec<(&'static str, SecretSlot, SecretSlot)> {
+    let Some((_, moves)) = table_for(stored_kind) else {
+        return Vec::new();
+    };
+    moves
+        .iter()
+        .filter_map(|step| match (step.from, step.to) {
+            (Source::Keychain(account, slot), Dest::Secret(target)) => {
+                Some((account, slot, target))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 // ── reading the old target ───────────────────────────────────────────────────
 
 /// One target, split the way the connect form would have split it.
@@ -461,24 +540,53 @@ fn plan(
 /// cannot read is not that, so a failed read is propagated like every other one
 /// here rather than falling back to a name that says the value was missing.
 fn display_name(prefs: &UserPrefsRepo<'_>, stored_kind: &str) -> Result<String, MigrateError> {
-    let read =
-        |key: &str| text_result(prefs, key).map_err(|err| MigrateError::Prefs(err.to_string()));
-    Ok(match stored_kind {
-        "local" => read(PREF_LOCAL_PATH)?
+    let pref_key = name_source(stored_kind).and_then(|form_key| {
+        fields_for(stored_kind)?
+            .iter()
+            .find(|spec| spec.key == form_key)?
+            .pref
+    });
+    let named_after = match pref_key {
+        Some(key) => text_result(prefs, key).map_err(|err| MigrateError::Prefs(err.to_string()))?,
+        None => None,
+    };
+    Ok(name_from(stored_kind, named_after))
+}
+
+/// The FORM key holding the value a kind names itself after.
+///
+/// Stated as a form key rather than a preference so the connect path — which
+/// has the form and not the preferences — asks the same question and gets the
+/// same answer. The migration turns it into a preference key through the
+/// [`super::persist`] table, which is where that correspondence already lives.
+pub(super) fn name_source(stored_kind: &str) -> Option<&'static str> {
+    Some(match stored_kind {
+        "local" | "dropbox" => "path",
+        "webdav" => "url",
+        "sftp" | "ftp" => "host",
+        "googledrive" => "folder_name",
+        _ => return None,
+    })
+}
+
+/// Turn the value a kind names itself after into the name the account gets.
+pub(super) fn name_from(stored_kind: &str, named_after: Option<String>) -> String {
+    match stored_kind {
+        "local" => named_after
             .map(|path| last_segment(&path).unwrap_or(path))
             .unwrap_or_else(|| "Sync folder".to_string()),
-        "webdav" => read(PREF_WEBDAV_URL)?
+        "webdav" => named_after
             .map(|url| url_host(&url).unwrap_or(url))
             .unwrap_or_else(|| "WebDAV".to_string()),
-        "sftp" => read(PREF_SFTP_HOST)?.unwrap_or_else(|| "SFTP".to_string()),
-        "ftp" => read(PREF_FTP_HOST)?.unwrap_or_else(|| "FTP".to_string()),
+        "sftp" => named_after.unwrap_or_else(|| "SFTP".to_string()),
+        "ftp" => named_after.unwrap_or_else(|| "FTP".to_string()),
         // The two OAuth services have no host to name, and their folder is
         // usually the provider default, so the service leads and the folder
         // qualifies it where there is one.
-        "dropbox" => qualified("Dropbox", read(PREF_DROPBOX_PATH)?),
-        "googledrive" => qualified("Google Drive", read(PREF_GOOGLEDRIVE_FOLDER_NAME)?),
+        "dropbox" => qualified("Dropbox", named_after),
+        "googledrive" => qualified("Google Drive", named_after),
         other => other.to_string(),
-    })
+    }
 }
 
 fn qualified(service: &str, detail: Option<String>) -> String {

@@ -630,6 +630,21 @@ pub async fn delete_account(
         &host_core::user_prefs::UserPrefsRepo::new(&shared),
         &id,
     );
+    let prefs_for_guard = host_core::user_prefs::UserPrefsRepo::new(&shared);
+    // Deleting the account this device syncs through would leave the pointer
+    // naming a row that is gone: the orchestrator keeps pushing to that target
+    // for the rest of the session, and the next launch comes up not syncing at
+    // all, with a log line and nothing the user could have predicted. Refused
+    // rather than silently deconfigured — stopping someone's sync is a decision
+    // they should make in the place that says "sync".
+    if host_core::sync_target::selected_account_id(&prefs_for_guard).as_deref() == Some(id.as_str())
+    {
+        return Err(CommandError {
+            code: "active_sync_conflict",
+            message: "This account is the sync target for this device.                       Disconnect it in Settings → Sync before deleting it."
+                .into(),
+        });
+    }
     registry.unregister(&id);
     // Best-effort credential cleanup — leaves no Aperio entry behind in
     // the keychain for that account id.

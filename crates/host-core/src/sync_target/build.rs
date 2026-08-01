@@ -44,6 +44,14 @@ use crate::user_prefs::{UserPrefsRepo, UserPrefsResult};
 pub enum Unbuildable {
     /// No target chosen on this device.
     NotConfigured,
+    /// This device points at an account row that is not there any more.
+    ///
+    /// Deliberately NOT [`Self::NotConfigured`], which is what it used to
+    /// collapse into. "Nobody chose" is a device that may still fall back to the
+    /// legacy preferences; this is a device that chose and whose choice was
+    /// DELETED, and resuming the target those preferences describe would start
+    /// uploading again to the place the user moved off. It reports instead.
+    AccountMissing { account_id: String },
     /// A value the adapter cannot work without is missing or empty.
     Incomplete { field: &'static str },
     /// The credential is not in this device's keychain.
@@ -60,6 +68,10 @@ impl std::fmt::Display for Unbuildable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotConfigured => write!(f, "no sync target configured"),
+            Self::AccountMissing { account_id } => write!(
+                f,
+                "the account this device syncs through ({account_id}) no longer exists",
+            ),
             Self::Incomplete { field } => write!(f, "sync target is missing {field}"),
             Self::MissingCredential { field } => {
                 write!(f, "no {field} stored for the sync target")
@@ -340,6 +352,46 @@ pub fn build_configured(
         field: "encryption key",
     })?;
     Ok(Arc::new(sync_core::EncryptingAdapter::new(plain, key)))
+}
+
+/// Build the adapter THIS DEVICE is configured to open, from whichever of the
+/// two records answers — the account it points at, or the preferences it has
+/// not moved off yet.
+///
+/// ## The pointer settles it, and nothing else gets a vote
+///
+/// A device with `sync.accountId` set syncs through that row and the legacy
+/// `sync.adapter.*` preferences are not read at all: not as a fallback, not for
+/// one field the row happens not to carry. Two records that can disagree is
+/// exactly what this layer exists to end, and a reader that quietly prefers
+/// whichever one is populated is how they get to disagree in the first place —
+/// the row says SFTP, an old preference still says WebDAV, and which target the
+/// device uploads to depends on which reader ran.
+///
+/// A pointer at a row that is GONE reports rather than recovers, for the reason
+/// spelled out on [`Unbuildable::AccountMissing`].
+pub fn build_for_device(
+    prefs: &UserPrefsRepo<'_>,
+    accounts: &crate::accounts::AccountsRepo<'_>,
+    secrets: &dyn SecretStore,
+    pins: &dyn crate::registry::HostKeyPins,
+    plugins: &dyn super::SyncPlugins,
+) -> Result<Arc<dyn SyncAdapter>, Unbuildable> {
+    if selected_account_id(prefs).is_some() {
+        return super::build_selected(prefs, accounts, secrets, pins, plugins);
+    }
+    build_configured(prefs, secrets, &AsOpener(plugins))
+}
+
+/// The account path needs a plugin resolver, the legacy path needs an opener,
+/// and a host should have to supply one thing. `SyncPlugins` is the larger of
+/// the two and already answers `open`.
+struct AsOpener<'a>(&'a dyn super::SyncPlugins);
+
+impl PluginOpener for AsOpener<'_> {
+    fn open(&self, plugin_id: &str, config_json: String) -> Result<Arc<dyn SyncAdapter>, String> {
+        self.0.open(plugin_id, config_json)
+    }
 }
 
 /// The device-local data key, base64 in the keychain.
