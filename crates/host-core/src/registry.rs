@@ -69,6 +69,23 @@ struct Routes {
     contact_list_to_account: HashMap<String, String>,
 }
 
+/// Reads the values an adapter marked `device_local` for one account.
+///
+/// A seam rather than a concrete store, for the same reason `SecretStore` is
+/// one: where these live is the host's business — `user_prefs` on both of
+/// today's hosts, via `account_local` — and the registry only needs them to
+/// arrive in time to open a plugin with.
+pub trait DeviceLocalRead: Send + Sync {
+    /// The stored values for `account_id`, restricted to `fields`. A field with
+    /// nothing stored is simply absent; the adapter's own default then applies,
+    /// which is the same thing that happens on a device where it was never set.
+    fn load(
+        &self,
+        account_id: &str,
+        fields: &[String],
+    ) -> serde_json::Map<String, serde_json::Value>;
+}
+
 /// Process-wide registry of all non-local adapter instances.
 pub struct AdapterRegistry {
     /// External adapters with CalendarFeature, keyed by account_id.
@@ -112,6 +129,18 @@ pub struct AdapterRegistry {
     /// through this instead of a hard-coded keyring call, so the
     /// registry stays Tauri-/platform-free.
     secret_store: Arc<dyn SecretStore>,
+
+    /// Reads this device's half of an account — the values its adapter marked
+    /// `device_local`, which never travel on the account row.
+    ///
+    /// Set after construction rather than taken as a constructor argument.
+    /// `register` receives only an `Account`, so these values have to reach it
+    /// some other way, and threading a database handle through both hosts'
+    /// setup for a feature no bundled adapter uses yet would be a wide change
+    /// bought for a narrow thing. Absent means "no local half", which is
+    /// exactly today's behaviour — a host that has not wired it is unchanged,
+    /// not degraded.
+    device_local: RwLock<Option<Arc<dyn DeviceLocalRead>>>,
     /// Host-channel capability tokens, keyed by account id.
     ///
     /// A token retires the moment it is dropped, so it has to outlive the
@@ -129,6 +158,46 @@ impl AdapterRegistry {
     /// bundled plugin); tests can pass an empty
     /// `PluginManager::new("0.1.0")` when they don't exercise the
     /// register / bootstrap path.
+    /// Give the registry a way to read this device's half of an account.
+    ///
+    /// Safe to call before or after accounts are registered: an adapter already
+    /// open keeps the configuration it was opened with until it is
+    /// re-registered, which is the rule every other change to an account
+    /// follows too.
+    pub fn set_device_local_store(&self, store: Arc<dyn DeviceLocalRead>) {
+        *self.device_local.write().expect("registry poisoned") = Some(store);
+    }
+
+    /// This account's device-local values, or an empty map when nothing is
+    /// wired or the schema marks no field.
+    fn device_local_values(
+        &self,
+        account_id: &str,
+        schema: &plugin_core::account_schema::AccountSchema,
+    ) -> serde_json::Map<String, serde_json::Value> {
+        // Secrets are excluded: they are device-local by living in the keychain,
+        // and `init_config` already reads them from there. Asking this store for
+        // them would be asking the wrong one.
+        let fields: Vec<String> = schema
+            .fields
+            .iter()
+            .filter(|f| f.device_local && !f.is_secret())
+            .map(|f| f.key.clone())
+            .collect();
+        if fields.is_empty() {
+            return serde_json::Map::new();
+        }
+        match self
+            .device_local
+            .read()
+            .expect("registry poisoned")
+            .as_ref()
+        {
+            Some(store) => store.load(account_id, &fields),
+            None => serde_json::Map::new(),
+        }
+    }
+
     pub fn new(plugin_manager: Arc<PluginManager>, secret_store: Arc<dyn SecretStore>) -> Self {
         Self::with_data_dir(plugin_manager, secret_store, None)
     }
@@ -144,6 +213,7 @@ impl AdapterRegistry {
         data_dir: Option<std::path::PathBuf>,
     ) -> Self {
         Self {
+            device_local: RwLock::new(None),
             external_cal: RwLock::new(HashMap::new()),
             external_tasks: RwLock::new(HashMap::new()),
             external_contacts: RwLock::new(HashMap::new()),
@@ -855,17 +925,18 @@ impl AdapterRegistry {
         plugin_id: &str,
         schema: &plugin_core::account_schema::AccountSchema,
     ) -> Result<(), RegistryError> {
-        let mut plugin_config =
-            crate::account_setup::init_config(schema, &account.config_json, |slot| {
-                self.secret_store.retrieve(&account.id, slot)
-            })
-            .map_err(|e| match e {
-                crate::account_setup::AccountSetupError::Config(m)
-                | crate::account_setup::AccountSetupError::InvalidInput(m) => {
-                    RegistryError::Config(m)
-                }
-                crate::account_setup::AccountSetupError::Secret(m) => RegistryError::Secret(m),
-            })?;
+        let local = self.device_local_values(&account.id, schema);
+        let mut plugin_config = crate::account_setup::init_config_with_local(
+            schema,
+            &account.config_json,
+            &local,
+            |slot| self.secret_store.retrieve(&account.id, slot),
+        )
+        .map_err(|e| match e {
+            crate::account_setup::AccountSetupError::Config(m)
+            | crate::account_setup::AccountSetupError::InvalidInput(m) => RegistryError::Config(m),
+            crate::account_setup::AccountSetupError::Secret(m) => RegistryError::Secret(m),
+        })?;
 
         // A writable directory of its own, for an adapter that asked for one.
         // Declared, so the host never has to know that a particular adapter
