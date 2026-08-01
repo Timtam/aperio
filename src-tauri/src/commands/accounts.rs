@@ -584,6 +584,13 @@ pub async fn delete_account(
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
     repo.delete(&id)?;
+    // This device's half goes with it. The row's removal syncs and this does
+    // not — another device deleting the account cannot tell this one where its
+    // key file was, so nothing else would ever clean these up.
+    let _ = host_core::account_local::forget_all(
+        &host_core::user_prefs::UserPrefsRepo::new(&shared),
+        &id,
+    );
     registry.unregister(&id);
     // Best-effort credential cleanup — leaves no Aperio entry behind in
     // the keychain for that account id.
@@ -1363,6 +1370,22 @@ pub async fn connect_account(
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
     let created = repo.create(request.adapter_kind.clone(), name, &plan.config_json)?;
+    // This device's half, keyed by the id the row just got. Written before the
+    // secrets so the same unwinding below covers it: a failure after this point
+    // deletes the account, and `forget` runs from the delete path.
+    if !plan.device_local.is_empty() {
+        let prefs = host_core::user_prefs::UserPrefsRepo::new(&shared);
+        let fields: Vec<String> = plan.device_local.keys().cloned().collect();
+        if let Err(err) =
+            host_core::account_local::store(&prefs, &created.id, &fields, &plan.device_local)
+        {
+            let _ = repo.delete(&created.id);
+            return Err(CommandError {
+                code: "internal",
+                message: format!("failed to store this device's settings: {err}"),
+            });
+        }
+    }
     for (slot, value) in &plan.secrets {
         if let Err(err) = secrets::store(&created.id, *slot, value) {
             let _ = secrets::delete_all(&created.id);

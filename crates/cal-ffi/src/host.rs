@@ -2407,6 +2407,10 @@ impl Host {
             Ok(Some(account)) if account.adapter_kind == "device_calendar"
         );
         repo.delete(&account_id).map_err(acc_err)?;
+        // This device's half goes with it. The row's removal syncs and this
+        // does not — another device deleting the account cannot tell this one
+        // where its key file was, so nothing else would ever clean these up.
+        let _ = host_core::account_local::forget_all(&UserPrefsRepo::new(&shared), &account_id);
         // Propagate the deletion to other devices (cascades secrets there too).
         if !is_device {
             self.writer
@@ -7440,6 +7444,18 @@ impl Host {
         let created = repo
             .create(kind, name, &plan.config_json)
             .map_err(acc_err)?;
+        // This device's half, keyed by the id the row just got. A failure here
+        // unwinds the row, the same way a failed secret write does below.
+        if !plan.device_local.is_empty() {
+            let prefs = UserPrefsRepo::new(&shared);
+            let fields: Vec<String> = plan.device_local.keys().cloned().collect();
+            if let Err(err) =
+                host_core::account_local::store(&prefs, &created.id, &fields, &plan.device_local)
+            {
+                let _ = repo.delete(&created.id);
+                return Err(storage_err(err));
+            }
+        }
         for (slot, value) in &plan.secrets {
             if let Err(err) = self.secret_store.store(&created.id, *slot, value) {
                 let _ = self.secret_store.delete_all(&created.id);

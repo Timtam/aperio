@@ -120,6 +120,29 @@ impl crate::registry::DeviceLocalRead for PrefsDeviceLocal {
     }
 }
 
+/// Forget everything stored for an account, whatever the schema says today.
+///
+/// Prefix-based rather than field-based on purpose. The caller reaches this
+/// after the account row is already gone, so the adapter kind — and with it the
+/// schema — is no longer available to ask; and a field the schema USED to
+/// declare would otherwise be left behind forever, since nothing would ever
+/// name it again.
+pub fn forget_all(prefs: &UserPrefsRepo<'_>, account_id: &str) -> UserPrefsResult<()> {
+    // `_` is a LIKE wildcard and account ids are free-form, so the pattern is
+    // escaped rather than trusted.
+    let escaped = account_id
+        .replace('!', "!!")
+        .replace('%', "!%")
+        .replace('_', "!_");
+    let pattern = format!("{PREFIX}{escaped}.%");
+    let conn = prefs.db.lock().expect("db mutex poisoned");
+    conn.execute(
+        "DELETE FROM user_prefs WHERE key LIKE ?1 ESCAPE '!'",
+        rusqlite::params![pattern],
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,6 +226,32 @@ mod tests {
         assert!(
             back.get("key_path").is_none(),
             "a stale key path survived a switch away from key auth",
+        );
+    }
+
+    #[test]
+    fn forget_all_clears_fields_the_schema_no_longer_declares() {
+        let db = DbHandle::open_in_memory().unwrap();
+        let shared = db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+
+        let mut values = Map::new();
+        values.insert("key_path".into(), Value::String("/x".into()));
+        store(&prefs, "acc-1", &fields(), &values).unwrap();
+        // A field from an older schema version, which nothing would name again.
+        prefs
+            .set("account.acc-1.retired_field", "leftover")
+            .unwrap();
+        // Another account, which must survive.
+        prefs.set("account.acc-2.key_path", "/keep").unwrap();
+
+        forget_all(&prefs, "acc-1").unwrap();
+
+        assert!(load(&prefs, "acc-1", &fields()).is_empty());
+        assert_eq!(prefs.get("account.acc-1.retired_field").unwrap(), None);
+        assert_eq!(
+            prefs.get("account.acc-2.key_path").unwrap().as_deref(),
+            Some("/keep"),
         );
     }
 
