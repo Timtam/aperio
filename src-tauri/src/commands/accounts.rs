@@ -33,6 +33,24 @@ fn account_payload(acc: &Account) -> AccountPayload {
     }
 }
 
+/// Append an `account.*` event unless this adapter's accounts stay on the
+/// device that made them. Returns whether the event was actually appended.
+///
+/// Every emit site goes through here so the rule is stated once; the reasoning
+/// is in [`crate::accounts::travels_between_devices`].
+fn append_account_event(
+    event_log: &EventLogWriter,
+    plugin_manager: &PluginManager,
+    adapter_kind: &str,
+    event: SyncEvent,
+) -> bool {
+    if !crate::accounts::travels_between_devices(plugin_manager, adapter_kind) {
+        return false;
+    }
+    event_log.append(event);
+    true
+}
+
 /// One-shot pref marker recording that we've already replayed
 /// the existing local accounts as `AccountCreated` events. The
 /// Account.* event variants were added in a later iteration —
@@ -57,7 +75,11 @@ const PREF_ACCOUNTS_BACKFILLED: &str = "sync.accounts.eventBackfillDone";
 /// surfaces as a `warn!` log and leaves the backfill
 /// un-flagged, so the next boot retries. We never want a
 /// backfill problem to block app startup.
-pub fn backfill_account_events(db: &crate::db::DbHandle, event_log: &EventLogWriter) {
+pub fn backfill_account_events(
+    db: &crate::db::DbHandle,
+    plugin_manager: &PluginManager,
+    event_log: &EventLogWriter,
+) {
     let shared = db.shared();
     let prefs = crate::user_prefs::UserPrefsRepo::new(&shared);
     match prefs.get(PREF_ACCOUNTS_BACKFILLED) {
@@ -78,11 +100,19 @@ pub fn backfill_account_events(db: &crate::db::DbHandle, event_log: &EventLogWri
     };
     let mut emitted = 0usize;
     for acc in accounts {
-        if acc.id == "local" || acc.adapter_kind == "local" {
-            continue;
+        // The hand-written `local` skip that used to stand here is subsumed by
+        // the predicate: the row it protected is the seeded local account, and
+        // `local` is host-internal — as is every other kind that belongs to the
+        // device that made it. Only what was really appended is counted, so the
+        // log line below stays true.
+        if append_account_event(
+            event_log,
+            plugin_manager,
+            acc.adapter_kind.as_str(),
+            SyncEvent::AccountCreated(account_payload(&acc)),
+        ) {
+            emitted += 1;
         }
-        event_log.append(SyncEvent::AccountCreated(account_payload(&acc)));
-        emitted += 1;
     }
     if let Err(err) = prefs.set(PREF_ACCOUNTS_BACKFILLED, "true") {
         tracing::warn!(?err, "account backfill: pref write failed");
@@ -578,11 +608,20 @@ pub struct DiscoveredEndpoints {
 pub async fn delete_account(
     db: State<'_, DbHandle>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
     event_log: State<'_, Arc<EventLogWriter>>,
     id: String,
 ) -> CommandResult<()> {
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
+    // Whether the deletion travels is a question about the adapter, and the
+    // only place the adapter is recorded is the row we are about to remove —
+    // so read the kind first. A missing row answers `not_found` here instead of
+    // one line further down, which is the same answer the caller already got.
+    let adapter_kind = repo
+        .get(&id)?
+        .map(|account| account.adapter_kind)
+        .ok_or_else(|| AccountsError::NotFound(id.clone()))?;
     repo.delete(&id)?;
     // This device's half goes with it. The row's removal syncs and this does
     // not — another device deleting the account cannot tell this one where its
@@ -597,7 +636,12 @@ pub async fn delete_account(
     if let Err(err) = secrets::delete_all(&id) {
         tracing::warn!(?err, account_id = %id, "secrets cleanup failed");
     }
-    event_log.append(SyncEvent::AccountDeleted(IdPayload { id }));
+    append_account_event(
+        &event_log,
+        &plugin_manager,
+        adapter_kind.as_str(),
+        SyncEvent::AccountDeleted(IdPayload { id }),
+    );
     Ok(())
 }
 
@@ -610,6 +654,7 @@ pub async fn delete_account(
 #[tauri::command]
 pub async fn rename_account(
     db: State<'_, DbHandle>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
     event_log: State<'_, Arc<EventLogWriter>>,
     id: String,
     new_name: String,
@@ -623,7 +668,12 @@ pub async fn rename_account(
     }
     let shared = db.shared();
     let account = AccountsRepo::new(&shared).rename(&id, trimmed)?;
-    event_log.append(SyncEvent::AccountUpdated(account_payload(&account)));
+    append_account_event(
+        &event_log,
+        &plugin_manager,
+        account.adapter_kind.as_str(),
+        SyncEvent::AccountUpdated(account_payload(&account)),
+    );
     Ok(account)
 }
 
@@ -765,7 +815,12 @@ pub async fn connect_google_account(
             message: format!("adapter registration failed: {err}"),
         });
     }
-    event_log.append(SyncEvent::AccountCreated(account_payload(&created)));
+    append_account_event(
+        &event_log,
+        &plugin_manager,
+        created.adapter_kind.as_str(),
+        SyncEvent::AccountCreated(account_payload(&created)),
+    );
     // The boot warm pass may already have run; kick a warm so the new account's
     // calendars/lists load now instead of only after the next pass / restart.
     refresher.trigger();
@@ -874,7 +929,12 @@ pub async fn connect_microsoft_account(
             message: format!("adapter registration failed: {err}"),
         });
     }
-    event_log.append(SyncEvent::AccountCreated(account_payload(&created)));
+    append_account_event(
+        &event_log,
+        &plugin_manager,
+        created.adapter_kind.as_str(),
+        SyncEvent::AccountCreated(account_payload(&created)),
+    );
     // The boot warm pass may already have run; kick a warm so the new account's
     // calendars/lists load now instead of only after the next pass / restart.
     refresher.trigger();
@@ -1417,7 +1477,12 @@ pub async fn connect_account(
             message: format!("adapter registration failed: {err}"),
         });
     }
-    event_log.append(SyncEvent::AccountCreated(account_payload(&created)));
+    append_account_event(
+        &event_log,
+        &plugin_manager,
+        created.adapter_kind.as_str(),
+        SyncEvent::AccountCreated(account_payload(&created)),
+    );
 
     // A warm pass only has something to fetch when the account owns containers.
     // A videoconference account owns none, and the catalog calls have a

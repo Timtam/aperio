@@ -480,7 +480,7 @@ pub fn run() {
     // writer race was live) never reached the event log. Replay them through
     // the writer once so the next sync round carries them. Idempotent — each
     // is gated by a pref it sets on success.
-    commands::backfill_account_events(&db, &event_log_writer);
+    commands::backfill_account_events(&db, &plugin_manager, &event_log_writer);
     commands::backfill_local_task_events(&db, &event_log_writer);
 
     // Local custom-sound store (user content, outside the sync/ subtree). §14.4:

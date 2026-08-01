@@ -141,7 +141,17 @@ impl SyncStore for DesktopSyncStore {
             .map_err(|err| StoreError::Backend(format!("dump accounts query: {err}")))?;
         let mut out = Vec::new();
         for r in rows {
-            out.push(r.map_err(|err| StoreError::Backend(format!("dump accounts row: {err}")))?);
+            let account: SnapshotAccount =
+                r.map_err(|err| StoreError::Backend(format!("dump accounts row: {err}")))?;
+            // The event path already refuses these; the snapshot used to filter
+            // by id alone and published them anyway. A phone's device-calendar
+            // account then arrived on the desktop as an account with no plugin,
+            // asking to be reconnected — a target that device cannot reach and
+            // must not try to.
+            if sync_core::event::is_host_internal_kind(&account.adapter_kind) {
+                continue;
+            }
+            out.push(account);
         }
         Ok(out)
     }
@@ -152,7 +162,10 @@ impl SyncStore for DesktopSyncStore {
     /// device would clobber its (locally-meaningful) timestamps without
     /// any user-visible benefit.
     fn upsert_account(&self, account: &SnapshotAccount) -> Result<(), StoreError> {
-        if account.id == "local" {
+        // The same rule as the applier's, on the snapshot path. Both ends check
+        // rather than one, because a snapshot written by an older build carries
+        // rows this one would otherwise trust.
+        if account.id == "local" || sync_core::event::is_host_internal_kind(&account.adapter_kind) {
             return Ok(());
         }
         let conn = self.db.lock().expect("db mutex poisoned");
@@ -412,6 +425,51 @@ mod tests {
             .unwrap();
         assert_eq!(kind, "caldav");
         assert_eq!(name, "Fastmail");
+    }
+
+    /// A phone's own calendar store is not something another device can open.
+    ///
+    /// The event path already refused it; the snapshot filtered by id alone
+    /// and published it anyway, so it arrived on the desktop as an account
+    /// with no plugin, asking to be reconnected. This asserts the sending end;
+    /// `upsert_account` and the applier refuse it on arrival too, because a
+    /// snapshot written by an older build still carries it.
+    #[tokio::test]
+    async fn snapshot_excludes_a_device_local_account() {
+        let (_tmp, db, adapter) = fresh();
+        {
+            let shared = db.shared();
+            let conn = shared.lock().unwrap();
+            conn.execute(
+                "INSERT INTO accounts
+                    (id, adapter_kind, display_name, config_json, created_at, updated_at)
+                 VALUES ('phone', 'device_calendar', 'Telefon', '{}', '2026-01-01', '2026-01-01')",
+                [],
+            )
+            .unwrap();
+            // A normal account beside it, so the test can tell "filtered" from
+            // "dumped nothing at all".
+            conn.execute(
+                "INSERT INTO accounts
+                    (id, adapter_kind, display_name, config_json, created_at, updated_at)
+                 VALUES ('fm', 'caldav', 'Fastmail', '{}', '2026-01-01', '2026-01-01')",
+                [],
+            )
+            .unwrap();
+        }
+        let snap = builder(&db, Arc::clone(&adapter)).build().unwrap();
+        let body: AperioSnapshotBody = serde_json::from_value(snap.body.clone()).unwrap();
+        assert!(
+            body.accounts
+                .iter()
+                .all(|acc| acc.adapter_kind != "device_calendar"),
+            "a device-local account reached the snapshot: {:?}",
+            body.accounts.iter().map(|a| &a.id).collect::<Vec<_>>(),
+        );
+        assert!(
+            body.accounts.iter().any(|acc| acc.id == "fm"),
+            "the ordinary account must still travel",
+        );
     }
 
     /// Local accounts (`id = "local"`) are never written into the

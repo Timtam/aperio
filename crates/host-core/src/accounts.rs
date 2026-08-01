@@ -156,6 +156,51 @@ pub struct Account {
     pub updated_at: String,
 }
 
+/// Whether this account's row belongs on the wire.
+///
+/// Accounts travel between a user's devices, and almost all of them should:
+/// connect a calendar on the laptop and it is there on the phone. An account
+/// that ONLY syncs is different in kind, and sending it does harm in four
+/// separate ways.
+///
+/// It gives nothing. A device joining an existing sync has to be told where
+/// the dataset is before it can read anything — it cannot learn the address of
+/// a server from a file on that server. By the time the row could arrive, the
+/// device already has the details, entered by hand.
+///
+/// It creates a duplicate. Both devices then hold two rows describing one
+/// target, differing only by identifier, and the second is one nobody chose.
+///
+/// It nags. A sync-only row on the receiving device has no credential in that
+/// device's keychain, so it surfaces in the reconnect prompts — asking someone
+/// to re-enter a password for a target that device does not use.
+///
+/// And it publishes. `config_json` is appended to the event log unencrypted
+/// whenever end-to-end encryption is off, so a WebDAV account's URL and user
+/// name would be written, in the clear, into a file on the very server they
+/// name. Those values are device-local preferences today and have never left
+/// the machine.
+///
+/// The test is capability-driven rather than a list of names, and that matters
+/// for what comes next: an account that offers a calendar AND storage — the
+/// shape Google Drive folding into the Google adapter produces — travels
+/// exactly as it always has. Only an adapter whose sole capability is `sync`
+/// stays home.
+///
+/// An unknown kind travels. A row from a plugin this build does not have must
+/// be passed on rather than dropped, which is what every device without that
+/// plugin already does.
+pub fn travels_between_devices(manager: &plugin_core::PluginManager, adapter_kind: &str) -> bool {
+    if AdapterKind::new(adapter_kind).is_host_internal() {
+        return false;
+    }
+    manager
+        .adapter_kinds()
+        .into_iter()
+        .find(|info| info.kind == adapter_kind)
+        .is_none_or(|info| info.holds_data)
+}
+
 #[derive(Debug, Error)]
 pub enum AccountsError {
     #[error("sqlite error: {0}")]
@@ -524,6 +569,109 @@ mod tests {
         }
     }
 
+    // ── what may leave this device ────────────────────────────────────────
+
+    /// A manager holding exactly one real DATA adapter. iCal is the cheapest —
+    /// it registers without a keychain secret and without touching the network
+    /// — and its own `plugin.json` is what answers, so the test cannot drift
+    /// away from the shipped manifest.
+    fn manager_with_ical() -> plugin_core::PluginManager {
+        let manager = plugin_core::PluginManager::new("0.1.0");
+        let manifest = plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
+            "../../cal-adapter-ical-plugin/plugin.json"
+        ))
+        .expect("the shipped iCal manifest parses");
+        let descriptor = unsafe { cal_adapter_ical_plugin::build_descriptor() };
+        manager
+            .register_static(manifest, descriptor, cal_adapter_ical_plugin::DESTROY_FN)
+            .expect("register the static iCal plugin");
+        manager
+    }
+
+    /// The kind the sync-only fixture below answers to.
+    const SYNC_ONLY_KIND: &str = "sync_local_folder";
+
+    /// A manager holding exactly one real SYNC-ONLY adapter: the shipped
+    /// local-filesystem sync plugin, whose manifest declares
+    /// `capabilities: ["sync"]` and nothing else.
+    ///
+    /// The one thing added here is a kind. Sync targets are not accounts on
+    /// this build, so no shipped sync manifest names one yet — and a kind is
+    /// exactly what makes this the case the rule is about: an account row that
+    /// could point at a sync target. Everything the predicate actually reads,
+    /// the capability list, is the plugin's own.
+    fn manager_with_sync_only() -> plugin_core::PluginManager {
+        let manager = plugin_core::PluginManager::new("0.1.0");
+        let mut manifest = plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
+            "../../sync-adapter-local-plugin/plugin.json"
+        ))
+        .expect("the shipped local-filesystem sync manifest parses");
+        manifest.adapter_kind = Some(SYNC_ONLY_KIND.to_string());
+        let descriptor = unsafe { sync_adapter_local_plugin::build_descriptor() };
+        manager
+            .register_static(manifest, descriptor, sync_adapter_local_plugin::DESTROY_FN)
+            .expect("register the static local-filesystem sync plugin");
+        manager
+    }
+
+    #[test]
+    fn a_host_internal_kind_never_travels() {
+        // No plugin serves either one, so the answer cannot come from the
+        // manager — it has to come from the kind itself, whatever is loaded.
+        for manager in [
+            plugin_core::PluginManager::new("0.1.0"),
+            manager_with_ical(),
+        ] {
+            for kind in [AdapterKind::LOCAL, AdapterKind::DEVICE_CALENDAR] {
+                assert!(
+                    !travels_between_devices(&manager, kind),
+                    "{kind} is this device's own and must never reach another",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_kind_no_plugin_serves_still_travels() {
+        // The forward-compatibility case, and the direction that matters: a
+        // device missing a plugin must PASS THE ROW ON rather than drop it,
+        // or one old device in the set silently deletes accounts for everyone
+        // else. Asked of an empty manager and of one with a plugin loaded,
+        // because "unknown" has to mean unknown either way.
+        for manager in [
+            plugin_core::PluginManager::new("0.1.0"),
+            manager_with_ical(),
+        ] {
+            assert!(
+                travels_between_devices(&manager, "quantum_teleconference"),
+                "a plugin this build lacks must not cost the user the account",
+            );
+        }
+    }
+
+    #[test]
+    fn a_data_holding_adapter_travels() {
+        // The ordinary case: connect a calendar on the laptop, find it on the
+        // phone.
+        assert!(travels_between_devices(&manager_with_ical(), "ical"));
+    }
+
+    #[test]
+    fn a_sync_only_adapter_stays_home() {
+        // The rule this predicate exists for. Its `config_json` names the very
+        // server the log is written to, and the receiving device already knows
+        // the address or it could not have read the log at all.
+        let manager = manager_with_sync_only();
+        assert!(
+            !travels_between_devices(&manager, SYNC_ONLY_KIND),
+            "an adapter whose only capability is `sync` must stay on the device \
+             that configured it",
+        );
+        // And it is genuinely the capability list answering, not the name:
+        // the same manager says yes to anything it does not serve.
+        assert!(travels_between_devices(&manager, "caldav"));
+    }
+
     #[test]
     fn deleting_local_is_refused() {
         let (_tmp, db) = fresh_db();
@@ -531,5 +679,28 @@ mod tests {
         let repo = AccountsRepo::new(&shared);
         let err = repo.delete(LOCAL_ACCOUNT_ID).unwrap_err();
         assert!(matches!(err, AccountsError::DeleteLocalForbidden));
+    }
+
+    /// `sync-core` keeps its own copy of these names, because it sits below
+    /// this module and cannot ask. If the two ever disagree, an account that
+    /// belongs to one machine starts crossing the wire — or one that should
+    /// travel stops. Neither says anything at the time.
+    #[test]
+    fn the_engines_copy_of_the_host_internal_kinds_agrees() {
+        for kind in sync_core::event::HOST_INTERNAL_ACCOUNT_KINDS
+            .iter()
+            .copied()
+        {
+            assert!(
+                AdapterKind::new(kind).is_host_internal(),
+                "{kind} is host-internal downstream but not here",
+            );
+        }
+        for kind in [AdapterKind::LOCAL, AdapterKind::DEVICE_CALENDAR] {
+            assert!(
+                sync_core::event::is_host_internal_kind(kind),
+                "{kind} is host-internal here but not downstream",
+            );
+        }
     }
 }

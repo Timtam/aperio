@@ -361,6 +361,25 @@ fn account_payload(acc: &host_core::accounts::Account) -> AccountPayload {
     }
 }
 
+/// Append an `account.*` event unless this adapter's accounts stay on the
+/// device that made them. Returns whether the event was actually appended.
+///
+/// Every emit site goes through here so the rule is stated once; the reasoning
+/// is in [`host_core::accounts::travels_between_devices`]. The desktop twin
+/// sits next to its own `account_payload`.
+fn append_account_event(
+    writer: &EventLogWriter,
+    plugin_manager: &PluginManager,
+    adapter_kind: &str,
+    event: SyncEvent,
+) -> bool {
+    if !host_core::accounts::travels_between_devices(plugin_manager, adapter_kind) {
+        return false;
+    }
+    writer.append(event);
+    true
+}
+
 use crate::{from_json, map_store_err, to_json, StoreError};
 
 /// Errors the foreign keychain implementation can raise. Mirrors
@@ -2277,12 +2296,15 @@ impl Host {
         // Sync the new account row to other devices (non-secret metadata only;
         // the receiver surfaces the "reconnect" wizard for the device-local
         // secret). Mirrors the desktop create_account. The device-calendar
-        // account is the exception (Option A): it is DEVICE-LOCAL and never
-        // synced, so other devices never receive a kind they can't construct.
-        if !is_device {
-            self.writer
-                .append(SyncEvent::AccountCreated(account_payload(&created)));
-        }
+        // exception (Option A) is no longer spelled out here: `device_calendar`
+        // is host-internal, so the predicate already keeps it home, along with
+        // every other account that belongs to the device that made it.
+        append_account_event(
+            &self.writer,
+            &self.plugin_manager,
+            created.adapter_kind.as_str(),
+            SyncEvent::AccountCreated(account_payload(&created)),
+        );
 
         to_json(&created)
     }
@@ -2405,23 +2427,26 @@ impl Host {
         let _ = self.secret_store.delete_all(&account_id);
         let shared = self.db.shared();
         let repo = AccountsRepo::new(&shared);
-        // A device-local account was never synced (Option A) — don't broadcast a
-        // deletion for a row the user's other devices never had. Check before the
-        // row is gone.
-        let is_device = matches!(
-            repo.get(&account_id),
-            Ok(Some(account)) if account.adapter_kind == "device_calendar"
-        );
+        // Whether the deletion travels is a question about the adapter, and the
+        // only place the adapter is recorded is the row we are about to remove —
+        // so read the kind before it is gone.
+        let adapter_kind = repo
+            .get(&account_id)
+            .map_err(acc_err)?
+            .map(|account| account.adapter_kind)
+            .ok_or(StoreError::NotFound)?;
         repo.delete(&account_id).map_err(acc_err)?;
         // This device's half goes with it. The row's removal syncs and this
         // does not — another device deleting the account cannot tell this one
         // where its key file was, so nothing else would ever clean these up.
         let _ = host_core::account_local::forget_all(&UserPrefsRepo::new(&shared), &account_id);
         // Propagate the deletion to other devices (cascades secrets there too).
-        if !is_device {
-            self.writer
-                .append(SyncEvent::AccountDeleted(IdPayload { id: account_id }));
-        }
+        append_account_event(
+            &self.writer,
+            &self.plugin_manager,
+            adapter_kind.as_str(),
+            SyncEvent::AccountDeleted(IdPayload { id: account_id }),
+        );
         Ok(())
     }
 
@@ -2439,13 +2464,14 @@ impl Host {
         let account = AccountsRepo::new(&shared)
             .rename(&id, trimmed)
             .map_err(acc_err)?;
-        // Device-local accounts are never synced (Option A): keep the rename
-        // device-local too, so no other device receives an update for a row it
-        // doesn't have.
-        if account.adapter_kind != "device_calendar" {
-            self.writer
-                .append(SyncEvent::AccountUpdated(account_payload(&account)));
-        }
+        // An account that never travelled must not receive an update either:
+        // no other device has the row to apply it to.
+        append_account_event(
+            &self.writer,
+            &self.plugin_manager,
+            account.adapter_kind.as_str(),
+            SyncEvent::AccountUpdated(account_payload(&account)),
+        );
         to_json(&account)
     }
 
@@ -4216,6 +4242,7 @@ impl Host {
                 host_core::credential_sync::emit_all_local_credentials(
                     &self.writer,
                     &shared,
+                    &self.plugin_manager,
                     self.secret_store.as_ref(),
                 );
                 to_json(&serde_json::json!({
@@ -4688,6 +4715,7 @@ impl Host {
         host_core::credential_sync::emit_all_local_credentials(
             &self.writer,
             &shared,
+            &self.plugin_manager,
             self.secret_store.as_ref(),
         );
         Ok(())
@@ -7487,8 +7515,12 @@ impl Host {
                 detail: format!("adapter registration failed: {err}"),
             });
         }
-        self.writer
-            .append(SyncEvent::AccountCreated(account_payload(&created)));
+        append_account_event(
+            &self.writer,
+            &self.plugin_manager,
+            created.adapter_kind.as_str(),
+            SyncEvent::AccountCreated(account_payload(&created)),
+        );
         to_json(&created)
     }
 }

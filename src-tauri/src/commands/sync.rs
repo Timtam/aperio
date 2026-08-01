@@ -1701,6 +1701,7 @@ pub struct EnableE2eReport {
 pub async fn enable_sync_encryption(
     orchestrator: State<'_, Arc<SyncOrchestrator>>,
     db: State<'_, DbHandle>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
     event_log: State<'_, Arc<crate::event_log::EventLogWriter>>,
     new_passphrase: String,
 ) -> CommandResult<EnableE2eReport> {
@@ -1822,6 +1823,7 @@ pub async fn enable_sync_encryption(
     crate::credential_sync::emit_all_local_credentials(
         &event_log,
         &shared,
+        plugin_manager.inner(),
         &crate::secrets::KeyringSecretStore,
     );
 
@@ -1853,6 +1855,7 @@ pub async fn enable_sync_encryption(
 pub async fn adopt_remote_encryption(
     orchestrator: State<'_, Arc<SyncOrchestrator>>,
     db: State<'_, DbHandle>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
     event_log: State<'_, Arc<crate::event_log::EventLogWriter>>,
     passphrase: String,
 ) -> CommandResult<()> {
@@ -1909,6 +1912,7 @@ pub async fn adopt_remote_encryption(
     crate::credential_sync::emit_all_local_credentials(
         &event_log,
         &shared,
+        plugin_manager.inner(),
         &crate::secrets::KeyringSecretStore,
     );
 

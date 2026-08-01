@@ -110,9 +110,20 @@ pub fn emit_credential_cleared(
 /// is actually on and only the syncable slots are ever touched. Best
 /// effort: a missing slot is normal (not every account has every slot)
 /// and a keychain read error for one slot doesn't abort the rest.
+///
+/// An account that stays on this device is skipped whole. Its row never
+/// reaches the other devices — see [`crate::accounts::travels_between_devices`]
+/// — so a secret for it would arrive keyed to an account id nothing there
+/// knows, and be stored for an adapter that device does not use. That is the
+/// argument [`SecretSlot::KeyPassphrase`] and [`SecretSlot::OauthClientSecret`]
+/// already make slot by slot: a credential the receiver cannot use is exposure
+/// bought for nothing. The `PluginManager` is here because the answer is the
+/// adapter's own — read off its declared capabilities, never off a list of
+/// names kept in the host.
 pub fn emit_all_local_credentials(
     event_log: &EventLogWriter,
     conn: &SharedConn,
+    manager: &plugin_core::PluginManager,
     secrets: &dyn SecretStore,
 ) {
     let accounts = match AccountsRepo::new(conn).list() {
@@ -123,6 +134,9 @@ pub fn emit_all_local_credentials(
         }
     };
     for account in accounts {
+        if !crate::accounts::travels_between_devices(manager, account.adapter_kind.as_str()) {
+            continue;
+        }
         for slot in [
             SecretSlot::Password,
             SecretSlot::RefreshToken,

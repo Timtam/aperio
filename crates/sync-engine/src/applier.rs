@@ -901,7 +901,11 @@ impl EventLogApplier {
     /// them locally. The implicit `local` account is skipped so a stray
     /// event from a peer can't overwrite its bootstrap timestamps.
     fn apply_account_upsert(&self, payload: &AccountPayload) -> SyncResult<()> {
-        if payload.id == "local" {
+        // Both halves of the same rule. The id check protects the built-in
+        // store's bootstrap row; the kind check refuses anything that describes
+        // one machine — a peer's device calendar has no meaning here, and
+        // applying it creates an account whose plugin will never load.
+        if payload.id == "local" || sync_core::event::is_host_internal_kind(&payload.adapter_kind) {
             return Ok(());
         }
         let account = SnapshotAccount {

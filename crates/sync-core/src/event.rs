@@ -371,6 +371,26 @@ pub struct PluginPayload {
 /// the secret per-device. `created_at` / `updated_at` round-trip
 /// to keep the snapshot path and the event path producing the
 /// same timestamps on the receiving side.
+/// Adapter kinds that describe something belonging to ONE machine, and must
+/// therefore never cross the wire in either direction.
+///
+/// `local` is the built-in store every device has its own copy of; a row for it
+/// arriving from a peer would overwrite that device's bootstrap timestamps.
+/// `device_calendar` is the phone's own calendar and reminder store, reached
+/// through an OS permission grant — an account for it on another device names a
+/// provider that device has no way to open, and shows up as a phantom account
+/// asking to be reconnected.
+///
+/// The authority is `host_core::accounts::AdapterKind::is_host_internal`, which
+/// cannot be reached from here — this crate sits below it. A test up there
+/// asserts the two agree, so the copy cannot drift in silence.
+pub const HOST_INTERNAL_ACCOUNT_KINDS: &[&str] = &["local", "device_calendar"];
+
+/// Whether a row with this kind stays on the machine that made it.
+pub fn is_host_internal_kind(adapter_kind: &str) -> bool {
+    HOST_INTERNAL_ACCOUNT_KINDS.contains(&adapter_kind)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AccountPayload {
     /// Stable account id (UUID minted on the originating device).
