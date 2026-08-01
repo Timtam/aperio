@@ -33,11 +33,50 @@ pub struct DesktopSyncStore {
     /// Used for the row dump/apply (`dump_for_snapshot` /
     /// `apply_snapshot_dump`). Points at the same `SharedConn` as `db`.
     adapter: Arc<LocalAdapter>,
+    /// Answers whether an account belongs on the wire. See [`Self::travels`].
+    plugins: Option<Arc<plugin_core::PluginManager>>,
 }
 
 impl DesktopSyncStore {
     pub fn new(db: SharedConn, adapter: Arc<LocalAdapter>) -> Self {
-        Self { db, adapter }
+        Self {
+            db,
+            adapter,
+            plugins: None,
+        }
+    }
+
+    /// Give the store the plugin manager, so the snapshot can tell an account
+    /// that travels from one that stays here.
+    ///
+    /// Optional because the snapshot is built on a path that has no manager in
+    /// several tests, and because absent has a safe meaning: without it the
+    /// only accounts filtered are the two host-internal kinds, which is what
+    /// this did before the question existed. It is set on both hosts at
+    /// start-up; a host that forgets publishes more than it should, so the
+    /// wiring is not optional in practice, only in type.
+    pub fn with_plugins(mut self, plugins: Arc<plugin_core::PluginManager>) -> Self {
+        self.plugins = Some(plugins);
+        self
+    }
+
+    /// Whether this account belongs in a snapshot.
+    ///
+    /// The event path asks `travels_between_devices` at every emitter. The
+    /// snapshot is the other way out, and used to ask a narrower question —
+    /// only the two host-internal names — so a sync target, once it became an
+    /// account, would have been published: its address written in the clear
+    /// into a file on the very server it names, and its password alongside when
+    /// end-to-end encryption is on, because `dump_credentials` walks whatever
+    /// this returns.
+    fn travels(&self, adapter_kind: &str) -> bool {
+        if sync_core::event::is_host_internal_kind(adapter_kind) {
+            return false;
+        }
+        match self.plugins.as_deref() {
+            Some(manager) => crate::accounts::travels_between_devices(manager, adapter_kind),
+            None => true,
+        }
     }
 }
 
@@ -143,12 +182,7 @@ impl SyncStore for DesktopSyncStore {
         for r in rows {
             let account: SnapshotAccount =
                 r.map_err(|err| StoreError::Backend(format!("dump accounts row: {err}")))?;
-            // The event path already refuses these; the snapshot used to filter
-            // by id alone and published them anyway. A phone's device-calendar
-            // account then arrived on the desktop as an account with no plugin,
-            // asking to be reconnected — a target that device cannot reach and
-            // must not try to.
-            if sync_core::event::is_host_internal_kind(&account.adapter_kind) {
+            if !self.travels(&account.adapter_kind) {
                 continue;
             }
             out.push(account);
@@ -162,10 +196,10 @@ impl SyncStore for DesktopSyncStore {
     /// device would clobber its (locally-meaningful) timestamps without
     /// any user-visible benefit.
     fn upsert_account(&self, account: &SnapshotAccount) -> Result<(), StoreError> {
-        // The same rule as the applier's, on the snapshot path. Both ends check
-        // rather than one, because a snapshot written by an older build carries
-        // rows this one would otherwise trust.
-        if account.id == "local" || sync_core::event::is_host_internal_kind(&account.adapter_kind) {
+        // The same rule as the sending end's, because a snapshot written by an
+        // older build — or by a device whose plugin set differs — carries rows
+        // this one would otherwise trust.
+        if account.id == "local" || !self.travels(&account.adapter_kind) {
             return Ok(());
         }
         let conn = self.db.lock().expect("db mutex poisoned");
@@ -425,6 +459,67 @@ mod tests {
             .unwrap();
         assert_eq!(kind, "caldav");
         assert_eq!(name, "Fastmail");
+    }
+
+    /// A sync target's address must not be written into a file on the very
+    /// server it names.
+    ///
+    /// The event path refuses it; the snapshot asks the same question only if
+    /// it was given the plugin manager, and this asserts it was. With
+    /// encryption on it matters twice over: `dump_credentials` walks whatever
+    /// `dump_accounts` returns, so the target's own password would go with it.
+    #[tokio::test]
+    async fn snapshot_excludes_a_sync_only_account() {
+        // The shipped local-filesystem sync plugin, kind read off its own
+        // manifest so a rename cannot turn this into a test of the
+        // unknown-kind branch.
+        let manifest = plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
+            "../../../sync-adapter-local-plugin/plugin.json"
+        ))
+        .expect("the shipped local-filesystem sync manifest parses");
+        let sync_kind = manifest
+            .adapter_kind
+            .clone()
+            .expect("the sync manifest declares a kind");
+        let plugins = Arc::new(plugin_core::PluginManager::new("0.1.0"));
+        let descriptor = unsafe { sync_adapter_local_plugin::build_descriptor() };
+        plugins
+            .register_static(manifest, descriptor, sync_adapter_local_plugin::DESTROY_FN)
+            .expect("register the static local sync plugin");
+
+        let (_tmp, db, adapter) = fresh();
+        {
+            let shared = db.shared();
+            let conn = shared.lock().unwrap();
+            conn.execute(
+                "INSERT INTO accounts
+                    (id, adapter_kind, display_name, config_json, created_at, updated_at)
+                 VALUES ('folder', ?1, 'Sicherung', '{\"remote_root\":\"/srv/aperio\"}',
+                         '2026-01-01', '2026-01-01')",
+                rusqlite::params![sync_kind],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO accounts
+                    (id, adapter_kind, display_name, config_json, created_at, updated_at)
+                 VALUES ('fm', 'caldav', 'Fastmail', '{}', '2026-01-01', '2026-01-01')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let store = DesktopSyncStore::new(db.shared(), Arc::clone(&adapter)).with_plugins(plugins);
+        let dumped = store.dump_accounts().expect("dump");
+
+        assert!(
+            dumped.iter().all(|a| a.adapter_kind != sync_kind),
+            "a sync target reached the snapshot: {:?}",
+            dumped.iter().map(|a| &a.id).collect::<Vec<_>>(),
+        );
+        assert!(
+            dumped.iter().any(|a| a.id == "fm"),
+            "an ordinary account must still travel",
+        );
     }
 
     /// A phone's own calendar store is not something another device can open.

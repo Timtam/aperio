@@ -35,6 +35,10 @@ vc-adapter-webex-plugin = { path = "../vc-adapter-webex-plugin", optional = true
 # keychain slots, which is host-core's derivation, not this crate's.
 host-core.workspace = true
 sync-engine.workspace = true
+# `manifests_parse` reads the two locale files to prove every kind an adapter
+# declares has a label a screen reader can read out. A missing key is silent at
+# runtime, so it has to be caught here.
+serde_json.workspace = true
 
 [features]
 default = ["static"]

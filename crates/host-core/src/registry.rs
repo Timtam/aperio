@@ -1105,10 +1105,27 @@ impl AdapterRegistry {
                 }
             }
         }
-        // `sync` is registered by the sync orchestrator against its own target
-        // config, not against a calendar account, so it is not a surface this
-        // path can place. A plugin that declares ONLY sync therefore lands
-        // here — and saying so beats registering nothing in silence.
+        // A sync target has nothing to place here. It holds no calendars, no
+        // task lists, no contacts and no meetings — the orchestrator opens it
+        // against its own configuration, not through this path.
+        //
+        // This used to be an error, and saying so beat registering nothing in
+        // silence, because a sync-only account could not exist. One can now:
+        // storage backends are accounts you add. Left as an error, every one of
+        // them would sit in the sweep failing on every round, get parked as
+        // unregisterable, and show the user a permanent fault for an account
+        // that is working exactly as intended.
+        let sync_only = !manifest.capabilities.is_empty()
+            && manifest
+                .capabilities
+                .iter()
+                .all(|c| *c == plugin_core::Capability::Sync);
+        // `has_data_family()` would be the wrong test here: it excludes
+        // meetings, so a videoconference plugin that failed to place its
+        // adapter would fall silent instead of reporting.
+        if !registered && sync_only {
+            return Ok(());
+        }
         if !registered {
             return Err(RegistryError::Construct(format!(
                 "plugin `{plugin_id}` declares no capability this account can use: {:?}",

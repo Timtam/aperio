@@ -8,6 +8,7 @@
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled sync adapter for Google Drive (API v3 + OAuth2 PKCE, drive.file scope).",
+  "adapter_kind": "googledrive",
   "signed": false,
   "account": {
     "fields": [

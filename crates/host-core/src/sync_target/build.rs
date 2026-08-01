@@ -85,7 +85,12 @@ pub trait PluginOpener {
     fn open(&self, plugin_id: &str, config_json: String) -> Result<Arc<dyn SyncAdapter>, String>;
 }
 
-fn text(prefs: &UserPrefsRepo<'_>, key: &str) -> Option<String> {
+/// A preference as a value, or `None` for absent-or-blank.
+///
+/// `pub(super)` because the migration reads the same preferences with the same
+/// rule — a target whose host is three spaces is a target with no host, and two
+/// modules disagreeing about that would migrate something the builder refuses.
+pub(super) fn text(prefs: &UserPrefsRepo<'_>, key: &str) -> Option<String> {
     prefs
         .get(key)
         .ok()

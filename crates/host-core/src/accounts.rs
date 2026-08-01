@@ -599,25 +599,37 @@ mod tests {
         manager
     }
 
-    /// The kind the sync-only fixture below answers to.
-    const SYNC_ONLY_KIND: &str = "sync_local_folder";
+    /// The kind the shipped local-filesystem sync plugin declares.
+    ///
+    /// `local_folder` and not `local`: `local` is [`AdapterKind::LOCAL`], the
+    /// built-in store, and it is host-internal. A sync adapter answering to it
+    /// would be short-circuited by the first line of the predicate and would
+    /// prove nothing about the capability rule underneath.
+    const SYNC_ONLY_KIND: &str = "local_folder";
 
     /// A manager holding exactly one real SYNC-ONLY adapter: the shipped
-    /// local-filesystem sync plugin, whose manifest declares
-    /// `capabilities: ["sync"]` and nothing else.
+    /// local-filesystem sync plugin, manifest untouched.
     ///
-    /// The one thing added here is a kind. Sync targets are not accounts on
-    /// this build, so no shipped sync manifest names one yet — and a kind is
-    /// exactly what makes this the case the rule is about: an account row that
-    /// could point at a sync target. Everything the predicate actually reads,
-    /// the capability list, is the plugin's own.
+    /// Nothing is injected here any more. That manifest now declares both
+    /// halves of the case this rule is about — an `adapter_kind`, so account
+    /// rows can name it, and `capabilities: ["sync"]` and nothing else, so
+    /// those rows are the ones that must stay home. Every input the predicate
+    /// reads is the plugin's own statement about itself, which is what keeps
+    /// these tests from drifting away from what actually ships.
     fn manager_with_sync_only() -> plugin_core::PluginManager {
         let manager = plugin_core::PluginManager::new("0.1.0");
-        let mut manifest = plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
+        let manifest = plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
             "../../sync-adapter-local-plugin/plugin.json"
         ))
         .expect("the shipped local-filesystem sync manifest parses");
-        manifest.adapter_kind = Some(SYNC_ONLY_KIND.to_string());
+        // Read off the manifest rather than assumed: if the shipped kind is
+        // renamed, every test below would otherwise start asking about a kind
+        // no plugin serves and quietly assert the unknown-kind branch instead.
+        assert_eq!(
+            manifest.adapter_kind.as_deref(),
+            Some(SYNC_ONLY_KIND),
+            "the shipped local-filesystem sync manifest changed its kind",
+        );
         let descriptor = unsafe { sync_adapter_local_plugin::build_descriptor() };
         manager
             .register_static(manifest, descriptor, sync_adapter_local_plugin::DESTROY_FN)

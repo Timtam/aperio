@@ -61,6 +61,7 @@ pub fn build_orchestrator(
     db: SharedConn,
     data_dir: PathBuf,
     secret_store: Arc<dyn SecretStore>,
+    plugins: Arc<plugin_core::PluginManager>,
     app_version: &str,
     boot_at: DateTime<Utc>,
 ) -> SyncGraph {
@@ -85,10 +86,13 @@ pub fn build_orchestrator(
     // reader only sees COMMITTED state — it must not miss rows the apply
     // wrote moments (or a transaction) earlier on the writer connection.
     let applier_adapter = Arc::new(LocalAdapter::new(db.clone()));
-    let sync_store: Arc<dyn SyncStore> = Arc::new(DesktopSyncStore::new(
-        db.clone(),
-        Arc::clone(&applier_adapter),
-    ));
+    // The manager reaches the store so a snapshot can tell an account that
+    // travels from one that stays on this device. Without it the snapshot would
+    // publish a sync target's address — and, with encryption on, its password —
+    // into a file on the very server it names.
+    let sync_store: Arc<dyn SyncStore> = Arc::new(
+        DesktopSyncStore::new(db.clone(), Arc::clone(&applier_adapter)).with_plugins(plugins),
+    );
     let applier = Arc::new(EventLogApplier::new(
         Arc::clone(&sync_store),
         Arc::clone(&secret_store),
@@ -166,6 +170,7 @@ mod tests {
                 db.shared(),
                 dir.path().to_path_buf(),
                 secret_store,
+                Arc::new(plugin_core::PluginManager::new("0.1.0")),
                 "0.1.0-test",
                 Utc::now(),
             )

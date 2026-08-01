@@ -2006,6 +2006,7 @@ impl Host {
                 db.shared(),
                 data_dir,
                 Arc::clone(&secret_store),
+                Arc::clone(&plugin_manager),
                 env!("CARGO_PKG_VERSION"),
                 boot_at,
             )

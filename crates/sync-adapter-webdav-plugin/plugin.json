@@ -8,6 +8,7 @@
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled sync adapter for WebDAV servers — Nextcloud, ownCloud, Apache mod_dav, IIS WebDAV, …",
+  "adapter_kind": "webdav",
   "signed": false,
   "account": {
     "fields": [

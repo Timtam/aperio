@@ -371,7 +371,14 @@
       "ews": "Exchange (EWS)",
       "vikunja": "Vikunja",
       "todoist": "Todoist",
-      "webex": "Cisco Webex"
+      "webex": "Cisco Webex",
+      "zoom": "Zoom",
+      "local_folder": "Ordner",
+      "webdav": "WebDAV",
+      "sftp": "SFTP",
+      "ftp": "FTPS",
+      "dropbox": "Dropbox",
+      "googledrive": "Google Drive"
     }
   },
   "dialogs": {
@@ -1744,7 +1751,14 @@
         "vikunja": "Vikunja",
         "todoist": "Todoist",
         "webex": "Cisco Webex",
-        "device_calendar": "Dieses Gerät"
+        "zoom": "Zoom",
+        "device_calendar": "Dieses Gerät",
+        "local_folder": "Ordner (dieses Gerät oder eingebundene Freigabe)",
+        "webdav": "WebDAV (Nextcloud, ownCloud, …)",
+        "sftp": "SFTP (Dateiübertragung über SSH)",
+        "ftp": "FTPS (auch Klartext-FTP)",
+        "dropbox": "Dropbox",
+        "googledrive": "Google Drive"
       }
     },
     "reminders": {

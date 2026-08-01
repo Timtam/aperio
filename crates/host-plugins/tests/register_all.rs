@@ -207,16 +207,56 @@ fn every_bundled_adapter_answers_both_picker_questions() {
         );
     }
 
-    // Exactly one adapter answers `can_sync` today, and it is none of them:
-    // the sync plugins declare no `adapter_kind` yet. When they do, this counts
-    // what the sync settings will offer.
+    // What the sync settings offer, by name. This used to assert the list was
+    // EMPTY — the sync plugins declared no `adapter_kind`, so they appeared in
+    // no picker and a sync target was not an account at all. Now they do, and
+    // the list is the whole answer to "where can this dataset live".
+    //
+    // Spelled out rather than counted: a kind here is persisted in
+    // `accounts.adapter_kind` and travels in the sync payload, so a rename is
+    // not a rename, it is an orphaned account row on every device. And each of
+    // these six needs a label in both locale files before it can ship, which
+    // `manifests_parse::every_declared_kind_is_named_in_both_locales` checks.
+    // `adapter_kinds()` sorts by kind, so this comparison is order-stable.
     let syncable: Vec<&str> = kinds
         .iter()
         .filter(|i| i.can_sync)
         .map(|i| i.kind.as_str())
         .collect();
-    assert!(
-        syncable.is_empty(),
-        "sync adapters became selectable as targets: {syncable:?} — the sync          settings must offer them, and the restore path must read the account",
+    assert_eq!(
+        syncable,
+        [
+            "dropbox",
+            "ftp",
+            "googledrive",
+            "local_folder",
+            "sftp",
+            "webdav",
+        ],
+        "the six bundled sync backends are what the sync settings may offer",
     );
+
+    // `local_folder`, not `local`. `local` is the built-in store's kind AND the
+    // implicit account's id, and `AdapterKind::is_host_internal` answers true
+    // for it — an adapter claiming it would be unregisterable while both
+    // frontends disagreed about what such a row meant.
+    assert!(
+        !kinds.iter().any(|i| i.kind == "local"),
+        "no plugin may claim the built-in store's kind",
+    );
+
+    // Every one of them is sync-only, which is what keeps its account row off
+    // the wire (`host_core::accounts::travels_between_devices`): the row's
+    // `config_json` names the very server the log is written to. An adapter
+    // that grew a data family would still be legal here — it would simply also
+    // answer `holds_data` — but it would stop staying home, and that is a
+    // decision, not a side effect.
+    for info in kinds.iter().filter(|i| i.can_sync) {
+        assert!(
+            !info.holds_data,
+            "{} answers both questions now; check that its account row is still \
+             meant to travel between devices",
+            info.kind,
+        );
+    }
 }

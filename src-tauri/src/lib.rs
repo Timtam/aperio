@@ -462,6 +462,7 @@ pub fn run() {
             db.shared(),
             data_dir.path.clone(),
             Arc::clone(&secret_store),
+            Arc::clone(&plugin_manager),
             env!("CARGO_PKG_VERSION"),
             boot_at,
         )

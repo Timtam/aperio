@@ -8,6 +8,7 @@
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled sync adapter for SFTP servers — password or SSH-key auth, host-key pinning via pre-validated fingerprint.",
+  "adapter_kind": "sftp",
   "signed": false,
   "account": {
     "host_key_pin": {
