@@ -22,6 +22,10 @@
 //! asserts the whitelist rejects it. A key added here without thinking about it
 //! fails that test rather than quietly appearing on someone's other device.
 
+mod persist;
+
+pub use persist::{all_pref_keys, fields_for, persist, restore, FieldSpec, PersistError};
+
 use sync_engine::SecretSlot;
 
 /// Which adapter this device syncs through, or absent for none.
