@@ -22,7 +22,10 @@
 //! asserts the whitelist rejects it. A key added here without thinking about it
 //! fails that test rather than quietly appearing on someone's other device.
 
+mod build;
 mod persist;
+
+pub use build::{build, e2e_enabled, PluginOpener, Unbuildable};
 
 pub use persist::{all_pref_keys, fields_for, persist, restore, FieldSpec, PersistError};
 

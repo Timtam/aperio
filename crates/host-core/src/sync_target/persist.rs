@@ -264,6 +264,11 @@ pub fn all_pref_keys() -> BTreeMap<&'static str, &'static str> {
     out
 }
 
+/// The fake secret store, shared with `build`'s tests — both need one and a
+/// second copy would be a second thing to keep in step.
+#[cfg(test)]
+pub(crate) use tests::FakeSecrets;
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -273,7 +278,7 @@ mod tests {
     use crate::db::DbHandle;
 
     #[derive(Default)]
-    struct FakeSecrets {
+    pub(crate) struct FakeSecrets {
         // Keyed by the slot's wire name: SecretSlot is not hashable, and the
         // wire name is what identifies it everywhere else anyway.
         entries: Mutex<HashMap<(String, &'static str), String>>,
