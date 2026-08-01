@@ -23,9 +23,15 @@
 //! fails that test rather than quietly appearing on someone's other device.
 
 mod build;
+mod from_account;
 mod persist;
 
 pub use build::{build, build_configured, e2e_enabled, PluginOpener, Unbuildable};
+
+pub use from_account::{
+    build_selected, from_account, select_account, selected_account_id, SyncPlugins,
+    PREF_SELECTED_ACCOUNT,
+};
 
 pub use persist::{all_pref_keys, fields_for, persist, restore, FieldSpec, PersistError};
 

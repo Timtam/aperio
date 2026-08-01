@@ -325,7 +325,7 @@ pub fn build_configured(
 }
 
 /// The device-local data key, base64 in the keychain.
-fn e2e_key(secrets: &dyn SecretStore) -> Option<[u8; sync_core::crypto::KEY_LEN]> {
+pub(super) fn e2e_key(secrets: &dyn SecretStore) -> Option<[u8; sync_core::crypto::KEY_LEN]> {
     use base64::Engine as _;
     let raw = secrets
         .retrieve(SECRET_ACCOUNT_E2E, SecretSlot::SyncEncryptionKey)
