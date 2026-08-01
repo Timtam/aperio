@@ -1254,7 +1254,7 @@ pub async fn test_account(
     // the registry to take them all, which no adapter has asked for yet.
     let secret = plan.secrets.first().map(|(_, value)| value.as_str());
     registry
-        .probe_account(&request.adapter_kind, &plan.config_json, secret)
+        .probe_account(&request.adapter_kind, &plan.probe_config_json(), secret)
         .await
         .map_err(|err| CommandError {
             code: "probe_failed",

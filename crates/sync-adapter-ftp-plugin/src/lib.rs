@@ -64,10 +64,17 @@ pub unsafe extern "C" fn plugin_open_instance(config_json: *const c_char) -> Ope
         if cfg.host.trim().is_empty() || cfg.user.trim().is_empty() {
             return Err("host and user must not be empty".to_string());
         }
-        let mode = match cfg.mode.as_str() {
+        // Refused rather than defaulted. Falling back to explicit would connect
+        // differently than the caller asked with nothing said — and in the one
+        // direction that matters, a value meant to be `plain` or `implicit`
+        // silently becoming `explicit` is a failed connection the user cannot
+        // explain. An empty value is the exception: it means "unset", and
+        // explicit is the right answer to that.
+        let mode = match cfg.mode.trim() {
+            "" | "explicit" => FtpsMode::Explicit,
             "implicit" => FtpsMode::Implicit,
             "plain" => FtpsMode::Plain,
-            _ => FtpsMode::Explicit,
+            other => return Err(format!("unknown FTPS mode `{other}`")),
         };
         Ok(FtpsSyncAdapter::new(
             cfg.host.trim(),

@@ -54,20 +54,26 @@ pub fn store(
 ) -> UserPrefsResult<()> {
     for field in known_fields {
         match values.get(field) {
-            Some(Value::String(text)) => prefs.set(&key_for(account_id, field), text)?,
-            Some(Value::Bool(flag)) => prefs.set(&key_for(account_id, field), &flag.to_string())?,
-            // Absent, null, or a shape this store does not carry.
-            _ => prefs.delete(&key_for(account_id, field))?,
+            None | Some(Value::Null) => prefs.delete(&key_for(account_id, field))?,
+            // Stored as JSON, not as the text inside it. The type has to
+            // survive: a plugin declaring `bool` or `u16` rejects the string
+            // form outright, and the failure is the whole init config, so the
+            // adapter never opens and the message names a deserialisation
+            // error rather than the field. Writing `true` and reading back
+            // `"true"` is exactly that bug, one storage layer down.
+            Some(value) => prefs.set(&key_for(account_id, field), &value.to_string())?,
         }
     }
     Ok(())
 }
 
-/// Read back this device's half.
+/// Read back this device's half, with each value the type it was written as.
 ///
-/// Everything comes back as it was written — text as text, a bool as the string
-/// it was stored as. The caller merges it into the adapter's init config, where
-/// the schema says which shape each field wants.
+/// A row that will not parse is skipped rather than surfaced as text. It can
+/// only come from a hand-edited database or a format that predates this one,
+/// and the field then behaves as if it had never been set — which every caller
+/// already handles, since a device that has not configured the account has
+/// nothing here either.
 pub fn load(
     prefs: &UserPrefsRepo<'_>,
     account_id: &str,
@@ -76,7 +82,9 @@ pub fn load(
     let mut out = Map::new();
     for field in known_fields {
         if let Ok(Some(text)) = prefs.get(&key_for(account_id, field)) {
-            out.insert(field.clone(), Value::String(text));
+            if let Ok(value) = serde_json::from_str::<Value>(&text) {
+                out.insert(field.clone(), value);
+            }
         }
     }
     out
@@ -150,6 +158,36 @@ mod tests {
 
     fn fields() -> Vec<String> {
         vec!["key_path".to_string(), "auth_method".to_string()]
+    }
+
+    /// The reason the store keeps JSON rather than text. A plugin declaring
+    /// `bool` or `u16` rejects the string form outright, and the failure is the
+    /// whole init config — so a value that goes in typed has to come back typed.
+    #[test]
+    fn a_round_trip_keeps_the_type_too() {
+        let db = DbHandle::open_in_memory().unwrap();
+        let shared = db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+        let fields = vec![
+            "enabled".to_string(),
+            "port".to_string(),
+            "path".to_string(),
+        ];
+
+        let mut values = Map::new();
+        values.insert("enabled".into(), Value::Bool(true));
+        values.insert("port".into(), Value::Number(2222.into()));
+        values.insert("path".into(), Value::String("/srv/aperio".into()));
+        store(&prefs, "acc-1", &fields, &values).unwrap();
+
+        let back = load(&prefs, "acc-1", &fields);
+        assert_eq!(back.get("enabled"), Some(&Value::Bool(true)));
+        assert_eq!(back.get("port"), Some(&Value::Number(2222.into())));
+        assert_eq!(
+            back.get("path"),
+            Some(&Value::String("/srv/aperio".into())),
+            "a path must not come back wrapped in quotes",
+        );
     }
 
     #[test]

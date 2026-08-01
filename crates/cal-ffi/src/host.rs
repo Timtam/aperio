@@ -2316,7 +2316,7 @@ impl Host {
         let secret = plan.secrets.first().map(|(_, value)| value.as_str());
         self.probe_account(
             &AdapterKind::new(&req.adapter_kind),
-            &plan.config_json,
+            &plan.probe_config_json(),
             secret,
         )
     }

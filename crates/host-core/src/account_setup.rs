@@ -344,6 +344,31 @@ pub struct NewAccountPlan {
     pub device_local: Map<String, Value>,
 }
 
+impl NewAccountPlan {
+    /// The config to hand a probe: both halves, in one object.
+    ///
+    /// A probe tests what the user just typed, and it persists nothing — so the
+    /// split that keeps device-local values off the synced row has no work to do
+    /// here, and doing it anyway is actively wrong. There is no account id yet,
+    /// so there is nowhere to read the local half back from; the values would
+    /// simply be missing. An adapter whose only field is device-local then gets
+    /// an empty config and fails to deserialise, and one that merely prefers a
+    /// key file falls back to password auth and reports a blank password —
+    /// telling the user their credentials are wrong when the form was fine.
+    pub fn probe_config_json(&self) -> String {
+        if self.device_local.is_empty() {
+            return self.config_json.clone();
+        }
+        let Ok(Value::Object(mut obj)) = serde_json::from_str::<Value>(&self.config_json) else {
+            return self.config_json.clone();
+        };
+        for (key, value) in &self.device_local {
+            obj.insert(key.clone(), value.clone());
+        }
+        Value::Object(obj).to_string()
+    }
+}
+
 /// Split what the user entered into the row and the keychain.
 ///
 /// `values` is keyed by the schema's field keys. `oauth` is the outcome of
@@ -434,7 +459,29 @@ pub fn plan_new_account(
                         field.key
                     ))
                 })?;
-                config.insert(field.key.clone(), Value::Number(number.into()));
+                // The declared bound, checked here for the same reason the kind
+                // exists: at the adapter this is a serde error naming a Rust
+                // type, and the whole struct fails with it.
+                if field.min.is_some_and(|min| number < min)
+                    || field.max.is_some_and(|max| number > max)
+                {
+                    return Err(AccountSetupError::InvalidInput(
+                        match (field.min, field.max) {
+                            (Some(min), Some(max)) => {
+                                format!("`{}` must be between {min} and {max}", field.key)
+                            }
+                            (Some(min), None) => format!("`{}` must be at least {min}", field.key),
+                            (None, Some(max)) => format!("`{}` must be at most {max}", field.key),
+                            (None, None) => unreachable!("neither bound set"),
+                        },
+                    ));
+                }
+                let number = Value::Number(number.into());
+                if field.device_local {
+                    device_local.insert(field.key.clone(), number);
+                } else {
+                    config.insert(field.key.clone(), number);
+                }
             }
             _ => {
                 let text = match supplied {
@@ -859,6 +906,8 @@ mod tests {
             default: None,
             secret_slot: slot,
             options: Vec::new(),
+            min: None,
+            max: None,
             device_local: false,
         }
     }
@@ -974,6 +1023,64 @@ mod tests {
         let text = err.to_string();
         assert!(text.contains("port"), "must name the field: {text}");
         assert!(text.contains("twenty-two"), "must quote the value: {text}");
+    }
+
+    /// A port outside `u16` would reach the adapter as a serde error naming a
+    /// Rust type, and take the whole init config down with it.
+    #[test]
+    fn a_number_outside_its_declared_range_is_refused_by_name() {
+        let mut port = field("port", AccountFieldKind::Number, None, false);
+        port.min = Some(1);
+        port.max = Some(65535);
+        let schema = AccountSchema {
+            fields: vec![port],
+            ..Default::default()
+        };
+        let err = plan_new_account(
+            &schema,
+            &values(&[("port", Value::String("70000".into()))]),
+            None,
+        )
+        .err()
+        .expect("must not plan");
+        let text = err.to_string();
+        assert!(text.contains("port"), "must name the field: {text}");
+        assert!(text.contains("65535"), "must state the bound: {text}");
+    }
+
+    /// A probe persists nothing and has no account id, so the split that keeps
+    /// device-local values off the synced row has nowhere to read them back
+    /// from. Both halves have to travel together, or an adapter whose only
+    /// field is device-local is untestable and one that prefers a key file
+    /// silently falls back to password auth.
+    #[test]
+    fn a_probe_sees_both_halves_of_the_form() {
+        let mut folder = field("remote_root", AccountFieldKind::Directory, None, true);
+        folder.device_local = true;
+        let schema = AccountSchema {
+            fields: vec![folder],
+            ..Default::default()
+        };
+        let plan = plan_new_account(
+            &schema,
+            &values(&[("remote_root", Value::String("/srv/aperio".into()))]),
+            None,
+        )
+        .expect("plan");
+
+        let persisted: Value = serde_json::from_str(&plan.config_json).unwrap();
+        assert!(
+            persisted.get("remote_root").is_none(),
+            "a device-local value must not reach the synced row: {}",
+            plan.config_json
+        );
+
+        let probed: Value = serde_json::from_str(&plan.probe_config_json()).unwrap();
+        assert_eq!(
+            probed.get("remote_root").and_then(|v| v.as_str()),
+            Some("/srv/aperio"),
+            "the probe would have received an empty config",
+        );
     }
 
     /// A blank optional number stays absent rather than becoming 0 — the

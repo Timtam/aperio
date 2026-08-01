@@ -112,7 +112,13 @@ export function AccountSchemaForm({
                 value={value}
                 onChangeText={(next) => onChange(field.key, next)}
                 secureTextEntry={field.kind === 'secret'}
-                keyboardType={field.kind === 'url' ? 'url' : 'default'}
+                keyboardType={
+                  field.kind === 'url'
+                    ? 'url'
+                    : field.kind === 'number'
+                      ? 'number-pad'
+                      : 'default'
+                }
                 // `directory` and `file` render as plain path fields here.
                 // There is no system picker to hand a path back to a text
                 // input on this platform, and the SFTP key path has always

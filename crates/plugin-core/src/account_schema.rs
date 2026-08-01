@@ -104,9 +104,9 @@ pub enum AccountFieldKind {
     /// forms as a string, so without a kind that says "this is a number" there
     /// is no point at which anything could know to convert it.
     ///
-    /// Never [`AccountField::device_local`]: the per-device store keeps text,
-    /// and a number that came back as text would fail exactly the way this kind
-    /// exists to prevent. [`AccountSchema::validate`] rejects the pairing.
+    /// Combines with [`AccountField::device_local`] like any other kind — the
+    /// per-device store keeps JSON, so a number written there comes back a
+    /// number.
     Number,
 
     /// One of a fixed set, chosen from [`AccountField::options`].
@@ -208,6 +208,21 @@ pub struct AccountField {
     /// kind, and rejected on one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<AccountFieldOption>,
+
+    /// Smallest and largest accepted value, for [`AccountFieldKind::Number`].
+    ///
+    /// Declared because only the adapter knows. A port is a `u16`, and the host
+    /// has no way to guess that from a field called `port` — so without a
+    /// declared range, `70000` passes every host check and then fails the
+    /// plugin with a message about a Rust type, which is the failure the
+    /// `number` kind exists to move earlier. Half the point of moving it is
+    /// wasted if the bound is missing.
+    ///
+    /// Absent means unbounded in that direction. Ignored for every other kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max: Option<i64>,
 
     /// Whether this value is meaningful only on the machine that entered it.
     ///
@@ -575,22 +590,39 @@ impl AccountSchema {
                 _ => {}
             }
             if field.kind == AccountFieldKind::Number {
-                if let Some(AccountFieldDefault::Text(value)) = &field.default {
-                    if value.trim().parse::<i64>().is_err() {
+                if let (Some(min), Some(max)) = (field.min, field.max) {
+                    if min > max {
                         return Err(PluginError::Manifest(format!(
-                            "account field `{}` is a number but defaults to `{value}`",
+                            "account field `{}` accepts {min} to {max}, which is nothing",
                             field.key
                         )));
                     }
                 }
-                // See the note on the kind: the per-device store is text-only,
-                // so this pairing would reintroduce the bug the kind prevents.
-                if field.device_local {
-                    return Err(PluginError::Manifest(format!(
-                        "account field `{}` is a number and device_local, which the per-device                          store cannot represent",
-                        field.key
-                    )));
+                if let Some(AccountFieldDefault::Text(value)) = &field.default {
+                    let Ok(parsed) = value.trim().parse::<i64>() else {
+                        return Err(PluginError::Manifest(format!(
+                            "account field `{}` is a number but defaults to `{value}`",
+                            field.key
+                        )));
+                    };
+                    // A default outside its own range would fail the moment the
+                    // user accepted the form untouched.
+                    if field.min.is_some_and(|min| parsed < min)
+                        || field.max.is_some_and(|max| parsed > max)
+                    {
+                        return Err(PluginError::Manifest(format!(
+                            "account field `{}` defaults to `{value}`, outside its own range",
+                            field.key
+                        )));
+                    }
                 }
+            } else if field.min.is_some() || field.max.is_some() {
+                // Silently ignored otherwise — reported, because the author
+                // clearly meant something by it.
+                return Err(PluginError::Manifest(format!(
+                    "account field `{}` declares a range but is not a number",
+                    field.key
+                )));
             }
             match (field.kind, &field.default) {
                 (AccountFieldKind::Bool, Some(AccountFieldDefault::Text(_))) => {
@@ -782,6 +814,8 @@ mod tests {
             default: None,
             secret_slot: slot,
             options: Vec::new(),
+            min: None,
+            max: None,
             device_local: false,
         }
     }
@@ -801,27 +835,46 @@ mod tests {
         );
     }
 
-    /// The pairing the kind's doc comment rules out, refused rather than
-    /// documented — the per-device store keeps text, so a number coming back
-    /// from it would fail deserialisation at the adapter, which is exactly the
-    /// failure the `number` kind exists to move earlier.
+    /// A numeric default that IS a number passes, so the rule above is a rule
+    /// and not an accidental ban on defaults.
     #[test]
-    fn a_number_that_stays_on_this_device_is_refused() {
+    fn a_range_on_something_that_is_not_a_number_is_refused() {
+        let mut host = field("host", AccountFieldKind::Text, None);
+        host.max = Some(255);
+        let schema = AccountSchema {
+            fields: vec![host],
+            ..Default::default()
+        };
+        let err = schema.validate().expect_err("must not validate");
+        assert!(err.to_string().contains("not a number"), "{err}");
+    }
+
+    #[test]
+    fn a_default_outside_its_own_range_is_refused() {
         let mut port = field("port", AccountFieldKind::Number, None);
-        port.device_local = true;
+        port.default = Some(AccountFieldDefault::Text("70000".into()));
+        port.min = Some(1);
+        port.max = Some(65535);
         let schema = AccountSchema {
             fields: vec![port],
             ..Default::default()
         };
         let err = schema.validate().expect_err("must not validate");
-        assert!(
-            err.to_string().contains("per-device"),
-            "the message has to say which half cannot hold it: {err}"
-        );
+        assert!(err.to_string().contains("outside its own range"), "{err}");
     }
 
-    /// A numeric default that IS a number passes, so the rule above is a rule
-    /// and not an accidental ban on defaults.
+    #[test]
+    fn an_empty_range_is_refused() {
+        let mut port = field("port", AccountFieldKind::Number, None);
+        port.min = Some(100);
+        port.max = Some(1);
+        let schema = AccountSchema {
+            fields: vec![port],
+            ..Default::default()
+        };
+        schema.validate().expect_err("must not validate");
+    }
+
     #[test]
     fn a_number_with_a_numeric_default_validates() {
         let mut port = field("port", AccountFieldKind::Number, None);
