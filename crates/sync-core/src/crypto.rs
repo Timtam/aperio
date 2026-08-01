@@ -301,7 +301,7 @@ pub fn decrypt(key: &[u8; KEY_LEN], blob: &[u8]) -> SyncResult<Vec<u8>> {
         // Don't echo the underlying error — it might leak whether
         // the tag mismatch was at the start or end, which the
         // BSON-style attacks exploit.
-        SyncError::auth("decryption failed — wrong passphrase or corrupt blob")
+        SyncError::decryption_failed("wrong passphrase or corrupt data")
     })
 }
 
@@ -397,18 +397,18 @@ mod tests {
     }
 
     #[test]
-    fn decrypt_with_wrong_key_returns_auth_error() {
+    fn decrypt_with_wrong_key_reports_a_decryption_failure() {
         let plaintext = b"private";
         let blob = encrypt(&[1u8; KEY_LEN], plaintext).unwrap();
         let err = decrypt(&[2u8; KEY_LEN], &blob).unwrap_err();
         assert!(
-            matches!(err, SyncError::Auth(_)),
+            matches!(err, SyncError::DecryptionFailed(_)),
             "expected Auth, got: {err:?}",
         );
     }
 
     #[test]
-    fn decrypt_with_corrupted_blob_returns_auth_error() {
+    fn decrypt_with_corrupted_blob_reports_a_decryption_failure() {
         let key = [3u8; KEY_LEN];
         let mut blob = encrypt(&key, b"some payload").unwrap();
         // Flip a single ciphertext byte (after the 12-byte nonce).
@@ -416,7 +416,7 @@ mod tests {
         // decrypt.
         blob[15] ^= 0x80;
         let err = decrypt(&key, &blob).unwrap_err();
-        assert!(matches!(err, SyncError::Auth(_)));
+        assert!(matches!(err, SyncError::DecryptionFailed(_)));
     }
 
     #[test]
@@ -480,12 +480,12 @@ mod tests {
     }
 
     #[test]
-    fn unwrap_with_wrong_kek_returns_auth_error() {
+    fn unwrap_with_wrong_kek_reports_a_decryption_failure() {
         let dek = [22u8; KEY_LEN];
         let wrapped = wrap_key(&[11u8; KEY_LEN], &dek).unwrap();
         let err = unwrap_key(&[99u8; KEY_LEN], &wrapped).unwrap_err();
         assert!(
-            matches!(err, SyncError::Auth(_)),
+            matches!(err, SyncError::DecryptionFailed(_)),
             "expected Auth, got {err:?}",
         );
     }
@@ -541,7 +541,7 @@ mod tests {
     /// — the same code as a wrong-passphrase decrypt, so the UI
     /// can present a unified message.
     #[test]
-    fn resolve_data_key_v2_wrong_passphrase_is_auth() {
+    fn resolve_data_key_v2_wrong_passphrase_reports_a_decryption_failure() {
         let mut params = EncryptionParams {
             salt: BASE64.encode([6u8; SALT_LEN]),
             m_cost: 64,
@@ -555,7 +555,7 @@ mod tests {
 
         let err = resolve_data_key("wrong", &params).unwrap_err();
         assert!(
-            matches!(err, SyncError::Auth(_)),
+            matches!(err, SyncError::DecryptionFailed(_)),
             "expected Auth, got {err:?}",
         );
     }

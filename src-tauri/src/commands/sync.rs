@@ -790,6 +790,7 @@ fn sync_err(err: sync_core::SyncError) -> CommandError {
         E::Auth(_) => "auth",
         E::Protocol(_) => "protocol",
         E::EncryptionRequired => "encryption_required",
+        E::DecryptionFailed(_) => "decryption_failed",
         E::NotFound(_) => "not_found",
         E::SchemaTooOld { .. } => "schema_too_old",
         E::StaleDevice { .. } => "stale_device",

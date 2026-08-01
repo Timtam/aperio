@@ -889,6 +889,7 @@
         "errorNotFound": "No dataset found at the path.",
         "errorSchemaTooOld": "Sync dataset needs a newer Aperio version.",
         "errorEncryption": "Encrypted dataset, but no password configured.",
+        "errorDecryption": "The sync passphrase does not open this dataset. The connection to the server is fine — check the passphrase, not the account password.",
         "e2eActive": "🔒 End-to-end encryption active",
         "e2eInactive": "End-to-end encryption disabled",
         "credentialsSyncedNote": "Account credentials (passwords and tokens) sync end-to-end encrypted, so your accounts work on every device without re-entering them.",

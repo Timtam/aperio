@@ -399,7 +399,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_log_with_wrong_key_returns_auth_error() {
+    async fn fetch_log_with_wrong_key_reports_a_decryption_failure() {
         // Push with key A; try to fetch with a wrapper holding
         // key B → AES-GCM's auth tag fails, surface as Auth so
         // the UI prompts for the correct passphrase.
@@ -417,7 +417,7 @@ mod tests {
             .fetch_new_logs(&DeviceCursor::epoch())
             .await
             .unwrap_err();
-        assert!(matches!(err, SyncError::Auth(_)));
+        assert!(matches!(err, SyncError::DecryptionFailed(_)));
     }
 
     #[tokio::test]

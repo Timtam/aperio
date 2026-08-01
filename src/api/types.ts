@@ -322,6 +322,7 @@ export interface CommandError {
     // pattern-match on a stable string.
     | 'io'
     | 'encryption_required'
+    | 'decryption_failed'
     | 'schema_too_old'
     | 'not_configured'
     // §20 plugin-system surface — `list_plugins` and friends

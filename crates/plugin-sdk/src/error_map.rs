@@ -63,6 +63,12 @@ pub fn sync_error_to_response(err: SyncError) -> PluginCallResult {
             PLUGIN_CALL_ERR_PROTOCOL,
             "encryption required but no key is configured".to_string(),
         ),
+        // Not AUTH, which is what the transport uses for rejected credentials.
+        // By the time decryption runs the backend has already accepted us; the
+        // bytes are here and the passphrase does not open them.
+        SyncError::DecryptionFailed(m) => {
+            (PLUGIN_CALL_ERR_PROTOCOL, format!("decryption failed: {m}"))
+        }
         SyncError::SchemaTooOld { required, running } => (
             PLUGIN_CALL_ERR_PROTOCOL,
             format!("schema too old: dataset needs {required}; running {running}"),

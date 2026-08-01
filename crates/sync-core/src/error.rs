@@ -48,6 +48,21 @@ pub enum SyncError {
     #[error("e2e encryption is enabled but no key is configured")]
     EncryptionRequired,
 
+    /// A key IS configured and it does not open the data.
+    ///
+    /// Kept apart from [`Self::Auth`], which it used to be reported as. The
+    /// storage backend had accepted the credentials by the time this happens —
+    /// the bytes came back fine and the passphrase failed to unwrap them — so
+    /// calling it an authentication failure sends the user to re-check a
+    /// password that already works. That is not hypothetical: it is how this
+    /// variant came to exist.
+    ///
+    /// Distinct from `EncryptionRequired`, too. There the answer is "supply a
+    /// passphrase"; here one was supplied and is wrong, which is a different
+    /// sentence and a different next step.
+    #[error("decryption failed: {0}")]
+    DecryptionFailed(String),
+
     /// Resource the caller asked for doesn't exist at the remote.
     /// Used by the onboarding flow (§19.11) when the user picks
     /// "Datensatz übernehmen" but no `meta.json` lives at the path
@@ -87,6 +102,10 @@ impl SyncError {
         Self::Network(msg.into())
     }
 
+    pub fn decryption_failed(msg: impl Into<String>) -> Self {
+        Self::DecryptionFailed(msg.into())
+    }
+
     pub fn auth(msg: impl Into<String>) -> Self {
         Self::Auth(msg.into())
     }
@@ -120,6 +139,7 @@ impl SyncError {
             Self::Auth(_) => "auth",
             Self::Protocol(_) => "protocol",
             Self::EncryptionRequired => "encryption_required",
+            Self::DecryptionFailed(_) => "decryption_failed",
             Self::NotFound(_) => "not_found",
             Self::SchemaTooOld { .. } => "schema_too_old",
             Self::StaleDevice { .. } => "stale_device",

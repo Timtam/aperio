@@ -32,6 +32,8 @@ export function useSyncErrorMessage(): (err: unknown) => string {
             return t('dialogs.settings.sync.errorNotFound');
           case 'encryption_required':
             return t('dialogs.settings.sync.errorEncryption');
+          case 'decryption_failed':
+            return t('dialogs.settings.sync.errorDecryption');
           case 'schema_too_old':
             return t('dialogs.settings.sync.errorSchemaTooOld');
           default:
