@@ -339,6 +339,13 @@ class CalFfiModule : Module() {
       host.configureSyncAdapterJson(configJson)
     }.runOnQueue(slowScope)
 
+    // The sync SCREEN's verb: point this device at an account it already has.
+    // Probes the target before it commits, so it belongs on the slow queue with
+    // the other network-touching calls.
+    AsyncFunction("selectSyncAccount") { accountId: String ->
+      host.selectSyncAccount(accountId)
+    }.runOnQueue(slowScope)
+
     AsyncFunction("syncStatusJson") {
       host.syncStatusJson()
     }
@@ -811,6 +818,13 @@ class CalFfiModule : Module() {
 
     AsyncFunction("previewSftpHostKeyJson") { argsJson: String ->
       host.previewSftpHostKeyJson(argsJson)
+    }.runOnQueue(slowScope)
+
+    // The same probe for an account the user is about to sync through — the
+    // repair for a selectSyncAccount that refused an unconfirmed host key.
+    // Returns the JSON `null` (no network) when the adapter pins no host key.
+    AsyncFunction("previewSyncAccountHostKeyJson") { accountId: String ->
+      host.previewSyncAccountHostKeyJson(accountId)
     }.runOnQueue(slowScope)
 
     AsyncFunction("trustSftpHostKey") { hostPort: String, fingerprint: String ->

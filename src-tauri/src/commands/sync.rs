@@ -659,6 +659,37 @@ fn connect_err(err: host_core::sync_target::ConnectError) -> CommandError {
     }
 }
 
+/// Why an account could not be opened as this device's sync target, in a code
+/// the frontend can act on.
+///
+/// One refusal gets a code of its own, because its repair is a GESTURE rather
+/// than a message: an unconfirmed host key is fixed by looking at a fingerprint
+/// and accepting it, and a settings panel that only printed the sentence would
+/// leave the user with nothing to press.
+///
+/// The rest carry `Unbuildable`'s own text. It names the field or the plugin's
+/// own complaint — "no password stored for the sync target", "sync plugin
+/// refused: …" — which is more than a code could, and a translated stand-in
+/// would say less. `plugin_missing` is NOT decided here: `PluginRefused` also
+/// covers a plugin that is installed and rejected the config, and telling
+/// someone to install a plugin they already have is worse than saying nothing.
+/// [`select_sync_account`] asks that question directly instead.
+fn unbuildable_err(err: host_core::sync_target::Unbuildable) -> CommandError {
+    use host_core::sync_target::Unbuildable as U;
+    let code: &'static str = match &err {
+        U::HostKeyNotTrusted { .. } => "host_key_not_trusted",
+        U::MissingCredential { .. } => "auth",
+        U::AccountMissing { .. } => "not_found",
+        U::NotConfigured | U::Incomplete { .. } | U::Invalid { .. } | U::PluginRefused { .. } => {
+            "invalid_input"
+        }
+    };
+    CommandError {
+        code,
+        message: err.to_string(),
+    }
+}
+
 /// Write the chosen target down as the account row this device syncs through,
 /// or disconnect from it.
 ///
@@ -799,6 +830,78 @@ fn wrap_if_encrypted(
     }
 }
 
+/// Everything between "this device has an adapter" and "the scheduler is
+/// running on it": probe, meta, the §19.13 compatibility gate, the E2E
+/// decision, activation — and only once all of that has passed, `persist`.
+///
+/// Two commands reach the live orchestrator this way and they differ in exactly
+/// one thing: what they write down afterwards. [`configure_sync_adapter`] writes
+/// the connect form as an account row; [`select_sync_account`] writes a pointer
+/// at a row that is already there. Everything else — including WHICH failures
+/// leave the previous target running — has to be identical, so it is one
+/// function rather than two that look alike today.
+///
+/// `persist` runs AFTER the probe and after `orchestrator.configure`, which is
+/// the ordering the connect path fought for: a target that was rejected leaves
+/// nothing written down, so the next restart cannot come up on a configuration
+/// the user was told had failed.
+async fn probe_activate_and_persist(
+    plain: Arc<dyn SyncAdapter>,
+    shared: &SharedConn,
+    orchestrator: &SyncOrchestrator,
+    scheduler: &SyncScheduler,
+    onboarding: &OnboardingService,
+    persist: impl FnOnce() -> CommandResult<()>,
+) -> CommandResult<()> {
+    // Probe the connection before keeping the adapter active —
+    // misconfigurations should surface immediately at the settings dialog, not
+    // hours later when the first sync_now runs.
+    plain.test_connection().await.map_err(sync_err)?;
+    // Phase Sk: inspect the target's `meta.json` to decide whether to wrap with
+    // `EncryptingAdapter`. We don't re-derive the key here — that requires the
+    // passphrase. If the target is E2E and we already have the key in our
+    // keychain (same logical dataset across adapter swap), reuse it. Otherwise
+    // refuse — the onboarding flow is the right path for "I'm joining a new
+    // encrypted dataset".
+    let target_meta = plain.fetch_meta().await.map_err(sync_err)?;
+    // Phase Sl: refuse the swap if the target dataset requires a newer Aperio
+    // than the running build. The Settings dialog gets the `schema_too_old`
+    // error code and renders the §19.13 update prompt; the user can either
+    // update or pick a different target.
+    if let Some(m) = target_meta.as_ref() {
+        sync_core::ensure_compatible(m, onboarding.app_version()).map_err(sync_err)?;
+    }
+    let e2e_target = target_meta.as_ref().map(|m| m.e2e_enabled).unwrap_or(false);
+    let key = if e2e_target {
+        let k = load_e2e_key().ok_or(CommandError {
+            code: "encryption_required",
+            message: "target dataset is encrypted; onboard via accept_remote_dataset first".into(),
+        })?;
+        Some(k)
+    } else {
+        None
+    };
+    let adapter = wrap_if_encrypted(plain, key);
+    orchestrator.configure(adapter);
+    // Now it is real: probed, wrapped and active.
+    persist()?;
+    // Keep PREF_E2E_ENABLED in sync with what we just discovered on the target
+    // meta. The keychain key stays either way; the flag is the source of truth
+    // for "should we wrap on next boot".
+    let prefs = UserPrefsRepo::new(shared);
+    if e2e_target {
+        prefs.set(PREF_E2E_ENABLED, "true").map_err(internal)?;
+    } else {
+        let _ = prefs.delete(PREF_E2E_ENABLED);
+    }
+    // Kick the scheduler so the user sees data flow immediately instead of
+    // waiting up to one interval for the periodic loop. The debounce window
+    // swallows any pile of mutations the writer queued while the adapter was
+    // unconfigured.
+    scheduler.kick();
+    Ok(())
+}
+
 /// Install / swap the active sync adapter. Persists the user's
 /// choice so the next app start reconstructs the same adapter
 /// in `lib.rs`'s setup phase.
@@ -807,6 +910,10 @@ fn wrap_if_encrypted(
 /// adapter" command. New users go through `preview_sync_target` +
 /// `accept_remote_dataset` / `adopt_local_dataset` instead, which
 /// configures the adapter as part of the onboarding flow.
+///
+/// It still takes a FORM, because the first-launch wizard still asks for one.
+/// The settings panel no longer does: it calls [`select_sync_account`] with an
+/// account the user already added.
 #[tauri::command]
 pub async fn configure_sync_adapter(
     db: State<'_, DbHandle>,
@@ -817,7 +924,6 @@ pub async fn configure_sync_adapter(
     config: SyncAdapterConfig,
 ) -> CommandResult<()> {
     let shared = db.shared();
-    let prefs = UserPrefsRepo::new(&shared);
     // A different backend invalidates every remote-missing sound verdict
     // (mirrors the orchestrator clearing its per-session pushed lengths).
     host_core::sound_assets::reset_missing_cache();
@@ -844,59 +950,15 @@ pub async fn configure_sync_adapter(
             // orchestrator kept running the old target — so the next restart
             // came up on a configuration the user had been told was rejected.
             let plain = build_adapter(&config, &shared, plugin_manager.inner())?;
-            // Probe the connection before keeping the adapter
-            // active — misconfigurations should surface immediately
-            // at the settings dialog, not hours later when the
-            // first sync_now runs.
-            plain.test_connection().await.map_err(sync_err)?;
-            // Phase Sk: inspect the target's `meta.json` to decide
-            // whether to wrap with `EncryptingAdapter`. We don't
-            // re-derive the key here — that requires the
-            // passphrase. If the target is E2E and we already have
-            // the key in our keychain (same logical dataset across
-            // adapter swap), reuse it. Otherwise refuse — the
-            // onboarding flow is the right path for "I'm joining a
-            // new encrypted dataset".
-            let target_meta = plain.fetch_meta().await.map_err(sync_err)?;
-            // Phase Sl: refuse the swap if the target dataset
-            // requires a newer Aperio than the running build. The
-            // Settings dialog gets the `schema_too_old` error code
-            // and renders the §19.13 update prompt; the user can
-            // either update or pick a different target.
-            if let Some(m) = target_meta.as_ref() {
-                sync_core::ensure_compatible(m, onboarding.app_version()).map_err(sync_err)?;
-            }
-            let e2e_target = target_meta.as_ref().map(|m| m.e2e_enabled).unwrap_or(false);
-            let key = if e2e_target {
-                let k = load_e2e_key().ok_or(CommandError {
-                    code: "encryption_required",
-                    message: "target dataset is encrypted; onboard via accept_remote_dataset first"
-                        .into(),
-                })?;
-                Some(k)
-            } else {
-                None
-            };
-            let adapter = wrap_if_encrypted(plain, key);
-            orchestrator.configure(adapter);
-            // Now it is real: probed, wrapped and active. Writing here means a
-            // rejected target leaves nothing behind.
-            persist_adapter_config(&shared, plugin_manager.inner(), &config)?;
-            // Keep PREF_E2E_ENABLED in sync with what we just
-            // discovered on the target meta. The keychain key
-            // stays either way; the flag is the source of truth
-            // for "should we wrap on next boot".
-            if e2e_target {
-                prefs.set(PREF_E2E_ENABLED, "true").map_err(internal)?;
-            } else {
-                let _ = prefs.delete(PREF_E2E_ENABLED);
-            }
-            // Kick the scheduler so the user sees data flow
-            // immediately instead of waiting up to one interval
-            // for the periodic loop. The debounce window swallows
-            // any pile of mutations the writer queued while the
-            // adapter was unconfigured.
-            scheduler.kick();
+            probe_activate_and_persist(
+                plain,
+                &shared,
+                &orchestrator,
+                &scheduler,
+                &onboarding,
+                || persist_adapter_config(&shared, plugin_manager.inner(), &config),
+            )
+            .await?;
         }
         SyncAdapterConfig::None => {
             orchestrator.deconfigure();
@@ -908,6 +970,96 @@ pub async fn configure_sync_adapter(
         }
     }
     Ok(())
+}
+
+/// Point this device at an account it ALREADY has, and sync through it.
+///
+/// The settings panel's whole question, in one call. The account was added
+/// under Settings → Accounts, or arrived with a restored dataset; nothing here
+/// takes a form, a host, or a password, because none of that is being decided —
+/// the row already holds it.
+///
+/// ## What it refuses, and why each refusal has its own code
+///
+/// [`host_core::sync_target::from_account`] opens the row through the plugin's
+/// own schema, so the three ways it can fail are the three the user can fix, and
+/// each fix is different:
+///
+/// - `host_key_not_trusted` — the protocol pins host keys (§19.5) and this
+///   device has not confirmed this server's fingerprint. The panel offers the
+///   trust gesture through [`preview_sync_account_host_key`].
+/// - `plugin_missing` — no loaded plugin serves the account's kind. The account
+///   came from another device that has a plugin this one does not.
+/// - `auth` — the credential is not in this device's keychain.
+///
+/// Nothing is written down until the target has been probed AND the
+/// compatibility and encryption gates have passed, so a refusal leaves this
+/// device syncing exactly where it did before.
+#[tauri::command]
+pub async fn select_sync_account(
+    db: State<'_, DbHandle>,
+    orchestrator: State<'_, Arc<SyncOrchestrator>>,
+    scheduler: State<'_, Arc<SyncScheduler>>,
+    onboarding: State<'_, Arc<OnboardingService>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
+    account_id: String,
+) -> CommandResult<()> {
+    let account_id = account_id.trim().to_string();
+    if account_id.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "no account id supplied".into(),
+        });
+    }
+    let shared = db.shared();
+    let prefs = UserPrefsRepo::new(&shared);
+    let accounts = AccountsRepo::new(&shared);
+    let account = accounts.get(&account_id)?.ok_or(CommandError {
+        code: "not_found",
+        message: format!("no account {account_id}"),
+    })?;
+    // Asked here rather than read off the builder's refusal: `PluginRefused`
+    // is also what a plugin that IS installed says when it dislikes the
+    // config, and "install the plugin" is the wrong instruction for that.
+    let plugins = HostSyncPlugins(plugin_manager.inner());
+    if host_core::sync_target::SyncPlugins::resolve(&plugins, account.adapter_kind.as_str())
+        .is_none()
+    {
+        return Err(CommandError {
+            code: "plugin_missing",
+            message: format!(
+                "no loaded plugin serves `{}`",
+                account.adapter_kind.as_str()
+            ),
+        });
+    }
+    // A different backend invalidates every remote-missing sound verdict —
+    // same reason as `configure_sync_adapter`.
+    host_core::sound_assets::reset_missing_cache();
+    let plain = host_core::sync_target::from_account(
+        &account,
+        &prefs,
+        &crate::secrets::KeyringSecretStore,
+        &UserPrefsHostKeyVerifier::new(shared.clone()),
+        &plugins,
+    )
+    .map_err(unbuildable_err)?;
+
+    probe_activate_and_persist(
+        plain,
+        &shared,
+        &orchestrator,
+        &scheduler,
+        &onboarding,
+        || {
+            // The one thing this command writes: which account this device
+            // syncs through. The row itself is the user's, added elsewhere and
+            // untouched here — moving off it must not disturb it, which is
+            // exactly what separates this from the connect path.
+            host_core::sync_target::select_account(&prefs, Some(&account.id)).map_err(internal)
+        },
+    )
+    .await
 }
 
 /// Set the periodic sync interval (in minutes). Values below 1 are
@@ -1030,6 +1182,14 @@ pub async fn get_sync_status(
 pub struct SyncAdapterSummary {
     pub kind: String,
     pub detail: String,
+    /// The account row this device syncs through, when it syncs through one.
+    ///
+    /// `None` on a device still reading the legacy `sync.adapter.*`
+    /// preferences. The settings panel needs the ID rather than the name: it
+    /// renders a list of the accounts that could hold the dataset and has to
+    /// mark the one that does — and two accounts may legitimately carry the
+    /// same display name.
+    pub account_id: Option<String>,
 }
 
 /// Build a [`SyncAdapterSummary`] from the persisted user_prefs.
@@ -1048,7 +1208,11 @@ pub fn get_sync_adapter_summary(
     // moved off.
     match host_core::sync_target::summary(&prefs, &AccountsRepo::new(&shared)) {
         host_core::sync_target::SummaryOutcome::Chosen(kind, detail) => {
-            return Ok(Some(SyncAdapterSummary { kind, detail }));
+            return Ok(Some(SyncAdapterSummary {
+                kind,
+                detail,
+                account_id: host_core::sync_target::selected_account_id(&prefs),
+            }));
         }
         // The pointer names a row that is gone. Saying nothing is right: the
         // preferences below are still complete on a migrated device, so falling
@@ -1133,7 +1297,12 @@ pub fn get_sync_adapter_summary(
         "none" => return Ok(None),
         _ => String::new(),
     };
-    Ok(Some(SyncAdapterSummary { kind, detail }))
+    // The legacy reader answered, so there is no row to name.
+    Ok(Some(SyncAdapterSummary {
+        kind,
+        detail,
+        account_id: None,
+    }))
 }
 
 /// Manually trigger a compaction round (Phase Sg, §19.10). Snapshots
@@ -2270,8 +2439,25 @@ pub async fn preview_sftp_host_key(
         serde_json::json!({ "host": trimmed_host, "port": port }),
     )
     .await?;
-    let host_port = format!("{trimmed_host}:{port}");
-    let verifier = UserPrefsHostKeyVerifier::new(db.shared());
+    classify_host_key(
+        &db.shared(),
+        format!("{trimmed_host}:{port}"),
+        probe.fingerprint,
+    )
+}
+
+/// Compare a freshly-observed fingerprint against this device's pin store.
+///
+/// Split out so the account-based probe below reaches the SAME three-way
+/// verdict. A second copy of this comparison is the one place a bug would be
+/// invisible: it would classify a CHANGED key as first use, and the user would
+/// be shown the benign prompt for what is the alarm case.
+fn classify_host_key(
+    db: &SharedConn,
+    host_port: String,
+    fingerprint: String,
+) -> CommandResult<HostKeyPreview> {
+    let verifier = UserPrefsHostKeyVerifier::new(db.clone());
     // `try_peek`, not `peek`: this is the one place the pin is COMPARED. A
     // read failure folded into `None` would classify a host key that CHANGED
     // as first use — the user sees the benign TOFU prompt instead of the
@@ -2284,14 +2470,111 @@ pub async fn preview_sftp_host_key(
     })?;
     let status = match stored {
         None => HostKeyPreviewStatus::New,
-        Some(s) if s == probe.fingerprint => HostKeyPreviewStatus::Unchanged,
+        Some(s) if s == fingerprint => HostKeyPreviewStatus::Unchanged,
         Some(s) => HostKeyPreviewStatus::Changed { stored: s },
     };
     Ok(HostKeyPreview {
         host_port,
-        fingerprint: probe.fingerprint,
+        fingerprint,
         status,
     })
+}
+
+/// The §19.5 trust gesture for an account the user is about to sync through.
+///
+/// [`select_sync_account`] refuses with `host_key_not_trusted` when the
+/// account's protocol pins host keys and this device has never confirmed the
+/// server's fingerprint — which is the normal state of an SFTP account added
+/// under Settings → Accounts, because that path never probes. Without this
+/// command the refusal is a dead end: the only other way to pin a fingerprint
+/// is the connect form, and the settings panel no longer shows one.
+///
+/// Nothing here names a protocol. WHICH fields hold the host and the port, and
+/// whether the account has a host key at all, come from the schema's
+/// `host_key_pin` declaration — the same one
+/// [`host_core::sync_target::from_account`] refuses on — so an adapter that
+/// starts pinning host keys tomorrow is served by writing it into its own
+/// manifest.
+///
+/// Reads the row's config with this device's half layered on top, in that
+/// order, because a device-local field is this device's answer and the row's is
+/// every other device's.
+#[tauri::command]
+pub async fn preview_sync_account_host_key(
+    db: State<'_, DbHandle>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
+    account_id: String,
+) -> CommandResult<HostKeyPreview> {
+    let account_id = account_id.trim().to_string();
+    let shared = db.shared();
+    let account = AccountsRepo::new(&shared)
+        .get(&account_id)?
+        .ok_or(CommandError {
+            code: "not_found",
+            message: format!("no account {account_id}"),
+        })?;
+    let (plugin_id, schema) = host_core::sync_target::SyncPlugins::resolve(
+        &HostSyncPlugins(plugin_manager.inner()),
+        account.adapter_kind.as_str(),
+    )
+    .ok_or_else(|| CommandError {
+        code: "plugin_missing",
+        message: format!(
+            "no loaded plugin serves `{}`",
+            account.adapter_kind.as_str()
+        ),
+    })?;
+    let pin = schema.host_key_pin.ok_or(CommandError {
+        code: "invalid_input",
+        message: "this account's protocol does not pin host keys".into(),
+    })?;
+
+    let stored: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str::<serde_json::Value>(&account.config_json)
+            .ok()
+            .and_then(|v| v.as_object().cloned())
+            .unwrap_or_default();
+    let local = host_core::account_local::load(
+        &UserPrefsRepo::new(&shared),
+        &account.id,
+        &[pin.host_field.clone(), pin.port_field.clone()],
+    );
+    // A port is a JSON number in the row and a string in some older ones; both
+    // mean the same thing, and a lookup key that disagrees makes a pin the user
+    // already confirmed invisible.
+    let text = |key: &str| -> String {
+        match local.get(key).or_else(|| stored.get(key)) {
+            Some(serde_json::Value::String(s)) => s.trim().to_string(),
+            Some(serde_json::Value::Number(n)) => n.to_string(),
+            _ => String::new(),
+        }
+    };
+    let host = text(&pin.host_field);
+    let port = text(&pin.port_field);
+    let parsed_port: u16 = port.parse().unwrap_or_default();
+    if host.is_empty() || parsed_port == 0 {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "this account does not say which server to probe".into(),
+        });
+    }
+    // Under the plugin's own field names, and built by hand rather than through
+    // `json!` because the keys are the declaration's, not literals.
+    let mut args = serde_json::Map::new();
+    args.insert(
+        pin.host_field.clone(),
+        serde_json::Value::String(host.clone()),
+    );
+    args.insert(pin.port_field.clone(), serde_json::Value::from(parsed_port));
+    let probe: HostKeyProbeResult = run_plugin_probe_host_key(
+        plugin_manager.inner(),
+        &plugin_id,
+        serde_json::Value::Object(args),
+    )
+    .await?;
+    // The same key `merge_pin` looks the pin up under, or a fingerprint the
+    // user confirms here stays invisible to the build that needs it.
+    classify_host_key(&shared, format!("{host}:{port}"), probe.fingerprint)
 }
 
 /// JSON shape the SFTP plugin returns from

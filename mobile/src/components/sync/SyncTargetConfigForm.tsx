@@ -540,7 +540,7 @@ export function SyncTargetConfigForm({ onConnected }: SyncTargetConfigFormProps)
   const cancelTrust = useCallback(() => {
     setPendingTrust(null);
     focusSftpConnect();
-    announce(t('mobile.sftpTrustCancelled'));
+    announce(t('dialogs.settings.sync.sftpTrustCancelled'));
   }, [announce, focusSftpConnect, t]);
 
   const forgetPin = useCallback(async () => {

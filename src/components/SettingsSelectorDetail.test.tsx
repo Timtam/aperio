@@ -122,6 +122,99 @@ describe('SettingsSelectorDetail', () => {
     ).toBeInTheDocument();
   });
 
+  it('opens on `preferredItemId` instead of the first item, and falls back when it is not in the list', () => {
+    const { unmount } = render(
+      <SettingsSelectorDetail<Item>
+        groups={groups}
+        getItemId={(i) => i.id}
+        getItemName={(i) => i.name}
+        getItemSummary={() => 'sum'}
+        selectorLabel="Choose list"
+        preferredItemId="c"
+        optionLabel={({ name }) => name}
+        detailHeading={({ name }) => `Editing ${name}`}
+        renderDetail={() => null}
+      />,
+    );
+    expect(screen.getByRole('option', { selected: true })).toHaveAccessibleName(
+      'Inbox',
+    );
+    unmount();
+
+    render(
+      <SettingsSelectorDetail<Item>
+        groups={groups}
+        getItemId={(i) => i.id}
+        getItemName={(i) => i.name}
+        getItemSummary={() => 'sum'}
+        selectorLabel="Choose list"
+        preferredItemId="gone"
+        optionLabel={({ name }) => name}
+        detailHeading={({ name }) => `Editing ${name}`}
+        renderDetail={() => null}
+      />,
+    );
+    expect(screen.getByRole('option', { selected: true })).toHaveAccessibleName(
+      'Privat',
+    );
+  });
+
+  it('reports every selection move to `onSelectionChange`', () => {
+    const seen: (string | null)[] = [];
+    const onSelectionChange = (id: string | null) => {
+      seen.push(id);
+    };
+    render(
+      <SettingsSelectorDetail<Item>
+        groups={groups}
+        getItemId={(i) => i.id}
+        getItemName={(i) => i.name}
+        getItemSummary={() => 'sum'}
+        selectorLabel="Choose list"
+        onSelectionChange={onSelectionChange}
+        optionLabel={({ name }) => name}
+        detailHeading={({ name }) => name}
+        renderDetail={() => null}
+      />,
+    );
+    expect(seen).toEqual([null, 'a']);
+
+    fireEvent.keyDown(screen.getByRole('listbox'), { key: 'ArrowDown' });
+    expect(seen).toEqual([null, 'a', 'b']);
+  });
+
+  it('renders the detail heading at the level the caller asks for', () => {
+    const { unmount } = render(
+      <SettingsSelectorDetail<Item>
+        groups={groups}
+        getItemId={(i) => i.id}
+        getItemName={(i) => i.name}
+        getItemSummary={() => 'sum'}
+        selectorLabel="Choose list"
+        optionLabel={({ name }) => name}
+        detailHeading={({ name }) => name}
+        renderDetail={() => null}
+      />,
+    );
+    expect(screen.getByRole('heading', { level: 3, name: 'Privat' })).toBeInTheDocument();
+    unmount();
+
+    render(
+      <SettingsSelectorDetail<Item>
+        groups={groups}
+        getItemId={(i) => i.id}
+        getItemName={(i) => i.name}
+        getItemSummary={() => 'sum'}
+        selectorLabel="Choose list"
+        detailHeadingLevel={4}
+        optionLabel={({ name }) => name}
+        detailHeading={({ name }) => name}
+        renderDetail={() => null}
+      />,
+    );
+    expect(screen.getByRole('heading', { level: 4, name: 'Privat' })).toBeInTheDocument();
+  });
+
   it('renders nothing fatal for an empty group set', () => {
     render(
       <SettingsSelectorDetail<Item>

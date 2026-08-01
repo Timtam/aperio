@@ -19,11 +19,9 @@ import {
 import { useDateFormat } from '../intl/dateFormat';
 import { useDialogState } from '../state/dialogStateContext';
 import { useSync } from '../state/useSync';
+import { ConfirmDialog } from './ConfirmDialog';
 import { SyncProtocolSection } from './SyncProtocolSection';
-import {
-  SyncTargetConfigForm,
-  type SyncConnectOutcome,
-} from './sync/SyncTargetConfigForm';
+import { SyncTargetAccountPicker } from './sync/SyncTargetAccountPicker';
 import { useSyncErrorMessage } from './sync/syncErrorMessage';
 
 /**
@@ -32,11 +30,24 @@ import { useSyncErrorMessage } from './sync/syncErrorMessage';
  *   1. **State** — connection state + last successful sync + manual
  *      `Sync now` / `Compact now`.
  *   2. **Interval** — periodic-sync preset.
- *   3. **Adapter** — when unconfigured, the shared
- *      [`SyncTargetConfigForm`](./sync/SyncTargetConfigForm.tsx) (also used by
- *      the first-launch wizard); when configured, a summary + Disconnect.
+ *   3. **Target** — WHICH of the user's accounts holds the dataset
+ *      ([`SyncTargetAccountPicker`](./sync/SyncTargetAccountPicker.tsx)),
+ *      plus the summary of the current one and Disconnect.
  *   4. **E2E** — adopt / enable / change-passphrase / disable encryption.
  *   5. **Protocol** — the §19.9 sync history.
+ *
+ * ## Why there is no connect form here any more
+ *
+ * This panel used to ask what KIND of target to use and then for its host,
+ * path and password, through the shared
+ * [`SyncTargetConfigForm`](./sync/SyncTargetConfigForm.tsx). A sync target is
+ * an account now: the user adds it under Settings → Accounts like any other,
+ * or it arrives with a restored dataset, and the only decision left for this
+ * device is which of them holds the dataset. That is the whole of the picker.
+ *
+ * The form itself is unchanged and still rendered by the first-launch wizard,
+ * which is the one place that legitimately has no accounts yet AND has to
+ * decide between joining an existing dataset and starting a new one.
  */
 
 const INTERVAL_PRESETS: readonly number[] = [1, 5, 15, 30, 60, 240];
@@ -45,7 +56,7 @@ export function SyncPanel() {
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const fmt = useDateFormat();
-  const { openSyncConflicts, openSyncAccountsConnect } = useDialogState();
+  const { openSyncConflicts } = useDialogState();
   const {
     status,
     refreshStatus,
@@ -56,8 +67,8 @@ export function SyncPanel() {
     triggerSync,
   } = useSync();
   // Shared sync error → message mapping, used by the E2E sections below. The
-  // adapter config form (extracted to `SyncTargetConfigForm`) uses the same
-  // hook internally.
+  // account picker uses the same hook internally, so both render identical
+  // wording for the same backend code.
   const messageForError = useSyncErrorMessage();
 
   const stateHeadingId = useId();
@@ -67,20 +78,25 @@ export function SyncPanel() {
   // focus would otherwise drop to <body> — outside the settings dialog's
   // role="application", where a screen reader has nothing to read and no
   // anchor to arrow from. The section heading is the one node that survives
-  // the swap, and it names what replaced the summary.
+  // the swap, and it names the section the user is standing in.
   const adapterHeadingRef = useRef<HTMLHeadingElement>(null);
   const intervalHeadingId = useId();
   const protocolHeadingId = useId();
   const passphraseHeadingId = useId();
   const enableE2eHeadingId = useId();
 
-  // The adapter-target CONFIGURATION form (kind picker, per-kind fields,
-  // OAuth, SFTP trust, preview→join/init) lives in `SyncTargetConfigForm`,
-  // shared with the first-launch wizard. SyncPanel keeps only the
-  // periodic-interval + compaction + E2E-rotation controls here.
+  // The target CONFIGURATION form (kind picker, per-kind fields, OAuth, the
+  // device name, preview→join/init) lives in `SyncTargetConfigForm` and is now
+  // rendered only by the first-launch wizard. This panel picks between
+  // accounts and keeps the periodic-interval, compaction and E2E controls.
   const [intervalDraft, setIntervalDraft] = useState<number | null>(null);
   const [busyCompact, setBusyCompact] = useState(false);
   const [busyDisconnect, setBusyDisconnect] = useState(false);
+  // Disconnecting is the one irreversible thing on this screen — it drops the
+  // account row and its credentials, not just the pointer — and it used to
+  // happen on a single unguarded press. The confirmation dialog says what is
+  // actually lost; its focus opens on Cancel.
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   // §19.7 passphrase rotation.
   const [oldPassphraseDraft, setOldPassphraseDraft] = useState('');
   const [newPassphraseDraft, setNewPassphraseDraft] = useState('');
@@ -133,27 +149,32 @@ export function SyncPanel() {
     try {
       await configureSyncAdapter({ kind: 'none' });
       setAdapterSummary(null);
+      announce(t('dialogs.settings.sync.adapterDisconnected'), 'assertive');
       // The summary is only half of what this panel renders. "Encrypted
       // dataset", "Sync now" and "Compact now" all hang off the sync STATUS,
       // which is pulled once on mount and refreshed only by engine events —
       // and disconnecting emits none. Without this the panel opened the
-      // configure form for a new target while still describing the old one as
+      // account picker for a new target while still describing the old one as
       // connected and encrypted, with both action buttons live; pressing "Sync
       // now" then failed, because it was acting on a target that no longer
       // existed.
       await refreshStatus();
-      // React swaps the summary for the config form on the state change above;
-      // land focus once that has committed.
+      // React unmounts the summary — and the Disconnect button inside it —
+      // on the state change above; land focus once that has committed.
       requestAnimationFrame(() => {
         adapterHeadingRef.current?.focus({ preventScroll: true });
       });
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('configure_sync_adapter(none) failed', err);
+      announce(
+        `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
+        'assertive',
+      );
     } finally {
       setBusyDisconnect(false);
     }
-  }, [refreshStatus]);
+  }, [announce, messageForError, refreshStatus, t]);
 
   const onCompact = useCallback(async () => {
     setBusyCompact(true);
@@ -333,31 +354,32 @@ export function SyncPanel() {
   })();
 
   // Reload the persisted-adapter summary (mount + after configure/disconnect).
-  const refreshAdapterSummary = useCallback(() => {
-    getSyncAdapterSummary()
-      .then(setAdapterSummary)
-      .catch((err) => {
-        // eslint-disable-next-line no-console
-        console.warn('get_sync_adapter_summary failed', err);
-        setAdapterSummary(null);
-      });
+  // Awaitable: the picker lands screen-reader focus on a note whose text is
+  // derived from THIS answer, so a fire-and-forget refresh would have it read
+  // the previous target one beat after the user chose a new one.
+  const refreshAdapterSummary = useCallback(async () => {
+    try {
+      setAdapterSummary(await getSyncAdapterSummary());
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('get_sync_adapter_summary failed', err);
+      setAdapterSummary(null);
+    }
   }, []);
 
   useEffect(() => {
-    refreshAdapterSummary();
+    void refreshAdapterSummary();
   }, [refreshAdapterSummary, status?.configured]);
 
-  // Refresh the summary card after the embedded config form connects, and
-  // prompt for any account credentials a restore couldn't recover.
-  const onTargetConnected = useCallback(
-    (outcome: SyncConnectOutcome) => {
-      refreshAdapterSummary();
-      if (outcome.accountsNeedingConnect.length > 0) {
-        openSyncAccountsConnect(outcome.accountsNeedingConnect);
-      }
-    },
-    [openSyncAccountsConnect, refreshAdapterSummary],
-  );
+  // Re-read both halves after the picker points this device somewhere else.
+  // Neither the summary nor the status re-reads itself: pointing at another
+  // account emits no engine event, so without this the panel would go on
+  // naming the account the dataset used to be on. Both awaited before the
+  // picker moves focus — see above.
+  const onTargetChanged = useCallback(async () => {
+    await refreshAdapterSummary();
+    await refreshStatus();
+  }, [refreshAdapterSummary, refreshStatus]);
 
   return (
     <div className="sync-panel">
@@ -366,7 +388,15 @@ export function SyncPanel() {
         <FocusableNote className="sync-panel__hint">
           {status?.configured
             ? t('dialogs.settings.sync.stateConfiguredSimple')
-            : t('dialogs.settings.sync.stateUnconfigured')}
+            : adapterSummary
+              ? // A target is chosen and the engine did not come up on it —
+                // a start-up restore that refused (locked keychain, missing
+                // credential, unconfirmed host key, missing plugin). Saying
+                // "no sync adapter configured yet" here was the third of
+                // three contradictory sentences on one screen, and the only
+                // one of them the user could act on was none.
+                t('dialogs.settings.sync.stateChosenNotRunning')
+              : t('dialogs.settings.sync.stateUnconfigured')}
         </FocusableNote>
         {status?.configured && (
           <FocusableNote className="sync-panel__hint">
@@ -463,6 +493,11 @@ export function SyncPanel() {
           {t('dialogs.settings.sync.intervalLabel')}
         </h3>
         <select
+          // The section heading names this control for a sighted user; a
+          // combo box has no name from surrounding text, so NVDA announced
+          // "combo box, 15 minutes" with nothing saying what the 15 minutes
+          // were for.
+          aria-label={t('dialogs.settings.sync.intervalLabel')}
           value={interval}
           onChange={(e) => void onIntervalChange(e.target.value)}
           disabled={!status?.configured}
@@ -480,37 +515,62 @@ export function SyncPanel() {
 
       <section aria-labelledby={adapterHeadingId}>
         <h3 id={adapterHeadingId} ref={adapterHeadingRef} tabIndex={-1}>
-          {t('dialogs.settings.sync.adapterTitle')}
+          {t('dialogs.settings.sync.targetTitle')}
         </h3>
-        {/* When configured: a non-editable summary + Disconnect. To swap
-            adapters, the user disconnects first. Otherwise: the shared config
-            form. */}
-        {status?.configured && adapterSummary ? (
+        {/* A non-editable summary of what this device syncs through, and
+            Disconnect. Rendered off the SUMMARY alone, not off the engine
+            being configured: a chosen target the engine did not come up on
+            still has to be disconnectable, and gating this on `configured`
+            was what left that state with no control at all.
+
+            The kind is deliberately not named here any more. It used to come
+            from a six-entry table in this file, forty lines above a picker
+            that names the same account's protocol from the plugin's own
+            declaration — so one account was read out under two different
+            names on one screen ("SFTP (SSH server)" here, "SFTP (file
+            transfer over SSH)" below). The detail IS the account's display
+            name, the picker states the protocol, and the table is gone. */}
+        {adapterSummary && (
           <div className="sync-panel__connected-summary">
             <FocusableNote className="sync-panel__hint">
-              {t('dialogs.settings.sync.connectedSummary', {
-                kind: t(
-                  `dialogs.settings.sync.adapterKind${
-                    adapterSummary.kind.charAt(0).toUpperCase() +
-                    adapterSummary.kind.slice(1)
-                  }`,
-                ),
-                detail: adapterSummary.detail || '–',
-              })}
+              {t(
+                status?.configured
+                  ? 'dialogs.settings.sync.connectedSummary'
+                  : 'dialogs.settings.sync.connectedSummaryNotRunning',
+                { detail: adapterSummary.detail || '–' },
+              )}
             </FocusableNote>
             <div className="sync-panel__actions">
               <button
                 type="button"
-                disabled={busyDisconnect}
-                onClick={() => void onDisconnect()}
+                // aria-disabled rather than native `disabled`: a button that
+                // disables itself while the round-trip runs drops focus to
+                // <body>, outside the modal's role="application", and NVDA
+                // leaves the dialog without hearing the outcome.
+                aria-disabled={busyDisconnect}
+                aria-busy={busyDisconnect}
+                onClick={() => {
+                  if (!busyDisconnect) setConfirmDisconnect(true);
+                }}
               >
                 {t('dialogs.settings.sync.adapterDisconnect')}
               </button>
             </div>
           </div>
-        ) : (
-          <SyncTargetConfigForm status={status} onConnected={onTargetConnected} />
         )}
+        {/* Which account holds the dataset. Rendered whether or not one is
+            chosen: moving to another account is a swap the backend probes
+            before it commits, so making the user disconnect first — and lose
+            the account row on the way — was never the safer order. */}
+        <SyncTargetAccountPicker
+          currentAccountId={adapterSummary?.account_id ?? null}
+          // The ENGINE's answer, not the stored pointer's — so the picker can
+          // tell "this account holds the dataset" from "this account is
+          // supposed to and nothing is syncing". `null` until the status has
+          // arrived, so it accuses nothing on the first render.
+          active={status ? status.configured : null}
+          onChanged={onTargetChanged}
+        />
       </section>
 
       {/* §19.7 — cross-device adoption banner. */}
@@ -673,6 +733,20 @@ export function SyncPanel() {
 
       {/* §19.9 detailed Sync-Protokoll. Always rendered. */}
       <SyncProtocolSection headingId={protocolHeadingId} />
+
+      {/* Disconnect drops the account row, its device-local half and its
+          credentials — everything except the dataset's encryption key. The
+          message says so, because "you can reconnect with one tap" is what
+          this used to promise and it has not been true since the target became
+          an account. Focus opens on Cancel. */}
+      <ConfirmDialog
+        isOpen={confirmDisconnect}
+        onClose={() => setConfirmDisconnect(false)}
+        onConfirm={() => void onDisconnect()}
+        title={t('dialogs.settings.sync.adapterDisconnect')}
+        message={t('dialogs.settings.sync.adapterDisconnectConfirm')}
+        confirmLabel={t('dialogs.settings.sync.adapterDisconnect')}
+      />
     </div>
   );
 }

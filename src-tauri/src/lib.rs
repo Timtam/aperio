@@ -798,6 +798,14 @@ pub fn run() {
             // orchestrator is registered in setup; these commands
             // are the user-facing surface.
             commands::configure_sync_adapter,
+            // The settings panel's verb: point this device at an account it
+            // already has. `configure_sync_adapter` still takes a form, for
+            // the first-launch wizard.
+            commands::select_sync_account,
+            // §19.5 for that path — the trust gesture for an account whose
+            // protocol pins host keys, which the account connect flow never
+            // performs.
+            commands::preview_sync_account_host_key,
             commands::sync_now,
             commands::get_sync_status,
             commands::get_sync_adapter_summary,

@@ -33,6 +33,32 @@ export interface SettingsSelectorDetailProps<T> {
   /** Build the detail region heading from group label + item name. */
   detailHeading: (args: { account: string; name: string }) => string;
   /**
+   * Heading level for the detail region's heading. Defaults to `3`.
+   *
+   * Pass `4` when the selector already sits inside a `<section>` that a
+   * caller-owned `<h3>` heads: two `<h3>`s in the same section read as
+   * SIBLINGS in a screen reader's heading list, so the detail looks like a
+   * second top-level topic rather than the selected item's editor.
+   */
+  detailHeadingLevel?: 3 | 4;
+  /**
+   * Item to select when there is no valid selection yet (mount, or the
+   * selected item disappeared). Falls back to the first item when absent or
+   * not in the list. Use it when one row is materially different from the
+   * others — the account that already holds the sync dataset — so the detail
+   * pane does not open on an item the user has to arrow away from.
+   */
+  preferredItemId?: string | null;
+  /**
+   * Called whenever the selection moves, with the newly selected id (`null`
+   * when the list emptied). Keep it referentially stable (module scope or
+   * `useCallback`) — it is an effect dependency. Callers use it to drop state
+   * that belonged to the previously selected item, e.g. a refusal whose repair
+   * button lives on that item's detail pane and is gone the moment the
+   * selection moves.
+   */
+  onSelectionChange?: (id: string | null) => void;
+  /**
    * Render the detail editor for the selected item. The returned content is
    * keyed by the selected item's id, so it remounts (resetting any internal
    * state) whenever the selection changes — callers need not key it themselves.
@@ -67,6 +93,9 @@ export function SettingsSelectorDetail<T>({
   selectorLabel,
   optionLabel,
   detailHeading,
+  detailHeadingLevel = 3,
+  preferredItemId,
+  onSelectionChange,
   renderDetail,
 }: SettingsSelectorDetailProps<T>) {
   // Flat id order for arrow-key navigation across the account groups.
@@ -77,7 +106,8 @@ export function SettingsSelectorDetail<T>({
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Keep a valid selection: default to the first item and recover if the
+  // Keep a valid selection: default to the caller's preferred item (the first
+  // one when it names none, or names one that isn't here) and recover if the
   // selected one disappears (group removed mid-session, etc.).
   useEffect(() => {
     if (orderedIds.length === 0) {
@@ -85,9 +115,19 @@ export function SettingsSelectorDetail<T>({
       return;
     }
     if (selectedId === null || !orderedIds.includes(selectedId)) {
-      setSelectedId(orderedIds[0]);
+      setSelectedId(
+        preferredItemId && orderedIds.includes(preferredItemId)
+          ? preferredItemId
+          : orderedIds[0],
+      );
     }
-  }, [orderedIds, selectedId]);
+  }, [orderedIds, preferredItemId, selectedId]);
+
+  // Tell the caller where the selection went, so it can drop state that
+  // belonged to the item the user just left.
+  useEffect(() => {
+    onSelectionChange?.(selectedId);
+  }, [onSelectionChange, selectedId]);
 
   const idPrefix = useId();
   const optionId = (id: string) => `${idPrefix}-opt-${id}`;
@@ -142,6 +182,8 @@ export function SettingsSelectorDetail<T>({
         return;
     }
   };
+
+  const DetailHeading = detailHeadingLevel === 4 ? 'h4' : 'h3';
 
   return (
     <div className="calendars-panel__master-detail">
@@ -228,12 +270,15 @@ export function SettingsSelectorDetail<T>({
           className="calendars-panel__detail"
           aria-labelledby={detailHeadingId}
         >
-          <h3 id={detailHeadingId} className="calendars-panel__detail-heading">
+          <DetailHeading
+            id={detailHeadingId}
+            className="calendars-panel__detail-heading"
+          >
             {detailHeading({
               account: selected.group.label,
               name: getItemName(selected.item),
             })}
-          </h3>
+          </DetailHeading>
           {/* Keyed by the selection so the editor remounts (and its internal
               state resets) when the selected entity changes. */}
           <Fragment key={getItemId(selected.item)}>

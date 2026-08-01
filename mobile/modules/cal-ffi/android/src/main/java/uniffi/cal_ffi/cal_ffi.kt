@@ -1044,6 +1044,8 @@ external fun uniffi_cal_ffi_checksum_method_host_pinned_sftp_host_key(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_preview_sftp_host_key_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_preview_sync_account_host_key_json(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_preview_sync_target_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_push_now(
@@ -1077,6 +1079,8 @@ external fun uniffi_cal_ffi_checksum_method_host_search_contacts_json(
 external fun uniffi_cal_ffi_checksum_method_host_search_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_sections_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_select_sync_account(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_set_account_secret(
 ): Short
@@ -1438,6 +1442,8 @@ external fun uniffi_cal_ffi_fn_method_host_pinned_sftp_host_key(`ptr`: Long,`hos
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_preview_sftp_host_key_json(`ptr`: Long,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_preview_sync_account_host_key_json(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_preview_sync_target_json(`ptr`: Long,`configJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_push_now(`ptr`: Long,`trigger`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1472,6 +1478,8 @@ external fun uniffi_cal_ffi_fn_method_host_search_json(`ptr`: Long,`query`: Rust
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_sections_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_select_sync_account(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_set_account_secret(`ptr`: Long,`accountId`: RustBuffer.ByValue,`secret`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_set_cache_observer(`ptr`: Long,`observer`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1944,7 +1952,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_disable_sync_encryption_json() != 18838.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_disconnect_sync() != 20870.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_disconnect_sync() != 8843.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_discover_json() != 25945.toShort()) {
@@ -2028,6 +2036,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_preview_sftp_host_key_json() != 14030.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_preview_sync_account_host_key_json() != 61118.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_preview_sync_target_json() != 3107.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2077,6 +2088,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_sections_json() != 56584.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_select_sync_account() != 27345.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_set_account_secret() != 44502.toShort()) {
@@ -4539,9 +4553,16 @@ public interface HostInterface {
     
     /**
      * Disconnect the configured sync target: deconfigure the orchestrator and
-     * mark the adapter kind "none" so the summary reports nothing. The per-kind
-     * field prefs + keychain secrets are KEPT, so reconnecting is one tap (no
-     * re-typing) — mirrors the desktop `configure_sync_adapter({kind:"none"})`.
+     * remove everything a restore path could act on — the account row, its
+     * credentials and device-local half, the pointer, and the legacy
+     * preferences and keychain pseudo-accounts. The dataset's encryption key
+     * stays; it is not a property of the target.
+     *
+     * Keeping the fields "so reconnecting is one tap" is what this used to do,
+     * and it is why a disconnected phone came back up on the next launch
+     * uploading to the target it had been told to stop using. Reconnecting now
+     * means re-entering the target. Mirrors the desktop
+     * `configure_sync_adapter({kind:"none"})`.
      */
     fun `disconnectSync`()
     
@@ -4762,6 +4783,31 @@ public interface HostInterface {
     fun `previewSftpHostKeyJson`(`argsJson`: kotlin.String): kotlin.String
     
     /**
+     * The §19.5 trust gesture for an ACCOUNT the user is about to sync
+     * through — the mobile twin of the desktop `preview_sync_account_host_key`.
+     *
+     * [`Self::select_sync_account`] refuses an account whose protocol pins host
+     * keys until this device has confirmed the server's fingerprint, which is
+     * the ordinary state of an SFTP account added under Settings → Accounts:
+     * that path never probes. Without this the refusal is a dead end, because
+     * the only other way to pin a fingerprint is the connect form and the sync
+     * screen no longer shows one.
+     *
+     * Answers `null` — no error — for an account whose adapter declares no
+     * `host_key_pin`. The desktop refuses that with an `invalid_input` CODE the
+     * panel branches on; this boundary has no code channel (a `StoreError`
+     * crosses as a message), so "this account has no fingerprint to check" is a
+     * VALUE here. It is also what lets the screen ask the question after any
+     * refusal without a network round-trip for the adapters that cannot
+     * produce this one.
+     *
+     * Nothing here names a protocol: WHICH fields hold the host and the port
+     * come from the schema's own `host_key_pin` declaration — the same one
+     * [`host_core::sync_target::from_account`] refuses on.
+     */
+    fun `previewSyncAccountHostKeyJson`(`accountId`: kotlin.String): kotlin.String
+    
+    /**
      * Probe a sync target WITHOUT committing to it (§19.11 onboarding): build
      * the adapter from `config_json`, read its `meta.json`, and return a
      * `SyncPreview` JSON — `{"kind":"empty"}` for a fresh target, or
@@ -4918,6 +4964,33 @@ public interface HostInterface {
      * list's owning account.
      */
     fun `sectionsJson`(`listId`: kotlin.String): kotlin.String
+    
+    /**
+     * Point this device at an account it ALREADY has, and sync through it —
+     * the mobile twin of the desktop `select_sync_account`.
+     *
+     * The sync screen's whole question, in one call. The account was added
+     * under Settings → Accounts, or arrived with a restored dataset; nothing
+     * here takes a form, a host or a password, because none of that is being
+     * decided — the row already holds it.
+     *
+     * [`host_core::sync_target::from_account`] opens the row through the
+     * plugin's own schema, so the ways it can refuse are the ways the user can
+     * fix, and each fix is different: an unconfirmed host key (§19.5) is
+     * repaired with [`Self::preview_sync_account_host_key_json`] then
+     * [`Self::trust_sftp_host_key`]; a credential that is not in this device's
+     * keychain is repaired on the accounts screen; a kind no loaded plugin
+     * serves is asked about BEFORE the builder, because `PluginRefused` also
+     * covers a plugin that IS installed and disliked the config, and "install
+     * the plugin" is the wrong instruction for that.
+     *
+     * Nothing is written down until the target has been probed AND the §19.13
+     * compatibility and E2E gates have passed ([`Self::wrap_for_target`]), so a
+     * refusal leaves this device syncing exactly where it did before. Same
+     * ordering as [`Self::configure_sync_adapter_json`], and for the same
+     * reason: a rejected target must not be what the next launch comes up on.
+     */
+    fun `selectSyncAccount`(`accountId`: kotlin.String)
     
     /**
      * (Re-)store the secret half of a NON-OAuth account's credentials — the
@@ -6346,9 +6419,16 @@ open class Host: Disposable, AutoCloseable, HostInterface
     
     /**
      * Disconnect the configured sync target: deconfigure the orchestrator and
-     * mark the adapter kind "none" so the summary reports nothing. The per-kind
-     * field prefs + keychain secrets are KEPT, so reconnecting is one tap (no
-     * re-typing) — mirrors the desktop `configure_sync_adapter({kind:"none"})`.
+     * remove everything a restore path could act on — the account row, its
+     * credentials and device-local half, the pointer, and the legacy
+     * preferences and keychain pseudo-accounts. The dataset's encryption key
+     * stays; it is not a property of the target.
+     *
+     * Keeping the fields "so reconnecting is one tap" is what this used to do,
+     * and it is why a disconnected phone came back up on the next launch
+     * uploading to the target it had been told to stop using. Reconnecting now
+     * means re-entering the target. Mirrors the desktop
+     * `configure_sync_adapter({kind:"none"})`.
      */
     @Throws(StoreException::class)override fun `disconnectSync`()
         = 
@@ -6902,6 +6982,43 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * The §19.5 trust gesture for an ACCOUNT the user is about to sync
+     * through — the mobile twin of the desktop `preview_sync_account_host_key`.
+     *
+     * [`Self::select_sync_account`] refuses an account whose protocol pins host
+     * keys until this device has confirmed the server's fingerprint, which is
+     * the ordinary state of an SFTP account added under Settings → Accounts:
+     * that path never probes. Without this the refusal is a dead end, because
+     * the only other way to pin a fingerprint is the connect form and the sync
+     * screen no longer shows one.
+     *
+     * Answers `null` — no error — for an account whose adapter declares no
+     * `host_key_pin`. The desktop refuses that with an `invalid_input` CODE the
+     * panel branches on; this boundary has no code channel (a `StoreError`
+     * crosses as a message), so "this account has no fingerprint to check" is a
+     * VALUE here. It is also what lets the screen ask the question after any
+     * refusal without a network round-trip for the adapters that cannot
+     * produce this one.
+     *
+     * Nothing here names a protocol: WHICH fields hold the host and the port
+     * come from the schema's own `host_key_pin` declaration — the same one
+     * [`host_core::sync_target::from_account`] refuses on.
+     */
+    @Throws(StoreException::class)override fun `previewSyncAccountHostKeyJson`(`accountId`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_preview_sync_account_host_key_json(
+        it,
+        FfiConverterString.lower(`accountId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Probe a sync target WITHOUT committing to it (§19.11 onboarding): build
      * the adapter from `config_json`, read its `meta.json`, and return a
      * `SyncPreview` JSON — `{"kind":"empty"}` for a fresh target, or
@@ -7254,6 +7371,44 @@ open class Host: Disposable, AutoCloseable, HostInterface
     }
     )
     }
+    
+
+    
+    /**
+     * Point this device at an account it ALREADY has, and sync through it —
+     * the mobile twin of the desktop `select_sync_account`.
+     *
+     * The sync screen's whole question, in one call. The account was added
+     * under Settings → Accounts, or arrived with a restored dataset; nothing
+     * here takes a form, a host or a password, because none of that is being
+     * decided — the row already holds it.
+     *
+     * [`host_core::sync_target::from_account`] opens the row through the
+     * plugin's own schema, so the ways it can refuse are the ways the user can
+     * fix, and each fix is different: an unconfirmed host key (§19.5) is
+     * repaired with [`Self::preview_sync_account_host_key_json`] then
+     * [`Self::trust_sftp_host_key`]; a credential that is not in this device's
+     * keychain is repaired on the accounts screen; a kind no loaded plugin
+     * serves is asked about BEFORE the builder, because `PluginRefused` also
+     * covers a plugin that IS installed and disliked the config, and "install
+     * the plugin" is the wrong instruction for that.
+     *
+     * Nothing is written down until the target has been probed AND the §19.13
+     * compatibility and E2E gates have passed ([`Self::wrap_for_target`]), so a
+     * refusal leaves this device syncing exactly where it did before. Same
+     * ordering as [`Self::configure_sync_adapter_json`], and for the same
+     * reason: a rejected target must not be what the next launch comes up on.
+     */
+    @Throws(StoreException::class)override fun `selectSyncAccount`(`accountId`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_select_sync_account(
+        it,
+        FfiConverterString.lower(`accountId`),_status)
+}
+    }
+    
     
 
     

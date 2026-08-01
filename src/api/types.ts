@@ -337,7 +337,12 @@ export interface CommandError {
     // `install_plugin_archive` refuses an in-place upgrade
     // when the plugin id is already loaded — v1 needs a
     // restart to swap libraries safely.
-    | 'restart_required';
+    | 'restart_required'
+    // §19.5 — `select_sync_account` refuses an account whose protocol pins
+    // host keys until this device has confirmed the server's fingerprint.
+    // Its own code because the repair is its own gesture: the sync settings
+    // offer the trust dialog rather than a message the user cannot act on.
+    | 'host_key_not_trusted';
   message: string;
 }
 

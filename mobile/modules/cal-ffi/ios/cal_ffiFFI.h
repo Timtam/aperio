@@ -1062,6 +1062,11 @@ RustBuffer uniffi_cal_ffi_fn_method_host_pinned_sftp_host_key(uint64_t ptr, Rust
 RustBuffer uniffi_cal_ffi_fn_method_host_preview_sftp_host_key_json(uint64_t ptr, RustBuffer args_json, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_PREVIEW_SYNC_ACCOUNT_HOST_KEY_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_PREVIEW_SYNC_ACCOUNT_HOST_KEY_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_preview_sync_account_host_key_json(uint64_t ptr, RustBuffer account_id, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_PREVIEW_SYNC_TARGET_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_PREVIEW_SYNC_TARGET_JSON
 RustBuffer uniffi_cal_ffi_fn_method_host_preview_sync_target_json(uint64_t ptr, RustBuffer config_json, RustCallStatus *_Nonnull out_status
@@ -1145,6 +1150,11 @@ RustBuffer uniffi_cal_ffi_fn_method_host_search_json(uint64_t ptr, RustBuffer qu
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SECTIONS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SECTIONS_JSON
 RustBuffer uniffi_cal_ffi_fn_method_host_sections_json(uint64_t ptr, RustBuffer list_id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SELECT_SYNC_ACCOUNT
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SELECT_SYNC_ACCOUNT
+void uniffi_cal_ffi_fn_method_host_select_sync_account(uint64_t ptr, RustBuffer account_id, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SET_ACCOUNT_SECRET
@@ -2327,6 +2337,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_preview_sftp_host_key_json(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_PREVIEW_SYNC_ACCOUNT_HOST_KEY_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_PREVIEW_SYNC_ACCOUNT_HOST_KEY_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_preview_sync_account_host_key_json(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_PREVIEW_SYNC_TARGET_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_PREVIEW_SYNC_TARGET_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_preview_sync_target_json(void
@@ -2426,6 +2442,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_search_json(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SECTIONS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SECTIONS_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_sections_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SELECT_SYNC_ACCOUNT
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SELECT_SYNC_ACCOUNT
+uint16_t uniffi_cal_ffi_checksum_method_host_select_sync_account(void
     
 );
 #endif

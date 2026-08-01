@@ -1471,6 +1471,11 @@ export const getSyncStatus = () =>
 export interface SyncAdapterSummary {
   kind: string;
   detail: string;
+  /** The account row this device syncs through. `null` on a device still
+   *  reading the legacy `sync.adapter.*` preferences. The sync settings mark
+   *  the chosen row in their account list by ID rather than by name — two
+   *  accounts may carry the same display name. */
+  account_id: string | null;
 }
 export const getSyncAdapterSummary = () =>
   invoke<SyncAdapterSummary | null>('get_sync_adapter_summary');
@@ -1480,6 +1485,25 @@ export const syncNow = () =>
 
 export const configureSyncAdapter = (config: SyncAdapterConfig) =>
   invoke<void>('configure_sync_adapter', { config });
+
+/** Point this device at an account it ALREADY has, and sync through it.
+ *
+ *  The sync settings' one verb. The account was added under Settings →
+ *  Accounts (or arrived with a restored dataset), so nothing here carries a
+ *  host, a path or a password — the row already holds them.
+ *
+ *  Probes the target and checks the dataset's compatibility + encryption
+ *  before writing anything down, so a refusal leaves this device syncing
+ *  exactly where it did. Rejects with a stable `code`:
+ *
+ *   - `host_key_not_trusted` — confirm the server's fingerprint first, via
+ *     [`previewSyncAccountHostKey`] + [`trustSftpHostKey`].
+ *   - `plugin_missing` — no loaded plugin serves this account's adapter.
+ *   - `auth` — the credential is not in this device's keychain.
+ *   - `encryption_required` — the target holds an encrypted dataset this
+ *     device has no key for; joining it is the onboarding flow's job. */
+export const selectSyncAccount = (accountId: string) =>
+  invoke<void>('select_sync_account', { accountId });
 
 /** Update the periodic interval (in minutes). Clamps to ≥1 on the
  *  backend; returns the value actually persisted. */
@@ -1714,6 +1738,20 @@ export type HostKeyPreviewStatus =
  *  fingerprint on first use (or refuse a changed one). */
 export const previewSftpHostKey = (host: string, port: number) =>
   invoke<HostKeyPreview>('preview_sftp_host_key', { host, port });
+
+/** The same probe for an account the user is about to sync through, when
+ *  [`selectSyncAccount`] refused with `host_key_not_trusted`.
+ *
+ *  Takes an account id rather than a host and a port because the sync settings
+ *  have neither: the row holds them, and WHICH of its fields they are is the
+ *  adapter's own `host_key_pin` declaration. Rejects with `invalid_input` for
+ *  an account whose protocol does not pin host keys.
+ *
+ *  Accepting commits through the same [`trustSftpHostKey`] as the connect
+ *  form — one pin store, keyed by `host:port`, so a fingerprint confirmed on
+ *  either path is confirmed for both. */
+export const previewSyncAccountHostKey = (accountId: string) =>
+  invoke<HostKeyPreview>('preview_sync_account_host_key', { accountId });
 
 /** Pin a host-key fingerprint after the user has confirmed it
  *  in the trust dialog. Overwrites any prior pin for the same

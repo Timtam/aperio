@@ -95,6 +95,14 @@ use vc_core::NewMeeting;
 struct SyncAdapterSummary {
     kind: String,
     detail: String,
+    /// The account row this device syncs through, when it syncs through one.
+    ///
+    /// `None` on a device still reading the legacy `sync.adapter.*`
+    /// preferences. The sync settings need the ID rather than the name: they
+    /// render a list of the accounts that could hold the dataset and have to
+    /// mark the one that does — and two accounts may legitimately carry the
+    /// same display name.
+    account_id: Option<String>,
 }
 /// Plugin ids of the statically-embedded sync adapters this host configures.
 /// The sync-target names, owned by `host_core::sync_target` so this host and
@@ -4909,29 +4917,112 @@ impl Host {
                 detail: format!("host-key probe blob: {e}"),
             })?;
         let host_port = format!("{host}:{}", args.port);
-        // `try_peek`, not `peek`: this is the one place the pin is COMPARED. A
-        // read failure folded into `None` would classify a host key that
-        // CHANGED as first use — the user sees the benign TOFU prompt instead
-        // of the §19.5 alarm, confirms, and `trust_sftp_host_key` writes the
-        // presented fingerprint over a pin we could not read. Refuse the
-        // preview instead; nothing is pinned and nothing is connected until
-        // the user retries.
-        let stored = UserPrefsHostKeyVerifier::new(self.db.shared())
-            .try_peek(&host_port)
-            .map_err(|err| StoreError::Storage {
-                detail: format!("read the pinned host key for {host_port}: {err}"),
-            })?;
-        let status = match stored {
-            None => serde_json::json!({ "kind": "new" }),
-            Some(ref s) if *s == probe.fingerprint => serde_json::json!({ "kind": "unchanged" }),
-            Some(s) => serde_json::json!({ "kind": "changed", "stored": s }),
+        Ok(classify_host_key(&self.db.shared(), host_port, probe.fingerprint)?.to_string())
+    }
+
+    /// The §19.5 trust gesture for an ACCOUNT the user is about to sync
+    /// through — the mobile twin of the desktop `preview_sync_account_host_key`.
+    ///
+    /// [`Self::select_sync_account`] refuses an account whose protocol pins host
+    /// keys until this device has confirmed the server's fingerprint, which is
+    /// the ordinary state of an SFTP account added under Settings → Accounts:
+    /// that path never probes. Without this the refusal is a dead end, because
+    /// the only other way to pin a fingerprint is the connect form and the sync
+    /// screen no longer shows one.
+    ///
+    /// Answers `null` — no error — for an account whose adapter declares no
+    /// `host_key_pin`. The desktop refuses that with an `invalid_input` CODE the
+    /// panel branches on; this boundary has no code channel (a `StoreError`
+    /// crosses as a message), so "this account has no fingerprint to check" is a
+    /// VALUE here. It is also what lets the screen ask the question after any
+    /// refusal without a network round-trip for the adapters that cannot
+    /// produce this one.
+    ///
+    /// Nothing here names a protocol: WHICH fields hold the host and the port
+    /// come from the schema's own `host_key_pin` declaration — the same one
+    /// [`host_core::sync_target::from_account`] refuses on.
+    pub fn preview_sync_account_host_key_json(
+        &self,
+        account_id: String,
+    ) -> Result<String, StoreError> {
+        let account_id = account_id.trim().to_string();
+        let shared = self.db.shared();
+        let account = AccountsRepo::new(&shared)
+            .get(&account_id)
+            .map_err(storage_err)?
+            .ok_or(StoreError::NotFound)?;
+        let Some((plugin_id, schema)) = host_core::sync_target::SyncPlugins::resolve(
+            &HostSyncPlugins(&self.plugin_manager),
+            account.adapter_kind.as_str(),
+        ) else {
+            return Err(StoreError::Storage {
+                detail: format!("no loaded plugin serves `{}`", account.adapter_kind),
+            });
         };
-        Ok(serde_json::json!({
-            "host_port": host_port,
-            "fingerprint": probe.fingerprint,
-            "status": status,
-        })
-        .to_string())
+        // No pin declared → nothing to confirm. `null`, not an error: see above.
+        let Some(pin) = schema.host_key_pin else {
+            return Ok("null".to_string());
+        };
+
+        let stored: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str::<serde_json::Value>(&account.config_json)
+                .ok()
+                .and_then(|v| v.as_object().cloned())
+                .unwrap_or_default();
+        // This device's half layered ON TOP of the row's, in that order: a
+        // device-local field is this device's answer and the row's is every
+        // other device's.
+        let local = host_core::account_local::load(
+            &UserPrefsRepo::new(&shared),
+            &account.id,
+            &[pin.host_field.clone(), pin.port_field.clone()],
+        );
+        // A port is a JSON number in the row and a string in some older ones;
+        // both mean the same thing, and a lookup key that disagrees makes a pin
+        // the user already confirmed invisible.
+        let text = |key: &str| -> String {
+            match local.get(key).or_else(|| stored.get(key)) {
+                Some(serde_json::Value::String(s)) => s.trim().to_string(),
+                Some(serde_json::Value::Number(n)) => n.to_string(),
+                _ => String::new(),
+            }
+        };
+        let host = text(&pin.host_field);
+        let port = text(&pin.port_field);
+        let parsed_port: u16 = port.parse().unwrap_or_default();
+        if host.is_empty() || parsed_port == 0 {
+            return Err(StoreError::InvalidField {
+                field: pin.host_field.clone(),
+                detail: "this account does not say which server to probe".to_string(),
+            });
+        }
+        // Under the plugin's own field names, and built by hand rather than
+        // through `json!` because the keys are the declaration's, not literals.
+        let mut args = serde_json::Map::new();
+        args.insert(
+            pin.host_field.clone(),
+            serde_json::Value::String(host.clone()),
+        );
+        args.insert(pin.port_field.clone(), serde_json::Value::from(parsed_port));
+        let bytes = self
+            .runtime
+            .block_on(async {
+                self.plugin_manager
+                    .probe_host_key(&plugin_id, &serde_json::Value::Object(args).to_string())
+                    .await
+            })
+            .map_err(map_probe_err)?;
+        #[derive(serde::Deserialize)]
+        struct ProbeResult {
+            fingerprint: String,
+        }
+        let probe: ProbeResult =
+            serde_json::from_slice(&bytes).map_err(|e| StoreError::Protocol {
+                detail: format!("host-key probe blob: {e}"),
+            })?;
+        // The same key `merge_pin` looks the pin up under, or a fingerprint the
+        // user confirms here stays invisible to the build that needs it.
+        Ok(classify_host_key(&shared, format!("{host}:{port}"), probe.fingerprint)?.to_string())
     }
 
     /// Pin a user-confirmed SFTP host-key fingerprint for `host_port` (§19.5 —
@@ -5013,6 +5104,76 @@ impl Host {
         Ok(())
     }
 
+    /// Point this device at an account it ALREADY has, and sync through it —
+    /// the mobile twin of the desktop `select_sync_account`.
+    ///
+    /// The sync screen's whole question, in one call. The account was added
+    /// under Settings → Accounts, or arrived with a restored dataset; nothing
+    /// here takes a form, a host or a password, because none of that is being
+    /// decided — the row already holds it.
+    ///
+    /// [`host_core::sync_target::from_account`] opens the row through the
+    /// plugin's own schema, so the ways it can refuse are the ways the user can
+    /// fix, and each fix is different: an unconfirmed host key (§19.5) is
+    /// repaired with [`Self::preview_sync_account_host_key_json`] then
+    /// [`Self::trust_sftp_host_key`]; a credential that is not in this device's
+    /// keychain is repaired on the accounts screen; a kind no loaded plugin
+    /// serves is asked about BEFORE the builder, because `PluginRefused` also
+    /// covers a plugin that IS installed and disliked the config, and "install
+    /// the plugin" is the wrong instruction for that.
+    ///
+    /// Nothing is written down until the target has been probed AND the §19.13
+    /// compatibility and E2E gates have passed ([`Self::wrap_for_target`]), so a
+    /// refusal leaves this device syncing exactly where it did before. Same
+    /// ordering as [`Self::configure_sync_adapter_json`], and for the same
+    /// reason: a rejected target must not be what the next launch comes up on.
+    pub fn select_sync_account(&self, account_id: String) -> Result<(), StoreError> {
+        let account_id = account_id.trim().to_string();
+        if account_id.is_empty() {
+            return Err(StoreError::InvalidField {
+                field: "account_id".to_string(),
+                detail: "no account id supplied".to_string(),
+            });
+        }
+        let shared = self.db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+        let account = AccountsRepo::new(&shared)
+            .get(&account_id)
+            .map_err(storage_err)?
+            .ok_or(StoreError::NotFound)?;
+        let plugins = HostSyncPlugins(&self.plugin_manager);
+        if host_core::sync_target::SyncPlugins::resolve(&plugins, account.adapter_kind.as_str())
+            .is_none()
+        {
+            return Err(StoreError::Unsupported {
+                detail: format!("no loaded plugin serves `{}`", account.adapter_kind),
+            });
+        }
+        // A different backend invalidates every remote-missing sound verdict
+        // (mirrors the orchestrator clearing its per-session pushed lengths).
+        host_core::sound_assets::reset_missing_cache();
+        let adapter = host_core::sync_target::from_account(
+            &account,
+            &prefs,
+            self.secret_store.as_ref(),
+            &UserPrefsHostKeyVerifier::new(shared.clone()),
+            &plugins,
+        )
+        .map_err(unbuildable_err)?;
+        // Probe before keeping it active so a bad address / credential fails
+        // here rather than on the first silent sync round.
+        self.runtime
+            .block_on(async { adapter.test_connection().await })
+            .map_err(sync_err)?;
+        let adapter = self.wrap_for_target(adapter)?;
+        self.orchestrator.configure(adapter);
+        // The one thing this call writes: which account this device syncs
+        // through. The row itself is the user's, added elsewhere and untouched
+        // here — moving off it must not disturb it, which is exactly what
+        // separates this from the connect path.
+        host_core::sync_target::select_account(&prefs, Some(&account.id)).map_err(storage_err)
+    }
+
     /// Disconnect the configured sync target: deconfigure the orchestrator and
     /// remove everything a restore path could act on — the account row, its
     /// credentials and device-local half, the pointer, and the legacy
@@ -5048,7 +5209,11 @@ impl Host {
         // the user moved off.
         match host_core::sync_target::summary(&prefs, &AccountsRepo::new(&shared)) {
             host_core::sync_target::SummaryOutcome::Chosen(kind, detail) => {
-                return to_json(&Some(SyncAdapterSummary { kind, detail }));
+                return to_json(&Some(SyncAdapterSummary {
+                    kind,
+                    detail,
+                    account_id: host_core::sync_target::selected_account_id(&prefs),
+                }));
             }
             // See the desktop twin: a pointer to a missing row must not fall
             // through to preferences that still describe the old target.
@@ -5133,7 +5298,12 @@ impl Host {
             "none" => return to_json(&Option::<SyncAdapterSummary>::None),
             _ => String::new(),
         };
-        to_json(&Some(SyncAdapterSummary { kind, detail }))
+        // The legacy reader answered, so there is no row to name.
+        to_json(&Some(SyncAdapterSummary {
+            kind,
+            detail,
+            account_id: None,
+        }))
     }
 
     /// Run one sync round (push local pending logs, fetch + apply foreign ones,
@@ -8100,6 +8270,71 @@ fn map_probe_err(e: plugin_core::manager::ProbeHostKeyError) -> StoreError {
     }
 }
 
+/// Compare a freshly-observed fingerprint against this device's pin store and
+/// build the `HostKeyPreview` wire shape.
+///
+/// Split out so the account-based probe reaches the SAME three-way verdict as
+/// the form-based one. A second copy of this comparison is the one place a bug
+/// would be invisible: it would classify a CHANGED key as first use, and the
+/// user would be shown the benign prompt for what is the alarm case.
+fn classify_host_key(
+    shared: &SharedConn,
+    host_port: String,
+    fingerprint: String,
+) -> Result<serde_json::Value, StoreError> {
+    // `try_peek`, not `peek`: this is the one place the pin is COMPARED. A read
+    // failure folded into `None` would classify a host key that CHANGED as
+    // first use — the user sees the benign TOFU prompt instead of the §19.5
+    // alarm, confirms, and `trust_sftp_host_key` writes the presented
+    // fingerprint over a pin we could not read. Refuse the preview instead;
+    // nothing is pinned and nothing is connected until the user retries.
+    let stored = UserPrefsHostKeyVerifier::new(shared.clone())
+        .try_peek(&host_port)
+        .map_err(|err| StoreError::Storage {
+            detail: format!("read the pinned host key for {host_port}: {err}"),
+        })?;
+    let status = match stored {
+        None => serde_json::json!({ "kind": "new" }),
+        Some(ref s) if *s == fingerprint => serde_json::json!({ "kind": "unchanged" }),
+        Some(s) => serde_json::json!({ "kind": "changed", "stored": s }),
+    };
+    Ok(serde_json::json!({
+        "host_port": host_port,
+        "fingerprint": fingerprint,
+        "status": status,
+    }))
+}
+
+/// Why an account could not be opened as this device's sync target, as the
+/// `StoreError` this boundary speaks.
+///
+/// Every variant carries [`host_core::sync_target::Unbuildable`]'s own text: it
+/// names the field or repeats the plugin's complaint — "no password stored for
+/// the sync target", "sync plugin refused: …" — which is more than a
+/// re-worded stand-in could say. The VARIANT is chosen for what the user has to
+/// do about it, which is the only distinction this boundary can carry: a
+/// credential to re-enter is `Auth`, a row that is gone is `NotFound`,
+/// everything else is a rejected field.
+fn unbuildable_err(err: host_core::sync_target::Unbuildable) -> StoreError {
+    use host_core::sync_target::Unbuildable as U;
+    match &err {
+        // Both are "this device is missing something only it can supply". The
+        // host key is not a credential, but the repair is the same shape — a
+        // gesture on this device — and the sync screen offers it through
+        // `preview_sync_account_host_key_json` rather than by reading this.
+        U::MissingCredential { .. } | U::HostKeyNotTrusted { .. } => StoreError::Auth {
+            detail: err.to_string(),
+        },
+        U::AccountMissing { .. } => StoreError::NotFound,
+        U::NotConfigured | U::Incomplete { .. } | U::Invalid { .. } | U::PluginRefused { .. } => {
+            StoreError::InvalidField {
+                field: "sync_target".to_string(),
+                detail: err.to_string(),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -8859,6 +9094,68 @@ mod tests {
     }
 
     /// Open a Host at `<dir>/<name>.sqlite` with a fresh fake keychain.
+    /// The sync screen's whole verb, end to end: an account the user already
+    /// has becomes this device's target, the pointer is written, and the
+    /// summary names the row rather than the legacy preferences.
+    #[test]
+    fn selecting_an_account_makes_it_the_sync_target() {
+        let remote = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let host = open_named(&dir, "select");
+
+        // Added the way the accounts screen adds one: the adapter's declared
+        // form, filled in. `remote_root` is device_local, so it lands in this
+        // device's preferences rather than in the row — which is exactly the
+        // half `from_account` has to find again when it opens the target.
+        let created = host
+            .connect_account_json(
+                serde_json::json!({
+                    "adapter_kind": "local_folder",
+                    "display_name": "NAS",
+                    "values": { "remote_root": remote.path().to_string_lossy() },
+                })
+                .to_string(),
+            )
+            .unwrap();
+        let account_id = serde_json::from_str::<serde_json::Value>(&created).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        // Adding the account is NOT choosing it: a device with a storage
+        // account it has not pointed at still syncs nowhere.
+        assert_eq!(host.get_sync_adapter_summary_json().unwrap(), "null");
+
+        host.select_sync_account(account_id.clone()).unwrap();
+
+        let summary: serde_json::Value =
+            serde_json::from_str(&host.get_sync_adapter_summary_json().unwrap()).unwrap();
+        // The kind in the spelling both frontends switch on (`stored_kind_for`),
+        // and the detail is the account's own display name.
+        assert_eq!(summary["kind"], "local");
+        assert_eq!(summary["detail"], "NAS");
+        assert_eq!(
+            summary["account_id"],
+            serde_json::Value::String(account_id.clone())
+        );
+        // Probed AND activated, not merely written down: a round runs.
+        host.sync_now_json("manual".to_string()).unwrap();
+    }
+
+    /// A refusal must leave this device syncing exactly where it did, which for
+    /// a device that syncs nowhere means still nowhere — the pointer is written
+    /// last, after the probe.
+    #[test]
+    fn selecting_an_account_that_is_not_there_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = open_named(&dir, "missing");
+        assert!(matches!(
+            host.select_sync_account("nope".to_string()),
+            Err(StoreError::NotFound)
+        ));
+        assert!(host.select_sync_account("   ".to_string()).is_err());
+        assert_eq!(host.get_sync_adapter_summary_json().unwrap(), "null");
+    }
+
     fn open_named(dir: &tempfile::TempDir, name: &str) -> Arc<Host> {
         Host::open(
             dir.path()

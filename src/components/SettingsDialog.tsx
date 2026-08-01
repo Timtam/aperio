@@ -10,6 +10,10 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { useDialogState } from '../state/dialogStateContext';
+import {
+  SettingsNavContext,
+  type SettingsNavValue,
+} from '../state/settingsNavContext';
 
 import { AccountsPanel } from './AccountsPanel';
 import { CalendarsPanel } from './CalendarsPanel';
@@ -150,6 +154,16 @@ export function SettingsDialog({
     [],
   );
 
+  // What a PANEL uses to send the user to another tab (Sync → "Add an
+  // account"). `focusTab` is exactly right for it: it lands focus on the
+  // destination tab button — a named, announcing element that survives the
+  // panel swap — before the panel underneath is unmounted. See
+  // `settingsNavContext.ts` for why `openSettings(tab)` cannot do this.
+  const nav = useMemo<SettingsNavValue>(
+    () => ({ goToTab: focusTab }),
+    [focusTab],
+  );
+
   const onTablistKey = useCallback(
     (e: ReactKeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -208,88 +222,90 @@ export function SettingsDialog({
       className="modal--settings"
       initialFocusRef={activeTabRef}
     >
-      <div className="settings">
-        <div
-          role="tablist"
-          aria-label={t('dialogs.settings.tablistAria')}
-          aria-orientation="vertical"
-          onKeyDown={onTablistKey}
-          className="settings__tablist"
-        >
-          {TAB_ORDER.map((id) => {
-            const selected = id === activeTab;
-            return (
-              <button
-                key={id}
-                ref={(el) => {
-                  tabRefs.current[id] = el;
-                  if (id === activeTab) activeTabRef.current = el;
-                }}
-                id={tabId(id)}
-                role="tab"
-                type="button"
-                aria-selected={selected}
-                // `aria-controls` is intentionally OMITTED on every
-                // tab. The W3C APG recommends it, but it makes NVDA
-                // follow the relationship on focus and read whatever
-                // the first interactive control in the panel sounds
-                // like — for our two panels those happen to be a
-                // listbox labelled "Verbundene Konten" / "Vorhandene
-                // Farb-Labels" and a kind-picker combobox that NVDA
-                // announces as "Lokal, 1 of 8". Both contain the tab
-                // label as a substring, so the user hears the tab
-                // name a second time as plain text via aria-live.
-                // Dropping aria-controls breaks no functionality:
-                // the visual / DOM relationship is obvious, the role
-                // pair (tab + tabpanel) still carries the semantic
-                // meaning, and keyboard navigation lands in the
-                // panel anyway when the user Tabs past the tablist.
-                tabIndex={selected ? 0 : -1}
-                className={
-                  'settings__tab' +
-                  (selected ? ' settings__tab--active' : '')
-                }
-                // Mouse / click activation: switch tab. Focus stays
-                // with the click target; the roving-tabindex update
-                // happens via the same state.
-                onClick={() => setActiveTab(id)}
-              >
-                {labels[id]}
-              </button>
-            );
-          })}
-        </div>
+      <SettingsNavContext.Provider value={nav}>
+        <div className="settings">
+          <div
+            role="tablist"
+            aria-label={t('dialogs.settings.tablistAria')}
+            aria-orientation="vertical"
+            onKeyDown={onTablistKey}
+            className="settings__tablist"
+          >
+            {TAB_ORDER.map((id) => {
+              const selected = id === activeTab;
+              return (
+                <button
+                  key={id}
+                  ref={(el) => {
+                    tabRefs.current[id] = el;
+                    if (id === activeTab) activeTabRef.current = el;
+                  }}
+                  id={tabId(id)}
+                  role="tab"
+                  type="button"
+                  aria-selected={selected}
+                  // `aria-controls` is intentionally OMITTED on every
+                  // tab. The W3C APG recommends it, but it makes NVDA
+                  // follow the relationship on focus and read whatever
+                  // the first interactive control in the panel sounds
+                  // like — for our two panels those happen to be a
+                  // listbox labelled "Verbundene Konten" / "Vorhandene
+                  // Farb-Labels" and a kind-picker combobox that NVDA
+                  // announces as "Lokal, 1 of 8". Both contain the tab
+                  // label as a substring, so the user hears the tab
+                  // name a second time as plain text via aria-live.
+                  // Dropping aria-controls breaks no functionality:
+                  // the visual / DOM relationship is obvious, the role
+                  // pair (tab + tabpanel) still carries the semantic
+                  // meaning, and keyboard navigation lands in the
+                  // panel anyway when the user Tabs past the tablist.
+                  tabIndex={selected ? 0 : -1}
+                  className={
+                    'settings__tab' +
+                    (selected ? ' settings__tab--active' : '')
+                  }
+                  // Mouse / click activation: switch tab. Focus stays
+                  // with the click target; the roving-tabindex update
+                  // happens via the same state.
+                  onClick={() => setActiveTab(id)}
+                >
+                  {labels[id]}
+                </button>
+              );
+            })}
+          </div>
 
-        {/* No `tabIndex` on the tabpanel: both panels host plenty of
-            focusable controls (the W3C APG carve-out), and adding the
-            panel itself as a tab stop made NVDA pause on it as an
-            "Eigenschaftsfeld" with no interaction — a confusing extra
-            beat between the active tab and the first real control.
-            We also intentionally OMIT `aria-labelledby` here. The
-            APG pattern recommends pointing it back at the active tab,
-            but combined with `aria-controls` on the tab that creates
-            a round-trip the screen reader walks on focus: the tab
-            name gets read first as the focused control and then again
-            as the controlled panel's accessible name. Dropping the
-            label-by leaves a nameless tabpanel — NVDA still places it
-            in its landmark list as "tabpanel" — and the focused tab
-            gets announced exactly once, the way the user expects. */}
-        <div
-          role="tabpanel"
-          id={panelId(activeTab)}
-          className="settings__panel"
-        >
-          {activeTab === 'general' && <GeneralPanel />}
-          {activeTab === 'accounts' && <AccountsPanel />}
-          {activeTab === 'calendars' && <CalendarsPanel />}
-          {activeTab === 'colorLabels' && <ColorLabelsPanel />}
-          {activeTab === 'tasks' && <TasksPanel />}
-          {activeTab === 'contacts' && <ContactsPanel />}
-          {activeTab === 'sync' && <SyncPanel />}
-          {activeTab === 'plugins' && <PluginsPanel />}
-          {activeTab === 'logs' && <LogsPanel />}
+          {/* No `tabIndex` on the tabpanel: both panels host plenty of
+              focusable controls (the W3C APG carve-out), and adding the
+              panel itself as a tab stop made NVDA pause on it as an
+              "Eigenschaftsfeld" with no interaction — a confusing extra
+              beat between the active tab and the first real control.
+              We also intentionally OMIT `aria-labelledby` here. The
+              APG pattern recommends pointing it back at the active tab,
+              but combined with `aria-controls` on the tab that creates
+              a round-trip the screen reader walks on focus: the tab
+              name gets read first as the focused control and then again
+              as the controlled panel's accessible name. Dropping the
+              label-by leaves a nameless tabpanel — NVDA still places it
+              in its landmark list as "tabpanel" — and the focused tab
+              gets announced exactly once, the way the user expects. */}
+          <div
+            role="tabpanel"
+            id={panelId(activeTab)}
+            className="settings__panel"
+          >
+            {activeTab === 'general' && <GeneralPanel />}
+            {activeTab === 'accounts' && <AccountsPanel />}
+            {activeTab === 'calendars' && <CalendarsPanel />}
+            {activeTab === 'colorLabels' && <ColorLabelsPanel />}
+            {activeTab === 'tasks' && <TasksPanel />}
+            {activeTab === 'contacts' && <ContactsPanel />}
+            {activeTab === 'sync' && <SyncPanel />}
+            {activeTab === 'plugins' && <PluginsPanel />}
+            {activeTab === 'logs' && <LogsPanel />}
+          </div>
         </div>
-      </div>
+      </SettingsNavContext.Provider>
 
       <div className="form__actions settings__footer">
         <button

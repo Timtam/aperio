@@ -181,6 +181,12 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** Set the active sync target from a JSON `{kind, …}` (local: `{kind:"local",
    *  path}`); persists + probes. Rejects on a bad target / unsupported kind. */
   configureSyncAdapterJson(configJson: string): Promise<void>;
+  /** Point this device at an account it ALREADY has, and sync through it — the
+   *  sync screen's one verb. Nothing here carries a host, a path or a password;
+   *  the account row holds them. Probes the target and clears the compatibility
+   *  + encryption gates before writing anything down, so a rejection leaves this
+   *  device syncing exactly where it did. */
+  selectSyncAccount(accountId: string): Promise<void>;
   /** The orchestrator status as JSON (configured / in_flight / last_synced_at /
    *  e2e_enabled / …). */
   syncStatusJson(): Promise<string>;
@@ -188,11 +194,15 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  JSON. Rejects "not configured" until a target is set. `trigger` is the wire
    *  SyncTrigger ("manual"/"app_start"/"periodic"/…) recorded in the sync log. */
   syncNowJson(trigger: string): Promise<string>;
-  /** Disconnect the configured sync target (deconfigure + mark kind "none";
-   *  keeps the field prefs + secrets so reconnect is one tap). */
+  /** Disconnect the configured sync target: deconfigure the orchestrator and
+   *  remove everything a restore could act on — the account row, its
+   *  credentials and device-local half, and the pointer at it. The dataset's
+   *  encryption key stays; it is not a property of the target. */
   disconnectSync(): Promise<void>;
   /** Non-secret summary of the configured target as JSON (`null` or
-   *  `{kind, detail}`) for the Settings "connected" card. */
+   *  `{kind, detail, account_id}`) for the Settings "connected" card.
+   *  `account_id` is the row this device syncs through, or `null` on a device
+   *  still reading the legacy `sync.adapter.*` preferences. */
   getSyncAdapterSummaryJson(): Promise<string>;
   /** Push local pending logs without fetching (RN AppState background); returns
    *  the number of logs pushed. `trigger` ("kick"/"app_exit"/…) is logged. */
@@ -565,6 +575,16 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  `{host_port, fingerprint, status}` JSON (status: `{kind:"new"|"unchanged"}`
    *  or `{kind:"changed", stored}`). The caller shows the trust dialog. */
   previewSftpHostKeyJson(argsJson: string): Promise<string>;
+  /** The same probe for an ACCOUNT the user is about to sync through, when
+   *  `selectSyncAccount` refused. Takes an account id rather than a host and a
+   *  port because the sync screen has neither: the row holds them, and WHICH of
+   *  its fields they are is the adapter's own `host_key_pin` declaration.
+   *
+   *  Resolves the JSON `null` — no rejection — for an account whose adapter
+   *  declares no host-key pin, and does no network in that case. That is how a
+   *  boundary with no error CODE answers "is there a fingerprint to check here
+   *  at all". */
+  previewSyncAccountHostKeyJson(accountId: string): Promise<string>;
   /** Pin a user-confirmed fingerprint for `hostPort` (first-use or key-change). */
   trustSftpHostKey(hostPort: string, fingerprint: string): Promise<void>;
   /** Drop the pinned fingerprint for `hostPort` (next connect re-prompts). */

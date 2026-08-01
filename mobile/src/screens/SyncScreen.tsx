@@ -37,18 +37,29 @@ import { listAccounts } from '../api/accounts';
 import { setUserPref } from '../api/prefs';
 import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
-import { SyncTargetConfigForm } from '../components/sync/SyncTargetConfigForm';
+import { SyncTargetAccountPicker } from '../components/sync/SyncTargetAccountPicker';
 import { formatLongDateTime } from '../intl/dateFormat';
 import { clampErrorText, useRefreshErrors } from '../state/useRefreshErrors';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import CalFfi from '../../modules/cal-ffi';
 
 // Cross-device sync — a full desktop peer (same engine, statically-embedded
-// adapters). The adapter-target CONFIGURATION form (kind picker, per-kind
-// fields, OAuth, SFTP host-key trust, preview → join/init) lives in
-// `SyncTargetConfigForm`, shared with the first-launch wizard. This screen
-// keeps the status display, periodic-interval + compaction controls, E2E
-// management, the stale-resume + adopt-encryption banners, and the protocol.
+// adapters). This screen keeps the status display, periodic-interval +
+// compaction controls, E2E management, the stale-resume + adopt-encryption
+// banners, and the protocol.
+//
+// ## Why there is no connect form here any more
+//
+// It used to ask what KIND of target to use and then for its host, path and
+// password, through the shared `SyncTargetConfigForm`. A sync target is an
+// ACCOUNT now: the user adds it under Settings → Accounts like any other, or it
+// arrives with a restored dataset, and the only decision left for this device is
+// which of them holds the dataset. That is the whole of
+// `SyncTargetAccountPicker`.
+//
+// The form itself is unchanged and still rendered by the first-launch wizard,
+// which is the one place that legitimately has no accounts yet AND has to decide
+// between joining an existing dataset and starting a new one.
 
 const PREF_SYNC_INTERVAL_MINUTES = 'sync.intervalMinutes';
 const INTERVAL_PRESETS: readonly number[] = [1, 5, 15, 30, 60, 240];
@@ -84,6 +95,11 @@ export default function SyncScreen() {
   const [disablePp, setDisablePp] = useState(''); // disable: current passphrase
   const [adoptPp, setAdoptPp] = useState(''); // adopt peer-enabled E2E passphrase
   const adoptBannerRef = useRef<Text>(null);
+  // Disconnecting unmounts the summary card AND the button that was pressed, so
+  // screen-reader focus would drop to nothing. This line is the one node that
+  // survives it and whose text IS the new state ("not configured"), which is the
+  // same anchor the desktop panel lands on.
+  const statusLineRef = useRef<Text>(null);
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
@@ -201,15 +217,6 @@ export default function SyncScreen() {
     );
   }, [announce, refresh, t]);
 
-  const kindLabel = useCallback(
-    (kind: string): string =>
-      t(
-        `dialogs.settings.sync.adapterKind${kind.charAt(0).toUpperCase()}${kind.slice(1)}`,
-        { defaultValue: kind },
-      ),
-    [t],
-  );
-
   const onDisconnect = useCallback(() => {
     Alert.alert(
       t('dialogs.settings.sync.adapterDisconnect'),
@@ -226,6 +233,18 @@ export default function SyncScreen() {
                 await disconnectSync();
                 await refresh();
                 announce(t('dialogs.settings.sync.adapterDisconnected'));
+                // The pressed button is gone with the card it lived in; land on
+                // the status line, which now says this device is not syncing.
+                // One frame later, so the re-render `refresh` triggered has
+                // committed and the line reads out its NEW text — moving focus
+                // in the same tick landed on the sentence that was there
+                // before the disconnect.
+                requestAnimationFrame(() => {
+                  const tag = statusLineRef.current
+                    ? findNodeHandle(statusLineRef.current)
+                    : null;
+                  if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+                });
               } catch (err) {
                 const message = errorMessage(err);
                 setError(message);
@@ -448,13 +467,21 @@ export default function SyncScreen() {
   return (
     <FormScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text
+        ref={statusLineRef}
         style={styles.status}
         accessibilityRole="text"
         accessibilityLiveRegion="polite"
       >
         {status?.configured
           ? `${t('mobile.syncStatusConfigured')} ${t('mobile.syncLastSynced', { when: lastSynced })}`
-          : t('mobile.syncStatusNotConfigured')}
+          : adapterSummary != null
+            ? // A target is chosen and the host did not come up on it — a
+              // start-up restore that refused (locked keychain, missing
+              // credential, unconfirmed host key). Saying "not set up" here
+              // contradicted the picker below, which named the very account
+              // it was set up with.
+              t('dialogs.settings.sync.stateChosenNotRunning')
+            : t('mobile.syncStatusNotConfigured')}
       </Text>
 
       {error != null && (
@@ -463,14 +490,25 @@ export default function SyncScreen() {
         </Text>
       )}
 
-      {/* Connected-target card + Disconnect. */}
-      {status?.configured && adapterSummary != null && (
+      {/* Connected-target card + Disconnect. Rendered off the SUMMARY alone,
+          not off the host being configured: a chosen target the host did not
+          come up on still has to be disconnectable, and gating this on
+          `configured` was what left that state with no control at all.
+
+          The kind is deliberately not named here any more. It came from a
+          hard-coded table while the picker below names the same account's
+          protocol from the plugin's own declaration, so one account was read
+          out under two different names on one screen. The detail IS the
+          account's display name, and the picker states the protocol. */}
+      {adapterSummary != null && (
         <View style={styles.field}>
           <Text style={styles.label} accessibilityRole="text">
-            {t('dialogs.settings.sync.connectedSummary', {
-              kind: kindLabel(adapterSummary.kind),
-              detail: adapterSummary.detail || '–',
-            })}
+            {t(
+              status?.configured
+                ? 'dialogs.settings.sync.connectedSummary'
+                : 'dialogs.settings.sync.connectedSummaryNotRunning',
+              { detail: adapterSummary.detail || '–' },
+            )}
           </Text>
           <Pressable
             accessibilityRole="button"
@@ -775,12 +813,25 @@ export default function SyncScreen() {
           </View>
         ))}
 
-      {/* Connection setup / onboarding — ONLY while no target is configured. The
-          shared config form (also used by the first-launch wizard) owns the
-          kind picker, per-kind fields, OAuth, SFTP trust, and preview→join/init. */}
-      {!status?.configured && (
-        <SyncTargetConfigForm onConnected={() => void refresh()} />
-      )}
+      {/* WHICH of the user's accounts holds the dataset. Rendered whether or
+          not one is chosen: moving to another account is a swap the host probes
+          before it commits, so making the user disconnect first — and lose the
+          account row on the way — was never the safer order. It sits exactly
+          where the connect form used to, so nothing else on this screen moved. */}
+      <View style={styles.field}>
+        <Text style={styles.label} accessibilityRole="header">
+          {t('dialogs.settings.sync.targetTitle')}
+        </Text>
+        <SyncTargetAccountPicker
+          currentAccountId={adapterSummary?.account_id ?? null}
+          // The HOST's answer, not the stored pointer's — so the picker can
+          // tell "this account holds the dataset" from "this account is
+          // supposed to and nothing is syncing". `null` until the status has
+          // arrived, so it accuses nothing on the first render.
+          active={status != null ? status.configured : null}
+          onChanged={refresh}
+        />
+      </View>
 
       {/* External data — manual refresh + live status for the external cache. */}
       {hasExternalAccounts && (

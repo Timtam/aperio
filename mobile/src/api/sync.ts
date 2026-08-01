@@ -153,15 +153,55 @@ export const configureSyncAdapter = (config: SyncAdapterConfig): Promise<void> =
 export interface SyncAdapterSummary {
   kind: string;
   detail: string;
+  /** The account row this device syncs through. `null` on a device still
+   *  reading the legacy `sync.adapter.*` preferences. The sync settings mark
+   *  the chosen row in their account list by ID rather than by name — two
+   *  accounts may carry the same display name. */
+  account_id: string | null;
 }
 
 /** Read the configured target's non-secret summary (kind + detail), or `null`. */
 export const getSyncAdapterSummary = async (): Promise<SyncAdapterSummary | null> =>
   JSON.parse(await CalFfi.getSyncAdapterSummaryJson()) as SyncAdapterSummary | null;
 
-/** Disconnect the configured sync target. Keeps the entered fields + secrets so
- *  reconnecting is one tap; the form re-shows once syncStatus reads back
- *  `configured: false`. */
+/** Point this device at an account it ALREADY has, and sync through it.
+ *
+ *  The sync settings' one verb. The account was added under Settings →
+ *  Accounts (or arrived with a restored dataset), so nothing here carries a
+ *  host, a path or a password — the row already holds them.
+ *
+ *  Probes the target and checks the dataset's compatibility + encryption before
+ *  writing anything down, so a refusal leaves this device syncing exactly where
+ *  it did. An account whose protocol pins host keys is refused until this
+ *  device has confirmed the server's fingerprint —
+ *  {@link previewSyncAccountHostKey} + {@link trustSftpHostKey} are the repair. */
+export const selectSyncAccount = (accountId: string): Promise<void> =>
+  CalFfi.selectSyncAccount(accountId);
+
+/** The §19.5 probe for an account the user is about to sync through, for when
+ *  {@link selectSyncAccount} refused.
+ *
+ *  Takes an account id rather than a host and a port because the sync settings
+ *  have neither: the row holds them, and WHICH of its fields they are is the
+ *  adapter's own `host_key_pin` declaration.
+ *
+ *  Resolves `null` — without touching the network — for an account whose
+ *  adapter pins no host key, which is the answer to "did the refusal even have
+ *  this shape". Accepting commits through the same {@link trustSftpHostKey} as
+ *  the connect form: one pin store keyed by `host:port`, so a fingerprint
+ *  confirmed on either path is confirmed for both. */
+export const previewSyncAccountHostKey = async (
+  accountId: string,
+): Promise<HostKeyPreview | null> =>
+  JSON.parse(
+    await CalFfi.previewSyncAccountHostKeyJson(accountId),
+  ) as HostKeyPreview | null;
+
+/** Disconnect the configured sync target: stops syncing on this device AND
+ *  removes the account row it synced through, with its credentials and its
+ *  device-local half. The dataset's end-to-end encryption key is kept — it
+ *  belongs to the dataset, not to the target. Reconnecting means adding the
+ *  account again under Settings → Accounts. */
 export const disconnectSync = (): Promise<void> => CalFfi.disconnectSync();
 
 /** The current engine status (no round). */
