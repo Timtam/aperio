@@ -136,12 +136,12 @@ pub async fn is_fresh_instance(
         return Ok(false);
     }
 
-    // A sync target configured (anything other than unset / empty / "none").
+    // A sync target configured.
     let kind = UserPrefsRepo::new(&shared)
         .get(PREF_ADAPTER_KIND)
         .ok()
         .flatten();
-    if matches!(kind, Some(k) if !k.is_empty() && k != "none") {
+    if !is_unconfigured(kind.as_deref()) {
         return Ok(false);
     }
 
@@ -1054,7 +1054,11 @@ pub fn get_sync_adapter_summary(
 ) -> CommandResult<Option<SyncAdapterSummary>> {
     let shared = db.shared();
     let prefs = UserPrefsRepo::new(&shared);
-    let Some(kind) = prefs.get(PREF_ADAPTER_KIND).map_err(internal)? else {
+    let kind = prefs
+        .get(PREF_ADAPTER_KIND)
+        .map_err(internal)?
+        .filter(|stored| !is_unconfigured(Some(stored)));
+    let Some(kind) = kind else {
         return Ok(None);
     };
     let detail = match kind.as_str() {
@@ -1990,7 +1994,11 @@ pub fn build_adapter_from_prefs(
     plugin_manager: &PluginManager,
 ) -> Option<Arc<dyn SyncAdapter>> {
     let prefs = UserPrefsRepo::new(db);
-    let kind = prefs.get(PREF_ADAPTER_KIND).ok().flatten()?;
+    let kind = prefs
+        .get(PREF_ADAPTER_KIND)
+        .ok()
+        .flatten()
+        .filter(|stored| !is_unconfigured(Some(stored)))?;
     let plain: Arc<dyn SyncAdapter> = match kind.as_str() {
         "local" => {
             let path = prefs.get(PREF_LOCAL_PATH).ok().flatten()?;
@@ -2603,14 +2611,14 @@ pub async fn get_pinned_sftp_host_key(
 /// the other one cannot drift apart. Aliased where the local spelling differed,
 /// which keeps this commit to the declarations themselves.
 use host_core::sync_target::{
-    PLUGIN_ID_DROPBOX, PLUGIN_ID_FTP, PLUGIN_ID_GOOGLEDRIVE, PLUGIN_ID_LOCAL, PLUGIN_ID_SFTP,
-    PLUGIN_ID_WEBDAV, PREF_ADAPTER_KIND, PREF_DROPBOX_CLIENT_ID, PREF_DROPBOX_CLIENT_SECRET,
-    PREF_DROPBOX_PATH, PREF_FTP_HOST, PREF_FTP_MODE, PREF_FTP_PATH, PREF_FTP_PORT, PREF_FTP_USER,
-    PREF_GOOGLEDRIVE_CLIENT_ID, PREF_GOOGLEDRIVE_CLIENT_SECRET, PREF_GOOGLEDRIVE_FOLDER_NAME,
-    PREF_LOCAL_PATH, PREF_SFTP_AUTH_METHOD, PREF_SFTP_HOST, PREF_SFTP_KEY_PATH, PREF_SFTP_PATH,
-    PREF_SFTP_PORT, PREF_SFTP_USER, PREF_WEBDAV_URL, PREF_WEBDAV_USER,
-    SECRET_ACCOUNT_DROPBOX as DROPBOX_SECRET_ACCOUNT, SECRET_ACCOUNT_E2E as E2E_SECRET_ACCOUNT,
-    SECRET_ACCOUNT_FTP as FTP_SECRET_ACCOUNT,
+    is_unconfigured, PLUGIN_ID_DROPBOX, PLUGIN_ID_FTP, PLUGIN_ID_GOOGLEDRIVE, PLUGIN_ID_LOCAL,
+    PLUGIN_ID_SFTP, PLUGIN_ID_WEBDAV, PREF_ADAPTER_KIND, PREF_DROPBOX_CLIENT_ID,
+    PREF_DROPBOX_CLIENT_SECRET, PREF_DROPBOX_PATH, PREF_FTP_HOST, PREF_FTP_MODE, PREF_FTP_PATH,
+    PREF_FTP_PORT, PREF_FTP_USER, PREF_GOOGLEDRIVE_CLIENT_ID, PREF_GOOGLEDRIVE_CLIENT_SECRET,
+    PREF_GOOGLEDRIVE_FOLDER_NAME, PREF_LOCAL_PATH, PREF_SFTP_AUTH_METHOD, PREF_SFTP_HOST,
+    PREF_SFTP_KEY_PATH, PREF_SFTP_PATH, PREF_SFTP_PORT, PREF_SFTP_USER, PREF_WEBDAV_URL,
+    PREF_WEBDAV_USER, SECRET_ACCOUNT_DROPBOX as DROPBOX_SECRET_ACCOUNT,
+    SECRET_ACCOUNT_E2E as E2E_SECRET_ACCOUNT, SECRET_ACCOUNT_FTP as FTP_SECRET_ACCOUNT,
     SECRET_ACCOUNT_GOOGLEDRIVE as GOOGLEDRIVE_SECRET_ACCOUNT,
     SECRET_ACCOUNT_SFTP as SFTP_SECRET_ACCOUNT, SECRET_ACCOUNT_SFTP_KEY as SFTP_KEY_SECRET_ACCOUNT,
     SECRET_ACCOUNT_WEBDAV as WEBDAV_SECRET_ACCOUNT,

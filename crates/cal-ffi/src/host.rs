@@ -101,9 +101,9 @@ struct SyncAdapterSummary {
 /// the other one cannot drift apart. Aliased where the local spelling differed,
 /// which keeps this commit to the declarations themselves.
 use host_core::sync_target::{
-    PLUGIN_ID_DROPBOX, PLUGIN_ID_FTP, PLUGIN_ID_GOOGLEDRIVE, PLUGIN_ID_SFTP, PLUGIN_ID_WEBDAV,
-    PREF_ADAPTER_KIND, PREF_DROPBOX_CLIENT_ID, PREF_DROPBOX_CLIENT_SECRET, PREF_DROPBOX_PATH,
-    PREF_FTP_HOST, PREF_FTP_MODE, PREF_FTP_PATH, PREF_FTP_PORT, PREF_FTP_USER,
+    is_unconfigured, PLUGIN_ID_DROPBOX, PLUGIN_ID_FTP, PLUGIN_ID_GOOGLEDRIVE, PLUGIN_ID_SFTP,
+    PLUGIN_ID_WEBDAV, PREF_ADAPTER_KIND, PREF_DROPBOX_CLIENT_ID, PREF_DROPBOX_CLIENT_SECRET,
+    PREF_DROPBOX_PATH, PREF_FTP_HOST, PREF_FTP_MODE, PREF_FTP_PATH, PREF_FTP_PORT, PREF_FTP_USER,
     PREF_GOOGLEDRIVE_CLIENT_ID, PREF_GOOGLEDRIVE_CLIENT_SECRET, PREF_GOOGLEDRIVE_FOLDER_NAME,
     PREF_LOCAL_PATH, PREF_SFTP_AUTH_METHOD, PREF_SFTP_HOST, PREF_SFTP_KEY_PATH, PREF_SFTP_PATH,
     PREF_SFTP_PORT, PREF_SFTP_USER, PREF_WEBDAV_URL, PREF_WEBDAV_USER,
@@ -1836,7 +1836,11 @@ fn restore_adapter_from_prefs(
     plugin_manager: &PluginManager,
     secret_store: &dyn SecretStore,
 ) -> Option<Arc<dyn SyncAdapter>> {
-    let kind = prefs.get(PREF_ADAPTER_KIND).ok().flatten()?;
+    let kind = prefs
+        .get(PREF_ADAPTER_KIND)
+        .ok()
+        .flatten()
+        .filter(|stored| !is_unconfigured(Some(stored)))?;
     match kind.as_str() {
         "local" => {
             let path = prefs.get(PREF_LOCAL_PATH).ok().flatten()?;
@@ -5137,7 +5141,12 @@ impl Host {
         self.orchestrator.deconfigure();
         let shared = self.db.shared();
         let prefs = UserPrefsRepo::new(&shared);
-        prefs.set(PREF_ADAPTER_KIND, "none").map_err(storage_err)?;
+        // Delete rather than write "none". The sentinel was this host's own
+        // invention and only one reader on either platform ever tested for it,
+        // so a disconnected phone kept reporting its old target in the sync
+        // view. Readers stay tolerant of it — it is on real devices — but
+        // nothing writes it any more.
+        prefs.delete(PREF_ADAPTER_KIND).map_err(storage_err)?;
         Ok(())
     }
 
@@ -5148,7 +5157,11 @@ impl Host {
     pub fn get_sync_adapter_summary_json(&self) -> Result<String, StoreError> {
         let shared = self.db.shared();
         let prefs = UserPrefsRepo::new(&shared);
-        let Some(kind) = prefs.get(PREF_ADAPTER_KIND).map_err(storage_err)? else {
+        let kind = prefs
+            .get(PREF_ADAPTER_KIND)
+            .map_err(storage_err)?
+            .filter(|stored| !is_unconfigured(Some(stored)));
+        let Some(kind) = kind else {
             return to_json(&Option::<SyncAdapterSummary>::None);
         };
         let detail = match kind.as_str() {
