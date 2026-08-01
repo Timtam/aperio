@@ -1212,6 +1212,20 @@ impl PluginManager {
                         .account
                         .as_ref()
                         .is_some_and(|a| a.oauth.is_some()),
+                    // Decided here rather than in two frontends, because it is
+                    // read off the capability list and the frontends must not
+                    // grow one. `holds_data` is deliberately "anything but
+                    // sync" rather than `has_data_family()`: a meeting provider
+                    // has no calendars and still needs an account.
+                    holds_data: p
+                        .manifest
+                        .capabilities
+                        .iter()
+                        .any(|c| *c != crate::capability::Capability::Sync),
+                    can_sync: p
+                        .manifest
+                        .capabilities
+                        .contains(&crate::capability::Capability::Sync),
                 })
             })
             .collect();

@@ -184,6 +184,10 @@ export interface AdapterKindInfo {
   name: string;
   plugin_id: string;
   owns_containers: boolean;
+  /** See the desktop twin. `holds_data` answers the Add-account picker's
+   *  question, `can_sync` the sync settings'. An adapter can answer both. */
+  holds_data: boolean;
+  can_sync: boolean;
   declares_account_schema: boolean;
   /** Whether connecting it means a provider sign-in rather than a typed
    *  credential. Lets a list of accounts decide how to offer a repair

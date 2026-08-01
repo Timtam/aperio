@@ -644,6 +644,13 @@ export interface AdapterKindInfo {
   plugin_id: string;
   /** Whether accounts of this adapter own calendars and task lists. */
   owns_containers: boolean;
+  /** Whether an account of this adapter is worth having on its own — it holds
+   *  calendars, task lists, contacts or meetings. False for an adapter whose
+   *  only capability is `sync`. The Add-account picker's question. */
+  holds_data: boolean;
+  /** Whether this adapter can be chosen as the sync target. The sync settings'
+   *  question. Not exclusive with the one above. */
+  can_sync: boolean;
   /** Whether it connects through the generic schema-driven flow. False for the
    *  adapters still on the older per-kind path. */
   declares_account_schema: boolean;

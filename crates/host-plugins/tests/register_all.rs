@@ -182,3 +182,39 @@ fn register_all_static_is_idempotent_safe_to_inspect() {
     assert_eq!(a.len(), b.len());
     assert_eq!(a.len(), host_plugins::BUNDLED_PLUGIN_COUNT);
 }
+
+/// Which picker an adapter belongs in is read off its capability list, not off
+/// a list of names in a frontend.
+///
+/// The two questions are different and an adapter may answer yes to both: a
+/// provider offering a calendar AND file storage is one account that also
+/// happens to be somewhere to sync. The frontends must never grow a table of
+/// which is which, so this checks the answers at the source, against the real
+/// bundled manifests.
+#[test]
+fn every_bundled_adapter_answers_both_picker_questions() {
+    let manager = PluginManager::new(env!("CARGO_PKG_VERSION"));
+    host_plugins::register_all_static(&manager).expect("all bundled plugins register");
+
+    let kinds = manager.adapter_kinds();
+    assert!(!kinds.is_empty(), "no adapter kinds at all");
+
+    for info in &kinds {
+        assert!(
+            info.holds_data || info.can_sync,
+            "{} answers neither question, so it appears in no picker and              cannot be reached at all",
+            info.kind,
+        );
+    }
+
+    // Every adapter that is currently bundled offers data. When a sync adapter
+    // is published this stops being true, and the assertion below it is the one
+    // that still has to hold.
+    for info in &kinds {
+        assert!(
+            info.holds_data,
+            "{} is sync-only and now published — check that the sync settings              offer it, since the Add-account picker deliberately will not",
+            info.kind,
+        );
+    }
+}

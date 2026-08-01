@@ -290,6 +290,23 @@ pub struct AdapterKindInfo {
     /// go back through the browser?". Asking the manifest is what keeps that
     /// decision from being a list of provider names in the UI.
     pub declares_oauth: bool,
+
+    /// Whether an account of this adapter is worth having on its own — it
+    /// holds calendars, task lists, contacts, or meetings.
+    ///
+    /// The question the Add-account picker asks. An adapter whose only
+    /// capability is `sync` answers `false`: it is a place to put the dataset,
+    /// not a source of anything, and offering it here would let a user create
+    /// an account that shows nothing and does nothing.
+    pub holds_data: bool,
+
+    /// Whether this adapter can be chosen as the sync target.
+    ///
+    /// The question the sync settings ask. The two are not exclusive — a
+    /// provider offering both a calendar and file storage answers `true` to
+    /// both and is ONE account either way, which is the point of the whole
+    /// exercise.
+    pub can_sync: bool,
 }
 
 /// Parsed `plugin.json`. All fields are owned strings so the

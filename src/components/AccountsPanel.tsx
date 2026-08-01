@@ -89,6 +89,7 @@ const HOST_INTERNAL_KINDS: ReadonlySet<AdapterKind> = new Set([
 
 
 
+
 export function AccountsPanel() {
   const { t, i18n } = useTranslation();
   const announce = useAnnouncer();
@@ -201,7 +202,16 @@ export function AccountsPanel() {
     listAdapterKinds()
       .then((kinds) => {
         if (cancelled) return;
-        const offered = kinds.filter((k) => !HOST_INTERNAL_KINDS.has(k.kind));
+        // `holds_data` is the plugin's own answer, read off its capability
+        // list by the host: true for anything offering calendars, task lists,
+        // contacts or meetings, false for an adapter whose only capability is
+        // `sync`. A sync target is a place to put the dataset, not a source of
+        // anything — offering one here would let someone create an account that
+        // shows nothing and does nothing. It belongs in the sync settings, and
+        // an adapter that is both appears in both while staying ONE account.
+        const offered = kinds.filter(
+          (k) => !HOST_INTERNAL_KINDS.has(k.kind) && k.holds_data,
+        );
         setAvailableKinds(offered);
         // Preselect the first one, but never overwrite a choice the user has
         // already made — this effect re-runs whenever a plugin is toggled.
