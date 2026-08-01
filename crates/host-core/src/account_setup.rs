@@ -593,6 +593,8 @@ mod tests {
             required,
             default: None,
             secret_slot: slot,
+            options: Vec::new(),
+            device_local: false,
         }
     }
 

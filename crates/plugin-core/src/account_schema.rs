@@ -82,6 +82,44 @@ pub enum AccountFieldKind {
     Secret,
     /// A checkbox. Its value is a JSON bool, and it is never a secret.
     Bool,
+
+    /// One of a fixed set, chosen from [`AccountField::options`].
+    ///
+    /// Declared rather than free text because the adapter knows the set and the
+    /// host does not: an FTPS transport mode or an SSH authentication method is
+    /// a closed list, and a typo in a text box reaches the adapter as a value
+    /// it may or may not reject. Several do not — they fall back to a default
+    /// and connect differently than the user asked, silently.
+    Choice,
+
+    /// A directory on this machine.
+    ///
+    /// Rendered with the platform's folder picker where there is one, and as a
+    /// plain path field where there is not. Marked `device_local` by every
+    /// adapter that uses it, for the reason on that flag.
+    Directory,
+
+    /// A file on this machine — an SSH private key, a certificate.
+    ///
+    /// Same rendering rule and the same reason for being device-local as
+    /// [`Self::Directory`].
+    File,
+}
+
+/// One entry of a [`AccountFieldKind::Choice`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountFieldOption {
+    /// The value stored and handed to the adapter. Never shown.
+    pub value: String,
+
+    /// What the user reads. Used verbatim when the app has no translation,
+    /// which is the normal case for a third-party plugin.
+    pub label: String,
+
+    /// Translation key, taking precedence over `label` — the same arrangement
+    /// the field labels use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label_key: Option<String>,
 }
 
 /// A field's starting value.
@@ -98,7 +136,7 @@ pub enum AccountFieldDefault {
 }
 
 /// One thing the user is asked for, or one setting they can turn on.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountField {
     /// Identifier, and the key this value appears under in the plugin's init
     /// config. A non-secret field is persisted in `config_json` under the same
@@ -139,12 +177,49 @@ pub struct AccountField {
     /// non-secret and belongs in `config_json`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret_slot: Option<AccountSecretSlot>,
+
+    /// The choices, for [`AccountFieldKind::Choice`]. Empty for every other
+    /// kind, and rejected on one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<AccountFieldOption>,
+
+    /// Whether this value is meaningful only on the machine that entered it.
+    ///
+    /// An account row travels between a user's devices. Most of what it carries
+    /// travels well — a server address, a user name, a client id, the name of a
+    /// folder in someone's Drive. Some values do not: the path to an SSH
+    /// private key is `/home/anna/.ssh/id_ed25519` on one machine and
+    /// `C:\Users\Anna\.ssh\id_ed25519` on another, and a folder on a local
+    /// disk means nothing anywhere else.
+    ///
+    /// Marked fields are kept out of the synced part of the account and stored
+    /// per device instead. Everything else about the account still travels, so
+    /// adding a calendar capability to a plugin that started as a sync backend
+    /// does not change where anything lives — which is exactly what a rule
+    /// based on what the account CAN do would have done.
+    ///
+    /// Only the adapter can answer this. The host cannot tell a filesystem path
+    /// from a URL by looking, and guessing wrong in either direction is bad:
+    /// too eager and a user retypes settings on every device, too shy and one
+    /// machine's paths overwrite another's.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub device_local: bool,
 }
 
 impl AccountField {
     /// Whether this value goes to the keychain rather than to `config_json`.
     pub fn is_secret(&self) -> bool {
         self.secret_slot.is_some()
+    }
+
+    /// Whether this value stays on the device that entered it.
+    ///
+    /// Secrets are already device-local by a different route — they live in the
+    /// platform keychain, not in the account row — so they answer `true` here
+    /// too, and a caller splitting an account into "travels" and "stays" gets
+    /// the right answer for both without a second rule.
+    pub fn stays_on_this_device(&self) -> bool {
+        self.device_local || self.is_secret()
     }
 }
 
@@ -390,6 +465,61 @@ impl AccountSchema {
                     field.key
                 )));
             }
+            // A choice must offer something to choose, and the options must be
+            // distinguishable. An empty list renders as a control with nothing
+            // in it — the user cannot proceed and nothing says why.
+            if field.kind == AccountFieldKind::Choice {
+                if field.options.is_empty() {
+                    return Err(PluginError::Manifest(format!(
+                        "account field `{}` is a choice with no options",
+                        field.key
+                    )));
+                }
+                for option in &field.options {
+                    if option.value.trim().is_empty() {
+                        return Err(PluginError::Manifest(format!(
+                            "account field `{}` has an option with an empty value",
+                            field.key
+                        )));
+                    }
+                    if option.label.trim().is_empty() && option.label_key.is_none() {
+                        return Err(PluginError::Manifest(format!(
+                            "account field `{}`: option `{}` has nothing to display",
+                            field.key, option.value
+                        )));
+                    }
+                    if field
+                        .options
+                        .iter()
+                        .filter(|o| o.value == option.value)
+                        .count()
+                        > 1
+                    {
+                        return Err(PluginError::Manifest(format!(
+                            "account field `{}` offers `{}` twice",
+                            field.key, option.value
+                        )));
+                    }
+                }
+                // A default outside the list would leave the control showing
+                // nothing selected while the value is non-empty.
+                if let Some(AccountFieldDefault::Text(value)) = &field.default {
+                    if !field.options.iter().any(|o| &o.value == value) {
+                        return Err(PluginError::Manifest(format!(
+                            "account field `{}` defaults to `{value}`, which it does                              not offer",
+                            field.key
+                        )));
+                    }
+                }
+            } else if !field.options.is_empty() {
+                // Options on anything else are a mistake that would be ignored
+                // rather than reported — the renderers only read them for a
+                // choice.
+                return Err(PluginError::Manifest(format!(
+                    "account field `{}` declares options but is not a choice",
+                    field.key
+                )));
+            }
             if self.fields.iter().filter(|f| f.key == field.key).count() > 1 {
                 return Err(PluginError::Manifest(format!(
                     "account field `{}` is declared twice",
@@ -485,6 +615,113 @@ impl AccountSchema {
 
 #[cfg(test)]
 mod tests {
+    fn choice(key: &str, options: Vec<AccountFieldOption>) -> AccountField {
+        AccountField {
+            key: key.to_string(),
+            kind: AccountFieldKind::Choice,
+            label: key.to_string(),
+            options,
+            ..Default::default()
+        }
+    }
+
+    fn option(value: &str) -> AccountFieldOption {
+        AccountFieldOption {
+            value: value.to_string(),
+            label: value.to_string(),
+            label_key: None,
+        }
+    }
+
+    fn schema_of(fields: Vec<AccountField>) -> AccountSchema {
+        AccountSchema {
+            fields,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_choice_must_offer_something() {
+        let err = schema_of(vec![choice("mode", vec![])])
+            .validate()
+            .unwrap_err();
+        assert!(err.to_string().contains("no options"), "{err}");
+    }
+
+    #[test]
+    fn a_choice_cannot_offer_the_same_value_twice() {
+        let err = schema_of(vec![choice(
+            "mode",
+            vec![option("explicit"), option("explicit")],
+        )])
+        .validate()
+        .unwrap_err();
+        assert!(err.to_string().contains("twice"), "{err}");
+    }
+
+    /// A default outside the list leaves the control showing nothing selected
+    /// while the stored value is non-empty — the user sees no answer and the
+    /// adapter gets one.
+    #[test]
+    fn a_choice_cannot_default_to_something_it_does_not_offer() {
+        let mut field = choice("mode", vec![option("explicit"), option("implicit")]);
+        field.default = Some(AccountFieldDefault::Text("plain".to_string()));
+        let err = schema_of(vec![field]).validate().unwrap_err();
+        assert!(err.to_string().contains("which it does"), "{err}");
+    }
+
+    #[test]
+    fn a_valid_choice_passes() {
+        let mut field = choice("mode", vec![option("explicit"), option("implicit")]);
+        field.default = Some(AccountFieldDefault::Text("explicit".to_string()));
+        schema_of(vec![field]).validate().unwrap();
+    }
+
+    /// Options on a non-choice would simply never be rendered. Reported rather
+    /// than ignored, because the author clearly meant something by them.
+    #[test]
+    fn options_on_anything_but_a_choice_are_refused() {
+        let mut field = choice("host", vec![option("a")]);
+        field.kind = AccountFieldKind::Text;
+        let err = schema_of(vec![field]).validate().unwrap_err();
+        assert!(err.to_string().contains("not a choice"), "{err}");
+    }
+
+    /// Secrets never reach the account row at all, so a caller splitting an
+    /// account into "travels" and "stays" must see them on the staying side
+    /// without needing a second rule for them.
+    #[test]
+    fn a_secret_stays_on_the_device_without_being_marked() {
+        let field = AccountField {
+            key: "password".into(),
+            kind: AccountFieldKind::Secret,
+            label: "Password".into(),
+            secret_slot: Some(AccountSecretSlot::Password),
+            ..Default::default()
+        };
+        assert!(!field.device_local);
+        assert!(field.stays_on_this_device());
+    }
+
+    #[test]
+    fn a_marked_path_stays_and_an_unmarked_url_travels() {
+        let key_path = AccountField {
+            key: "key_path".into(),
+            kind: AccountFieldKind::File,
+            label: "Key file".into(),
+            device_local: true,
+            ..Default::default()
+        };
+        let url = AccountField {
+            key: "url".into(),
+            kind: AccountFieldKind::Url,
+            label: "URL".into(),
+            ..Default::default()
+        };
+        assert!(key_path.stays_on_this_device());
+        assert!(!url.stays_on_this_device());
+    }
+
     use super::*;
 
     fn field(key: &str, kind: AccountFieldKind, slot: Option<AccountSecretSlot>) -> AccountField {
@@ -498,6 +735,8 @@ mod tests {
             required: false,
             default: None,
             secret_slot: slot,
+            options: Vec::new(),
+            device_local: false,
         }
     }
 

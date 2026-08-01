@@ -905,10 +905,17 @@ pub struct AccountFormSpec {
     pub owns_containers: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
+pub struct AccountFormOption {
+    pub value: String,
+    /// Already in the caller's language, like every other label here.
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct AccountFormField {
     pub key: String,
-    /// `text` | `url` | `secret` | `bool`.
+    /// `text` | `url` | `secret` | `bool` | `choice` | `directory` | `file`.
     pub kind: String,
     /// Already in the caller's language. The adapter names the field and its
     /// own catalogue supplies the words; the frontend renders what it is given
@@ -919,6 +926,11 @@ pub struct AccountFormField {
     pub required: bool,
     pub default_bool: Option<bool>,
     pub default_text: Option<String>,
+    /// The choices, for `kind == "choice"`. Empty otherwise.
+    pub options: Vec<AccountFormOption>,
+    /// Whether this value belongs only to the device that entered it — a
+    /// filesystem path, typically. See `AccountField::device_local`.
+    pub device_local: bool,
 }
 
 /// One button the connect form should offer, everything already in the
@@ -985,8 +997,25 @@ pub fn account_form_spec(
                     AccountFieldKind::Url => "url",
                     AccountFieldKind::Secret => "secret",
                     AccountFieldKind::Bool => "bool",
+                    AccountFieldKind::Choice => "choice",
+                    // A directory and a file differ only in which picker the
+                    // frontend opens; both are a path in a text box where there
+                    // is no picker.
+                    AccountFieldKind::Directory => "directory",
+                    AccountFieldKind::File => "file",
                 }
                 .to_string(),
+                options: f
+                    .options
+                    .iter()
+                    .map(|o| AccountFormOption {
+                        value: o.value.clone(),
+                        label: label_of(o.label_key.as_deref(), &o.label),
+                    })
+                    .collect(),
+                // Passed through so a form can say so. Nothing renders on it
+                // yet; the split it describes lands with the account rows.
+                device_local: f.device_local,
                 label: label_of(f.label_key.as_deref(), &f.label),
                 hint: f
                     .hint
