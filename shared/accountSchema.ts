@@ -26,8 +26,21 @@ export interface AccountFormField {
    *
    * `directory` and `file` are paths on THIS machine. They differ only in which
    * picker to open, and where there is none they are a plain text field.
+   *
+   * `number` still travels as a string — every control here produces text —
+   * and the host converts it before the adapter sees it. What the kind buys is
+   * the right control: a numeric keyboard on the phone, and a spinner rather
+   * than a text box on the desktop.
    */
-  kind: 'text' | 'url' | 'secret' | 'bool' | 'choice' | 'directory' | 'file';
+  kind:
+    | 'text'
+    | 'url'
+    | 'secret'
+    | 'bool'
+    | 'choice'
+    | 'directory'
+    | 'file'
+    | 'number';
   /**
    * Already in the reader's language.
    *

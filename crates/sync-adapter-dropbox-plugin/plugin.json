@@ -8,5 +8,57 @@
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled sync adapter for Dropbox (API v2 + OAuth2 PKCE).",
-  "signed": false
+  "signed": false,
+  "account": {
+    "fields": [
+      {
+        "key": "client_id",
+        "kind": "text",
+        "label": "App key (client ID)",
+        "label_key": "account.client_id.label",
+        "hint_key": "account.client_id.hint",
+        "required": true
+      },
+      {
+        "key": "client_secret",
+        "kind": "secret",
+        "secret_slot": "oauth_client_secret",
+        "label": "App secret",
+        "label_key": "account.client_secret.label",
+        "hint_key": "account.client_secret.hint",
+        "required": true
+      },
+      {
+        "key": "base_path",
+        "kind": "text",
+        "label": "Folder path",
+        "label_key": "account.base_path.label",
+        "hint_key": "account.base_path.hint",
+        "required": false
+      }
+    ],
+    "oauth": {
+      "client_id_field": "client_id",
+      "client_secret_field": "client_secret",
+      "refresh_token_field": "refresh_token"
+    }
+  },
+  "strings": {
+    "en": {
+      "account.base_path.hint": "Folder inside your Dropbox that holds the sync data (log/, snapshot.json, …). Blank means the app's own root folder. Example: /aperio",
+      "account.base_path.label": "Folder path",
+      "account.client_id.hint": "From your app on dropbox.com/developers/apps, on its settings page under \"App key\". Create the app with the \"App folder\" or \"Full Dropbox\" access type. It identifies the app, not you, and is not a secret.",
+      "account.client_id.label": "App key (client ID)",
+      "account.client_secret.hint": "Right under the app key, as \"App secret\". It is needed alongside the app key — Dropbox issues no token without it. Kept in the system keychain, never in the account row.",
+      "account.client_secret.label": "App secret"
+    },
+    "de": {
+      "account.base_path.hint": "Ordner in deiner Dropbox, der die Sync-Daten enthält (log/, snapshot.json, …). Leer bedeutet den Wurzelordner der App. Beispiel: /aperio",
+      "account.base_path.label": "Ordner-Pfad",
+      "account.client_id.hint": "Aus deiner App auf dropbox.com/developers/apps, auf deren Einstellungsseite unter „App key“. Lege die App mit dem Zugriffstyp „App folder“ oder „Full Dropbox“ an. Identifiziert die App, nicht dich, und ist kein Geheimnis.",
+      "account.client_id.label": "App key (Client-ID)",
+      "account.client_secret.hint": "Direkt unter dem App key, als „App secret“. Es wird zusammen mit dem App key benötigt — ohne es gibt Dropbox kein Token heraus. Wird im Schlüsselbund des Systems abgelegt, nie in der Kontozeile.",
+      "account.client_secret.label": "App secret"
+    }
+  }
 }

@@ -153,9 +153,38 @@ pub enum SecretSlot {
     /// the account, and every device resolves its own — so syncing it would put
     /// a credential on the wire for no benefit at all.
     OauthClientSecret,
+
+    /// Passphrase for a private key file — SFTP key auth.
+    ///
+    /// Separate from [`Self::Password`] so an adapter offering both password
+    /// and key authentication can hold both without one clobbering the other.
+    ///
+    /// Deliberately NOT in [`Self::syncable_from_wire`]. It unlocks a file that
+    /// exists on one machine at one path; sending it to a device that has no
+    /// such file puts a credential on the wire in exchange for nothing.
+    KeyPassphrase,
 }
 
 impl SecretSlot {
+    /// Every slot, so nothing has to hand-write the list again.
+    ///
+    /// Two places used to: the dev exporter and the desktop's `delete_all`,
+    /// which is what removes an account's credentials from the keychain when
+    /// the account is deleted. A slot missing from that second list is a
+    /// credential left behind on the machine after the user asked for it to be
+    /// gone — and adding a variant is exactly when someone forgets. The test
+    /// beside this one matches exhaustively, so a new variant breaks the build
+    /// rather than the promise.
+    pub const ALL: &'static [SecretSlot] = &[
+        SecretSlot::AccessToken,
+        SecretSlot::RefreshToken,
+        SecretSlot::Password,
+        SecretSlot::ApiToken,
+        SecretSlot::SyncEncryptionKey,
+        SecretSlot::OauthClientSecret,
+        SecretSlot::KeyPassphrase,
+    ];
+
     /// Public wire name — used as the keychain service suffix and as the slot
     /// name in `credential.set` events.
     pub fn wire_name(self) -> &'static str {
@@ -166,6 +195,7 @@ impl SecretSlot {
             SecretSlot::ApiToken => "api_token",
             SecretSlot::SyncEncryptionKey => "sync_encryption_key",
             SecretSlot::OauthClientSecret => "oauth_client_secret",
+            SecretSlot::KeyPassphrase => "key_passphrase",
         }
     }
 
@@ -184,6 +214,46 @@ impl SecretSlot {
             "api_token" => Some(SecretSlot::ApiToken),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod secret_slot_tests {
+    use super::SecretSlot;
+
+    /// The match is the point. Adding a variant fails to compile here, which is
+    /// the only reliable way to make someone remember `ALL` — and `ALL` is what
+    /// deletes an account's credentials from the keychain.
+    #[test]
+    fn all_holds_every_slot() {
+        for slot in SecretSlot::ALL.iter().copied() {
+            match slot {
+                SecretSlot::AccessToken
+                | SecretSlot::RefreshToken
+                | SecretSlot::Password
+                | SecretSlot::ApiToken
+                | SecretSlot::SyncEncryptionKey
+                | SecretSlot::OauthClientSecret
+                | SecretSlot::KeyPassphrase => {}
+            }
+        }
+        assert_eq!(
+            SecretSlot::ALL.len(),
+            7,
+            "a variant was added but not listed"
+        );
+        let mut names: Vec<&str> = SecretSlot::ALL.iter().map(|s| s.wire_name()).collect();
+        names.sort_unstable();
+        let count = names.len();
+        names.dedup();
+        assert_eq!(names.len(), count, "two slots share a keychain name");
+    }
+
+    /// A key passphrase unlocks a file that exists on one machine at one path.
+    /// Sending it to a device with no such file is exposure for nothing.
+    #[test]
+    fn a_key_passphrase_never_arrives_from_another_device() {
+        assert!(SecretSlot::syncable_from_wire("key_passphrase").is_none());
     }
 }
 

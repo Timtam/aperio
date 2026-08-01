@@ -45,14 +45,7 @@ use sync_engine::SecretSlot;
 /// Every slot the app can write. Probed for each account id, because which
 /// slots an account uses is the adapter's business and an account that changed
 /// hands (a password login later moved to OAuth) can hold more than one.
-const ALL_SLOTS: &[SecretSlot] = &[
-    SecretSlot::Password,
-    SecretSlot::ApiToken,
-    SecretSlot::AccessToken,
-    SecretSlot::RefreshToken,
-    SecretSlot::OauthClientSecret,
-    SecretSlot::SyncEncryptionKey,
-];
+const ALL_SLOTS: &[SecretSlot] = SecretSlot::ALL;
 
 /// The keychain naming scheme, mirrored from `src-tauri/src/secrets.rs`. Keep
 /// the two in step: service is `Aperio:<slot wire name>`, user is the account

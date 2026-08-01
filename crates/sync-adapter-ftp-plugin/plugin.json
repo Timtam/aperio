@@ -8,5 +8,113 @@
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled sync adapter for FTP servers — explicit FTPS (AUTH TLS), implicit FTPS, or plain unencrypted FTP for legacy LAN setups.",
-  "signed": false
+  "signed": false,
+  "account": {
+    "fields": [
+      {
+        "key": "host",
+        "kind": "text",
+        "label": "Server",
+        "label_key": "account.host.label",
+        "hint_key": "account.host.hint",
+        "required": true
+      },
+      {
+        "key": "port",
+        "kind": "number",
+        "label": "Port",
+        "label_key": "account.port.label",
+        "hint_key": "account.port.hint",
+        "required": false,
+        "default": "21"
+      },
+      {
+        "key": "user",
+        "kind": "text",
+        "label": "Username",
+        "label_key": "account.user.label",
+        "hint_key": "account.user.hint",
+        "required": true
+      },
+      {
+        "key": "password",
+        "kind": "secret",
+        "secret_slot": "password",
+        "label": "Password",
+        "label_key": "account.password.label",
+        "hint_key": "account.password.hint",
+        "required": true
+      },
+      {
+        "key": "path",
+        "kind": "text",
+        "label": "Directory on the server",
+        "label_key": "account.path.label",
+        "hint_key": "account.path.hint",
+        "required": false
+      },
+      {
+        "key": "mode",
+        "kind": "choice",
+        "label": "TLS mode",
+        "label_key": "account.mode.label",
+        "hint_key": "account.mode.hint",
+        "required": false,
+        "default": "explicit",
+        "options": [
+          {
+            "value": "explicit",
+            "label": "Explicit FTPS (AUTH TLS, port 21)",
+            "label_key": "account.mode.option.explicit"
+          },
+          {
+            "value": "implicit",
+            "label": "Implicit FTPS (TLS first, port 990)",
+            "label_key": "account.mode.option.implicit"
+          },
+          {
+            "value": "plain",
+            "label": "Plain FTP (no encryption, port 21)",
+            "label_key": "account.mode.option.plain"
+          }
+        ]
+      }
+    ]
+  },
+  "strings": {
+    "en": {
+      "account.host.hint": "Host name or IP address of the server, without a scheme and without a path — ftp.example.com or 192.168.1.10.",
+      "account.host.label": "Server",
+      "account.mode.hint": "Explicit connects in the clear and upgrades to TLS with AUTH TLS; it is what almost every current server expects. Implicit starts the TLS handshake straight away, on port 990 by convention. Plain uses no TLS at all: user name, password and every synced item cross the network readable — pick it only for an isolated LAN you control.",
+      "account.mode.label": "TLS mode",
+      "account.mode.option.explicit": "Explicit FTPS (AUTH TLS, port 21)",
+      "account.mode.option.implicit": "Implicit FTPS (TLS first, port 990)",
+      "account.mode.option.plain": "Plain FTP (no encryption, port 21)",
+      "account.password.hint": "The password for that login. Stored only in your operating system's credential store, never in the account database.",
+      "account.password.label": "Password",
+      "account.path.hint": "Remote directory that will hold log/, snapshot.json and the sound files, for example /aperio. Aperio creates it if it does not exist. Leave blank to use whatever directory the server puts you in after login.",
+      "account.path.label": "Directory on the server",
+      "account.port.hint": "21 for explicit FTPS and for plain FTP, 990 for implicit FTPS. Change it only if your server was set up on a different port.",
+      "account.port.label": "Port",
+      "account.user.hint": "The FTP login name as the server's administrator issued it — not an e-mail address unless the server uses one.",
+      "account.user.label": "Username"
+    },
+    "de": {
+      "account.host.hint": "Hostname oder IP-Adresse des Servers, ohne Schema und ohne Pfad — ftp.example.com oder 192.168.1.10.",
+      "account.host.label": "Server",
+      "account.mode.hint": "Explizites FTPS verbindet im Klartext und schaltet per AUTH TLS auf TLS um; das erwarten praktisch alle aktuellen Server. Implizites FTPS beginnt sofort mit dem TLS-Handshake, üblicherweise auf Port 990. Klartext-FTP nutzt gar kein TLS: Benutzername, Passwort und alle übertragenen Daten sind im Netz mitlesbar — nur für ein isoliertes LAN wählen, das du kontrollierst.",
+      "account.mode.label": "TLS-Modus",
+      "account.mode.option.explicit": "Explizites FTPS (AUTH TLS, Port 21)",
+      "account.mode.option.implicit": "Implizites FTPS (TLS sofort, Port 990)",
+      "account.mode.option.plain": "Klartext-FTP (ohne Verschlüsselung, Port 21)",
+      "account.password.hint": "Das Passwort zu diesem Anmeldenamen. Wird nur im Anmeldeinformations-Manager des Betriebssystems gespeichert, nie in der Kontodatenbank.",
+      "account.password.label": "Passwort",
+      "account.path.hint": "Remote-Verzeichnis für log/, snapshot.json und die Klangdateien, z.B. /aperio. Aperio legt es an, wenn es fehlt. Leer lassen, um das Verzeichnis zu verwenden, in dem der Server dich nach dem Login ablegt.",
+      "account.path.label": "Verzeichnis auf dem Server",
+      "account.port.hint": "21 für explizites FTPS und für Klartext-FTP, 990 für implizites FTPS. Nur ändern, wenn der Server auf einem anderen Port eingerichtet ist.",
+      "account.port.label": "Port",
+      "account.user.hint": "Der FTP-Anmeldename, wie ihn die Serververwaltung vergeben hat — keine E-Mail-Adresse, außer der Server verlangt eine.",
+      "account.user.label": "Benutzername"
+    }
+  }
 }

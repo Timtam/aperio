@@ -84,14 +84,12 @@ pub fn delete(account_id: &str, slot: SecretSlot) -> Result<(), SecretError> {
 /// the goal is "after this call, no Aperio secret exists for that
 /// account", regardless of starting state.
 pub fn delete_all(account_id: &str) -> Result<(), SecretError> {
-    let slots = [
-        SecretSlot::AccessToken,
-        SecretSlot::RefreshToken,
-        SecretSlot::Password,
-        SecretSlot::ApiToken,
-    ];
+    // Every slot, from the enum itself. The hand-written list this replaced had
+    // fallen two behind — an account's OAuth client secret and, later, an SSH
+    // key passphrase would have outlived the account that owned them, on a path
+    // whose whole promise is that they do not.
     let mut first_err: Option<SecretError> = None;
-    for slot in slots {
+    for slot in SecretSlot::ALL.iter().copied() {
         if let Err(err) = delete(account_id, slot) {
             warn!(?err, slot = ?slot, "failed to delete secret slot");
             if first_err.is_none() {

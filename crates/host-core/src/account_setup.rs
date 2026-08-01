@@ -75,6 +75,7 @@ pub fn host_slot(slot: AccountSecretSlot) -> SecretSlot {
         AccountSecretSlot::Password => SecretSlot::Password,
         AccountSecretSlot::ApiToken => SecretSlot::ApiToken,
         AccountSecretSlot::OauthClientSecret => SecretSlot::OauthClientSecret,
+        AccountSecretSlot::KeyPassphrase => SecretSlot::KeyPassphrase,
     }
 }
 
@@ -396,6 +397,44 @@ pub fn plan_new_account(
                 } else {
                     config.insert(field.key.clone(), Value::Bool(value));
                 }
+            }
+            AccountFieldKind::Number => {
+                // Both forms hand every value over as a string, so the text
+                // path is the normal one; a JSON number is accepted too, for a
+                // caller that already has one.
+                let text = match supplied {
+                    Some(Value::String(s)) => s.trim().to_string(),
+                    Some(Value::Number(n)) => n.to_string(),
+                    None | Some(Value::Null) => match &field.default {
+                        Some(AccountFieldDefault::Text(t)) => t.trim().to_string(),
+                        _ => String::new(),
+                    },
+                    Some(_) => {
+                        return Err(AccountSetupError::InvalidInput(format!(
+                            "`{}` must be a number",
+                            field.key
+                        )))
+                    }
+                };
+                if text.is_empty() {
+                    if field.required {
+                        return Err(AccountSetupError::InvalidInput(format!(
+                            "`{}` is required",
+                            field.key
+                        )));
+                    }
+                    continue;
+                }
+                // Rejected here rather than at the adapter, where the failure
+                // would name a deserialisation error instead of the field the
+                // user typed in.
+                let number: i64 = text.parse().map_err(|_| {
+                    AccountSetupError::InvalidInput(format!(
+                        "`{}` must be a whole number, not `{text}`",
+                        field.key
+                    ))
+                })?;
+                config.insert(field.key.clone(), Value::Number(number.into()));
             }
             _ => {
                 let text = match supplied {
@@ -870,6 +909,138 @@ mod tests {
             host_channel: false,
             ..Default::default()
         }
+    }
+
+    /// The trap that made this kind necessary: a plugin declaring `port: u16`
+    /// rejects `"22"` outright, and the failure is the whole struct.
+    #[test]
+    fn a_number_reaches_the_adapter_as_a_number() {
+        let schema = AccountSchema {
+            fields: vec![
+                field("host", AccountFieldKind::Text, None, true),
+                field("port", AccountFieldKind::Number, None, false),
+            ],
+            ..Default::default()
+        };
+        let plan = plan_new_account(
+            &schema,
+            &values(&[
+                ("host", Value::String("files.example.com".into())),
+                // As it leaves both forms: text.
+                ("port", Value::String("2222".into())),
+            ]),
+            None,
+        )
+        .expect("plan");
+        let cfg: Value = serde_json::from_str(&plan.config_json).unwrap();
+        assert_eq!(cfg["port"], serde_json::json!(2222));
+        assert!(
+            !cfg["port"].is_string(),
+            "a string here fails the adapter's own deserialisation: {}",
+            plan.config_json
+        );
+    }
+
+    #[test]
+    fn a_number_falls_back_to_its_declared_default() {
+        let mut port = field("port", AccountFieldKind::Number, None, false);
+        port.default = Some(AccountFieldDefault::Text("22".into()));
+        let schema = AccountSchema {
+            fields: vec![port],
+            ..Default::default()
+        };
+        let plan = plan_new_account(&schema, &Map::new(), None).expect("plan");
+        let cfg: Value = serde_json::from_str(&plan.config_json).unwrap();
+        assert_eq!(cfg["port"], serde_json::json!(22));
+    }
+
+    /// Rejected here, where the message can name the field the user typed in.
+    /// At the adapter it would arrive as a deserialisation error about a struct.
+    #[test]
+    fn a_number_that_is_not_one_is_refused_by_name() {
+        let schema = AccountSchema {
+            fields: vec![field("port", AccountFieldKind::Number, None, false)],
+            ..Default::default()
+        };
+        let err = plan_new_account(
+            &schema,
+            &values(&[("port", Value::String("twenty-two".into()))]),
+            None,
+        )
+        // `.err()` rather than `expect_err`: the plan carries secrets and
+        // deliberately has no `Debug`.
+        .err()
+        .expect("must not plan");
+        let text = err.to_string();
+        assert!(text.contains("port"), "must name the field: {text}");
+        assert!(text.contains("twenty-two"), "must quote the value: {text}");
+    }
+
+    /// A blank optional number stays absent rather than becoming 0 — the
+    /// adapter's own `#[serde(default)]` is the right answer, and a zero port
+    /// is not.
+    #[test]
+    fn a_blank_optional_number_is_absent() {
+        let schema = AccountSchema {
+            fields: vec![field("port", AccountFieldKind::Number, None, false)],
+            ..Default::default()
+        };
+        let plan = plan_new_account(
+            &schema,
+            &values(&[("port", Value::String("  ".into()))]),
+            None,
+        )
+        .expect("plan");
+        let cfg: Value = serde_json::from_str(&plan.config_json).unwrap();
+        assert!(cfg.get("port").is_none(), "{}", plan.config_json);
+    }
+
+    /// The SFTP shape: a password and a key passphrase, held at once. Sharing
+    /// one slot would make the second write overwrite the first, and switching
+    /// auth method back would silently reuse the wrong credential.
+    #[test]
+    fn two_credentials_go_to_two_slots() {
+        let schema = AccountSchema {
+            fields: vec![
+                field(
+                    "password",
+                    AccountFieldKind::Secret,
+                    Some(AccountSecretSlot::Password),
+                    false,
+                ),
+                field(
+                    "key_passphrase",
+                    AccountFieldKind::Secret,
+                    Some(AccountSecretSlot::KeyPassphrase),
+                    false,
+                ),
+            ],
+            ..Default::default()
+        };
+        let plan = plan_new_account(
+            &schema,
+            &values(&[
+                ("password", Value::String("pw".into())),
+                ("key_passphrase", Value::String("kp".into())),
+            ]),
+            None,
+        )
+        .expect("plan");
+        assert_eq!(plan.secrets.len(), 2);
+        assert_eq!(
+            plan.secrets
+                .iter()
+                .find(|(s, _)| *s == SecretSlot::Password)
+                .map(|(_, v)| v.as_str()),
+            Some("pw"),
+        );
+        assert_eq!(
+            plan.secrets
+                .iter()
+                .find(|(s, _)| *s == SecretSlot::KeyPassphrase)
+                .map(|(_, v)| v.as_str()),
+            Some("kp"),
+        );
     }
 
     fn values(pairs: &[(&str, Value)]) -> Map<String, Value> {

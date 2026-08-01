@@ -121,8 +121,20 @@ export function AccountSchemaForm({
           <label className="form__field" key={field.key}>
             <span className="form__label">{label(field)}</span>
             <input
-              type={field.kind === 'secret' ? 'password' : 'text'}
-              inputMode={field.kind === 'url' ? 'url' : undefined}
+              type={
+                field.kind === 'secret'
+                  ? 'password'
+                  : field.kind === 'number'
+                    ? 'number'
+                    : 'text'
+              }
+              inputMode={
+                field.kind === 'url'
+                  ? 'url'
+                  : field.kind === 'number'
+                    ? 'numeric'
+                    : undefined
+              }
               value={value}
               onChange={(e) => onChange(field.key, e.target.value)}
               autoComplete="off"

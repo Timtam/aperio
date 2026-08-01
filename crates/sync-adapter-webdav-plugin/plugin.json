@@ -8,5 +8,52 @@
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled sync adapter for WebDAV servers — Nextcloud, ownCloud, Apache mod_dav, IIS WebDAV, …",
-  "signed": false
+  "signed": false,
+  "account": {
+    "fields": [
+      {
+        "key": "url",
+        "kind": "url",
+        "label": "Folder URL",
+        "label_key": "account.url.label",
+        "hint_key": "account.url.hint",
+        "required": true
+      },
+      {
+        "key": "user",
+        "kind": "text",
+        "label": "Username",
+        "label_key": "account.user.label",
+        "hint_key": "account.user.hint",
+        "required": false
+      },
+      {
+        "key": "password",
+        "kind": "secret",
+        "secret_slot": "password",
+        "label": "Password",
+        "label_key": "account.password.label",
+        "hint_key": "account.password.hint",
+        "required": false
+      }
+    ]
+  },
+  "strings": {
+    "en": {
+      "account.password.hint": "Optional, and only meaningful together with a username. Sent as HTTP Basic authentication, so use an https address. Prefer an app password where the provider offers one (Nextcloud: Settings, Security). Stored only in your operating system's credential store.",
+      "account.password.label": "Password",
+      "account.url.hint": "Full URL of the folder Aperio syncs into, for example https://cloud.example.com/remote.php/dav/files/anna/aperio/. That folder must already exist; Aperio creates only its own subfolders inside it.",
+      "account.url.label": "Folder URL",
+      "account.user.hint": "Optional: leave it blank for a server that serves this folder without authentication. Otherwise the account name of the WebDAV share, which is not always your e-mail address.",
+      "account.user.label": "Username"
+    },
+    "de": {
+      "account.password.hint": "Optional und nur zusammen mit einem Benutzernamen sinnvoll. Wird als HTTP-Basic-Authentifizierung gesendet, also eine https-Adresse verwenden. Wo der Anbieter App-Passwörter kennt, eines davon nehmen (Nextcloud: Einstellungen, Sicherheit). Das Passwort wird nur im Anmeldeinformations-Manager des Betriebssystems gespeichert.",
+      "account.password.label": "Passwort",
+      "account.url.hint": "Vollständige URL des Ordners, in den Aperio synchronisiert, etwa https://cloud.example.com/remote.php/dav/files/anna/aperio/. Dieser Ordner muss bereits existieren; Aperio legt darin nur seine eigenen Unterordner an.",
+      "account.url.label": "Ordner-URL",
+      "account.user.hint": "Optional: leer lassen, wenn der Server den Ordner ohne Anmeldung ausliefert. Sonst der Kontoname der WebDAV-Freigabe, der nicht immer die E-Mail-Adresse ist.",
+      "account.user.label": "Benutzername"
+    }
+  }
 }

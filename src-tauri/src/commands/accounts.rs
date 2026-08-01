@@ -1005,6 +1005,7 @@ pub fn account_form_spec(
                     AccountFieldKind::Secret => "secret",
                     AccountFieldKind::Bool => "bool",
                     AccountFieldKind::Choice => "choice",
+                    AccountFieldKind::Number => "number",
                     // A directory and a file differ only in which picker the
                     // frontend opens; both are a path in a text box where there
                     // is no picker.

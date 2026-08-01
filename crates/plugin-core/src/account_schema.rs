@@ -53,6 +53,16 @@ pub enum AccountSecretSlot {
     ApiToken,
     /// An OAuth *client* secret, as opposed to a user credential.
     OauthClientSecret,
+
+    /// The passphrase protecting a private key file.
+    ///
+    /// Distinct from [`Self::Password`] because an adapter may want both at
+    /// once: SFTP offers password auth and key auth, and a user who switches
+    /// between them must not lose the credential for the other. Secrets are
+    /// routed by slot alone, so two fields sharing one slot means the second
+    /// write overwrites the first and the value read back is inserted under
+    /// both field names — wrong in a way nothing reports.
+    KeyPassphrase,
 }
 
 impl AccountSecretSlot {
@@ -65,6 +75,7 @@ impl AccountSecretSlot {
             Self::Password => "password",
             Self::ApiToken => "api_token",
             Self::OauthClientSecret => "oauth_client_secret",
+            Self::KeyPassphrase => "key_passphrase",
         }
     }
 }
@@ -82,6 +93,21 @@ pub enum AccountFieldKind {
     Secret,
     /// A checkbox. Its value is a JSON bool, and it is never a secret.
     Bool,
+
+    /// A whole number. Its value reaches the adapter as a JSON number, not as
+    /// the text the user typed.
+    ///
+    /// The distinction is not cosmetic. A plugin that declares `port: u16`
+    /// rejects `"22"` outright — serde does not coerce — and the failure is the
+    /// whole struct, so the adapter never opens and the message names a
+    /// deserialisation error rather than the field. Every value leaves both
+    /// forms as a string, so without a kind that says "this is a number" there
+    /// is no point at which anything could know to convert it.
+    ///
+    /// Never [`AccountField::device_local`]: the per-device store keeps text,
+    /// and a number that came back as text would fail exactly the way this kind
+    /// exists to prevent. [`AccountSchema::validate`] rejects the pairing.
+    Number,
 
     /// One of a fixed set, chosen from [`AccountField::options`].
     ///
@@ -506,7 +532,7 @@ impl AccountSchema {
                 if let Some(AccountFieldDefault::Text(value)) = &field.default {
                     if !field.options.iter().any(|o| &o.value == value) {
                         return Err(PluginError::Manifest(format!(
-                            "account field `{}` defaults to `{value}`, which it does                              not offer",
+                            "account field `{}` offers no option `{value}`, which is its default",
                             field.key
                         )));
                     }
@@ -547,6 +573,24 @@ impl AccountSchema {
                     )))
                 }
                 _ => {}
+            }
+            if field.kind == AccountFieldKind::Number {
+                if let Some(AccountFieldDefault::Text(value)) = &field.default {
+                    if value.trim().parse::<i64>().is_err() {
+                        return Err(PluginError::Manifest(format!(
+                            "account field `{}` is a number but defaults to `{value}`",
+                            field.key
+                        )));
+                    }
+                }
+                // See the note on the kind: the per-device store is text-only,
+                // so this pairing would reintroduce the bug the kind prevents.
+                if field.device_local {
+                    return Err(PluginError::Manifest(format!(
+                        "account field `{}` is a number and device_local, which the per-device                          store cannot represent",
+                        field.key
+                    )));
+                }
             }
             match (field.kind, &field.default) {
                 (AccountFieldKind::Bool, Some(AccountFieldDefault::Text(_))) => {
@@ -667,7 +711,9 @@ mod tests {
         let mut field = choice("mode", vec![option("explicit"), option("implicit")]);
         field.default = Some(AccountFieldDefault::Text("plain".to_string()));
         let err = schema_of(vec![field]).validate().unwrap_err();
-        assert!(err.to_string().contains("which it does"), "{err}");
+        // Both halves: the value the author wrote, and that it is the default.
+        assert!(err.to_string().contains("`plain`"), "{err}");
+        assert!(err.to_string().contains("default"), "{err}");
     }
 
     #[test]
@@ -738,6 +784,79 @@ mod tests {
             options: Vec::new(),
             device_local: false,
         }
+    }
+
+    #[test]
+    fn a_number_whose_default_is_not_a_number_is_refused() {
+        let mut port = field("port", AccountFieldKind::Number, None);
+        port.default = Some(AccountFieldDefault::Text("twenty-two".into()));
+        let schema = AccountSchema {
+            fields: vec![port],
+            ..Default::default()
+        };
+        let err = schema.validate().expect_err("must not validate");
+        assert!(
+            err.to_string().contains("twenty-two"),
+            "the message has to quote the offending value: {err}"
+        );
+    }
+
+    /// The pairing the kind's doc comment rules out, refused rather than
+    /// documented — the per-device store keeps text, so a number coming back
+    /// from it would fail deserialisation at the adapter, which is exactly the
+    /// failure the `number` kind exists to move earlier.
+    #[test]
+    fn a_number_that_stays_on_this_device_is_refused() {
+        let mut port = field("port", AccountFieldKind::Number, None);
+        port.device_local = true;
+        let schema = AccountSchema {
+            fields: vec![port],
+            ..Default::default()
+        };
+        let err = schema.validate().expect_err("must not validate");
+        assert!(
+            err.to_string().contains("per-device"),
+            "the message has to say which half cannot hold it: {err}"
+        );
+    }
+
+    /// A numeric default that IS a number passes, so the rule above is a rule
+    /// and not an accidental ban on defaults.
+    #[test]
+    fn a_number_with_a_numeric_default_validates() {
+        let mut port = field("port", AccountFieldKind::Number, None);
+        port.default = Some(AccountFieldDefault::Text("22".into()));
+        let schema = AccountSchema {
+            fields: vec![port],
+            ..Default::default()
+        };
+        schema.validate().expect("a numeric default is fine");
+    }
+
+    /// Two credentials, two slots. Sharing one would make the second write
+    /// overwrite the first in the keychain.
+    #[test]
+    fn a_key_passphrase_has_a_slot_of_its_own() {
+        assert_ne!(
+            AccountSecretSlot::KeyPassphrase.wire_name(),
+            AccountSecretSlot::Password.wire_name(),
+        );
+        let schema = AccountSchema {
+            fields: vec![
+                field(
+                    "password",
+                    AccountFieldKind::Secret,
+                    Some(AccountSecretSlot::Password),
+                ),
+                field(
+                    "key_passphrase",
+                    AccountFieldKind::Secret,
+                    Some(AccountSecretSlot::KeyPassphrase),
+                ),
+            ],
+            ..Default::default()
+        };
+        schema.validate().expect("two secrets, two slots");
     }
 
     #[test]

@@ -8,5 +8,58 @@
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled sync adapter for Google Drive (API v3 + OAuth2 PKCE, drive.file scope).",
-  "signed": false
+  "signed": false,
+  "account": {
+    "fields": [
+      {
+        "key": "client_id",
+        "kind": "text",
+        "label": "Client ID",
+        "label_key": "account.client_id.label",
+        "hint_key": "account.client_id.hint",
+        "required": true
+      },
+      {
+        "key": "client_secret",
+        "kind": "secret",
+        "secret_slot": "oauth_client_secret",
+        "label": "Client secret",
+        "label_key": "account.client_secret.label",
+        "hint_key": "account.client_secret.hint",
+        "required": true
+      },
+      {
+        "key": "folder_name",
+        "kind": "text",
+        "label": "Folder name",
+        "label_key": "account.folder_name.label",
+        "hint_key": "account.folder_name.hint",
+        "required": false,
+        "default": "Aperio"
+      }
+    ],
+    "oauth": {
+      "client_id_field": "client_id",
+      "client_secret_field": "client_secret",
+      "refresh_token_field": "refresh_token"
+    }
+  },
+  "strings": {
+    "en": {
+      "account.client_id.hint": "From an OAuth client of type \"Desktop app\" in the Google Cloud console (APIs & Services → Credentials). The same project needs the Google Drive API enabled.",
+      "account.client_id.label": "Client ID",
+      "account.client_secret.hint": "Sits directly under the client ID in the same Cloud Console entry. Google's installed-app flow presents it at the token endpoint, so it is required. Kept in the system keychain, never in the account database.",
+      "account.client_secret.label": "Client secret",
+      "account.folder_name.hint": "The folder under My Drive that holds the sync data (log/, snapshot.json, …). Aperio creates it on the first sync if it is not there; blank means Aperio. Only files Aperio created itself are visible to it, because it asks for the drive.file scope alone.",
+      "account.folder_name.label": "Folder name"
+    },
+    "de": {
+      "account.client_id.hint": "Aus einem OAuth-Client vom Typ Desktop-App in der Google Cloud Console unter APIs und Dienste, Anmeldedaten. Im selben Projekt muss die Google-Drive-API aktiviert sein.",
+      "account.client_id.label": "Client-ID",
+      "account.client_secret.hint": "Steht im selben Eintrag direkt unter der Client-ID. Googles Installed-App-Flow reicht es beim Token-Endpunkt ein, es ist also Pflicht. Wird im Schlüsselbund des Systems abgelegt, nie in der Kontodatenbank.",
+      "account.client_secret.label": "Client-Secret",
+      "account.folder_name.hint": "Ordner unter Meine Ablage, der den Sync-Datensatz aufnimmt (log/, snapshot.json, …). Aperio legt ihn beim ersten Sync an, falls er fehlt; leer bedeutet Aperio. Aperio sieht nur selbst angelegte Dateien, da es allein den Scope drive.file anfordert.",
+      "account.folder_name.label": "Ordnername"
+    }
+  }
 }

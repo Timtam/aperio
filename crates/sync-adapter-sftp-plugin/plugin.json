@@ -8,5 +8,133 @@
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled sync adapter for SFTP servers — password or SSH-key auth, host-key pinning via pre-validated fingerprint.",
-  "signed": false
+  "signed": false,
+  "account": {
+    "fields": [
+      {
+        "key": "host",
+        "kind": "text",
+        "label": "Server",
+        "label_key": "account.host.label",
+        "hint_key": "account.host.hint",
+        "required": true
+      },
+      {
+        "key": "port",
+        "kind": "number",
+        "label": "Port",
+        "label_key": "account.port.label",
+        "hint_key": "account.port.hint",
+        "required": false,
+        "default": "22"
+      },
+      {
+        "key": "user",
+        "kind": "text",
+        "label": "Username",
+        "label_key": "account.user.label",
+        "hint_key": "account.user.hint",
+        "required": true
+      },
+      {
+        "key": "password",
+        "kind": "secret",
+        "secret_slot": "password",
+        "label": "Password",
+        "label_key": "account.password.label",
+        "hint_key": "account.password.hint",
+        "required": false
+      },
+      {
+        "key": "path",
+        "kind": "text",
+        "label": "Directory on the server",
+        "label_key": "account.path.label",
+        "hint_key": "account.path.hint",
+        "required": true
+      },
+      {
+        "key": "auth_method",
+        "kind": "choice",
+        "label": "Authentication",
+        "label_key": "account.auth_method.label",
+        "hint_key": "account.auth_method.hint",
+        "required": true,
+        "default": "password",
+        "options": [
+          {
+            "value": "password",
+            "label": "Password",
+            "label_key": "account.auth_method.password"
+          },
+          {
+            "value": "key",
+            "label": "SSH key",
+            "label_key": "account.auth_method.key"
+          }
+        ],
+        "device_local": true
+      },
+      {
+        "key": "key_path",
+        "kind": "file",
+        "label": "Key file",
+        "label_key": "account.key_path.label",
+        "hint_key": "account.key_path.hint",
+        "required": false,
+        "device_local": true
+      },
+      {
+        "key": "key_passphrase",
+        "kind": "secret",
+        "secret_slot": "key_passphrase",
+        "label": "Key passphrase",
+        "label_key": "account.key_passphrase.label",
+        "hint_key": "account.key_passphrase.hint",
+        "required": false
+      }
+    ]
+  },
+  "strings": {
+    "en": {
+      "account.auth_method.hint": "Password, or an SSH private key kept on this machine. The choice applies to this device only — another device may authenticate differently against the same server.",
+      "account.auth_method.key": "SSH key",
+      "account.auth_method.label": "Authentication",
+      "account.auth_method.password": "Password",
+      "account.host.hint": "Host name or IP address of the SSH server, with no scheme: backup.example.com, not sftp://backup.example.com. The first connection asks you to confirm the server's fingerprint.",
+      "account.host.label": "Server",
+      "account.key_passphrase.hint": "Only needed if the key file itself is encrypted. Leave blank for a key without a passphrase.",
+      "account.key_passphrase.label": "Key passphrase",
+      "account.key_path.hint": "Path to the private key file on this machine, such as /home/anna/.ssh/id_ed25519 or C:\\Users\\Anna\\.ssh\\id_ed25519 — not the .pub file. The path stays here and is never carried to your other devices.",
+      "account.key_path.label": "Key file",
+      "account.password.hint": "Only for password authentication. Stored in your operating system's credential store, never in the account database.",
+      "account.password.label": "Password",
+      "account.path.hint": "Absolute path on the server that Aperio syncs into, such as /home/anna/aperio. Missing directories are created.",
+      "account.path.label": "Directory on the server",
+      "account.port.hint": "22 unless the server listens on a different port.",
+      "account.port.label": "Port",
+      "account.user.hint": "Your SSH login name on that server — the part before the @ in ssh anna@backup.example.com.",
+      "account.user.label": "Username"
+    },
+    "de": {
+      "account.auth_method.hint": "Passwort oder ein SSH-Schlüssel auf diesem Gerät. Die Wahl gilt nur für dieses Gerät — ein anderes Gerät kann sich am selben Server anders anmelden.",
+      "account.auth_method.key": "SSH-Schlüssel",
+      "account.auth_method.label": "Anmeldeverfahren",
+      "account.auth_method.password": "Passwort",
+      "account.host.hint": "Rechnername oder IP-Adresse des SSH-Servers, ohne Schema: backup.example.com, nicht sftp://backup.example.com. Beim ersten Verbinden bestätigst du den Fingerabdruck des Servers.",
+      "account.host.label": "Server",
+      "account.key_passphrase.hint": "Nur nötig, wenn die Schlüsseldatei selbst verschlüsselt ist. Bei einem Schlüssel ohne Passphrase leer lassen.",
+      "account.key_passphrase.label": "Passphrase des Schlüssels",
+      "account.key_path.hint": "Pfad zur privaten Schlüsseldatei auf diesem Gerät, etwa /home/anna/.ssh/id_ed25519 oder C:\\Users\\Anna\\.ssh\\id_ed25519 — nicht die .pub-Datei. Der Pfad bleibt hier und wird nicht auf deine anderen Geräte übertragen.",
+      "account.key_path.label": "Schlüsseldatei",
+      "account.password.hint": "Nur bei Anmeldung per Passwort. Wird im Anmeldeinformations-Manager des Betriebssystems gespeichert, nie in der Kontodatenbank.",
+      "account.password.label": "Passwort",
+      "account.path.hint": "Absoluter Pfad auf dem Server, in den Aperio synchronisiert, etwa /home/anna/aperio. Fehlende Verzeichnisse werden angelegt.",
+      "account.path.label": "Verzeichnis auf dem Server",
+      "account.port.hint": "22, sofern der Server nicht auf einem anderen Port lauscht.",
+      "account.port.label": "Port",
+      "account.user.hint": "Dein SSH-Anmeldename auf diesem Server — der Teil vor dem @ in ssh anna@backup.example.com.",
+      "account.user.label": "Benutzername"
+    }
+  }
 }
