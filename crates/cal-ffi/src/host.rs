@@ -114,7 +114,10 @@ use host_core::sync_target::{
     SECRET_ACCOUNT_WEBDAV as WEBDAV_SECRET_ACCOUNT,
 };
 
-const PLUGIN_ID_SYNC_LOCAL: &str = "com.aperio.sync-adapter-local";
+// Imported below with the other five rather than declared here. It was the
+// one this host still spelled out for itself — the same string today, and a
+// second place for it to stop being the same tomorrow.
+use host_core::sync_target::PLUGIN_ID_LOCAL as PLUGIN_ID_SYNC_LOCAL;
 
 fn sync_err(e: SyncError) -> StoreError {
     StoreError::Storage {
@@ -1384,7 +1387,7 @@ impl Host {
                     "port": port,
                     "user": user,
                     "path": path,
-                    "auth_method": auth_method,
+                    "auth_method": if auth_method == "key" { "key" } else { "password" },
                     "password": resolved_password,
                     "key_path": resolved_key_path,
                     "key_passphrase": resolved_key_passphrase,
@@ -1951,9 +1954,11 @@ fn restore_adapter_from_prefs(
                     (String::new(), kp.trim().to_string(), pass)
                 }
                 // "password" + any unknown value both resolve as password auth —
-                // forward-compat parity with the desktop build_adapter_from_prefs
-                // restore arm (a future auth method an older Aperio doesn't know
-                // still restores as password rather than silently dropping sync).
+                // forward-compat parity with the desktop restore arm. The method
+                // sent onwards is normalised below rather than echoed: the plugin
+                // accepts only "password"/"key", so forwarding an unknown string
+                // made the open fail and dropped sync silently, which is what
+                // this fallback is meant to avoid.
                 // No stored password → incomplete; don't restore.
                 _ => {
                     let pw = secret_store
@@ -1978,7 +1983,8 @@ fn restore_adapter_from_prefs(
                 "port": port,
                 "user": user.trim(),
                 "path": path.trim(),
-                "auth_method": auth_method,
+                // Normalised, not echoed — see the fallback arm above.
+                "auth_method": if auth_method == "key" { "key" } else { "password" },
                 "password": password,
                 "key_path": key_path,
                 "key_passphrase": key_passphrase,

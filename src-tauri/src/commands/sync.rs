@@ -463,7 +463,8 @@ fn build_adapter(
                 "port": *port,
                 "user": trimmed_user,
                 "path": trimmed_path,
-                "auth_method": auth_method,
+                // Normalised, not echoed — see the fallback arm above.
+                "auth_method": if auth_method == "key" { "key" } else { "password" },
                 "password": resolved_password,
                 "key_path": resolved_key_path,
                 "key_passphrase": resolved_key_passphrase,
@@ -1991,9 +1992,14 @@ pub fn build_adapter_from_prefs(
                         .unwrap_or_default();
                     (String::new(), kp.trim().to_string(), pass)
                 }
-                // "password" + anything unknown both fall to
-                // password auth — forward-compat for a future
-                // auth method that an older Aperio doesn't know.
+                // "password" + anything unknown both fall to password auth —
+                // forward-compat for a future auth method an older Aperio does
+                // not know. The credential resolved here has to be sent
+                // ALONGSIDE a method the plugin accepts: it rejects anything but
+                // "password"/"key", so forwarding the unknown string made the
+                // open fail and restore return nothing. Sync then stayed off
+                // with no error, since this path discards plugin errors —
+                // precisely the outcome this fallback exists to prevent.
                 _ => {
                     let pw = secrets::retrieve(SFTP_SECRET_ACCOUNT, SecretSlot::Password).ok()?;
                     (pw, String::new(), String::new())
@@ -2012,7 +2018,8 @@ pub fn build_adapter_from_prefs(
                 "port": port,
                 "user": user.trim(),
                 "path": path.trim(),
-                "auth_method": auth_method,
+                // Normalised, not echoed — see the fallback arm above.
+                "auth_method": if auth_method == "key" { "key" } else { "password" },
                 "password": resolved_password,
                 "key_path": resolved_key_path,
                 "key_passphrase": resolved_key_passphrase,
