@@ -3,6 +3,7 @@ import { StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import type { AccountFormField, AccountFormSpec } from '@aperio/shared';
 
+import { RadioGroup } from './RadioGroup';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 /**
@@ -83,6 +84,26 @@ export function AccountSchemaForm({
             typeof values[field.key] === 'string'
               ? (values[field.key] as string)
               : (field.default_text ?? '');
+          if (field.kind === 'choice') {
+            // A real radio group, not a text box with suggestions: the set is
+            // closed and the adapter declared it. RadioGroup already carries
+            // the radiogroup role, a focus stop per option and the selected
+            // state, so this is wiring rather than new behaviour.
+            return (
+              <View key={field.key} style={styles.field}>
+                <RadioGroup
+                  label={label(field)}
+                  value={value}
+                  options={field.options.map((option) => ({
+                    value: option.value,
+                    label: option.label,
+                  }))}
+                  onChange={(next) => onChange(field.key, next)}
+                />
+                {description && <Text style={styles.hint}>{description}</Text>}
+              </View>
+            );
+          }
           return (
             <View key={field.key} style={styles.field}>
               <Text style={styles.label}>{label(field)}</Text>
@@ -92,6 +113,11 @@ export function AccountSchemaForm({
                 onChangeText={(next) => onChange(field.key, next)}
                 secureTextEntry={field.kind === 'secret'}
                 keyboardType={field.kind === 'url' ? 'url' : 'default'}
+                // `directory` and `file` render as plain path fields here.
+                // There is no system picker to hand a path back to a text
+                // input on this platform, and the SFTP key path has always
+                // been typed. Autocorrect is already off, which is what would
+                // otherwise mangle a path.
                 autoCapitalize="none"
                 autoCorrect={false}
                 accessibilityLabel={label(field)}

@@ -19,6 +19,8 @@ function field(
     required: false,
     default_bool: null,
     default_text: null,
+    options: [],
+    device_local: false,
     ...overrides,
   };
 }

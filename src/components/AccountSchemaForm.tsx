@@ -93,6 +93,30 @@ export function AccountSchemaForm({
             ? (values[field.key] as string)
             : (field.default_text ?? '');
         const description = hint(field);
+        if (field.kind === 'choice') {
+          // A native <select>, so the set stays closed and the browser gives
+          // us keyboard behaviour and the listbox role for nothing. A text box
+          // would let a typo through, and several adapters do not reject one —
+          // the FTPS plugin falls back to explicit and connects differently
+          // than the user asked, with nothing said.
+          return (
+            <label className="form__field" key={field.key}>
+              <span className="form__label">{label(field)}</span>
+              <select
+                value={value}
+                onChange={(e) => onChange(field.key, e.target.value)}
+                required={field.required}
+              >
+                {field.options.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              {description && <span className="form__hint">{description}</span>}
+            </label>
+          );
+        }
         return (
           <label className="form__field" key={field.key}>
             <span className="form__label">{label(field)}</span>
@@ -105,6 +129,13 @@ export function AccountSchemaForm({
               spellCheck={false}
               required={field.required}
             />
+            {/* A `directory` or `file` field is a path, typed. A picker button
+                belongs here and is deliberately not in this commit: it needs a
+                Tauri dialog command, a focus return after the native dialog
+                closes, and a decision about what happens when the user cancels
+                — none of which should ride along unannounced with a schema
+                change. Typing a path already works, which is what the SFTP key
+                field has always done. */}
             {description && <span className="form__hint">{description}</span>}
           </label>
         );

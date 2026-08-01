@@ -9,9 +9,25 @@
  */
 
 /** One thing the connect form asks for, or one setting it offers. */
+/** One entry of a `choice` field. */
+export interface AccountFormOption {
+  value: string;
+  /** Already in the reader's language, like every other label here. */
+  label: string;
+}
+
 export interface AccountFormField {
   key: string;
-  kind: 'text' | 'url' | 'secret' | 'bool';
+  /**
+   * `choice` is a closed set the adapter declares — several adapters do NOT
+   * reject a value outside their set (the FTPS plugin falls through to
+   * explicit), so a free-text box would let a typo pick a different transport
+   * in silence.
+   *
+   * `directory` and `file` are paths on THIS machine. They differ only in which
+   * picker to open, and where there is none they are a plain text field.
+   */
+  kind: 'text' | 'url' | 'secret' | 'bool' | 'choice' | 'directory' | 'file';
   /**
    * Already in the reader's language.
    *
@@ -25,6 +41,17 @@ export interface AccountFormField {
   required: boolean;
   default_bool: boolean | null;
   default_text: string | null;
+  /** The choices, for `kind === 'choice'`. Empty otherwise. */
+  options: AccountFormOption[];
+  /**
+   * Whether this value means anything only on the device that entered it — a
+   * filesystem path, typically.
+   *
+   * Only the adapter can answer it: a host cannot tell a path from a URL by
+   * looking, and guessing wrong either makes the user retype settings on every
+   * device or lets one machine's paths overwrite another's.
+   */
+  device_local: boolean;
 }
 
 /**
