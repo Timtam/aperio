@@ -1089,6 +1089,22 @@ impl Host {
             .runtime
             .block_on(async { adapter.fetch_meta().await })
             .map_err(sync_err)?;
+        // Refuse a dataset that needs a newer Aperio than this build, before
+        // anything is written. The desktop has always checked here; this host
+        // only checked on the JOIN path (`preview_sync_target`, which the form
+        // reads as `app_too_old`), so SWAPPING to a too-new target was accepted
+        // and only surfaced later, at round time, where nobody is looking.
+        //
+        // It goes ahead of the E2E branch deliberately: that branch WRITES
+        // `PREF_E2E_ENABLED` as a side effect, and refusing after it would leave
+        // the flag set for a target this device just declined.
+        //
+        // The same version string the orchestrator was built with (host.rs's
+        // `build_orchestrator` call), so the two cannot disagree about what is
+        // running.
+        if let Some(m) = meta.as_ref() {
+            sync_core::ensure_compatible(m, env!("CARGO_PKG_VERSION")).map_err(sync_err)?;
+        }
         let e2e_target = meta.as_ref().map(|m| m.e2e_enabled).unwrap_or(false);
         let shared = self.db.shared();
         let prefs = UserPrefsRepo::new(&shared);
