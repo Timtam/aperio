@@ -328,6 +328,19 @@ pub struct NewAccountPlan {
     /// Keychain writes, in the order they should happen. No `Debug` reaches
     /// these values; the slot names alone are loggable.
     pub secrets: Vec<(SecretSlot, String)>,
+    /// The values the adapter marked `device_local` — meaningful only on the
+    /// machine that entered them, so they are kept out of `config_json`, which
+    /// travels between a user's devices.
+    ///
+    /// A filesystem path is the clear case: an SSH key at
+    /// `/home/anna/.ssh/id_ed25519` on one machine is at
+    /// `C:\\Users\\Anna\\.ssh\\id_ed25519` on another. Sharing one row means
+    /// whichever device wrote last decides, and the other then authenticates
+    /// with a path that does not exist there — a failure with no obvious cause,
+    /// on a machine nobody touched.
+    ///
+    /// Empty for every adapter that marks nothing, which is most of them.
+    pub device_local: Map<String, Value>,
 }
 
 /// Split what the user entered into the row and the keychain.
@@ -348,6 +361,7 @@ pub fn plan_new_account(
 ) -> Result<NewAccountPlan> {
     let mut config = Map::new();
     let mut secrets = Vec::new();
+    let mut device_local = Map::new();
     // The OAuth client pair is settled by the posture, not by the form, so the
     // generic loop must not also route those two fields.
     let (id_field, secret_field) = match schema.oauth.as_ref() {
@@ -377,7 +391,11 @@ pub fn plan_new_account(
                         )))
                     }
                 };
-                config.insert(field.key.clone(), Value::Bool(value));
+                if field.device_local {
+                    device_local.insert(field.key.clone(), Value::Bool(value));
+                } else {
+                    config.insert(field.key.clone(), Value::Bool(value));
+                }
             }
             _ => {
                 let text = match supplied {
@@ -406,7 +424,12 @@ pub fn plan_new_account(
                     continue;
                 }
                 match field.secret_slot {
+                    // A secret is already device-local by a different route —
+                    // the keychain — so the flag adds nothing here.
                     Some(slot) => secrets.push((host_slot(slot), text)),
+                    None if field.device_local => {
+                        device_local.insert(field.key.clone(), Value::String(text));
+                    }
                     None => {
                         config.insert(field.key.clone(), Value::String(text));
                     }
@@ -427,6 +450,7 @@ pub fn plan_new_account(
     }
 
     Ok(NewAccountPlan {
+        device_local,
         config_json: Value::Object(config).to_string(),
         secrets,
     })
@@ -573,6 +597,102 @@ fn resolve_oauth_client(
 
 #[cfg(test)]
 mod tests {
+    /// The rule from the schema, exercised where it takes effect.
+    ///
+    /// A marked field must not reach `config_json`, because that column is what
+    /// travels between devices; an unmarked one must, because otherwise the
+    /// user retypes their server address on every phone they own.
+    #[test]
+    fn a_marked_field_leaves_the_travelling_half() {
+        let mut key_path = field("key_path", AccountFieldKind::File, None, false);
+        key_path.device_local = true;
+        let schema = AccountSchema {
+            fields: vec![field("host", AccountFieldKind::Text, None, false), key_path],
+            ..Default::default()
+        };
+        let mut values = Map::new();
+        values.insert("host".into(), Value::String("backup.example.test".into()));
+        values.insert(
+            "key_path".into(),
+            Value::String("/home/anna/.ssh/id_ed25519".into()),
+        );
+
+        let plan = plan_new_account(&schema, &values, None).unwrap();
+        let config: Value = serde_json::from_str(&plan.config_json).unwrap();
+
+        assert_eq!(
+            config.get("host").and_then(|v| v.as_str()),
+            Some("backup.example.test"),
+            "an unmarked value must travel, or every device retypes it",
+        );
+        assert!(
+            config.get("key_path").is_none(),
+            "a marked value reached config_json, which syncs",
+        );
+        assert_eq!(
+            plan.device_local.get("key_path").and_then(|v| v.as_str()),
+            Some("/home/anna/.ssh/id_ed25519"),
+        );
+    }
+
+    /// Secrets never went into the row anyway. The flag must not divert them
+    /// into a third place where nothing would look for them.
+    #[test]
+    fn a_secret_still_goes_to_the_keychain_when_also_marked() {
+        let mut password = field(
+            "password",
+            AccountFieldKind::Secret,
+            Some(AccountSecretSlot::Password),
+            false,
+        );
+        password.device_local = true;
+        let schema = AccountSchema {
+            fields: vec![password],
+            ..Default::default()
+        };
+        let mut values = Map::new();
+        values.insert("password".into(), Value::String("hunter2".into()));
+
+        let plan = plan_new_account(&schema, &values, None).unwrap();
+        assert_eq!(plan.secrets.len(), 1);
+        assert!(plan.device_local.is_empty());
+    }
+
+    /// Checkboxes take the same route as text, which is easy to forget because
+    /// they are handled in a separate branch.
+    #[test]
+    fn a_marked_checkbox_is_device_local_too() {
+        let mut flag = field("use_local_cache", AccountFieldKind::Bool, None, false);
+        flag.device_local = true;
+        let schema = AccountSchema {
+            fields: vec![flag],
+            ..Default::default()
+        };
+        let mut values = Map::new();
+        values.insert("use_local_cache".into(), Value::Bool(true));
+
+        let plan = plan_new_account(&schema, &values, None).unwrap();
+        let config: Value = serde_json::from_str(&plan.config_json).unwrap();
+        assert!(config.get("use_local_cache").is_none());
+        assert_eq!(
+            plan.device_local.get("use_local_cache"),
+            Some(&Value::Bool(true))
+        );
+    }
+
+    /// Most adapters mark nothing, and must be unaffected.
+    #[test]
+    fn an_adapter_that_marks_nothing_is_unchanged() {
+        let schema = AccountSchema {
+            fields: vec![field("url", AccountFieldKind::Url, None, false)],
+            ..Default::default()
+        };
+        let mut values = Map::new();
+        values.insert("url".into(), Value::String("https://example.test/".into()));
+        let plan = plan_new_account(&schema, &values, None).unwrap();
+        assert!(plan.device_local.is_empty());
+    }
+
     use super::*;
     use plugin_core::account_schema::AccountField;
     use std::cell::RefCell;
