@@ -1046,10 +1046,16 @@ pub fn get_sync_adapter_summary(
     // once the pointer is set the preferences below are a record nothing
     // maintains, and rendering a card from them would show the target the user
     // moved off.
-    if let Some((kind, detail)) =
-        host_core::sync_target::summary(&prefs, &AccountsRepo::new(&shared))
-    {
-        return Ok(Some(SyncAdapterSummary { kind, detail }));
+    match host_core::sync_target::summary(&prefs, &AccountsRepo::new(&shared)) {
+        host_core::sync_target::SummaryOutcome::Chosen(kind, detail) => {
+            return Ok(Some(SyncAdapterSummary { kind, detail }));
+        }
+        // The pointer names a row that is gone. Saying nothing is right: the
+        // preferences below are still complete on a migrated device, so falling
+        // through would announce the pre-migration target while the round is
+        // running somewhere else.
+        host_core::sync_target::SummaryOutcome::Missing => return Ok(None),
+        host_core::sync_target::SummaryOutcome::NotChosen => {}
     }
     let kind = prefs
         .get(PREF_ADAPTER_KIND)

@@ -36,7 +36,7 @@ pub use build::{
 /// What the two hosts call when the user connects or disconnects: the account
 /// row, its credentials, the pointer, and the retirement of the record they
 /// replace.
-pub use connect::{connect, disconnect, stored_secret, summary, ConnectError};
+pub use connect::{connect, disconnect, stored_secret, summary, ConnectError, SummaryOutcome};
 
 pub use from_account::{
     build_selected, from_account, select_account, selected_account_id, SyncPlugins,

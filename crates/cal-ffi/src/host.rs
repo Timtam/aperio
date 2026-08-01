@@ -5046,10 +5046,16 @@ impl Host {
         // alone: once the pointer is set the preferences below are a record
         // nothing maintains, and a card built from them would name the target
         // the user moved off.
-        if let Some((kind, detail)) =
-            host_core::sync_target::summary(&prefs, &AccountsRepo::new(&shared))
-        {
-            return to_json(&Some(SyncAdapterSummary { kind, detail }));
+        match host_core::sync_target::summary(&prefs, &AccountsRepo::new(&shared)) {
+            host_core::sync_target::SummaryOutcome::Chosen(kind, detail) => {
+                return to_json(&Some(SyncAdapterSummary { kind, detail }));
+            }
+            // See the desktop twin: a pointer to a missing row must not fall
+            // through to preferences that still describe the old target.
+            host_core::sync_target::SummaryOutcome::Missing => {
+                return to_json(&Option::<SyncAdapterSummary>::None);
+            }
+            host_core::sync_target::SummaryOutcome::NotChosen => {}
         }
         let kind = prefs
             .get(PREF_ADAPTER_KIND)

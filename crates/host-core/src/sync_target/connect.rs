@@ -522,11 +522,37 @@ pub fn stored_secret(
 /// is created and the user can change it afterwards, which makes it strictly
 /// better here: two SFTP targets on one server were previously one string
 /// repeated twice.
-pub fn summary(prefs: &UserPrefsRepo<'_>, accounts: &AccountsRepo<'_>) -> Option<(String, String)> {
-    let id = selected_account_id(prefs)?;
-    let account = accounts.get(&id).ok().flatten()?;
-    let kind = stored_kind_for(account.adapter_kind.as_str())?;
-    Some((kind.to_string(), account.display_name))
+pub fn summary(prefs: &UserPrefsRepo<'_>, accounts: &AccountsRepo<'_>) -> SummaryOutcome {
+    let Some(id) = selected_account_id(prefs) else {
+        return SummaryOutcome::NotChosen;
+    };
+    match accounts.get(&id).ok().flatten() {
+        Some(account) => match stored_kind_for(account.adapter_kind.as_str()) {
+            Some(kind) => SummaryOutcome::Chosen(kind.to_string(), account.display_name),
+            None => SummaryOutcome::Missing,
+        },
+        None => SummaryOutcome::Missing,
+    }
+}
+
+/// What the sync panel should say about the chosen target.
+///
+/// Three answers rather than an `Option`, because two of them used to be the
+/// same one and the caller then guessed wrong. A device that has never chosen
+/// falls back to the legacy preferences, which is right — that is where a
+/// device that has not connected on this build still keeps its target. A device
+/// whose pointer names a row that is GONE must not: the legacy preferences are
+/// still complete on a migrated device by design, so the panel would announce
+/// the pre-migration target while the orchestrator was somewhere else entirely.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SummaryOutcome {
+    /// A chosen account: its stored-kind name and its display name.
+    Chosen(String, String),
+    /// This device has not chosen. The caller may fall back.
+    NotChosen,
+    /// A pointer to a row that no longer exists, or one this build cannot name.
+    /// The caller must NOT fall back — say nothing rather than something wrong.
+    Missing,
 }
 
 /// The legacy pseudo-account value for one of `kind`'s credentials.
@@ -1248,9 +1274,36 @@ mod tests {
         );
         assert_eq!(
             summary(&prefs, &accounts),
-            Some(("webdav".to_string(), "cloud.example.test".to_string())),
+            SummaryOutcome::Chosen("webdav".to_string(), "cloud.example.test".to_string()),
         );
         assert!(accounts.get(&id).unwrap().is_some());
+    }
+
+    /// A pointer to a row that is gone must not read like a device that never
+    /// chose one: the caller falls back to the legacy preferences on the
+    /// second, and on a migrated device those still name the pre-migration
+    /// target, so the panel would announce a server the round is not using.
+    #[test]
+    fn a_pointer_to_a_missing_row_is_not_an_unchosen_device() {
+        let f = Fixture::new();
+        let shared = f.db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+        let accounts = AccountsRepo::new(&shared);
+
+        assert_eq!(summary(&prefs, &accounts), SummaryOutcome::NotChosen);
+
+        let id = connect(
+            &prefs,
+            &accounts,
+            &f.secrets,
+            &Plugins("webdav"),
+            "webdav",
+            &webdav_form(),
+        )
+        .unwrap();
+        accounts.delete(&id).unwrap();
+
+        assert_eq!(summary(&prefs, &accounts), SummaryOutcome::Missing);
     }
 
     /// The SFTP key passphrase sits in a pseudo-account of its own in the
