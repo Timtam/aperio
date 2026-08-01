@@ -122,13 +122,65 @@ out of the account row, and hands your plugin back the init config it asked for.
 | Field | Meaning |
 |---|---|
 | `key` | Identifier, and the key this value appears under in your plugin's init config. A non-secret field is persisted in `config_json` under the same key. |
-| `kind` | `"text"`, `"url"`, `"secret"` or `"bool"`. Drives the input type — including the on-screen keyboard on mobile, which is why `url` is worth distinguishing. |
+| `kind` | One of the seven below. Drives the control the user gets — including the on-screen keyboard on mobile, which is why `url` is worth distinguishing from `text`. |
 | `label` | Your own string. Used verbatim when the app has no translation, which is the normal case for a third-party plugin. |
 | `label_key` | Optional translation key the app resolves in the user's language; it takes precedence over `label`. Bundled adapters set this so their strings live in the app's locale files. |
 | `hint` / `hint_key` | Optional explanatory line under the field. Same arrangement. |
 | `required` | Whether the form refuses to submit without it. |
-| `default` | Starting value — a boolean for `bool`, a string otherwise. |
-| `secret_slot` | Present exactly when the field is a secret. One of `access_token`, `refresh_token`, `password`, `api_token`, `oauth_client_secret`. |
+| `default` | Starting value — a boolean for `bool`, a string otherwise. A `number` default is a string too (`"22"`), and it must parse. |
+| `secret_slot` | Present exactly when the field is a secret. One of `access_token`, `refresh_token`, `password`, `api_token`, `oauth_client_secret`, `key_passphrase`. |
+| `options` | The choices, for `kind: "choice"`. Each is `{ "value", "label" }` with an optional `label_key`. Rejected on any other kind. |
+| `min` / `max` | Accepted range, for `kind: "number"`. Rejected on any other kind. |
+| `device_local` | Whether this value stays on the machine that entered it. See below. |
+
+### Kinds
+
+| Kind | Control | Notes |
+|---|---|---|
+| `text` | Single-line text | The default. |
+| `url` | Single-line text | Mobile gets a URL keyboard. |
+| `secret` | Masked | Requires — and is required by — `secret_slot`. |
+| `bool` | Checkbox | Its value is a JSON boolean. |
+| `number` | Numeric entry | Reaches you as a JSON **number**, not as text. |
+| `choice` | Closed list | Requires `options`. |
+| `directory` / `file` | Path entry | A path on the user's machine. Mark these `device_local`. |
+
+Two of those are worth a paragraph.
+
+**`number` exists because both frontends produce strings.** If your init config
+declares `port: u16`, serde will not accept `"22"` — and the failure is the
+whole struct, so your adapter never opens and the user sees a deserialisation
+error naming a Rust type instead of the field they typed in. Declaring `number`
+makes the host convert before you see it, and reject a non-number where the
+message can name the field. Declare `min` and `max` as well: only you know that
+a port is a `u16`, and without the bound `70000` still reaches you.
+
+**`choice` exists because several adapters do not reject a value outside their
+set.** A free-text box lets a typo pick a different transport, and the
+connection then behaves differently than the user asked with nothing said. The
+set belongs in your manifest, where the host can enforce it.
+
+### Values that stay on one device
+
+An account row travels between a user's devices. Most of what it carries
+travels well — a server address, a user name, a client id, the name of a folder
+in someone's cloud storage. Some values do not: an SSH private key lives at
+`/home/anna/.ssh/id_ed25519` on one machine and somewhere else entirely on the
+next, and a folder on a local disk means nothing anywhere else.
+
+Mark those `device_local: true`. They are kept out of the synced part of the
+account and stored per device instead; the host merges them back into your init
+config before your instance is opened, so you read them under the same key
+either way. On a device that has not configured the account, they are simply
+absent — give those fields a serde default, or handle their absence.
+
+Only you can answer this. The host cannot tell a filesystem path from a URL by
+looking, and guessing wrong is costly in both directions: too eager and the
+user retypes settings on every device they own, too shy and one machine's paths
+overwrite another's.
+
+Secrets are already device-local by a different route — they live in the
+platform keychain, never in the account row — so there is no need to mark them.
 
 **A field is a secret only together with its slot, and a secret never reaches
 `config_json`.** That column is documented as non-secret and is appended to the
