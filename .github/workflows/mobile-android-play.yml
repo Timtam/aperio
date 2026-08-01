@@ -67,6 +67,40 @@ jobs:
             cp -R target/uniffi-kotlin/uniffi mobile/modules/cal-ffi/android/src/main/java/uniffi
           fi
 
+      - name: Let the fresh .so into the EAS archive
+        run: |
+          # THE fix, and the reason two earlier attempts did nothing.
+          #
+          # `eas build` does not upload what git tracks. With `requireCommit`
+          # unset — and `mobile/eas.json` sets only `appVersionSource` — it
+          # clones with `--no-checkout` and then copies the WORKING TREE,
+          # filtered by the `.gitignore` files it finds starting from the git
+          # root. So the ephemeral commit below writes an index nothing reads,
+          # and `mobile/.gitignore`'s jniLibs rule deletes both ABI directories
+          # from the upload. Gradle then reports
+          # `cal-ffi:mergeReleaseNativeLibs NO-SOURCE` and ships an AAB with no
+          # native library, which the device reports as a missing libcal_ffi.so.
+          #
+          # A `.easignore` does not help unless it sits at the REPOSITORY root:
+          # eas-cli joins exactly one path and does not recurse, so the earlier
+          # `mobile/.easignore` was never read. A root one is worse than this
+          # line — it REPLACES every `.gitignore` in the tree, so it would have
+          # to re-list `/target/`, `/data/`, `/dist/`, `/src-tauri/target/` and
+          # `web/`'s rules, and missing one uploads a full Rust build directory.
+          #
+          # Deleting the rule on the runner is the narrow move: it changes the
+          # one thing standing between cargo-ndk's output and the upload, and
+          # only on the ephemeral checkout.
+          # A fixed-string filter, not a regex: the rule contains slashes, and
+          # a sed address holding `$#` is a shell variable before sed ever sees
+          # it — which is how the first draft of this line silently did nothing.
+          grep -vFx '/modules/cal-ffi/android/src/main/jniLibs/' mobile/.gitignore > mobile/.gitignore.new
+          mv mobile/.gitignore.new mobile/.gitignore
+          if grep -q jniLibs mobile/.gitignore; then
+            echo "the jniLibs rule survived; the archive would ship without the native library" >&2
+            exit 1
+          fi
+
       - name: Ephemeral commit so EAS captures the fresh .so
         run: |
           # Set the identity on the repo rather than passing it per command.
@@ -82,6 +116,11 @@ jobs:
           git add -f mobile/modules/cal-ffi/android/src/main/jniLibs
           git add mobile/modules/cal-ffi/android/src/main/java/uniffi
           git commit -m "ci: vendor fresh cal-ffi .so [not pushed]" || echo "nothing to commit"
+          # This used to be the proof that the native library would ship, and
+          # it proved nothing: it interrogates the git INDEX, which eas-cli
+          # never reads. It passed on every build that then shipped without the
+          # library. Kept only as a check that cargo-ndk wrote what it was asked
+          # for; the real proof is the archive inspection further down.
           # Prove the artefacts are actually in the tree EAS will archive. A
           # missing .so here means the build would ship without the native
           # library and fail at runtime rather than at build time.
@@ -120,5 +159,22 @@ jobs:
           if [ "${{ github.event.inputs.submit }}" != "false" ] && [ "$PROFILE" = "production" ]; then
             SUBMIT="--auto-submit"
           fi
+          # Ask eas-cli for the archive it WOULD upload, and look inside it.
+          # Same code path as the build, so this cannot pass while the build
+          # ships something else — which is precisely how the index check above
+          # failed for months. Both ABIs: an AAB carrying one installs fine and
+          # then dies on devices built for the other, and nothing in a store
+          # listing says so.
+          eas build:inspect --platform android --profile "$PROFILE" \
+            --stage archive --output "$RUNNER_TEMP/eas-archive" \
+            --force --non-interactive
+          for abi in arm64-v8a x86_64; do
+            lib="$RUNNER_TEMP/eas-archive/mobile/modules/cal-ffi/android/src/main/jniLibs/$abi/libcal_ffi.so"
+            if [ ! -s "$lib" ]; then
+              echo "libcal_ffi.so for $abi is missing from the archive EAS would upload" >&2
+              exit 1
+            fi
+            echo "archive carries $abi: $(stat -c%s "$lib") bytes"
+          done
           echo "eas build --platform android --profile $PROFILE $SUBMIT --non-interactive"
           eas build --platform android --profile "$PROFILE" $SUBMIT --non-interactive
