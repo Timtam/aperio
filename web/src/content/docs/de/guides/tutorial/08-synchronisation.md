@@ -16,12 +16,38 @@ wird. Es gibt keinen Aperio-Server; deine Daten bleiben bei dir.
 
 ## Synchronisation einrichten
 
-1. Öffne die **Einstellungen** und gehe zu **Synchronisation**.
-2. Wähle den **Speicher-Typ** (z. B. WebDAV oder ein lokaler/geteilter
-   Ordner) und gib die Zugangsdaten bzw. den Pfad an.
-3. **Speichern** – Aperio führt den ersten Abgleich durch.
-4. Richte denselben Speicher auf deinem zweiten Gerät ein. Beide Geräte
+Ein Speicherort ist in Aperio ein **Konto** wie jedes andere: Du legst ihn
+unter **Einstellungen → Konten** an, und in der Synchronisation wählst du
+nur noch aus, welches deiner Konten den Datensatz hält.
+
+1. Öffne die **Einstellungen** und gehe zu **Konten**.
+2. Lege ein Konto für deinen Speicherort an (z. B. WebDAV, SFTP, FTPS,
+   Dropbox, Google Drive oder ein lokaler bzw. geteilter Ordner) und gib
+   Adresse und Zugangsdaten an.
+3. Wechsle auf **Synchronisation**. Unter **Synchronisationsziel** stehen
+   genau die Konten, die einen Datensatz halten können.
+4. Wähle das gewünschte Konto in der Liste und aktiviere
+   **Über … synchronisieren**. Aperio prüft die Verbindung, bevor die Wahl
+   gespeichert wird – schlägt sie fehl, bleibt alles wie vorher.
+5. Richte denselben Speicher auf deinem zweiten Gerät ein. Beide Geräte
    teilen sich nun denselben Stand.
+
+Beim **allerersten Start** fragt der Einrichtungsassistent den Speicherort
+direkt ab – dort entscheidest du auch, ob ein vorhandener Datensatz
+übernommen oder ein neuer angelegt wird.
+
+Kann Aperio nach einem Neustart über das gewählte Konto nicht
+synchronisieren – gesperrter Schlüsselbund, fehlende Zugangsdaten, ein auf
+diesem Gerät nicht bestätigter Server-Fingerabdruck oder ein fehlendes
+Plugin –, sagt das Synchronisationsziel das bei diesem Konto und bietet
+**… erneut versuchen** an. Der Versuch nennt den tatsächlichen Grund und
+bietet die Reparatur an, wo sie in einer Bestätigung besteht. **Trennen**
+bleibt ebenfalls erreichbar.
+
+Welches Konto ein Gerät verwendet, ist eine **gerätelokale** Entscheidung:
+Die Konten selbst wandern zwischen deinen Geräten, die Wahl des Ziels nicht.
+So kann ein Laptop über das Internet und ein Rechner über eine Freigabe im
+selben Netz auf denselben Datensatz zugreifen.
 
 ## Abgleich und Konflikte
 

@@ -16,12 +16,37 @@ data stays with you.
 
 ## Setting up synchronization
 
-1. Open the **settings** and go to **Synchronization**.
-2. Choose the **storage type** (e.g. WebDAV or a local/shared folder) and
-   enter the credentials or path.
-3. **Save** – Aperio performs the first reconciliation.
-4. Set up the same storage on your second device. Both devices now share the
+In Aperio a storage location is an **account** like any other: you add it
+under **Settings → Accounts**, and the synchronization settings only ask
+which of your accounts holds the dataset.
+
+1. Open the **settings** and go to **Accounts**.
+2. Add an account for your storage location (e.g. WebDAV, SFTP, FTPS,
+   Dropbox, Google Drive, or a local/shared folder) and enter its address
+   and credentials.
+3. Switch to **Synchronization**. Under **Sync target** you'll find exactly
+   the accounts that can hold a dataset.
+4. Pick the one you want in the list and choose **Sync through …**. Aperio
+   probes the connection before the choice is saved — if it fails, nothing
+   changes.
+5. Set up the same storage on your second device. Both devices now share the
    same state.
+
+On the **very first launch** the setup wizard asks for the storage location
+directly — that is also where you decide whether to adopt an existing
+dataset or start a new one.
+
+If Aperio cannot start syncing through the chosen account after a restart —
+a locked keychain, a credential that is no longer there, a server
+fingerprint not confirmed on this device, or a missing plugin — the sync
+target says so on that account and offers **Try … again** for it. Pressing
+that names the actual reason and, where the repair is a confirmation, offers
+it right there. **Disconnect** stays available as well.
+
+Which account a device uses is a **device-local** decision: the accounts
+themselves travel between your devices, the choice of target does not. So a
+laptop can reach the same dataset over the internet while a desktop reaches
+it over a share on the local network.
 
 ## Reconciliation and conflicts
 
