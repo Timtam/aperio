@@ -46,9 +46,25 @@ pub async fn record_external_recurrence_completion(
     };
 
     // The cached snapshot reflects the PRE-write state — our idempotency anchor.
-    let cached = cache
-        .read_tasks(account, &completed.list_id)
-        .unwrap_or_default();
+    // Every guard below is a lookup in it, so an empty list from a FAILED read
+    // would silently disarm all three and both branches would create a task on
+    // the user's real provider account without ever checking whether this turn
+    // was already handled. A duplicate there can only be cleaned up by hand;
+    // not acting is recoverable (re-saving the task runs this again, and a peer
+    // with a healthy cache still does it), so an unreadable anchor stops us.
+    let cached = match cache.read_tasks(account, &completed.list_id) {
+        Ok(tasks) => tasks,
+        Err(err) => {
+            tracing::warn!(
+                account = %account,
+                list = %completed.list_id,
+                ?err,
+                "couldn't read the cached pre-write snapshot; skipping recurrence \
+                 reconciliation rather than risking a duplicate on the provider",
+            );
+            return;
+        }
+    };
 
     // Re-saving an already-completed task must not act again.
     if cached

@@ -223,8 +223,21 @@ pub fn run() {
         const HEAL_FLAG: &str = "cache.ewsCursorHealV1";
         let shared = db.shared();
         let prefs = crate::user_prefs::UserPrefsRepo::new(&shared);
-        let already_done = matches!(prefs.get(HEAL_FLAG).ok().flatten().as_deref(), Some("done"));
-        if !already_done {
+        // A FAILED flag read is not "not yet healed". Running the heal
+        // clears every EWS event cursor, which forces a full cold re-fetch on a
+        // boot where nothing was actually wrong. Skip and retry on the next
+        // boot instead — the flag stays unset either way, so nothing is lost.
+        let run_heal = match prefs.get(HEAL_FLAG) {
+            Ok(flag) => flag.as_deref() != Some("done"),
+            Err(err) => {
+                tracing::warn!(
+                    ?err,
+                    "EWS cursor heal: couldn't read the completion flag; will retry next boot",
+                );
+                false
+            }
+        };
+        if run_heal {
             match accounts::AccountsRepo::new(&shared).list() {
                 Ok(accts) => {
                     let mut healed = 0usize;
@@ -275,8 +288,21 @@ pub fn run() {
         const HEAL_FLAG: &str = "cache.ewsAttendeeHealV1";
         let shared = db.shared();
         let prefs = crate::user_prefs::UserPrefsRepo::new(&shared);
-        let already_done = matches!(prefs.get(HEAL_FLAG).ok().flatten().as_deref(), Some("done"));
-        if !already_done {
+        // A FAILED flag read is not "not yet healed". Running the heal
+        // clears every EWS event cursor, which forces a full cold re-fetch on a
+        // boot where nothing was actually wrong. Skip and retry on the next
+        // boot instead — the flag stays unset either way, so nothing is lost.
+        let run_heal = match prefs.get(HEAL_FLAG) {
+            Ok(flag) => flag.as_deref() != Some("done"),
+            Err(err) => {
+                tracing::warn!(
+                    ?err,
+                    "EWS attendee heal: couldn't read the completion flag; will retry next boot",
+                );
+                false
+            }
+        };
+        if run_heal {
             match accounts::AccountsRepo::new(&shared).list() {
                 Ok(accts) => {
                     let mut healed = 0usize;
@@ -327,8 +353,21 @@ pub fn run() {
         const HEAL_FLAG: &str = "cache.ewsCancelledSignalHealV2";
         let shared = db.shared();
         let prefs = crate::user_prefs::UserPrefsRepo::new(&shared);
-        let already_done = matches!(prefs.get(HEAL_FLAG).ok().flatten().as_deref(), Some("done"));
-        if !already_done {
+        // A FAILED flag read is not "not yet healed". Running the heal
+        // clears every EWS event cursor, which forces a full cold re-fetch on a
+        // boot where nothing was actually wrong. Skip and retry on the next
+        // boot instead — the flag stays unset either way, so nothing is lost.
+        let run_heal = match prefs.get(HEAL_FLAG) {
+            Ok(flag) => flag.as_deref() != Some("done"),
+            Err(err) => {
+                tracing::warn!(
+                    ?err,
+                    "EWS cancelled-signal heal: couldn't read the completion flag; will retry next boot",
+                );
+                false
+            }
+        };
+        if run_heal {
             match accounts::AccountsRepo::new(&shared).list() {
                 Ok(accts) => {
                     let mut healed = 0usize;
@@ -380,8 +419,21 @@ pub fn run() {
         const HEAL_FLAG: &str = "cache.contactsMultigetHealV2";
         let shared = db.shared();
         let prefs = crate::user_prefs::UserPrefsRepo::new(&shared);
-        let already_done = matches!(prefs.get(HEAL_FLAG).ok().flatten().as_deref(), Some("done"));
-        if !already_done {
+        // A FAILED flag read is not "not yet healed". Running the heal
+        // clears every account's contacts sync token, which forces a full cold re-fetch on a
+        // boot where nothing was actually wrong. Skip and retry on the next
+        // boot instead — the flag stays unset either way, so nothing is lost.
+        let run_heal = match prefs.get(HEAL_FLAG) {
+            Ok(flag) => flag.as_deref() != Some("done"),
+            Err(err) => {
+                tracing::warn!(
+                    ?err,
+                    "contacts heal: couldn't read the completion flag; will retry next boot",
+                );
+                false
+            }
+        };
+        if run_heal {
             match accounts::AccountsRepo::new(&shared).list() {
                 Ok(accts) => {
                     let mut healed = 0usize;

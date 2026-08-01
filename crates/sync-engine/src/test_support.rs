@@ -28,6 +28,10 @@ pub struct FakeStore {
     pub applied: Mutex<HashSet<String>>,
     pub conflicts: Mutex<Vec<NewConflict>>,
     pub e2e: bool,
+    /// Keys whose `get_pref` returns `Err` instead of a value. Lets a test
+    /// exercise the difference between "this pref is unset" and "the store
+    /// could not be read" — the two used to be the same thing to callers.
+    pub failing_pref_reads: Mutex<HashSet<String>>,
 }
 
 impl SyncStore for FakeStore {
@@ -51,6 +55,11 @@ impl SyncStore for FakeStore {
     }
 
     fn get_pref(&self, key: &str) -> Result<Option<String>, StoreError> {
+        if self.failing_pref_reads.lock().unwrap().contains(key) {
+            return Err(StoreError::Backend(format!(
+                "simulated read failure: {key}"
+            )));
+        }
         Ok(self.prefs.lock().unwrap().get(key).cloned())
     }
 

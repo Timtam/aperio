@@ -45,21 +45,34 @@ impl UserPrefsHostKeyVerifier {
         format!("{PREFIX}{host_port}")
     }
 
+    /// Look up the pinned fingerprint for `host_port`, or `None`
+    /// if nothing is pinned yet — surfacing a read failure as an
+    /// error. The COMPARING caller (`preview_sftp_host_key`) must
+    /// use this one: see [`Self::peek`] for why `None` is the
+    /// wrong answer there.
+    pub fn try_peek(&self, host_port: &str) -> crate::user_prefs::UserPrefsResult<Option<String>> {
+        UserPrefsRepo::new(&self.db).get(&Self::key_for(host_port))
+    }
+
     /// Look up the pinned fingerprint for `host_port`, or
-    /// `None` if nothing is pinned yet. Used by
-    /// `preview_sftp_host_key` (to classify a freshly-probed
-    /// fingerprint as New / Unchanged / Changed) and by
-    /// `pinned_sftp_fingerprint` (to thread the pin into the
-    /// plugin's init_config).
+    /// `None` if nothing is pinned yet — folding a read failure
+    /// into `None`.
+    ///
+    /// Only safe where an absent pin FAILS CLOSED: the adapter-build
+    /// path (`pinned_sftp_fingerprint`, the registry's
+    /// [`crate::registry::HostKeyPins`]) rejects an empty pin and
+    /// refuses to connect, so the worst a failed read does there is
+    /// send the user back to the trust dialog.
+    ///
+    /// It is NOT safe where the result is COMPARED against a
+    /// presented key: "no pin" classifies a CHANGED host key as
+    /// first use, which swaps the §19.5 MITM warning for the benign
+    /// first-use prompt and then overwrites the good pin with the
+    /// presented fingerprint. That path uses [`Self::try_peek`].
     pub fn peek(&self, host_port: &str) -> Option<String> {
-        let repo = UserPrefsRepo::new(&self.db);
-        match repo.get(&Self::key_for(host_port)) {
+        match self.try_peek(host_port) {
             Ok(s) => s,
             Err(err) => {
-                // A transient read failure shouldn't trap the
-                // user. Returning None lets the preview path
-                // fall back to the "first use" dialog, which is
-                // recoverable.
                 warn!(
                     ?err,
                     host_port = %host_port,
@@ -174,6 +187,25 @@ mod tests {
         let _ = v.peek("nas:22");
         // Still the same entry after multiple peeks.
         assert_eq!(v.peek("nas:22"), Some("SHA256:abc".into()));
+    }
+
+    #[test]
+    fn try_peek_reports_a_read_failure_instead_of_no_pin() {
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        let v = UserPrefsHostKeyVerifier::new(shared.clone());
+        v.record("nas:22", "SHA256:abc");
+        // Break the read the way a lock/corruption would.
+        shared
+            .lock()
+            .unwrap()
+            .execute_batch("ALTER TABLE user_prefs RENAME TO user_prefs_hidden;")
+            .unwrap();
+        // The lenient helper still says "nothing pinned" …
+        assert_eq!(v.peek("nas:22"), None);
+        // … but the comparing caller can tell the difference, which is what
+        // keeps a CHANGED key from being classified as first use.
+        assert!(v.try_peek("nas:22").is_err());
     }
 
     #[test]

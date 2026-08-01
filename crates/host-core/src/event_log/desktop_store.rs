@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use cal_adapter_local::{LocalAdapter, SnapshotApplyReport, SnapshotDump};
 use chrono::Utc;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use sync_engine::whitelist::{is_synced_key, SYNC_WHITELIST};
 use sync_engine::{NewConflict, SnapshotAccount, StoreError, SyncStore};
 
@@ -122,14 +122,20 @@ impl SyncStore for DesktopSyncStore {
                     }
                 }
             } else {
-                // Exact key — single row.
+                // Exact key — single row. `optional()` rather than `.ok()`:
+                // the dump is published as the authoritative settings state,
+                // so a key dropped by a failed read would look to every
+                // onboarding device like a setting the user never chose. The
+                // prefix branch above already propagates; this one has to say
+                // the same thing rather than return an incomplete `Ok`.
                 let value: Option<String> = conn
                     .query_row(
                         "SELECT value FROM user_prefs WHERE key = ?",
                         params![pattern],
                         |row| row.get(0),
                     )
-                    .ok();
+                    .optional()
+                    .map_err(|err| StoreError::Backend(format!("dump settings: {err}")))?;
                 if let Some(v) = value {
                     out.insert((*pattern).to_string(), v);
                 }

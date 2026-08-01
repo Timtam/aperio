@@ -275,8 +275,11 @@ impl Compactor {
         //     newest remote log could include a foreign log we haven't
         //     applied. Bounding by our own content stops the snapshot from
         //     advertising coverage of events it doesn't actually hold.
-        let own_newest = self.read_own_newest_log();
-        let cursor = self.read_cursor();
+        //   - Unreadable: both reads propagate rather than collapsing to the
+        //     `MIN_UTC` floor, which would look like "no content yet" and take
+        //     the brand-new-dataset branch below.
+        let own_newest = self.read_own_newest_log()?;
+        let cursor = self.read_cursor()?;
         let content_horizon = own_newest.max(cursor);
 
         // Refuse to compact when THIS device is itself behind the published GC
@@ -536,26 +539,38 @@ impl Compactor {
     /// Read a persisted RFC 3339 timestamp pref, or the `MIN_UTC` floor
     /// when absent/unparseable. Shared by the cursor + own-newest-log
     /// reads that anchor the content-bounded snapshot timestamp.
-    fn read_ts_pref(&self, key: &str) -> DateTime<Utc> {
-        self.store
+    ///
+    /// A failed READ is an error, not a floor. `MIN_UTC` means "this device
+    /// holds no content yet", which is a claim about the dataset made by a
+    /// device that could not read how far it had actually got.
+    ///
+    /// On a dataset whose meta already carries a `gc_horizon`, the stale guard
+    /// above catches that and refuses anyway — so the window this closes is the
+    /// narrower one where it does not: a dataset with no horizon yet, where the
+    /// floor takes the brand-new-dataset branch and stamps a snapshot as
+    /// covering everything. Refusing costs one skipped round, and the counters
+    /// are untouched, so the next round retries.
+    fn read_ts_pref(&self, key: &str) -> SyncResult<DateTime<Utc>> {
+        let raw = self
+            .store
             .get_pref(key)
-            .ok()
-            .flatten()
+            .map_err(|err| sync_core::SyncError::internal(format!("read {key}: {err}")))?;
+        Ok(raw
             .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
             .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or(DateTime::<Utc>::MIN_UTC)
+            .unwrap_or(DateTime::<Utc>::MIN_UTC))
     }
 
     /// This device's foreign fetch cursor — the newest foreign log it has
     /// applied. Bounds which foreign logs the GC may delete (only those at
     /// or below it are in the snapshot we built).
-    fn read_cursor(&self) -> DateTime<Utc> {
+    fn read_cursor(&self) -> SyncResult<DateTime<Utc>> {
         self.read_ts_pref(SYNC_CURSOR_PREF_KEY)
     }
 
     /// This device's newest own-written log timestamp. Together with the
     /// cursor it bounds `snapshot_ts` to real, held content.
-    fn read_own_newest_log(&self) -> DateTime<Utc> {
+    fn read_own_newest_log(&self) -> SyncResult<DateTime<Utc>> {
         self.read_ts_pref(SYNC_OWN_NEWEST_LOG_PREF_KEY)
     }
 
@@ -750,6 +765,33 @@ mod tests {
             .metadata
             .snapshot_timestamp;
         assert_eq!(meta.snapshot_timestamp, snap_ts);
+    }
+
+    #[tokio::test]
+    async fn compact_refuses_when_the_content_horizon_cant_be_read() {
+        // An unreadable cursor used to collapse to the MIN_UTC floor, which
+        // reads as "brand new dataset" and stamps the snapshot `now - 1s` —
+        // advertising coverage of foreign logs this device never applied. The
+        // round must fail instead, leaving the remote snapshot untouched.
+        let (store, compactor) = build_compactor();
+        store
+            .prefs
+            .lock()
+            .unwrap()
+            .insert(SYNC_CURSOR_PREF_KEY.into(), Utc::now().to_rfc3339());
+        store
+            .failing_pref_reads
+            .lock()
+            .unwrap()
+            .insert(SYNC_CURSOR_PREF_KEY.into());
+
+        let adapter = FakeAdapter::new();
+        assert!(compactor.compact_now(&adapter).await.is_err());
+        assert!(
+            adapter.snapshot.lock().unwrap().is_none(),
+            "no snapshot may be published on an unreadable horizon",
+        );
+        assert!(adapter.meta.lock().unwrap().is_none());
     }
 
     #[tokio::test]

@@ -285,13 +285,27 @@ pub async fn enumerate_external_triggers(
     // fallback below — would double-notify. Every other external provider
     // (CalDAV / Graph / EWS / Google / Vikunja / Todoist) doesn't self-notify,
     // so it stays in.
-    let device_accounts: std::collections::HashSet<String> = AccountsRepo::new(db)
-        .list()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|account| account.adapter_kind == AdapterKind::DEVICE_CALENDAR)
-        .map(|account| account.id)
-        .collect();
+    //
+    // An unreadable account list leaves the set EMPTY, i.e. nothing suppressed.
+    // That is the deliberate choice, not an oversight: the two directions trade
+    // a duplicate alert against a missing one, and a missing appointment
+    // reminder is the worse of the two. The scan re-runs on its own cadence, so
+    // the duplicates last at most one pass. Logged so it isn't silent.
+    let device_accounts: std::collections::HashSet<String> = match AccountsRepo::new(db).list() {
+        Ok(accounts) => accounts
+            .into_iter()
+            .filter(|account| account.adapter_kind == AdapterKind::DEVICE_CALENDAR)
+            .map(|account| account.id)
+            .collect(),
+        Err(err) => {
+            warn!(
+                ?err,
+                "reminder scan: couldn't list accounts; device-local calendars may \
+                 double-notify for this pass",
+            );
+            std::collections::HashSet::new()
+        }
+    };
 
     let mut acc: Vec<Trigger> = Vec::new();
 
@@ -550,11 +564,26 @@ pub fn enumerate_app_start_triggers(db: &SharedConn) -> Vec<Trigger> {
 /// Look up the user's "Settings → Kalender" default reminders for `calendar_id`
 /// (the key `useCalendarDefaultReminders` writes). Empty when nothing is
 /// configured — the wire reminders win as-is in that case.
+///
+/// A failed read also yields an empty list — there is nothing better to fall
+/// back to, and the callers treat empty as "no defaults configured". It means a
+/// configured default can go unapplied for one scan, so the failure is logged
+/// rather than swallowed; the next pass picks the setting up again.
 pub fn calendar_default_reminders(db: &SharedConn, calendar_id: &str) -> Vec<Reminder> {
     let key = format!("calendar.{}.defaultReminders", calendar_id);
     let repo = UserPrefsRepo::new(db);
-    let Ok(Some(raw)) = repo.get(&key) else {
-        return Vec::new();
+    let raw = match repo.get(&key) {
+        Ok(Some(raw)) => raw,
+        Ok(None) => return Vec::new(),
+        Err(err) => {
+            warn!(
+                ?err,
+                calendar_id = %calendar_id,
+                "couldn't read the calendar's default reminders; \
+                 treating this pass as if none were configured",
+            );
+            return Vec::new();
+        }
     };
     serde_json::from_str::<Vec<Reminder>>(&raw).unwrap_or_default()
 }

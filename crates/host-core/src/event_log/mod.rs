@@ -72,11 +72,19 @@ use crate::user_prefs::UserPrefsRepo;
 /// On a write failure (only a SQLite I/O hiccup) we warn and continue with the
 /// in-memory id; the next app start re-mints, which is the right "device looked
 /// like a new install" behaviour for a corrupted DB.
+///
+/// A READ failure is handled the same way but must NOT write: a locked or
+/// momentarily unreadable database is not a new install, and persisting a fresh
+/// id in that case would overwrite this device's real identity for good — it
+/// would re-register under a new name in `meta.json`, push under a new log
+/// filename, and orphan its own log for every peer. Leaving the stored row
+/// alone means the next start finds it again.
 pub fn load_or_mint_device_id(db: &SharedConn) -> DeviceId {
     let repo = UserPrefsRepo::new(db);
     match repo.get(DEVICE_ID_PREF_KEY) {
         Ok(Some(stored)) if !stored.is_empty() => DeviceId::from_string(stored),
-        _ => {
+        Ok(_) => {
+            // Genuinely absent (or an empty row): this IS a first start.
             let fresh = DeviceId::new();
             if let Err(err) = repo.set(DEVICE_ID_PREF_KEY, fresh.as_str()) {
                 warn!(
@@ -86,5 +94,62 @@ pub fn load_or_mint_device_id(db: &SharedConn) -> DeviceId {
             }
             fresh
         }
+        Err(err) => {
+            warn!(
+                ?err,
+                "couldn't read {DEVICE_ID_PREF_KEY}; running this session under a \
+                 transient id and leaving the stored one untouched",
+            );
+            DeviceId::new()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::DbHandle;
+    use tempfile::TempDir;
+
+    fn fresh_db() -> (TempDir, DbHandle) {
+        let dir = TempDir::new().unwrap();
+        let db = DbHandle::open(dir.path().join("test.sqlite")).unwrap();
+        (dir, db)
+    }
+
+    #[test]
+    fn first_start_mints_and_persists() {
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        let first = load_or_mint_device_id(&shared);
+        assert!(!first.as_str().is_empty());
+        // A second start reads the SAME id back.
+        assert_eq!(load_or_mint_device_id(&shared).as_str(), first.as_str());
+    }
+
+    #[test]
+    fn a_failed_read_leaves_the_stored_id_intact() {
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        let stored = load_or_mint_device_id(&shared);
+
+        // Break the read the way a lock/corruption would: with the table gone
+        // the SELECT errors instead of returning "no row".
+        shared
+            .lock()
+            .unwrap()
+            .execute_batch("ALTER TABLE user_prefs RENAME TO user_prefs_hidden;")
+            .unwrap();
+        let transient = load_or_mint_device_id(&shared);
+        assert_ne!(transient.as_str(), stored.as_str());
+
+        // The persisted identity survived the outage — the next start is this
+        // device again, not a stranger.
+        shared
+            .lock()
+            .unwrap()
+            .execute_batch("ALTER TABLE user_prefs_hidden RENAME TO user_prefs;")
+            .unwrap();
+        assert_eq!(load_or_mint_device_id(&shared).as_str(), stored.as_str());
     }
 }

@@ -2167,7 +2167,17 @@ pub async fn preview_sftp_host_key(
     .await?;
     let host_port = format!("{trimmed_host}:{port}");
     let verifier = UserPrefsHostKeyVerifier::new(db.shared());
-    let status = match verifier.peek(&host_port) {
+    // `try_peek`, not `peek`: this is the one place the pin is COMPARED. A
+    // read failure folded into `None` would classify a host key that CHANGED
+    // as first use — the user sees the benign TOFU prompt instead of the
+    // §19.5 alarm, confirms, and `trust_sftp_host_key` writes the presented
+    // fingerprint over a pin we could not read. Refuse the preview instead;
+    // nothing is pinned and nothing is connected until the user retries.
+    let stored = verifier.try_peek(&host_port).map_err(|err| CommandError {
+        code: "internal",
+        message: format!("read the pinned host key for {host_port}: {err}"),
+    })?;
+    let status = match stored {
         None => HostKeyPreviewStatus::New,
         Some(s) if s == probe.fingerprint => HostKeyPreviewStatus::Unchanged,
         Some(s) => HostKeyPreviewStatus::Changed { stored: s },

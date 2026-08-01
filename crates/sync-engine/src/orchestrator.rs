@@ -390,7 +390,7 @@ impl SyncOrchestrator {
             .flatten()
             // Fall back to the fetch cursor on pre-upgrade
             // datasets that don't have the new pref written yet.
-            .or_else(|| self.read_cursor());
+            .or_else(|| self.read_cursor().ok().flatten());
         let interval_minutes = self.read_interval_minutes();
         let e2e_enabled = self
             .store
@@ -544,7 +544,21 @@ impl SyncOrchestrator {
                 .devices
                 .get(self.local_device_id.as_str())
                 .is_some_and(|entry| entry.stale);
-            if flagged_stale || snapshot_backstop_trips(self.held_horizon(), meta) {
+            // An unreadable horizon must not decide this. Flooring would make
+            // the backstop trip and re-onboard the device; treating it as "not
+            // stale" leaves the flag from meta.json, which the peer computed
+            // from what this device last published.
+            let backstop = match self.held_horizon() {
+                Ok(horizon) => snapshot_backstop_trips(horizon, meta),
+                Err(err) => {
+                    warn!(
+                        ?err,
+                        "couldn't read this device's horizon; not tripping the backstop"
+                    );
+                    false
+                }
+            };
+            if flagged_stale || backstop {
                 match self.hooks.resume_from_stale(adapter.as_ref()).await {
                     Ok(()) => {
                         info!("§19.10: device was stale; auto-resumed via snapshot re-pull");
@@ -604,7 +618,7 @@ impl SyncOrchestrator {
         }
 
         // 2. Fetch + apply.
-        let cursor = self.cursor_for_fetch();
+        let cursor = self.cursor_for_fetch()?;
         match adapter.fetch_new_logs(&cursor).await {
             Ok(logs) => {
                 // Filter out our own device's logs. The remote
@@ -701,12 +715,21 @@ impl SyncOrchestrator {
         // Failures here are non-fatal: the next round retries, and a missed
         // heartbeat at worst means our entry looks slightly behind in
         // someone else's UI until then.
-        if let Err(err) = self
-            .hooks
-            .heartbeat(adapter.as_ref(), self.held_horizon(), round_meta.as_ref())
-            .await
-        {
-            warn!(?err, "meta.json heartbeat failed");
+        //
+        // Skipped entirely when the horizon cannot be read, rather than
+        // published as the `MIN_UTC` floor. See `held_horizon` — publishing "I
+        // have nothing" is what gets a device flagged stale and re-onboarded.
+        match self.held_horizon() {
+            Ok(horizon) => {
+                if let Err(err) = self
+                    .hooks
+                    .heartbeat(adapter.as_ref(), horizon, round_meta.as_ref())
+                    .await
+                {
+                    warn!(?err, "meta.json heartbeat failed");
+                }
+            }
+            Err(err) => warn!(?err, "skipping the heartbeat: horizon unreadable"),
         }
 
         // 5. (DESIGN.md §19.10 / §19.11.7) Sound-asset sync — pushes
@@ -920,7 +943,10 @@ impl SyncOrchestrator {
         // can read it without re-scanning the pending dir. Monotonic: only
         // advance, never regress (a swept/rotated-away file mustn't lower it).
         if let Some(ts) = newest_own {
-            if ts > self.read_own_newest_log() {
+            // Monotonic only against a horizon we could actually read. An
+            // unreadable one would compare against `MIN_UTC` and let a swept
+            // file lower the stored value.
+            if self.read_own_newest_log().is_ok_and(|held| ts > held) {
                 if let Err(err) = self
                     .store
                     .set_pref(SYNC_OWN_NEWEST_LOG_PREF_KEY, &ts.to_rfc3339())
@@ -937,26 +963,44 @@ impl SyncOrchestrator {
     /// own_newest_log)`. The §19.10 stale backstop compares this against the
     /// dataset's snapshot horizon — a device is behind only when BOTH its
     /// foreign cursor and its own newest log predate the snapshot.
-    fn held_horizon(&self) -> DateTime<Utc> {
-        self.cursor_for_fetch()
+    ///
+    /// Fails rather than flooring when either half cannot be read. This value
+    /// is PUBLISHED — it is what tells every other device how far this one has
+    /// got. `MIN_UTC` published as a held horizon says "I have nothing", so the
+    /// next peer to compact flags this device stale, and its next round is a
+    /// forced re-onboard through a full snapshot pull. A momentary lock is not
+    /// worth that. Saying nothing leaves the previous heartbeat standing, which
+    /// is merely slightly stale and self-corrects next round.
+    fn held_horizon(&self) -> SyncResult<DateTime<Utc>> {
+        Ok(self
+            .cursor_for_fetch()?
             .last_seen_log
-            .max(self.read_own_newest_log())
+            .max(self.read_own_newest_log()?))
     }
 
     /// Read the persisted newest own-written log timestamp, or `MIN_UTC`
     /// when this device has never written one.
-    fn read_own_newest_log(&self) -> DateTime<Utc> {
-        self.store
+    /// A missing pref floors to `MIN_UTC` — this device has genuinely written
+    /// nothing. A failed READ does not: see [`Self::held_horizon`]. An
+    /// unparseable value still floors, because a garbled timestamp is a value
+    /// this device wrote and cannot use, not a store that would not answer.
+    fn read_own_newest_log(&self) -> SyncResult<DateTime<Utc>> {
+        let raw = self
+            .store
             .get_pref(SYNC_OWN_NEWEST_LOG_PREF_KEY)
-            .ok()
-            .flatten()
+            .map_err(|err| {
+                sync_core::SyncError::internal(format!(
+                    "read {SYNC_OWN_NEWEST_LOG_PREF_KEY}: {err}"
+                ))
+            })?;
+        Ok(raw
             .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
             .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or(DateTime::<Utc>::MIN_UTC)
+            .unwrap_or(DateTime::<Utc>::MIN_UTC))
     }
 
-    fn cursor_for_fetch(&self) -> DeviceCursor {
-        let raw = self.read_cursor();
+    fn cursor_for_fetch(&self) -> SyncResult<DeviceCursor> {
+        let raw = self.read_cursor()?;
         // Exclude our own device's files at the LISTING stage: they sit
         // above the cursor (it only advances on foreign logs) and were
         // re-downloaded in full every round just for the post-fetch
@@ -971,18 +1015,24 @@ impl SyncOrchestrator {
             .into_iter()
             .map(|(name, len)| sync_core::KnownLogLength { name, len })
             .collect();
-        match raw.and_then(|s| DateTime::parse_from_rfc3339(&s).ok()) {
-            Some(ts) => DeviceCursor {
-                last_seen_log: ts.with_timezone(&Utc),
-                exclude_device,
-                known_lengths,
+        Ok(
+            match raw.and_then(|s| DateTime::parse_from_rfc3339(&s).ok()) {
+                Some(ts) => DeviceCursor {
+                    last_seen_log: ts.with_timezone(&Utc),
+                    exclude_device,
+                    known_lengths,
+                },
+                // Absent or unparseable: start from the epoch and re-apply. The
+                // apply side is idempotent, so this costs bandwidth, not
+                // correctness — which is why it stays a fallback while an
+                // unreadable STORE does not.
+                None => DeviceCursor {
+                    exclude_device,
+                    known_lengths,
+                    ..DeviceCursor::epoch()
+                },
             },
-            None => DeviceCursor {
-                exclude_device,
-                known_lengths,
-                ..DeviceCursor::epoch()
-            },
-        }
+        )
     }
 
     /// The persisted (filename → applied byte length) map backing
@@ -1012,8 +1062,10 @@ impl SyncOrchestrator {
         }
     }
 
-    fn read_cursor(&self) -> Option<String> {
-        self.store.get_pref(SYNC_CURSOR_PREF_KEY).ok().flatten()
+    fn read_cursor(&self) -> SyncResult<Option<String>> {
+        self.store.get_pref(SYNC_CURSOR_PREF_KEY).map_err(|err| {
+            sync_core::SyncError::internal(format!("read {SYNC_CURSOR_PREF_KEY}: {err}"))
+        })
     }
 
     fn save_cursor(&self, ts: DateTime<Utc>) -> SyncResult<()> {

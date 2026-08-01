@@ -165,10 +165,18 @@ impl DbHandle {
         //   writer. Falls back automatically on read-only file systems.
         // - synchronous=NORMAL: durable enough for desktop use, much faster
         //   than FULL.
+        // - busy_timeout: the same 5s wait the read pool takes. In-process
+        //   contention serialises on the `SharedConn` mutex and never reaches
+        //   SQLite, but a SECOND holder of the file — another app instance, a
+        //   backup/AV scanner on Windows, a non-passive checkpoint — does, and
+        //   without a busy handler every one of those returns SQLITE_BUSY
+        //   instantly. Callers then have to decide what a momentary lock means
+        //   for them; waiting it out means most never have to.
         conn.execute_batch(
             "PRAGMA foreign_keys = ON;
              PRAGMA journal_mode = WAL;
-             PRAGMA synchronous = NORMAL;",
+             PRAGMA synchronous = NORMAL;
+             PRAGMA busy_timeout = 5000;",
         )?;
 
         // Bring the schema up to date BEFORE sharing the connection — the

@@ -40,13 +40,21 @@ impl<'a> UserPrefsRepo<'a> {
 
     /// Read the value for `key`. Returns `None` when no row exists
     /// — the caller decides what the default behaviour should be.
+    ///
+    /// `None` means exactly that: no row. It used to also mean "the read
+    /// failed", because the query ended in `.ok()`, and every failure a locked
+    /// or damaged database can produce arrived as an unset preference. Callers
+    /// cannot tell those apart and reasonably assume the first, so a moment of
+    /// contention read as a user who had never chosen anything — and code that
+    /// writes a default back in that case would have made it permanent.
     pub fn get(&self, key: &str) -> UserPrefsResult<Option<String>> {
         let conn = self.db.lock().expect("db mutex poisoned");
         let mut stmt = conn.prepare("SELECT value FROM user_prefs WHERE key = ?")?;
-        let row = stmt
-            .query_row(params![key], |row| row.get::<_, String>(0))
-            .ok();
-        Ok(row)
+        match stmt.query_row(params![key], |row| row.get::<_, String>(0)) {
+            Ok(value) => Ok(Some(value)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(err) => Err(err.into()),
+        }
     }
 
     /// Upsert a key/value pair. We use the SQLite `ON CONFLICT … DO

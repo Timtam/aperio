@@ -323,8 +323,19 @@ fn calendar_supports_event_color(cache: &CacheStore, account: &str, calendar_id:
 /// Resolve an event's `color_label` to the `#rrggbb` a color-capable provider
 /// stores in `COLOR`. `None` (no label, or the label was deleted) clears the
 /// provider color on the next write.
-fn resolve_color_hex(adapter: &LocalAdapter, label: Option<&ColorLabelId>) -> Option<String> {
-    adapter.resolve_label_to_hex(label?.as_str()).ok().flatten()
+///
+/// The lookup is a real query, and its result is written straight to the
+/// provider — so a failed read must not degrade to `None`. That would clear a
+/// colour the user never touched, on the remote, and propagate the loss to
+/// every device. Failing the whole save leaves the event as it was.
+fn resolve_color_hex(
+    adapter: &LocalAdapter,
+    label: Option<&ColorLabelId>,
+) -> CommandResult<Option<String>> {
+    let Some(label) = label else {
+        return Ok(None);
+    };
+    Ok(adapter.resolve_label_to_hex(label.as_str())?)
 }
 
 /// Map each event's native `color_hex` (set by a color-capable adapter from
@@ -502,7 +513,7 @@ pub async fn create_event(
         // writes a native RFC 7986 COLOR. Non-capable providers keep the
         // color as a host-local override (set separately via set_event_color).
         if calendar_supports_event_color(&cache, &account, &request.calendar_id) {
-            new_event.color_hex = resolve_color_hex(&adapter, new_event.color_label.as_ref());
+            new_event.color_hex = resolve_color_hex(&adapter, new_event.color_label.as_ref())?;
         }
         ext.create_event(&request.calendar_id, new_event).await?
     };
@@ -616,7 +627,7 @@ pub async fn update_event(
         if target_account != LOCAL_ID
             && calendar_supports_event_color(&cache, &target_account, &event.calendar_id)
         {
-            new_payload.color_hex = resolve_color_hex(&adapter, new_payload.color_label.as_ref());
+            new_payload.color_hex = resolve_color_hex(&adapter, new_payload.color_label.as_ref())?;
         }
 
         let created = if target_account == LOCAL_ID {
@@ -717,7 +728,7 @@ pub async fn update_event(
         if capable {
             // Color-capable provider: resolve the label to a hex so the
             // adapter writes (or clears) the native RFC 7986 COLOR.
-            event.color_hex = resolve_color_hex(&adapter, event.color_label.as_ref());
+            event.color_hex = resolve_color_hex(&adapter, event.color_label.as_ref())?;
         }
         let updated = ext.update_event(event).await?;
         if capable {

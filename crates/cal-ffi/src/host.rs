@@ -4832,7 +4832,19 @@ impl Host {
                 detail: format!("host-key probe blob: {e}"),
             })?;
         let host_port = format!("{host}:{}", args.port);
-        let status = match UserPrefsHostKeyVerifier::new(self.db.shared()).peek(&host_port) {
+        // `try_peek`, not `peek`: this is the one place the pin is COMPARED. A
+        // read failure folded into `None` would classify a host key that
+        // CHANGED as first use — the user sees the benign TOFU prompt instead
+        // of the §19.5 alarm, confirms, and `trust_sftp_host_key` writes the
+        // presented fingerprint over a pin we could not read. Refuse the
+        // preview instead; nothing is pinned and nothing is connected until
+        // the user retries.
+        let stored = UserPrefsHostKeyVerifier::new(self.db.shared())
+            .try_peek(&host_port)
+            .map_err(|err| StoreError::Storage {
+                detail: format!("read the pinned host key for {host_port}: {err}"),
+            })?;
+        let status = match stored {
             None => serde_json::json!({ "kind": "new" }),
             Some(ref s) if *s == probe.fingerprint => serde_json::json!({ "kind": "unchanged" }),
             Some(s) => serde_json::json!({ "kind": "changed", "stored": s }),

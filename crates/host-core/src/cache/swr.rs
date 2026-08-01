@@ -299,9 +299,29 @@ pub async fn refresh_events(
                 // visible count with each retry's different skip set.
                 let mut changes = cs.changes;
                 if !cs.unfetched.is_empty() {
-                    let preserved = cache
-                        .read_events_by_native(account, calendar, &cs.unfetched)
-                        .unwrap_or_default();
+                    // The cache is the ONLY place these rows still exist. An
+                    // empty result here is indistinguishable from "nothing was
+                    // cached", and the replace below would then delete them
+                    // while `set_token` advanced the cursor past the deletion —
+                    // they would never come back. So a read failure abandons
+                    // the round instead: snapshot and token both stay as they
+                    // were, and the next refresh retries from the same point.
+                    let preserved =
+                        match cache.read_events_by_native(account, calendar, &cs.unfetched) {
+                            Ok(rows) => rows,
+                            Err(err) => {
+                                tracing::warn!(
+                                    target: "aperio::cache",
+                                    account = %account,
+                                    calendar = %calendar,
+                                    skipped = cs.unfetched.len(),
+                                    ?err,
+                                    "couldn't read the rows the adapter skipped; \
+                                     leaving the cached snapshot and its token untouched",
+                                );
+                                return Ok(false);
+                            }
+                        };
                     let kept: Vec<_> = {
                         let fetched_ids: std::collections::HashSet<&str> =
                             changes.iter().map(|e| e.id.as_str()).collect();
