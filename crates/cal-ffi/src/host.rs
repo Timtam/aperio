@@ -1443,124 +1443,45 @@ impl Host {
     /// non-empty inline secret is written — an omitted/empty one keeps the
     /// stored keychain entry (the reuse contract). The `_` arm is unreachable
     /// (the builder rejects unknown kinds before this runs).
+    /// Write the chosen target down, through the table shared with the desktop
+    /// host (`host_core::sync_target`), which owns the per-kind knowledge and
+    /// the tests that cover it.
+    ///
+    /// All this does is flatten the typed request into the value map that table
+    /// takes. There is no branching on kind here, on purpose: this host and the
+    /// desktop each used to carry their own six-arm match, and the two had
+    /// drifted — one storing credentials for an authentication method the user
+    /// had not chosen, the other writing a sentinel most readers never
+    /// recognised. Both were repaired before this moved, so the move itself
+    /// changes no behaviour.
     fn persist_sync_config(&self, req: &ConfigureSyncRequest) -> Result<(), StoreError> {
         let shared = self.db.shared();
         let prefs = UserPrefsRepo::new(&shared);
-        match req.kind.as_str() {
-            "local" => {
-                let path = req.path.as_deref().unwrap_or_default().trim();
-                prefs.set(PREF_ADAPTER_KIND, "local").map_err(storage_err)?;
-                prefs.set(PREF_LOCAL_PATH, path).map_err(storage_err)?;
+
+        let mut values = serde_json::Map::new();
+        let mut put = |key: &str, value: Option<&str>| {
+            if let Some(v) = value {
+                values.insert(key.to_string(), serde_json::Value::String(v.to_string()));
             }
-            "webdav" => {
-                let url = req.url.as_deref().unwrap_or_default().trim();
-                let user = req.user.as_deref().unwrap_or_default().trim();
-                prefs
-                    .set(PREF_ADAPTER_KIND, "webdav")
-                    .map_err(storage_err)?;
-                prefs.set(PREF_WEBDAV_URL, url).map_err(storage_err)?;
-                prefs.set(PREF_WEBDAV_USER, user).map_err(storage_err)?;
-                if let Some(pw) = req.password.as_deref().map(str::trim) {
-                    if !pw.is_empty() {
-                        self.secret_store
-                            .store(WEBDAV_SECRET_ACCOUNT, SecretSlot::Password, pw)
-                            .map_err(storage_err)?;
-                    }
-                }
-            }
-            "ftp" => {
-                let host = req.host.as_deref().unwrap_or_default().trim();
-                let user = req.user.as_deref().unwrap_or_default().trim();
-                let port = req.port.unwrap_or(21);
-                let path = req.path.as_deref().unwrap_or_default().trim();
-                let mode = req.mode.as_deref().unwrap_or("explicit").trim();
-                prefs.set(PREF_ADAPTER_KIND, "ftp").map_err(storage_err)?;
-                prefs.set(PREF_FTP_HOST, host).map_err(storage_err)?;
-                prefs
-                    .set(PREF_FTP_PORT, &port.to_string())
-                    .map_err(storage_err)?;
-                prefs.set(PREF_FTP_USER, user).map_err(storage_err)?;
-                prefs.set(PREF_FTP_PATH, path).map_err(storage_err)?;
-                prefs.set(PREF_FTP_MODE, mode).map_err(storage_err)?;
-                if let Some(pw) = req.password.as_deref().map(str::trim) {
-                    if !pw.is_empty() {
-                        self.secret_store
-                            .store(FTP_SECRET_ACCOUNT, SecretSlot::Password, pw)
-                            .map_err(storage_err)?;
-                    }
-                }
-            }
-            "dropbox" => {
-                let client_id = req.client_id.as_deref().unwrap_or_default().trim();
-                let client_secret = req.client_secret.as_deref().unwrap_or_default().trim();
-                let path = req.path.as_deref().unwrap_or_default().trim();
-                prefs
-                    .set(PREF_ADAPTER_KIND, "dropbox")
-                    .map_err(storage_err)?;
-                prefs
-                    .set(PREF_DROPBOX_CLIENT_ID, client_id)
-                    .map_err(storage_err)?;
-                prefs
-                    .set(PREF_DROPBOX_CLIENT_SECRET, client_secret)
-                    .map_err(storage_err)?;
-                prefs.set(PREF_DROPBOX_PATH, path).map_err(storage_err)?;
-            }
-            "googledrive" => {
-                let client_id = req.client_id.as_deref().unwrap_or_default().trim();
-                let client_secret = req.client_secret.as_deref().unwrap_or_default().trim();
-                let folder_name = req.folder_name.as_deref().unwrap_or_default().trim();
-                prefs
-                    .set(PREF_ADAPTER_KIND, "googledrive")
-                    .map_err(storage_err)?;
-                prefs
-                    .set(PREF_GOOGLEDRIVE_CLIENT_ID, client_id)
-                    .map_err(storage_err)?;
-                prefs
-                    .set(PREF_GOOGLEDRIVE_CLIENT_SECRET, client_secret)
-                    .map_err(storage_err)?;
-                prefs
-                    .set(PREF_GOOGLEDRIVE_FOLDER_NAME, folder_name)
-                    .map_err(storage_err)?;
-            }
-            "sftp" => {
-                let host = req.host.as_deref().unwrap_or_default().trim();
-                let user = req.user.as_deref().unwrap_or_default().trim();
-                let port = req.port.unwrap_or(22);
-                let path = req.path.as_deref().unwrap_or_default().trim();
-                let auth_method = req.auth_method.as_deref().unwrap_or("password").trim();
-                prefs.set(PREF_ADAPTER_KIND, "sftp").map_err(storage_err)?;
-                prefs.set(PREF_SFTP_HOST, host).map_err(storage_err)?;
-                prefs
-                    .set(PREF_SFTP_PORT, &port.to_string())
-                    .map_err(storage_err)?;
-                prefs.set(PREF_SFTP_USER, user).map_err(storage_err)?;
-                prefs.set(PREF_SFTP_PATH, path).map_err(storage_err)?;
-                prefs
-                    .set(PREF_SFTP_AUTH_METHOD, auth_method)
-                    .map_err(storage_err)?;
-                if auth_method == "key" {
-                    let key_path = req.key_path.as_deref().unwrap_or_default().trim();
-                    prefs
-                        .set(PREF_SFTP_KEY_PATH, key_path)
-                        .map_err(storage_err)?;
-                    if let Some(pp) = req.key_passphrase.as_deref().map(str::trim) {
-                        if !pp.is_empty() {
-                            self.secret_store
-                                .store(SFTP_KEY_SECRET_ACCOUNT, SecretSlot::Password, pp)
-                                .map_err(storage_err)?;
-                        }
-                    }
-                } else if let Some(pw) = req.password.as_deref().map(str::trim) {
-                    if !pw.is_empty() {
-                        self.secret_store
-                            .store(SFTP_SECRET_ACCOUNT, SecretSlot::Password, pw)
-                            .map_err(storage_err)?;
-                    }
-                }
-            }
-            _ => {}
+        };
+        put("path", req.path.as_deref());
+        put("url", req.url.as_deref());
+        put("user", req.user.as_deref());
+        put("password", req.password.as_deref());
+        put("host", req.host.as_deref());
+        put("mode", req.mode.as_deref());
+        put("client_id", req.client_id.as_deref());
+        put("client_secret", req.client_secret.as_deref());
+        put("folder_name", req.folder_name.as_deref());
+        put("auth_method", req.auth_method.as_deref());
+        put("key_path", req.key_path.as_deref());
+        put("key_passphrase", req.key_passphrase.as_deref());
+        if let Some(port) = req.port {
+            values.insert("port".to_string(), serde_json::Value::from(port));
         }
-        Ok(())
+
+        host_core::sync_target::persist(&prefs, self.secret_store.as_ref(), &req.kind, &values)
+            .map_err(storage_err)
     }
 
     /// Task-list twin of [`Host::route`]: `None` is the local branch (the
