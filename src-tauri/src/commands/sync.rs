@@ -63,12 +63,6 @@ use cal_core::CalendarFeature;
 // `aperio_plugin_create` descriptor + `plugin.json`. Centralised
 // here so the per-kind plugin dispatch matches each plugin
 // verbatim.
-const PLUGIN_ID_LOCAL: &str = "com.aperio.sync-adapter-local";
-const PLUGIN_ID_WEBDAV: &str = "com.aperio.sync-adapter-webdav";
-const PLUGIN_ID_FTP: &str = "com.aperio.sync-adapter-ftp";
-const PLUGIN_ID_SFTP: &str = "com.aperio.sync-adapter-sftp";
-const PLUGIN_ID_DROPBOX: &str = "com.aperio.sync-adapter-dropbox";
-const PLUGIN_ID_GOOGLEDRIVE: &str = "com.aperio.sync-adapter-googledrive";
 
 /// Look up the user-pinned SFTP host-key fingerprint (§19.5)
 /// for the given `host:port` and surface it as the plugin's
@@ -119,10 +113,6 @@ fn open_sync_plugin(
     Ok(Arc::new(adapter))
 }
 
-/// `user_prefs` key naming the currently-configured adapter
-/// family. Empty / missing → no adapter, sync disabled.
-const PREF_ADAPTER_KIND: &str = "sync.adapter.kind";
-
 /// Whether this looks like a FRESH instance that should be offered the
 /// first-launch wizard (§19.11): no EXTERNAL account configured, no sync
 /// target set, and an empty local store (no task lists, no calendars).
@@ -166,95 +156,12 @@ pub async fn is_fresh_instance(
     Ok(true)
 }
 
-/// Family-specific config (per-kind sub-key). For `kind="local"`
-/// we just need a filesystem path.
-const PREF_LOCAL_PATH: &str = "sync.adapter.local.path";
-
-/// WebDAV adapter config keys. The URL + user live in user_prefs
-/// (device-local; never propagated); the password is stored in the
-/// platform keychain via the `secrets` module against a fixed
-/// pseudo-account id so we get a single managed slot.
-const PREF_WEBDAV_URL: &str = "sync.adapter.webdav.url";
-const PREF_WEBDAV_USER: &str = "sync.adapter.webdav.user";
-
-/// SFTP adapter config keys. Same device-local / never-synced
-/// guarantee as the WebDAV pair. Password / key passphrase live
-/// in the keychain under a separate pseudo-account.
-const PREF_SFTP_HOST: &str = "sync.adapter.sftp.host";
-const PREF_SFTP_PORT: &str = "sync.adapter.sftp.port";
-const PREF_SFTP_USER: &str = "sync.adapter.sftp.user";
-const PREF_SFTP_PATH: &str = "sync.adapter.sftp.path";
-/// `"password"` or `"key"` — selects which auth variant the
-/// adapter builds. Mirrors the frontend's radio.
-const PREF_SFTP_AUTH_METHOD: &str = "sync.adapter.sftp.authMethod";
-/// Absolute path to the SSH private key file when `authMethod`
-/// is "key". The path is local-only, not a secret — it can live
-/// in user_prefs without going through the keychain.
-const PREF_SFTP_KEY_PATH: &str = "sync.adapter.sftp.keyPath";
-
-/// Pseudo-account id used to store the WebDAV password in the
-/// platform keychain. The `secrets` module is account-scoped; we
-/// use this fixed string so the sync adapter has its own managed
-/// keychain entry independent of any user-facing account row.
-const WEBDAV_SECRET_ACCOUNT: &str = "sync.adapter.webdav";
-
-/// Pseudo-account id for the SFTP password, separate from the
-/// WebDAV one so switching backends doesn't accidentally invalidate
-/// the other family's stored credential.
-const SFTP_SECRET_ACCOUNT: &str = "sync.adapter.sftp";
-
-/// Pseudo-account id for the SSH-key passphrase. Stored in its
-/// own slot so a user that switches from password to key auth
-/// (or vice versa) doesn't clobber the inactive credential.
-const SFTP_KEY_SECRET_ACCOUNT: &str = "sync.adapter.sftp.key";
-
-/// FTPS adapter config keys. Same device-local / never-synced
-/// guarantee as the SFTP family. The password lives in the
-/// keychain under FTP_SECRET_ACCOUNT.
-const PREF_FTP_HOST: &str = "sync.adapter.ftp.host";
-const PREF_FTP_PORT: &str = "sync.adapter.ftp.port";
-const PREF_FTP_USER: &str = "sync.adapter.ftp.user";
-const PREF_FTP_PATH: &str = "sync.adapter.ftp.path";
-/// `"explicit"` or `"implicit"` — picks the TLS handshake
-/// timing. Mirrors the frontend's mode dropdown.
-const PREF_FTP_MODE: &str = "sync.adapter.ftp.mode";
-
-/// Pseudo-account id for the FTPS password.
-const FTP_SECRET_ACCOUNT: &str = "sync.adapter.ftp";
-
-/// Dropbox adapter config keys. The OAuth refresh token lives
-/// in the keychain under DROPBOX_SECRET_ACCOUNT; the
-/// non-secret app-config bits sit here so they survive a
-/// re-launch.
-const PREF_DROPBOX_CLIENT_ID: &str = "sync.adapter.dropbox.clientId";
-const PREF_DROPBOX_CLIENT_SECRET: &str = "sync.adapter.dropbox.clientSecret";
-const PREF_DROPBOX_PATH: &str = "sync.adapter.dropbox.path";
-
-/// Pseudo-account id for the Dropbox refresh token.
-const DROPBOX_SECRET_ACCOUNT: &str = "sync.adapter.dropbox";
-
-/// Google Drive adapter config keys. Same shape as the
-/// Dropbox set; the refresh token lives in the keychain
-/// under GOOGLEDRIVE_SECRET_ACCOUNT.
-const PREF_GOOGLEDRIVE_CLIENT_ID: &str = "sync.adapter.googledrive.clientId";
-const PREF_GOOGLEDRIVE_CLIENT_SECRET: &str = "sync.adapter.googledrive.clientSecret";
-const PREF_GOOGLEDRIVE_FOLDER_NAME: &str = "sync.adapter.googledrive.folderName";
-
-/// Pseudo-account id for the Google Drive refresh token.
-const GOOGLEDRIVE_SECRET_ACCOUNT: &str = "sync.adapter.googledrive";
-
 /// `user_prefs` key flagging whether the current sync dataset is
 /// E2E-encrypted. Now owned by `host_core::credential_sync` (the single
 /// auditable home for the credential-sync gate, shared with the mobile
 /// host); re-exported here so existing `commands::PREF_E2E_ENABLED`
 /// references + the `pub use sync::*` surface keep resolving.
 pub use host_core::credential_sync::PREF_E2E_ENABLED;
-
-/// Pseudo-account id for the cross-device sync encryption key.
-/// Different from the WebDAV password slot so disabling sync
-/// encryption doesn't accidentally invalidate the WebDAV
-/// credentials (or vice versa).
-const E2E_SECRET_ACCOUNT: &str = "sync.adapter.e2e";
 
 /// Request body for [`configure_sync_adapter`] and the onboarding
 /// commands. The kind is flattened so the frontend can build:
@@ -2692,3 +2599,19 @@ pub async fn get_pinned_sftp_host_key(
     let verifier = UserPrefsHostKeyVerifier::new(shared);
     Ok(verifier.peek(trimmed))
 }
+/// The sync-target names, owned by `host_core::sync_target` so this host and
+/// the other one cannot drift apart. Aliased where the local spelling differed,
+/// which keeps this commit to the declarations themselves.
+use host_core::sync_target::{
+    PLUGIN_ID_DROPBOX, PLUGIN_ID_FTP, PLUGIN_ID_GOOGLEDRIVE, PLUGIN_ID_LOCAL, PLUGIN_ID_SFTP,
+    PLUGIN_ID_WEBDAV, PREF_ADAPTER_KIND, PREF_DROPBOX_CLIENT_ID, PREF_DROPBOX_CLIENT_SECRET,
+    PREF_DROPBOX_PATH, PREF_FTP_HOST, PREF_FTP_MODE, PREF_FTP_PATH, PREF_FTP_PORT, PREF_FTP_USER,
+    PREF_GOOGLEDRIVE_CLIENT_ID, PREF_GOOGLEDRIVE_CLIENT_SECRET, PREF_GOOGLEDRIVE_FOLDER_NAME,
+    PREF_LOCAL_PATH, PREF_SFTP_AUTH_METHOD, PREF_SFTP_HOST, PREF_SFTP_KEY_PATH, PREF_SFTP_PATH,
+    PREF_SFTP_PORT, PREF_SFTP_USER, PREF_WEBDAV_URL, PREF_WEBDAV_USER,
+    SECRET_ACCOUNT_DROPBOX as DROPBOX_SECRET_ACCOUNT, SECRET_ACCOUNT_E2E as E2E_SECRET_ACCOUNT,
+    SECRET_ACCOUNT_FTP as FTP_SECRET_ACCOUNT,
+    SECRET_ACCOUNT_GOOGLEDRIVE as GOOGLEDRIVE_SECRET_ACCOUNT,
+    SECRET_ACCOUNT_SFTP as SFTP_SECRET_ACCOUNT, SECRET_ACCOUNT_SFTP_KEY as SFTP_KEY_SECRET_ACCOUNT,
+    SECRET_ACCOUNT_WEBDAV as WEBDAV_SECRET_ACCOUNT,
+};

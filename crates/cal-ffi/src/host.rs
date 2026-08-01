@@ -87,49 +87,6 @@ use sync_core::{
 use sync_engine::{EventLogWriter, SecretError, SecretSlot, SecretStore, SyncOrchestrator};
 use vc_core::NewMeeting;
 
-/// Sync-adapter pref keys (device-local; never propagated). Match the desktop
-/// `commands::sync` keys so the same SQLite row layout serves both backends.
-const PREF_ADAPTER_KIND: &str = "sync.adapter.kind";
-const PREF_LOCAL_PATH: &str = "sync.adapter.local.path";
-/// WebDAV adapter config keys. The URL + user are device-local prefs (never
-/// propagated); the password lives in the keychain under a fixed pseudo-account
-/// so the adapter owns one managed slot independent of any user account row.
-const PREF_WEBDAV_URL: &str = "sync.adapter.webdav.url";
-const PREF_WEBDAV_USER: &str = "sync.adapter.webdav.user";
-const WEBDAV_SECRET_ACCOUNT: &str = "sync.adapter.webdav";
-/// FTPS adapter config keys. Same device-local / never-synced guarantee as the
-/// WebDAV pair; the password lives in the keychain under FTP_SECRET_ACCOUNT.
-const PREF_FTP_HOST: &str = "sync.adapter.ftp.host";
-const PREF_FTP_PORT: &str = "sync.adapter.ftp.port";
-const PREF_FTP_USER: &str = "sync.adapter.ftp.user";
-const PREF_FTP_PATH: &str = "sync.adapter.ftp.path";
-const PREF_FTP_MODE: &str = "sync.adapter.ftp.mode";
-const FTP_SECRET_ACCOUNT: &str = "sync.adapter.ftp";
-/// Dropbox / Google Drive OAuth sync-adapter keys. client_id (+ Google's
-/// secret) + the dataset path/folder are device-local prefs; the refresh token
-/// lives in the keychain under a fixed pseudo-account (one managed slot per
-/// adapter kind, divorced from any user account row — same keying as desktop).
-const PREF_DROPBOX_CLIENT_ID: &str = "sync.adapter.dropbox.clientId";
-const PREF_DROPBOX_CLIENT_SECRET: &str = "sync.adapter.dropbox.clientSecret";
-const PREF_DROPBOX_PATH: &str = "sync.adapter.dropbox.path";
-const DROPBOX_SECRET_ACCOUNT: &str = "sync.adapter.dropbox";
-const PREF_GOOGLEDRIVE_CLIENT_ID: &str = "sync.adapter.googledrive.clientId";
-const PREF_GOOGLEDRIVE_CLIENT_SECRET: &str = "sync.adapter.googledrive.clientSecret";
-const PREF_GOOGLEDRIVE_FOLDER_NAME: &str = "sync.adapter.googledrive.folderName";
-const GOOGLEDRIVE_SECRET_ACCOUNT: &str = "sync.adapter.googledrive";
-/// SFTP adapter keys. host/port/user/path/auth-method/key-path are device-local
-/// prefs; the password (or SSH-key passphrase) lives in the keychain under one
-/// of two pseudo-accounts so switching auth methods doesn't clobber the other
-/// family's stored credential. The trusted host-key fingerprint is NOT here —
-/// it's in the shared host-core `UserPrefsHostKeyVerifier` (user_prefs
-/// `sync.adapter.sftp.knownHosts.<host:port>`, device-local, §19.5 TOFU).
-const PREF_SFTP_HOST: &str = "sync.adapter.sftp.host";
-const PREF_SFTP_PORT: &str = "sync.adapter.sftp.port";
-const PREF_SFTP_USER: &str = "sync.adapter.sftp.user";
-const PREF_SFTP_PATH: &str = "sync.adapter.sftp.path";
-const PREF_SFTP_AUTH_METHOD: &str = "sync.adapter.sftp.authMethod";
-const PREF_SFTP_KEY_PATH: &str = "sync.adapter.sftp.keyPath";
-
 /// Non-secret summary of the configured sync target — its kind plus a human
 /// "detail" string (user@url / host:port/path / folder), for the Settings
 /// "connected" card. Serializes to `null` (Option::None) when nothing is
@@ -139,20 +96,25 @@ struct SyncAdapterSummary {
     kind: String,
     detail: String,
 }
-const SFTP_SECRET_ACCOUNT: &str = "sync.adapter.sftp";
-const SFTP_KEY_SECRET_ACCOUNT: &str = "sync.adapter.sftp.key";
 /// Plugin ids of the statically-embedded sync adapters this host configures.
+/// The sync-target names, owned by `host_core::sync_target` so this host and
+/// the other one cannot drift apart. Aliased where the local spelling differed,
+/// which keeps this commit to the declarations themselves.
+use host_core::sync_target::{
+    PLUGIN_ID_DROPBOX, PLUGIN_ID_FTP, PLUGIN_ID_GOOGLEDRIVE, PLUGIN_ID_SFTP, PLUGIN_ID_WEBDAV,
+    PREF_ADAPTER_KIND, PREF_DROPBOX_CLIENT_ID, PREF_DROPBOX_CLIENT_SECRET, PREF_DROPBOX_PATH,
+    PREF_FTP_HOST, PREF_FTP_MODE, PREF_FTP_PATH, PREF_FTP_PORT, PREF_FTP_USER,
+    PREF_GOOGLEDRIVE_CLIENT_ID, PREF_GOOGLEDRIVE_CLIENT_SECRET, PREF_GOOGLEDRIVE_FOLDER_NAME,
+    PREF_LOCAL_PATH, PREF_SFTP_AUTH_METHOD, PREF_SFTP_HOST, PREF_SFTP_KEY_PATH, PREF_SFTP_PATH,
+    PREF_SFTP_PORT, PREF_SFTP_USER, PREF_WEBDAV_URL, PREF_WEBDAV_USER,
+    SECRET_ACCOUNT_DROPBOX as DROPBOX_SECRET_ACCOUNT, SECRET_ACCOUNT_E2E as E2E_SECRET_ACCOUNT,
+    SECRET_ACCOUNT_FTP as FTP_SECRET_ACCOUNT,
+    SECRET_ACCOUNT_GOOGLEDRIVE as GOOGLEDRIVE_SECRET_ACCOUNT,
+    SECRET_ACCOUNT_SFTP as SFTP_SECRET_ACCOUNT, SECRET_ACCOUNT_SFTP_KEY as SFTP_KEY_SECRET_ACCOUNT,
+    SECRET_ACCOUNT_WEBDAV as WEBDAV_SECRET_ACCOUNT,
+};
+
 const PLUGIN_ID_SYNC_LOCAL: &str = "com.aperio.sync-adapter-local";
-const PLUGIN_ID_WEBDAV: &str = "com.aperio.sync-adapter-webdav";
-const PLUGIN_ID_FTP: &str = "com.aperio.sync-adapter-ftp";
-const PLUGIN_ID_DROPBOX: &str = "com.aperio.sync-adapter-dropbox";
-const PLUGIN_ID_GOOGLEDRIVE: &str = "com.aperio.sync-adapter-googledrive";
-const PLUGIN_ID_SFTP: &str = "com.aperio.sync-adapter-sftp";
-/// Fixed keychain pseudo-account holding the E2E data key (base64) under
-/// `SecretSlot::SyncEncryptionKey`. Device-local by design — the key is NEVER
-/// synced (syncing it would defeat E2E), so a joining device derives it from a
-/// passphrase via the onboarding flow. Matches the desktop's `E2E_SECRET_ACCOUNT`.
-const E2E_SECRET_ACCOUNT: &str = "sync.adapter.e2e";
 
 fn sync_err(e: SyncError) -> StoreError {
     StoreError::Storage {

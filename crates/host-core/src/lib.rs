@@ -35,6 +35,7 @@ pub mod sound;
 pub mod sound_assets;
 pub mod sync;
 pub mod sync_log;
+pub mod sync_target;
 pub mod tasks;
 pub mod user_prefs;
 pub mod vc_calendar;
