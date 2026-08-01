@@ -623,7 +623,7 @@ pub fn init_config_with_local(
     }
 
     if let Some(oauth) = &schema.oauth {
-        let client = resolve_oauth_client(oauth, config_json, &mut read_secret)?;
+        let client = resolve_oauth_client(schema, oauth, config_json, &mut read_secret)?;
         obj.insert(oauth.client_id_field.clone(), Value::String(client.id));
         if let (Some(key), Some(secret)) = (&oauth.client_secret_field, client.secret) {
             obj.insert(key.clone(), Value::String(secret));
@@ -650,7 +650,11 @@ pub fn init_config_with_local(
 /// says so plainly instead of decaying into an unexplained `invalid_grant`
 /// weeks later. The bring-your-own posture reads the id from the row and the
 /// secret from the keychain.
+///
+/// The whole schema is passed, not just its `oauth` block, because whether the
+/// client secret is mandatory is a property of the FIELD — see the read below.
 fn resolve_oauth_client(
+    schema: &AccountSchema,
     oauth: &AccountOauth,
     config_json: &str,
     read_secret: &mut impl FnMut(SecretSlot) -> std::result::Result<String, SecretError>,
@@ -696,13 +700,42 @@ fn resolve_oauth_client(
             AccountSetupError::Config(format!("this account has no `{}`", oauth.client_id_field))
         })?
         .to_string();
-    let secret =
-        match &oauth.client_secret_field {
-            Some(_) => Some(read_secret(SecretSlot::OauthClientSecret).map_err(|e| {
-                AccountSetupError::Secret(format!("missing OAuth client secret: {e}"))
-            })?),
-            None => None,
-        };
+    // Declaring a client-secret field is not the same as demanding one, and the
+    // schema already says which it is. A provider whose client is public —
+    // PKCE, no secret issued at all — may still declare the field so that a
+    // user with a confidential registration can supply one, and mark it
+    // optional; an account of that shape with nothing in the slot is complete,
+    // not broken. Reading the slot unconditionally and turning `NotFound` into
+    // an error made such an account permanently unopenable, with nothing the
+    // user could type to repair it.
+    //
+    // `required` keeps failing loudly, and must. Google's installed-app flow
+    // presents the secret at the token endpoint, so an account that lost it
+    // fails at the provider instead — later, as an `invalid_client` a long way
+    // from its cause.
+    //
+    // Only `NotFound` is tolerated. A keychain that will not ANSWER — locked,
+    // busy, broken — is an error whatever the field says, exactly as in the
+    // per-field loop above: absent and unreadable are different states and
+    // collapsing them reports a credential the user never lost as gone.
+    let secret = match &oauth.client_secret_field {
+        Some(key) => {
+            // An undeclared field cannot happen — `AccountSchema::validate`
+            // rejects a `client_secret_field` naming one — and if it somehow
+            // did, the stricter of the two answers is the safe one.
+            let required = schema.field(key).is_none_or(|field| field.required);
+            match read_secret(SecretSlot::OauthClientSecret) {
+                Ok(value) => Some(value),
+                Err(SecretError::NotFound) if !required => None,
+                Err(err) => {
+                    return Err(AccountSetupError::Secret(format!(
+                        "missing OAuth client secret: {err}"
+                    )))
+                }
+            }
+        }
+        None => None,
+    };
     Ok(OauthClient { id, secret })
 }
 
@@ -1420,6 +1453,76 @@ mod tests {
             "read {:?}",
             kc.read.borrow()
         );
+    }
+
+    /// A client secret the schema does not demand may be absent, and the
+    /// account still opens.
+    ///
+    /// The failure this prevents is permanent and silent: a provider whose
+    /// client needs no secret (PKCE) leaves the slot empty, and refusing to
+    /// open on `NotFound` leaves an account nothing can repair — there is no
+    /// value to type, because there was never meant to be one.
+    #[test]
+    fn an_optional_client_secret_may_be_missing() {
+        let schema = oauth_schema();
+        assert!(
+            !schema.field("client_secret").unwrap().required,
+            "this schema is the optional case; the test below is the other one",
+        );
+        let kc = Keychain::new(&[(SecretSlot::RefreshToken, "r3fresh")]);
+        let merged = init_config(&schema, r#"{"client_id":"C-mine"}"#, kc.reader())
+            .expect("an optional secret that is absent is not a failure");
+        let parsed: Value = serde_json::from_str(&merged).unwrap();
+        assert_eq!(parsed["client_id"], "C-mine");
+        assert_eq!(parsed["refresh_token"], "r3fresh");
+        assert!(
+            parsed.get("client_secret").is_none(),
+            "an absent secret must stay absent rather than becoming \"\": {merged}",
+        );
+    }
+
+    /// Tolerating an ABSENT secret must not tolerate an UNREADABLE keychain.
+    /// A locked or busy store answering `Backend` is not a provider that issues
+    /// no secret, and opening without one would authenticate as a client the
+    /// user did not configure.
+    #[test]
+    fn an_optional_client_secret_still_refuses_a_keychain_that_will_not_answer() {
+        let schema = oauth_schema();
+        let err = init_config(&schema, r#"{"client_id":"C-mine"}"#, |slot| {
+            if slot == SecretSlot::OauthClientSecret {
+                Err(SecretError::Backend("locked".into()))
+            } else {
+                Ok("r3fresh".to_string())
+            }
+        })
+        .expect_err("an unreadable keychain is not an absent value");
+        assert!(err.to_string().contains("client secret"), "{err}");
+    }
+
+    /// The other direction, against the manifest that ships rather than a
+    /// hand-written twin of it: Google's installed-app flow presents the client
+    /// secret at the token endpoint, the schema says `required`, and an account
+    /// that lost it has to fail here — where the message names the credential —
+    /// instead of at the provider as an `invalid_client` weeks later.
+    #[test]
+    fn a_required_client_secret_still_fails_loudly() {
+        let manifest = plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
+            "../../sync-adapter-googledrive-plugin/plugin.json"
+        ))
+        .expect("the shipped manifest parses");
+        let schema = manifest
+            .account
+            .expect("the shipped manifest declares an account schema");
+        assert!(
+            schema.field("client_secret").unwrap().required,
+            "Google Drive's client secret is mandatory; a schema saying otherwise \
+             would make the tolerance above apply to it",
+        );
+
+        let kc = Keychain::new(&[(SecretSlot::RefreshToken, "r3fresh")]);
+        let err = init_config(&schema, r#"{"client_id":"C-mine"}"#, kc.reader())
+            .expect_err("a required client secret that is gone must refuse");
+        assert!(err.to_string().contains("client secret"), "{err}");
     }
 
     #[test]

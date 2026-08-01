@@ -371,6 +371,16 @@ impl AdapterRegistry {
             if account.adapter_kind.is_host_internal() {
                 continue;
             }
+            // A storage backend has nothing to place, so `has_adapter` is
+            // false for it forever — and without this it would be counted as
+            // newly registered on EVERY pass. Both hosts read a non-zero count
+            // as "new accounts arrived" and answer with a full warm pass and a
+            // three-scope cache broadcast, so a single WebDAV account would
+            // have meant a network fetch for every container of every account,
+            // and list churn on both frontends, after every sync round.
+            if self.is_sync_only(&account.adapter_kind) {
+                continue;
+            }
             if only_missing && self.has_adapter(&account.id) {
                 continue;
             }
@@ -434,6 +444,25 @@ impl AdapterRegistry {
     /// All four maps are consulted because the surfaces an account fills
     /// depend on its kind (VC accounts only ever land in `external_vc`,
     /// Todoist only in `external_tasks`, …).
+    /// Whether this adapter places nothing here — its only capability is sync.
+    ///
+    /// Read off the manifests directly rather than through `adapter_kinds()`,
+    /// which hides disabled plugins: switching one off must not change what the
+    /// sweep does with its accounts.
+    fn is_sync_only(&self, adapter_kind: &crate::accounts::AdapterKind) -> bool {
+        self.plugin_manager
+            .all()
+            .into_iter()
+            .find(|p| p.manifest.adapter_kind.as_deref() == Some(adapter_kind.as_str()))
+            .is_some_and(|p| {
+                !p.manifest.capabilities.is_empty()
+                    && p.manifest
+                        .capabilities
+                        .iter()
+                        .all(|c| *c == plugin_core::Capability::Sync)
+            })
+    }
+
     fn has_adapter(&self, account_id: &str) -> bool {
         self.external_cal
             .read()

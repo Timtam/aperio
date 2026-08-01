@@ -212,7 +212,7 @@ Endpoints, scopes and the token exchange are yours, behind your
 | Field | Meaning |
 |---|---|
 | `client_id_field` | Which declared field holds the client id. Must not be a secret — a client id travels in every authorization URL anyway, and the host needs it in the row to record which registration an account belongs to. |
-| `client_secret_field` | Which field holds the client secret, for providers that require one. Omit for a public PKCE client. Must be a secret in the `oauth_client_secret` slot. |
+| `client_secret_field` | Which field holds the client secret, for providers that require one. Omit for a public PKCE client. Must be a secret in the `oauth_client_secret` slot. That field's `required` flag also decides what opening an account does when the keychain holds no client secret: a required one refuses, an optional one opens without it. A keychain that will not *answer* is refused either way. |
 | `refresh_token_field` | Init-config key the refresh token is merged under at open time. Omit if you do not want one kept. |
 | `access_token_field` | The same for the access token. Usually omitted: an adapter that re-mints on first use would rather not be handed one the host has to keep fresh. |
 | `builtin_provider` | Names a credential set the app build may carry for your provider. Optional. |

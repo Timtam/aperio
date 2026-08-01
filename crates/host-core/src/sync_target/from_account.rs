@@ -69,14 +69,30 @@ pub trait SyncPlugins {
     fn open(&self, plugin_id: &str, config_json: String) -> Result<Arc<dyn SyncAdapter>, String>;
 }
 
-/// Read the chosen account id.
-pub fn selected_account_id(prefs: &UserPrefsRepo<'_>) -> Option<String> {
-    prefs
-        .get(PREF_SELECTED_ACCOUNT)
-        .ok()
-        .flatten()
+/// Read the chosen account id, with a read that FAILED kept apart from a device
+/// that has not chosen.
+///
+/// The distinction only matters to a caller that WRITES on the strength of the
+/// answer, which is why it is a second function rather than a change to the one
+/// below. The migration is that caller: it writes the pointer when this device
+/// has none, and a locked database read as "none" would move where an existing
+/// device syncs — silently, and against a choice the user made.
+pub(super) fn selected_account_id_result(
+    prefs: &UserPrefsRepo<'_>,
+) -> UserPrefsResult<Option<String>> {
+    Ok(prefs
+        .get(PREF_SELECTED_ACCOUNT)?
         .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
+        .filter(|v| !v.is_empty()))
+}
+
+/// Read the chosen account id.
+///
+/// A failed read is an unchosen device here, which is what every caller of this
+/// one wants: they are about to build an adapter, and "no adapter this launch"
+/// is the same outcome either way and is retried on the next one.
+pub fn selected_account_id(prefs: &UserPrefsRepo<'_>) -> Option<String> {
+    selected_account_id_result(prefs).ok().flatten()
 }
 
 /// Choose an account to sync through, or `None` to sync through none.
@@ -417,6 +433,37 @@ mod tests {
         assert_eq!(selected_account_id(&prefs), None);
         // Blank is the same as none, not an account whose id is empty.
         select_account(&prefs, Some("   ")).unwrap();
+        assert_eq!(selected_account_id(&prefs), None);
+    }
+
+    /// The two postures, on the same unreadable store.
+    ///
+    /// A caller that is about to BUILD may treat a failed read as "nothing
+    /// chosen" — it writes nothing, and the next launch reads again. A caller
+    /// that is about to WRITE may not: the migration decides whether to point
+    /// this device somewhere on the strength of this answer, and "nobody chose"
+    /// from a database that would not say moves a working sync onto another
+    /// target with nothing to show for it.
+    #[test]
+    fn an_unreadable_pointer_is_an_error_for_a_caller_that_writes() {
+        let db = DbHandle::open_in_memory().unwrap();
+        let shared = db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+        select_account(&prefs, Some("acc-1")).unwrap();
+        assert_eq!(
+            selected_account_id_result(&prefs).unwrap().as_deref(),
+            Some("acc-1"),
+        );
+
+        shared
+            .lock()
+            .unwrap()
+            .execute("DROP TABLE user_prefs", [])
+            .unwrap();
+        assert!(
+            selected_account_id_result(&prefs).is_err(),
+            "a store that will not answer must not answer `nobody chose`",
+        );
         assert_eq!(selected_account_id(&prefs), None);
     }
 

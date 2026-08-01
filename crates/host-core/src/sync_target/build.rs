@@ -33,7 +33,7 @@ use sync_engine::{SecretSlot, SecretStore};
 
 use super::*;
 use crate::sftp_host_keys::UserPrefsHostKeyVerifier;
-use crate::user_prefs::UserPrefsRepo;
+use crate::user_prefs::{UserPrefsRepo, UserPrefsResult};
 
 /// Why no adapter could be built.
 ///
@@ -85,18 +85,31 @@ pub trait PluginOpener {
     fn open(&self, plugin_id: &str, config_json: String) -> Result<Arc<dyn SyncAdapter>, String>;
 }
 
-/// A preference as a value, or `None` for absent-or-blank.
+/// A preference as a value, or `None` for absent-or-blank — with a read that
+/// FAILED kept apart from a value that is not there.
 ///
 /// `pub(super)` because the migration reads the same preferences with the same
 /// rule — a target whose host is three spaces is a target with no host, and two
 /// modules disagreeing about that would migrate something the builder refuses.
-pub(super) fn text(prefs: &UserPrefsRepo<'_>, key: &str) -> Option<String> {
-    prefs
-        .get(key)
-        .ok()
-        .flatten()
+/// The rule lives here once; what a caller does about an unanswered read is the
+/// caller's own posture, and the two callers have opposite ones.
+pub(super) fn text_result(prefs: &UserPrefsRepo<'_>, key: &str) -> UserPrefsResult<Option<String>> {
+    Ok(prefs
+        .get(key)?
         .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
+        .filter(|v| !v.is_empty()))
+}
+
+/// [`text_result`], with a failed read read as an absent value.
+///
+/// Sound HERE and nowhere else in this module's neighbourhood: [`build`]
+/// persists nothing. A launch whose database will not answer builds no adapter,
+/// or builds one missing an optional value, and the next launch does it again
+/// from the same preferences — nothing has been decided and nothing recorded.
+/// The migration cannot afford the same shrug, because it WRITES what it read
+/// and then marks itself done; it uses [`text_result`].
+pub(super) fn text(prefs: &UserPrefsRepo<'_>, key: &str) -> Option<String> {
+    text_result(prefs, key).ok().flatten()
 }
 
 fn require(

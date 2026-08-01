@@ -24,6 +24,7 @@
 
 mod build;
 mod from_account;
+mod migrate;
 mod persist;
 
 pub use build::{build, build_configured, e2e_enabled, PluginOpener, Unbuildable};
@@ -33,6 +34,10 @@ pub use from_account::{
     PREF_SELECTED_ACCOUNT,
 };
 
+pub use migrate::{migrate_to_account, MigrateError, PREF_MIGRATED_ACCOUNT};
+
+/// What both hosts call at start-up: the migration, then whichever reader can
+/// answer. Each host supplies only how it opens a plugin.
 pub use persist::{all_pref_keys, fields_for, persist, restore, FieldSpec, PersistError};
 
 use sync_engine::SecretSlot;
