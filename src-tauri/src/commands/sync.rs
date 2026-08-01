@@ -884,12 +884,21 @@ pub async fn configure_sync_adapter(
         | SyncAdapterConfig::Ftp { .. }
         | SyncAdapterConfig::Dropbox { .. }
         | SyncAdapterConfig::GoogleDrive { .. } => {
-            // Persist BEFORE building the adapter so the keychain
-            // entry for the new WebDAV password is in place; the
-            // adapter constructor then reads it back when the
-            // request body omitted the password (e.g. URL-only
-            // edit). Then we probe.
-            persist_adapter_config(&prefs, &config)?;
+            // Build first, probe, and only then write anything down — the
+            // order the mobile host already uses.
+            //
+            // This used to persist first, on the stated grounds that the new
+            // password had to be in the keychain for the constructor to read
+            // back. It does not: `build_adapter` resolves each secret from the
+            // REQUEST first and falls back to the stored one only when the
+            // request omits it, which is what makes a URL-only edit work. The
+            // rationale described a dependency that was not there.
+            //
+            // What the old order did do was leave a failed attempt written
+            // down. Type a wrong password, watch the probe fail, and the
+            // preferences and keychain already held the new values while the
+            // orchestrator kept running the old target — so the next restart
+            // came up on a configuration the user had been told was rejected.
             let plain = build_adapter(&config, &shared, plugin_manager.inner())?;
             // Probe the connection before keeping the adapter
             // active — misconfigurations should surface immediately
@@ -926,6 +935,9 @@ pub async fn configure_sync_adapter(
             };
             let adapter = wrap_if_encrypted(plain, key);
             orchestrator.configure(adapter);
+            // Now it is real: probed, wrapped and active. Writing here means a
+            // rejected target leaves nothing behind.
+            persist_adapter_config(&prefs, &config)?;
             // Keep PREF_E2E_ENABLED in sync with what we just
             // discovered on the target meta. The keychain key
             // stays either way; the flag is the source of truth
