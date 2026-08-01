@@ -171,6 +171,61 @@ pub fn connect(
         fields.insert(field.to_string(), value.clone());
     }
 
+    // Whether this is the SAME target with an edited credential, or a different
+    // one that merely speaks the same protocol.
+    //
+    // The distinction decides whether a stored password may be inherited below,
+    // and getting it wrong sends the old server's credential to the new one at
+    // probe time. Same kind is not enough: two WebDAV servers are the same kind.
+    //
+    // The test is that no non-secret value changed. It is deliberately blunt —
+    // editing a folder path on the same server also costs a retyped password —
+    // because the alternative is the host deciding which fields identify a
+    // server, and that is exactly the per-adapter knowledge this layer does not
+    // have. Erring toward "you changed where this goes, so say the password
+    // again" is the safe direction.
+    //
+    // Compared on the PLUGIN's keys, above, rather than the form's: a field
+    // whose two names differ would otherwise read as "not supplied", count as
+    // unchanged, and let the credential through — the one direction that must
+    // not happen by accident.
+    let same_target = current.is_some_and(|account| {
+        let stored: Map<String, Value> = serde_json::from_str(&account.config_json)
+            .ok()
+            .and_then(|v: Value| v.as_object().cloned())
+            .unwrap_or_default();
+        let local = crate::account_local::load(
+            prefs,
+            &account.id,
+            &schema
+                .fields
+                .iter()
+                .filter(|f| f.device_local && !f.is_secret())
+                .map(|f| f.key.clone())
+                .collect::<Vec<_>>(),
+        );
+        schema
+            .fields
+            .iter()
+            .filter(|f| !f.is_secret())
+            .all(|field| {
+                // A value the form left blank says nothing either way: an optional
+                // field nobody filled in is not a change.
+                match text_of(fields.get(&field.key)) {
+                    None => true,
+                    Some(entered) => {
+                        let held = local.get(&field.key).or_else(|| stored.get(&field.key));
+                        match held {
+                            Some(Value::String(s)) => s.trim() == entered,
+                            Some(Value::Number(n)) => n.to_string() == entered,
+                            Some(Value::Bool(b)) => b.to_string() == entered,
+                            _ => false,
+                        }
+                    }
+                }
+            })
+    });
+
     // "Edit the host without retyping the password." A credential the form left
     // out is the one already stored, and the plan below has to SEE it —
     // otherwise it refuses a required field the user never lost, and an OAuth
@@ -187,6 +242,9 @@ pub fn connect(
             continue;
         };
         if text_of(fields.get(&field.key)).is_some() {
+            continue;
+        }
+        if !same_target {
             continue;
         }
         if let Some(held) = held_credential(secrets, kind, current, slot)? {
@@ -227,11 +285,42 @@ pub fn connect(
     let account = match current {
         // An edit of the target this device already syncs through. The row
         // keeps its id — its credentials and its device-local half are keyed by
-        // that — and keeps its NAME, which the user may have changed and which
-        // re-deriving would silently undo on every password edit.
-        Some(existing) => accounts
+        // that.
+        //
+        // It keeps its NAME only while it is the same target: a name the user
+        // changed must survive a password edit, but a row now pointing at a
+        // different server must not go on announcing the old one. That name is
+        // what the sync panel reads back, so leaving it would have shown one
+        // host while uploading to another.
+        Some(existing) if same_target => accounts
             .set_config(&existing.id, &plan.config_json)
             .map_err(accounts_err)?,
+        Some(existing) => {
+            // The row is reused — its id is what the device-local half and the
+            // keychain entries are keyed by — but it now describes a DIFFERENT
+            // server, so every credential on it belongs to the old one. Not
+            // inheriting them into the form was only half the job: they would
+            // still be sitting in the keychain under this id, and `init_config`
+            // reads them from there at open time. So the new host would have
+            // been handed the old host's password anyway, by a different route.
+            for field in &schema.fields {
+                if let Some(slot) = field.secret_slot.map(host_slot) {
+                    let _ = secrets.delete(&existing.id, slot);
+                }
+            }
+            let renamed = accounts
+                .set_config(&existing.id, &plan.config_json)
+                .map_err(accounts_err)?;
+            accounts
+                .rename(
+                    &renamed.id,
+                    &name_from(
+                        kind,
+                        name_source(kind).and_then(|form_key| text_of(values.get(form_key))),
+                    ),
+                )
+                .map_err(accounts_err)?
+        }
         None => accounts
             .create(
                 AdapterKind::new(account_kind),
@@ -970,11 +1059,18 @@ mod tests {
             &f.secrets,
             &Plugins("webdav"),
             "webdav",
-            &values(&[("url", "https://elsewhere.test/dav/"), ("user", "anna")]),
+            // The SAME target, password omitted. Changing the URL as well is
+            // what this test used to do, and it is exactly the case the
+            // inheritance rule now refuses — the stored credential belongs to
+            // the server that was there before.
+            &values(&[
+                ("url", "https://cloud.example.test/dav/aperio/"),
+                ("user", "anna"),
+            ]),
         )
         .unwrap();
 
-        assert_eq!(first, again, "an edit of the same kind keeps the row");
+        assert_eq!(first, again, "an edit of the same target keeps the row");
         assert_eq!(
             f.secrets.retrieve(&again, SecretSlot::Password).ok(),
             Some("hunter2".to_string()),
@@ -983,7 +1079,7 @@ mod tests {
             serde_json::from_str(&accounts.get(&again).unwrap().unwrap().config_json).unwrap();
         assert_eq!(
             config.get("url").and_then(Value::as_str),
-            Some("https://elsewhere.test/dav/"),
+            Some("https://cloud.example.test/dav/aperio/"),
         );
     }
 
@@ -1011,8 +1107,11 @@ mod tests {
             &f.secrets,
             &Plugins("ftp"),
             "ftp",
+            // Same host, same everything, password omitted — the case the
+            // inheritance exists for. Pointing at `ftp2` instead would be a
+            // different server, and the stored password is not its.
             &values(&[
-                ("host", "ftp2.example.test"),
+                ("host", "ftp.example.test"),
                 ("port", "21"),
                 ("user", "anna"),
                 ("path", "/aperio"),
@@ -1222,5 +1321,98 @@ mod tests {
                 "{kind} declares no fields to split",
             );
         }
+    }
+
+    /// The one that would have sent a password to a server it does not belong
+    /// to.
+    ///
+    /// Editing only the credential keeps the stored one visible to the plan, so
+    /// "change the password without retyping the URL" still works. Pointing at
+    /// a DIFFERENT server of the same kind must not: the row's keychain entry
+    /// is the old host's, and inheriting it means the probe authenticates
+    /// against the new host with the old host's password.
+    #[test]
+    fn a_different_server_of_the_same_kind_does_not_inherit_the_password() {
+        let f = Fixture::new();
+        let shared = f.db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+        let accounts = AccountsRepo::new(&shared);
+
+        let first = connect(
+            &prefs,
+            &accounts,
+            &f.secrets,
+            &Plugins("webdav"),
+            "webdav",
+            &values(&[
+                ("url", "https://one.example.test/dav/"),
+                ("user", "anna"),
+                ("password", "first-secret"),
+            ]),
+        )
+        .expect("first connect");
+
+        // Same kind, same user, DIFFERENT host, password left blank.
+        connect(
+            &prefs,
+            &accounts,
+            &f.secrets,
+            &Plugins("webdav"),
+            "webdav",
+            &values(&[("url", "https://two.example.test/dav/"), ("user", "anna")]),
+        )
+        .expect("WebDAV allows an anonymous target, so this connects");
+
+        // Not inherited into the form, AND not left sitting in the keychain
+        // under the reused row id — `init_config` would have read it back and
+        // handed the new host the old host's password by a different route.
+        assert!(
+            f.secrets.retrieve(&first, SecretSlot::Password).is_err(),
+            "the previous server's password survived a change of target",
+        );
+    }
+
+    /// The behaviour the narrowing must not cost: same target, new password,
+    /// nothing else retyped.
+    #[test]
+    fn the_same_target_still_takes_a_new_password_alone() {
+        let f = Fixture::new();
+        let shared = f.db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+        let accounts = AccountsRepo::new(&shared);
+
+        let first = connect(
+            &prefs,
+            &accounts,
+            &f.secrets,
+            &Plugins("webdav"),
+            "webdav",
+            &values(&[
+                ("url", "https://one.example.test/dav/"),
+                ("user", "anna"),
+                ("password", "old"),
+            ]),
+        )
+        .expect("first connect");
+
+        let again = connect(
+            &prefs,
+            &accounts,
+            &f.secrets,
+            &Plugins("webdav"),
+            "webdav",
+            &values(&[
+                ("url", "https://one.example.test/dav/"),
+                ("user", "anna"),
+                ("password", "new"),
+            ]),
+        )
+        .expect("same target, new password");
+
+        assert_eq!(first, again, "the row is reused, not replaced");
+        assert_eq!(
+            f.secrets.retrieve(&again, SecretSlot::Password).unwrap(),
+            "new",
+        );
     }
 }
