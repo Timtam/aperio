@@ -1,0 +1,66 @@
+# What EAS uploads. Read INSTEAD of .gitignore, not in addition to it — so this
+# file has to repeat everything .gitignore excludes, and its one deliberate
+# difference is the reason it exists.
+#
+# THE DIFFERENCE: `modules/cal-ffi/android/src/main/jniLibs/` is NOT excluded
+# here. Those are the cargo-ndk builds of libcal_ffi.so, gitignored because they
+# are regenerable build output that has no business in version control. Without
+# this file EAS applied that same rule to its upload and shipped an app with no
+# native library at all — installable, launching, and dead at the first bridge
+# call:
+#
+#     UnsatisfiedLinkError: dlopen failed: library "libcal_ffi.so" not found
+#
+# Force-adding them to git did not help, and could not: EAS reads the ignore
+# rules, not the index. The CI workflow's "ephemeral commit" step was written on
+# that assumption and fixed nothing, because the commit was never the mechanism
+# that mattered.
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# Google Play service-account key (written from a CI secret; never upload)
+/google-service-account.json
+
+# local env files
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+# Generated native projects. EAS runs prebuild itself, and uploading a stale
+# local android/ directory is how a build ends up packaging months-old outputs.
+/ios
+/android
+
+# Gradle build output for local native modules — regenerable, and large.
+/modules/*/android/build/
+/modules/*/android/.cxx/
+/modules/*/android/.gradle/
