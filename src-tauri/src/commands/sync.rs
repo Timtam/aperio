@@ -950,14 +950,35 @@ pub async fn configure_sync_adapter(
 #[tauri::command]
 pub async fn set_sync_interval(
     scheduler: State<'_, Arc<SyncScheduler>>,
+    event_log: State<'_, Arc<crate::event_log::EventLogWriter>>,
     minutes: u32,
 ) -> CommandResult<u32> {
-    scheduler
+    let clamped = scheduler
         .set_interval_minutes(minutes)
         .map_err(|err| CommandError {
             code: "internal",
             message: err,
-        })
+        })?;
+
+    // `sync.intervalMinutes` is on the sync whitelist — it is meant to be one
+    // setting across a user's devices, not a per-device one. But the scheduler
+    // writes it straight through `UserPrefsRepo`, which persists the row and
+    // appends nothing, so changing it here never reached the other devices. The
+    // generic `set_user_pref` command does emit for whitelisted keys; this one
+    // bypassed it to reach the scheduler's clamping and its wake-up.
+    //
+    // Emit the same event that path would. The value goes over as a JSON
+    // number, which is what the generic path produces too — it parses the
+    // stored string as JSON before falling back to a string — so both writers
+    // put the same shape on the wire.
+    event_log.append(sync_core::SyncEvent::SettingsUpdated(
+        sync_core::SettingsPayload {
+            key: sync_engine::PREF_SYNC_INTERVAL_MINUTES.to_string(),
+            value: serde_json::Value::from(clamped),
+        },
+    ));
+
+    Ok(clamped)
 }
 
 /// Trigger one sync round (push pending logs + fetch & apply
