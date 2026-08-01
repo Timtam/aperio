@@ -163,6 +163,7 @@ mod tests {
         PREF_GOOGLEDRIVE_CLIENT_ID,
         PREF_GOOGLEDRIVE_CLIENT_SECRET,
         PREF_GOOGLEDRIVE_FOLDER_NAME,
+        sync_engine::whitelist::PREF_E2E_ENABLED,
     ];
 
     /// The invariant the whole design rests on: none of this crosses devices.

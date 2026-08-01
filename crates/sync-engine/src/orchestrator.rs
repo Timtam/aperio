@@ -394,7 +394,7 @@ impl SyncOrchestrator {
         let interval_minutes = self.read_interval_minutes();
         let e2e_enabled = self
             .store
-            .get_pref("sync.adapter.e2eEnabled")
+            .get_pref(crate::whitelist::PREF_E2E_ENABLED)
             .ok()
             .flatten()
             .as_deref()

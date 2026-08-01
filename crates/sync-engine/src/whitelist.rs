@@ -12,6 +12,19 @@
 //! `sync.adapter.*`, `sync.cursor.*`, `sync.compaction.*`) is
 //! deliberately excluded — those are per-device, not preferences.
 
+/// Whether this device encrypts what it uploads.
+///
+/// Lives here, in the crate whose orchestrator reads it, rather than in
+/// `host_core` — which depends on this crate, so the const could not travel the
+/// other way and the orchestrator had been reading the bare string literal
+/// instead. `host_core::credential_sync` re-exports it, so the name every
+/// caller already uses is unchanged.
+///
+/// Device-local like every other `sync.adapter.*` key: whether a device
+/// encrypts is settled when it joins, and the key that would decrypt is not
+/// something to publish through the transport it protects.
+pub const PREF_E2E_ENABLED: &str = "sync.adapter.e2eEnabled";
+
 /// Per-key sync whitelist. Entries ending in `.` are prefix patterns
 /// matching any key that starts with them; bare entries are exact
 /// matches.

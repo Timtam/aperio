@@ -36,7 +36,7 @@ use crate::user_prefs::UserPrefsRepo;
 /// decides whether the sync adapter wraps in `EncryptingAdapter` and whether
 /// credentials may enter the sync log. Owned here (the single auditable home
 /// for the credential-sync gate); `commands::sync` re-exports it.
-pub const PREF_E2E_ENABLED: &str = "sync.adapter.e2eEnabled";
+pub use sync_engine::whitelist::PREF_E2E_ENABLED;
 
 /// Whether end-to-end encryption is currently on for the sync dataset —
 /// the gate that decides if a credential may enter the sync log at all.
