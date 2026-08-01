@@ -176,7 +176,13 @@ pub use host_core::credential_sync::PREF_E2E_ENABLED;
 ///
 /// Future adapter kinds (`sftp`, `dropbox`, `googledrive`, …) will
 /// add their own branches as new struct variants.
-#[derive(Debug, Clone, Deserialize)]
+// `Serialize` is here for one internal purpose: turning this into the
+// `{kind, values}` map `host_core::sync_target::persist` takes. Writing that
+// conversion by hand would mean keeping the six-arm match this change removes.
+//
+// It carries passwords, so it must never be logged, returned to the frontend,
+// or put in an error message. The one call is in `persist_adapter_config`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SyncAdapterConfig {
     /// Filesystem path-based adapter — DESIGN.md §19.6 entry.
@@ -601,179 +607,52 @@ fn build_adapter(
 /// Persist the (already-validated) adapter config into `user_prefs`
 /// so the next app start restores the same adapter. Mirrors what
 /// `build_adapter_from_prefs` will read back.
+/// Write the chosen target down, or clear the choice.
+///
+/// The per-kind knowledge lives in `host_core::sync_target`, shared with the
+/// mobile host, along with the tests that cover it. This function is the
+/// adapter between the desktop's typed request and that table: it serialises
+/// the request — which is internally tagged, so it already produces
+/// `{"kind": …, <fields>}` — splits the tag off, and hands the rest over.
+///
+/// It writes nothing itself, which is the point. The two hosts used to carry a
+/// six-arm match each, and those two copies had drifted.
 fn persist_adapter_config(prefs: &UserPrefsRepo, config: &SyncAdapterConfig) -> CommandResult<()> {
-    match config {
-        SyncAdapterConfig::Local { path } => {
-            let trimmed = path.trim();
-            prefs.set(PREF_ADAPTER_KIND, "local").map_err(internal)?;
-            prefs.set(PREF_LOCAL_PATH, trimmed).map_err(internal)?;
-            Ok(())
-        }
-        SyncAdapterConfig::Webdav {
-            url,
-            user,
-            password,
-        } => {
-            prefs.set(PREF_ADAPTER_KIND, "webdav").map_err(internal)?;
-            prefs.set(PREF_WEBDAV_URL, url.trim()).map_err(internal)?;
-            prefs.set(PREF_WEBDAV_USER, user.trim()).map_err(internal)?;
-            // Only overwrite the keychain when the request body
-            // explicitly carries a non-empty password. URL/user
-            // edits that omit the password keep the prior secret.
-            if let Some(pw) = password.as_deref().map(str::trim) {
-                if !pw.is_empty() {
-                    secrets::store(WEBDAV_SECRET_ACCOUNT, SecretSlot::Password, pw).map_err(
-                        |err| CommandError {
-                            code: "internal",
-                            message: format!("keychain store: {err}"),
-                        },
-                    )?;
-                }
-            }
-            Ok(())
-        }
-        SyncAdapterConfig::Sftp {
-            host,
-            port,
-            user,
-            path,
-            auth_method,
-            password,
-            key_path,
-            key_passphrase,
-        } => {
-            prefs.set(PREF_ADAPTER_KIND, "sftp").map_err(internal)?;
-            prefs.set(PREF_SFTP_HOST, host.trim()).map_err(internal)?;
-            prefs
-                .set(PREF_SFTP_PORT, &port.to_string())
-                .map_err(internal)?;
-            prefs.set(PREF_SFTP_USER, user.trim()).map_err(internal)?;
-            prefs.set(PREF_SFTP_PATH, path.trim()).map_err(internal)?;
-            prefs
-                .set(PREF_SFTP_AUTH_METHOD, auth_method.trim())
-                .map_err(internal)?;
-            // Write only what the CHOSEN method uses, the way the mobile host
-            // already does. This branch used to store whatever the request
-            // carried, so picking key auth and leaving a password in the form
-            // put that password in the keychain for a mode that will never read
-            // it — the builder dispatches strictly on `auth_method`.
-            //
-            // What it must NOT do is clear the other method's credential. The
-            // two keychain slots are separate precisely so switching back does
-            // not mean retyping a passphrase, and nothing reads the inactive one
-            // in the meantime.
-            //
-            // Empty values are still skipped, so editing a host or a path
-            // without re-entering the secret keeps the stored one, as in the
-            // WebDAV branch above.
-            if auth_method.trim() == "key" {
-                if let Some(p) = key_path.as_deref().map(str::trim) {
-                    if !p.is_empty() {
-                        prefs.set(PREF_SFTP_KEY_PATH, p).map_err(internal)?;
-                    }
-                }
-                if let Some(pp) = key_passphrase.as_deref().map(str::trim) {
-                    if !pp.is_empty() {
-                        secrets::store(SFTP_KEY_SECRET_ACCOUNT, SecretSlot::Password, pp).map_err(
-                            |err| CommandError {
-                                code: "internal",
-                                message: format!("keychain store: {err}"),
-                            },
-                        )?;
-                    }
-                }
-            } else if let Some(pw) = password.as_deref().map(str::trim) {
-                if !pw.is_empty() {
-                    secrets::store(SFTP_SECRET_ACCOUNT, SecretSlot::Password, pw).map_err(
-                        |err| CommandError {
-                            code: "internal",
-                            message: format!("keychain store: {err}"),
-                        },
-                    )?;
-                }
-            }
-            Ok(())
-        }
-        SyncAdapterConfig::Dropbox {
-            client_id,
-            client_secret,
-            path,
-        } => {
-            // Refresh token already in the keychain from the
-            // OAuth dance — persist_adapter_config doesn't
-            // touch it; we only mirror the non-secret app
-            // config into user_prefs here.
-            prefs.set(PREF_ADAPTER_KIND, "dropbox").map_err(internal)?;
-            prefs
-                .set(PREF_DROPBOX_CLIENT_ID, client_id.trim())
-                .map_err(internal)?;
-            prefs
-                .set(PREF_DROPBOX_CLIENT_SECRET, client_secret.trim())
-                .map_err(internal)?;
-            prefs
-                .set(PREF_DROPBOX_PATH, path.trim())
-                .map_err(internal)?;
-            Ok(())
-        }
-        SyncAdapterConfig::GoogleDrive {
-            client_id,
-            client_secret,
-            folder_name,
-        } => {
-            // Same shape as the Dropbox branch — refresh token
-            // already lives in the keychain from
-            // `connect_googledrive_oauth`; we only persist the
-            // non-secret app-config bits.
-            prefs
-                .set(PREF_ADAPTER_KIND, "googledrive")
-                .map_err(internal)?;
-            prefs
-                .set(PREF_GOOGLEDRIVE_CLIENT_ID, client_id.trim())
-                .map_err(internal)?;
-            prefs
-                .set(PREF_GOOGLEDRIVE_CLIENT_SECRET, client_secret.trim())
-                .map_err(internal)?;
-            prefs
-                .set(PREF_GOOGLEDRIVE_FOLDER_NAME, folder_name.trim())
-                .map_err(internal)?;
-            Ok(())
-        }
-        SyncAdapterConfig::Ftp {
-            host,
-            port,
-            user,
-            path,
-            mode,
-            password,
-        } => {
-            prefs.set(PREF_ADAPTER_KIND, "ftp").map_err(internal)?;
-            prefs.set(PREF_FTP_HOST, host.trim()).map_err(internal)?;
-            prefs
-                .set(PREF_FTP_PORT, &port.to_string())
-                .map_err(internal)?;
-            prefs.set(PREF_FTP_USER, user.trim()).map_err(internal)?;
-            prefs.set(PREF_FTP_PATH, path.trim()).map_err(internal)?;
-            prefs.set(PREF_FTP_MODE, mode.trim()).map_err(internal)?;
-            // Only overwrite the keychain when the request
-            // carries a non-empty password — same reuse
-            // contract as WebDAV / SFTP.
-            if let Some(pw) = password.as_deref().map(str::trim) {
-                if !pw.is_empty() {
-                    secrets::store(FTP_SECRET_ACCOUNT, SecretSlot::Password, pw).map_err(
-                        |err| CommandError {
-                            code: "internal",
-                            message: format!("keychain store: {err}"),
-                        },
-                    )?;
-                }
-            }
-            Ok(())
-        }
-        SyncAdapterConfig::None => {
-            prefs.delete(PREF_ADAPTER_KIND).map_err(internal)?;
-            Ok(())
-        }
+    if matches!(config, SyncAdapterConfig::None) {
+        // Disconnect deletes the choice and deliberately leaves the fields and
+        // the keychain entries in place, so reconnecting to the same target
+        // does not mean retyping everything.
+        prefs.delete(PREF_ADAPTER_KIND).map_err(internal)?;
+        return Ok(());
     }
+
+    let mut value = serde_json::to_value(config).map_err(|err| CommandError {
+        code: "internal",
+        message: format!("sync config: {err}"),
+    })?;
+    let object = value.as_object_mut().ok_or(CommandError {
+        code: "internal",
+        message: "sync config did not serialise to an object".into(),
+    })?;
+    let kind = object
+        .remove("kind")
+        .and_then(|k| k.as_str().map(str::to_string))
+        .ok_or(CommandError {
+            code: "internal",
+            message: "sync config carried no kind".into(),
+        })?;
+
+    host_core::sync_target::persist(prefs, &crate::secrets::KeyringSecretStore, &kind, object)
+        .map_err(|err| match err {
+            host_core::sync_target::PersistError::UnknownKind(k) => CommandError {
+                code: "invalid_input",
+                message: format!("unknown sync adapter kind: {k}"),
+            },
+            other => CommandError {
+                code: "internal",
+                message: other.to_string(),
+            },
+        })
 }
 
 /// Translate a [`sync_core::SyncError`] into a [`CommandError`]
