@@ -10,6 +10,9 @@ description = "Aperio — Tauri-free host logic shared by the desktop backend an
 
 [dependencies]
 aperio-db.workspace = true
+# The E2E data key is stored base64-encoded in the keychain; the sync-target
+# restore decodes it here so the wrap happens in one place rather than two.
+base64 = "0.22"
 builtin-oauth.workspace = true
 cal-core.workspace = true
 cal-adapter-local.workspace = true

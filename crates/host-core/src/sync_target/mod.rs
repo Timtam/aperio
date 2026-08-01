@@ -25,7 +25,7 @@
 mod build;
 mod persist;
 
-pub use build::{build, e2e_enabled, PluginOpener, Unbuildable};
+pub use build::{build, build_configured, e2e_enabled, PluginOpener, Unbuildable};
 
 pub use persist::{all_pref_keys, fields_for, persist, restore, FieldSpec, PersistError};
 

@@ -297,6 +297,46 @@ fn json_map(value: Value) -> Map<String, Value> {
     }
 }
 
+/// Rebuild the adapter and, if this device encrypts, wrap it — the whole
+/// restore, in one call.
+///
+/// The wrap used to sit in each host, one layer above its own copy of the
+/// builder, which meant two places had to agree on when to encrypt and what to
+/// do when the key is gone. They do not need to agree if there is only one.
+///
+/// A missing key with the flag set is refused rather than falling back to
+/// plaintext: that combination means the keychain was wiped or the data
+/// directory was carried to a fresh install, and uploading the next round
+/// unencrypted would publish, in the clear, exactly what the user asked to be
+/// encrypted — into a dataset every other device will then refuse to read.
+pub fn build_configured(
+    prefs: &UserPrefsRepo<'_>,
+    secrets: &dyn SecretStore,
+    opener: &dyn PluginOpener,
+) -> Result<Arc<dyn SyncAdapter>, Unbuildable> {
+    let plain = build(prefs, secrets, opener)?;
+    if !e2e_enabled(prefs) {
+        return Ok(plain);
+    }
+    let key = e2e_key(secrets).ok_or(Unbuildable::MissingCredential {
+        field: "encryption key",
+    })?;
+    Ok(Arc::new(sync_core::EncryptingAdapter::new(plain, key)))
+}
+
+/// The device-local data key, base64 in the keychain.
+fn e2e_key(secrets: &dyn SecretStore) -> Option<[u8; sync_core::crypto::KEY_LEN]> {
+    use base64::Engine as _;
+    let raw = secrets
+        .retrieve(SECRET_ACCOUNT_E2E, SecretSlot::SyncEncryptionKey)
+        .ok()?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(raw.trim())
+        .ok()?;
+    let out: [u8; sync_core::crypto::KEY_LEN] = bytes.try_into().ok()?;
+    Some(out)
+}
+
 /// Whether this device encrypts what it uploads.
 pub fn e2e_enabled(prefs: &UserPrefsRepo<'_>) -> bool {
     prefs

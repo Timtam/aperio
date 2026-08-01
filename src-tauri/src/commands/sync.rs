@@ -1923,240 +1923,47 @@ pub async fn adopt_remote_encryption(
 /// Same plugin-routing shape as [`build_adapter`]: the persisted
 /// pref values become a JSON config that's handed to the
 /// matching sync plugin via `open_instance`.
+/// Rebuild the configured adapter from this device's preferences, for
+/// `lib.rs::setup` on app start.
+///
+/// Everything this used to do — the per-kind preference reads, the keychain
+/// lookups, assembling the plugin's init config, the SFTP host-key refusal, and
+/// the encryption wrap — now lives in `host_core::sync_target`, shared with the
+/// mobile host and tested there. What remains here is how THIS host opens a
+/// plugin.
+///
+/// The reason it returns `None` rather than the reason it failed is that the
+/// caller has nowhere to put one at start-up; the reason is logged instead,
+/// which is more than either host did before.
 pub fn build_adapter_from_prefs(
     db: &SharedConn,
     plugin_manager: &PluginManager,
 ) -> Option<Arc<dyn SyncAdapter>> {
-    let prefs = UserPrefsRepo::new(db);
-    let kind = prefs
-        .get(PREF_ADAPTER_KIND)
-        .ok()
-        .flatten()
-        .filter(|stored| !is_unconfigured(Some(stored)))?;
-    let plain: Arc<dyn SyncAdapter> = match kind.as_str() {
-        "local" => {
-            let path = prefs.get(PREF_LOCAL_PATH).ok().flatten()?;
-            if path.trim().is_empty() {
-                return None;
-            }
-            let cfg = serde_json::json!({ "remote_root": path.trim() }).to_string();
-            open_sync_plugin(plugin_manager, PLUGIN_ID_LOCAL, cfg).ok()?
+    struct Opener<'a>(&'a PluginManager);
+    impl host_core::sync_target::PluginOpener for Opener<'_> {
+        fn open(
+            &self,
+            plugin_id: &str,
+            config_json: String,
+        ) -> Result<Arc<dyn SyncAdapter>, String> {
+            open_sync_plugin(self.0, plugin_id, config_json).map_err(|err| err.message)
         }
-        "webdav" => {
-            let url = prefs.get(PREF_WEBDAV_URL).ok().flatten()?;
-            if url.trim().is_empty() {
-                return None;
-            }
-            let user = prefs
-                .get(PREF_WEBDAV_USER)
-                .ok()
-                .flatten()
-                .unwrap_or_default();
-            let password = secrets::retrieve(WEBDAV_SECRET_ACCOUNT, SecretSlot::Password)
-                .ok()
-                .unwrap_or_default();
-            let cfg = serde_json::json!({
-                "url": url.trim(),
-                "user": user.trim(),
-                "password": password,
-            })
-            .to_string();
-            open_sync_plugin(plugin_manager, PLUGIN_ID_WEBDAV, cfg).ok()?
-        }
-        "sftp" => {
-            let host = prefs.get(PREF_SFTP_HOST).ok().flatten()?;
-            if host.trim().is_empty() {
-                return None;
-            }
-            let port = prefs
-                .get(PREF_SFTP_PORT)
-                .ok()
-                .flatten()
-                .and_then(|s| s.parse::<u16>().ok())
-                .unwrap_or(22);
-            let user = prefs.get(PREF_SFTP_USER).ok().flatten()?;
-            if user.trim().is_empty() {
-                return None;
-            }
-            let path = prefs.get(PREF_SFTP_PATH).ok().flatten()?;
-            if path.trim().is_empty() {
-                return None;
-            }
-            let auth_method = prefs
-                .get(PREF_SFTP_AUTH_METHOD)
-                .ok()
-                .flatten()
-                .unwrap_or_else(|| "password".to_string());
-            let (resolved_password, resolved_key_path, resolved_key_passphrase) = match auth_method
-                .as_str()
-            {
-                "key" => {
-                    let kp = prefs.get(PREF_SFTP_KEY_PATH).ok().flatten()?;
-                    if kp.trim().is_empty() {
-                        return None;
-                    }
-                    let pass = secrets::retrieve(SFTP_KEY_SECRET_ACCOUNT, SecretSlot::Password)
-                        .ok()
-                        .unwrap_or_default();
-                    (String::new(), kp.trim().to_string(), pass)
-                }
-                // "password" + anything unknown both fall to password auth —
-                // forward-compat for a future auth method an older Aperio does
-                // not know. The credential resolved here has to be sent
-                // ALONGSIDE a method the plugin accepts: it rejects anything but
-                // "password"/"key", so forwarding the unknown string made the
-                // open fail and restore return nothing. Sync then stayed off
-                // with no error, since this path discards plugin errors —
-                // precisely the outcome this fallback exists to prevent.
-                _ => {
-                    let pw = secrets::retrieve(SFTP_SECRET_ACCOUNT, SecretSlot::Password).ok()?;
-                    (pw, String::new(), String::new())
-                }
-            };
-            let pinned_fp = pinned_sftp_fingerprint(db, host.trim(), port);
-            // §19.5: never restore an SFTP target with no pinned host key — that
-            // would silently TOFU (accept whatever key the network presents) on
-            // the next sync round. Leave sync unconfigured until the user
-            // re-trusts via the trust dialog.
-            if pinned_fp.trim().is_empty() {
-                return None;
-            }
-            let cfg = serde_json::json!({
-                "host": host.trim(),
-                "port": port,
-                "user": user.trim(),
-                "path": path.trim(),
-                // Normalised, not echoed — see the fallback arm above.
-                "auth_method": if auth_method == "key" { "key" } else { "password" },
-                "password": resolved_password,
-                "key_path": resolved_key_path,
-                "key_passphrase": resolved_key_passphrase,
-                "pinned_fingerprint": pinned_fp,
-            })
-            .to_string();
-            open_sync_plugin(plugin_manager, PLUGIN_ID_SFTP, cfg).ok()?
-        }
-        "ftp" => {
-            let host = prefs.get(PREF_FTP_HOST).ok().flatten()?;
-            if host.trim().is_empty() {
-                return None;
-            }
-            let port = prefs
-                .get(PREF_FTP_PORT)
-                .ok()
-                .flatten()
-                .and_then(|s| s.parse::<u16>().ok())
-                .unwrap_or(21);
-            let user = prefs.get(PREF_FTP_USER).ok().flatten()?;
-            if user.trim().is_empty() {
-                return None;
-            }
-            let path = prefs.get(PREF_FTP_PATH).ok().flatten().unwrap_or_default();
-            let mode = prefs
-                .get(PREF_FTP_MODE)
-                .ok()
-                .flatten()
-                .unwrap_or_else(|| "explicit".to_string());
-            // Validated on restore as well as on connect. The plugin does not
-            // reject an unknown mode — it falls through to Explicit — so a
-            // stored value that is not one of the three would quietly change
-            // which transport this device uses, with nothing reporting it. The
-            // connect paths have always checked; this one never did.
-            if !matches!(mode.trim(), "implicit" | "explicit" | "plain") {
-                tracing::warn!(
-                    mode = %mode,
-                    "stored FTPS mode is not one of implicit/explicit/plain; \
-                     refusing to restore rather than guessing a transport",
-                );
-                return None;
-            }
-            let password = secrets::retrieve(FTP_SECRET_ACCOUNT, SecretSlot::Password).ok()?;
-            let cfg = serde_json::json!({
-                "host": host.trim(),
-                "port": port,
-                "user": user.trim(),
-                "password": password,
-                "path": path.trim(),
-                "mode": mode,
-            })
-            .to_string();
-            open_sync_plugin(plugin_manager, PLUGIN_ID_FTP, cfg).ok()?
-        }
-        "dropbox" => {
-            let client_id = prefs.get(PREF_DROPBOX_CLIENT_ID).ok().flatten()?;
-            if client_id.trim().is_empty() {
-                return None;
-            }
-            let client_secret = prefs
-                .get(PREF_DROPBOX_CLIENT_SECRET)
-                .ok()
-                .flatten()
-                .unwrap_or_default();
-            let path = prefs
-                .get(PREF_DROPBOX_PATH)
-                .ok()
-                .flatten()
-                .unwrap_or_default();
-            let refresh_token =
-                secrets::retrieve(DROPBOX_SECRET_ACCOUNT, SecretSlot::RefreshToken).ok()?;
-            let cfg = serde_json::json!({
-                "client_id": client_id.trim(),
-                "client_secret": client_secret.trim(),
-                "base_path": path.trim(),
-                "refresh_token": refresh_token,
-            })
-            .to_string();
-            open_sync_plugin(plugin_manager, PLUGIN_ID_DROPBOX, cfg).ok()?
-        }
-        "googledrive" => {
-            let client_id = prefs.get(PREF_GOOGLEDRIVE_CLIENT_ID).ok().flatten()?;
-            if client_id.trim().is_empty() {
-                return None;
-            }
-            // Google requires both id + secret for installed apps,
-            // so a missing secret here means the user never
-            // finished the Settings form. Treat that as
-            // "not configured" rather than booting a half-built
-            // adapter.
-            let client_secret = prefs.get(PREF_GOOGLEDRIVE_CLIENT_SECRET).ok().flatten()?;
-            if client_secret.trim().is_empty() {
-                return None;
-            }
-            let folder_name = prefs
-                .get(PREF_GOOGLEDRIVE_FOLDER_NAME)
-                .ok()
-                .flatten()
-                .unwrap_or_default();
-            let refresh_token =
-                secrets::retrieve(GOOGLEDRIVE_SECRET_ACCOUNT, SecretSlot::RefreshToken).ok()?;
-            let cfg = serde_json::json!({
-                "client_id": client_id.trim(),
-                "client_secret": client_secret.trim(),
-                "folder_name": folder_name.trim(),
-                "refresh_token": refresh_token,
-            })
-            .to_string();
-            open_sync_plugin(plugin_manager, PLUGIN_ID_GOOGLEDRIVE, cfg).ok()?
-        }
-        // Forward-compat: an unknown kind (left over from a
-        // future Aperio version) is silently treated as "no
-        // adapter configured" rather than a hard error. The
-        // user reconfigures in Settings; we don't crash the
-        // app over it.
-        _ => return None,
-    };
+    }
 
-    // Phase Sk: if the dataset is flagged E2E in user_prefs,
-    // wrap with `EncryptingAdapter` using the keychain-stored
-    // key. If the key is missing (keychain wiped, fresh OS
-    // install with the same data dir), bail out so the user
-    // re-runs onboarding rather than syncing garbage.
-    let e2e_on = prefs.get(PREF_E2E_ENABLED).ok().flatten().as_deref() == Some("true");
-    if e2e_on {
-        let key = load_e2e_key()?;
-        Some(wrap_if_encrypted(plain, Some(key)))
-    } else {
-        Some(plain)
+    let prefs = UserPrefsRepo::new(db);
+    match host_core::sync_target::build_configured(
+        &prefs,
+        &crate::secrets::KeyringSecretStore,
+        &Opener(plugin_manager),
+    ) {
+        Ok(adapter) => Some(adapter),
+        Err(host_core::sync_target::Unbuildable::NotConfigured) => None,
+        Err(err) => {
+            // Not silent any more. Every one of these used to be a bare `?`
+            // that left sync switched off with nothing said about it.
+            tracing::warn!(%err, "could not restore the configured sync target");
+            None
+        }
     }
 }
 
@@ -2565,11 +2372,9 @@ pub async fn get_pinned_sftp_host_key(
 /// which keeps this commit to the declarations themselves.
 use host_core::sync_target::{
     is_unconfigured, PLUGIN_ID_DROPBOX, PLUGIN_ID_FTP, PLUGIN_ID_GOOGLEDRIVE, PLUGIN_ID_LOCAL,
-    PLUGIN_ID_SFTP, PLUGIN_ID_WEBDAV, PREF_ADAPTER_KIND, PREF_DROPBOX_CLIENT_ID,
-    PREF_DROPBOX_CLIENT_SECRET, PREF_DROPBOX_PATH, PREF_FTP_HOST, PREF_FTP_MODE, PREF_FTP_PATH,
-    PREF_FTP_PORT, PREF_FTP_USER, PREF_GOOGLEDRIVE_CLIENT_ID, PREF_GOOGLEDRIVE_CLIENT_SECRET,
-    PREF_GOOGLEDRIVE_FOLDER_NAME, PREF_LOCAL_PATH, PREF_SFTP_AUTH_METHOD, PREF_SFTP_HOST,
-    PREF_SFTP_KEY_PATH, PREF_SFTP_PATH, PREF_SFTP_PORT, PREF_SFTP_USER, PREF_WEBDAV_URL,
+    PLUGIN_ID_SFTP, PLUGIN_ID_WEBDAV, PREF_ADAPTER_KIND, PREF_DROPBOX_PATH, PREF_FTP_HOST,
+    PREF_FTP_PATH, PREF_FTP_PORT, PREF_FTP_USER, PREF_GOOGLEDRIVE_FOLDER_NAME, PREF_LOCAL_PATH,
+    PREF_SFTP_HOST, PREF_SFTP_PATH, PREF_SFTP_PORT, PREF_SFTP_USER, PREF_WEBDAV_URL,
     PREF_WEBDAV_USER, SECRET_ACCOUNT_DROPBOX as DROPBOX_SECRET_ACCOUNT,
     SECRET_ACCOUNT_E2E as E2E_SECRET_ACCOUNT, SECRET_ACCOUNT_FTP as FTP_SECRET_ACCOUNT,
     SECRET_ACCOUNT_GOOGLEDRIVE as GOOGLEDRIVE_SECRET_ACCOUNT,
