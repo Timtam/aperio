@@ -1835,6 +1835,19 @@ fn restore_adapter_from_prefs(
                 .ok()
                 .flatten()
                 .unwrap_or_else(|| "explicit".to_string());
+            // Validated on restore as well as on connect. The plugin does not
+            // reject an unknown mode — it falls through to Explicit — so a
+            // stored value that is not one of the three would quietly change
+            // which transport this device uses, with nothing reporting it. The
+            // connect paths have always checked; this one never did.
+            if !matches!(mode.trim(), "implicit" | "explicit" | "plain") {
+                tracing::warn!(
+                    mode = %mode,
+                    "stored FTPS mode is not one of implicit/explicit/plain; \
+                     refusing to restore rather than guessing a transport",
+                );
+                return None;
+            }
             // FTP has no anonymous path in our model — a missing password
             // means the config is incomplete, so don't restore (the desktop
             // `?`-shortcuts here too).

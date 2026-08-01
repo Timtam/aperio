@@ -196,8 +196,16 @@ pub enum SyncAdapterConfig {
     /// keychain password is reused. The Settings UI uses that to
     /// support "edit URL without re-typing the password". An empty
     /// string is treated as "no auth", same as omitting the field.
+    ///
+    /// `user` is optional for the same reason it is on the mobile host and in
+    /// the adapter itself: an empty user means anonymous, which the WebDAV
+    /// plugin models as `WebDavCredentials::None` and some servers genuinely
+    /// serve. Requiring the field here made a payload without it a wire-level
+    /// deserialisation failure, so the two hosts disagreed about whether an
+    /// anonymous collection could be used at all.
     Webdav {
         url: String,
+        #[serde(default)]
         user: String,
         #[serde(default)]
         password: Option<String>,
@@ -2049,6 +2057,19 @@ pub fn build_adapter_from_prefs(
                 .ok()
                 .flatten()
                 .unwrap_or_else(|| "explicit".to_string());
+            // Validated on restore as well as on connect. The plugin does not
+            // reject an unknown mode — it falls through to Explicit — so a
+            // stored value that is not one of the three would quietly change
+            // which transport this device uses, with nothing reporting it. The
+            // connect paths have always checked; this one never did.
+            if !matches!(mode.trim(), "implicit" | "explicit" | "plain") {
+                tracing::warn!(
+                    mode = %mode,
+                    "stored FTPS mode is not one of implicit/explicit/plain; \
+                     refusing to restore rather than guessing a transport",
+                );
+                return None;
+            }
             let password = secrets::retrieve(FTP_SECRET_ACCOUNT, SecretSlot::Password).ok()?;
             let cfg = serde_json::json!({
                 "host": host.trim(),
