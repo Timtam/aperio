@@ -165,9 +165,14 @@ jobs:
           # failed for months. Both ABIs: an AAB carrying one installs fine and
           # then dies on devices built for the other, and nothing in a store
           # listing says so.
+          # `build:inspect` takes platform, profile, stage, output, force and
+          # verbose — and nothing else. `--non-interactive` is a flag of
+          # `build`, not of this one, and passing it aborted the step before
+          # anything was inspected. It needs no such flag: every input it could
+          # prompt for is given, and EXPO_TOKEN authenticates it.
           eas build:inspect --platform android --profile "$PROFILE" \
             --stage archive --output "$RUNNER_TEMP/eas-archive" \
-            --force --non-interactive
+            --force
           for abi in arm64-v8a x86_64; do
             lib="$RUNNER_TEMP/eas-archive/mobile/modules/cal-ffi/android/src/main/jniLibs/$abi/libcal_ffi.so"
             if [ ! -s "$lib" ]; then
