@@ -652,27 +652,39 @@ fn persist_adapter_config(prefs: &UserPrefsRepo, config: &SyncAdapterConfig) -> 
             prefs
                 .set(PREF_SFTP_AUTH_METHOD, auth_method.trim())
                 .map_err(internal)?;
-            if let Some(p) = key_path.as_deref().map(str::trim) {
-                if !p.is_empty() {
-                    prefs.set(PREF_SFTP_KEY_PATH, p).map_err(internal)?;
+            // Write only what the CHOSEN method uses, the way the mobile host
+            // already does. This branch used to store whatever the request
+            // carried, so picking key auth and leaving a password in the form
+            // put that password in the keychain for a mode that will never read
+            // it — the builder dispatches strictly on `auth_method`.
+            //
+            // What it must NOT do is clear the other method's credential. The
+            // two keychain slots are separate precisely so switching back does
+            // not mean retyping a passphrase, and nothing reads the inactive one
+            // in the meantime.
+            //
+            // Empty values are still skipped, so editing a host or a path
+            // without re-entering the secret keeps the stored one, as in the
+            // WebDAV branch above.
+            if auth_method.trim() == "key" {
+                if let Some(p) = key_path.as_deref().map(str::trim) {
+                    if !p.is_empty() {
+                        prefs.set(PREF_SFTP_KEY_PATH, p).map_err(internal)?;
+                    }
                 }
-            }
-            // Only overwrite the password keychain when the
-            // request body carries a non-empty value. Same
-            // reasoning as the WebDAV branch.
-            if let Some(pw) = password.as_deref().map(str::trim) {
+                if let Some(pp) = key_passphrase.as_deref().map(str::trim) {
+                    if !pp.is_empty() {
+                        secrets::store(SFTP_KEY_SECRET_ACCOUNT, SecretSlot::Password, pp).map_err(
+                            |err| CommandError {
+                                code: "internal",
+                                message: format!("keychain store: {err}"),
+                            },
+                        )?;
+                    }
+                }
+            } else if let Some(pw) = password.as_deref().map(str::trim) {
                 if !pw.is_empty() {
                     secrets::store(SFTP_SECRET_ACCOUNT, SecretSlot::Password, pw).map_err(
-                        |err| CommandError {
-                            code: "internal",
-                            message: format!("keychain store: {err}"),
-                        },
-                    )?;
-                }
-            }
-            if let Some(pp) = key_passphrase.as_deref().map(str::trim) {
-                if !pp.is_empty() {
-                    secrets::store(SFTP_KEY_SECRET_ACCOUNT, SecretSlot::Password, pp).map_err(
                         |err| CommandError {
                             code: "internal",
                             message: format!("keychain store: {err}"),
