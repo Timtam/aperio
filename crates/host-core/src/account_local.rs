@@ -27,6 +27,7 @@
 
 use serde_json::{Map, Value};
 
+use crate::db::SharedConn;
 use crate::user_prefs::{UserPrefsRepo, UserPrefsResult};
 
 /// Preference keys look like `account.<id>.<field>`.
@@ -95,6 +96,28 @@ pub fn forget(
         prefs.delete(&key_for(account_id, field))?;
     }
     Ok(())
+}
+
+/// The registry's [`crate::registry::DeviceLocalRead`], backed by this module.
+///
+/// A separate type rather than an impl on some existing one, because the
+/// registry deliberately knows nothing about databases: it holds the trait, and
+/// this is the only thing in the tree that satisfies it. A test host could
+/// satisfy it with a map and never touch SQLite.
+pub struct PrefsDeviceLocal {
+    db: SharedConn,
+}
+
+impl PrefsDeviceLocal {
+    pub fn new(db: SharedConn) -> Self {
+        Self { db }
+    }
+}
+
+impl crate::registry::DeviceLocalRead for PrefsDeviceLocal {
+    fn load(&self, account_id: &str, fields: &[String]) -> Map<String, Value> {
+        load(&UserPrefsRepo::new(&self.db), account_id, fields)
+    }
 }
 
 #[cfg(test)]

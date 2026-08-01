@@ -1959,6 +1959,12 @@ impl Host {
             Arc::clone(&secret_store),
             Some(data_dir.clone()),
         ));
+        // Before bootstrap, so the first registration already sees this
+        // device's half of every account. Registering first and wiring after
+        // would open every adapter once with the travelling half alone.
+        registry.set_device_local_store(Arc::new(host_core::account_local::PrefsDeviceLocal::new(
+            db.shared(),
+        )));
         {
             let shared = db.shared();
             let repo = AccountsRepo::new(&shared);
