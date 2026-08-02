@@ -435,10 +435,16 @@ pub struct PluginManifest {
     /// the config shape they were written with. The host does not translate
     /// between them, and could not — it does not know what the fields mean.
     ///
-    /// Adopted kinds are for RESOLUTION only. They are deliberately absent from
-    /// [`crate::manifest::AdapterKindInfo`] and therefore from every picker: a
-    /// merged adapter must be offered once, under one name, or the Add-account
-    /// list grows an entry for a thing that no longer exists separately.
+    /// An adopted kind is LISTED in [`AdapterKindInfo`] with `offered: false`,
+    /// not omitted. Both halves are load-bearing: the accounts carrying it are
+    /// real, and every surface that groups or describes accounts builds its
+    /// groups from that list, so leaving it out makes a working account vanish
+    /// with nothing said. `offered: false` is what keeps the Add-account list
+    /// from growing an entry for an adapter that no longer exists separately.
+    ///
+    /// It follows that an adopted kind DOES need a display name in the app's
+    /// locale files, because account rows are labelled from the kind — see the
+    /// `every_declared_kind_is_named_in_both_locales` test in `host-plugins`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub adopts_adapter_kinds: Vec<String>,
 

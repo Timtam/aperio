@@ -201,9 +201,7 @@ pub fn travels_between_devices(manager: &plugin_core::PluginManager, adapter_kin
     // "unknown kind" and start travelling — the one thing this rule exists to
     // stop, reachable by a toggle in the settings.
     manager
-        .all()
-        .into_iter()
-        .find(|p| p.manifest.serves_kind(adapter_kind))
+        .any_plugin_for_adapter_kind(adapter_kind)
         .is_none_or(|p| {
             p.manifest
                 .capabilities

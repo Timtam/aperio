@@ -131,8 +131,12 @@ What you take on with them:
   wherever the app DESCRIBES accounts — an account that already carries one has
   to stay visible, groupable and repairable — but never where it CREATES one.
   The Add-account picker and the sync-target form both skip them, so a merged
-  adapter is offered once, under one name. They need no display name in the
-  app's locale files.
+  adapter is offered once, under one name.
+- **An adopted kind still needs its display name.** Account rows are labelled
+  from the kind, so a bundled adapter that adopts one must keep that kind's
+  entry in `locales/{en,de}/translation.json` under
+  `dialogs.accounts.kindName.*`. Dropping it is not a blank label — a screen
+  reader reads out the raw key.
 - **Delete the plugin you adopted from.** While both are installed the one that
   declares the kind as its own keeps it, so the adopting half serves nothing —
   and which one a user's accounts bind to depends on what they have installed.

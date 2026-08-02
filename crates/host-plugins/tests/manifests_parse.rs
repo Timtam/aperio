@@ -214,17 +214,6 @@ fn no_two_adapters_in_the_tree_share_a_kind() {
     }
 }
 
-/// Every kind an adapter declares has a name a person can hear.
-///
-/// Both account-row label sites — the desktop's `AccountsPanel`/`Sidebar` and
-/// the mobile `AccountsScreen` — call
-/// `t('dialogs.accounts.kindName.' + kind)` with no `defaultValue`, and the
-/// reconnect dialog does the same with `syncAccountsConnect.kind.`. i18next
-/// returns the key itself when it misses, so the failure mode is not a blank or
-/// a fallback: it is a row that a screen reader reads out as
-/// "dialogs dot accounts dot kind name dot googledrive", once per account,
-/// forever, with nothing on screen looking wrong to a sighted reviewer.
-///
 /// An adopted kind belongs to exactly one adapter too — and never to a plugin
 /// that is still shipping.
 ///
@@ -266,11 +255,32 @@ fn an_adopted_kind_has_no_other_claimant_in_the_tree() {
         }
     }
 
+    assert!(
+        !manifests.is_empty(),
+        "no manifest in the tree was walked — the walk is probably wrong",
+    );
     assert!(problems.is_empty(), "{}", problems.join("; "));
 }
 
+/// Every kind an adapter declares has a name a person can hear.
+///
+/// Both account-row label sites — the desktop's `AccountsPanel`/`Sidebar` and
+/// the mobile `AccountsScreen` — call
+/// `t('dialogs.accounts.kindName.' + kind)` with no `defaultValue`, and the
+/// reconnect dialog does the same with `syncAccountsConnect.kind.`. i18next
+/// returns the key itself when it misses, so the failure mode is not a blank or
+/// a fallback: it is a row that a screen reader reads out as
+/// "dialogs dot accounts dot kind name dot googledrive", once per account,
+/// forever, with nothing on screen looking wrong to a sighted reviewer.
+///
 /// So it is asserted here, against the shipped locale files, rather than left to
 /// be noticed.
+///
+/// ADOPTED kinds count. They are listed by `PluginManager::adapter_kinds()`
+/// (only `offered` is false), so an account carrying one is drawn, grouped and
+/// labelled through exactly the same `t(...)` call as any other. A kind that
+/// stops being anybody's `adapter_kind` because it was adopted must not fall
+/// out of this guard on the way.
 #[test]
 fn every_declared_kind_is_named_in_both_locales() {
     let repo_root = crates_dir()
@@ -280,7 +290,12 @@ fn every_declared_kind_is_named_in_both_locales() {
 
     let mut kinds: Vec<String> = manifests_in_tree()
         .into_iter()
-        .filter_map(|(_, m)| m.adapter_kind)
+        .flat_map(|(_, m)| {
+            m.adapter_kind
+                .into_iter()
+                .chain(m.adopts_adapter_kinds)
+                .collect::<Vec<_>>()
+        })
         .collect();
     kinds.sort();
     kinds.dedup();

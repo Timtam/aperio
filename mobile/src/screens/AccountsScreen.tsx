@@ -217,10 +217,13 @@ export default function AccountsScreen() {
     listAdapterKinds()
       .then((kinds) => {
         if (!cancelled) {
-          // Storage backends belong here too, and adopted kinds do not —
-          // see the desktop twin.
+          // Storage backends belong here too. Deliberately NOT filtered on
+          // `offered`: this list also answers questions ABOUT existing
+          // accounts (the repair mode below), so an account whose kind its
+          // plugin only adopted must stay describable. `offeredKinds` is the
+          // half that may be created. See the desktop twin.
           setAvailableKinds(
-            kinds.filter((k) => k.offered && !HOST_INTERNAL_KINDS.has(k.kind)),
+            kinds.filter((k) => !HOST_INTERNAL_KINDS.has(k.kind)),
           );
         }
       })
@@ -876,10 +879,13 @@ export default function AccountsScreen() {
         cancelLabel={t('mobile.cancel')}
         onCancel={cancelAdd}
       >
-        {/* Whatever the host reported. A bundled adapter gets its translated
+        {/* Whatever the host reported, minus the kinds no plugin can create
+            an account for any more. A bundled adapter gets its translated
             name; anything else falls back to the plugin's own, which beats a
             missing-key marker. */}
-        {availableKinds.map((entry) => {
+        {availableKinds
+          .filter((entry) => entry.offered)
+          .map((entry) => {
           const label = t(`dialogs.accounts.kindName.${entry.kind}`, {
             defaultValue: entry.name,
           });

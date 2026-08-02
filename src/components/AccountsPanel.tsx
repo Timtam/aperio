@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -153,6 +154,18 @@ export function AccountsPanel() {
   // credential is the ADAPTER's statement, carried on the kind listing. Naming
   // google and microsoft_graph here labelled a Webex account's button
   // "Re-enter password" for what is now a browser sign-in.
+  /** The half of {@link availableKinds} a NEW account may be created with.
+   *
+   *  A kind its plugin only ADOPTED has no adapter left to create one against,
+   *  so it is not offered — but it stays in `availableKinds`, because the
+   *  accounts already carrying it have to remain describable. Mixing the two
+   *  up is what made this screen offer "Re-enter password" for an account that
+   *  signs in through a browser. */
+  const offeredKinds = useMemo(
+    () => availableKinds.filter((k) => k.offered),
+    [availableKinds],
+  );
+
   const signsInWithProvider = useCallback(
     (kind: string): boolean =>
       availableKinds.find((k) => k.kind === kind)?.declares_oauth === true,
@@ -202,25 +215,24 @@ export function AccountsPanel() {
     listAdapterKinds()
       .then((kinds) => {
         if (cancelled) return;
-        // Everything the host offers, including the storage backends. A sync
+        // Everything the host knows, including the storage backends. A sync
         // target IS an account here — you add it on this screen and then pick
         // it in the sync settings, which is what `can_sync` is for. Filtering
         // them out would leave no way to create one.
         //
-        // `k.offered` drops the kinds a plugin only ADOPTED: an account that
-        // already carries one keeps working and stays listed everywhere else,
-        // but the adapter it was created with is gone, so this screen must not
-        // offer to make another.
-        const offered = kinds.filter(
-          (k) => k.offered && !HOST_INTERNAL_KINDS.has(k.kind),
-        );
-        setAvailableKinds(offered);
+        // Deliberately NOT filtered on `offered`: this list also answers
+        // questions ABOUT existing accounts (see `signsInWithProvider`), and an
+        // account whose kind its plugin only adopted must still be describable.
+        // `offeredKinds` below is the half that may be created.
+        const known = kinds.filter((k) => !HOST_INTERNAL_KINDS.has(k.kind));
+        setAvailableKinds(known);
         // Preselect the first one, but never overwrite a choice the user has
         // already made — this effect re-runs whenever a plugin is toggled.
+        const creatable = known.filter((entry) => entry.offered);
         setKind((current) =>
-          offered.some((entry) => entry.kind === current)
+          creatable.some((entry) => entry.kind === current)
             ? current
-            : (offered[0]?.kind ?? ''),
+            : (creatable[0]?.kind ?? ''),
         );
       })
       .catch((err) => {
@@ -300,7 +312,7 @@ export function AccountsPanel() {
         setError(t('dialogs.accounts.nameRequired'));
         return;
       }
-      if (!availableKinds.some((entry) => entry.kind === kind)) {
+      if (!offeredKinds.some((entry) => entry.kind === kind)) {
         // Defence in depth: the picker only offers what the host reported, but
         // a plugin can be switched off between opening the form and submitting.
         setError(t('dialogs.accounts.kindUnavailable'));
@@ -422,7 +434,7 @@ export function AccountsPanel() {
       }
     },
     [
-      availableKinds,
+      offeredKinds,
       displayName,
       kind,
       formSpec,
@@ -1141,7 +1153,7 @@ export function AccountsPanel() {
                 {/* Whatever the host reported. A bundled adapter gets its
                     translated name; anything else falls back to the plugin's
                     own, which beats a missing-key marker. */}
-                {availableKinds.map((entry) => (
+                {offeredKinds.map((entry) => (
                   <option key={entry.kind} value={entry.kind}>
                     {t(`dialogs.accounts.kindName.${entry.kind}`, {
                       defaultValue: entry.name,
@@ -1242,7 +1254,7 @@ export function AccountsPanel() {
                   submitting ||
                   testing ||
                   discovering ||
-                  !availableKinds.some((entry) => entry.kind === kind) ||
+                  !offeredKinds.some((entry) => entry.kind === kind) ||
                   undefined
                 }
               >

@@ -451,9 +451,7 @@ impl AdapterRegistry {
     /// sweep does with its accounts.
     fn is_sync_only(&self, adapter_kind: &crate::accounts::AdapterKind) -> bool {
         self.plugin_manager
-            .all()
-            .into_iter()
-            .find(|p| p.manifest.serves_kind(adapter_kind.as_str()))
+            .any_plugin_for_adapter_kind(adapter_kind.as_str())
             .is_some_and(|p| {
                 !p.manifest.capabilities.is_empty()
                     && p.manifest

@@ -1185,15 +1185,48 @@ impl PluginManager {
     /// between launches of the same build.
     pub fn plugin_for_adapter_kind(&self, adapter_kind: &str) -> Option<Arc<LoadedPlugin>> {
         let inner = self.inner.read().expect("manager poisoned");
+        // Registration order, not map order: two plugins claiming one kind as
+        // their own is a packaging mistake this cannot fix, but it must at
+        // least resolve the SAME way on every launch rather than following
+        // whatever the hash map yields first.
         let live = || {
             inner
-                .plugins
-                .values()
+                .order
+                .iter()
+                .filter_map(|id| inner.plugins.get(id))
                 .filter(|p| !inner.disabled.contains(&p.manifest.id))
         };
         live()
             .find(|p| p.manifest.adapter_kind.as_deref() == Some(adapter_kind))
             .or_else(|| live().find(|p| p.manifest.adopts_kind(adapter_kind)))
+            .cloned()
+    }
+
+    /// The plugin serving `adapter_kind` INCLUDING disabled ones.
+    ///
+    /// [`Self::plugin_for_adapter_kind`] answers "which plugin will handle this
+    /// account now"; this answers "which adapter is this kind's, at all". The
+    /// difference matters for the questions that must NOT change when a user
+    /// flicks a toggle in the settings — whether a kind's accounts travel
+    /// between devices, and whether it is a storage backend rather than a
+    /// source of data. Reading those through the filtered view would let
+    /// disabling a plugin change where its accounts go.
+    ///
+    /// Same own-beats-adopted preference as the enabled-only twin, and for a
+    /// stronger reason: the two used to disagree. Both readers below took the
+    /// FIRST plugin whose manifest served the kind, in registration order,
+    /// while the resolver preferred the plugin that OWNS it. With a merged
+    /// adapter and the one it supersedes both installed, the account bound to
+    /// one plugin while its travel rule was read off the other's capabilities
+    /// — and for a sync-only kind adopted by a data adapter that reads as
+    /// "this travels", which publishes a device-local storage target and its
+    /// folder path to every other device.
+    pub fn any_plugin_for_adapter_kind(&self, adapter_kind: &str) -> Option<Arc<LoadedPlugin>> {
+        let inner = self.inner.read().expect("manager poisoned");
+        let all = || inner.order.iter().filter_map(|id| inner.plugins.get(id));
+        all()
+            .find(|p| p.manifest.adapter_kind.as_deref() == Some(adapter_kind))
+            .or_else(|| all().find(|p| p.manifest.adopts_kind(adapter_kind)))
             .cloned()
     }
 
@@ -2029,39 +2062,98 @@ mod tests {
         assert!(mgr.plugin_for_adapter_kind("dropbox").is_none());
     }
 
-    /// While the merged adapter and the one it supersedes are both installed,
-    /// the one that declares the kind as its OWN wins — every launch, whatever
-    /// order the map iterates in.
-    #[test]
-    fn an_own_kind_beats_an_adopted_one() {
+    /// A manager holding both halves of a consolidation, registered in the
+    /// given order. The order is a parameter because a resolver that merely
+    /// takes the first match passes half the time by luck, and a test that
+    /// pins one order would be the half that passes.
+    fn merged_and_legacy(legacy_first: bool) -> PluginManager {
         let mgr = PluginManager::new("0.1.0");
         let mut merged = stub_manifest("test.merged");
         merged.adapter_kind = Some("google".into());
         merged.adopts_adapter_kinds = vec!["googledrive".into()];
-        mgr.insert_stub_for_tests("test.merged", merged);
         let mut legacy = stub_manifest("test.legacy");
         legacy.adapter_kind = Some("googledrive".into());
-        mgr.insert_stub_for_tests("test.legacy", legacy);
+        if legacy_first {
+            mgr.insert_stub_for_tests("test.legacy", legacy);
+            mgr.insert_stub_for_tests("test.merged", merged);
+        } else {
+            mgr.insert_stub_for_tests("test.merged", merged);
+            mgr.insert_stub_for_tests("test.legacy", legacy);
+        }
+        mgr
+    }
 
-        assert_eq!(
-            mgr.plugin_for_adapter_kind("googledrive")
-                .expect("still served")
-                .manifest
-                .id,
-            "test.legacy",
-            "the superseded plugin still owns its own kind while it is installed",
-        );
+    /// While the merged adapter and the one it supersedes are both installed,
+    /// the one that declares the kind as its OWN wins — whichever was
+    /// registered first.
+    #[test]
+    fn an_own_kind_beats_an_adopted_one() {
+        for legacy_first in [true, false] {
+            let mgr = merged_and_legacy(legacy_first);
+            assert_eq!(
+                mgr.plugin_for_adapter_kind("googledrive")
+                    .expect("still served")
+                    .manifest
+                    .id,
+                "test.legacy",
+                "the superseded plugin still owns its own kind while it is \
+                 installed (legacy_first={legacy_first})",
+            );
 
-        // And once it goes, the adopting plugin picks the rows up rather than
-        // leaving them as "plugin missing".
-        mgr.set_enabled("test.legacy", false);
-        assert_eq!(
-            mgr.plugin_for_adapter_kind("googledrive")
-                .expect("adopted")
-                .manifest
-                .id,
-            "test.merged",
-        );
+            // And once it goes, the adopting plugin picks the rows up rather
+            // than leaving them as "plugin missing".
+            mgr.set_enabled("test.legacy", false);
+            assert_eq!(
+                mgr.plugin_for_adapter_kind("googledrive")
+                    .expect("adopted")
+                    .manifest
+                    .id,
+                "test.merged",
+            );
+        }
+    }
+
+    /// The question asked of DISABLED plugins too resolves the same way.
+    ///
+    /// `travels_between_devices` and `is_sync_only` must not change their
+    /// answer when a user flicks a toggle, so they read through this rather
+    /// than the enabled-only view — and they used to take the first manifest
+    /// that served the kind in registration order, disagreeing with the
+    /// resolver whenever the adopting plugin came first. For a sync-only kind
+    /// adopted by a data adapter that reads as "these accounts travel", which
+    /// publishes a device-local storage target to every other device.
+    #[test]
+    fn the_disabled_inclusive_resolver_agrees_with_the_enabled_one() {
+        for legacy_first in [true, false] {
+            let mgr = merged_and_legacy(legacy_first);
+            assert_eq!(
+                mgr.any_plugin_for_adapter_kind("googledrive")
+                    .expect("served")
+                    .manifest
+                    .id,
+                "test.legacy",
+                "legacy_first={legacy_first}",
+            );
+            assert_eq!(
+                mgr.any_plugin_for_adapter_kind("googledrive")
+                    .map(|p| p.manifest.id.clone()),
+                mgr.plugin_for_adapter_kind("googledrive")
+                    .map(|p| p.manifest.id.clone()),
+                "the two resolvers named different plugins (legacy_first={legacy_first})",
+            );
+
+            // Disabling must not move the answer — that is the whole reason
+            // this second resolver exists.
+            mgr.set_enabled("test.legacy", false);
+            assert_eq!(
+                mgr.any_plugin_for_adapter_kind("googledrive")
+                    .expect("still this kind's adapter")
+                    .manifest
+                    .id,
+                "test.legacy",
+                "a disabled plugin still OWNS its kind (legacy_first={legacy_first})",
+            );
+        }
     }
 
     /// Adopted kinds are LISTED but not OFFERED.
@@ -2107,30 +2199,26 @@ mod tests {
     /// picks, not whichever the hash map yielded first.
     #[test]
     fn a_kind_claimed_twice_keeps_the_entry_that_resolves() {
-        let mgr = PluginManager::new("0.1.0");
-        let mut merged = stub_manifest("test.merged");
-        merged.adapter_kind = Some("google".into());
-        merged.adopts_adapter_kinds = vec!["googledrive".into()];
-        mgr.insert_stub_for_tests("test.merged", merged);
-        let mut legacy = stub_manifest("test.legacy");
-        legacy.adapter_kind = Some("googledrive".into());
-        mgr.insert_stub_for_tests("test.legacy", legacy);
-
-        let entry = mgr
-            .adapter_kinds()
-            .into_iter()
-            .find(|k| k.kind == "googledrive")
-            .expect("listed once");
-        assert!(entry.offered, "the plugin that OWNS the kind describes it");
-        assert_eq!(entry.plugin_id, "test.legacy");
-        assert_eq!(
-            entry.plugin_id,
-            mgr.plugin_for_adapter_kind("googledrive")
-                .expect("resolves")
-                .manifest
-                .id,
-            "the list and the resolver must name the same plugin",
-        );
+        for legacy_first in [true, false] {
+            let mgr = merged_and_legacy(legacy_first);
+            let listed: Vec<_> = mgr
+                .adapter_kinds()
+                .into_iter()
+                .filter(|k| k.kind == "googledrive")
+                .collect();
+            assert_eq!(listed.len(), 1, "legacy_first={legacy_first}");
+            let entry = &listed[0];
+            assert!(entry.offered, "the plugin that OWNS the kind describes it");
+            assert_eq!(
+                entry.plugin_id,
+                mgr.plugin_for_adapter_kind("googledrive")
+                    .expect("resolves")
+                    .manifest
+                    .id,
+                "the list and the resolver must name the same plugin \
+                 (legacy_first={legacy_first})",
+            );
+        }
     }
 
     /// A disabled plugin does not resolve the kinds it adopted either —
