@@ -830,6 +830,49 @@ fn wrap_if_encrypted(
     }
 }
 
+/// Whether a key out of this device's keychain actually opens the dataset on
+/// the target.
+///
+/// The keychain outlives the data folder — it belongs to the operating system,
+/// not to Aperio — so a device whose data was wiped, or one that used to sync
+/// somewhere else entirely, still holds a key. Reusing it is right when it is
+/// the same dataset and wrong when it is not, and nothing about `meta.json`
+/// says which: there is no dataset identifier in it, and the salt cannot stand
+/// in for one because it rotates on every passphrase change while the data key
+/// stays put.
+///
+/// So the key is tried rather than reasoned about. AES-GCM authenticates, so a
+/// wrong key fails to open the object rather than yielding rubbish.
+///
+/// Three answers, and the third is the honest one: a dataset that carries
+/// neither a snapshot nor a log has nothing to try the key against. Saying so
+/// beats claiming a match — the caller proceeds, and the failure, if there is
+/// one, surfaces later where it always did.
+enum StoredKeyVerdict {
+    Opens,
+    Mismatch,
+    NothingToTry,
+}
+
+async fn verify_stored_key(plain: &Arc<dyn SyncAdapter>, key: [u8; KEY_LEN]) -> StoredKeyVerdict {
+    let probe = EncryptingAdapter::new(Arc::clone(plain), key);
+    match probe.fetch_snapshot().await {
+        Ok(Some(_)) => return StoredKeyVerdict::Opens,
+        Err(_) => return StoredKeyVerdict::Mismatch,
+        // No snapshot yet — a young dataset. Its logs are encrypted too, so
+        // they answer the same question.
+        Ok(None) => {}
+    }
+    match probe
+        .fetch_new_logs(&sync_core::DeviceCursor::epoch())
+        .await
+    {
+        Ok(logs) if !logs.is_empty() => StoredKeyVerdict::Opens,
+        Ok(_) => StoredKeyVerdict::NothingToTry,
+        Err(_) => StoredKeyVerdict::Mismatch,
+    }
+}
+
 /// Everything between "this device has an adapter" and "the scheduler is
 /// running on it": probe, meta, the §19.13 compatibility gate, the E2E
 /// decision, activation — and only once all of that has passed, `persist`.
@@ -877,6 +920,21 @@ async fn probe_activate_and_persist(
             code: "encryption_required",
             message: "target dataset is encrypted; onboard via accept_remote_dataset first".into(),
         })?;
+        // The key came out of the keychain, not out of a passphrase the user
+        // just typed. Establish that it opens THIS dataset before handing it to
+        // the orchestrator: used against the wrong one it does not fail here,
+        // it fails on the next round with a message about an unreadable record,
+        // and nothing connects that to a key left behind by an earlier install.
+        match verify_stored_key(&plain, k).await {
+            StoredKeyVerdict::Mismatch => {
+                return Err(CommandError {
+                    code: "encryption_key_mismatch",
+                    message: "this device holds an encryption key from an earlier setup, and it                               does not open this dataset"
+                        .into(),
+                })
+            }
+            StoredKeyVerdict::Opens | StoredKeyVerdict::NothingToTry => {}
+        }
         Some(k)
     } else {
         None

@@ -322,6 +322,10 @@ export interface CommandError {
     // pattern-match on a stable string.
     | 'io'
     | 'encryption_required'
+    // A key this device already held, tried against the target's dataset and
+    // refused by it. Distinct from `decryption_failed`, which is the same
+    // wrongness discovered mid-round, after the choice was already made.
+    | 'encryption_key_mismatch'
     | 'decryption_failed'
     | 'schema_too_old'
     | 'not_configured'

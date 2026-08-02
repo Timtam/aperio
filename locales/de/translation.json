@@ -919,6 +919,7 @@
         "errorNotFound": "Kein Datensatz am Pfad gefunden.",
         "errorSchemaTooOld": "Sync-Datensatz benötigt eine neuere Aperio-Version.",
         "errorEncryption": "Verschlüsselter Datensatz, aber kein Passwort konfiguriert.",
+        "errorKeyMismatch": "Dieses Gerät hält noch einen Verschlüsselungsschlüssel aus einer früheren Einrichtung — der Anmeldeinformationsspeicher des Systems behält ihn auch dann, wenn Aperios Datenordner gelöscht wird — und er öffnet diesen Datensatz nicht. Es wurde nichts geändert.",
         "errorDecryption": "Falsche Sync-Passphrase.",
         "e2eActive": "🔒 Ende-zu-Ende-Verschlüsselung aktiv",
         "e2eInactive": "Ende-zu-Ende-Verschlüsselung deaktiviert",
