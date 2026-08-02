@@ -48,6 +48,7 @@
     },
     "owner": "tonirbarth",
     "plugins": [
+      "./plugins/withoutPushEntitlement",
       [
         "expo-splash-screen",
         {
@@ -87,7 +88,6 @@
       ],
       "./plugins/withReminderSoundProvider",
       "./plugins/withAppGroup",
-      "./plugins/withoutPushEntitlement",
       "./plugins/withAndroidAbis",
       [
         "expo-localization",

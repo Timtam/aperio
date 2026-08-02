@@ -125,6 +125,19 @@ jobs:
       - name: Install eas-cli
         run: npm i -g eas-cli
 
+      # What the app will ASK Apple for, printed before anything tries to sign
+      # it. Entitlements are assembled by config plugins whose order decides the
+      # outcome, and the only place that used to be visible was an Xcode error
+      # 25 minutes later — which is how a silently-broken `withoutPushEntitlement`
+      # went unnoticed until EAS enabled Push Notifications at the developer
+      # portal on its own.
+      #
+      # `|| true` on purpose: this is diagnostics. A config command that trips
+      # over something must not be what stops a build that would otherwise pass.
+      - name: Show the entitlements this build will request
+        working-directory: mobile
+        run: npx expo config --type introspect | sed -n '/entitlements/,/}/p' || true
+
       - name: EAS build + submit
         working-directory: mobile
         env:
