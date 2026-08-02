@@ -544,6 +544,28 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  already holds a dataset. Side-effect-free; the caller offers join vs
    *  overwrite. */
   previewSyncTargetJson(configJson: string): Promise<string>;
+  /** The same question, asked with `{adapter_kind, values}` from the shared
+   *  account-schema form. Refuses with `host_key_not_trusted` for a target whose
+   *  fingerprint this device has not confirmed — a step in the flow, answered
+   *  with the fingerprint probe and the trust gesture, not a dead end. */
+  previewSyncTargetValuesJson(requestJson: string): Promise<string>;
+  /** Join an existing dataset reached through the schema form's values. Commits
+   *  the target as an ACCOUNT ROW plus this device's pointer at it, so a device
+   *  onboarded here is indistinguishable afterwards from one that picked the
+   *  account on the sync screen. Returns the OnboardingReport JSON. */
+  acceptRemoteDatasetValuesJson(
+    requestJson: string,
+    deviceName: string | null,
+    passphrase: string | null,
+  ): Promise<string>;
+  /** Start a fresh dataset on a target reached through the schema form's values;
+   *  same commit as its accept twin. A blank passphrase means a PLAINTEXT fresh
+   *  dataset, not an error. Returns the OnboardingReport JSON. */
+  adoptLocalDatasetValuesJson(
+    requestJson: string,
+    deviceName: string | null,
+    passphrase: string | null,
+  ): Promise<string>;
   /** Join an EXISTING remote dataset: build the adapter, derive the E2E key from
    *  `passphrase` + the dataset's meta params when it's encrypted, pull + apply
    *  the snapshot + logs, register this device, then activate + persist (storing

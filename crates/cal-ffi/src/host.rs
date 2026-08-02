@@ -126,6 +126,30 @@ use host_core::sync_target::{
 // second place for it to stop being the same tomorrow.
 use host_core::sync_target::PLUGIN_ID_LOCAL as PLUGIN_ID_SYNC_LOCAL;
 
+/// Why a sync target could not be built from a form, in a shape the phone can
+/// act on.
+///
+/// The host-key refusal keeps a code, because its repair is a GESTURE: the
+/// fingerprint has to be shown and accepted, and a screen that only printed the
+/// sentence would leave the user with nothing to press. It rides the same
+/// `Sync` variant the engine's own failures use, so the mobile frontend maps it
+/// through one function rather than two.
+///
+/// Everything else carries the error's own text — it names the field or repeats
+/// the plugin's complaint, which is more than a code could say.
+fn connect_err(e: host_core::sync_target::ConnectError) -> StoreError {
+    use host_core::sync_target::ConnectError as E;
+    match &e {
+        E::HostKeyNotTrusted { .. } => StoreError::Sync {
+            code: "host_key_not_trusted".to_string(),
+            detail: e.to_string(),
+        },
+        _ => StoreError::Storage {
+            detail: e.to_string(),
+        },
+    }
+}
+
 fn sync_err(e: SyncError) -> StoreError {
     StoreError::Sync {
         code: e.code().to_string(),
@@ -4469,6 +4493,38 @@ impl Host {
         to_json(&preview)
     }
 
+    /// The same question, asked with an adapter kind and the shared schema
+    /// form's values — the mobile twin of the desktop
+    /// `preview_sync_target_values`.
+    ///
+    /// The safe one to move first: it reaches the target and reports what is
+    /// there, and commits nothing, so the two entry points cannot disagree
+    /// about anything that outlives the call.
+    ///
+    /// Refuses with the host-key error for a target whose fingerprint this
+    /// device has not confirmed. That is a step in the flow rather than a
+    /// fault — the caller answers it with the fingerprint probe and the trust
+    /// gesture, exactly as the account picker does.
+    pub fn preview_sync_target_values_json(
+        &self,
+        request_json: String,
+    ) -> Result<String, StoreError> {
+        let req: SchemaFormRequest = from_json("sync target form", &request_json)?;
+        let shared = self.db.shared();
+        let adapter = host_core::sync_target::preview_adapter(
+            &HostSyncPlugins(&self.plugin_manager),
+            &UserPrefsHostKeyVerifier::new(shared),
+            &req.adapter_kind,
+            &req.values,
+        )
+        .map_err(connect_err)?;
+        let preview = self
+            .runtime
+            .block_on(async { self.onboarding.preview(adapter.as_ref()).await })
+            .map_err(sync_err)?;
+        to_json(&preview)
+    }
+
     /// Resume a device flagged STALE (§19.10): it fell so far behind the dataset
     /// that incremental sync can't safely catch up, so re-onboard from the
     /// configured target, then drop the latched stale flag (subsequent rounds run
@@ -4659,6 +4715,193 @@ impl Host {
                 .map_err(storage_err)?;
         } else {
             // A plaintext fresh dataset clears any stale E2E flag.
+            let _ = prefs.delete(host_core::credential_sync::PREF_E2E_ENABLED);
+        }
+        to_json(&report)
+    }
+
+    /// Join an existing dataset reached through the shared schema form's own
+    /// values — the mobile twin of the desktop `accept_remote_dataset_values`.
+    ///
+    /// Everything [`Self::accept_remote_dataset_json`] does, except for what it
+    /// writes down at the end: this one commits through
+    /// [`host_core::sync_target::connect`], so the target becomes an ACCOUNT ROW
+    /// plus this device's pointer at it, rather than a set of `sync.adapter.*`
+    /// preferences only this device can see. A phone onboarded here is
+    /// afterwards indistinguishable from one that picked the account on the sync
+    /// screen — which is the point of the unification: the two entry points must
+    /// not leave the device in two different states.
+    pub fn accept_remote_dataset_values_json(
+        &self,
+        request_json: String,
+        device_name: Option<String>,
+        passphrase: Option<String>,
+    ) -> Result<String, StoreError> {
+        let req: SchemaFormRequest = from_json("sync target form", &request_json)?;
+        let shared = self.db.shared();
+        let plugins = HostSyncPlugins(&self.plugin_manager);
+        let plain = host_core::sync_target::preview_adapter(
+            &plugins,
+            &UserPrefsHostKeyVerifier::new(shared.clone()),
+            &req.adapter_kind,
+            &req.values,
+        )
+        .map_err(connect_err)?;
+        self.runtime
+            .block_on(async { plain.test_connection().await })
+            .map_err(sync_err)?;
+        // Peek at meta.json first: an encrypted dataset needs its key derived
+        // from the passphrase + the dataset's own params BEFORE anything reads a
+        // snapshot or a log, because the applier needs plaintext bytes.
+        let meta = self
+            .runtime
+            .block_on(async { plain.fetch_meta().await })
+            .map_err(sync_err)?;
+        let e2e_active = meta.as_ref().map(|m| m.e2e_enabled).unwrap_or(false);
+        let key: Option<[u8; KEY_LEN]> = if e2e_active {
+            let pp = passphrase
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| StoreError::Auth {
+                    detail: "this dataset is encrypted; a passphrase is required".to_string(),
+                })?;
+            let params = meta
+                .as_ref()
+                .and_then(|m| m.e2e_params.clone())
+                .ok_or_else(|| StoreError::Storage {
+                    detail: "meta.json says e2e but carries no params".to_string(),
+                })?;
+            Some(resolve_data_key(pp, &params).map_err(sync_err)?)
+        } else {
+            None
+        };
+        let adapter = wrap_if_encrypted(plain, key);
+        let prefs = UserPrefsRepo::new(&shared);
+        // Set before applying, reverted on failure: the snapshot's credential
+        // restore is gated on this flag, so an E2E dataset applied while it is
+        // still false drops every account's password and re-asks for all of them.
+        if e2e_active {
+            prefs
+                .set(host_core::credential_sync::PREF_E2E_ENABLED, "true")
+                .map_err(storage_err)?;
+        }
+        let trimmed = device_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let report = match self.runtime.block_on(async {
+            self.onboarding
+                .accept_remote(adapter.as_ref(), trimmed)
+                .await
+        }) {
+            Ok(report) => report,
+            Err(err) => {
+                if e2e_active {
+                    let _ = prefs.delete(host_core::credential_sync::PREF_E2E_ENABLED);
+                }
+                return Err(sync_err(err));
+            }
+        };
+        self.orchestrator.configure(adapter);
+        // The account row, its secrets, this device's half of the fields and the
+        // pointer — the same write the sync screen makes.
+        host_core::sync_target::connect(
+            &prefs,
+            &AccountsRepo::new(&shared),
+            self.secret_store.as_ref(),
+            &plugins,
+            &req.adapter_kind,
+            &req.values,
+        )
+        .map_err(connect_err)?;
+        if let Some(k) = key {
+            store_e2e_key(self.secret_store.as_ref(), &k)?;
+        } else {
+            let _ = prefs.delete(host_core::credential_sync::PREF_E2E_ENABLED);
+        }
+        // Joining just materialised this device's external accounts; a compacted
+        // dataset restores them through the SNAPSHOT, which `report.applied`
+        // never sees. Self-gating, so calling it unconditionally is free.
+        self.register_synced_accounts();
+        to_json(&report)
+    }
+
+    /// Start a fresh dataset on a target reached through the shared schema
+    /// form's values — the mobile twin of the desktop
+    /// `adopt_local_dataset_values`.
+    ///
+    /// Same body as [`Self::adopt_local_dataset_json`], same committing step as
+    /// [`Self::accept_remote_dataset_values_json`]: an account row plus a
+    /// pointer, not a preference. A blank passphrase means a PLAINTEXT fresh
+    /// dataset rather than an error — encryption can be turned on afterwards.
+    pub fn adopt_local_dataset_values_json(
+        &self,
+        request_json: String,
+        device_name: Option<String>,
+        passphrase: Option<String>,
+    ) -> Result<String, StoreError> {
+        let req: SchemaFormRequest = from_json("sync target form", &request_json)?;
+        let shared = self.db.shared();
+        let plugins = HostSyncPlugins(&self.plugin_manager);
+        let plain = host_core::sync_target::preview_adapter(
+            &plugins,
+            &UserPrefsHostKeyVerifier::new(shared.clone()),
+            &req.adapter_kind,
+            &req.values,
+        )
+        .map_err(connect_err)?;
+        self.runtime
+            .block_on(async { plain.test_connection().await })
+            .map_err(sync_err)?;
+        let (key, e2e_params): (Option<[u8; KEY_LEN]>, Option<EncryptionParams>) = match passphrase
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            Some(pp) => {
+                let mut params = EncryptionParams::fresh();
+                let kek = derive_key(pp, &params).map_err(sync_err)?;
+                let dek = fresh_data_key();
+                let wrapped = wrap_key(&kek, &dek).map_err(sync_err)?;
+                params.wrapped_data_key = Some(wrapped);
+                (Some(dek), Some(params))
+            }
+            None => (None, None),
+        };
+        let adapter = wrap_if_encrypted(plain, key);
+        let trimmed = device_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        // adopt_local writes the fresh meta.json + registers this device FIRST;
+        // only then do we activate, commit and store the key, so a mid-failure
+        // leaves neither key nor flag set.
+        let report = self
+            .runtime
+            .block_on(async {
+                self.onboarding
+                    .adopt_local(adapter.as_ref(), trimmed, e2e_params)
+                    .await
+            })
+            .map_err(sync_err)?;
+        self.orchestrator.configure(adapter);
+        let prefs = UserPrefsRepo::new(&shared);
+        host_core::sync_target::connect(
+            &prefs,
+            &AccountsRepo::new(&shared),
+            self.secret_store.as_ref(),
+            &plugins,
+            &req.adapter_kind,
+            &req.values,
+        )
+        .map_err(connect_err)?;
+        if let Some(k) = key {
+            store_e2e_key(self.secret_store.as_ref(), &k)?;
+            prefs
+                .set(host_core::credential_sync::PREF_E2E_ENABLED, "true")
+                .map_err(storage_err)?;
+        } else {
             let _ = prefs.delete(host_core::credential_sync::PREF_E2E_ENABLED);
         }
         to_json(&report)

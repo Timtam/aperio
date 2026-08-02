@@ -820,6 +820,10 @@ class CalFfiModule : Module() {
       coded { host.previewSyncTargetJson(configJson) }
     }.runOnQueue(slowScope)
 
+    AsyncFunction("previewSyncTargetValuesJson") { requestJson: String ->
+      coded { host.previewSyncTargetValuesJson(requestJson) }
+    }.runOnQueue(slowScope)
+
     AsyncFunction("acceptRemoteDatasetJson") { configJson: String, deviceName: String?, passphrase: String? ->
       coded { host.acceptRemoteDatasetJson(configJson, deviceName, passphrase) }
     }.runOnQueue(slowScope)
@@ -828,6 +832,16 @@ class CalFfiModule : Module() {
     // button's empty-target path), optionally enabling E2E at creation.
     AsyncFunction("adoptLocalDatasetJson") { configJson: String, deviceName: String?, passphrase: String? ->
       coded { host.adoptLocalDatasetJson(configJson, deviceName, passphrase) }
+    }.runOnQueue(slowScope)
+
+    // The same two answers, asked with the shared schema form's own values, and
+    // committing to an ACCOUNT ROW rather than to device-local preferences.
+    AsyncFunction("acceptRemoteDatasetValuesJson") { requestJson: String, deviceName: String?, passphrase: String? ->
+      coded { host.acceptRemoteDatasetValuesJson(requestJson, deviceName, passphrase) }
+    }.runOnQueue(slowScope)
+
+    AsyncFunction("adoptLocalDatasetValuesJson") { requestJson: String, deviceName: String?, passphrase: String? ->
+      coded { host.adoptLocalDatasetValuesJson(requestJson, deviceName, passphrase) }
     }.runOnQueue(slowScope)
 
     AsyncFunction("resumeStaleDeviceJson") {

@@ -541,3 +541,71 @@ export const adoptLocalDataset = async (
         ),
       ) as OnboardingReport,
   );
+
+// ── The same three, asked with the shared schema form's values (§19.11 on the
+// unified path) ──
+//
+// The typed twins above take a `SyncAdapterConfig` and commit to `sync.adapter.*`
+// preferences; these take the adapter kind plus the form's own values and commit
+// to an ACCOUNT ROW plus this device's pointer at it. Same flow, same three
+// steps — preview, then join or start fresh — and the difference is only what
+// the device is left holding, which is the whole point of the unification.
+
+/** Probe a target described by the schema form's values, WITHOUT committing.
+ *  Rejects with the `host_key_not_trusted` code for a server whose fingerprint
+ *  this device has not confirmed; the caller answers that with the fingerprint
+ *  probe and the trust gesture rather than with a message. */
+export const previewSyncTargetValues = async (
+  adapter_kind: string,
+  values: Record<string, string | boolean>,
+): Promise<SyncPreview> =>
+  JSON.parse(
+    await CalFfi.previewSyncTargetValuesJson(
+      JSON.stringify({ adapter_kind, values }),
+    ),
+  ) as SyncPreview;
+
+/** Join the EXISTING dataset on a target described by the form's values. Pass
+ *  `passphrase` when the preview said `e2e_enabled` — it is how this device
+ *  derives the key, and there is no other way in. */
+export const acceptRemoteDatasetValues = async (
+  adapter_kind: string,
+  values: Record<string, string | boolean>,
+  deviceName: string | null,
+  passphrase: string | null,
+): Promise<OnboardingReport> => {
+  const report = await withSyncActivity(
+    async () =>
+      JSON.parse(
+        await CalFfi.acceptRemoteDatasetValuesJson(
+          JSON.stringify({ adapter_kind, values }),
+          deviceName,
+          passphrase,
+        ),
+      ) as OnboardingReport,
+  );
+  // Joining applied the peer dataset to the local store; reload the open screens
+  // so it shows without a restart.
+  if ((report.applied ?? 0) > 0) notifyDataReload();
+  return report;
+};
+
+/** Start a FRESH dataset on a target described by the form's values: overwrite
+ *  its meta.json so it names only this device, minting E2E from `passphrase`
+ *  when one is given (null/blank = plaintext). */
+export const adoptLocalDatasetValues = async (
+  adapter_kind: string,
+  values: Record<string, string | boolean>,
+  deviceName: string | null,
+  passphrase: string | null = null,
+): Promise<OnboardingReport> =>
+  withSyncActivity(
+    async () =>
+      JSON.parse(
+        await CalFfi.adoptLocalDatasetValuesJson(
+          JSON.stringify({ adapter_kind, values }),
+          deviceName,
+          passphrase,
+        ),
+      ) as OnboardingReport,
+  );

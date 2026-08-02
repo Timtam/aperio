@@ -704,6 +704,12 @@ public class CalFfiModule: Module {
       try self.coded { try self.host.previewSyncTargetJson(configJson: configJson) }
     }.runOnQueue(slowQueue)
 
+    AsyncFunction("previewSyncTargetValuesJson") { (requestJson: String) -> String in
+      try self.coded {
+        try self.host.previewSyncTargetValuesJson(requestJson: requestJson)
+      }
+    }.runOnQueue(slowQueue)
+
     AsyncFunction("acceptRemoteDatasetJson") { (configJson: String, deviceName: String?, passphrase: String?) -> String in
       try self.coded {
         try self.host.acceptRemoteDatasetJson(
@@ -717,6 +723,22 @@ public class CalFfiModule: Module {
       try self.coded {
         try self.host.adoptLocalDatasetJson(
           configJson: configJson, deviceName: deviceName, passphrase: passphrase)
+      }
+    }.runOnQueue(slowQueue)
+
+    // The same two answers, asked with the shared schema form's own values, and
+    // committing to an ACCOUNT ROW rather than to device-local preferences.
+    AsyncFunction("acceptRemoteDatasetValuesJson") { (requestJson: String, deviceName: String?, passphrase: String?) -> String in
+      try self.coded {
+        try self.host.acceptRemoteDatasetValuesJson(
+          requestJson: requestJson, deviceName: deviceName, passphrase: passphrase)
+      }
+    }.runOnQueue(slowQueue)
+
+    AsyncFunction("adoptLocalDatasetValuesJson") { (requestJson: String, deviceName: String?, passphrase: String?) -> String in
+      try self.coded {
+        try self.host.adoptLocalDatasetValuesJson(
+          requestJson: requestJson, deviceName: deviceName, passphrase: passphrase)
       }
     }.runOnQueue(slowQueue)
 

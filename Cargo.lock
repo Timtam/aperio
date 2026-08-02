@@ -2907,6 +2907,7 @@ version = "0.1.0"
 dependencies = [
  "aperio-db",
  "async-trait",
+ "base64 0.22.1",
  "builtin-oauth",
  "cal-adapter-ical-plugin",
  "cal-adapter-local",
@@ -2921,6 +2922,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sync-adapter-local",
+ "sync-adapter-local-plugin",
  "sync-core",
  "sync-engine",
  "tempfile",
@@ -2946,6 +2948,7 @@ dependencies = [
  "cal-adapter-vikunja-plugin",
  "host-core",
  "plugin-core",
+ "serde_json",
  "sync-adapter-dropbox-plugin",
  "sync-adapter-ftp-plugin",
  "sync-adapter-googledrive-plugin",

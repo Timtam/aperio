@@ -11,9 +11,7 @@ import {
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { AppDialog } from './AppDialog';
 import { RadioGroup } from './RadioGroup';
-import {
-  SyncTargetConfigForm,
-} from './sync/SyncTargetConfigForm';
+import { SyncTargetSchemaForm } from './sync/SyncTargetSchemaForm';
 
 interface FirstLaunchWizardModalProps {
   visible: boolean;
@@ -30,11 +28,13 @@ const LANGUAGE_OPTIONS: readonly LanguageChoice[] = ['system', 'de', 'en'];
  * shown once on a fresh instance:
  *
  *   1. **Language** — reuse the synced `locale` pref (default = system).
- *   2. **Sync** — restore from / create / skip a sync target via the shared
- *      [`SyncTargetConfigForm`](./sync/SyncTargetConfigForm.tsx). RESTORING an
- *      existing dataset brings back data + accounts, so the wizard ENDS;
- *      CREATING a fresh one (or skipping) continues to the account step.
- *   3. **First account** — point the user at Settings → Accounts, or finish.
+ *   2. **First account** — point the user at Settings → Accounts, or finish.
+ *   3. **Sync** — restore from / create / skip a sync target via the shared
+ *      [`SyncTargetSchemaForm`](./sync/SyncTargetSchemaForm.tsx), whose fields
+ *      come from the chosen plugin's own account schema. Storage is the LAST
+ *      step either way: joining brings the accounts down with the dataset, and
+ *      starting fresh has already been through the account step — so a
+ *      connected target ends the wizard.
  *
  * Gated by [`FirstLaunchWizardGate`](./FirstLaunchWizardGate.tsx) so it only
  * ever appears on a genuinely fresh instance.
@@ -134,7 +134,7 @@ export function FirstLaunchWizardModal({
           <Text style={styles.hint} accessibilityRole="text">
             {t('dialogs.firstLaunchWizard.syncHint')}
           </Text>
-          <SyncTargetConfigForm onConnected={onSyncConnected} />
+          <SyncTargetSchemaForm onConnected={onSyncConnected} />
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={t('dialogs.firstLaunchWizard.back')}

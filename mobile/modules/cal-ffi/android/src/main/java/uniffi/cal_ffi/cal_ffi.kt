@@ -894,6 +894,8 @@ external fun uniffi_cal_ffi_checksum_method_deviceeventstorebridge_delete_remind
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_values_json(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_account_form_spec_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_accounts_json(
@@ -901,6 +903,8 @@ external fun uniffi_cal_ffi_checksum_method_host_accounts_json(
 external fun uniffi_cal_ffi_checksum_method_host_add_event_exdate_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_adopt_local_dataset_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_adopt_local_dataset_values_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_adopt_meeting_json(
 ): Short
@@ -1047,6 +1051,8 @@ external fun uniffi_cal_ffi_checksum_method_host_preview_sftp_host_key_json(
 external fun uniffi_cal_ffi_checksum_method_host_preview_sync_account_host_key_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_preview_sync_target_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_preview_sync_target_values_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_push_now(
 ): Short
@@ -1292,6 +1298,8 @@ external fun uniffi_cal_ffi_fn_constructor_host_open(`dbPath`: RustBuffer.ByValu
 ): Long
 external fun uniffi_cal_ffi_fn_method_host_accept_remote_dataset_json(`ptr`: Long,`configJson`: RustBuffer.ByValue,`deviceName`: RustBuffer.ByValue,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_accept_remote_dataset_values_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,`deviceName`: RustBuffer.ByValue,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_account_form_spec_json(`ptr`: Long,`adapterKind`: RustBuffer.ByValue,`lang`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_accounts_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1299,6 +1307,8 @@ external fun uniffi_cal_ffi_fn_method_host_accounts_json(`ptr`: Long,uniffi_out_
 external fun uniffi_cal_ffi_fn_method_host_add_event_exdate_json(`ptr`: Long,`id`: RustBuffer.ByValue,`occurrence`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,`sendCancellations`: Byte,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_adopt_local_dataset_json(`ptr`: Long,`configJson`: RustBuffer.ByValue,`deviceName`: RustBuffer.ByValue,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_adopt_local_dataset_values_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,`deviceName`: RustBuffer.ByValue,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_adopt_meeting_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1445,6 +1455,8 @@ external fun uniffi_cal_ffi_fn_method_host_preview_sftp_host_key_json(`ptr`: Lon
 external fun uniffi_cal_ffi_fn_method_host_preview_sync_account_host_key_json(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_preview_sync_target_json(`ptr`: Long,`configJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_preview_sync_target_values_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_push_now(`ptr`: Long,`trigger`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
@@ -1811,6 +1823,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json() != 45743.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_values_json() != 40519.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_account_form_spec_json() != 15758.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1821,6 +1836,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_adopt_local_dataset_json() != 28459.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_adopt_local_dataset_values_json() != 62805.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_adopt_meeting_json() != 14491.toShort()) {
@@ -2040,6 +2058,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_preview_sync_target_json() != 3107.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_preview_sync_target_values_json() != 54953.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_push_now() != 4483.toShort()) {
@@ -4127,6 +4148,21 @@ public interface HostInterface {
     fun `acceptRemoteDatasetJson`(`configJson`: kotlin.String, `deviceName`: kotlin.String?, `passphrase`: kotlin.String?): kotlin.String
     
     /**
+     * Join an existing dataset reached through the shared schema form's own
+     * values — the mobile twin of the desktop `accept_remote_dataset_values`.
+     *
+     * Everything [`Self::accept_remote_dataset_json`] does, except for what it
+     * writes down at the end: this one commits through
+     * [`host_core::sync_target::connect`], so the target becomes an ACCOUNT ROW
+     * plus this device's pointer at it, rather than a set of `sync.adapter.*`
+     * preferences only this device can see. A phone onboarded here is
+     * afterwards indistinguishable from one that picked the account on the sync
+     * screen — which is the point of the unification: the two entry points must
+     * not leave the device in two different states.
+     */
+    fun `acceptRemoteDatasetValuesJson`(`requestJson`: kotlin.String, `deviceName`: kotlin.String?, `passphrase`: kotlin.String?): kotlin.String
+    
+    /**
      * The connect form an adapter declares, as JSON, or `null` when it
      * declares none.
      *
@@ -4171,6 +4207,18 @@ public interface HostInterface {
      * OnboardingReport JSON.
      */
     fun `adoptLocalDatasetJson`(`configJson`: kotlin.String, `deviceName`: kotlin.String?, `passphrase`: kotlin.String?): kotlin.String
+    
+    /**
+     * Start a fresh dataset on a target reached through the shared schema
+     * form's values — the mobile twin of the desktop
+     * `adopt_local_dataset_values`.
+     *
+     * Same body as [`Self::adopt_local_dataset_json`], same committing step as
+     * [`Self::accept_remote_dataset_values_json`]: an account row plus a
+     * pointer, not a preference. A blank passphrase means a PLAINTEXT fresh
+     * dataset rather than an error — encryption can be turned on afterwards.
+     */
+    fun `adoptLocalDatasetValuesJson`(`requestJson`: kotlin.String, `deviceName`: kotlin.String?, `passphrase`: kotlin.String?): kotlin.String
     
     /**
      * Take responsibility for a meeting Aperio did not create, so it can also
@@ -4819,6 +4867,22 @@ public interface HostInterface {
     fun `previewSyncTargetJson`(`configJson`: kotlin.String): kotlin.String
     
     /**
+     * The same question, asked with an adapter kind and the shared schema
+     * form's values — the mobile twin of the desktop
+     * `preview_sync_target_values`.
+     *
+     * The safe one to move first: it reaches the target and reports what is
+     * there, and commits nothing, so the two entry points cannot disagree
+     * about anything that outlives the call.
+     *
+     * Refuses with the host-key error for a target whose fingerprint this
+     * device has not confirmed. That is a step in the flow rather than a
+     * fault — the caller answers it with the fingerprint probe and the trust
+     * gesture, exactly as the account picker does.
+     */
+    fun `previewSyncTargetValuesJson`(`requestJson`: kotlin.String): kotlin.String
+    
+    /**
      * Push the local pending logs without fetching (call from RN AppState
      * "background"). Returns the number of logs pushed. Records the outcome in
      * the failure latch AND a `sync_log` row, like `sync_now`. `trigger` is the
@@ -5448,6 +5512,33 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Join an existing dataset reached through the shared schema form's own
+     * values — the mobile twin of the desktop `accept_remote_dataset_values`.
+     *
+     * Everything [`Self::accept_remote_dataset_json`] does, except for what it
+     * writes down at the end: this one commits through
+     * [`host_core::sync_target::connect`], so the target becomes an ACCOUNT ROW
+     * plus this device's pointer at it, rather than a set of `sync.adapter.*`
+     * preferences only this device can see. A phone onboarded here is
+     * afterwards indistinguishable from one that picked the account on the sync
+     * screen — which is the point of the unification: the two entry points must
+     * not leave the device in two different states.
+     */
+    @Throws(StoreException::class)override fun `acceptRemoteDatasetValuesJson`(`requestJson`: kotlin.String, `deviceName`: kotlin.String?, `passphrase`: kotlin.String?): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_accept_remote_dataset_values_json(
+        it,
+        FfiConverterString.lower(`requestJson`),FfiConverterOptionalString.lower(`deviceName`),FfiConverterOptionalString.lower(`passphrase`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * The connect form an adapter declares, as JSON, or `null` when it
      * declares none.
      *
@@ -5533,6 +5624,30 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_adopt_local_dataset_json(
         it,
         FfiConverterString.lower(`configJson`),FfiConverterOptionalString.lower(`deviceName`),FfiConverterOptionalString.lower(`passphrase`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Start a fresh dataset on a target reached through the shared schema
+     * form's values — the mobile twin of the desktop
+     * `adopt_local_dataset_values`.
+     *
+     * Same body as [`Self::adopt_local_dataset_json`], same committing step as
+     * [`Self::accept_remote_dataset_values_json`]: an account row plus a
+     * pointer, not a preference. A blank passphrase means a PLAINTEXT fresh
+     * dataset rather than an error — encryption can be turned on afterwards.
+     */
+    @Throws(StoreException::class)override fun `adoptLocalDatasetValuesJson`(`requestJson`: kotlin.String, `deviceName`: kotlin.String?, `passphrase`: kotlin.String?): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_adopt_local_dataset_values_json(
+        it,
+        FfiConverterString.lower(`requestJson`),FfiConverterOptionalString.lower(`deviceName`),FfiConverterOptionalString.lower(`passphrase`),_status)
 }
     }
     )
@@ -7034,6 +7149,34 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_preview_sync_target_json(
         it,
         FfiConverterString.lower(`configJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The same question, asked with an adapter kind and the shared schema
+     * form's values — the mobile twin of the desktop
+     * `preview_sync_target_values`.
+     *
+     * The safe one to move first: it reaches the target and reports what is
+     * there, and commits nothing, so the two entry points cannot disagree
+     * about anything that outlives the call.
+     *
+     * Refuses with the host-key error for a target whose fingerprint this
+     * device has not confirmed. That is a step in the flow rather than a
+     * fault — the caller answers it with the fingerprint probe and the trust
+     * gesture, exactly as the account picker does.
+     */
+    @Throws(StoreException::class)override fun `previewSyncTargetValuesJson`(`requestJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_preview_sync_target_values_json(
+        it,
+        FfiConverterString.lower(`requestJson`),_status)
 }
     }
     )
