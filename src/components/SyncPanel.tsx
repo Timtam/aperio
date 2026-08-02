@@ -21,6 +21,7 @@ import { useDialogState } from '../state/dialogStateContext';
 import { useSync } from '../state/useSync';
 import { ConfirmDialog } from './ConfirmDialog';
 import { SyncProtocolSection } from './SyncProtocolSection';
+import { SyncDevicesPanel } from './sync/SyncDevicesPanel';
 import { SyncTargetAccountPicker } from './sync/SyncTargetAccountPicker';
 import { useSyncErrorMessage } from './sync/syncErrorMessage';
 
@@ -84,6 +85,7 @@ export function SyncPanel() {
   const protocolHeadingId = useId();
   const passphraseHeadingId = useId();
   const enableE2eHeadingId = useId();
+  const devicesHeadingId = useId();
 
   // The target CONFIGURATION form (kind picker, per-kind fields, OAuth, the
   // device name, preview→join/init) lives in `SyncTargetConfigForm` and is now
@@ -571,6 +573,18 @@ export function SyncPanel() {
           active={status ? status.configured : null}
           onChanged={onTargetChanged}
         />
+      </section>
+
+      {/* §19 device registry — what this device calls itself, and who else the
+          dataset still counts. Its own section rather than a block inside the
+          target one: the name belongs to this device and survives a change of
+          target, and the registry is a property of the DATASET rather than of
+          the account that happens to hold it. */}
+      <section aria-labelledby={devicesHeadingId}>
+        <h3 id={devicesHeadingId}>
+          {t('dialogs.settings.sync.devicesTitle')}
+        </h3>
+        <SyncDevicesPanel configured={status?.configured ?? false} />
       </section>
 
       {/* §19.7 — cross-device adoption banner. */}

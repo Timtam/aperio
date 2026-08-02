@@ -1432,13 +1432,51 @@ export type SyncCompatibility =
 export interface SyncDeviceSummary {
   id: string;
   name: string | null;
+  /** The device's CONTENT horizon — the newest log it holds. NOT when it was
+   *  last here: on a quiet dataset this does not move however often the device
+   *  syncs. Use {@link last_seen} for that. */
   last_seen_log: string;
+  /** When the device last completed a round, or `null` on a dataset whose
+   *  registry predates the field. `null` reads as "unknown", never as a very
+   *  old date — the difference decides whether a row looks abandoned. */
+  last_seen: string | null;
   app_version: string;
   stale: boolean;
   /** `true` when this entry refers to the current device — the
    *  dialog highlights it ("Dieses Gerät"). */
   is_this_device: boolean;
 }
+
+/** What this device calls itself, plus what it would suggest calling itself.
+ *
+ *  `suggested` is the machine's host name, offered on a device that has never
+ *  been named; `null` when the host name cannot be read, which is not an error
+ *  — the name is optional and the field simply starts empty. */
+export interface DeviceNameInfo {
+  configured: string | null;
+  suggested: string | null;
+}
+
+export const syncDeviceName = () => invoke<DeviceNameInfo>('sync_device_name');
+
+/** Rename this device; a blank name clears it. Reaches the other devices on
+ *  the next sync round — the heartbeat notices the difference and pushes. */
+export const setSyncDeviceName = (name: string) =>
+  invoke<void>('set_sync_device_name', { name });
+
+/** Every device registered on the dataset this one syncs through. Rejects with
+ *  `not_configured` when this device syncs nowhere. */
+export const listSyncDevices = () =>
+  invoke<SyncDeviceSummary[]>('list_sync_devices');
+
+/** Drop a device's registry entry.
+ *
+ *  Not a revocation: it removes the claim that the device is still
+ *  participating, and one that still runs re-registers on its next round. It
+ *  leaves the device's log files alone — the compactor collects those once the
+ *  snapshot covers them. Refuses this device's own id. */
+export const forgetSyncDevice = (deviceId: string) =>
+  invoke<void>('forget_sync_device', { deviceId });
 
 /** Counters returned by accept/adopt onboarding. */
 export interface OnboardingReport {

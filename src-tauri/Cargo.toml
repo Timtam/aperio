@@ -25,6 +25,13 @@ tauri-plugin-notification = "2"
 # macOS LaunchAgent, Linux .desktop autostart). Driven only from our own
 # `autostart_*` commands, so no webview-facing capability is exposed.
 tauri-plugin-autostart = "2"
+# §19 device registry: the name this machine SUGGESTS for itself, so a new
+# device does not join the dataset as a 32-character id. Only the suggestion —
+# the user's answer is a preference, and the core never asks the operating
+# system anything. Lives here rather than in host-core because "what is this
+# machine called" is exactly the sort of host-specific question the core does
+# not answer: the mobile host has its own source for it.
+hostname = "0.4"
 # Native file picker for the SFTP SSH-key path (DESIGN.md §19.6).
 # A bare text input would let users mis-type the path; the picker
 # also matches the platform's "select a file" idiom (NSOpenPanel

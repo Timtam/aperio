@@ -856,6 +856,12 @@ pub fn run() {
             commands::trust_sftp_host_key,
             commands::forget_sftp_host_key,
             commands::get_pinned_sftp_host_key,
+            // §19 device registry: what this device calls itself, and who else
+            // the dataset still counts as a participant.
+            commands::sync_device_name,
+            commands::set_sync_device_name,
+            commands::list_sync_devices,
+            commands::forget_sync_device,
             // Phase Sm follow-up (DESIGN.md §19.9): the detailed
             // sync protocol. `list_sync_log_entries` reads the
             // history, `clear_sync_log` scrubs it.

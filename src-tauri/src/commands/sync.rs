@@ -49,8 +49,8 @@ use crate::accounts::AccountsRepo;
 use crate::cache::CacheRefresher;
 use crate::db::{DbHandle, SharedConn};
 use crate::event_log::{
-    CompactionReport, OnboardingReport, OnboardingService, SyncOrchestrator, SyncPreview,
-    SyncRoundReport, SyncScheduler, SyncStatus,
+    CompactionReport, DeviceSummary, OnboardingReport, OnboardingService, SyncOrchestrator,
+    SyncPreview, SyncRoundReport, SyncScheduler, SyncStatus,
 };
 use crate::registry::AdapterRegistry;
 use crate::secrets::{self, SecretSlot};
@@ -3049,6 +3049,99 @@ pub async fn forget_sftp_host_key(db: State<'_, DbHandle>, host_port: String) ->
     let verifier = UserPrefsHostKeyVerifier::new(shared);
     verifier.forget(trimmed);
     Ok(())
+}
+
+/// The name this device publishes to the rest of the dataset.
+///
+/// `configured` is what the user has actually set; `suggested` is this
+/// machine's host name, offered as a starting point on a device that has never
+/// been named. Both in one call because the panel needs both to render one
+/// field, and asking twice would let them disagree across a round trip.
+#[derive(Debug, Serialize)]
+pub struct DeviceNameInfo {
+    pub configured: Option<String>,
+    /// `None` when the host name cannot be read — a container with no
+    /// `/etc/hostname`, a locked-down environment. Not an error: the field just
+    /// starts empty, and a name is optional anyway.
+    pub suggested: Option<String>,
+}
+
+/// What this device calls itself, and what it would suggest calling itself.
+#[tauri::command]
+pub async fn sync_device_name(db: State<'_, DbHandle>) -> CommandResult<DeviceNameInfo> {
+    let shared = db.shared();
+    let prefs = UserPrefsRepo::new(&shared);
+    Ok(DeviceNameInfo {
+        configured: host_core::device_names::local_device_name(&prefs),
+        suggested: hostname::get()
+            .ok()
+            .and_then(|raw| raw.into_string().ok())
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty()),
+    })
+}
+
+/// Rename this device. Blank clears the name.
+///
+/// Nothing is pushed here. The heartbeat compares the stored name against the
+/// one in this device's `meta.json` record and pushes when they differ, so the
+/// rename reaches the other devices on the next round — which is also the only
+/// ordering that cannot leave the two disagreeing.
+#[tauri::command]
+pub async fn set_sync_device_name(db: State<'_, DbHandle>, name: String) -> CommandResult<()> {
+    let shared = db.shared();
+    let prefs = UserPrefsRepo::new(&shared);
+    host_core::device_names::set_local_device_name(&prefs, &name).map_err(internal)
+}
+
+/// Every device registered on the dataset this one syncs through.
+///
+/// A live read of `meta.json`, so it needs a configured target — a device that
+/// syncs nowhere has no registry to show, and `not_configured` is what the
+/// panel renders as "no target chosen" rather than as a failure.
+#[tauri::command]
+pub async fn list_sync_devices(
+    orchestrator: State<'_, Arc<SyncOrchestrator>>,
+    onboarding: State<'_, Arc<OnboardingService>>,
+) -> CommandResult<Vec<DeviceSummary>> {
+    let adapter = orchestrator.adapter_handle().ok_or(CommandError {
+        code: "not_configured",
+        message: "this device syncs through no target".into(),
+    })?;
+    onboarding
+        .list_devices(adapter.as_ref())
+        .await
+        .map_err(sync_err)
+}
+
+/// Drop a device's registry entry.
+///
+/// See `OnboardingService::forget_device` for what this does and does not
+/// touch. Two things the panel relies on: the device's log files stay (they are
+/// dataset content, and the compactor collects them once the snapshot covers
+/// them), and a device that is still running comes back on its next round — so
+/// this is a tidy-up, not a revocation, and the UI says so.
+#[tauri::command]
+pub async fn forget_sync_device(
+    orchestrator: State<'_, Arc<SyncOrchestrator>>,
+    onboarding: State<'_, Arc<OnboardingService>>,
+    device_id: String,
+) -> CommandResult<()> {
+    let device_id = device_id.trim().to_string();
+    if device_id.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "no device id supplied".into(),
+        });
+    }
+    let adapter = orchestrator.adapter_handle().ok_or(CommandError {
+        code: "not_configured",
+        message: "this device syncs through no target".into(),
+    })?;
+    onboarding
+        .forget_device(adapter.as_ref(), &device_id)
+        .await
+        .map_err(sync_err)
 }
 
 /// Read the currently-pinned fingerprint for a host_port, or
