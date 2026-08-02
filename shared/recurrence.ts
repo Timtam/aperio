@@ -395,7 +395,32 @@ export function isExpandedOccurrence<E extends RecurringEventLike>(
  * contain `@aperio`, so the split shortcut dropped half the master UID.
  */
 export function seriesIdOf<E extends RecurringEventLike>(event: E): string {
-  return isExpandedOccurrence(event) ? event.series_id : event.id;
+  if (isExpandedOccurrence(event)) return event.series_id;
+  // An OVERRIDE — a real row the provider sent for one modified occurrence —
+  // is just as much part of a series, and its id carries the master's in front
+  // of the marker. This used to return the override's own id, so "the whole
+  // series" acted on the single row the user had opened and left the series
+  // untouched.
+  return overrideSeriesId(event) ?? event.id;
+}
+
+/**
+ * Whether a row is ONE occurrence of a recurring series — expanded by us from
+ * a master, or sent by the provider as a modified occurrence.
+ *
+ * The distinction that matters to a user is "does acting on this need to ask
+ * about scope", and both shapes answer yes. Only one of them satisfies
+ * {@link isExpandedOccurrence}, which is a type guard for the synthetic shape
+ * and stays narrow: an override has no `occurrence_start` field, so widening
+ * the guard would let code read one that is not there.
+ *
+ * Every surface that opens a scope prompt, or that must not silently act on a
+ * whole series, asks THIS.
+ */
+export function isSeriesOccurrence<E extends RecurringEventLike>(
+  event: E,
+): boolean {
+  return isExpandedOccurrence(event) || overrideRecurrenceIso(event) != null;
 }
 
 /**
@@ -405,7 +430,13 @@ export function seriesIdOf<E extends RecurringEventLike>(event: E): string {
 export function occurrenceIsoOf<E extends RecurringEventLike>(
   event: E,
 ): string | null {
-  return isExpandedOccurrence(event) ? event.occurrence_start : null;
+  if (isExpandedOccurrence(event)) return event.occurrence_start;
+  // An override's instant is the RRULE slot it REPLACES, which is what an
+  // EXDATE has to name — not where the user moved it to. Returning `null` here
+  // is what made "delete just this one" bail out silently on an edited
+  // occurrence: the caller reads the instant first and returns when it is
+  // absent.
+  return overrideRecurrenceIso(event);
 }
 
 /** UTC "basic" RFC-5545 timestamp (`YYYYMMDDTHHMMSSZ`) — the form an RRULE

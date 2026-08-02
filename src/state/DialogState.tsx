@@ -6,7 +6,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import { isExpandedOccurrence } from '@aperio/shared';
+import { isSeriesOccurrence } from '@aperio/shared';
 
 import type {
   Account,
@@ -351,7 +351,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       // edit targets this occurrence or the whole series (Outlook-style), then
       // hand off to the editor locked to that scope. Everything else — creating,
       // or editing a non-recurring / master row — opens the editor directly.
-      if (event && isExpandedOccurrence(event)) {
+      if (event && isSeriesOccurrence(event)) {
         push({ kind: 'eventEditScope', event });
         return;
       }

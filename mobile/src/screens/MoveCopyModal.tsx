@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 
 import type { Task } from '@aperio/shared';
-import { isExpandedOccurrence, selectableTaskLists } from '@aperio/shared';
+import { isSeriesOccurrence, selectableTaskLists } from '@aperio/shared';
 
 import { Calendar, listCalendars } from '../api/calendar';
 import { getTaskById, getTasks } from '../api/client';
@@ -71,7 +71,7 @@ export default function MoveCopyModal({
   const initialContainerId =
     params.kind === 'task' ? params.listId : params.event.calendar_id;
   const isRecurringOccurrence =
-    params.kind === 'event' && isExpandedOccurrence(params.event);
+    params.kind === 'event' && isSeriesOccurrence(params.event);
 
   // Load: a task is re-fetched by id (+ its direct children); event surfaces just
   // need the calendar list (the event itself rode in via params).

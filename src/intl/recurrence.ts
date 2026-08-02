@@ -10,6 +10,7 @@ export {
   expandEvent,
   expandAll,
   isExpandedOccurrence,
+  isSeriesOccurrence,
   seriesIdOf,
   occurrenceIsoOf,
   truncateRRuleBefore,

@@ -23,7 +23,7 @@ import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { useEventTabNavigation } from '../../hooks/useEventTabNavigation';
 import { localDateKey } from '../../intl/dateKey';
 import {
-  isExpandedOccurrence,
+  isSeriesOccurrence,
   occurrenceIsoOf,
   seriesIdOf,
 } from '../../intl/recurrence';
@@ -358,7 +358,7 @@ export function MonthView() {
     // recurring master row (unexpandable RRULE) has none, so it takes the plain
     // confirm (series delete) instead of a scope choice that would otherwise fall
     // through to deleting the whole series.
-    if (isExpandedOccurrence(ev)) {
+    if (isSeriesOccurrence(ev)) {
       setScopeTarget(ev);
     } else {
       setConfirmTarget(ev);
@@ -405,7 +405,7 @@ export function MonthView() {
       if (!payload) {
         const dropped = readEventDrag(e.dataTransfer);
         if (!dropped) return;
-        if (isExpandedOccurrence(dropped) || dropped.recurrence?.rrule) {
+        if (isSeriesOccurrence(dropped) || dropped.recurrence?.rrule) {
           setPendingEventDrop({ event: dropped, dayKey });
           return;
         }

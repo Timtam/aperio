@@ -13,7 +13,7 @@ import {
 } from '../../intl/eventColor';
 import { eventCoversDay, eventDayTimes, multiDayInfo } from '../../intl/multiDay';
 import {
-  isExpandedOccurrence,
+  isSeriesOccurrence,
   occurrenceIsoOf,
   seriesIdOf,
 } from '../../intl/recurrence';
@@ -665,7 +665,7 @@ export function DayView() {
     // unparseable RRULE that couldn't be expanded) has no single occurrence —
     // offering "this occurrence" there would fall through to a full-series
     // delete — so it takes the plain confirm (which deletes the series).
-    if (isExpandedOccurrence(ev)) {
+    if (isSeriesOccurrence(ev)) {
       setScopeTarget(ev);
     } else {
       setConfirmTarget(ev);

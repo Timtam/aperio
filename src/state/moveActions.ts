@@ -12,7 +12,7 @@ import {
 } from '../api/client';
 import type { CalendarEvent, Task } from '../api/types';
 import {
-  isExpandedOccurrence,
+  isSeriesOccurrence,
   occurrenceIsoOf,
   seriesIdOf,
 } from '../intl/recurrence';
@@ -232,7 +232,7 @@ export async function moveOrCopyEvent(
   mode: MoveCopyMode,
   scope: MoveCopyScope = 'series',
 ): Promise<void> {
-  const asOccurrence = scope === 'occurrence' && isExpandedOccurrence(event);
+  const asOccurrence = scope === 'occurrence' && isSeriesOccurrence(event);
 
   // Whole-series move is the only path that updates the existing row in place
   // (and lets external adapters reroute via the move hint). Everything else
@@ -301,7 +301,7 @@ export async function moveEventToDay(
     return when.toISOString();
   };
 
-  if (scope === 'occurrence' && isExpandedOccurrence(event)) {
+  if (scope === 'occurrence' && isSeriesOccurrence(event)) {
     await apiCreateEvent({
       calendar_id: event.calendar_id,
       title: event.title,

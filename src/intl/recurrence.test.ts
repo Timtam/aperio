@@ -3,7 +3,10 @@ import {
   expandEvent,
   expandAll,
   isExpandedOccurrence,
+  isSeriesOccurrence,
   localTimeZone,
+  occurrenceIsoOf,
+  seriesIdOf,
   truncateRRuleBefore,
   splitRRuleForEdit,
   withCreatedRecurrenceZone,
@@ -661,5 +664,58 @@ describe('splitRRuleForEdit', () => {
     expect(before).toBe(5); // Mondays #1..#5, INCLUDING the exdated #3
     const { newRule } = splitRRuleForEdit(master.recurrence!.rrule, cut, before);
     expect(newRule).toBe('FREQ=WEEKLY;BYDAY=MO;COUNT=5'); // #6..#10, no phantom
+  });
+});
+
+describe('an override is an occurrence of its series', () => {
+  /** What every adapter emits for a modified occurrence: a real row whose id
+   *  is `{master}::rid::{the slot it replaces}`, carrying no rule of its own. */
+  const override = mkEvent({
+    id: 'master-1::rid::2026-05-26T09:00:00.000Z',
+    start: '2026-05-26T14:00:00.000Z',
+    end: '2026-05-26T15:00:00.000Z',
+  });
+
+  /** The bug Toni hit: an edited occurrence stopped being part of its series.
+   *  The editor gates its scope prompt on this, so `false` here means the
+   *  prompt silently disappears the moment an occurrence is edited once. */
+  it('counts as a series occurrence', () => {
+    expect(isSeriesOccurrence(override)).toBe(true);
+  });
+
+  /** …but is NOT the synthetic shape. The type guard has to stay narrow:
+   *  an override has no `occurrence_start` field, so widening it would let
+   *  callers read one that is not there. */
+  it('is not an expanded occurrence', () => {
+    expect(isExpandedOccurrence(override)).toBe(false);
+  });
+
+  /** "Whole series" has to reach the MASTER. This returned the override's own
+   *  id, so acting on the series acted on the single row instead. */
+  it('resolves to the master, not to itself', () => {
+    expect(seriesIdOf(override)).toBe('master-1');
+  });
+
+  /** The instant an EXDATE must name is the slot the override REPLACES, not
+   *  where the user moved it to — 09:00, not the 14:00 it now sits at. */
+  it('reports the slot it replaces, not its own start', () => {
+    expect(occurrenceIsoOf(override)).toBe('2026-05-26T09:00:00.000Z');
+  });
+
+  /** A plain event is untouched by any of it. */
+  it('leaves a standalone event alone', () => {
+    const plain = mkEvent();
+    expect(isSeriesOccurrence(plain)).toBe(false);
+    expect(seriesIdOf(plain)).toBe('evt-1');
+    expect(occurrenceIsoOf(plain)).toBeNull();
+  });
+
+  /** A master keeps answering for itself — it IS the series. */
+  it('leaves a master alone', () => {
+    const master = mkEvent({
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=3', exceptions: [], tzid: null },
+    });
+    expect(isSeriesOccurrence(master)).toBe(false);
+    expect(seriesIdOf(master)).toBe('evt-1');
   });
 });

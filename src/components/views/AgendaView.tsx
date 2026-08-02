@@ -9,7 +9,7 @@ import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
 import { labelsLookup, resolveEventColor } from '../../intl/eventColor';
 import {
-  isExpandedOccurrence,
+  isSeriesOccurrence,
   occurrenceIsoOf,
   seriesIdOf,
 } from '../../intl/recurrence';
@@ -158,7 +158,7 @@ export function AgendaView() {
     // (an unexpandable RRULE) has no single occurrence — offering "this
     // occurrence" there would fall through to a full-series delete — so it takes
     // the plain confirm (which deletes the series).
-    if (isExpandedOccurrence(ev)) {
+    if (isSeriesOccurrence(ev)) {
       setScopeTarget(ev);
     } else {
       setConfirmTarget(ev);

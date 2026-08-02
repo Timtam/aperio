@@ -11,7 +11,7 @@ import { selectableEventCalendars, selectableTaskLists } from '@aperio/shared';
 import { useAnnouncer } from '../a11y/announcerContext';
 import { createTask as apiCreateTask, isCommandError } from '../api/client';
 import type { Task } from '../api/types';
-import { isExpandedOccurrence } from '../intl/recurrence';
+import { isSeriesOccurrence } from '../intl/recurrence';
 import {
   moveOrCopyEvent,
   moveTaskToList,
@@ -70,7 +70,7 @@ export function MoveCopyDialog({
   // Recurring events reach the dialog as expanded occurrences; only then is
   // the "this occurrence vs the whole series" choice meaningful (§7.5).
   const isRecurringOccurrence =
-    target.kind === 'event' && isExpandedOccurrence(target.event);
+    target.kind === 'event' && isSeriesOccurrence(target.event);
   const [scope, setScope] = useState<MoveCopyScope>('occurrence');
   const [targetContainerId, setTargetContainerId] = useState(initialContainerId);
   const [error, setError] = useState<string | null>(null);

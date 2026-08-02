@@ -26,6 +26,7 @@ import type { CalendarEvent, FreeBusy, FreeBusySlot } from '../api/types';
 import {
   expandEvent,
   isExpandedOccurrence,
+  isSeriesOccurrence,
   occurrenceIsoOf,
   seriesIdOf,
   splitRRuleForEdit,
@@ -268,7 +269,9 @@ export function EventDialog({
   // When editing a single occurrence of a recurring series the user
   // can apply changes to just this occurrence (creates an EXDATE +
   // standalone override) or to the whole series.
-  const isOccurrence = isEdit && !!event && isExpandedOccurrence(event);
+  // Expanded from a master OR a provider-sent override — both are one
+  // occurrence of a series, and both have to offer the scope choice.
+  const isOccurrence = isEdit && !!event && isSeriesOccurrence(event);
   const [editScope, setEditScope] = useState<EditScope>(
     initialScope ?? 'occurrence',
   );
@@ -488,6 +491,52 @@ export function EventDialog({
         if (isEdit && event) {
           const seriesId = seriesIdOf(event);
 
+          // Already an override — the user is editing an occurrence they have
+          // edited before. There is nothing to carve out: the row in front of
+          // them IS the exception, and the series already has its EXDATE. So
+          // update it in place, by its OWN id.
+          //
+          // Without this branch it fell through to the series update below,
+          // which writes to `seriesId` — and `seriesId` now resolves an
+          // override to its master. "Just this one" would have rewritten the
+          // whole series, which is the one outcome this dialog exists to
+          // prevent.
+          if (
+            editScope === 'occurrence' &&
+            !isExpandedOccurrence(event) &&
+            occurrenceIsoOf(event) != null
+          ) {
+            const overrideRow: CalendarEvent = {
+              ...event,
+              title: trimmedTitle,
+              calendar_id: form.calendarId,
+              start,
+              end,
+              all_day: form.allDay,
+              location: form.location.trim() || null,
+              description: form.description.trim() || null,
+              // Stays null: an override is one instance and owns no rule.
+              recurrence: null,
+              color_label: form.colorLabel,
+              reminders: remindersForWire,
+              attendees: form.attendees,
+              send_invitations: sendInvitations,
+            };
+            await apiUpdateEvent(overrideRow, event.calendar_id);
+            if (!storesColorNatively) {
+              await setEventColor(
+                overrideRow.id,
+                overrideRow.calendar_id,
+                form.colorLabel,
+              );
+            }
+            announce(
+              t('dialogs.event.occurrenceUpdated', { title: trimmedTitle }),
+            );
+            onClose();
+            return;
+          }
+
           if (isOccurrence && editScope === 'occurrence' && event.recurrence) {
             // Single-instance override: add the original date to the
             // series EXDATE list, then create a standalone event with
@@ -525,11 +574,10 @@ export function EventDialog({
             }
           }
 
-          if (
-            isOccurrence &&
-            editScope === 'this_and_future' &&
-            event.recurrence
-          ) {
+          // No `event.recurrence` precondition: this branch reads the rule
+          // off the MASTER it loads below, and an override — which is exactly
+          // the row a user splits a series at — carries none of its own.
+          if (isOccurrence && editScope === 'this_and_future') {
             // Split the series at this occurrence: truncate the original to end
             // just before it (keeping its own fields), then create a NEW series
             // from here carrying the edits. The new series reuses the original

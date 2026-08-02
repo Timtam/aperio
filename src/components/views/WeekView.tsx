@@ -32,7 +32,7 @@ import {
   TASK_DND_TYPE,
   type MoveCopyScope,
 } from '../../state/moveActions';
-import { isExpandedOccurrence } from '../../intl/recurrence';
+import { isSeriesOccurrence } from '../../intl/recurrence';
 import { MoveEventScopeDialog } from '../MoveEventScopeDialog';
 import { useDialogState } from '../../state/dialogStateContext';
 import { useEvents } from '../../state/useEvents';
@@ -805,7 +805,7 @@ export function WeekView() {
   );
   const handleEventDayDrop = useCallback(
     (ev: CalendarEvent, dayKey: string) => {
-      if (isExpandedOccurrence(ev) || ev.recurrence?.rrule) {
+      if (isSeriesOccurrence(ev) || ev.recurrence?.rrule) {
         setPendingEventDrop({ event: ev, dayKey });
         return;
       }
