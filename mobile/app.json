@@ -9,6 +9,7 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
+      "appleTeamId": "X3TAD26JBY",
       "bundleIdentifier": "com.aperio.mobile",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
@@ -96,7 +97,8 @@
         }
       ],
       "react-native-bottom-tabs",
-      "expo-background-task"
+      "expo-background-task",
+      "@bacons/apple-targets"
     ]
   }
 }

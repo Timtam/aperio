@@ -83,8 +83,9 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       ohne Widget und ohne Datenbank-Umzug. Beantwortet: signiert die
       Capability überhaupt gegen unser Profil? Genau daran scheiterte Bau #5
       mit `aps-environment` (siehe `withoutPushEntitlement.js`).
-- [ ] **Schritt 1** — Widget-Target über Config-Plugin, feste Zeile, keine
-      Daten. Beweist, dass das Target angelegt, signiert und installiert wird.
+- [x] **Schritt 1** — Widget-Target über `@bacons/apple-targets`
+      (`mobile/targets/widget/`), feste Zeile, keine Daten. Beweist, dass das
+      Target angelegt, signiert und installiert wird.
 - [ ] **Schritt 2** — Datenbank-Umzug (kopieren, testweise öffnen, erst dann die
       Originale löschen; scheitert ein Schritt, bleibt alles am alten Platz),
       schmaler Lesepfad in `cal-ffi` (`upcoming_json(limit, now)` statt des
