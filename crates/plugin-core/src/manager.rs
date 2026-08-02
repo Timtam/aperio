@@ -1175,15 +1175,25 @@ impl PluginManager {
     /// the first match wins and the situation is left for the plugin panel to
     /// surface, since refusing to resolve either would take the user's working
     /// accounts down over someone else's packaging mistake.
+    ///
+    /// A plugin's OWN kind beats one it merely adopts
+    /// ([`crate::manifest::PluginManifest::adopts_adapter_kinds`]). That
+    /// ordering is the whole point during a consolidation: while the merged
+    /// adapter and the one it supersedes are both installed, the superseded
+    /// plugin still declares the kind as its own and keeps its rows, and the
+    /// answer does not depend on hash-map order — which would otherwise vary
+    /// between launches of the same build.
     pub fn plugin_for_adapter_kind(&self, adapter_kind: &str) -> Option<Arc<LoadedPlugin>> {
         let inner = self.inner.read().expect("manager poisoned");
-        inner
-            .plugins
-            .values()
-            .find(|p| {
-                p.manifest.adapter_kind.as_deref() == Some(adapter_kind)
-                    && !inner.disabled.contains(&p.manifest.id)
-            })
+        let live = || {
+            inner
+                .plugins
+                .values()
+                .filter(|p| !inner.disabled.contains(&p.manifest.id))
+        };
+        live()
+            .find(|p| p.manifest.adapter_kind.as_deref() == Some(adapter_kind))
+            .or_else(|| live().find(|p| p.manifest.adopts_kind(adapter_kind)))
             .cloned()
     }
 
@@ -1969,8 +1979,99 @@ mod tests {
             tasks: Default::default(),
             account: None,
             adapter_kind: None,
+            adopts_adapter_kinds: Vec::new(),
             strings: Default::default(),
         }
+    }
+
+    /// A kind a plugin ADOPTS resolves to it — the whole mechanism, in one
+    /// assertion. Without it a consolidated adapter would have to rewrite every
+    /// account row that names the kind it replaced.
+    #[test]
+    fn an_adopted_kind_resolves_to_the_adopting_plugin() {
+        let mgr = PluginManager::new("0.1.0");
+        let mut merged = stub_manifest("test.merged");
+        merged.adapter_kind = Some("google".into());
+        merged.adopts_adapter_kinds = vec!["googledrive".into()];
+        mgr.insert_stub_for_tests("test.merged", merged);
+
+        for kind in ["google", "googledrive"] {
+            assert_eq!(
+                mgr.plugin_for_adapter_kind(kind)
+                    .expect("the merged plugin serves it")
+                    .manifest
+                    .id,
+                "test.merged",
+                "{kind} did not reach the plugin that serves it",
+            );
+        }
+        assert!(mgr.plugin_for_adapter_kind("dropbox").is_none());
+    }
+
+    /// While the merged adapter and the one it supersedes are both installed,
+    /// the one that declares the kind as its OWN wins — every launch, whatever
+    /// order the map iterates in.
+    #[test]
+    fn an_own_kind_beats_an_adopted_one() {
+        let mgr = PluginManager::new("0.1.0");
+        let mut merged = stub_manifest("test.merged");
+        merged.adapter_kind = Some("google".into());
+        merged.adopts_adapter_kinds = vec!["googledrive".into()];
+        mgr.insert_stub_for_tests("test.merged", merged);
+        let mut legacy = stub_manifest("test.legacy");
+        legacy.adapter_kind = Some("googledrive".into());
+        mgr.insert_stub_for_tests("test.legacy", legacy);
+
+        assert_eq!(
+            mgr.plugin_for_adapter_kind("googledrive")
+                .expect("still served")
+                .manifest
+                .id,
+            "test.legacy",
+            "the superseded plugin still owns its own kind while it is installed",
+        );
+
+        // And once it goes, the adopting plugin picks the rows up rather than
+        // leaving them as "plugin missing".
+        mgr.set_enabled("test.legacy", false);
+        assert_eq!(
+            mgr.plugin_for_adapter_kind("googledrive")
+                .expect("adopted")
+                .manifest
+                .id,
+            "test.merged",
+        );
+    }
+
+    /// Adopted kinds resolve; they are not OFFERED. A merged adapter appears
+    /// once in the Add-account picker, under one name — the entry for the thing
+    /// it absorbed must not survive it.
+    #[test]
+    fn an_adopted_kind_is_not_offered_as_its_own_adapter() {
+        let mgr = PluginManager::new("0.1.0");
+        let mut merged = stub_manifest("test.merged");
+        merged.adapter_kind = Some("google".into());
+        merged.adopts_adapter_kinds = vec!["googledrive".into()];
+        mgr.insert_stub_for_tests("test.merged", merged);
+
+        let offered: Vec<String> = mgr.adapter_kinds().into_iter().map(|k| k.kind).collect();
+        assert_eq!(offered, vec!["google".to_string()]);
+    }
+
+    /// A disabled plugin does not resolve the kinds it adopted either —
+    /// otherwise switching it off would leave its adopted accounts alive while
+    /// its own went missing.
+    #[test]
+    fn disabling_a_plugin_takes_its_adopted_kinds_with_it() {
+        let mgr = PluginManager::new("0.1.0");
+        let mut merged = stub_manifest("test.merged");
+        merged.adapter_kind = Some("google".into());
+        merged.adopts_adapter_kinds = vec!["googledrive".into()];
+        mgr.insert_stub_for_tests("test.merged", merged);
+        mgr.set_enabled("test.merged", false);
+
+        assert!(mgr.plugin_for_adapter_kind("google").is_none());
+        assert!(mgr.plugin_for_adapter_kind("googledrive").is_none());
     }
 
     #[test]

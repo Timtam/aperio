@@ -34,6 +34,7 @@ fn manifest() -> PluginManifest {
         tasks: Default::default(),
         account: None,
         adapter_kind: None,
+        adopts_adapter_kinds: Vec::new(),
         strings: Default::default(),
     }
 }

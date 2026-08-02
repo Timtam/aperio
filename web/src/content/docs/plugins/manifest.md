@@ -48,6 +48,7 @@ reads it to discover the plugin before loading any code.
 | `description` | string | ✅ | One-line description shown in plugin settings. |
 | `signed` | boolean | ✅ | Whether the plugin is signed (bundled plugins are `false`). |
 | `adapter_kind` | string | — | The value accounts of this adapter carry in the `adapter_kind` column, e.g. `"caldav"`, `"webex"`. Set it if your plugin has accounts; the host builds its kind→plugin map from these. See below. |
+| `adopts_adapter_kinds` | string[] | — | Kinds written by an adapter this plugin has absorbed, so the rows keep resolving here. Resolution only — never offered as its own entry. See below. |
 | `account` | object | — | What the plugin needs in order to have an account: the fields to ask for, which are secrets, and whether it signs in via OAuth. See below. |
 
 ## Capability detail blocks
@@ -99,6 +100,42 @@ Two constraints worth knowing:
 An account whose kind no plugin serves is not an error. It lists like any other
 and shows as "plugin missing" — which is exactly what a user sees on a device
 that has not installed your plugin yet.
+
+## `adopts_adapter_kinds` — taking over another adapter's rows
+
+Two adapters sometimes become one: a provider you served with two plugins turns
+out to be one account with two capabilities. The problem is the rows that are
+already out there. A kind is written into every account row and travels in every
+sync payload, so renaming it means rewriting rows on one device and propagating
+the rewrite — across devices that are offline, devices on an older version, and
+devices where the plugin is not installed at all.
+
+Declare instead that you now serve the old kind:
+
+```json
+"adapter_kind": "acme",
+"adopts_adapter_kinds": ["acme-drive"]
+```
+
+Nothing that was written down changes. `adapter_kind` is what accounts created
+from now on carry; the adopted kinds are what existing ones already carry, and
+they keep resolving to you.
+
+What you take on with them:
+
+- **Your `open` must accept the config those rows were written with.** The host
+  does not translate between the two shapes and could not — it does not know
+  what your fields mean. Accept both, or migrate inside your own plugin where
+  you know what a value means.
+- **Adopted kinds are for resolution, not for offering.** They never appear in
+  the Add-account picker, and they need no display name in the app's locale
+  files. A merged adapter is offered once, under one name.
+- **Delete the plugin you adopted from.** While both are installed the one that
+  declares the kind as its own keeps it, so the adopting half serves nothing —
+  and which one a user's accounts bind to depends on what they have installed.
+
+The manifest is rejected at load time if an adopted kind is blank, is listed
+twice, repeats your own `adapter_kind`, or appears without one.
 
 ## `account` — the connect form
 

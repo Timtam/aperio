@@ -53,29 +53,71 @@ pub fn pref_key_for_disabled(plugin_id: &str) -> String {
     format!("{PREF_PREFIX_PLUGIN_DISABLED}{plugin_id}")
 }
 
-/// The [`AdapterKind`] a plugin serves, from its own manifest.
+/// Every [`AdapterKind`] whose accounts belong to a plugin — its own, plus any
+/// it ADOPTS from an adapter it superseded.
 ///
-/// `None` for plugin types that are not account-scoped: sync adapters live in
-/// `user_prefs`, notification channels have no per-account state.
-fn adapter_kind_for_plugin(plugin_id: &str, plugin_manager: &PluginManager) -> Option<AdapterKind> {
-    plugin_manager
-        .get_including_disabled(plugin_id)
-        .and_then(|p| p.manifest.adapter_kind.clone())
-        .map(AdapterKind::new)
+/// Empty for plugin types that are not account-scoped (a notification channel
+/// has no per-account state).
+///
+/// A set rather than one value because a merged adapter answers for rows
+/// written under the kind of the adapter it replaced. Those rows are its
+/// accounts in every sense that matters here: enabling the plugin must
+/// register them, uninstalling it must unregister them, and an upgrade must
+/// take them down and put them back. Asking only for the plugin's OWN kind
+/// would leave exactly the adopted accounts stranded — registered against a
+/// library that has been unloaded.
+fn adapter_kinds_for_plugin(plugin_id: &str, plugin_manager: &PluginManager) -> Vec<AdapterKind> {
+    let Some(plugin) = plugin_manager.get_including_disabled(plugin_id) else {
+        return Vec::new();
+    };
+    plugin
+        .manifest
+        .adapter_kind
+        .iter()
+        .chain(plugin.manifest.adopts_adapter_kinds.iter())
+        .map(|k| AdapterKind::new(k.as_str()))
+        .collect()
 }
 
-/// The adapter kind this plugin serves, read off its own manifest.
+/// Every adapter kind this plugin serves, read off its own manifest — its own
+/// and any it adopts.
 ///
 /// Was a hand-written table of plugin ids. The six sync backends declare their
 /// kind now, so a seventh needs no edit here to be protected — and a calendar
 /// adapter answers its own kind, which simply never matches an active SYNC
 /// target, so the guard still fires only where there is a real match risk.
-fn sync_kind_for_plugin(manager: &plugin_core::PluginManager, plugin_id: &str) -> Option<String> {
+///
+/// Adopted kinds count: a device syncing through a row an adapter INHERITED is
+/// syncing through that adapter, and a guard that missed it would let the user
+/// disable the plugin their sync depends on.
+fn sync_kinds_for_plugin(manager: &plugin_core::PluginManager, plugin_id: &str) -> Vec<String> {
     manager
         .all()
         .into_iter()
         .find(|p| p.manifest.id == plugin_id)
-        .and_then(|p| p.manifest.adapter_kind.clone())
+        .map(|p| {
+            p.manifest
+                .adapter_kind
+                .iter()
+                .chain(p.manifest.adopts_adapter_kinds.iter())
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Whether `plugin_id` serves the kind this device is currently syncing
+/// through — the shared half of the three guards below.
+fn guards_active_sync(
+    manager: &plugin_core::PluginManager,
+    plugin_id: &str,
+    db: &host_core::db::SharedConn,
+) -> bool {
+    let kinds = sync_kinds_for_plugin(manager, plugin_id);
+    if kinds.is_empty() {
+        return false;
+    }
+    active_sync_kind(db).is_some_and(|active| kinds.contains(&active))
 }
 
 /// The sync target this device is actually using, as an adapter kind.
@@ -289,20 +331,16 @@ pub async fn set_plugin_enabled(
     // with "plugin missing" the moment the gate flips. The
     // frontend surfaces this as a "switch sync first" hint
     // pointing the user at the Sync tab.
-    if !request.enabled {
-        if let Some(plugin_sync_kind) = sync_kind_for_plugin(&plugin_manager, &request.plugin_id) {
-            if active_sync_kind(&shared).as_deref() == Some(plugin_sync_kind.as_str()) {
-                return Err(CommandError {
-                    code: "active_sync_conflict",
-                    message: format!(
-                        "{} is the sync adapter you're currently using; \
-                         switch to a different one in Settings → Sync \
-                         before disabling it.",
-                        request.plugin_id,
-                    ),
-                });
-            }
-        }
+    if !request.enabled && guards_active_sync(&plugin_manager, &request.plugin_id, &shared) {
+        return Err(CommandError {
+            code: "active_sync_conflict",
+            message: format!(
+                "{} is the sync adapter you're currently using; \
+                     switch to a different one in Settings → Sync \
+                     before disabling it.",
+                request.plugin_id,
+            ),
+        });
     }
 
     // 1) Persist first. If a later step fails, the user's
@@ -331,14 +369,15 @@ pub async fn set_plugin_enabled(
     //    plugin-missing error and surface it through the
     //    SyncPanel.
     if changed {
-        if let Some(kind) = adapter_kind_for_plugin(&request.plugin_id, plugin_manager.inner()) {
+        let kinds = adapter_kinds_for_plugin(&request.plugin_id, plugin_manager.inner());
+        if !kinds.is_empty() {
             let accounts_repo = AccountsRepo::new(&shared);
             let accounts = accounts_repo.list().map_err(|e| CommandError {
                 code: "internal",
                 message: format!("list accounts for re-sync: {e}"),
             })?;
             for account in accounts {
-                if account.adapter_kind != kind {
+                if !kinds.contains(&account.adapter_kind) {
                     continue;
                 }
                 if request.enabled {
@@ -475,18 +514,16 @@ pub async fn install_plugin_archive(
     // adapters first.
     let is_upgrade = plugin_manager.get_including_disabled(&plugin_id).is_some();
     if is_upgrade {
-        if let Some(plugin_sync_kind) = sync_kind_for_plugin(&plugin_manager, &plugin_id) {
-            if active_sync_kind(&shared).as_deref() == Some(plugin_sync_kind.as_str()) {
-                return Err(CommandError {
-                    code: "active_sync_conflict",
-                    message: format!(
-                        "{} is the sync adapter you're currently using; \
-                         switch to a different one in Settings → Sync \
-                         before upgrading it.",
-                        plugin_id,
-                    ),
-                });
-            }
+        if guards_active_sync(&plugin_manager, &plugin_id, &shared) {
+            return Err(CommandError {
+                code: "active_sync_conflict",
+                message: format!(
+                    "{} is the sync adapter you're currently using; \
+                     switch to a different one in Settings → Sync \
+                     before upgrading it.",
+                    plugin_id,
+                ),
+            });
         }
         try_unload_for_upgrade(&plugin_manager, &registry, &shared, &plugin_id).await?;
     }
@@ -518,7 +555,8 @@ pub async fn install_plugin_archive(
     // installing the plugin should bring them back online
     // without an app restart.
     let plugin_id = installed.manifest.id.clone();
-    if let Some(kind) = adapter_kind_for_plugin(&plugin_id, plugin_manager.inner()) {
+    let kinds = adapter_kinds_for_plugin(&plugin_id, plugin_manager.inner());
+    if !kinds.is_empty() {
         let shared = db.shared();
         let accounts_repo = AccountsRepo::new(&shared);
         let accounts = accounts_repo.list().map_err(|e| CommandError {
@@ -526,7 +564,7 @@ pub async fn install_plugin_archive(
             message: format!("list accounts for post-install register: {e}"),
         })?;
         for account in accounts {
-            if account.adapter_kind != kind {
+            if !kinds.contains(&account.adapter_kind) {
                 continue;
             }
             if let Err(err) = registry.register(&account) {
@@ -661,14 +699,15 @@ async fn try_unload_for_upgrade(
     //    the account so we can re-register on rollback or
     //    after the new version loads.
     let mut affected_accounts = Vec::new();
-    if let Some(kind) = adapter_kind_for_plugin(plugin_id, plugin_manager) {
+    let kinds = adapter_kinds_for_plugin(plugin_id, plugin_manager);
+    if !kinds.is_empty() {
         let accounts_repo = AccountsRepo::new(db);
         let accounts = accounts_repo.list().map_err(|e| CommandError {
             code: "internal",
             message: format!("list accounts for upgrade unload: {e}"),
         })?;
         for account in accounts {
-            if account.adapter_kind != kind {
+            if !kinds.contains(&account.adapter_kind) {
                 continue;
             }
             registry.unregister(&account.id);
@@ -922,16 +961,14 @@ pub async fn uninstall_plugin(
     //    subsequent sync round; same posture as iterations
     //    14 + 17.
     let shared = db.shared();
-    if let Some(plugin_sync_kind) = sync_kind_for_plugin(&plugin_manager, &plugin_id) {
-        if active_sync_kind(&shared).as_deref() == Some(plugin_sync_kind.as_str()) {
-            return Err(CommandError {
-                code: "active_sync_conflict",
-                message: format!(
-                    "{plugin_id} is the sync adapter you're currently using; \
-                     switch to a different one in Settings → Sync before uninstalling it.",
-                ),
-            });
-        }
+    if guards_active_sync(&plugin_manager, &plugin_id, &shared) {
+        return Err(CommandError {
+            code: "active_sync_conflict",
+            message: format!(
+                "{plugin_id} is the sync adapter you're currently using; \
+                 switch to a different one in Settings → Sync before uninstalling it.",
+            ),
+        });
     }
 
     // 3) If the plugin is currently loaded, tear it down via

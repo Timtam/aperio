@@ -453,7 +453,7 @@ impl AdapterRegistry {
         self.plugin_manager
             .all()
             .into_iter()
-            .find(|p| p.manifest.adapter_kind.as_deref() == Some(adapter_kind.as_str()))
+            .find(|p| p.manifest.serves_kind(adapter_kind.as_str()))
             .is_some_and(|p| {
                 !p.manifest.capabilities.is_empty()
                     && p.manifest

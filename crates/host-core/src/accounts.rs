@@ -203,7 +203,7 @@ pub fn travels_between_devices(manager: &plugin_core::PluginManager, adapter_kin
     manager
         .all()
         .into_iter()
-        .find(|p| p.manifest.adapter_kind.as_deref() == Some(adapter_kind))
+        .find(|p| p.manifest.serves_kind(adapter_kind))
         .is_none_or(|p| {
             p.manifest
                 .capabilities
@@ -680,6 +680,38 @@ mod tests {
         assert!(
             !travels_between_devices(&manager, SYNC_ONLY_KIND),
             "a disabled sync target started travelling",
+        );
+    }
+
+    /// A kind a plugin ADOPTS answers with that plugin's rule, not with the
+    /// "nobody serves it" default.
+    ///
+    /// This is the safety edge of adoption. `travels_between_devices` errs
+    /// towards TRUE for an unknown kind, because a device missing a plugin must
+    /// pass rows on rather than drop them. So a consolidation that left the
+    /// adopted kind unresolvable would not fail loudly — it would quietly start
+    /// publishing device-local sync targets, with their folder paths, to every
+    /// other device.
+    #[test]
+    fn an_adopted_kind_inherits_the_adopting_plugins_rule() {
+        const RETIRED: &str = "retired-folder-sync";
+        let manager = plugin_core::PluginManager::new("0.1.0");
+        let mut manifest = plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
+            "../../sync-adapter-local-plugin/plugin.json"
+        ))
+        .expect("the shipped local-filesystem sync manifest parses");
+        manifest.adopts_adapter_kinds = vec![RETIRED.to_string()];
+        let descriptor = unsafe { sync_adapter_local_plugin::build_descriptor() };
+        manager
+            .register_static(manifest, descriptor, sync_adapter_local_plugin::DESTROY_FN)
+            .expect("register the static local-filesystem sync plugin");
+
+        // Unadopted, it would travel — that is the default for a kind nothing
+        // serves, and the reason this has to be checked rather than assumed.
+        assert!(travels_between_devices(&manager, "some-other-kind"));
+        assert!(
+            !travels_between_devices(&manager, RETIRED),
+            "an adopted sync-only kind started travelling",
         );
     }
 

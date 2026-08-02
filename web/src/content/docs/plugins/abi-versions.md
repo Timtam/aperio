@@ -190,6 +190,13 @@ row and travels in every sync payload, so it has to stay byte-stable for the lif
 of the data, while a plugin id is free to change when a plugin is renamed. You
 may use your id as your kind; they are simply separate promises.
 
+**`adopts_adapter_kinds`** — kinds written by an adapter your plugin has
+absorbed, so those account rows keep resolving to you instead of reading as
+"plugin missing". Resolution only: an adopted kind is never offered as its own
+entry in the Add-account picker, and your `open` has to accept the config shape
+those rows were written with. See [the manifest
+reference](/plugins/manifest/).
+
 **`account`** — the fields your connect form asks for, which of them are
 secrets, and whether you sign in via OAuth. Declare it and the host draws your
 form with no host-side code. See [the manifest reference](/plugins/manifest/).

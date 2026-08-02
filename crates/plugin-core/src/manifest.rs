@@ -402,6 +402,32 @@ pub struct PluginManifest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adapter_kind: Option<String>,
 
+    /// Further kinds this plugin ADOPTS — rows written under another adapter's
+    /// kind that this plugin now serves.
+    ///
+    /// The mechanism that lets two adapters become one without touching a
+    /// single account row. [`Self::adapter_kind`] is what NEW accounts of this
+    /// plugin carry; these are what OLD ones already carry, and they keep
+    /// resolving here forever.
+    ///
+    /// It exists because the alternative is worse. A kind is persisted in every
+    /// account row and travels in every sync payload, so folding
+    /// `sync-adapter-googledrive` into the Google adapter by renaming the kind
+    /// would mean rewriting rows on one device and propagating the rewrite —
+    /// with older devices, offline devices and a plugin that may not be
+    /// installed everywhere. Adoption changes nothing that was written down.
+    ///
+    /// The adopting plugin owes the rows it takes on: its `open` has to accept
+    /// the config shape they were written with. The host does not translate
+    /// between them, and could not — it does not know what the fields mean.
+    ///
+    /// Adopted kinds are for RESOLUTION only. They are deliberately absent from
+    /// [`crate::manifest::AdapterKindInfo`] and therefore from every picker: a
+    /// merged adapter must be offered once, under one name, or the Add-account
+    /// list grows an entry for a thing that no longer exists separately.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub adopts_adapter_kinds: Vec<String>,
+
     /// This plugin's own text, in the languages it speaks — see
     /// [`crate::strings`] for why it lives here rather than in the host's
     /// locale files, and for the resolution order.
@@ -477,6 +503,36 @@ impl PluginManifest {
         if let Some(account) = &self.account {
             account.validate()?;
         }
+        // An adopted kind that is blank, duplicated, or the plugin's own is a
+        // packaging mistake with quiet consequences — the first two make the
+        // resolution order depend on vector position, the third makes the
+        // manifest look like it adopts something when it adopts nothing. All
+        // three are cheaper to reject here than to debug from an account that
+        // renders as "plugin missing".
+        for (index, kind) in self.adopts_adapter_kinds.iter().enumerate() {
+            if kind.trim().is_empty() {
+                return Err(PluginError::Manifest(
+                    "adopts_adapter_kinds must not contain an empty kind".into(),
+                ));
+            }
+            if Some(kind.as_str()) == self.adapter_kind.as_deref() {
+                return Err(PluginError::Manifest(format!(
+                    "adopts_adapter_kinds repeats this plugin's own kind `{kind}`",
+                )));
+            }
+            if self.adopts_adapter_kinds[..index].contains(kind) {
+                return Err(PluginError::Manifest(format!(
+                    "adopts_adapter_kinds lists `{kind}` twice",
+                )));
+            }
+        }
+        // Adopting without serving anything of its own would leave the plugin
+        // with no kind for the accounts a user creates NEXT.
+        if !self.adopts_adapter_kinds.is_empty() && self.adapter_kind.is_none() {
+            return Err(PluginError::Manifest(
+                "adopts_adapter_kinds needs an adapter_kind of its own to adopt into".into(),
+            ));
+        }
         Ok(())
     }
 
@@ -507,6 +563,26 @@ impl PluginManifest {
     pub fn has_data_family(&self) -> bool {
         self.capabilities.iter().any(Capability::is_data_family)
     }
+
+    /// Whether this plugin serves `kind` — as its own, or by adoption.
+    ///
+    /// The single question every resolver asks. It used to be spelled
+    /// `manifest.adapter_kind.as_deref() == Some(kind)` in four places, which
+    /// is exactly the kind of comparison that gets extended in three of them.
+    pub fn serves_kind(&self, kind: &str) -> bool {
+        self.adapter_kind.as_deref() == Some(kind) || self.adopts_kind(kind)
+    }
+
+    /// Whether it serves `kind` only by ADOPTION — it is somebody else's kind,
+    /// taken on so existing rows keep working.
+    ///
+    /// Separate from [`Self::serves_kind`] because resolution has to prefer an
+    /// own kind over an adopted one: while a merged plugin and the plugin it
+    /// supersedes are both installed, exactly one of them must win, and it must
+    /// be the same one on every launch.
+    pub fn adopts_kind(&self, kind: &str) -> bool {
+        self.adopts_adapter_kinds.iter().any(|k| k == kind)
+    }
 }
 
 #[cfg(test)]
@@ -528,6 +604,80 @@ mod tests {
                 "description": "Bundled SQLite-backed local adapter."
             }}"#
         )
+    }
+
+    /// A manifest that adopts another adapter's kind, and the two questions
+    /// every resolver asks of it.
+    #[test]
+    fn adoption_round_trips_and_answers_both_questions() {
+        let json = format!(
+            r#"{{
+                "id": "com.aperio.cal-adapter-google",
+                "name": "Aperio Google",
+                "version": "0.1.0",
+                "plugin_type": "adapter",
+                "capabilities": ["calendar", "sync"],
+                "abi_version": {ABI_VERSION},
+                "min_app_version": "0.1.0",
+                "adapter_kind": "google",
+                "adopts_adapter_kinds": ["googledrive"]
+            }}"#
+        );
+        let m = PluginManifest::from_bytes(json.as_bytes()).expect("parses");
+        assert_eq!(m.adopts_adapter_kinds, vec!["googledrive".to_string()]);
+
+        assert!(m.serves_kind("google"));
+        assert!(m.serves_kind("googledrive"));
+        assert!(!m.serves_kind("dropbox"));
+
+        // Its OWN kind is not an adoption — resolution order depends on the
+        // difference.
+        assert!(!m.adopts_kind("google"));
+        assert!(m.adopts_kind("googledrive"));
+
+        // Absent in an ordinary manifest, and absent from the serialised form
+        // when empty, so existing manifests round-trip byte-for-byte.
+        let plain = PluginManifest::from_bytes(sample_manifest_json().as_bytes()).expect("parses");
+        assert!(plain.adopts_adapter_kinds.is_empty());
+        let round = serde_json::to_string(&plain).expect("serialises");
+        assert!(!round.contains("adopts_adapter_kinds"), "{round}");
+    }
+
+    /// The three packaging mistakes, rejected while the plugin is loading
+    /// rather than from an account that renders as "plugin missing".
+    #[test]
+    fn a_malformed_adoption_list_is_refused_at_parse_time() {
+        let manifest = |kind: &str, adopts: &str| {
+            format!(
+                r#"{{
+                    "id": "com.example.adapter",
+                    "name": "Example",
+                    "version": "0.1.0",
+                    "plugin_type": "adapter",
+                    "capabilities": ["calendar"],
+                    "abi_version": {ABI_VERSION},
+                    "min_app_version": "0.1.0",
+                    {kind}
+                    "adopts_adapter_kinds": {adopts}
+                }}"#
+            )
+        };
+        let own = r#""adapter_kind": "example","#;
+
+        for (case, json) in [
+            ("blank", manifest(own, r#"["  "]"#)),
+            ("its own kind", manifest(own, r#"["example"]"#)),
+            ("a duplicate", manifest(own, r#"["a", "a"]"#)),
+            ("nothing to adopt into", manifest("", r#"["legacy"]"#)),
+        ] {
+            assert!(
+                PluginManifest::from_bytes(json.as_bytes()).is_err(),
+                "{case} was accepted",
+            );
+        }
+
+        // …and the shape that is fine.
+        assert!(PluginManifest::from_bytes(manifest(own, r#"["a", "b"]"#).as_bytes()).is_ok());
     }
 
     #[test]

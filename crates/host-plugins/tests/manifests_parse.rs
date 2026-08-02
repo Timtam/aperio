@@ -225,6 +225,50 @@ fn no_two_adapters_in_the_tree_share_a_kind() {
 /// "dialogs dot accounts dot kind name dot googledrive", once per account,
 /// forever, with nothing on screen looking wrong to a sighted reviewer.
 ///
+/// An adopted kind belongs to exactly one adapter too — and never to a plugin
+/// that is still shipping.
+///
+/// Adoption exists so a merged adapter can take over the rows of one it
+/// replaced ([`PluginManifest::adopts_adapter_kinds`]). Shipping both at once
+/// is not a state this tree should ever be in: the resolver prefers the plugin
+/// that owns the kind, so the adopting half would sit there serving nothing,
+/// and which of them a user's accounts bind to would depend on which is
+/// installed — a difference between two machines running the same version.
+///
+/// When you adopt, delete what you adopted from.
+#[test]
+fn an_adopted_kind_has_no_other_claimant_in_the_tree() {
+    let manifests = manifests_in_tree();
+    let mut own: std::collections::BTreeMap<String, String> = Default::default();
+    for (name, manifest) in &manifests {
+        if let Some(kind) = &manifest.adapter_kind {
+            own.insert(kind.clone(), name.clone());
+        }
+    }
+
+    let mut problems = Vec::new();
+    let mut adopted: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for (name, manifest) in &manifests {
+        for kind in &manifest.adopts_adapter_kinds {
+            if let Some(owner) = own.get(kind) {
+                problems.push(format!(
+                    "{name} adopts `{kind}`, which {owner} still declares as its own",
+                ));
+            }
+            adopted.entry(kind.clone()).or_default().push(name.clone());
+        }
+    }
+    for (kind, names) in &adopted {
+        if names.len() > 1 {
+            problems.push(format!(
+                "`{kind}` is adopted by more than one adapter: {names:?}"
+            ));
+        }
+    }
+
+    assert!(problems.is_empty(), "{}", problems.join("; "));
+}
+
 /// So it is asserted here, against the shipped locale files, rather than left to
 /// be noticed.
 #[test]
