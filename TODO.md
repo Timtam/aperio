@@ -59,6 +59,53 @@ führen: drei leere Crates sind keine Roadmap. WebEx ist echt implementiert
 - [ ] Handler: snooze (neu planen), mark-done, open-from-notification
 - Einstieg: `src-tauri/src/reminders.rs` (`fire()`), Notification-Builder um `.action()` erweitern.
 
+### A7 · Mobile Widgets (iOS zuerst) `[~]`
+Termine und Aufgaben auf dem Home- und Sperrbildschirm, mit Abhaken. Drei
+Widgets statt eines mit Umschalter — ein Widget mit Modi ist per Screenreader
+schlechter zu erfassen als drei mit je einem Zweck:
+
+1. **Als Nächstes** — kommende Termine und fällige Aufgaben gemischt, nur Anzeige.
+2. **Heute** — die heutigen Aufgaben, mit Abhak-Schalter.
+3. **Nächster Termin** — eine Zeile plus Countdown (Sperrbildschirm).
+
+Ein Widget läuft in einem eigenen Prozess und kommt weder an die React-Native-
+Schicht noch an die App-Sandbox. Gewählter Weg: der Rust-Kern wird in die
+Extension mitgelinkt und liest die Datenbank direkt — dafür muss sie aus
+`applicationSupportDirectory` in einen App-Group-Container umziehen. Das
+`CalFfi.xcframework` liegt bereits versioniert im Repo, es muss nichts Neues
+gebaut werden.
+
+Reihenfolge nach RISIKO, nicht nach Interesse: jeder Schritt kostet einen
+EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
+Übrige trägt.
+
+- [x] **Schritt 0** — App-Group-Entitlement allein (`plugins/withAppGroup.js`),
+      ohne Widget und ohne Datenbank-Umzug. Beantwortet: signiert die
+      Capability überhaupt gegen unser Profil? Genau daran scheiterte Bau #5
+      mit `aps-environment` (siehe `withoutPushEntitlement.js`).
+- [ ] **Schritt 1** — Widget-Target über Config-Plugin, feste Zeile, keine
+      Daten. Beweist, dass das Target angelegt, signiert und installiert wird.
+- [ ] **Schritt 2** — Datenbank-Umzug (kopieren, testweise öffnen, erst dann die
+      Originale löschen; scheitert ein Schritt, bleibt alles am alten Platz),
+      schmaler Lesepfad in `cal-ffi` (`upcoming_json(limit, now)` statt des
+      vollen `Host` — Widget-Extensions haben ein knappes Speicherbudget),
+      Widget 1 mit echten Daten.
+- [ ] **Schritt 3** — Countdown. `Text(timerInterval:)` rendert das System
+      selbst, ohne Zeitachsen-Neuladen. Eigenes, gröberes `accessibilityLabel`
+      („in etwa 20 Minuten"), sonst redet VoiceOver sekundenweise.
+- [ ] **Schritt 4** — Abhaken per `AppIntent`. Der einzige Teil, der aus der
+      Extension SCHREIBT. Vorher zu klären, ob Ereignis-Log und Sync-Warteschlange
+      einen zweiten schreibenden Prozess vertragen — WAL kann Mehrprozess, das
+      sagt nichts über die Schicht darüber.
+- [ ] **Android** — dieselben drei Widgets über Glance. Zurückgestellt, nicht
+      verworfen: es gibt kein Testgerät.
+- Offen: Live Activities brauchen einen Start aus dem Vordergrund oder per Push;
+  Aperio hat keinen Server und entfernt das Push-Entitlement bewusst. Ein
+  Countdown „ohne Zutun" ist unter iOS damit nicht erreichbar, unter Android
+  über eine dauerhafte Benachrichtigung aus dem Hintergrund-Worker schon.
+- Einstieg: `mobile/plugins/`, `mobile/modules/cal-ffi/ios/CalFfiModule.swift`
+  (Datenbankpfad), `crates/cal-ffi/src/host.rs` (Lesepfad).
+
 ### A6 · Offline-Queue für externe APIs (§18.2)
 - [ ] SQLite-Queue, die Mutationen an externe Kalender/Aufgaben (create/update/delete event+task) offline puffert
 - [ ] Retry bei Reconnect inkl. ETag-Prüfung

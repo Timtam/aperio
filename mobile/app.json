@@ -86,6 +86,7 @@
         }
       ],
       "./plugins/withReminderSoundProvider",
+      "./plugins/withAppGroup",
       "./plugins/withoutPushEntitlement",
       "./plugins/withAndroidAbis",
       [
