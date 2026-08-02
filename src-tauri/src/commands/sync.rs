@@ -1479,6 +1479,35 @@ pub async fn preview_sync_target(
     onboarding.preview(adapter.as_ref()).await.map_err(sync_err)
 }
 
+/// The same question, asked with a kind and the form's values.
+///
+/// The twin of [`preview_sync_target`] for a caller rendering the shared
+/// schema form rather than one hand-written per backend. Same answer, same
+/// side effects — which is to say none: this reaches the target and reports
+/// what is there, and a wizard that then does nothing has changed nothing.
+///
+/// It exists beside the typed one rather than replacing it because the two
+/// frontends move one at a time; the typed half goes when the last per-kind
+/// form does.
+#[tauri::command]
+pub async fn preview_sync_target_values(
+    db: State<'_, DbHandle>,
+    onboarding: State<'_, Arc<OnboardingService>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
+    kind: String,
+    values: serde_json::Map<String, serde_json::Value>,
+) -> CommandResult<SyncPreview> {
+    let shared = db.shared();
+    let adapter = host_core::sync_target::preview_adapter(
+        &HostSyncPlugins(plugin_manager.inner()),
+        &UserPrefsHostKeyVerifier::new(shared.clone()),
+        &kind,
+        &values,
+    )
+    .map_err(connect_err)?;
+    onboarding.preview(adapter.as_ref()).await.map_err(sync_err)
+}
+
 /// Bring up adapters for external accounts an onboarding pass just
 /// materialised, then warm their cache.
 ///
