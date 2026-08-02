@@ -39,7 +39,7 @@
 
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// `(cdylib-crate, plugin-crate, plugin-id)` for every bundled
 /// plugin. The cdylib crate emits the loadable library — its
@@ -85,11 +85,6 @@ const PLUGINS: &[(&str, &str, &str)] = &[
         "com.aperio.cal-adapter-todoist",
     ),
     (
-        "sync-adapter-local-cdylib",
-        "sync-adapter-local-plugin",
-        "com.aperio.sync-adapter-local",
-    ),
-    (
         "sync-adapter-webdav-cdylib",
         "sync-adapter-webdav-plugin",
         "com.aperio.sync-adapter-webdav",
@@ -121,6 +116,54 @@ fn main() {
     stage_bundled_plugins();
 }
 
+/// Delete staged plugins that [`PLUGINS`] no longer lists.
+///
+/// Staging copies each plugin into `plugins/bundled/<plugin-id>/`, and nothing
+/// ever removed one. A target directory therefore accumulated every plugin the
+/// workspace had EVER produced: retiring an adapter deleted its crate, its
+/// manifest and its registration, and the app went on loading yesterday's
+/// cdylib from disk — with a manifest whose kind nothing serves any more.
+///
+/// It is not hypothetical. Folding Drive into Google and folder sync into the
+/// built-in store removed two plugins, and the bundled-plugin test failed on
+/// the next run with 14 loaded against 12 expected, purely from leftovers.
+///
+/// Only directories named like a plugin id we could plausibly have written are
+/// touched — `com.aperio.*`. A third-party plugin a developer dropped in by
+/// hand is somebody else's, and a build script is the wrong thing to be
+/// deleting it.
+fn prune_unlisted_plugins(bundled_dir: &Path) {
+    let expected: Vec<&str> = PLUGINS.iter().map(|(_, _, id)| *id).collect();
+    let entries = match fs::read_dir(bundled_dir) {
+        Ok(entries) => entries,
+        // Nothing staged yet: the first build in a clean target.
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if !name.starts_with("com.aperio.") || expected.contains(&name) {
+            continue;
+        }
+        match fs::remove_dir_all(&path) {
+            Ok(()) => println!(
+                "cargo:warning=removed stale bundled plugin {name}: no longer part of the \
+                 workspace",
+            ),
+            Err(err) => println!(
+                "cargo:warning=stale bundled plugin {name} could not be removed from {}: \
+                 {err}",
+                path.display(),
+            ),
+        }
+    }
+}
+
 fn stage_bundled_plugins() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir
@@ -140,6 +183,11 @@ fn stage_bundled_plugins() {
         .expect("OUT_DIR has the expected target/<profile>/build/<hash>/out shape")
         .to_path_buf();
     let bundled_dir = profile_dir.join("plugins").join("bundled");
+
+    // Before staging, not after: a plugin that was renamed appears under two
+    // ids otherwise, and the old one would be loaded alongside the new for the
+    // rest of that build.
+    prune_unlisted_plugins(&bundled_dir);
 
     for (cdylib_crate, plugin_crate, plugin_id) in PLUGINS {
         // plugin.json + the watched source live in the rlib
