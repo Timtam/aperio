@@ -618,6 +618,27 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   forgetSftpHostKey(hostPort: string): Promise<void>;
   /** The pinned fingerprint for `hostPort`, or null. No network. */
   pinnedSftpHostKey(hostPort: string): Promise<string | null>;
+
+  /** What this device calls itself in every other device's list:
+   *  `{"configured": string|null, "suggested": string|null}`.
+   *
+   *  `suggested` is always null from the core — a phone's own name is an OS
+   *  question, and the Rust side deliberately does not ask it. The JS wrapper
+   *  fills the suggestion in from `expo-constants`. */
+  syncDeviceNameJson(): Promise<string>;
+  /** Rename this device; a blank name clears it. Reaches the other devices on
+   *  the next sync round, when the heartbeat notices the difference. */
+  setSyncDeviceName(name: string): Promise<void>;
+  /** Every device registered on the dataset this one syncs through, as a JSON
+   *  array. A live read of `meta.json`, so it needs a configured target. */
+  listSyncDevicesJson(): Promise<string>;
+  /** Drop a device's registry entry.
+   *
+   *  Removes the claim that the device still participates — which is what lets
+   *  the compactor collect logs nobody will read — and nothing else. The log
+   *  files stay, and a device that still runs re-registers on its next round.
+   *  Rejects for this device's own id. */
+  forgetSyncDevice(deviceId: string): Promise<void>;
 }
 
 export default requireNativeModule<CalFfiModule>('CalFfi');

@@ -38,6 +38,7 @@ import { setUserPref } from '../api/prefs';
 import { useSyncErrorMessage } from '../api/syncErrorMessage';
 import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
+import { SyncDevicesPanel } from '../components/sync/SyncDevicesPanel';
 import { SyncTargetAccountPicker } from '../components/sync/SyncTargetAccountPicker';
 import { formatLongDateTime } from '../intl/dateFormat';
 import { clampErrorText, useRefreshErrors } from '../state/useRefreshErrors';
@@ -834,6 +835,18 @@ export default function SyncScreen() {
           active={status != null ? status.configured : null}
           onChanged={refresh}
         />
+      </View>
+
+      {/* §19 device registry — what this device calls itself, and who else the
+          dataset still counts. Its own block rather than part of the target
+          one: the name belongs to this device and survives a change of target,
+          and the registry is a property of the DATASET rather than of the
+          account that happens to hold it. */}
+      <View style={styles.field}>
+        <Text style={styles.label} accessibilityRole="header">
+          {t('dialogs.settings.sync.devicesTitle')}
+        </Text>
+        <SyncDevicesPanel configured={status?.configured ?? false} />
       </View>
 
       {/* External data — manual refresh + live status for the external cache. */}

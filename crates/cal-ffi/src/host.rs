@@ -5333,6 +5333,86 @@ impl Host {
         Ok(())
     }
 
+    /// What this device calls itself in every other device's list, as JSON:
+    /// `{"configured": string|null, "suggested": string|null}`.
+    ///
+    /// `suggested` is always `null` here. The desktop host reads the machine's
+    /// host name for it; on a phone the equivalent answer belongs to the OS
+    /// layer above this one (`expo-constants` knows the device name and the
+    /// Rust core deliberately does not), so the mobile UI fills the suggestion
+    /// in itself and this stays honest about knowing nothing.
+    pub fn sync_device_name_json(&self) -> Result<String, StoreError> {
+        let shared = self.db.shared();
+        let prefs = host_core::user_prefs::UserPrefsRepo::new(&shared);
+        to_json(&serde_json::json!({
+            "configured": host_core::device_names::local_device_name(&prefs),
+            "suggested": Option::<String>::None,
+        }))
+    }
+
+    /// Rename this device; a blank name clears it.
+    ///
+    /// Nothing is pushed here. The heartbeat compares the stored name against
+    /// the one in this device's `meta.json` record and pushes when they differ,
+    /// so the rename reaches the other devices on the next round — the only
+    /// ordering that cannot leave the two disagreeing.
+    pub fn set_sync_device_name(&self, name: String) -> Result<(), StoreError> {
+        let shared = self.db.shared();
+        let prefs = host_core::user_prefs::UserPrefsRepo::new(&shared);
+        host_core::device_names::set_local_device_name(&prefs, &name).map_err(|err| {
+            StoreError::Storage {
+                detail: format!("save device name: {err}"),
+            }
+        })
+    }
+
+    /// Every device registered on the dataset this one syncs through, as a JSON
+    /// array of `DeviceSummary`. A live read of `meta.json`, so it needs a
+    /// configured target.
+    pub fn list_sync_devices_json(&self) -> Result<String, StoreError> {
+        let adapter =
+            self.orchestrator
+                .adapter_handle()
+                .ok_or_else(|| StoreError::Unsupported {
+                    detail: "no sync adapter configured".to_string(),
+                })?;
+        let devices = self
+            .runtime
+            .block_on(async { self.onboarding.list_devices(adapter.as_ref()).await })
+            .map_err(sync_err)?;
+        to_json(&devices)
+    }
+
+    /// Drop a device's registry entry.
+    ///
+    /// Not a revocation and not a delete: it removes the claim that the device
+    /// is still participating, which is what frees the compactor to collect
+    /// logs nobody will read. The log FILES stay, and a device that still runs
+    /// re-registers on its next round. Refuses this device's own id — the next
+    /// heartbeat would undo it.
+    pub fn forget_sync_device(&self, device_id: String) -> Result<(), StoreError> {
+        let device_id = device_id.trim().to_string();
+        if device_id.is_empty() {
+            return Err(StoreError::InvalidField {
+                field: "device_id".to_string(),
+                detail: "device_id must not be empty".to_string(),
+            });
+        }
+        let adapter =
+            self.orchestrator
+                .adapter_handle()
+                .ok_or_else(|| StoreError::Unsupported {
+                    detail: "no sync adapter configured".to_string(),
+                })?;
+        self.runtime
+            .block_on(async {
+                self.onboarding
+                    .forget_device(adapter.as_ref(), &device_id)
+                    .await
+            })
+            .map_err(sync_err)
+    }
+
     /// Drop the pinned SFTP fingerprint for `host_port` (the "forget pin"
     /// gesture; the next connect re-runs the first-use trust dialog).
     pub fn forget_sftp_host_key(&self, host_port: String) -> Result<(), StoreError> {

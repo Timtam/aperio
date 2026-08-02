@@ -204,8 +204,13 @@ export function SyncDevicesPanel({ configured }: SyncDevicesPanelProps) {
         case 'self':
           return t('dialogs.settings.sync.deviceThisOne');
         case 'seen':
+          // Absolute, like every other timestamp in the app ("Letzter
+          // erfolgreicher Abgleich", the cache's "zuletzt aktualisiert"). A
+          // relative form reads faster but drifts as the panel stays open, and
+          // the question being asked here — is this the device I stopped using
+          // in spring — is answered by a date, not by "vor 4 Monaten".
           return t('dialogs.settings.sync.deviceLastSeen', {
-            when: fmt.formatRelative(activity.at),
+            when: fmt.format(activity.at, 'PPPp'),
           });
         case 'unknown':
           return t('dialogs.settings.sync.deviceLastSeenUnknown');

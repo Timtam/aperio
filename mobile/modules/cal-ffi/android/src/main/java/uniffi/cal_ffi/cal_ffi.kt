@@ -1002,6 +1002,8 @@ external fun uniffi_cal_ffi_checksum_method_host_event_meeting_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_forget_sync_device(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_get_cache_refresh_status_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_get_contact_photo_json(
@@ -1039,6 +1041,8 @@ external fun uniffi_cal_ffi_checksum_method_host_list_color_labels_json(
 external fun uniffi_cal_ffi_checksum_method_host_list_custom_sounds_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_list_sync_conflicts_json(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_list_sync_devices_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_list_sync_log_json(
 ): Short
@@ -1110,6 +1114,8 @@ external fun uniffi_cal_ffi_checksum_method_host_set_log_level(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_set_section_color(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_set_sync_device_name(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_set_user_pref(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_sync_account_host_key_pin_json(
@@ -1117,6 +1123,8 @@ external fun uniffi_cal_ffi_checksum_method_host_sync_account_host_key_pin_json(
 external fun uniffi_cal_ffi_checksum_method_host_sync_conflict_count(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_sync_contacts_now(
+): Short
+external fun uniffi_cal_ffi_checksum_method_host_sync_device_name_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_sync_now_json(
 ): Short
@@ -1408,6 +1416,8 @@ external fun uniffi_cal_ffi_fn_method_host_event_meeting_json(`ptr`: Long,`event
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_forget_sftp_host_key(`ptr`: Long,`hostPort`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_forget_sync_device(`ptr`: Long,`deviceId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_get_cache_refresh_status_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_get_contact_photo_json(`ptr`: Long,`id`: RustBuffer.ByValue,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1445,6 +1455,8 @@ external fun uniffi_cal_ffi_fn_method_host_list_color_labels_json(`ptr`: Long,un
 external fun uniffi_cal_ffi_fn_method_host_list_custom_sounds_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_sync_conflicts_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_list_sync_devices_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_sync_log_json(`ptr`: Long,`limit`: Int,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1516,6 +1528,8 @@ external fun uniffi_cal_ffi_fn_method_host_set_log_level(`ptr`: Long,`level`: Ru
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_set_section_color(`ptr`: Long,`sectionId`: RustBuffer.ByValue,`listId`: RustBuffer.ByValue,`colorLabelId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_set_sync_device_name(`ptr`: Long,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_set_user_pref(`ptr`: Long,`key`: RustBuffer.ByValue,`value`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_sync_account_host_key_pin_json(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1524,6 +1538,8 @@ external fun uniffi_cal_ffi_fn_method_host_sync_conflict_count(`ptr`: Long,uniff
 ): Int
 external fun uniffi_cal_ffi_fn_method_host_sync_contacts_now(`ptr`: Long,`includeReadOnly`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
+external fun uniffi_cal_ffi_fn_method_host_sync_device_name_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_sync_now_json(`ptr`: Long,`trigger`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_sync_status_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1989,6 +2005,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key() != 61915.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_forget_sync_device() != 23589.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_get_cache_refresh_status_json() != 11899.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2031,7 +2050,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_list_accounts_missing_credentials_json() != 60783.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_list_adapter_kinds_json() != 24838.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_list_adapter_kinds_json() != 29136.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_list_calendars_json() != 16827.toShort()) {
@@ -2044,6 +2063,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_list_sync_conflicts_json() != 46993.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_list_sync_devices_json() != 49622.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_list_sync_log_json() != 60629.toShort()) {
@@ -2109,7 +2131,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_search_contacts_json() != 56276.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_search_json() != 52768.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_search_json() != 14222.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_sections_json() != 56584.toShort()) {
@@ -2151,6 +2173,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_set_section_color() != 14381.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_set_sync_device_name() != 49279.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_set_user_pref() != 9799.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2161,6 +2186,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_sync_contacts_now() != 7203.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_sync_device_name_json() != 63807.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_sync_now_json() != 5198.toShort()) {
@@ -4661,6 +4689,17 @@ public interface HostInterface {
     fun `forgetSftpHostKey`(`hostPort`: kotlin.String)
     
     /**
+     * Drop a device's registry entry.
+     *
+     * Not a revocation and not a delete: it removes the claim that the device
+     * is still participating, which is what frees the compactor to collect
+     * logs nobody will read. The log FILES stay, and a device that still runs
+     * re-registers on its next round. Refuses this device's own id — the next
+     * heartbeat would undo it.
+     */
+    fun `forgetSyncDevice`(`deviceId`: kotlin.String)
+    
+    /**
      * The warm-pass status (`{refreshing, last_refreshed_at}`) as JSON — the
      * "last updated" / spinner surface. Mirrors `get_cache_refresh_status`.
      */
@@ -4772,11 +4811,16 @@ public interface HostInterface {
     fun `listAccountsMissingCredentialsJson`(): kotlin.String
     
     /**
-     * Every adapter this build can connect an account for, as JSON.
+     * Every adapter this build knows, as JSON.
      *
      * Assembled from the loaded manifests rather than from a list in the UI:
      * which adapters exist is decided by which plugins are embedded, and the
      * connect picker has no business knowing that in advance.
+     *
+     * The built-in store rides along from its own manifest — see
+     * [`host_core::builtin_adapters`]. The device calendar does not: it exists
+     * only where the native bridge does and is added by granting a permission,
+     * so the accounts screen offers it on its own terms.
      */
     fun `listAdapterKindsJson`(): kotlin.String
     
@@ -4807,6 +4851,13 @@ public interface HostInterface {
      * `SyncConflict` wire shape).
      */
     fun `listSyncConflictsJson`(): kotlin.String
+    
+    /**
+     * Every device registered on the dataset this one syncs through, as a JSON
+     * array of `DeviceSummary`. A live read of `meta.json`, so it needs a
+     * configured target.
+     */
+    fun `listSyncDevicesJson`(): kotlin.String
     
     /**
      * Recent `sync_log` rows as a JSON `SyncLogEntry[]` (newest first), capped
@@ -5161,6 +5212,16 @@ public interface HostInterface {
     fun `setSectionColor`(`sectionId`: kotlin.String, `listId`: kotlin.String, `colorLabelId`: kotlin.String?)
     
     /**
+     * Rename this device; a blank name clears it.
+     *
+     * Nothing is pushed here. The heartbeat compares the stored name against
+     * the one in this device's `meta.json` record and pushes when they differ,
+     * so the rename reaches the other devices on the next round — the only
+     * ordering that cannot leave the two disagreeing.
+     */
+    fun `setSyncDeviceName`(`name`: kotlin.String)
+    
+    /**
      * Upsert a user preference. A whitelisted key also appends `SettingsUpdated`
      * (wire value = the stored string parsed as JSON, else wrapped as a JSON
      * string — same round-trip as the desktop).
@@ -5195,6 +5256,18 @@ public interface HostInterface {
      * already in flight (the core dedupes).
      */
     fun `syncContactsNow`(`includeReadOnly`: kotlin.Boolean?): kotlin.Boolean
+    
+    /**
+     * What this device calls itself in every other device's list, as JSON:
+     * `{"configured": string|null, "suggested": string|null}`.
+     *
+     * `suggested` is always `null` here. The desktop host reads the machine's
+     * host name for it; on a phone the equivalent answer belongs to the OS
+     * layer above this one (`expo-constants` knows the device name and the
+     * Rust core deliberately does not), so the mobile UI fills the suggestion
+     * in itself and this stays honest about knowing nothing.
+     */
+    fun `syncDeviceNameJson`(): kotlin.String
     
     /**
      * Run one sync round (push local pending logs, fetch + apply foreign ones,
@@ -6667,6 +6740,28 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Drop a device's registry entry.
+     *
+     * Not a revocation and not a delete: it removes the claim that the device
+     * is still participating, which is what frees the compactor to collect
+     * logs nobody will read. The log FILES stay, and a device that still runs
+     * re-registers on its next round. Refuses this device's own id — the next
+     * heartbeat would undo it.
+     */
+    @Throws(StoreException::class)override fun `forgetSyncDevice`(`deviceId`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_forget_sync_device(
+        it,
+        FfiConverterString.lower(`deviceId`),_status)
+}
+    }
+    
+    
+
+    
+    /**
      * The warm-pass status (`{refreshing, last_refreshed_at}`) as JSON — the
      * "last updated" / spinner surface. Mirrors `get_cache_refresh_status`.
      */
@@ -6945,11 +7040,16 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
-     * Every adapter this build can connect an account for, as JSON.
+     * Every adapter this build knows, as JSON.
      *
      * Assembled from the loaded manifests rather than from a list in the UI:
      * which adapters exist is decided by which plugins are embedded, and the
      * connect picker has no business knowing that in advance.
+     *
+     * The built-in store rides along from its own manifest — see
+     * [`host_core::builtin_adapters`]. The device calendar does not: it exists
+     * only where the native bridge does and is added by granting a permission,
+     * so the accounts screen offers it on its own terms.
      */
     @Throws(StoreException::class)override fun `listAdapterKindsJson`(): kotlin.String {
             return FfiConverterString.lift(
@@ -7032,6 +7132,25 @@ open class Host: Disposable, AutoCloseable, HostInterface
     callWithHandle {
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_method_host_list_sync_conflicts_json(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Every device registered on the dataset this one syncs through, as a JSON
+     * array of `DeviceSummary`. A live read of `meta.json`, so it needs a
+     * configured target.
+     */
+    @Throws(StoreException::class)override fun `listSyncDevicesJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_list_sync_devices_json(
         it,
         _status)
 }
@@ -7794,6 +7913,27 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Rename this device; a blank name clears it.
+     *
+     * Nothing is pushed here. The heartbeat compares the stored name against
+     * the one in this device's `meta.json` record and pushes when they differ,
+     * so the rename reaches the other devices on the next round — the only
+     * ordering that cannot leave the two disagreeing.
+     */
+    @Throws(StoreException::class)override fun `setSyncDeviceName`(`name`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_set_sync_device_name(
+        it,
+        FfiConverterString.lower(`name`),_status)
+}
+    }
+    
+    
+
+    
+    /**
      * Upsert a user preference. A whitelisted key also appends `SettingsUpdated`
      * (wire value = the stored string parsed as JSON, else wrapped as a JSON
      * string — same round-trip as the desktop).
@@ -7869,6 +8009,30 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_sync_contacts_now(
         it,
         FfiConverterOptionalBoolean.lower(`includeReadOnly`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * What this device calls itself in every other device's list, as JSON:
+     * `{"configured": string|null, "suggested": string|null}`.
+     *
+     * `suggested` is always `null` here. The desktop host reads the machine's
+     * host name for it; on a phone the equivalent answer belongs to the OS
+     * layer above this one (`expo-constants` knows the device name and the
+     * Rust core deliberately does not), so the mobile UI fills the suggestion
+     * in itself and this stays honest about knowing nothing.
+     */
+    @Throws(StoreException::class)override fun `syncDeviceNameJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_sync_device_name_json(
+        it,
+        _status)
 }
     }
     )

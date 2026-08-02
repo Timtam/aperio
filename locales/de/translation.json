@@ -838,7 +838,7 @@
         "devicesNoTarget": "Dieses Gerät synchronisiert über kein Ziel, es gibt also keine Geräteliste.",
         "devicesLoadFailed": "Die Geräteliste konnte nicht gelesen werden: {{message}}",
         "deviceThisOne": "Dieses Gerät",
-        "deviceLastSeen": "Zuletzt gesehen {{when}}",
+        "deviceLastSeen": "Zuletzt gesehen: {{when}}",
         "deviceLastSeenUnknown": "Zuletzt gesehen: unbekannt — dieses Gerät hat sich noch nicht mit einer Version gemeldet, die das festhält.",
         "deviceUnnamed": "Unbenannt ({{id}}…)",
         "deviceOptionLabel": "{{name}}, {{summary}}",

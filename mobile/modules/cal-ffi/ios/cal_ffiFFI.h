@@ -957,6 +957,11 @@ RustBuffer uniffi_cal_ffi_fn_method_host_event_meeting_json(uint64_t ptr, RustBu
 void uniffi_cal_ffi_fn_method_host_forget_sftp_host_key(uint64_t ptr, RustBuffer host_port, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_FORGET_SYNC_DEVICE
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_FORGET_SYNC_DEVICE
+void uniffi_cal_ffi_fn_method_host_forget_sync_device(uint64_t ptr, RustBuffer device_id, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_GET_CACHE_REFRESH_STATUS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_GET_CACHE_REFRESH_STATUS_JSON
 RustBuffer uniffi_cal_ffi_fn_method_host_get_cache_refresh_status_json(uint64_t ptr, RustCallStatus *_Nonnull out_status
@@ -1050,6 +1055,11 @@ RustBuffer uniffi_cal_ffi_fn_method_host_list_custom_sounds_json(uint64_t ptr, R
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_LIST_SYNC_CONFLICTS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_LIST_SYNC_CONFLICTS_JSON
 RustBuffer uniffi_cal_ffi_fn_method_host_list_sync_conflicts_json(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_LIST_SYNC_DEVICES_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_LIST_SYNC_DEVICES_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_list_sync_devices_json(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_LIST_SYNC_LOG_JSON
@@ -1227,6 +1237,11 @@ void uniffi_cal_ffi_fn_method_host_set_log_level(uint64_t ptr, RustBuffer level,
 void uniffi_cal_ffi_fn_method_host_set_section_color(uint64_t ptr, RustBuffer section_id, RustBuffer list_id, RustBuffer color_label_id, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SET_SYNC_DEVICE_NAME
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SET_SYNC_DEVICE_NAME
+void uniffi_cal_ffi_fn_method_host_set_sync_device_name(uint64_t ptr, RustBuffer name, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SET_USER_PREF
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SET_USER_PREF
 void uniffi_cal_ffi_fn_method_host_set_user_pref(uint64_t ptr, RustBuffer key, RustBuffer value, RustCallStatus *_Nonnull out_status
@@ -1245,6 +1260,11 @@ uint32_t uniffi_cal_ffi_fn_method_host_sync_conflict_count(uint64_t ptr, RustCal
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SYNC_CONTACTS_NOW
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SYNC_CONTACTS_NOW
 int8_t uniffi_cal_ffi_fn_method_host_sync_contacts_now(uint64_t ptr, RustBuffer include_read_only, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SYNC_DEVICE_NAME_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SYNC_DEVICE_NAME_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_sync_device_name_json(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SYNC_NOW_JSON
@@ -2231,6 +2251,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_FORGET_SYNC_DEVICE
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_FORGET_SYNC_DEVICE
+uint16_t uniffi_cal_ffi_checksum_method_host_forget_sync_device(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_GET_CACHE_REFRESH_STATUS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_GET_CACHE_REFRESH_STATUS_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_get_cache_refresh_status_json(void
@@ -2342,6 +2368,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_list_custom_sounds_json(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_LIST_SYNC_CONFLICTS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_LIST_SYNC_CONFLICTS_JSON
 uint16_t uniffi_cal_ffi_checksum_method_host_list_sync_conflicts_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_LIST_SYNC_DEVICES_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_LIST_SYNC_DEVICES_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_list_sync_devices_json(void
     
 );
 #endif
@@ -2555,6 +2587,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_set_section_color(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SET_SYNC_DEVICE_NAME
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SET_SYNC_DEVICE_NAME
+uint16_t uniffi_cal_ffi_checksum_method_host_set_sync_device_name(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SET_USER_PREF
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SET_USER_PREF
 uint16_t uniffi_cal_ffi_checksum_method_host_set_user_pref(void
@@ -2576,6 +2614,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_sync_conflict_count(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SYNC_CONTACTS_NOW
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SYNC_CONTACTS_NOW
 uint16_t uniffi_cal_ffi_checksum_method_host_sync_contacts_now(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SYNC_DEVICE_NAME_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SYNC_DEVICE_NAME_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_sync_device_name_json(void
     
 );
 #endif

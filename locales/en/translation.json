@@ -841,7 +841,7 @@
         "devicesNoTarget": "This device syncs through no target, so there is no device list.",
         "devicesLoadFailed": "The device list could not be read: {{message}}",
         "deviceThisOne": "This device",
-        "deviceLastSeen": "Last seen {{when}}",
+        "deviceLastSeen": "Last seen: {{when}}",
         "deviceLastSeenUnknown": "Last seen: unknown — this device has not reported in from a version that records it.",
         "deviceUnnamed": "Unnamed ({{id}}…)",
         "deviceOptionLabel": "{{name}}, {{summary}}",

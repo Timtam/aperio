@@ -2216,6 +2216,17 @@ public protocol HostProtocol: AnyObject, Sendable {
     func forgetSftpHostKey(hostPort: String) throws 
     
     /**
+     * Drop a device's registry entry.
+     *
+     * Not a revocation and not a delete: it removes the claim that the device
+     * is still participating, which is what frees the compactor to collect
+     * logs nobody will read. The log FILES stay, and a device that still runs
+     * re-registers on its next round. Refuses this device's own id — the next
+     * heartbeat would undo it.
+     */
+    func forgetSyncDevice(deviceId: String) throws 
+    
+    /**
      * The warm-pass status (`{refreshing, last_refreshed_at}`) as JSON — the
      * "last updated" / spinner surface. Mirrors `get_cache_refresh_status`.
      */
@@ -2327,11 +2338,16 @@ public protocol HostProtocol: AnyObject, Sendable {
     func listAccountsMissingCredentialsJson() throws  -> String
     
     /**
-     * Every adapter this build can connect an account for, as JSON.
+     * Every adapter this build knows, as JSON.
      *
      * Assembled from the loaded manifests rather than from a list in the UI:
      * which adapters exist is decided by which plugins are embedded, and the
      * connect picker has no business knowing that in advance.
+     *
+     * The built-in store rides along from its own manifest — see
+     * [`host_core::builtin_adapters`]. The device calendar does not: it exists
+     * only where the native bridge does and is added by granting a permission,
+     * so the accounts screen offers it on its own terms.
      */
     func listAdapterKindsJson() throws  -> String
     
@@ -2362,6 +2378,13 @@ public protocol HostProtocol: AnyObject, Sendable {
      * `SyncConflict` wire shape).
      */
     func listSyncConflictsJson() throws  -> String
+    
+    /**
+     * Every device registered on the dataset this one syncs through, as a JSON
+     * array of `DeviceSummary`. A live read of `meta.json`, so it needs a
+     * configured target.
+     */
+    func listSyncDevicesJson() throws  -> String
     
     /**
      * Recent `sync_log` rows as a JSON `SyncLogEntry[]` (newest first), capped
@@ -2716,6 +2739,16 @@ public protocol HostProtocol: AnyObject, Sendable {
     func setSectionColor(sectionId: String, listId: String, colorLabelId: String?) throws 
     
     /**
+     * Rename this device; a blank name clears it.
+     *
+     * Nothing is pushed here. The heartbeat compares the stored name against
+     * the one in this device's `meta.json` record and pushes when they differ,
+     * so the rename reaches the other devices on the next round — the only
+     * ordering that cannot leave the two disagreeing.
+     */
+    func setSyncDeviceName(name: String) throws 
+    
+    /**
      * Upsert a user preference. A whitelisted key also appends `SettingsUpdated`
      * (wire value = the stored string parsed as JSON, else wrapped as a JSON
      * string — same round-trip as the desktop).
@@ -2750,6 +2783,18 @@ public protocol HostProtocol: AnyObject, Sendable {
      * already in flight (the core dedupes).
      */
     func syncContactsNow(includeReadOnly: Bool?) throws  -> Bool
+    
+    /**
+     * What this device calls itself in every other device's list, as JSON:
+     * `{"configured": string|null, "suggested": string|null}`.
+     *
+     * `suggested` is always `null` here. The desktop host reads the machine's
+     * host name for it; on a phone the equivalent answer belongs to the OS
+     * layer above this one (`expo-constants` knows the device name and the
+     * Rust core deliberately does not), so the mobile UI fills the suggestion
+     * in itself and this stays honest about knowing nothing.
+     */
+    func syncDeviceNameJson() throws  -> String
     
     /**
      * Run one sync round (push local pending logs, fetch + apply foreign ones,
@@ -3939,6 +3984,23 @@ open func forgetSftpHostKey(hostPort: String)throws   {try rustCallWithError(Ffi
 }
     
     /**
+     * Drop a device's registry entry.
+     *
+     * Not a revocation and not a delete: it removes the claim that the device
+     * is still participating, which is what frees the compactor to collect
+     * logs nobody will read. The log FILES stay, and a device that still runs
+     * re-registers on its next round. Refuses this device's own id — the next
+     * heartbeat would undo it.
+     */
+open func forgetSyncDevice(deviceId: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_forget_sync_device(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(deviceId),$0
+    )
+}
+}
+    
+    /**
      * The warm-pass status (`{refreshing, last_refreshed_at}`) as JSON — the
      * "last updated" / spinner surface. Mirrors `get_cache_refresh_status`.
      */
@@ -4145,11 +4207,16 @@ open func listAccountsMissingCredentialsJson()throws  -> String  {
 }
     
     /**
-     * Every adapter this build can connect an account for, as JSON.
+     * Every adapter this build knows, as JSON.
      *
      * Assembled from the loaded manifests rather than from a list in the UI:
      * which adapters exist is decided by which plugins are embedded, and the
      * connect picker has no business knowing that in advance.
+     *
+     * The built-in store rides along from its own manifest — see
+     * [`host_core::builtin_adapters`]. The device calendar does not: it exists
+     * only where the native bridge does and is added by granting a permission,
+     * so the accounts screen offers it on its own terms.
      */
 open func listAdapterKindsJson()throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
@@ -4206,6 +4273,19 @@ open func listCustomSoundsJson()throws  -> String  {
 open func listSyncConflictsJson()throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_list_sync_conflicts_json(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Every device registered on the dataset this one syncs through, as a JSON
+     * array of `DeviceSummary`. A live read of `meta.json`, so it needs a
+     * configured target.
+     */
+open func listSyncDevicesJson()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_list_sync_devices_json(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -4808,6 +4888,22 @@ open func setSectionColor(sectionId: String, listId: String, colorLabelId: Strin
 }
     
     /**
+     * Rename this device; a blank name clears it.
+     *
+     * Nothing is pushed here. The heartbeat compares the stored name against
+     * the one in this device's `meta.json` record and pushes when they differ,
+     * so the rename reaches the other devices on the next round — the only
+     * ordering that cannot leave the two disagreeing.
+     */
+open func setSyncDeviceName(name: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_set_sync_device_name(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(name),$0
+    )
+}
+}
+    
+    /**
      * Upsert a user preference. A whitelisted key also appends `SettingsUpdated`
      * (wire value = the stored string parsed as JSON, else wrapped as a JSON
      * string — same round-trip as the desktop).
@@ -4866,6 +4962,24 @@ open func syncContactsNow(includeReadOnly: Bool?)throws  -> Bool  {
     uniffi_cal_ffi_fn_method_host_sync_contacts_now(
             self.uniffiCloneHandle(),
         FfiConverterOptionBool.lower(includeReadOnly),$0
+    )
+})
+}
+    
+    /**
+     * What this device calls itself in every other device's list, as JSON:
+     * `{"configured": string|null, "suggested": string|null}`.
+     *
+     * `suggested` is always `null` here. The desktop host reads the machine's
+     * host name for it; on a phone the equivalent answer belongs to the OS
+     * layer above this one (`expo-constants` knows the device name and the
+     * Rust core deliberately does not), so the mobile UI fills the suggestion
+     * in itself and this stays honest about knowing nothing.
+     */
+open func syncDeviceNameJson()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_sync_device_name_json(
+            self.uniffiCloneHandle(),$0
     )
 })
 }
@@ -8990,6 +9104,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key() != 61915) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_forget_sync_device() != 23589) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_get_cache_refresh_status_json() != 11899) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -9032,7 +9149,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_list_accounts_missing_credentials_json() != 60783) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_list_adapter_kinds_json() != 24838) {
+    if (uniffi_cal_ffi_checksum_method_host_list_adapter_kinds_json() != 29136) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_list_calendars_json() != 16827) {
@@ -9045,6 +9162,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_list_sync_conflicts_json() != 46993) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_list_sync_devices_json() != 49622) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_list_sync_log_json() != 60629) {
@@ -9110,7 +9230,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_search_contacts_json() != 56276) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_search_json() != 52768) {
+    if (uniffi_cal_ffi_checksum_method_host_search_json() != 14222) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_sections_json() != 56584) {
@@ -9152,6 +9272,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_set_section_color() != 14381) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_set_sync_device_name() != 49279) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_set_user_pref() != 9799) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -9162,6 +9285,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_sync_contacts_now() != 7203) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_sync_device_name_json() != 63807) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_sync_now_json() != 5198) {

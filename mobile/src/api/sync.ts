@@ -3,6 +3,13 @@
 // adapters, credentials via the keychain bridge). JSON passthrough over the
 // Host's sync methods, wire shapes identical to the desktop.
 
+// Already in the native build — `expo` depends on it and autolinking picks it
+// up — so declaring it in package.json makes the import legitimate without
+// changing a byte of the binary. Used for one thing: `Constants.deviceName`,
+// what the user called this phone in its own settings, offered as the starting
+// point for its name in the sync device list.
+import Constants from 'expo-constants';
+
 import CalFfi from '../../modules/cal-ffi';
 import { notifyDataReload } from '../state/cacheObserver';
 import { withSyncActivity } from '../state/syncActivity';
@@ -445,11 +452,58 @@ export const changeSyncPassphrase = async (
 export interface SyncDeviceSummary {
   id: string;
   name: string | null;
+  /** The device's CONTENT horizon — the newest log it holds. NOT when it was
+   *  last here: on a quiet dataset this does not move however often the device
+   *  syncs. Use {@link last_seen} for that. */
   last_seen_log: string;
+  /** When the device last completed a round, or `null` on a dataset whose
+   *  registry predates the field. `null` means unknown, never a very old
+   *  date. */
+  last_seen: string | null;
   app_version: string;
   stale: boolean;
   is_this_device: boolean;
 }
+
+/** What this device calls itself, plus what it would suggest calling itself.
+ *
+ *  The core always answers `suggested: null` — a phone's own name is an OS
+ *  question and the Rust side deliberately does not ask it. {@link
+ *  syncDeviceName} fills the suggestion in from `expo-constants`. */
+export interface DeviceNameInfo {
+  configured: string | null;
+  suggested: string | null;
+}
+
+/** This device's published name, with the phone's own name as a suggestion.
+ *
+ *  `Constants.deviceName` is what the user called their phone in its own
+ *  settings ("Tonis iPhone"), which is a far better starting point than a hex
+ *  id — and it is only a SUGGESTION: nothing is stored until the user saves. */
+export const syncDeviceName = async (): Promise<DeviceNameInfo> => {
+  const info = JSON.parse(await CalFfi.syncDeviceNameJson()) as DeviceNameInfo;
+  const suggested = Constants.deviceName?.trim();
+  return { ...info, suggested: suggested ? suggested : null };
+};
+
+/** Rename this device; a blank name clears it. Reaches the other devices on
+ *  the next sync round, when the heartbeat notices the difference. */
+export const setSyncDeviceName = (name: string): Promise<void> =>
+  CalFfi.setSyncDeviceName(name);
+
+/** Every device registered on the dataset this one syncs through. Rejects
+ *  with `unsupported` when this device syncs nowhere. */
+export const listSyncDevices = async (): Promise<SyncDeviceSummary[]> =>
+  JSON.parse(await CalFfi.listSyncDevicesJson()) as SyncDeviceSummary[];
+
+/** Drop a device's registry entry.
+ *
+ *  Not a revocation: it removes the claim that the device still participates,
+ *  which is what lets the compactor collect logs nobody will read. The device's
+ *  log files stay, and one that still runs re-registers on its next round.
+ *  Rejects for this device's own id. */
+export const forgetSyncDevice = (deviceId: string): Promise<void> =>
+  CalFfi.forgetSyncDevice(deviceId);
 
 /** How the running build relates to a dataset's version requirements (the
  *  desktop `Compatibility`). Anything but `ok` gates the join. */

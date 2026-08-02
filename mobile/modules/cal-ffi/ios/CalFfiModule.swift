@@ -775,5 +775,23 @@ public class CalFfiModule: Module {
     AsyncFunction("pinnedSftpHostKey") { (hostPort: String) -> String? in
       try self.host.pinnedSftpHostKey(hostPort: hostPort)
     }
+
+    // §19 device registry: this device's own name, and the list of everyone the
+    // dataset still counts as a participant.
+    AsyncFunction("syncDeviceNameJson") { () -> String in
+      try self.coded { try self.host.syncDeviceNameJson() }
+    }
+
+    AsyncFunction("setSyncDeviceName") { (name: String) in
+      try self.coded { try self.host.setSyncDeviceName(name: name) }
+    }
+
+    AsyncFunction("listSyncDevicesJson") { () -> String in
+      try self.coded { try self.host.listSyncDevicesJson() }
+    }
+
+    AsyncFunction("forgetSyncDevice") { (deviceId: String) in
+      try self.coded { try self.host.forgetSyncDevice(deviceId: deviceId) }
+    }
   }
 }
