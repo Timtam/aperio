@@ -20,12 +20,24 @@ import type {
   HostKeyPreview,
   SyncPreview,
 } from '../../api/client';
+import type { Account } from '../../api/types';
 import { fetchAccountsNeedingConnect } from '../accountsNeedingConnect';
 import { AccountSchemaForm } from '../AccountSchemaForm';
 import { FocusableNote } from '../../a11y/FocusableNote';
 import { SyncSftpTrustDialog } from '../SyncSftpTrustDialog';
-import type { SyncConnectOutcome } from './SyncTargetConfigForm';
 import { useSyncErrorMessage } from './syncErrorMessage';
+
+/** What a successful connect produced — handed to the caller so it can decide
+ *  what to do next (refresh its summary card, advance a wizard, prompt for
+ *  missing account credentials, …). */
+export interface SyncConnectOutcome {
+  /** `true` when we JOINED an existing remote dataset (restore), `false` when
+   *  we initialized a fresh one on an empty target (create). */
+  joined: boolean;
+  /** Accounts whose secrets didn't arrive with a restored dataset and need the
+   *  user to re-enter credentials. Empty for a freshly-created dataset. */
+  accountsNeedingConnect: Account[];
+}
 
 /**
  * Where the dataset lives, asked once for every backend.

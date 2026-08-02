@@ -15,8 +15,10 @@ import {
 } from '../intl/language';
 import { useDialogState } from '../state/dialogStateContext';
 import { Modal } from './Modal';
-import type { SyncConnectOutcome } from './sync/SyncTargetConfigForm';
-import { SyncTargetSchemaForm } from './sync/SyncTargetSchemaForm';
+import {
+  SyncTargetSchemaForm,
+  type SyncConnectOutcome,
+} from './sync/SyncTargetSchemaForm';
 
 interface FirstLaunchWizardDialogProps {
   isOpen: boolean;

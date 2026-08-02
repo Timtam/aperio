@@ -32,12 +32,14 @@ import { AppDialog } from '../AppDialog';
  *
  * It used to ask a different question — what kind of target, and what are its
  * host, path and password — through
- * [`SyncTargetConfigForm`](./SyncTargetConfigForm.tsx). That form still exists
- * and the first-launch wizard still renders it, because a fresh install has no
- * accounts yet and has to create its first one while deciding whether to join a
- * dataset or start one. Everywhere else the account is already there: added
- * under Settings → Accounts, or carried in by a restore. So this asks the only
- * question that is left, and it asks it about rows rather than about protocols.
+ * a form with a block per backend. The first-launch wizard still asks that —
+ * through [`SyncTargetSchemaForm`](./SyncTargetSchemaForm.tsx), whose fields
+ * come from the plugin's own schema — because a fresh install has no accounts
+ * yet and has to create its first one while deciding whether to join a dataset
+ * or start one. Everywhere else the account is already there: added under
+ * Settings → Accounts, or carried in by a restore. So this asks the only
+ * question that is left, and it asks it about rows rather than about
+ * protocols.
  *
  * The desktop twin is `src/components/sync/SyncTargetAccountPicker.tsx`; same
  * behaviour, different markup — a phone has no master/detail listbox, so the

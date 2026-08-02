@@ -28,7 +28,7 @@ import { useSyncErrorMessage } from './syncErrorMessage';
  * holds the dataset.
  *
  * It used to ask a different question — what kind of target, and what are its
- * host, path and password — through [`SyncTargetConfigForm`](./SyncTargetConfigForm.tsx).
+ * host, path and password — through a form with a block per backend.
  * That form still exists and the first-launch wizard still renders it, because
  * a fresh instance has no accounts yet and has to create its first one while
  * deciding whether to join a dataset or start one. Everywhere else the account

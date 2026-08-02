@@ -36,7 +36,14 @@ import { useThemedStyles, type ThemeColors } from '../../theme';
 import { AccountSchemaForm } from '../AccountSchemaForm';
 import { AppDialog } from '../AppDialog';
 import { RadioGroup } from '../RadioGroup';
-import type { SyncConnectOutcome } from './SyncTargetConfigForm';
+
+/** What a successful connect produced — handed to the caller so it can decide
+ *  what to do next (refresh its status, advance a wizard, …). */
+export interface SyncConnectOutcome {
+  /** `true` when we JOINED an existing remote dataset (restore); `false` when
+   *  we initialised a fresh one on an empty target (create). */
+  joined: boolean;
+}
 
 /**
  * Where the dataset lives, asked once for every backend — the mobile twin of

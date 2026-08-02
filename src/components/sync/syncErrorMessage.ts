@@ -8,7 +8,7 @@ import { isCommandError } from '../../api/client';
  * user-facing sync message, keyed on the stable error `code` with a
  * fall-through to the raw message so context is never silently swallowed.
  *
- * Shared by [`SyncTargetConfigForm`](./SyncTargetConfigForm.tsx) and the
+ * Shared by [`SyncTargetSchemaForm`](./SyncTargetSchemaForm.tsx) and the
  * Settings → Sync E2E sections (`SyncPanel`) so both render identical wording.
  */
 export function useSyncErrorMessage(): (err: unknown) => string {
