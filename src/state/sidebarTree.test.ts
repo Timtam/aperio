@@ -297,4 +297,43 @@ describe('parentTriState / accountTriState', () => {
     const a = tree.find((n) => n.accountId === 'a')!;
     expect(accountTriState(a)).toBe('mixed');
   });
+
+  it('leaves storage accounts out of the tree', () => {
+    // A WebDAV account is something you add and then choose as the sync
+    // target. It owns no calendar, task list or address book and never will,
+    // so a node for it is a branch that can never fill — and one more stop on
+    // every pass through the sidebar.
+    const tree = buildSidebarTree({
+      accounts: [
+        makeAccount('a1', 'Fastmail', 'caldav'),
+        makeAccount('a2', 'Nextcloud', 'webdav'),
+      ],
+      calendars: [],
+      taskLists: [],
+      selectedCalendarIds: new Set<string>(),
+      selectedTaskListIds: new Set<string>(),
+      dataHoldingKinds: new Set(['caldav']),
+    });
+    expect(tree.map((n) => n.accountId)).not.toContain('a2');
+    expect(tree.map((n) => n.accountId)).toContain('a1');
+    // The built-in store is not a plugin and answers no capability question,
+    // so it must survive the filter on its id.
+    expect(tree.map((n) => n.accountId)).toContain('local');
+  });
+
+  it('keeps every account until the capability answer arrives', () => {
+    // `undefined` is the first render, before `listAdapterKinds()` resolves.
+    // Hiding rows there would flash an incomplete sidebar; showing a storage
+    // row for one paint is the lesser of the two.
+    const tree = buildSidebarTree({
+      accounts: [
+        makeAccount('a2', 'Nextcloud', 'webdav'),
+      ],
+      calendars: [],
+      taskLists: [],
+      selectedCalendarIds: new Set<string>(),
+      selectedTaskListIds: new Set<string>(),
+    });
+    expect(tree.map((n) => n.accountId)).toContain('a2');
+  });
 });

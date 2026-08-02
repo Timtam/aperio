@@ -162,6 +162,21 @@ export function buildSidebarTree(input: {
    *  "no list selected" which mirrors the empty-set defaults the
    *  other branches use. */
   selectedContactListIds?: Set<string>;
+  /**
+   * Adapter kinds whose accounts hold containers, from the host's
+   * `listAdapterKinds()`. Accounts of any OTHER kind are left out of the tree.
+   *
+   * A storage backend — WebDAV, SFTP, a folder — is an account you add and
+   * then choose as the sync target, and it owns no calendar, task list or
+   * address book. Rendering a node for it puts a permanently empty branch in
+   * the sidebar that can never fill, one more stop on every pass through the
+   * tree, for a row whose whole job happens in the sync settings.
+   *
+   * Optional, and absent means "keep everything": that is what the tree did
+   * before storage backends existed, and it keeps the tests from having to
+   * describe a capability system they are not about.
+   */
+  dataHoldingKinds?: ReadonlySet<string>;
 }): AccountNode[] {
   const {
     accounts,
@@ -171,6 +186,7 @@ export function buildSidebarTree(input: {
     selectedCalendarIds,
     selectedTaskListIds,
     selectedContactListIds,
+    dataHoldingKinds,
   } = input;
 
   // Group calendars / task lists / contact lists by account id.
@@ -212,8 +228,19 @@ export function buildSidebarTree(input: {
         },
       ];
 
+  // Storage backends drop out here rather than at the render site, so nothing
+  // downstream has to know they existed: the tri-state roll-ups, the keyboard
+  // order and the expansion state are all derived from this list.
+  const shown =
+    dataHoldingKinds === undefined
+      ? allAccounts
+      : allAccounts.filter(
+          (a) =>
+            a.id === LOCAL_ACCOUNT_ID || dataHoldingKinds.has(a.adapter_kind),
+        );
+
   // Stable order: local first, then alphabetical by display name.
-  const sortedAccounts = [...allAccounts].sort((a, b) => {
+  const sortedAccounts = [...shown].sort((a, b) => {
     if (a.id === LOCAL_ACCOUNT_ID && b.id !== LOCAL_ACCOUNT_ID) return -1;
     if (b.id === LOCAL_ACCOUNT_ID && a.id !== LOCAL_ACCOUNT_ID) return 1;
     return a.display_name.localeCompare(b.display_name, undefined, {

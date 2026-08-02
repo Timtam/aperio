@@ -22,6 +22,7 @@ import {
   deleteContactList,
   deleteTaskList,
   isCommandError,
+  listAdapterKinds,
   renameAccount,
   renameContactList,
   renameContainer,
@@ -162,6 +163,35 @@ export function Sidebar({
   const { focusedCalendarId, enterFocus, exitFocus } = useViewState();
   const isFocused = focusedCalendarId !== null;
 
+  // Which adapter kinds own containers, straight from the host — the same
+  // answer the Add-account picker uses. Undefined until it arrives, and
+  // `buildSidebarTree` reads that as "keep everything", so the tree is complete
+  // from the first paint and merely loses the storage rows a moment later
+  // rather than flashing an empty sidebar.
+  const [dataHoldingKinds, setDataHoldingKinds] = useState<
+    ReadonlySet<string> | undefined
+  >(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    listAdapterKinds()
+      .then((kinds) => {
+        if (cancelled) return;
+        setDataHoldingKinds(
+          new Set(kinds.filter((k) => k.holds_data).map((k) => k.kind)),
+        );
+      })
+      .catch((err) => {
+        // Leaving it undefined keeps every account visible, which is the
+        // honest failure: a sidebar that hides an account because a probe
+        // failed would look like the account was gone.
+        // eslint-disable-next-line no-console
+        console.warn('listAdapterKinds failed; showing every account', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const tree = useMemo(
     () =>
       buildSidebarTree({
@@ -172,9 +202,11 @@ export function Sidebar({
         selectedCalendarIds,
         selectedTaskListIds,
         selectedContactListIds,
+        dataHoldingKinds,
       }),
     [
       accounts,
+      dataHoldingKinds,
       calendars,
       taskLists,
       contactLists,
