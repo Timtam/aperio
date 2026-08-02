@@ -140,9 +140,10 @@ fn every_bundled_adapter_says_where_its_credential_lives() {
     // There is no fallback left. A kind no bundled plugin claims answers
     // nothing — not a guessed `Password`, not a remembered refresh token — and
     // that is what keeps the credential-repair banner from asking the user to
-    // fix a credential no adapter wants. "zoom" is the case that proves it: the
-    // adapter exists in the tree but is unplugged, so this build genuinely does
-    // not serve the kind. Any future name list would break this assert.
+    // fix a credential no adapter wants. "zoom" is the case that proves it: no
+    // adapter in this tree serves that kind at all, so the answer has to come
+    // from the loaded manifests rather than from a guess. Any future name list
+    // would break this assert.
     assert!(
         schema_for_kind(&manager, "zoom").is_none(),
         "zoom is not bundled, so no schema can be found for it",

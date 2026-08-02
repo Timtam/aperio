@@ -46,9 +46,7 @@ members = [
     "crates/sync-adapter-dropbox-plugin",
 
     # Videokonferenz-Adapter
-    "crates/vc-adapter-zoom",
     "crates/vc-adapter-webex",
-    "crates/vc-adapter-zoom-plugin",
     "crates/vc-adapter-webex-plugin",
 
     # cdylib FFI shells: emit the #[no_mangle] C-ABI exports the desktop
@@ -67,7 +65,6 @@ members = [
     "crates/sync-adapter-ftp-cdylib",
     "crates/sync-adapter-sftp-cdylib",
     "crates/sync-adapter-dropbox-cdylib",
-    "crates/vc-adapter-zoom-cdylib",
     "crates/vc-adapter-webex-cdylib",
 
     # Tauri-free host logic shared by the desktop backend and the mobile

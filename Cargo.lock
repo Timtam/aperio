@@ -7907,38 +7907,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vc-adapter-zoom"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "serde",
- "vc-core",
-]
-
-[[package]]
-name = "vc-adapter-zoom-cdylib"
-version = "0.1.0"
-dependencies = [
- "plugin-sdk",
- "vc-adapter-zoom-plugin",
-]
-
-[[package]]
-name = "vc-adapter-zoom-plugin"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "plugin-core",
- "plugin-sdk",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "vc-adapter-zoom",
- "vc-core",
-]
-
-[[package]]
 name = "vc-core"
 version = "0.1.0"
 dependencies = [
