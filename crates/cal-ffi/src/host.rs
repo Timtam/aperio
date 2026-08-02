@@ -114,7 +114,6 @@ use host_core::sync_target::{
     PREF_FTP_PORT, PREF_FTP_USER, PREF_GOOGLEDRIVE_FOLDER_NAME, PREF_LOCAL_PATH, PREF_SFTP_HOST,
     PREF_SFTP_PATH, PREF_SFTP_PORT, PREF_SFTP_USER, PREF_WEBDAV_URL, PREF_WEBDAV_USER,
     SECRET_ACCOUNT_DROPBOX as DROPBOX_SECRET_ACCOUNT, SECRET_ACCOUNT_E2E as E2E_SECRET_ACCOUNT,
-    SECRET_ACCOUNT_GOOGLEDRIVE as GOOGLEDRIVE_SECRET_ACCOUNT,
 };
 // The four per-kind credential pseudo-accounts are gone from this file. Nothing
 // here reads a credential by its legacy address any more: `stored_secret` knows
@@ -5068,9 +5067,13 @@ impl Host {
         plugin_id: String,
         request_json: String,
     ) -> Result<(), StoreError> {
+        // Drive is deliberately absent. It reaches Aperio as a Google ACCOUNT
+        // now, so its sign-in runs the account OAuth path and its refresh token
+        // lands in that account's keychain slot — not in a pseudo-account
+        // divorced from every row. The `sync.adapter.googledrive` slot is still
+        // READ, by the legacy pre-migration build path, and never written here.
         let secret_account = match plugin_id.as_str() {
             PLUGIN_ID_DROPBOX => DROPBOX_SECRET_ACCOUNT,
-            PLUGIN_ID_GOOGLEDRIVE => GOOGLEDRIVE_SECRET_ACCOUNT,
             other => {
                 return Err(StoreError::InvalidField {
                     field: "plugin_id".to_string(),
@@ -11391,13 +11394,19 @@ mod tests {
         assert!(v["state"].as_str().is_some());
     }
 
+    /// The merged Google consent asks for Drive too.
+    ///
+    /// It used to be the retired Drive plugin's own dance. Now one sign-in
+    /// covers calendars, tasks, contacts AND the storage the account can hold,
+    /// which is the whole point of the merge — and the `drive.file` assertion
+    /// below is what proves the scope survived it.
     #[test]
-    fn begin_googledrive_oauth_returns_an_authorize_url() {
+    fn the_google_consent_asks_for_drive_as_well() {
         let (_dir, host, _kc) = open_host();
         let args = r#"{"client_id":"gd-client","redirect_uri":"aperio://oauth-callback"}"#;
         let out = host
             .begin_oauth_json(
-                "com.aperio.sync-adapter-googledrive".to_string(),
+                "com.aperio.cal-adapter-google".to_string(),
                 args.to_string(),
             )
             .unwrap();

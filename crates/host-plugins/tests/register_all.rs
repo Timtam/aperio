@@ -25,7 +25,6 @@ const EXPECTED_IDS: &[&str] = &[
     "com.aperio.sync-adapter-ftp",
     "com.aperio.sync-adapter-sftp",
     "com.aperio.sync-adapter-dropbox",
-    "com.aperio.sync-adapter-googledrive",
     "com.aperio.vc-adapter-webex",
 ];
 
@@ -207,17 +206,20 @@ fn every_bundled_adapter_answers_both_picker_questions() {
         );
     }
 
-    // What the sync settings offer, by name. This used to assert the list was
+    // Where a dataset can live, by name. This used to assert the list was
     // EMPTY — the sync plugins declared no `adapter_kind`, so they appeared in
-    // no picker and a sync target was not an account at all. Now they do, and
-    // the list is the whole answer to "where can this dataset live".
+    // no picker and a sync target was not an account at all.
     //
     // Spelled out rather than counted: a kind here is persisted in
     // `accounts.adapter_kind` and travels in the sync payload, so a rename is
-    // not a rename, it is an orphaned account row on every device. And each of
-    // these six needs a label in both locale files before it can ship, which
+    // not a rename, it is an orphaned account row on every device. And each
+    // needs a label in both locale files before it can ship, which
     // `manifests_parse::every_declared_kind_is_named_in_both_locales` checks.
     // `adapter_kinds()` sorts by kind, so this comparison is order-stable.
+    //
+    // `google` and `googledrive` are ONE adapter: Drive folded into the Google
+    // account, and the old kind stays listed because rows still carry it. Which
+    // of the two may be created is `offered`, asserted just below.
     let syncable: Vec<&str> = kinds
         .iter()
         .filter(|i| i.can_sync)
@@ -228,12 +230,28 @@ fn every_bundled_adapter_answers_both_picker_questions() {
         [
             "dropbox",
             "ftp",
+            "google",
             "googledrive",
             "local_folder",
             "sftp",
             "webdav",
         ],
-        "the six bundled sync backends are what the sync settings may offer",
+        "these are the bundled kinds a dataset can live on",
+    );
+
+    // …and only one Google entry may be CREATED. `googledrive` is listed so the
+    // rows that still carry it stay visible and groupable, but the adapter that
+    // minted them is gone, so offering it would put an entry in the Add-account
+    // picker for something that no longer exists on its own.
+    let offered: Vec<&str> = kinds
+        .iter()
+        .filter(|i| i.can_sync && i.offered)
+        .map(|i| i.kind.as_str())
+        .collect();
+    assert_eq!(
+        offered,
+        ["dropbox", "ftp", "google", "local_folder", "sftp", "webdav"],
+        "an adopted kind resolves but is never offered",
     );
 
     // `local_folder`, not `local`. `local` is the built-in store's kind AND the
@@ -245,18 +263,31 @@ fn every_bundled_adapter_answers_both_picker_questions() {
         "no plugin may claim the built-in store's kind",
     );
 
-    // Every one of them is sync-only, which is what keeps its account row off
-    // the wire (`host_core::accounts::travels_between_devices`): the row's
-    // `config_json` names the very server the log is written to. An adapter
-    // that grew a data family would still be legal here — it would simply also
-    // answer `holds_data` — but it would stop staying home, and that is a
-    // decision, not a side effect.
-    for info in kinds.iter().filter(|i| i.can_sync) {
-        assert!(
-            !info.holds_data,
-            "{} answers both questions now; check that its account row is still \
-             meant to travel between devices",
-            info.kind,
-        );
-    }
+    // A sync backend that holds no data keeps its account row OFF the wire
+    // (`host_core::accounts::travels_between_devices`): the row's `config_json`
+    // names the very server the log is written to, and often a path that means
+    // nothing on another machine.
+    //
+    // Google answers both questions, and that is a decision rather than a side
+    // effect. Drive folded into the Google account, so one row is a calendar
+    // source AND a place the dataset can live — it travelled before the merge
+    // because of its calendars and goes on travelling. What makes that safe is
+    // that nothing in a Drive config is machine-specific: a client id, and the
+    // name of a folder that is the same folder seen from every device.
+    // Contrast `local_folder` and `sftp`, whose paths are not.
+    //
+    // Spelled out, so a SEVENTH backend that grows a data family has to come
+    // through here and answer the same question rather than start travelling
+    // quietly.
+    let both: Vec<&str> = kinds
+        .iter()
+        .filter(|i| i.can_sync && i.holds_data)
+        .map(|i| i.kind.as_str())
+        .collect();
+    assert_eq!(
+        both,
+        ["google", "googledrive"],
+        "a sync backend that also holds data starts travelling between devices; \
+         check its config carries nothing machine-specific first",
+    );
 }

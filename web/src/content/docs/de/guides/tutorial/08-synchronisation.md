@@ -11,8 +11,8 @@ Darum geht es in diesem Kapitel.
 
 Aperio legt deine lokalen Daten als Änderungsprotokoll ab und gleicht sie
 über einen Speicherort ab, den **du** bestimmst – zum Beispiel WebDAV,
-Dropbox oder einen anderen Ordner, der zwischen deinen Geräten geteilt
-wird. Es gibt keinen Aperio-Server; deine Daten bleiben bei dir.
+Dropbox, die Drive-Ablage deines Google-Kontos oder einen anderen Ordner,
+der zwischen deinen Geräten geteilt wird. Es gibt keinen Aperio-Server; deine Daten bleiben bei dir.
 
 ## Synchronisation einrichten
 
@@ -22,8 +22,10 @@ nur noch aus, welches deiner Konten den Datensatz hält.
 
 1. Öffne die **Einstellungen** und gehe zu **Konten**.
 2. Lege ein Konto für deinen Speicherort an (z. B. WebDAV, SFTP, FTPS,
-   Dropbox, Google Drive oder ein lokaler bzw. geteilter Ordner) und gib
-   Adresse und Zugangsdaten an.
+   Dropbox oder ein lokaler bzw. geteilter Ordner) und gib Adresse und
+   Zugangsdaten an. **Google Drive ist kein eigener Eintrag**: ein
+   Google-Konto kann den Datensatz selbst halten — hast du also schon eines
+   für deine Kalender, überspring diesen Schritt und wähl es im nächsten.
 3. Wechsle auf **Synchronisation**. Unter **Synchronisationsziel** stehen
    genau die Konten, die einen Datensatz halten können.
 4. Wähle das gewünschte Konto in der Liste und aktiviere

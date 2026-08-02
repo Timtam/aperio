@@ -1507,7 +1507,7 @@ mod tests {
     #[test]
     fn a_required_client_secret_still_fails_loudly() {
         let manifest = plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
-            "../../sync-adapter-googledrive-plugin/plugin.json"
+            "../../cal-adapter-google-plugin/plugin.json"
         ))
         .expect("the shipped manifest parses");
         let schema = manifest

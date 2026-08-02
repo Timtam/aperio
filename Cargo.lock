@@ -893,13 +893,17 @@ name = "cal-adapter-google-plugin"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "cal-adapter-google",
  "cal-core",
  "chrono",
  "plugin-core",
  "plugin-sdk",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sync-adapter-googledrive",
+ "sync-core",
  "tokio",
  "tracing",
 ]
@@ -2951,7 +2955,6 @@ dependencies = [
  "serde_json",
  "sync-adapter-dropbox-plugin",
  "sync-adapter-ftp-plugin",
- "sync-adapter-googledrive-plugin",
  "sync-adapter-local-plugin",
  "sync-adapter-sftp-plugin",
  "sync-adapter-webdav-plugin",
@@ -6557,31 +6560,6 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
-]
-
-[[package]]
-name = "sync-adapter-googledrive-cdylib"
-version = "0.1.0"
-dependencies = [
- "plugin-sdk",
- "sync-adapter-googledrive-plugin",
-]
-
-[[package]]
-name = "sync-adapter-googledrive-plugin"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "plugin-core",
- "plugin-sdk",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sync-adapter-googledrive",
- "sync-core",
- "tokio",
- "tracing",
 ]
 
 [[package]]

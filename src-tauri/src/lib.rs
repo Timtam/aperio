@@ -852,7 +852,6 @@ pub fn run() {
             commands::connect_dropbox_oauth,
             commands::has_dropbox_refresh_token,
             // §19.6 Google Drive OAuth dance.
-            commands::connect_googledrive_oauth,
             commands::has_googledrive_refresh_token,
             commands::trust_sftp_host_key,
             commands::forget_sftp_host_key,

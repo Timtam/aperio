@@ -31,6 +31,7 @@
 
 use std::os::raw::{c_char, c_void};
 
+use base64::Engine as _;
 use cal_adapter_google::{GoogleAdapter, TokenSet};
 use cal_core::adapter::{Capability, Credentials as CalCredentials};
 use cal_core::types::{AttendeeStatus, ContactPhoto, DateRange, NewContact, NewEvent, NewTask};
@@ -39,12 +40,120 @@ use chrono::{DateTime, Utc};
 use plugin_sdk::plugin_core::abi::OpenInstanceResult;
 use plugin_sdk::plugin_core::ffi::PluginCallResult;
 use plugin_sdk::plugin_core::vtables::{
-    AdapterVtable, CalendarVtable, ContactsVtable, TasksVtable,
+    AdapterVtable, CalendarVtable, ContactsVtable, SyncVtable, TasksVtable,
 };
-use plugin_sdk::{decode_args, ok_response, open_instance_with, PluginInstance};
+use plugin_sdk::{
+    decode_args, error_response, ok_response, open_instance_with, sync_error_to_response,
+    PluginInstance,
+};
 use serde::Deserialize;
+use sync_adapter_googledrive::{DriveSyncAdapter, GoogleDriveAccountConfig};
+use sync_core::{DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter};
 
-plugin_sdk::cal_dispatch_helpers!(GoogleAdapter);
+/// One Google account, in both of the roles it can now play.
+///
+/// `PluginInstance<T>` carries exactly one type, and this plugin serves two
+/// families of vtable whose adapters are separate structs. So the instance is
+/// the pair, and each FFI shim projects into the half it belongs to.
+///
+/// Both halves are optional, and which one is present is decided by what the
+/// host handed over rather than by a flag:
+///
+/// - `cal` needs an access token. An account created as a Drive SYNC TARGET
+///   never had one — the old `googledrive` schema had no such field — so its
+///   calendar side cannot be built, and saying so is better than building an
+///   adapter that 403s on every call.
+/// - `drive` needs a refresh token, which is what mints Drive's own access
+///   tokens. An account whose grant has lapsed has none, and then there is
+///   nothing to sync through either.
+///
+/// Neither absence is an error at open time. A calendars-only Google account is
+/// perfectly usable, and so is a Drive-only one; the refusal comes when
+/// something actually asks the missing half to do work, and it names the repair.
+pub struct GoogleAccount {
+    cal: Option<GoogleAdapter>,
+    drive: Option<DriveSyncAdapter>,
+}
+
+/// The calendar/tasks/contacts half, or the refusal that says how to get it.
+///
+/// A `googledrive` row adopted by this plugin reaches here: it is a real Google
+/// account, it just signed in for Drive alone. Re-connecting it runs the
+/// current consent, which asks for both, so the repair is the ordinary one the
+/// accounts screen already offers for an OAuth account.
+fn cal_half(account: &GoogleAccount) -> Result<&GoogleAdapter, cal_core::error::Error> {
+    account.cal.as_ref().ok_or_else(|| {
+        cal_core::error::Error::authentication(
+            "this account was connected for Drive storage only; reconnect it to use its \
+             calendars, tasks and contacts",
+        )
+    })
+}
+
+/// The Drive half, or the refusal that says why it is missing.
+fn drive_half(account: &GoogleAccount) -> Result<&DriveSyncAdapter, sync_core::SyncError> {
+    account.drive.as_ref().ok_or_else(|| {
+        sync_core::SyncError::Auth(
+            "this Google account holds no refresh token, so it cannot reach Drive; reconnect it"
+                .to_string(),
+        )
+    })
+}
+
+// The dispatch helpers, by hand rather than through `cal_dispatch_helpers!` /
+// `sync_dispatch_helpers!`: both macros emit `instance` / `dispatch` /
+// `dispatch_unit` at crate root against ONE adapter type, so a plugin that
+// serves two families cannot use either. `plugin_sdk`'s underlying functions are
+// generic over the instance type and unconstrained, which is all this needs.
+
+#[allow(dead_code)]
+fn instance<'a>(
+    handle: *mut c_void,
+) -> Result<&'a PluginInstance<GoogleAccount>, PluginCallResult> {
+    plugin_sdk::instance::<GoogleAccount>(handle)
+}
+
+fn dispatch<T, F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
+where
+    T: serde::Serialize,
+    F: FnOnce(&'static GoogleAdapter) -> Fut,
+    Fut: std::future::Future<Output = cal_core::error::Result<T>>,
+{
+    plugin_sdk::cal_dispatch::<GoogleAccount, T, _, _>(handle, move |acct| async move {
+        call(cal_half(acct)?).await
+    })
+}
+
+fn dispatch_unit<F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
+where
+    F: FnOnce(&'static GoogleAdapter) -> Fut,
+    Fut: std::future::Future<Output = cal_core::error::Result<()>>,
+{
+    plugin_sdk::cal_dispatch_unit::<GoogleAccount, _, _>(handle, move |acct| async move {
+        call(cal_half(acct)?).await
+    })
+}
+
+fn sync_dispatch<T, F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
+where
+    T: serde::Serialize,
+    F: FnOnce(&'static DriveSyncAdapter) -> Fut,
+    Fut: std::future::Future<Output = sync_core::SyncResult<T>>,
+{
+    plugin_sdk::sync_dispatch::<GoogleAccount, T, _, _>(handle, move |acct| async move {
+        call(drive_half(acct)?).await
+    })
+}
+
+fn sync_dispatch_unit<F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
+where
+    F: FnOnce(&'static DriveSyncAdapter) -> Fut,
+    Fut: std::future::Future<Output = sync_core::SyncResult<()>>,
+{
+    plugin_sdk::sync_dispatch_unit::<GoogleAccount, _, _>(handle, move |acct| async move {
+        call(drive_half(acct)?).await
+    })
+}
 
 #[derive(Debug, Deserialize)]
 struct InitConfig {
@@ -63,6 +172,12 @@ struct InitConfig {
     expires_at: DateTime<Utc>,
     #[serde(default)]
     scope: Option<String>,
+    /// The folder under My Drive that holds the dataset when this account is
+    /// used as the sync target. Absent or blank means `Aperio`, which is also
+    /// what a row written by the retired `googledrive` adapter carries when the
+    /// user never changed it.
+    #[serde(default)]
+    folder_name: String,
 }
 
 fn assume_expired() -> DateTime<Utc> {
@@ -75,19 +190,52 @@ pub unsafe extern "C" fn plugin_open_instance(config_json: *const c_char) -> Ope
     open_instance_with(config_json, |json| {
         let cfg: InitConfig =
             serde_json::from_str(json).map_err(|e| format!("malformed init config: {e}"))?;
-        if cfg.client_id.trim().is_empty()
-            || cfg.client_secret.trim().is_empty()
-            || cfg.access_token.trim().is_empty()
-        {
-            return Err("client_id, client_secret and access_token must not be empty".to_string());
+        if cfg.client_id.trim().is_empty() || cfg.client_secret.trim().is_empty() {
+            return Err("client_id and client_secret must not be empty".to_string());
         }
-        let tokens = TokenSet {
-            access_token: cfg.access_token,
-            refresh_token: cfg.refresh_token,
-            expires_at: cfg.expires_at,
-            scope: cfg.scope,
+        // Neither token is demanded here. Which halves this account can serve
+        // is READ OFF what arrived, because the answer differs per account and
+        // refusing to open at all would take a working half down with the
+        // missing one. See [`GoogleAccount`].
+        if cfg.access_token.trim().is_empty()
+            && cfg
+                .refresh_token
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .is_empty()
+        {
+            return Err(
+                "this account carries neither an access token nor a refresh token".to_string(),
+            );
+        }
+        let drive = match cfg.refresh_token.as_deref().map(str::trim) {
+            Some(refresh) if !refresh.is_empty() => Some(
+                DriveSyncAdapter::new(
+                    GoogleDriveAccountConfig {
+                        client_id: cfg.client_id.clone(),
+                        client_secret: cfg.client_secret.clone(),
+                        folder_name: cfg.folder_name.clone(),
+                    },
+                    refresh,
+                )
+                .map_err(|e| format!("Drive adapter ctor failed: {e:?}"))?,
+            ),
+            _ => None,
         };
-        Ok(GoogleAdapter::new(cfg.client_id, cfg.client_secret, tokens))
+        let cal = (!cfg.access_token.trim().is_empty()).then(|| {
+            GoogleAdapter::new(
+                cfg.client_id,
+                cfg.client_secret,
+                TokenSet {
+                    access_token: cfg.access_token,
+                    refresh_token: cfg.refresh_token,
+                    expires_at: cfg.expires_at,
+                    scope: cfg.scope,
+                },
+            )
+        });
+        Ok(GoogleAccount { cal, drive })
     })
 }
 
@@ -95,7 +243,7 @@ pub unsafe extern "C" fn plugin_open_instance(config_json: *const c_char) -> Ope
 /// FFI export; `handle` must be the pointer returned by
 /// [`plugin_open_instance`].
 pub unsafe extern "C" fn plugin_close_instance(handle: *mut c_void) {
-    PluginInstance::<GoogleAdapter>::drop_handle(handle);
+    PluginInstance::<GoogleAccount>::drop_handle(handle);
 }
 
 // ── Adapter base ───────────────────────────────────────────
@@ -119,7 +267,14 @@ unsafe extern "C" fn ffi_capabilities(
         Ok(i) => i,
         Err(r) => return r,
     };
-    let caps: Vec<Capability> = cal_core::Adapter::capabilities(inst.plugin()).to_vec();
+    // Synchronous, so it cannot go through `dispatch`; the same projection by
+    // hand. An account with no calendar half declares no calendar capability,
+    // which is the truthful answer rather than an error — the caller is asking
+    // what this account can do, and the reply is "none of this".
+    let caps: Vec<Capability> = match inst.plugin().cal.as_ref() {
+        Some(cal) => cal_core::Adapter::capabilities(cal).to_vec(),
+        None => Vec::new(),
+    };
     ok_response(&caps)
 }
 
@@ -243,7 +398,13 @@ unsafe extern "C" fn ffi_calendar_color(
         Ok(i) => i,
         Err(r) => return r,
     };
-    let color = inst.plugin().calendar_color(&calendar_id);
+    // Also synchronous. No calendar half means no cached colour, which is the
+    // same answer this returns for a calendar it has not listed yet.
+    let color = inst
+        .plugin()
+        .cal
+        .as_ref()
+        .and_then(|cal| cal.calendar_color(&calendar_id));
     ok_response(&color)
 }
 
@@ -653,10 +814,167 @@ pub static CONTACTS_VTABLE: ContactsVtable = ContactsVtable {
     ..ContactsVtable::empty()
 };
 
+// ── SyncFeature (Google Drive) ─────────────────────────────
+//
+// Lifted verbatim from the retired `sync-adapter-googledrive-plugin`; only the
+// projection into the account's Drive half is new. The adapter crate itself did
+// not move.
+
+unsafe extern "C" fn ffi_test_connection(
+    h: *mut c_void,
+    _a: *const u8,
+    _l: usize,
+) -> PluginCallResult {
+    sync_dispatch_unit(h, |p| async move { p.test_connection().await })
+}
+
+unsafe extern "C" fn ffi_fetch_meta(h: *mut c_void, _a: *const u8, _l: usize) -> PluginCallResult {
+    sync_dispatch(h, |p| async move { p.fetch_meta().await })
+}
+
+unsafe extern "C" fn ffi_push_meta(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let meta: MetaJson = match decode_args(a, l) {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    sync_dispatch_unit(h, |p| async move { p.push_meta(&meta).await })
+}
+
+unsafe extern "C" fn ffi_fetch_new_logs(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let cursor: DeviceCursor = match decode_args(a, l) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    sync_dispatch(h, |p| async move { p.fetch_new_logs(&cursor).await })
+}
+
+unsafe extern "C" fn ffi_push_log(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let log: LogFile = match decode_args(a, l) {
+        Ok(l) => l,
+        Err(r) => return r,
+    };
+    sync_dispatch_unit(h, |p| async move { p.push_log(&log).await })
+}
+
+unsafe extern "C" fn ffi_fetch_snapshot(
+    h: *mut c_void,
+    _a: *const u8,
+    _l: usize,
+) -> PluginCallResult {
+    sync_dispatch(h, |p| async move { p.fetch_snapshot().await })
+}
+
+unsafe extern "C" fn ffi_push_snapshot(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let snap: Snapshot = match decode_args(a, l) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    sync_dispatch_unit(h, |p| async move { p.push_snapshot(&snap).await })
+}
+
+unsafe extern "C" fn ffi_delete_log(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let name: LogFileName = match decode_args(a, l) {
+        Ok(n) => n,
+        Err(r) => return r,
+    };
+    sync_dispatch_unit(h, |p| async move { p.delete_log(&name).await })
+}
+
+#[derive(Debug, Deserialize)]
+struct PushSoundAssetArgs {
+    hash: String,
+    extension: String,
+    bytes_base64: String,
+}
+
+unsafe extern "C" fn ffi_push_sound_asset(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: PushSoundAssetArgs = match decode_args(a, l) {
+        Ok(a) => a,
+        Err(r) => return r,
+    };
+    let bytes = match base64::engine::general_purpose::STANDARD.decode(args.bytes_base64.as_bytes())
+    {
+        Ok(b) => b,
+        Err(err) => {
+            return error_response(
+                plugin_sdk::plugin_core::ffi::PLUGIN_CALL_ERR_INVALID,
+                &format!("bad base64: {err}"),
+            )
+        }
+    };
+    sync_dispatch_unit(h, move |p| {
+        let hash = args.hash;
+        let extension = args.extension;
+        async move { p.push_sound_asset(&hash, &extension, &bytes).await }
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct FetchSoundAssetArgs {
+    hash: String,
+    extension: String,
+}
+
+unsafe extern "C" fn ffi_fetch_sound_asset(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: FetchSoundAssetArgs = match decode_args(a, l) {
+        Ok(a) => a,
+        Err(r) => return r,
+    };
+    let inst = match instance(h) {
+        Ok(i) => i,
+        Err(r) => return r,
+    };
+    // Hand-rolled rather than through `sync_dispatch`: the payload is bytes and
+    // has to be base64'd on the way out, which the generic marshaller does not
+    // do. Same shape as the retired plugin's.
+    let account: &'static GoogleAccount =
+        unsafe { std::mem::transmute::<&GoogleAccount, &'static GoogleAccount>(inst.plugin()) };
+    let outcome = inst.runtime().block_on(async move {
+        drive_half(account)?
+            .fetch_sound_asset(&args.hash, &args.extension)
+            .await
+    });
+    match outcome {
+        Ok(None) => ok_response(&Option::<String>::None),
+        Ok(Some(bytes)) => {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+            ok_response(&Some(b64))
+        }
+        Err(err) => sync_error_to_response(err),
+    }
+}
+
+pub static SYNC_VTABLE: SyncVtable = SyncVtable {
+    test_connection: Some(ffi_test_connection),
+    fetch_meta: Some(ffi_fetch_meta),
+    push_meta: Some(ffi_push_meta),
+    fetch_new_logs: Some(ffi_fetch_new_logs),
+    push_log: Some(ffi_push_log),
+    fetch_snapshot: Some(ffi_fetch_snapshot),
+    push_snapshot: Some(ffi_push_snapshot),
+    delete_log: Some(ffi_delete_log),
+    push_sound_asset: Some(ffi_push_sound_asset),
+    fetch_sound_asset: Some(ffi_fetch_sound_asset),
+    ..SyncVtable::empty()
+};
+
 pub static ADAPTER_VTABLE: AdapterVtable = AdapterVtable {
     calendar: &CALENDAR_VTABLE,
     tasks: &TASKS_VTABLE,
     contacts: &CONTACTS_VTABLE,
+    sync: &SYNC_VTABLE,
     ..AdapterVtable::empty()
 };
 
@@ -820,6 +1138,7 @@ mod tests {
             "refresh_token",
             "expires_at",
             "scope",
+            "folder_name",
         ];
         for field in &schema.fields {
             assert!(
@@ -846,13 +1165,41 @@ mod tests {
     }
 
     #[test]
-    fn only_the_two_values_the_user_types_are_asked_for() {
-        // The three token keys `InitConfig` also reads are filled by the host
+    fn only_what_the_user_can_type_is_asked_for() {
+        // The four token keys `InitConfig` also reads are filled by the host
         // after the sign-in dance. Declaring one as a form field would put an
         // empty box on the connect form for something nobody can type.
+        //
+        // `folder_name` IS typeable and therefore does appear — it is optional
+        // and only means anything once the account is picked as the place the
+        // data is stored, which is what its hint says.
         let schema = manifest().account.unwrap();
         let keys: Vec<&str> = schema.fields.iter().map(|f| f.key.as_str()).collect();
-        assert_eq!(keys, ["client_id", "client_secret"]);
+        assert_eq!(keys, ["client_id", "client_secret", "folder_name"]);
+        assert!(
+            !schema.field("folder_name").unwrap().required,
+            "a Google account that never holds the dataset must not have to name a folder",
+        );
+    }
+
+    /// The adoption, asserted on the manifest that ships.
+    ///
+    /// A `googledrive` row is what a device carried before Drive folded into
+    /// this adapter. Dropping this line would not fail anything at build time —
+    /// it would leave those rows resolving to no plugin at all, which the host
+    /// reads as an unknown kind and therefore as something that TRAVELS
+    /// between devices.
+    #[test]
+    fn the_retired_drive_adapters_kind_is_adopted() {
+        let m = manifest();
+        assert_eq!(m.adapter_kind.as_deref(), Some("google"));
+        assert!(m.serves_kind("googledrive"), "{:?}", m.adopts_adapter_kinds);
+        assert!(m.adopts_kind("googledrive"));
+        assert!(
+            m.capabilities
+                .contains(&plugin_sdk::plugin_core::Capability::Sync),
+            "adopting the kind is pointless without the capability that serves it",
+        );
     }
 
     #[test]

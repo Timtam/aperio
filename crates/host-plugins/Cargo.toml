@@ -27,7 +27,6 @@ sync-adapter-webdav-plugin = { path = "../sync-adapter-webdav-plugin", optional 
 sync-adapter-ftp-plugin = { path = "../sync-adapter-ftp-plugin", optional = true }
 sync-adapter-sftp-plugin = { path = "../sync-adapter-sftp-plugin", optional = true }
 sync-adapter-dropbox-plugin = { path = "../sync-adapter-dropbox-plugin", optional = true }
-sync-adapter-googledrive-plugin = { path = "../sync-adapter-googledrive-plugin", optional = true }
 vc-adapter-webex-plugin = { path = "../vc-adapter-webex-plugin", optional = true }
 
 [dev-dependencies]
@@ -65,7 +64,6 @@ sync-webdav = ["registry", "dep:sync-adapter-webdav-plugin"]
 sync-ftp = ["registry", "dep:sync-adapter-ftp-plugin"]
 sync-sftp = ["registry", "dep:sync-adapter-sftp-plugin"]
 sync-dropbox = ["registry", "dep:sync-adapter-dropbox-plugin"]
-sync-googledrive = ["registry", "dep:sync-adapter-googledrive-plugin"]
 vc-webex = ["registry", "dep:vc-adapter-webex-plugin"]
 
 # Convenience: link + register ALL 17 bundled adapter plugins (the default).
@@ -82,7 +80,6 @@ static = [
     "sync-ftp",
     "sync-sftp",
     "sync-dropbox",
-    "sync-googledrive",
     "vc-webex",
 ]
 

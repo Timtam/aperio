@@ -44,7 +44,6 @@ members = [
     "crates/sync-adapter-ftp-plugin",
     "crates/sync-adapter-sftp-plugin",
     "crates/sync-adapter-dropbox-plugin",
-    "crates/sync-adapter-googledrive-plugin",
 
     # Videokonferenz-Adapter
     "crates/vc-adapter-zoom",
@@ -68,7 +67,6 @@ members = [
     "crates/sync-adapter-ftp-cdylib",
     "crates/sync-adapter-sftp-cdylib",
     "crates/sync-adapter-dropbox-cdylib",
-    "crates/sync-adapter-googledrive-cdylib",
     "crates/vc-adapter-zoom-cdylib",
     "crates/vc-adapter-webex-cdylib",
 

@@ -131,7 +131,13 @@ pub const PLUGIN_ID_WEBDAV: &str = "com.aperio.sync-adapter-webdav";
 pub const PLUGIN_ID_FTP: &str = "com.aperio.sync-adapter-ftp";
 pub const PLUGIN_ID_SFTP: &str = "com.aperio.sync-adapter-sftp";
 pub const PLUGIN_ID_DROPBOX: &str = "com.aperio.sync-adapter-dropbox";
-pub const PLUGIN_ID_GOOGLEDRIVE: &str = "com.aperio.sync-adapter-googledrive";
+/// Google Drive folded into the Google adapter, which ADOPTS the `googledrive`
+/// kind. The constant keeps its name — it still answers "which plugin serves
+/// that kind" — but the plugin behind it is now the one that also serves the
+/// user's calendars. A device that has not yet migrated its `sync.adapter.*`
+/// preferences into an account row reaches Drive through this, and the merged
+/// plugin opens such a config with its Drive half alone.
+pub const PLUGIN_ID_GOOGLEDRIVE: &str = "com.aperio.cal-adapter-google";
 
 /// Every kind this build can sync through, and the plugin that serves it.
 pub const KINDS: &[(&str, &str)] = &[

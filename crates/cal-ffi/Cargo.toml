@@ -70,7 +70,6 @@ host-plugins = { workspace = true, features = [
     "sync-ftp",
     "sync-sftp",
     "sync-dropbox",
-    "sync-googledrive",
             "vc-webex",
 ] }
 plugin-core.workspace = true

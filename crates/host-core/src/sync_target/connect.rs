@@ -737,7 +737,9 @@ mod tests {
             "sftp" => include_bytes!("../../../sync-adapter-sftp-plugin/plugin.json"),
             "ftp" => include_bytes!("../../../sync-adapter-ftp-plugin/plugin.json"),
             "dropbox" => include_bytes!("../../../sync-adapter-dropbox-plugin/plugin.json"),
-            "googledrive" => include_bytes!("../../../sync-adapter-googledrive-plugin/plugin.json"),
+            // Adopted by the Google adapter, which is where its schema
+            // lives now — see `adopts_adapter_kinds`.
+            "googledrive" => include_bytes!("../../../cal-adapter-google-plugin/plugin.json"),
             other => panic!("no shipped manifest for {other}"),
         };
         PluginManifest::from_bytes(bytes)

@@ -73,13 +73,24 @@ pub const SCOPE_CONTACTS_OTHER_READONLY: &str =
 /// `@gmail.com` accounts respond with 403 / empty, so the list
 /// renders as empty there and that's the documented behaviour.
 pub const SCOPE_DIRECTORY_READONLY: &str = "https://www.googleapis.com/auth/directory.readonly";
+/// Per-file Drive access — the narrowest scope Google offers for it. It grants
+/// the app nothing but the files it created itself, so an Aperio account can
+/// hold the sync dataset in Drive without being able to see anything else the
+/// user keeps there.
+///
+/// It is requested on EVERY Google sign-in, not only when the account is later
+/// picked as the sync target. Google's incremental authorization would allow
+/// the narrower thing, at the cost of a second consent screen appearing in the
+/// middle of the sync settings; the decision to ask once was deliberate.
+pub const SCOPE_DRIVE_FILE: &str = "https://www.googleapis.com/auth/drive.file";
 /// The combined scope string we request on the consent screen.
 /// Google's OAuth dialog renders one entry per space-separated
 /// scope; granting once covers every feature this adapter exposes
 /// (Calendar + Tasks + Contacts incl. the auto-collected Other
 /// list and the Workspace Directory) so users don't see a
 /// separate dialog when they later open another surface of the
-/// app.
+/// app — Drive included, since one Google account can now also hold the sync
+/// dataset.
 ///
 /// **Re-consent note:** users with tokens minted before Phase 10h
 /// have `calendar tasks`. Tokens minted between 10h-1 and 10h-2
@@ -88,7 +99,7 @@ pub const SCOPE_DIRECTORY_READONLY: &str = "https://www.googleapis.com/auth/dire
 /// fails with 403; the wrapping command should surface the
 /// standard "reconnect this account" affordance rather than
 /// silently degrading.
-pub const SCOPES: &str = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/contacts https://www.googleapis.com/auth/contacts.other.readonly https://www.googleapis.com/auth/directory.readonly";
+pub const SCOPES: &str = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/contacts https://www.googleapis.com/auth/contacts.other.readonly https://www.googleapis.com/auth/directory.readonly https://www.googleapis.com/auth/drive.file";
 /// 5 minute ceiling on the consent dance. Google rejects unused
 /// codes after a similar window anyway and waiting longer means
 /// Aperio is hung holding a TCP port.

@@ -10,8 +10,8 @@ what this chapter is about.
 ## How synchronization works
 
 Aperio stores your local data as a change log and reconciles it through a
-storage location that **you** choose – for example WebDAV, Dropbox or
-another folder shared between your devices. There is no Aperio server; your
+storage location that **you** choose – for example WebDAV, Dropbox, your
+Google account's Drive, or another folder shared between your devices. There is no Aperio server; your
 data stays with you.
 
 ## Setting up synchronization
@@ -22,8 +22,10 @@ which of your accounts holds the dataset.
 
 1. Open the **settings** and go to **Accounts**.
 2. Add an account for your storage location (e.g. WebDAV, SFTP, FTPS,
-   Dropbox, Google Drive, or a local/shared folder) and enter its address
-   and credentials.
+   Dropbox, or a local/shared folder) and enter its address and
+   credentials. **Google Drive is not a separate entry**: a Google account
+   can hold the dataset itself, so if you already have one for your
+   calendars, skip this step and pick it in the next one.
 3. Switch to **Synchronization**. Under **Sync target** you'll find exactly
    the accounts that can hold a dataset.
 4. Pick the one you want in the list and choose **Sync through …**. Aperio

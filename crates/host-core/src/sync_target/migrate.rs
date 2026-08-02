@@ -750,7 +750,9 @@ mod tests {
             "sftp" => include_bytes!("../../../sync-adapter-sftp-plugin/plugin.json"),
             "ftp" => include_bytes!("../../../sync-adapter-ftp-plugin/plugin.json"),
             "dropbox" => include_bytes!("../../../sync-adapter-dropbox-plugin/plugin.json"),
-            "googledrive" => include_bytes!("../../../sync-adapter-googledrive-plugin/plugin.json"),
+            // Adopted by the Google adapter, which is where its schema
+            // lives now — see `adopts_adapter_kinds`.
+            "googledrive" => include_bytes!("../../../cal-adapter-google-plugin/plugin.json"),
             other => panic!("no shipped manifest for {other}"),
         };
         PluginManifest::from_bytes(bytes).expect("the shipped manifest parses")
@@ -974,10 +976,14 @@ mod tests {
                 *account_kind,
                 "{stored_kind}: wrong adapter kind",
             );
-            assert_eq!(
-                manifest_for(stored_kind).adapter_kind.as_deref(),
-                Some(*account_kind),
-                "{stored_kind}: the shipped manifest declares a different kind",
+            // `serves_kind`, not `adapter_kind`: the migration writes the kind
+            // the row will carry forever, and what has to hold is that some
+            // shipped plugin RESOLVES it. `googledrive` is served by the Google
+            // adapter, which adopted it when Drive folded in — the row is
+            // unchanged, only the plugin behind it moved.
+            assert!(
+                manifest_for(stored_kind).serves_kind(account_kind),
+                "{stored_kind}: no shipped manifest serves `{account_kind}`",
             );
 
             let schema = schema_for(stored_kind);

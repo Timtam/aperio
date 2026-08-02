@@ -104,7 +104,6 @@ const SYNC_ADAPTER_KINDS: &[(&str, &str)] = &[
     ("sync-adapter-sftp-plugin", "sftp"),
     ("sync-adapter-ftp-plugin", "ftp"),
     ("sync-adapter-dropbox-plugin", "dropbox"),
-    ("sync-adapter-googledrive-plugin", "googledrive"),
 ];
 
 /// The sync adapters are published: each declares the kind above, and nothing

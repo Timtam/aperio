@@ -173,12 +173,6 @@ pub fn register_all_static(manager: &PluginManager) -> PluginResult<()> {
         "../../sync-adapter-dropbox-plugin/plugin.json",
         interactive_auth
     );
-    #[cfg(feature = "sync-googledrive")]
-    register!(
-        sync_adapter_googledrive_plugin,
-        "../../sync-adapter-googledrive-plugin/plugin.json",
-        interactive_auth
-    );
 
     // Video-conferencing adapters.
     //
@@ -212,5 +206,4 @@ pub const BUNDLED_PLUGIN_COUNT: usize = cfg!(feature = "caldav") as usize
     + cfg!(feature = "sync-ftp") as usize
     + cfg!(feature = "sync-sftp") as usize
     + cfg!(feature = "sync-dropbox") as usize
-    + cfg!(feature = "sync-googledrive") as usize
     + cfg!(feature = "vc-webex") as usize;

@@ -110,11 +110,6 @@ const PLUGINS: &[(&str, &str, &str)] = &[
         "com.aperio.sync-adapter-dropbox",
     ),
     (
-        "sync-adapter-googledrive-cdylib",
-        "sync-adapter-googledrive-plugin",
-        "com.aperio.sync-adapter-googledrive",
-    ),
-    (
         "vc-adapter-webex-cdylib",
         "vc-adapter-webex-plugin",
         "com.aperio.vc-adapter-webex",

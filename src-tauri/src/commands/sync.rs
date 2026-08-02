@@ -2644,73 +2644,6 @@ pub async fn has_dropbox_refresh_token(db: State<'_, DbHandle>) -> CommandResult
 // Google Drive OAuth dance.
 // ---------------------------------------------------------------------------
 
-/// Run the Google Drive OAuth authorisation-code flow against
-/// the user's own Drive app (client_id + client_secret from
-/// console.cloud.google.com). On success, stores the refresh
-/// token in the keychain under
-/// `GOOGLEDRIVE_SECRET_ACCOUNT::RefreshToken` so subsequent
-/// `configure_sync_adapter` calls can build the adapter without
-/// re-running the dance.
-///
-/// Opens the system browser; blocks on the loopback listener
-/// for up to 5 minutes waiting for the user to complete the
-/// consent screen.
-///
-/// Unlike Dropbox, Google's installed-app flow requires
-/// `client_secret` to be supplied (their docs explicitly note
-/// that the secret isn't treated as a secret in this context
-/// — it's still part of the token exchange).
-#[tauri::command]
-pub async fn connect_googledrive_oauth(
-    plugin_manager: State<'_, Arc<PluginManager>>,
-    client_id: String,
-    client_secret: String,
-) -> CommandResult<()> {
-    let trimmed_id = client_id.trim();
-    let trimmed_secret = client_secret.trim();
-    if trimmed_id.is_empty() {
-        return Err(CommandError {
-            code: "invalid_input",
-            message: "Google Drive client_id must not be empty".into(),
-        });
-    }
-    if trimmed_secret.is_empty() {
-        return Err(CommandError {
-            code: "invalid_input",
-            message: "Google Drive client_secret must not be empty".into(),
-        });
-    }
-    let tokens = run_plugin_auth(
-        plugin_manager.inner(),
-        PLUGIN_ID_GOOGLEDRIVE,
-        serde_json::json!({
-            "client_id": trimmed_id,
-            "client_secret": trimmed_secret,
-        }),
-    )
-    .await?;
-    let refresh_token =
-        tokens
-            .get("refresh_token")
-            .and_then(|v| v.as_str())
-            .ok_or(CommandError {
-                code: "protocol",
-                message: "Google returned no refresh token — make sure the \
-                 consent screen is configured for offline access"
-                    .into(),
-            })?;
-    secrets::store(
-        GOOGLEDRIVE_SECRET_ACCOUNT,
-        SecretSlot::RefreshToken,
-        refresh_token,
-    )
-    .map_err(|err| CommandError {
-        code: "internal",
-        message: format!("keychain store Google Drive refresh: {err}"),
-    })?;
-    Ok(())
-}
-
 /// Returns `true` when a Google Drive refresh token is on
 /// file — drives the "signed in" indicator next to the OAuth
 /// button in the SyncPanel. See [`has_dropbox_refresh_token`] for why it asks
@@ -3129,7 +3062,6 @@ use host_core::sync_target::{
     PREF_SFTP_HOST, PREF_SFTP_PATH, PREF_SFTP_PORT, PREF_SFTP_USER, PREF_WEBDAV_URL,
     PREF_WEBDAV_USER, SECRET_ACCOUNT_DROPBOX as DROPBOX_SECRET_ACCOUNT,
     SECRET_ACCOUNT_E2E as E2E_SECRET_ACCOUNT,
-    SECRET_ACCOUNT_GOOGLEDRIVE as GOOGLEDRIVE_SECRET_ACCOUNT,
 };
 // The four per-kind credential pseudo-accounts are gone from this file. Nothing
 // here reads a credential by its legacy address any more: `stored_secret` knows

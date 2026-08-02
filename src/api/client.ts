@@ -1872,22 +1872,6 @@ export const connectDropboxOauth = (
 export const hasDropboxRefreshToken = () =>
   invoke<boolean>('has_dropbox_refresh_token');
 
-/** §19.6 Google Drive OAuth dance. Same shape as
- *  `connectDropboxOauth` — opens the system browser at
- *  Google's consent screen, blocks on the loopback listener
- *  until the user completes, stores the resulting refresh
- *  token in the keychain. Unlike Dropbox, Google requires
- *  `clientSecret` to be non-empty (the secret is part of the
- *  token-exchange POST body even for installed apps). */
-export const connectGoogledriveOauth = (
-  clientId: string,
-  clientSecret: string,
-) =>
-  invoke<void>('connect_googledrive_oauth', {
-    clientId,
-    clientSecret,
-  });
-
 /** Probe for whether the keychain already holds a Google
  *  Drive refresh token. Drives the "signed in" / "sign in"
  *  toggle on the Google Drive button in the SyncPanel. */
