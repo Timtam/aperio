@@ -85,34 +85,6 @@ export const forgetSftpHostKey = (hostPort: string): Promise<void> =>
 export const pinnedSftpHostKey = (hostPort: string): Promise<string | null> =>
   CalFfi.pinnedSftpHostKey(hostPort);
 
-/** The statically-embedded sync-adapter plugin ids the Host drives OAuth for. */
-export const SYNC_OAUTH_PLUGIN_IDS: Record<'dropbox' | 'googledrive', string> = {
-  dropbox: 'com.aperio.sync-adapter-dropbox',
-  googledrive: 'com.aperio.sync-adapter-googledrive',
-};
-
-/** Token-exchange inputs for {@link completeSyncOauth} (the redirect's code +
- *  the PKCE verifier/state from `beginOauth`). */
-export interface CompleteSyncOauthRequest {
-  client_id: string;
-  /** Dropbox: optional (PKCE public app). Google Drive: required. */
-  client_secret?: string | null;
-  code: string;
-  pkce_verifier: string;
-  state: string;
-  returned_state: string;
-  redirect_uri: string;
-}
-
-/** Complete a sync-target OAuth: exchange the redirect's code for tokens, then
- *  store the refresh token in the adapter's keychain slot (no account is
- *  created). Follow with {@link configureSyncAdapter} to activate the target. */
-export const completeSyncOauth = (
-  pluginId: string,
-  request: CompleteSyncOauthRequest,
-): Promise<void> =>
-  CalFfi.completeSyncOauthJson(pluginId, JSON.stringify(request));
-
 /** Read-only engine state (the desktop `SyncStatus` shape). */
 export interface SyncStatus {
   configured: boolean;

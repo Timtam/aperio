@@ -21,7 +21,7 @@ use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::error::{GoogleDriveError, GoogleDriveResult};
+use super::error::{GoogleDriveError, GoogleDriveResult};
 
 const API_BASE: &str = "https://www.googleapis.com/drive/v3";
 const UPLOAD_BASE: &str = "https://www.googleapis.com/upload/drive/v3";

@@ -42,10 +42,12 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tracing::{debug, warn};
 
-use crate::error::{GoogleDriveError, GoogleDriveResult};
+use super::error::{GoogleDriveError, GoogleDriveResult};
 
-pub const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
-pub const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+// Google's endpoints are Google's, whichever half of this crate is asking.
+// They were declared twice while Drive lived in its own crate, and two copies
+// of a URL is two things to keep in step for no benefit.
+pub use crate::auth::{GOOGLE_AUTH_URL, GOOGLE_TOKEN_URL};
 
 /// `drive.file` is the per-app scope: Aperio can read + write
 /// only the files it creates itself, never see the rest of the

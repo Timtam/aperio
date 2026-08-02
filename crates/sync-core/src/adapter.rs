@@ -22,7 +22,8 @@
 //! - `sync-adapter-sftp` — SFTP over SSH
 //! - `sync-adapter-ftp` — FTPS
 //! - `sync-adapter-dropbox` — Dropbox API v2
-//! - `sync-adapter-googledrive` — Google Drive API v3
+//! - `cal-adapter-google::drive` — Google Drive API v3, the storage role
+//!   of the same account that serves its calendars
 //!
 //! ## Layering: encryption sits ABOVE the adapter
 //!

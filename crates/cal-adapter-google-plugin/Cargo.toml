@@ -16,9 +16,8 @@ plugin-sdk.workspace = true
 cal-adapter-google = { path = "../cal-adapter-google" }
 cal-core.workspace = true
 # Google Drive as a sync target rides on the same account: one sign-in, one
-# row, two roles. The adapter crate stays separate; only its plugin wrapper
-# was folded in here.
-sync-adapter-googledrive = { path = "../sync-adapter-googledrive" }
+# row, two roles — and, since the fold, one crate. Drive is
+# `cal-adapter-google::drive`.
 sync-core.workspace = true
 base64 = "0.22"
 # `interactive_auth` runs the OAuth token exchange over HTTP.

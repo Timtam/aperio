@@ -14,6 +14,8 @@
 pub mod api;
 pub mod auth;
 pub mod contacts;
+/// Google Drive: the storage role of the same account.
+pub mod drive;
 pub mod error;
 pub mod mapping;
 pub mod tasks;

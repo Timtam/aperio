@@ -37,7 +37,6 @@ members = [
     "crates/sync-adapter-ftp",
     "crates/sync-adapter-sftp",
     "crates/sync-adapter-dropbox",
-    "crates/sync-adapter-googledrive",
     "crates/sync-adapter-webdav-plugin",
     "crates/sync-adapter-ftp-plugin",
     "crates/sync-adapter-sftp-plugin",

@@ -17,11 +17,9 @@ import {
   AdapterKind,
   beginAccountOauth,
   beginAccountReconnect,
-  beginOauth,
   completeAccountReconnect,
   connectAccount,
 } from './accounts';
-import { SYNC_OAUTH_PLUGIN_IDS, completeSyncOauth } from './sync';
 
 /** The custom-scheme redirect the native auth session waits for. Must match the
  *  app's `aperio` scheme (app.json) AND the redirect URI registered on the
@@ -93,61 +91,6 @@ export interface SyncOAuthConnectInput {
   clientId: string;
   /** Dropbox: optional (PKCE public app). Google Drive: required. */
   clientSecret?: string;
-}
-
-/** Outcome of {@link connectSyncOAuth}. No account — sync OAuth only stores the
- *  refresh token; activation is a separate `configureSyncAdapter` step. */
-export type SyncOAuthResult = { kind: 'connected' } | { kind: 'cancelled' };
-
-/** Run the host-driven OAuth for a sync target: begin → native auth session →
- *  complete (exchange + store the refresh token). Does NOT activate the target —
- *  follow with `configureSyncAdapter({kind, client_id, …})`. */
-export async function connectSyncOAuth(
-  input: SyncOAuthConnectInput,
-): Promise<SyncOAuthResult> {
-  const pluginId = SYNC_OAUTH_PLUGIN_IDS[input.provider];
-
-  // 1. begin — pure: the Host builds the consent URL + PKCE verifier + state.
-  const authz = await beginOauth(pluginId, {
-    client_id: input.clientId,
-    redirect_uri: OAUTH_REDIRECT_URI,
-  });
-
-  // 2. open the consent URL in a native auth session.
-  const result = await WebBrowser.openAuthSessionAsync(
-    authz.authorize_url,
-    OAUTH_REDIRECT_URI,
-  );
-  if (result.type !== 'success') {
-    return { kind: 'cancelled' };
-  }
-
-  // 3. parse code + state (or a provider error) from the redirect.
-  const params = Linking.parse(result.url).queryParams ?? {};
-  const errorParam = firstString(params.error);
-  if (errorParam != null) {
-    if (errorParam === 'access_denied' || errorParam === 'user_cancelled') {
-      return { kind: 'cancelled' };
-    }
-    throw new Error(errorParam);
-  }
-  const code = firstString(params.code);
-  const returnedState = firstString(params.state) ?? '';
-  if (code == null || code.length === 0) {
-    throw new Error('OAUTH_NO_CODE');
-  }
-
-  // 4. complete — exchange the code + store the refresh token in the keychain.
-  await completeSyncOauth(pluginId, {
-    client_id: input.clientId,
-    client_secret: input.clientSecret ?? null,
-    code,
-    pkce_verifier: authz.pkce_verifier,
-    state: authz.state,
-    returned_state: returnedState,
-    redirect_uri: OAUTH_REDIRECT_URI,
-  });
-  return { kind: 'connected' };
 }
 
 /** Expo's `Linking.parse` types query values as `string | string[] | undefined`

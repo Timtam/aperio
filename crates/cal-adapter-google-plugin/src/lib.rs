@@ -32,6 +32,7 @@
 use std::os::raw::{c_char, c_void};
 
 use base64::Engine as _;
+use cal_adapter_google::drive::{DriveSyncAdapter, GoogleDriveAccountConfig};
 use cal_adapter_google::{GoogleAdapter, TokenSet};
 use cal_core::adapter::{Capability, Credentials as CalCredentials};
 use cal_core::types::{AttendeeStatus, ContactPhoto, DateRange, NewContact, NewEvent, NewTask};
@@ -47,7 +48,6 @@ use plugin_sdk::{
     PluginInstance,
 };
 use serde::Deserialize;
-use sync_adapter_googledrive::{DriveSyncAdapter, GoogleDriveAccountConfig};
 use sync_core::{DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter};
 
 /// One Google account, in both of the roles it can now play.

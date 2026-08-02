@@ -1,5 +1,13 @@
-//! Google Drive API v3 `SyncAdapter` implementation
-//! (DESIGN.md §19.6).
+//! Google Drive — the same account's storage role.
+//!
+//! It was its own crate behind its own plugin: two adapters for one provider,
+//! two sign-ins, two rows. The merge left it as the last half-measure — one
+//! plugin, still two crates — and this is the rest of it. Nothing about the
+//! Drive API moved; only where it lives.
+//!
+//! What it shares with the rest of the crate now that they are neighbours:
+//! Google's OAuth endpoints, which both halves had their own copy of. See
+//! [`oauth`]. (DESIGN.md §19.6.)
 //!
 //! Pure-Rust HTTP client built on `reqwest` (rustls) +
 //! Google's OAuth 2.0 PKCE installed-app flow with the

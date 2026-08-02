@@ -11,6 +11,10 @@ description = "Aperio Google Calendar adapter — OAuth 2.0 PKCE flow + REST API
 [dependencies]
 async-trait.workspace = true
 cal-core.workspace = true
+# The Drive half is a `SyncAdapter`; `futures` is what its parallel log
+# fetch is built on. One provider, one crate, both roles.
+sync-core.workspace = true
+futures.workspace = true
 chrono.workspace = true
 reqwest.workspace = true
 serde.workspace = true

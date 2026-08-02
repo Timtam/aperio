@@ -865,6 +865,7 @@ dependencies = [
  "base64 0.22.1",
  "cal-core",
  "chrono",
+ "futures",
  "hex",
  "mockito",
  "open",
@@ -873,6 +874,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "sync-core",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -901,7 +903,6 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "sync-adapter-googledrive",
  "sync-core",
  "tokio",
  "tracing",
@@ -6537,28 +6538,6 @@ dependencies = [
  "sync-core",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "sync-adapter-googledrive"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "chrono",
- "futures",
- "hex",
- "open",
- "rand 0.8.6",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "sync-core",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "url",
 ]
 
 [[package]]
