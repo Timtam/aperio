@@ -1,3 +1,18 @@
+//! Device names — this one's, and everybody else's.
+//!
+//! Two halves that sound alike and are not:
+//!
+//! - [`local_device_name`] / [`set_local_device_name`] own the name THIS
+//!   device publishes. It is a device-local preference (`sync.deviceName`,
+//!   deliberately not in `SYNC_WHITELIST` — a synced device name would give
+//!   every device the same one), and the heartbeat writes it into this
+//!   device's `meta.json` record on the next round.
+//! - [`DeviceNamesRepo`] is a read-through CACHE of what the OTHER devices
+//!   published, so a panel can say "announced by MacBook" without waiting for
+//!   a fetch.
+//!
+//! ## The old note below is still true of the cache
+//!
 //! Local cache of every cross-device sync participant's
 //! human-readable name (DESIGN.md §19 + §20.8).
 //!
@@ -17,6 +32,45 @@ use rusqlite::params;
 use thiserror::Error;
 
 use crate::db::SharedConn;
+use crate::user_prefs::UserPrefsRepo;
+
+pub use sync_engine::PREF_DEVICE_NAME;
+
+/// The name this device publishes to the rest of the dataset, or `None` while
+/// it has never been named.
+///
+/// `None` is not a failure and not an empty string: it means every other
+/// device's list shows this one as a bare 32-character id, which is exactly
+/// what the frontends offer to fix.
+pub fn local_device_name(prefs: &UserPrefsRepo<'_>) -> Option<String> {
+    prefs
+        .get(PREF_DEVICE_NAME)
+        .ok()
+        .flatten()
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+}
+
+/// Set the name this device publishes; a blank one clears it.
+///
+/// Takes effect on the next round rather than immediately — the heartbeat
+/// compares the stored name against the published record and pushes when they
+/// differ, so a rename is one meta write and needs nothing else to notice it.
+///
+/// Clearing rather than storing `""` is what keeps that comparison honest: the
+/// record's name is an `Option`, so a stored empty string would read as a
+/// change on every single round and never settle.
+pub fn set_local_device_name(
+    prefs: &UserPrefsRepo<'_>,
+    name: &str,
+) -> crate::user_prefs::UserPrefsResult<()> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        prefs.delete(PREF_DEVICE_NAME)
+    } else {
+        prefs.set(PREF_DEVICE_NAME, trimmed)
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum DeviceNamesError {
@@ -73,6 +127,35 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let db = DbHandle::open(dir.path().join("test.sqlite")).unwrap();
         (dir, db)
+    }
+
+    /// Blank clears rather than storing an empty string. The heartbeat
+    /// compares its stored name against the published `Option<String>`, and a
+    /// stored `""` would never equal `None` — so every round would read as a
+    /// rename and push meta, forever.
+    #[test]
+    fn a_blank_name_clears_rather_than_storing_nothing() {
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+
+        set_local_device_name(&prefs, "  Arbeitsrechner  ").unwrap();
+        assert_eq!(
+            local_device_name(&prefs).as_deref(),
+            Some("Arbeitsrechner"),
+            "surrounding space is not part of a name",
+        );
+
+        set_local_device_name(&prefs, "   ").unwrap();
+        assert_eq!(local_device_name(&prefs), None);
+        assert_eq!(prefs.get(PREF_DEVICE_NAME).unwrap(), None);
+    }
+
+    #[test]
+    fn an_unnamed_device_reads_as_none() {
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        assert_eq!(local_device_name(&UserPrefsRepo::new(&shared)), None);
     }
 
     #[test]

@@ -371,6 +371,12 @@ impl Compactor {
             DeviceRecord {
                 name: device_name,
                 last_seen_log: snapshot_ts,
+                // `upsert_device` replaces the whole record, so leaving this
+                // `None` would ERASE the stamp the heartbeat wrote — and a
+                // compaction is itself the strongest evidence this device was
+                // here, so the one moment it is most certainly true is the
+                // moment the answer would have gone missing.
+                last_seen: Some(Utc::now()),
                 app_version: self.app_version.clone(),
                 stale: false,
             },
@@ -864,6 +870,7 @@ mod tests {
             DeviceRecord {
                 name: None,
                 last_seen_log: Utc::now(),
+                last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: false,
             },
@@ -913,6 +920,7 @@ mod tests {
             DeviceRecord {
                 name: None,
                 last_seen_log: Utc::now() - ChronoDuration::days(30),
+                last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: false,
             },
@@ -964,6 +972,7 @@ mod tests {
             DeviceRecord {
                 name: None,
                 last_seen_log: Utc::now() - ChronoDuration::days(3),
+                last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: false,
             },

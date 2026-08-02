@@ -72,6 +72,20 @@ pub use sync_engine::PREF_DEVICE_NAME;
 /// chosen" apart from "adapter currently disconnected".
 pub const PREF_ONBOARDED: &str = "sync.onboarded";
 
+/// How stale this device's `last_seen` stamp may get before the heartbeat
+/// re-publishes it for that reason alone.
+///
+/// The trade this number makes: every round that has nothing else to say skips
+/// its meta push entirely, and this is the one thing that would spoil that, so
+/// it has to be far coarser than the sync interval. Twelve hours means at most
+/// two extra pushes a day on a completely idle dataset, and a device list that
+/// can be up to twelve hours out about a device that IS syncing.
+///
+/// Twelve hours of imprecision is invisible in what the list is read for.
+/// Nobody prunes a registry by asking which device was here this morning; they
+/// ask which of these eight has not been here since March.
+const LAST_SEEN_REFRESH: chrono::Duration = chrono::Duration::hours(12);
+
 /// Outcome of [`OnboardingService::preview`]. Mirrors the three
 /// cases the §19.11 onboarding dialog distinguishes.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -108,7 +122,14 @@ pub struct DeviceSummary {
     /// key React lists on.
     pub id: String,
     pub name: Option<String>,
+    /// The device's CONTENT horizon, as RFC 3339. Not when it was here — see
+    /// [`sync_core::DeviceRecord::last_seen_log`], which explains why the two
+    /// are different questions and why this one cannot answer the other.
     pub last_seen_log: String,
+    /// When this device last completed a round, as RFC 3339, or `None` on a
+    /// dataset whose registry predates the field — which reads honestly as
+    /// "unknown" rather than as a very old date.
+    pub last_seen: Option<String>,
     pub app_version: String,
     pub stale: bool,
     /// `true` when this entry refers to the current device. Lets
@@ -240,22 +261,125 @@ impl OnboardingService {
                     // pseudo-timestamp.
                     snapshot_timestamp: snapshot_ts_if_real(&meta),
                     e2e_enabled: meta.e2e_enabled,
-                    devices: meta
-                        .devices
-                        .iter()
-                        .map(|(id, rec)| DeviceSummary {
-                            id: id.clone(),
-                            name: rec.name.clone(),
-                            last_seen_log: rec.last_seen_log.to_rfc3339(),
-                            app_version: rec.app_version.clone(),
-                            stale: rec.stale,
-                            is_this_device: id == self.local_device_id.as_str(),
-                        })
-                        .collect(),
+                    devices: self.summarise_devices(&meta),
                     compatibility,
                 }
             }
         })
+    }
+
+    /// Every device the dataset has a record for, this one included and marked.
+    ///
+    /// A live read: `meta.json` is the registry, and the answer to "who else is
+    /// on this dataset" is only ever as good as the last fetch. Cheap — one
+    /// small file — and the alternative, a cached copy, would answer a question
+    /// about right now with something from the last round.
+    pub async fn list_devices(&self, adapter: &dyn SyncAdapter) -> SyncResult<Vec<DeviceSummary>> {
+        Ok(adapter
+            .fetch_meta()
+            .await?
+            .as_ref()
+            .map(|meta| self.summarise_devices(meta))
+            .unwrap_or_default())
+    }
+
+    /// Drop another device's registry entry.
+    ///
+    /// ## What the user is actually doing
+    ///
+    /// Not revoking access, and not deleting anything the device wrote. A
+    /// registry entry is a claim about who is still participating, and after
+    /// enough reinstalls and test devices the claim stops being true. Every
+    /// entry holds the GC floor down at its own held horizon
+    /// (`min_device_held` in the compactor), so leftovers are not merely
+    /// clutter in a list — they keep logs alive that nothing will ever read.
+    ///
+    /// The log FILES stay. They are dataset content: the compactor deletes each
+    /// one once the snapshot covers it, and taking them out from under it here
+    /// would delete events no device has folded in yet. Dropping the record is
+    /// enough for the floor, because the floor is computed from the records.
+    ///
+    /// ## Why it is safe to be wrong
+    ///
+    /// A device that is still running re-registers itself on its next round —
+    /// nothing here revokes a credential, and the registry is not a permission
+    /// list. The worst outcome of removing a live device is that the compactor
+    /// stops holding logs for it in the meantime, and it consumes the snapshot
+    /// on return instead of replaying logs. Slower, not lossy: its own
+    /// un-uploaded events are in its own database, and the logs it did upload
+    /// are only ever GC'd once some device has folded them into the snapshot.
+    ///
+    /// ## The one it refuses
+    ///
+    /// This device. Removing our own record would be undone by our own next
+    /// heartbeat, so the gesture would read as broken rather than as refused —
+    /// and a user reaching for it means something else ("stop syncing", which
+    /// is Disconnect, and which does clean up after itself).
+    pub async fn forget_device(
+        &self,
+        adapter: &dyn SyncAdapter,
+        device_id: &str,
+    ) -> SyncResult<()> {
+        let device_id = device_id.trim();
+        if device_id == self.local_device_id.as_str() {
+            return Err(SyncError::internal(
+                "this device cannot remove its own registry entry; disconnect instead",
+            ));
+        }
+        // Fetched fresh rather than taken from the round: the PUT below rewrites
+        // the whole file, so basing it on anything older would revert whatever a
+        // peer wrote in between — the same reasoning as the heartbeat's
+        // re-fetch, and here the window is a user staring at a dialog rather
+        // than a round, so it is wider.
+        let Some(mut meta) = adapter.fetch_meta().await? else {
+            return Err(SyncError::not_found(
+                "the target has no meta.json, so it has no device registry",
+            ));
+        };
+        if !meta.remove_device(&sync_core::DeviceId::from_string(device_id.to_string())) {
+            // Already gone. Two devices pruning the same leftover is an
+            // ordinary race and the second one has got what it asked for.
+            debug!(device = device_id, "forget_device: no such record");
+            return Ok(());
+        }
+        adapter.push_meta(&meta).await?;
+        info!(device = device_id, "removed a device from the registry");
+        Ok(())
+    }
+
+    /// The registry as the frontends render it, newest-seen first so the
+    /// entries a user is deciding about — the ones that have not been here for
+    /// months — collect at the end rather than scattering through the list.
+    fn summarise_devices(&self, meta: &MetaJson) -> Vec<DeviceSummary> {
+        // Sorted on the TIMESTAMPS, before they become strings. Comparing the
+        // RFC 3339 forms would happen to work today — `to_rfc3339` on a UTC
+        // value always writes the same offset, so lexical order is chronological
+        // — and would quietly stop working the day anything renders one in a
+        // local zone.
+        let mut rows: Vec<(&String, &sync_core::DeviceRecord)> = meta.devices.iter().collect();
+        // This device first, whatever its stamp: it is the entry the user
+        // orients by, and the one row they must not act on by accident. Then by
+        // stamp, newest first — an entry with no stamp sorts last, because
+        // "never reported" is the strongest form of "not recently".
+        rows.sort_by(|(a_id, a), (b_id, b)| {
+            let a_is_self = *a_id == self.local_device_id.as_str();
+            let b_is_self = *b_id == self.local_device_id.as_str();
+            b_is_self
+                .cmp(&a_is_self)
+                .then_with(|| b.last_seen.cmp(&a.last_seen))
+                .then_with(|| a_id.cmp(b_id))
+        });
+        rows.into_iter()
+            .map(|(id, rec)| DeviceSummary {
+                id: id.clone(),
+                name: rec.name.clone(),
+                last_seen_log: rec.last_seen_log.to_rfc3339(),
+                last_seen: rec.last_seen.map(|ts| ts.to_rfc3339()),
+                app_version: rec.app_version.clone(),
+                stale: rec.stale,
+                is_this_device: id == self.local_device_id.as_str(),
+            })
+            .collect()
     }
 
     /// "Datensatz übernehmen" path. Pulls every log from the remote,
@@ -808,6 +932,7 @@ impl OnboardingService {
             .get(PREF_DEVICE_NAME)
             .ok()
             .flatten();
+        let now = Utc::now();
         let is_current = |meta: &MetaJson| {
             meta.devices
                 .get(self.local_device_id.as_str())
@@ -816,6 +941,26 @@ impl OnboardingService {
                         && d.name == name
                         && d.app_version == self.app_version
                         && !d.stale
+                        // Deliberately COARSE. Every other term here is an
+                        // equality, and treating the wall clock the same way
+                        // would make the skip below unreachable — the stamp
+                        // differs by definition on every round, so a quiet
+                        // dataset would go back to one GET plus one PUT per
+                        // device per round, which is exactly the traffic the
+                        // skip was added to remove.
+                        //
+                        // So the record counts as current while its stamp is
+                        // younger than the refresh window, and the push
+                        // happens at most twice a day for this reason alone.
+                        // What that costs is precision the device list does
+                        // not use: it says "yesterday" or "in March", and
+                        // being up to twelve hours out never changes which of
+                        // those it says.
+                        //
+                        // `None` is not current. That is how the stamp first
+                        // appears on a dataset that predates the field.
+                        && d.last_seen
+                            .is_some_and(|seen| now - seen < LAST_SEEN_REFRESH)
                 })
         };
         if round_meta.is_some_and(&is_current) {
@@ -843,6 +988,7 @@ impl OnboardingService {
             DeviceRecord {
                 name,
                 last_seen_log,
+                last_seen: Some(now),
                 app_version: self.app_version.clone(),
                 stale: false,
             },
@@ -858,11 +1004,13 @@ impl OnboardingService {
                 .ok()
                 .flatten()
         });
+        let now = Utc::now();
         meta.upsert_device(
             &self.local_device_id,
             DeviceRecord {
                 name,
-                last_seen_log: Utc::now(),
+                last_seen_log: now,
+                last_seen: Some(now),
                 app_version: self.app_version.clone(),
                 stale: false,
             },
@@ -1126,6 +1274,7 @@ mod tests {
             DeviceRecord {
                 name: Some("Desktop".into()),
                 last_seen_log: Utc::now(),
+                last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: false,
             },
@@ -1156,6 +1305,7 @@ mod tests {
             DeviceRecord {
                 name: Some("Other Device".into()),
                 last_seen_log: Utc::now(),
+                last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: false,
             },
@@ -1210,6 +1360,7 @@ mod tests {
             DeviceRecord {
                 name: Some("A".into()),
                 last_seen_log: Utc::now(),
+                last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: false,
             },
@@ -1219,6 +1370,7 @@ mod tests {
             DeviceRecord {
                 name: Some("B".into()),
                 last_seen_log: Utc::now(),
+                last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: false,
             },
@@ -1264,13 +1416,15 @@ mod tests {
         let adapter = FakeAdapter::new();
         let now = Utc::now();
         // Round-cached meta: our record already carries exactly the horizon
-        // we are about to stamp.
+        // we are about to stamp, and a wall-clock stamp from within the
+        // refresh window — both halves have to be current for the skip.
         let mut cached = MetaJson::fresh("1.0.0-test");
         cached.upsert_device(
             &DeviceId::from_string("dev-this".into()),
             DeviceRecord {
                 name: None,
                 last_seen_log: now,
+                last_seen: Some(now - chrono::Duration::hours(1)),
                 app_version: "1.0.0-test".into(),
                 stale: false,
             },
@@ -1284,6 +1438,7 @@ mod tests {
             DeviceRecord {
                 name: Some("Marker".into()),
                 last_seen_log: now,
+                last_seen: None,
                 app_version: "1.0.0-test".into(),
                 stale: false,
             },
@@ -1322,6 +1477,7 @@ mod tests {
             DeviceRecord {
                 name: None,
                 last_seen_log: old,
+                last_seen: None,
                 app_version: "1.0.0-test".into(),
                 stale: false,
             },
@@ -1333,6 +1489,7 @@ mod tests {
             DeviceRecord {
                 name: Some("Marker".into()),
                 last_seen_log: now,
+                last_seen: None,
                 app_version: "1.0.0-test".into(),
                 stale: false,
             },
@@ -1369,6 +1526,7 @@ mod tests {
             DeviceRecord {
                 name: None,
                 last_seen_log: old,
+                last_seen: None,
                 app_version: "1.0.0-test".into(),
                 stale: false,
             },
@@ -1384,6 +1542,203 @@ mod tests {
             .device(&DeviceId::from_string("dev-this".into()))
             .expect("self entry");
         assert_eq!(rec.last_seen_log, now, "moved horizon was pushed");
+    }
+
+    /// The stamp is what the device list reads, and it has to keep moving on a
+    /// dataset where nothing else does — otherwise a machine that syncs every
+    /// quarter of an hour reads as abandoned, which is the exact judgement the
+    /// list exists to support.
+    #[tokio::test]
+    async fn heartbeat_republishes_a_stamp_that_has_gone_stale() {
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+        let now = Utc::now();
+        let mut cached = MetaJson::fresh("1.0.0-test");
+        cached.upsert_device(
+            &DeviceId::from_string("dev-this".into()),
+            DeviceRecord {
+                name: None,
+                // Nothing has happened on this dataset for two days, so the
+                // horizon is unchanged and every OTHER term of the skip test
+                // still matches. Only the wall clock has moved.
+                last_seen_log: now,
+                last_seen: Some(now - chrono::Duration::days(2)),
+                app_version: "1.0.0-test".into(),
+                stale: false,
+            },
+        );
+        adapter.install_meta(cached.clone());
+
+        svc.heartbeat_meta(&adapter, now, Some(&cached))
+            .await
+            .unwrap();
+
+        let after = adapter.fetch_meta().await.unwrap().unwrap();
+        let seen = after
+            .device(&DeviceId::from_string("dev-this".into()))
+            .expect("self entry")
+            .last_seen
+            .expect("the stamp was refreshed");
+        assert!(
+            now - seen < chrono::Duration::minutes(1),
+            "stamp is {seen}, expected roughly {now}",
+        );
+    }
+
+    /// How the stamp appears on a dataset that predates it: the record reads
+    /// as not-current exactly once, and the push that follows fills it in.
+    #[tokio::test]
+    async fn heartbeat_fills_in_a_stamp_that_was_never_written() {
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+        let now = Utc::now();
+        let mut cached = MetaJson::fresh("1.0.0-test");
+        cached.upsert_device(
+            &DeviceId::from_string("dev-this".into()),
+            DeviceRecord {
+                name: None,
+                last_seen_log: now,
+                last_seen: None,
+                app_version: "1.0.0-test".into(),
+                stale: false,
+            },
+        );
+        adapter.install_meta(cached.clone());
+
+        svc.heartbeat_meta(&adapter, now, Some(&cached))
+            .await
+            .unwrap();
+
+        assert!(
+            after_self(&adapter).await.last_seen.is_some(),
+            "an unstamped record must not read as current, or it never gains one",
+        );
+    }
+
+    /// A registry entry, as terse as the tests below need it.
+    fn record(name: Option<&str>, last_seen: Option<DateTime<Utc>>) -> DeviceRecord {
+        DeviceRecord {
+            name: name.map(str::to_string),
+            last_seen_log: Utc::now(),
+            last_seen,
+            app_version: "1.0.0-test".into(),
+            stale: false,
+        }
+    }
+
+    /// A registry with this device and two leftovers, one of which never
+    /// reported a wall clock at all.
+    fn registry_with_leftovers() -> MetaJson {
+        let now = Utc::now();
+        let mut meta = MetaJson::fresh("1.0.0-test");
+        meta.upsert_device(
+            &DeviceId::from_string("dev-this".into()),
+            record(Some("Desktop"), Some(now)),
+        );
+        meta.upsert_device(
+            &DeviceId::from_string("dev-old".into()),
+            record(Some("Test-Laptop"), Some(now - chrono::Duration::days(90))),
+        );
+        meta.upsert_device(
+            &DeviceId::from_string("dev-ancient".into()),
+            record(None, None),
+        );
+        meta
+    }
+
+    /// The order the list is read in: this device, then by how recently each
+    /// one was here, with "never reported" at the bottom.
+    #[tokio::test]
+    async fn the_device_list_puts_this_device_first_and_the_silent_ones_last() {
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+        adapter.install_meta(registry_with_leftovers());
+
+        let devices = svc.list_devices(&adapter).await.unwrap();
+
+        let ids: Vec<&str> = devices.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(ids, vec!["dev-this", "dev-old", "dev-ancient"]);
+        assert!(devices[0].is_this_device);
+        assert!(!devices[1].is_this_device);
+        assert!(
+            devices[2].last_seen.is_none(),
+            "a record from before the stamp existed must read as unknown, not as 1970",
+        );
+    }
+
+    /// The whole point: an entry that is not a device any more goes, and
+    /// nothing else does.
+    #[tokio::test]
+    async fn forgetting_a_device_takes_its_record_and_leaves_the_rest() {
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+        adapter.install_meta(registry_with_leftovers());
+
+        svc.forget_device(&adapter, "dev-old").await.unwrap();
+
+        let after = adapter.fetch_meta().await.unwrap().unwrap();
+        assert!(after
+            .device(&DeviceId::from_string("dev-old".into()))
+            .is_none());
+        assert!(after
+            .device(&DeviceId::from_string("dev-this".into()))
+            .is_some());
+        assert!(after
+            .device(&DeviceId::from_string("dev-ancient".into()))
+            .is_some());
+    }
+
+    /// Two devices pruning the same leftover in the same minute. The second
+    /// one asked for it to be gone and it is gone.
+    #[tokio::test]
+    async fn forgetting_a_device_that_is_already_gone_is_not_an_error() {
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+        adapter.install_meta(registry_with_leftovers());
+
+        svc.forget_device(&adapter, "dev-old").await.unwrap();
+        svc.forget_device(&adapter, "dev-old")
+            .await
+            .expect("the job was already done");
+    }
+
+    /// Refused rather than performed-and-undone: the next heartbeat would put
+    /// the record straight back, so honouring it would read as a broken
+    /// button rather than as a decision the app declined to make.
+    #[tokio::test]
+    async fn a_device_cannot_forget_itself() {
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+        adapter.install_meta(registry_with_leftovers());
+
+        let err = svc
+            .forget_device(&adapter, "dev-this")
+            .await
+            .expect_err("this device must refuse to remove itself");
+        assert!(err.to_string().contains("disconnect"), "{err}");
+
+        let after = adapter.fetch_meta().await.unwrap().unwrap();
+        assert!(after
+            .device(&DeviceId::from_string("dev-this".into()))
+            .is_some());
+    }
+
+    /// This device's own record after whatever the test just did.
+    async fn after_self(adapter: &FakeAdapter) -> DeviceRecord {
+        adapter
+            .fetch_meta()
+            .await
+            .unwrap()
+            .unwrap()
+            .device(&DeviceId::from_string("dev-this".into()))
+            .expect("self entry")
+            .clone()
     }
 
     #[tokio::test]
@@ -1406,6 +1761,7 @@ mod tests {
             DeviceRecord {
                 name: None,
                 last_seen_log: Utc::now() - chrono::Duration::days(2),
+                last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: true,
             },

@@ -602,6 +602,7 @@ mod tests {
             sync_core::DeviceRecord {
                 name: Some("Desktop".into()),
                 last_seen_log: Utc::now(),
+                last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: false,
             },

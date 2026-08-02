@@ -52,7 +52,36 @@ pub struct DeviceRecord {
     /// Timestamp of the latest log file this device has read AND
     /// applied locally. Compaction can drop logs older than the
     /// minimum across all devices.
+    ///
+    /// NOT a heartbeat, despite the name: it is a CONTENT horizon. On a
+    /// dataset where nothing is happening it does not move, however often the
+    /// device syncs. Anything that wants to say "this device was here
+    /// recently" has to read [`Self::last_seen`] instead.
     pub last_seen_log: DateTime<Utc>,
+    /// Wall clock of the last round this device completed — the answer to
+    /// "which of these entries is still a device and which is left over".
+    ///
+    /// [`Self::last_seen_log`] cannot answer it: a device that syncs every
+    /// fifteen minutes against a quiet dataset holds the same content horizon
+    /// for weeks, and a device abandoned in March holds the horizon it had in
+    /// March. The two are indistinguishable, and telling them apart is the
+    /// whole point of the device list.
+    ///
+    /// Optional, and absent rather than defaulted: a dataset written by a
+    /// build that predates this field has no answer, and `None` says so. A
+    /// zero timestamp would have claimed 1970 — an entry that looks like the
+    /// most abandoned device on the list when it may be the one syncing right
+    /// now. The stamp appears the first time each device completes a round on
+    /// a build that writes it.
+    ///
+    /// Additive, so no [`SCHEMA_VERSION`] bump: nothing in this crate sets
+    /// `deny_unknown_fields`, so an older Aperio reading this file ignores the
+    /// key, and — because it round-trips through its own `DeviceRecord` — drops
+    /// it again on the next write. Which is the honest outcome: while an old
+    /// build is participating, it genuinely cannot report when it was last
+    /// here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_seen: Option<DateTime<Utc>>,
     /// App version that most recently updated this record. Lets
     /// the schema-versioning check (§19.13) reason about whether
     /// devices are running compatible binaries.
@@ -187,6 +216,27 @@ impl MetaJson {
     pub fn device(&self, id: &DeviceId) -> Option<&DeviceRecord> {
         self.devices.get(id.as_str())
     }
+
+    /// Drop a device from the registry. `true` when there was one to drop.
+    ///
+    /// ## What this is not
+    ///
+    /// It is not a revocation and it is not a delete. A device that is still
+    /// running re-registers itself on its very next round — `upsert_device`
+    /// does not ask whether it used to be there — so the gesture means "stop
+    /// counting this one", and the registry corrects itself if the user was
+    /// wrong about it being gone.
+    ///
+    /// It also leaves the device's LOG FILES where they are. They are dataset
+    /// content, not device state: the compactor deletes each one once the
+    /// snapshot covers it, and removing them here would delete events that no
+    /// device has folded in yet. The one thing this call is for — a registry
+    /// entry holding the GC floor down at some timestamp from March — is
+    /// achieved by dropping the record alone, because the floor is computed
+    /// from the records.
+    pub fn remove_device(&mut self, id: &DeviceId) -> bool {
+        self.devices.remove(id.as_str()).is_some()
+    }
 }
 
 #[cfg(test)]
@@ -202,6 +252,7 @@ mod tests {
             DeviceRecord {
                 name: Some("Desktop".into()),
                 last_seen_log: Utc::now(),
+                last_seen: None,
                 app_version: "1.0.0".into(),
                 stale: false,
             },
@@ -225,6 +276,7 @@ mod tests {
                 DeviceRecord {
                     name: None,
                     last_seen_log: Utc::now(),
+                    last_seen: None,
                     app_version: "1.0.0".into(),
                     stale: false,
                 },
@@ -234,6 +286,94 @@ mod tests {
         // `stale: false` is the default — we keep the on-disk
         // shape minimal so the file stays readable.
         assert!(!json.contains("\"stale\""));
+    }
+
+    /// The registry a dataset written before this field existed carries, and
+    /// what happens when it is read by a build that has it.
+    ///
+    /// `None`, not "1970". The device list renders "unknown" for it, which is
+    /// true; a zero timestamp would have sorted every pre-existing device to
+    /// the top of the abandoned end of the list, including the one the user is
+    /// sitting in front of.
+    #[test]
+    fn a_registry_without_the_stamp_reads_as_no_answer() {
+        let raw = r#"{
+            "schema_version": 1,
+            "min_app_version": "1.0.0",
+            "snapshot_timestamp": "2025-01-01T00:00:00Z",
+            "devices": {
+                "dev-a": {
+                    "last_seen_log": "2025-01-01T00:00:00Z",
+                    "app_version": "1.0.0"
+                }
+            }
+        }"#;
+        let meta = MetaJson::from_bytes(raw.as_bytes()).unwrap();
+        assert_eq!(meta.devices["dev-a"].last_seen, None);
+    }
+
+    /// Absent when unset, so a dataset shared with an older build does not
+    /// grow a null key that build then has to ignore.
+    #[test]
+    fn the_stamp_is_omitted_on_serialise_when_unset() {
+        let mut meta = MetaJson::fresh("1.0.0");
+        let dev = DeviceId::from_string("dev-a".into());
+        meta.upsert_device(
+            &dev,
+            DeviceRecord {
+                name: None,
+                last_seen_log: Utc::now(),
+                last_seen: None,
+                app_version: "1.0.0".into(),
+                stale: false,
+            },
+        );
+        let json = String::from_utf8(meta.to_bytes().unwrap()).unwrap();
+        assert!(!json.contains("last_seen\""), "{json}");
+
+        // And present the moment there is something to say.
+        meta.upsert_device(
+            &dev,
+            DeviceRecord {
+                name: None,
+                last_seen_log: Utc::now(),
+                last_seen: Some(Utc::now()),
+                app_version: "1.0.0".into(),
+                stale: false,
+            },
+        );
+        let json = String::from_utf8(meta.to_bytes().unwrap()).unwrap();
+        assert!(json.contains("\"last_seen\""), "{json}");
+    }
+
+    /// Removing a record takes that record and nothing else — in particular
+    /// not the other devices, which is what a user pruning a list of eight
+    /// test installs is trusting it not to do.
+    #[test]
+    fn removing_a_device_takes_that_device_only() {
+        let mut meta = MetaJson::fresh("1.0.0");
+        let keep = DeviceId::from_string("keep".into());
+        let drop = DeviceId::from_string("drop".into());
+        for id in [&keep, &drop] {
+            meta.upsert_device(
+                id,
+                DeviceRecord {
+                    name: None,
+                    last_seen_log: Utc::now(),
+                    last_seen: None,
+                    app_version: "1.0.0".into(),
+                    stale: false,
+                },
+            );
+        }
+
+        assert!(meta.remove_device(&drop));
+        assert!(meta.device(&drop).is_none());
+        assert!(meta.device(&keep).is_some());
+
+        // Twice is not an error. Two devices can prune the same leftover in
+        // the same minute, and the second one has simply found the job done.
+        assert!(!meta.remove_device(&drop));
     }
 
     #[test]

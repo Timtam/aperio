@@ -1187,6 +1187,7 @@ mod tests {
             DeviceRecord {
                 name: None,
                 last_seen_log: Utc::now(),
+                last_seen: None,
                 app_version: "1.0.0-test".into(),
                 stale: false,
             },
