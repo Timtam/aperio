@@ -13,7 +13,6 @@ import { AppDialog } from './AppDialog';
 import { RadioGroup } from './RadioGroup';
 import {
   SyncTargetConfigForm,
-  type SyncConnectOutcome,
 } from './sync/SyncTargetConfigForm';
 
 interface FirstLaunchWizardModalProps {
@@ -77,20 +76,14 @@ export function FirstLaunchWizardModal({
     label: t(`dialogs.firstLaunchWizard.language_${opt}`),
   }));
 
-  // RESTORE (joined an existing dataset) ends the wizard; CREATE (fresh target)
-  // continues to the account step.
-  const onSyncConnected = useCallback(
-    (outcome: SyncConnectOutcome) => {
-      if (outcome.joined) {
-        onClose();
-        return;
-      }
-      setStep('account');
-    },
-    [onClose],
-  );
+  // Storage is the last step either way now — joining brings the accounts down
+  // with the dataset, and starting fresh has already been through the account
+  // step — so a connected target ends the wizard.
+  const onSyncConnected = useCallback(() => {
+    onClose();
+  }, [onClose]);
 
-  const stepNumber = step === 'language' ? 1 : step === 'sync' ? 2 : 3;
+  const stepNumber = step === 'language' ? 1 : step === 'account' ? 2 : 3;
 
   return (
     <AppDialog
@@ -123,7 +116,7 @@ export function FirstLaunchWizardModal({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={t('dialogs.firstLaunchWizard.next')}
-            onPress={() => setStep('sync')}
+            onPress={() => setStep('account')}
             style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}
           >
             <Text style={styles.primaryButtonText}>
@@ -145,7 +138,7 @@ export function FirstLaunchWizardModal({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={t('dialogs.firstLaunchWizard.back')}
-            onPress={() => setStep('language')}
+            onPress={() => setStep('account')}
             style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
           >
             <Text style={styles.ghostButtonText}>
@@ -155,7 +148,7 @@ export function FirstLaunchWizardModal({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={t('dialogs.firstLaunchWizard.syncSkip')}
-            onPress={() => setStep('account')}
+            onPress={onClose}
             style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
           >
             <Text style={styles.ghostButtonText}>
@@ -176,7 +169,7 @@ export function FirstLaunchWizardModal({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={t('dialogs.firstLaunchWizard.back')}
-            onPress={() => setStep('sync')}
+            onPress={() => setStep('language')}
             style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
           >
             <Text style={styles.ghostButtonText}>
@@ -185,12 +178,12 @@ export function FirstLaunchWizardModal({
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={t('dialogs.firstLaunchWizard.finish')}
-            onPress={onClose}
+            accessibilityLabel={t('dialogs.firstLaunchWizard.next')}
+            onPress={() => setStep('sync')}
             style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}
           >
             <Text style={styles.primaryButtonText}>
-              {t('dialogs.firstLaunchWizard.finish')}
+              {t('dialogs.firstLaunchWizard.next')}
             </Text>
           </Pressable>
         </>
