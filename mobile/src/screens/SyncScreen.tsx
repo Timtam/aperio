@@ -35,6 +35,7 @@ import {
 } from '../api/sync';
 import { listAccounts } from '../api/accounts';
 import { setUserPref } from '../api/prefs';
+import { useSyncErrorMessage } from '../api/syncErrorMessage';
 import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
 import { SyncTargetAccountPicker } from '../components/sync/SyncTargetAccountPicker';
@@ -64,12 +65,14 @@ import CalFfi from '../../modules/cal-ffi';
 const PREF_SYNC_INTERVAL_MINUTES = 'sync.intervalMinutes';
 const INTERVAL_PRESETS: readonly number[] = [1, 5, 15, 30, 60, 240];
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 export default function SyncScreen() {
   const { t, i18n } = useTranslation();
+  // Every failure on this screen that came out of the sync engine now carries
+  // its own code, so it can be said in the reader's language instead of the
+  // engine's English. Anything else — a calendar refresh, a store write — has
+  // no code and falls through to its own message, exactly as before.
+  const errorMessage = useSyncErrorMessage();
   const navigation = useNavigation();
   const styles = useThemedStyles(makeStyles);
 
@@ -116,7 +119,7 @@ export default function SyncScreen() {
         announce(t('mobile.error', { message: errorMessage(err) }));
       }
     },
-    [announce, t],
+    [announce, t, errorMessage],
   );
 
   const intervalOptions = useMemo(
@@ -141,7 +144,7 @@ export default function SyncScreen() {
     } finally {
       setBusyCompact(false);
     }
-  }, [announce, t]);
+  }, [announce, t, errorMessage]);
 
   const refresh = useCallback(async () => {
     try {
@@ -156,7 +159,7 @@ export default function SyncScreen() {
     } catch (err) {
       setError(errorMessage(err));
     }
-  }, []);
+  }, [errorMessage]);
 
   // Refresh on every focus (not just mount) so a background-triggered round's
   // result shows when the user opens this screen.
@@ -188,7 +191,7 @@ export default function SyncScreen() {
       setError(message);
       announce(t('mobile.error', { message }));
     }
-  }, [announce, t]);
+  }, [announce, t, errorMessage]);
 
   const clearLog = useCallback(() => {
     Alert.alert(
@@ -215,7 +218,7 @@ export default function SyncScreen() {
         },
       ],
     );
-  }, [announce, refresh, t]);
+  }, [announce, refresh, t, errorMessage]);
 
   const onDisconnect = useCallback(() => {
     Alert.alert(
@@ -257,7 +260,7 @@ export default function SyncScreen() {
         },
       ],
     );
-  }, [announce, refresh, t]);
+  }, [announce, refresh, t, errorMessage]);
 
   const runSync = useCallback(async () => {
     setError(null);
@@ -280,7 +283,7 @@ export default function SyncScreen() {
     } finally {
       setBusy(false);
     }
-  }, [announce, refresh, t]);
+  }, [announce, refresh, t, errorMessage]);
 
   // §19.7 — enable E2E (irreversible without the passphrase, gated by a confirm).
   const runEnableE2e = useCallback(
@@ -300,7 +303,7 @@ export default function SyncScreen() {
         setBusy(false);
       }
     },
-    [announce, refresh, t],
+    [announce, refresh, t, errorMessage],
   );
 
   const enableE2e = useCallback(() => {
@@ -352,7 +355,7 @@ export default function SyncScreen() {
     } finally {
       setBusy(false);
     }
-  }, [announce, changeNewPp, changeOldPp, t]);
+  }, [announce, changeNewPp, changeOldPp, t, errorMessage]);
 
   const runDisableE2e = useCallback(
     async (pp: string) => {
@@ -375,7 +378,7 @@ export default function SyncScreen() {
         await refresh();
       }
     },
-    [announce, refresh, t],
+    [announce, refresh, t, errorMessage],
   );
 
   const disableE2e = useCallback(() => {
@@ -422,7 +425,7 @@ export default function SyncScreen() {
       setBusy(false);
       await refresh();
     }
-  }, [adoptPp, announce, refresh, t]);
+  }, [adoptPp, announce, refresh, t, errorMessage]);
 
   // §19.10 — re-onboard a device that fell behind the compaction window.
   const resumeStale = useCallback(async () => {
@@ -439,7 +442,7 @@ export default function SyncScreen() {
       setBusy(false);
       await refresh();
     }
-  }, [announce, refresh, t]);
+  }, [announce, refresh, t, errorMessage]);
 
   // Move SR focus onto the adopt banner when it appears.
   const adoptRequired = status?.last_error_code === 'encryption_required';
@@ -449,7 +452,7 @@ export default function SyncScreen() {
       ? findNodeHandle(adoptBannerRef.current)
       : null;
     if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
-  }, [adoptRequired]);
+  }, [adoptRequired, errorMessage]);
 
   const lastSynced =
     status?.last_synced_at != null
