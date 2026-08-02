@@ -128,7 +128,16 @@ jobs:
           # decides what gets staged. It used to be the literal 17, written out at
           # three places in this file plus once more in a Rust test — so unplugging
           # an adapter turned a correct build into a red one.
-          expected=$(grep -c '"com\.aperio\.' src-tauri/build.rs)
+          # Scoped to the PLUGINS TABLE, not the whole file. A `com.aperio.`
+          # literal anywhere else in build.rs inflates this — which is exactly
+          # what happened the day it grew a helper filtering on that prefix:
+          # one string, in a function that stages nothing, and every artifact
+          # build went red against a tree that was fine.
+          expected=$(sed -n '/^const PLUGINS/,/^];/p' src-tauri/build.rs | grep -c '"com\.aperio\.')
+          if [ "$expected" -lt 1 ]; then
+            echo "::error::could not read the PLUGINS table out of src-tauri/build.rs"
+            exit 1
+          fi
           echo "build.rs stages $expected plugins"
           STAGED_DIR="target/release/plugins/bundled"
           if [ ! -d "$STAGED_DIR" ]; then
@@ -260,7 +269,16 @@ jobs:
           # decides what gets staged. It used to be the literal 17, written out at
           # three places in this file plus once more in a Rust test — so unplugging
           # an adapter turned a correct build into a red one.
-          expected=$(grep -c '"com\.aperio\.' src-tauri/build.rs)
+          # Scoped to the PLUGINS TABLE, not the whole file. A `com.aperio.`
+          # literal anywhere else in build.rs inflates this — which is exactly
+          # what happened the day it grew a helper filtering on that prefix:
+          # one string, in a function that stages nothing, and every artifact
+          # build went red against a tree that was fine.
+          expected=$(sed -n '/^const PLUGINS/,/^];/p' src-tauri/build.rs | grep -c '"com\.aperio\.')
+          if [ "$expected" -lt 1 ]; then
+            echo "::error::could not read the PLUGINS table out of src-tauri/build.rs"
+            exit 1
+          fi
           echo "build.rs stages $expected plugins"
           for triple in x86_64-apple-darwin aarch64-apple-darwin; do
             d="target/$triple/release/plugins/bundled"
@@ -314,7 +332,16 @@ jobs:
             cp "$ARM/plugins/bundled/$id/plugin.json" "$out/plugin.json"
           done
 
-          expected=$(grep -c '"com\.aperio\.' src-tauri/build.rs)
+          # Scoped to the PLUGINS TABLE, not the whole file. A `com.aperio.`
+          # literal anywhere else in build.rs inflates this — which is exactly
+          # what happened the day it grew a helper filtering on that prefix:
+          # one string, in a function that stages nothing, and every artifact
+          # build went red against a tree that was fine.
+          expected=$(sed -n '/^const PLUGINS/,/^];/p' src-tauri/build.rs | grep -c '"com\.aperio\.')
+          if [ "$expected" -lt 1 ]; then
+            echo "::error::could not read the PLUGINS table out of src-tauri/build.rs"
+            exit 1
+          fi
           count=$(find "$STAGE_DIR/plugins/bundled" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
           if [ "$count" -ne "$expected" ]; then
             echo "::error::universal layout has $count plugins, expected $expected"

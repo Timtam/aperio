@@ -158,6 +158,57 @@ mod tests {
         assert_eq!(manager.len(), 0);
     }
 
+    /// The release workflow derives "how many plugins should be staged" by
+    /// reading `build.rs`, and it has to read the same number this build
+    /// stages.
+    ///
+    /// It is a shell one-liner over a Rust file, which is exactly as fragile as
+    /// it sounds — and it broke: `build.rs` grew a helper that filters stale
+    /// directories on the `com.aperio.` PREFIX, one string literal in a
+    /// function that stages nothing, and the count went up by one. Every
+    /// artifact build then failed against a tree that was perfectly fine, and
+    /// nothing said so until a thirty-minute CI run came back red.
+    ///
+    /// So the derivation is pinned here, where `cargo test` finds a mismatch in
+    /// seconds. The extraction below mirrors the workflow's: take the
+    /// `const PLUGINS` block, count the `"com.aperio.` lines in it.
+    #[test]
+    fn the_workflow_derives_the_same_plugin_count_this_build_stages() {
+        let build_rs = include_str!("../build.rs");
+        let table = build_rs
+            .split_once("\nconst PLUGINS")
+            .expect("build.rs declares a PLUGINS table")
+            .1
+            .split_once("\n];")
+            .expect("the PLUGINS table is terminated")
+            .0;
+        let derived = table
+            .lines()
+            .filter(|line| line.contains("\"com.aperio."))
+            .count();
+
+        // The entry count, measured a DIFFERENT way — off each tuple's first
+        // field, the cdylib crate name. Counting the ids again would just
+        // restate the line above and assert nothing.
+        let entries = table
+            .lines()
+            .filter(|line| line.trim_end().ends_with("-cdylib\","))
+            .count();
+
+        assert_eq!(
+            derived, entries,
+            "the workflow's `sed '/^const PLUGINS/,/^];/p' | grep -c '\"com\\.aperio\\.'` \
+             sees {derived} plugins but the table has {entries} entries — the \
+             artifact build will fail against a healthy tree. Something inside the \
+             table carries a `\"com.aperio.` literal that is not an entry's id.",
+        );
+        assert!(
+            entries >= 12,
+            "only {entries} plugins in the table; if an adapter was unplugged on \
+             purpose, lower this floor deliberately rather than by accident",
+        );
+    }
+
     /// `bundled_dir()` returns a path under the dir of the
     /// currently-running test binary. The path may or may not
     /// exist depending on whether `cargo build --workspace`
