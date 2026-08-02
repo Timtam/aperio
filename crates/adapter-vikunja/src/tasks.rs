@@ -1344,6 +1344,24 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
     // in Vikunja's own UI shows as InProgress here too).
     let status = if entry.done {
         TaskStatus::Completed
+    } else if entry.percent_done >= 1.0 {
+        // Finished, but not done. That combination does not describe work in
+        // progress — it is what a REPEATING task looks like the moment after
+        // it is ticked off.
+        //
+        // Vikunja's own recurrence handles the tick: it moves the dates
+        // forward and flips `done` back to false, so the task comes round
+        // again. What it does NOT do is reset `percent_done`, which Aperio
+        // wrote as `1.0` on the way in. So the task returned tomorrow reading
+        // "not done, 100%" — and the rule below turned every repeating task,
+        // forever after its first completion, into an in-progress one.
+        //
+        // Read as Open, which is what it is: a fresh instance nobody has
+        // touched yet. The cost is a task somebody deliberately parked at
+        // exactly 100% in Vikunja's own UI without ticking it, which now reads
+        // Open rather than InProgress — a rarer thing than a repeating task,
+        // and a smaller lie.
+        TaskStatus::Open
     } else if entry.percent_done > 0.0 {
         TaskStatus::InProgress
     } else {
@@ -1467,9 +1485,20 @@ fn vikunja_body_extras(
 /// fraction reads back as InProgress); Open/Cancelled are 0, Completed is 1
 /// (Vikunja also sets it from `done`, but we send it explicitly so an update
 /// that moves a task Open ⇄ InProgress ⇄ Completed is deterministic).
-fn status_percent_done(status: TaskStatus) -> f64 {
+///
+/// `repeats` is the exception, and it is about what happens AFTER the write.
+/// Ticking off a repeating task does not leave it done: Vikunja's recurrence
+/// moves the dates forward and flips `done` back to false. It does not touch
+/// `percent_done`, so whatever we send survives onto the next instance — and a
+/// fresh instance nobody has started must not arrive carrying progress. So a
+/// completion that will immediately come round again writes 0.
+///
+/// It is `done` that records the completion, and `map_task` reads that first;
+/// the zero is invisible for as long as the task is actually done.
+fn status_percent_done(status: TaskStatus, repeats: bool) -> f64 {
     match status {
         TaskStatus::InProgress => 0.5,
+        TaskStatus::Completed if repeats => 0.0,
         TaskStatus::Completed => 1.0,
         TaskStatus::Open | TaskStatus::Cancelled => 0.0,
     }
@@ -1498,7 +1527,7 @@ fn new_task_to_body(new: &NewTask) -> TaskEntry {
         title: Some(new.title.clone()),
         description,
         done: matches!(new.status, TaskStatus::Completed),
-        percent_done: status_percent_done(new.status),
+        percent_done: status_percent_done(new.status, repeat_after != 0),
         done_at: None,
         due_date: combine_date_time(new.deadline_date, new.deadline_time),
         start_date: combine_date_time(new.scheduled_date, new.scheduled_time),
@@ -1556,7 +1585,7 @@ fn task_to_body(task: &Task) -> TaskEntry {
         title: Some(task.title.clone()),
         description,
         done: matches!(task.status, TaskStatus::Completed),
-        percent_done: status_percent_done(task.status),
+        percent_done: status_percent_done(task.status, repeat_after != 0),
         // We never write `done_at` ourselves — Vikunja sets it
         // server-side when `done` flips to true.
         done_at: None,
@@ -1838,6 +1867,56 @@ mod tests {
         // Priority 0 collapses to Low (the "no priority" bucket
         // round-trips to a real Aperio value).
         assert_eq!(task.priority, TaskPriority::Low);
+    }
+
+    /// A repeating task that has just been ticked off comes back from Vikunja
+    /// as "not done, 100%" — the dates moved on, `done` flipped back, and
+    /// `percent_done` was left where the completion put it.
+    ///
+    /// That is a brand-new instance nobody has touched, and it has to read
+    /// Open. It used to read InProgress, so every repeating task was marked as
+    /// being worked on from its first completion onwards, for good.
+    #[test]
+    fn map_task_reads_a_repeated_tasks_leftover_progress_as_open() {
+        let repeated = TaskEntry {
+            id: 8,
+            title: Some("Bins out".into()),
+            done: false,
+            percent_done: 1.0,
+            // Weekly — the shape that makes Vikunja re-open the task.
+            repeat_after: 7 * 24 * 60 * 60,
+            project_id: 1,
+            ..Default::default()
+        };
+        assert_eq!(map_task(repeated, "1").status, TaskStatus::Open);
+
+        // And a NON-repeating row in the same state reads the same way. The
+        // rule is about the combination "finished but not done", not about the
+        // repeat: it never describes work in progress.
+        let stray = TaskEntry {
+            id: 9,
+            title: Some("Odd".into()),
+            done: false,
+            percent_done: 1.0,
+            project_id: 1,
+            ..Default::default()
+        };
+        assert_eq!(map_task(stray, "1").status, TaskStatus::Open);
+    }
+
+    /// Completing a REPEATING task writes zero progress, because the value
+    /// outlives the completion: Vikunja reopens the task and keeps whatever
+    /// `percent_done` we sent. `done` is what records the completion, and it
+    /// is read first.
+    #[test]
+    fn completing_a_repeating_task_leaves_no_progress_behind() {
+        assert_eq!(status_percent_done(TaskStatus::Completed, true), 0.0);
+        // A one-off keeps the honest 1.0 — nothing reopens it.
+        assert_eq!(status_percent_done(TaskStatus::Completed, false), 1.0);
+        // Everything else is unchanged by the repeat.
+        assert_eq!(status_percent_done(TaskStatus::InProgress, true), 0.5);
+        assert_eq!(status_percent_done(TaskStatus::InProgress, false), 0.5);
+        assert_eq!(status_percent_done(TaskStatus::Open, true), 0.0);
     }
 
     #[test]
