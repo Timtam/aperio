@@ -3,12 +3,13 @@
   "name": "Aperio Local",
   "version": "0.1.0",
   "plugin_type": "adapter",
-  "capabilities": ["calendar", "tasks", "contacts"],
+  "capabilities": ["calendar", "tasks", "contacts", "sync"],
   "abi_version": 3,
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
-  "description": "The built-in store: calendars, task lists and address books that live in Aperio's own database rather than at a provider.",
+  "description": "The built-in store: calendars, task lists and address books that live in Aperio's own database rather than at a provider — and, given a folder, the place the dataset is mirrored to.",
   "adapter_kind": "local",
+  "adopts_adapter_kinds": ["local_folder"],
   "signed": false,
   "tasks": {
     "nested_projects": true,
@@ -18,5 +19,28 @@
     "move_between_projects": true,
     "create_lists": true,
     "delete_lists": true
+  },
+  "account": {
+    "fields": [
+      {
+        "key": "remote_root",
+        "kind": "directory",
+        "label": "Folder",
+        "label_key": "account.remote_root.label",
+        "hint_key": "account.remote_root.hint",
+        "required": true,
+        "device_local": true
+      }
+    ]
+  },
+  "strings": {
+    "en": {
+      "account.remote_root.hint": "Only needed if you choose this as the place your data is stored. It is the folder the dataset is mirrored into — D:\\Aperio, /srv/aperio, a USB stick, or a network share mounted into this machine's filesystem. Aperio creates it if it is not there. The path stays on this device: your other devices reach the same folder under a different path, or not at all.",
+      "account.remote_root.label": "Folder"
+    },
+    "de": {
+      "account.remote_root.hint": "Wird nur gebraucht, wenn du dies als Speicherort deiner Daten wählst. Es ist der Ordner, in den der Datenbestand gespiegelt wird — D:\\Aperio, /srv/aperio, ein USB-Stick oder eine in dieses System eingebundene Netzfreigabe. Aperio legt ihn an, wenn er fehlt. Der Pfad bleibt auf diesem Gerät: deine anderen Geräte erreichen denselben Ordner unter einem anderen Pfad oder gar nicht.",
+      "account.remote_root.label": "Ordner"
+    }
   }
 }

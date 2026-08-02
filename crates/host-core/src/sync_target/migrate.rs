@@ -298,13 +298,17 @@ const GOOGLEDRIVE: &[Move] = &[
 
 /// Each stored kind, the adapter kind the account takes, and the values to move.
 ///
-/// The account kind is the one the PLUGIN declares in its manifest, which is the
-/// same string in five cases and not in the sixth: the local filesystem adapter
-/// answers to `local_folder`, because `local` is [`AdapterKind::LOCAL`] — the
-/// built-in store, host-internal, and an account of that kind already exists on
-/// every device.
+/// One string in every case now, including the local one. It used to be
+/// `local_folder` there — a name that existed only to dodge a collision with the
+/// built-in store, which owned `local` and could not hold a dataset. Folder sync
+/// folded INTO the built-in store, so the collision is gone and the two are one
+/// account: this device's data, and the folder it is mirrored to.
+///
+/// A device migrating from the preferences therefore does not gain a row. It
+/// writes the folder into the built-in account's device-local half and points
+/// at it — see [`super::connect`], which reaches the same row from a form.
 const KIND_TABLE: &[(&str, &str, &[Move])] = &[
-    ("local", "local_folder", LOCAL),
+    ("local", "local", LOCAL),
     ("webdav", "webdav", WEBDAV),
     ("sftp", "sftp", SFTP),
     ("ftp", "ftp", FTP),
@@ -330,17 +334,13 @@ fn table_for(stored_kind: &str) -> Option<(&'static str, &'static [Move])> {
 
 /// The account kind a target of `stored_kind` takes.
 ///
-/// The one the PLUGIN declares, which is the same string in five cases and not
-/// in the sixth: the local filesystem adapter answers to `local_folder`,
-/// because `local` is [`AdapterKind::LOCAL`], the host's own store.
+/// The same string in every case since folder sync folded into the built-in
+/// store — see [`KIND_TABLE`].
 pub(super) fn account_kind_for(stored_kind: &str) -> Option<&'static str> {
     table_for(stored_kind).map(|(account_kind, _)| account_kind)
 }
 
 /// The reverse, for a caller that has a row and needs the stored spelling.
-///
-/// Both frontends switch on `local`, not on `local_folder`, and the settings
-/// card is rendered from that string.
 pub(super) fn stored_kind_for(account_kind: &str) -> Option<&'static str> {
     KIND_TABLE
         .iter()
@@ -745,7 +745,9 @@ mod tests {
     /// hand-written twin in this workspace has.
     fn manifest_for(stored_kind: &str) -> PluginManifest {
         let bytes: &[u8] = match stored_kind {
-            "local" => include_bytes!("../../../sync-adapter-local-plugin/plugin.json"),
+            // Folder sync folded into the built-in store, which is
+            // where the folder field is declared now.
+            "local" => include_bytes!("../../../cal-adapter-local/plugin.json"),
             "webdav" => include_bytes!("../../../sync-adapter-webdav-plugin/plugin.json"),
             "sftp" => include_bytes!("../../../sync-adapter-sftp-plugin/plugin.json"),
             "ftp" => include_bytes!("../../../sync-adapter-ftp-plugin/plugin.json"),

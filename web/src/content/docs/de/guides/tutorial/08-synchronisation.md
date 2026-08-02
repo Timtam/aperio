@@ -21,11 +21,12 @@ unter **Einstellungen → Konten** an, und in der Synchronisation wählst du
 nur noch aus, welches deiner Konten den Datensatz hält.
 
 1. Öffne die **Einstellungen** und gehe zu **Konten**.
-2. Lege ein Konto für deinen Speicherort an (z. B. WebDAV, SFTP, FTPS,
-   Dropbox oder ein lokaler bzw. geteilter Ordner) und gib Adresse und
-   Zugangsdaten an. **Google Drive ist kein eigener Eintrag**: ein
-   Google-Konto kann den Datensatz selbst halten — hast du also schon eines
-   für deine Kalender, überspring diesen Schritt und wähl es im nächsten.
+2. Lege ein Konto für deinen Speicherort an (z. B. WebDAV, SFTP, FTPS oder
+   Dropbox) und gib Adresse und Zugangsdaten an. Zwei Einträge brauchen kein
+   eigenes Konto: **ein Ordner auf diesem Gerät** gehört zu Aperio selbst,
+   und **Google Drive** reitet auf einem Google-Konto, das du vielleicht
+   schon für deine Kalender hast. Für beide überspringst du diesen Schritt
+   und wählst sie im nächsten.
 3. Wechsle auf **Synchronisation**. Unter **Synchronisationsziel** stehen
    genau die Konten, die einen Datensatz halten können.
 4. Wähle das gewünschte Konto in der Liste und aktiviere

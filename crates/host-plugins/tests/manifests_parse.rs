@@ -99,7 +99,6 @@ fn manifests_in_tree() -> Vec<(String, plugin_core::PluginManifest)> {
 /// host-internal — an adapter claiming it would be unregisterable, and the two
 /// frontends would each have a different idea of what the row meant.
 const SYNC_ADAPTER_KINDS: &[(&str, &str)] = &[
-    ("sync-adapter-local-plugin", "local_folder"),
     ("sync-adapter-webdav-plugin", "webdav"),
     ("sync-adapter-sftp-plugin", "sftp"),
     ("sync-adapter-ftp-plugin", "ftp"),
@@ -128,6 +127,23 @@ fn the_sync_adapters_declare_the_kinds_the_hosts_resolve() {
 
     for (name, manifest) in &manifests {
         if !name.starts_with("sync-adapter-") {
+            continue;
+        }
+        // The folder adapter is the exception, and deliberately: it folded into
+        // the built-in store, which declares the kind AND the field. This crate
+        // kept only the vtable, so it has no kind of its own to check and no
+        // schema to lose — `host_core::builtin_adapters::sync_plugin_for` is
+        // what names it, by plugin id.
+        if manifest.adapter_kind.is_none() {
+            assert!(
+                name == "sync-adapter-local-plugin",
+                "{name} declares no adapter kind; only the folder adapter may, \
+                 because the built-in store declares its kind for it",
+            );
+            assert!(
+                manifest.account.is_none(),
+                "{name} declares no kind, so a schema on it could never be reached",
+            );
             continue;
         }
         seen += 1;

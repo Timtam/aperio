@@ -1833,6 +1833,14 @@ impl host_core::sync_target::SyncPlugins for HostSyncPlugins<'_> {
         &self,
         adapter_kind: &str,
     ) -> Option<(String, plugin_core::account_schema::AccountSchema)> {
+        // The built-in store first. It declares that it can hold the dataset
+        // and has no vtable to do it with, so its execution is a plugin's —
+        // see `host_core::builtin_adapters::sync_plugin_for`. Asked first
+        // because no plugin declares its kind, so the lookup below would
+        // simply miss and the built-in account could never be a sync target.
+        if let Some(found) = host_core::builtin_adapters::sync_plugin_for(adapter_kind) {
+            return Some(found);
+        }
         let plugin = self.0.plugin_for_adapter_kind(adapter_kind)?;
         let schema = plugin.manifest.account.clone()?;
         Some((plugin.manifest.id.clone(), schema))
@@ -9365,51 +9373,66 @@ mod tests {
     }
 
     /// Open a Host at `<dir>/<name>.sqlite` with a fresh fake keychain.
-    /// The sync screen's whole verb, end to end: an account the user already
-    /// has becomes this device's target, the pointer is written, and the
-    /// summary names the row rather than the legacy preferences.
+    /// The sync screen's whole verb, end to end — on the account every device
+    /// already has.
+    ///
+    /// Folder sync folded into the built-in store, so "mirror my data into this
+    /// folder" is a property of the `local` account rather than a second one
+    /// beside it. That makes this the smallest end-to-end case there is: no
+    /// network, no credential, and the row is not even created here because it
+    /// exists from bootstrap. What is written is the folder — device-local, so
+    /// it lands in this device's preferences rather than in a row that travels
+    /// — and the pointer.
     #[test]
-    fn selecting_an_account_makes_it_the_sync_target() {
+    fn selecting_the_built_in_store_makes_it_the_sync_target() {
         let remote = tempfile::tempdir().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let host = open_named(&dir, "select");
 
-        // Added the way the accounts screen adds one: the adapter's declared
-        // form, filled in. `remote_root` is device_local, so it lands in this
-        // device's preferences rather than in the row — which is exactly the
-        // half `from_account` has to find again when it opens the target.
-        let created = host
-            .connect_account_json(
-                serde_json::json!({
-                    "adapter_kind": "local_folder",
-                    "display_name": "NAS",
-                    "values": { "remote_root": remote.path().to_string_lossy() },
-                })
-                .to_string(),
-            )
-            .unwrap();
-        let account_id = serde_json::from_str::<serde_json::Value>(&created).unwrap()["id"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        // Adding the account is NOT choosing it: a device with a storage
-        // account it has not pointed at still syncs nowhere.
-        assert_eq!(host.get_sync_adapter_summary_json().unwrap(), "null");
+        let before = host.accounts_json().unwrap();
 
-        host.select_sync_account(account_id.clone()).unwrap();
+        // The connect path, with the built-in store's own declared field. No
+        // account is created: `sync_target::connect` finds the implicit row.
+        host.adopt_local_dataset_values_json(
+            serde_json::json!({
+                "adapter_kind": "local",
+                "values": { "remote_root": remote.path().to_string_lossy() },
+            })
+            .to_string(),
+            Some("This device".to_string()),
+            None,
+        )
+        .unwrap();
+
+        let after = host.accounts_json().unwrap();
+        assert_eq!(
+            serde_json::from_str::<Vec<serde_json::Value>>(&before)
+                .unwrap()
+                .len(),
+            serde_json::from_str::<Vec<serde_json::Value>>(&after)
+                .unwrap()
+                .len(),
+            "choosing the built-in store as the storage must not mint a second \
+             account: it is the one that was already there",
+        );
 
         let summary: serde_json::Value =
             serde_json::from_str(&host.get_sync_adapter_summary_json().unwrap()).unwrap();
-        // The kind in the spelling both frontends switch on (`stored_kind_for`),
-        // and the detail is the account's own display name.
         assert_eq!(summary["kind"], "local");
-        assert_eq!(summary["detail"], "NAS");
         assert_eq!(
             summary["account_id"],
-            serde_json::Value::String(account_id.clone())
+            serde_json::Value::String("local".to_string())
         );
+
         // Probed AND activated, not merely written down: a round runs.
         host.sync_now_json("manual".to_string()).unwrap();
+
+        // And selecting it again by id is the sync screen's own verb, which has
+        // to reach the same row.
+        host.select_sync_account("local".to_string()).unwrap();
+        let again: serde_json::Value =
+            serde_json::from_str(&host.get_sync_adapter_summary_json().unwrap()).unwrap();
+        assert_eq!(again["account_id"], summary["account_id"]);
     }
 
     /// A refusal must leave this device syncing exactly where it did, which for

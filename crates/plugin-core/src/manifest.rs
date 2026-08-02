@@ -284,6 +284,21 @@ pub struct AdapterKindInfo {
     /// CREATES something, and ignore it wherever the surface DESCRIBES what
     /// already exists.
     pub offered: bool,
+    /// Whether an account of this kind ALREADY exists and cannot be created or
+    /// deleted — the built-in store, and nothing else today.
+    ///
+    /// The companion to [`Self::offered`], because the two answer different
+    /// questions and conflating them costs a feature either way. "May a user
+    /// create one?" is `offered`, and it is false for the built-in store and
+    /// for an adopted kind alike. "May a user CHOOSE this?" is a different
+    /// matter: the built-in store can be picked as the place the dataset lives
+    /// — it needs no account created, because its account is already there —
+    /// while an adopted kind cannot, since the adapter that made its rows is
+    /// gone.
+    ///
+    /// So a surface that creates filters on `offered`; a surface that offers a
+    /// CHOICE among things that can already exist accepts `offered || implicit`.
+    pub implicit: bool,
     /// The plugin's display name — the label to use when the app has no
     /// translation for this kind, which is the normal case for a third-party
     /// plugin.

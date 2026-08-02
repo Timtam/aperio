@@ -56,8 +56,9 @@ sync-adapter-local = { path = "../sync-adapter-local" }
 # `travels_between_devices` has to be asked about a REAL sync-only adapter —
 # one whose manifest declares `capabilities: ["sync"]` and nothing else. A
 # hand-written twin would drift from the shipped manifests the way every
-# hand-written twin in this workspace has.
-sync-adapter-local-plugin = { path = "../sync-adapter-local-plugin" }
+# hand-written twin in this workspace has. WebDAV, because the folder adapter
+# folded into the built-in store and stopped being sync-ONLY in that sense.
+sync-adapter-webdav-plugin = { path = "../sync-adapter-webdav-plugin" }
 # Re-declare the engine + local adapter with their test-support features so the
 # moved applier/onboarding/sync tests reach FakeSecrets / the in-memory store.
 # Dev-only: the normal (mobile) build never enables these.

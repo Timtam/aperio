@@ -635,6 +635,14 @@ impl host_core::sync_target::SyncPlugins for HostSyncPlugins<'_> {
         &self,
         adapter_kind: &str,
     ) -> Option<(String, plugin_core::account_schema::AccountSchema)> {
+        // The built-in store first. It declares that it can hold the dataset
+        // and has no vtable to do it with, so its execution is a plugin's —
+        // see `host_core::builtin_adapters::sync_plugin_for`. Asked first
+        // because no plugin declares its kind, so the lookup below would
+        // simply miss and the built-in account could never be a sync target.
+        if let Some(found) = host_core::builtin_adapters::sync_plugin_for(adapter_kind) {
+            return Some(found);
+        }
         let plugin = self.0.plugin_for_adapter_kind(adapter_kind)?;
         let schema = plugin.manifest.account.clone()?;
         Some((plugin.manifest.id.clone(), schema))

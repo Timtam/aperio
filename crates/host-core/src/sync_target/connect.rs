@@ -377,55 +377,69 @@ pub fn connect(
     let plan = plan_new_account(&schema, &fields, oauth.as_ref())
         .map_err(|err| ConnectError::Invalid(err.to_string()))?;
 
-    let account = match current {
-        // An edit of the target this device already syncs through. The row
-        // keeps its id — its credentials and its device-local half are keyed by
-        // that.
-        //
-        // It keeps its NAME only while it is the same target: a name the user
-        // changed must survive a password edit, but a row now pointing at a
-        // different server must not go on announcing the old one. That name is
-        // what the sync panel reads back, so leaving it would have shown one
-        // host while uploading to another.
-        Some(existing) if same_target => accounts
-            .set_config(&existing.id, &plan.config_json)
-            .map_err(accounts_err)?,
-        Some(existing) => {
-            // The row is reused — its id is what the device-local half and the
-            // keychain entries are keyed by — but it now describes a DIFFERENT
-            // server, so every credential on it belongs to the old one. Not
-            // inheriting them into the form was only half the job: they would
-            // still be sitting in the keychain under this id, and `init_config`
-            // reads them from there at open time. So the new host would have
-            // been handed the old host's password anyway, by a different route.
-            for field in &schema.fields {
-                if let Some(slot) = field.secret_slot.map(host_slot) {
-                    let _ = secrets.delete(&existing.id, slot);
-                }
-            }
-            let renamed = accounts
+    // The built-in store is one row that already exists — created at bootstrap,
+    // never deleted, and the one every calendar without a provider hangs off.
+    // Choosing it as the storage must not mint a second one, and must not touch
+    // its name or its config: the only thing the form carries for it is the
+    // folder, which is device-local and written below like any other.
+    let builtin = AdapterKind::new(account_kind)
+        .is_host_internal()
+        .then(|| accounts.get(account_kind))
+        .transpose()
+        .map_err(accounts_err)?
+        .flatten();
+    let account = match builtin {
+        Some(existing) => existing,
+        None => match current {
+            // An edit of the target this device already syncs through. The row
+            // keeps its id — its credentials and its device-local half are keyed by
+            // that.
+            //
+            // It keeps its NAME only while it is the same target: a name the user
+            // changed must survive a password edit, but a row now pointing at a
+            // different server must not go on announcing the old one. That name is
+            // what the sync panel reads back, so leaving it would have shown one
+            // host while uploading to another.
+            Some(existing) if same_target => accounts
                 .set_config(&existing.id, &plan.config_json)
-                .map_err(accounts_err)?;
-            accounts
-                .rename(
-                    &renamed.id,
+                .map_err(accounts_err)?,
+            Some(existing) => {
+                // The row is reused — its id is what the device-local half and the
+                // keychain entries are keyed by — but it now describes a DIFFERENT
+                // server, so every credential on it belongs to the old one. Not
+                // inheriting them into the form was only half the job: they would
+                // still be sitting in the keychain under this id, and `init_config`
+                // reads them from there at open time. So the new host would have
+                // been handed the old host's password anyway, by a different route.
+                for field in &schema.fields {
+                    if let Some(slot) = field.secret_slot.map(host_slot) {
+                        let _ = secrets.delete(&existing.id, slot);
+                    }
+                }
+                let renamed = accounts
+                    .set_config(&existing.id, &plan.config_json)
+                    .map_err(accounts_err)?;
+                accounts
+                    .rename(
+                        &renamed.id,
+                        &name_from(
+                            kind,
+                            name_source(kind).and_then(|form_key| text_of(values.get(form_key))),
+                        ),
+                    )
+                    .map_err(accounts_err)?
+            }
+            None => accounts
+                .create(
+                    AdapterKind::new(account_kind),
                     &name_from(
                         kind,
                         name_source(kind).and_then(|form_key| text_of(values.get(form_key))),
                     ),
+                    &plan.config_json,
                 )
-                .map_err(accounts_err)?
-        }
-        None => accounts
-            .create(
-                AdapterKind::new(account_kind),
-                &name_from(
-                    kind,
-                    name_source(kind).and_then(|form_key| text_of(values.get(form_key))),
-                ),
-                &plan.config_json,
-            )
-            .map_err(accounts_err)?,
+                .map_err(accounts_err)?,
+        },
     };
 
     // Every device-local field the schema declares, so one the form left out is
@@ -488,10 +502,19 @@ pub fn connect(
     // sync-only account: it never travelled, nothing else references it, and
     // leaving it behind puts a target the user replaced back in their account
     // list with a live credential attached to it.
+    //
+    // Unless it is the built-in store, which is not that kind of row at all:
+    // every calendar without a provider hangs off it, and deleting it to tidy
+    // up a storage choice would take the user's local data with it. Its
+    // device-local half IS cleared — the folder means something only while this
+    // device mirrors into it, and a later switch back that silently reused a
+    // path the user has since forgotten is worse than asking again.
     if let Some(old) = previous.filter(|account| account.adapter_kind != account_kind) {
         secrets.delete_all(&old.id).map_err(secret_err)?;
         crate::account_local::forget_all(prefs, &old.id).map_err(prefs_err)?;
-        accounts.delete(&old.id).map_err(accounts_err)?;
+        if !old.adapter_kind.is_host_internal() {
+            accounts.delete(&old.id).map_err(accounts_err)?;
+        }
     }
 
     Ok(account.id)
@@ -732,7 +755,9 @@ mod tests {
     /// has, and the whole failure mode here is a key one character off.
     fn schema_for(stored_kind: &str) -> AccountSchema {
         let bytes: &[u8] = match stored_kind {
-            "local" => include_bytes!("../../../sync-adapter-local-plugin/plugin.json"),
+            // Folder sync folded into the built-in store, which is
+            // where the folder field is declared now.
+            "local" => include_bytes!("../../../cal-adapter-local/plugin.json"),
             "webdav" => include_bytes!("../../../sync-adapter-webdav-plugin/plugin.json"),
             "sftp" => include_bytes!("../../../sync-adapter-sftp-plugin/plugin.json"),
             "ftp" => include_bytes!("../../../sync-adapter-ftp-plugin/plugin.json"),

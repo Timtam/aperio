@@ -476,22 +476,24 @@ mod tests {
     /// `dump_accounts` returns, so the target's own password would go with it.
     #[tokio::test]
     async fn snapshot_excludes_a_sync_only_account() {
-        // The shipped local-filesystem sync plugin, kind read off its own
-        // manifest so a rename cannot turn this into a test of the
-        // unknown-kind branch.
+        // The shipped WebDAV plugin — a real sync-ONLY adapter, kind read off
+        // its own manifest so a rename cannot turn this into a test of the
+        // unknown-kind branch. (Folder sync used to serve here; it folded into
+        // the built-in store, whose account holds calendars and therefore does
+        // not answer the question this test asks.)
         let manifest = plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
-            "../../../sync-adapter-local-plugin/plugin.json"
+            "../../../sync-adapter-webdav-plugin/plugin.json"
         ))
-        .expect("the shipped local-filesystem sync manifest parses");
+        .expect("the shipped WebDAV sync manifest parses");
         let sync_kind = manifest
             .adapter_kind
             .clone()
             .expect("the sync manifest declares a kind");
         let plugins = Arc::new(plugin_core::PluginManager::new("0.1.0"));
-        let descriptor = unsafe { sync_adapter_local_plugin::build_descriptor() };
+        let descriptor = unsafe { sync_adapter_webdav_plugin::build_descriptor() };
         plugins
-            .register_static(manifest, descriptor, sync_adapter_local_plugin::DESTROY_FN)
-            .expect("register the static local sync plugin");
+            .register_static(manifest, descriptor, sync_adapter_webdav_plugin::DESTROY_FN)
+            .expect("register the static WebDAV sync plugin");
 
         let (_tmp, db, adapter) = fresh();
         {

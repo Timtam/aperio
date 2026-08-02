@@ -7,30 +7,6 @@
   "abi_version": 3,
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
-  "description": "Bundled sync adapter that mirrors the dataset to a local filesystem directory — NAS share, USB stick, dev test fixture.",
-  "adapter_kind": "local_folder",
-  "signed": false,
-  "account": {
-    "fields": [
-      {
-        "key": "remote_root",
-        "kind": "directory",
-        "label": "Folder",
-        "label_key": "account.remote_root.label",
-        "hint_key": "account.remote_root.hint",
-        "required": true,
-        "device_local": true
-      }
-    ]
-  },
-  "strings": {
-    "en": {
-      "account.remote_root.hint": "The folder the dataset is mirrored into — D:\\Aperio, /srv/aperio, a USB stick, or a network share mounted into this machine's filesystem. Aperio creates it if it is not there. The path stays on this device: your other devices reach the same folder under a different path, or not at all.",
-      "account.remote_root.label": "Folder"
-    },
-    "de": {
-      "account.remote_root.hint": "Der Ordner, in den der Datenbestand gespiegelt wird — D:\\Aperio, /srv/aperio, ein USB-Stick oder eine in dieses System eingebundene Netzfreigabe. Aperio legt ihn an, wenn er fehlt. Der Pfad bleibt auf diesem Gerät: deine anderen Geräte erreichen denselben Ordner unter einem anderen Pfad oder gar nicht.",
-      "account.remote_root.label": "Ordner"
-    }
-  }
+  "description": "Mirrors the dataset to a filesystem directory — NAS share, USB stick, dev test fixture. It declares no adapter kind and no account schema of its own: the account that uses it is the built-in store, which declares both and routes here for the sync half.",
+  "signed": false
 }

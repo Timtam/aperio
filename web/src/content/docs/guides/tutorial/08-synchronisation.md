@@ -21,9 +21,12 @@ under **Settings → Accounts**, and the synchronization settings only ask
 which of your accounts holds the dataset.
 
 1. Open the **settings** and go to **Accounts**.
-2. Add an account for your storage location (e.g. WebDAV, SFTP, FTPS,
-   Dropbox, or a local/shared folder) and enter its address and
-   credentials. **Google Drive is not a separate entry**: a Google account
+2. Add an account for your storage location (e.g. WebDAV, SFTP, FTPS or
+   Dropbox) and enter its address and credentials. Two entries need no
+   account of their own: **a folder on this device** is part of Aperio
+   itself, and **Google Drive** rides on a Google account you may already
+   have for your calendars. For either, skip this step and pick it in the
+   next one. **Google Drive is not a separate entry**: a Google account
    can hold the dataset itself, so if you already have one for your
    calendars, skip this step and pick it in the next one.
 3. Switch to **Synchronization**. Under **Sync target** you'll find exactly

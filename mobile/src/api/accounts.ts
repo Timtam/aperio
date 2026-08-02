@@ -187,6 +187,16 @@ export interface AdapterKindInfo {
    *  Filter on it wherever a surface CREATES something; ignore it wherever a
    *  surface DESCRIBES what already exists. */
   offered: boolean;
+  /** Whether an account of this kind ALREADY exists and cannot be created or
+   *  deleted — the built-in store, and nothing else today.
+   *
+   *  The companion to {@link offered}, because the two answer different
+   *  questions. A surface that CREATES filters on `offered`; a surface that
+   *  offers a CHOICE among things that can already exist accepts
+   *  `offered || implicit`. Without the distinction the built-in store — the
+   *  one storage backend needing no account created first — would drop out of
+   *  the sync form, and "a folder on this device" would stop being an answer. */
+  implicit: boolean;
   /** The plugin's own display name — the label when the app has no translation
    *  for this kind, which is the normal case for a third-party plugin. */
   name: string;

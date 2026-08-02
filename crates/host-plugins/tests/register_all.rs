@@ -220,6 +220,12 @@ fn every_bundled_adapter_answers_both_picker_questions() {
     // `google` and `googledrive` are ONE adapter: Drive folded into the Google
     // account, and the old kind stays listed because rows still carry it. Which
     // of the two may be created is `offered`, asserted just below.
+    //
+    // No `local_folder`, and no `local`: folder sync folded into the BUILT-IN
+    // store, which is not a plugin and is therefore not in this list at all. It
+    // is declared by `host_core::builtin_adapters` and asserted at the bottom
+    // of this test — leaving it out here would have quietly dropped the one
+    // storage backend that needs no account of its own.
     let syncable: Vec<&str> = kinds
         .iter()
         .filter(|i| i.can_sync)
@@ -227,15 +233,7 @@ fn every_bundled_adapter_answers_both_picker_questions() {
         .collect();
     assert_eq!(
         syncable,
-        [
-            "dropbox",
-            "ftp",
-            "google",
-            "googledrive",
-            "local_folder",
-            "sftp",
-            "webdav",
-        ],
+        ["dropbox", "ftp", "google", "googledrive", "sftp", "webdav"],
         "these are the bundled kinds a dataset can live on",
     );
 
@@ -250,18 +248,30 @@ fn every_bundled_adapter_answers_both_picker_questions() {
         .collect();
     assert_eq!(
         offered,
-        ["dropbox", "ftp", "google", "local_folder", "sftp", "webdav"],
+        ["dropbox", "ftp", "google", "sftp", "webdav"],
         "an adopted kind resolves but is never offered",
     );
 
-    // `local_folder`, not `local`. `local` is the built-in store's kind AND the
-    // implicit account's id, and `AdapterKind::is_host_internal` answers true
-    // for it — an adapter claiming it would be unregisterable while both
-    // frontends disagreed about what such a row meant.
+    // No PLUGIN may claim the built-in store's kind. `AdapterKind::is_host_internal`
+    // answers true for `local`, so such a plugin would be unregisterable while
+    // both frontends disagreed about what one of its rows meant.
     assert!(
         !kinds.iter().any(|i| i.kind == "local"),
         "no plugin may claim the built-in store's kind",
     );
+
+    // The built-in store, from the other list. Folder sync folded into it, so
+    // it is the one place a dataset can live without an account of its own —
+    // and the only entry that answers both questions while being creatable by
+    // nobody, because it is already there.
+    let builtin = host_core::builtin_adapters::builtin_adapter_kinds();
+    let local = builtin
+        .iter()
+        .find(|k| k.kind == "local")
+        .expect("the built-in store declares itself");
+    assert!(local.can_sync, "folder sync folded into it");
+    assert!(local.holds_data, "and it still holds the calendars");
+    assert!(!local.offered, "there is one, and it exists from bootstrap");
 
     // A sync backend that holds no data keeps its account row OFF the wire
     // (`host_core::accounts::travels_between_devices`): the row's `config_json`

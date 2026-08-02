@@ -597,41 +597,42 @@ mod tests {
         manager
     }
 
-    /// The kind the shipped local-filesystem sync plugin declares.
+    /// The kind of a shipped adapter that does nothing BUT sync.
     ///
-    /// `local_folder` and not `local`: `local` is [`AdapterKind::LOCAL`], the
-    /// built-in store, and it is host-internal. A sync adapter answering to it
-    /// would be short-circuited by the first line of the predicate and would
-    /// prove nothing about the capability rule underneath.
-    const SYNC_ONLY_KIND: &str = "local_folder";
+    /// WebDAV, since folder sync folded into the built-in store: that one used
+    /// to be the sync-only fixture, and its account is now the `local` one,
+    /// which holds calendars and is host-internal besides — so it would be
+    /// short-circuited by the first line of the predicate and would prove
+    /// nothing about the capability rule underneath.
+    const SYNC_ONLY_KIND: &str = "webdav";
 
-    /// A manager holding exactly one real SYNC-ONLY adapter: the shipped
-    /// local-filesystem sync plugin, manifest untouched.
+    /// A manager holding exactly one real SYNC-ONLY adapter: the shipped WebDAV
+    /// plugin, manifest untouched.
     ///
-    /// Nothing is injected here any more. That manifest now declares both
-    /// halves of the case this rule is about — an `adapter_kind`, so account
-    /// rows can name it, and `capabilities: ["sync"]` and nothing else, so
-    /// those rows are the ones that must stay home. Every input the predicate
-    /// reads is the plugin's own statement about itself, which is what keeps
-    /// these tests from drifting away from what actually ships.
+    /// Nothing is injected here. That manifest declares both halves of the case
+    /// this rule is about — an `adapter_kind`, so account rows can name it, and
+    /// `capabilities: ["sync"]` and nothing else, so those rows are the ones
+    /// that must stay home. Every input the predicate reads is the plugin's own
+    /// statement about itself, which is what keeps these tests from drifting
+    /// away from what actually ships.
     fn manager_with_sync_only() -> plugin_core::PluginManager {
         let manager = plugin_core::PluginManager::new("0.1.0");
         let manifest = plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
-            "../../sync-adapter-local-plugin/plugin.json"
+            "../../sync-adapter-webdav-plugin/plugin.json"
         ))
-        .expect("the shipped local-filesystem sync manifest parses");
+        .expect("the shipped WebDAV sync manifest parses");
         // Read off the manifest rather than assumed: if the shipped kind is
         // renamed, every test below would otherwise start asking about a kind
         // no plugin serves and quietly assert the unknown-kind branch instead.
         assert_eq!(
             manifest.adapter_kind.as_deref(),
             Some(SYNC_ONLY_KIND),
-            "the shipped local-filesystem sync manifest changed its kind",
+            "the shipped WebDAV sync manifest changed its kind",
         );
-        let descriptor = unsafe { sync_adapter_local_plugin::build_descriptor() };
+        let descriptor = unsafe { sync_adapter_webdav_plugin::build_descriptor() };
         manager
-            .register_static(manifest, descriptor, sync_adapter_local_plugin::DESTROY_FN)
-            .expect("register the static local-filesystem sync plugin");
+            .register_static(manifest, descriptor, sync_adapter_webdav_plugin::DESTROY_FN)
+            .expect("register the static WebDAV sync plugin");
         manager
     }
 
@@ -695,14 +696,14 @@ mod tests {
         const RETIRED: &str = "retired-folder-sync";
         let manager = plugin_core::PluginManager::new("0.1.0");
         let mut manifest = plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
-            "../../sync-adapter-local-plugin/plugin.json"
+            "../../sync-adapter-webdav-plugin/plugin.json"
         ))
-        .expect("the shipped local-filesystem sync manifest parses");
+        .expect("the shipped WebDAV sync manifest parses");
         manifest.adopts_adapter_kinds = vec![RETIRED.to_string()];
-        let descriptor = unsafe { sync_adapter_local_plugin::build_descriptor() };
+        let descriptor = unsafe { sync_adapter_webdav_plugin::build_descriptor() };
         manager
-            .register_static(manifest, descriptor, sync_adapter_local_plugin::DESTROY_FN)
-            .expect("register the static local-filesystem sync plugin");
+            .register_static(manifest, descriptor, sync_adapter_webdav_plugin::DESTROY_FN)
+            .expect("register the static WebDAV sync plugin");
 
         // Unadopted, it would travel — that is the default for a kind nothing
         // serves, and the reason this has to be checked rather than assumed.

@@ -65,11 +65,20 @@ pub fn builtin_adapter_kinds() -> Vec<AdapterKindInfo> {
         // uses, and for the same underlying reason: the entry describes an
         // account that exists, not one that can be created.
         offered: false,
+        // …but choosable. It is the one storage backend that needs no account
+        // created first, because the account is the one every device already
+        // has. Without this the sync form would have dropped it and "a folder
+        // on this device" would have stopped being an answer at onboarding.
+        implicit: true,
         name: m.name.clone(),
         plugin_id: m.id.clone(),
         owns_containers: m.has_data_family(),
-        // It needs no connect form and signs in nowhere: it is already there.
-        declares_account_schema: false,
+        // It DOES declare a schema now — one field, the folder its data is
+        // mirrored into when this account is chosen as the storage. Nothing is
+        // asked at creation time (there is nothing to create), so the flag is
+        // read off the manifest rather than pinned false.
+        declares_account_schema: m.account.is_some(),
+        // It signs in nowhere: it is already there.
         declares_oauth: false,
         holds_data: m
             .capabilities
@@ -79,6 +88,40 @@ pub fn builtin_adapter_kinds() -> Vec<AdapterKindInfo> {
             .capabilities
             .contains(&plugin_core::capability::Capability::Sync),
     }]
+}
+
+/// The plugin that EXECUTES sync for a built-in kind, with the schema that
+/// describes it.
+///
+/// The built-in store declares that it can hold the dataset; it has no vtable
+/// to do it with. `sync-adapter-local-plugin` has the vtable and, since the
+/// merge, no kind of its own — so the declaration and the execution are two
+/// halves of one adapter, joined here.
+///
+/// That split is the same one the store already lives with for calendars: it
+/// declares itself in a manifest and is CALLED as a linked-in type. Sync is the
+/// one capability whose execution does go through a plugin, so this is where
+/// the two are named in the same breath.
+///
+/// `local_folder` answers too. It is the kind the folder sync used to carry as
+/// its own, adopted by the built-in store's manifest, so an account row written
+/// before the merge still resolves — and, like every adoption, without anything
+/// that was persisted having to change.
+///
+/// Nothing else is here and nothing else should be: a second built-in adapter
+/// that wanted a plugin to execute for it would be adding a row above, not a
+/// branch somewhere else.
+pub fn sync_plugin_for(
+    adapter_kind: &str,
+) -> Option<(String, plugin_core::account_schema::AccountSchema)> {
+    let m = local_manifest();
+    if !m.serves_kind(adapter_kind) {
+        return None;
+    }
+    Some((
+        "com.aperio.sync-adapter-local".to_string(),
+        m.account.clone()?,
+    ))
 }
 
 /// The plugin kinds plus the built-in ones, sorted and deduplicated the same
@@ -115,12 +158,18 @@ mod tests {
         assert_eq!(local.kind, "local");
         assert!(local.holds_data, "it holds calendars, tasks and contacts");
         assert!(local.owns_containers);
-        assert!(!local.can_sync, "the built-in store is not a sync target");
+        assert!(
+            local.can_sync,
+            "folder sync folded in: the built-in account can hold the dataset",
+        );
         assert!(
             !local.offered,
             "there is exactly one, and it already exists"
         );
-        assert!(!local.declares_account_schema, "it needs no connect form");
+        assert!(
+            local.declares_account_schema,
+            "one field — the folder its data is mirrored into",
+        );
     }
 
     /// It is the kind `AdapterKind` already treats as the host's own. The two

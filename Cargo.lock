@@ -2926,7 +2926,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sync-adapter-local",
- "sync-adapter-local-plugin",
+ "sync-adapter-webdav-plugin",
  "sync-core",
  "sync-engine",
  "tempfile",

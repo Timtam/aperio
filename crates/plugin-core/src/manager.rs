@@ -1261,6 +1261,10 @@ impl PluginManager {
                     .map(|(kind, offered)| AdapterKindInfo {
                         kind,
                         offered,
+                        // A plugin's accounts are made by the user, one or
+                        // many. Only the host provides one that is simply
+                        // there.
+                        implicit: false,
                         name: p.manifest.name.clone(),
                         plugin_id: p.manifest.id.clone(),
                         owns_containers: p.manifest.has_data_family(),
