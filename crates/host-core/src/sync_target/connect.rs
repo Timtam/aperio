@@ -43,7 +43,10 @@
 //! says so — but the stronger guarantee is structural, as in the migration:
 //! nothing here takes an emitter, so there is nothing to call.
 
+use std::sync::Arc;
+
 use serde_json::{Map, Value};
+use sync_core::SyncAdapter;
 use sync_engine::{SecretError, SecretSlot, SecretStore};
 
 use super::from_account::selected_account_id_result;
@@ -53,6 +56,7 @@ use super::migrate::{
 use super::*;
 use crate::account_setup::{choose_oauth_client, host_slot, plan_new_account};
 use crate::accounts::{Account, AccountsError, AccountsRepo, AdapterKind};
+use crate::registry::HostKeyPins;
 use crate::user_prefs::UserPrefsRepo;
 
 /// Why the choice could not be written down.
@@ -79,6 +83,14 @@ pub enum ConnectError {
     Accounts(String),
     #[error("keychain: {0}")]
     Secret(String),
+    /// The protocol pins host keys and this device has not confirmed one for
+    /// this host. A step in the flow rather than a fault: the frontend answers
+    /// it with the fingerprint dialog.
+    #[error("the host key for {host_port} has not been confirmed on this device")]
+    HostKeyNotTrusted { host_port: String },
+    /// The plugin refused the config it was handed.
+    #[error("{0}")]
+    PluginRefused(String),
 }
 
 fn prefs_err(err: impl std::fmt::Display) -> ConnectError {
@@ -130,6 +142,89 @@ fn text_of(value: Option<&Value>) -> Option<String> {
 ///   between them — which is the state every reader already handles.
 /// - Dropping the previous account is last, because a spare row in a list is a
 ///   smaller thing to leave behind than a device with no target at all.
+/// Open an adapter from what the user just typed, WITHOUT writing anything
+/// down.
+///
+/// The onboarding flow needs this and [`connect`] cannot give it. Setting up a
+/// target from the settings is one decision — this is the target, use it — and
+/// the row can be written as soon as the probe passes. Joining a dataset is
+/// two: reach the target, see whether a dataset is already there, and only
+/// then choose between adopting it and starting a fresh one. The first half
+/// has to happen against a live adapter that nothing has committed to.
+///
+/// Everything provider-specific still comes from the schema, so the wizard
+/// stops needing a form per backend — which is the point. It splits the values
+/// exactly as [`connect`] does, through the same `plan_new_account`, and then
+/// puts the secrets back under their own field names rather than fetching them
+/// from a keychain they are not in yet.
+pub fn preview_adapter(
+    plugins: &dyn SyncPlugins,
+    pins: &dyn HostKeyPins,
+    kind: &str,
+    values: &Map<String, Value>,
+) -> Result<Arc<dyn SyncAdapter>, ConnectError> {
+    let kind = kind.trim();
+    let account_kind =
+        account_kind_for(kind).ok_or_else(|| ConnectError::UnknownKind(kind.to_string()))?;
+    let (plugin_id, schema) = plugins
+        .resolve(account_kind)
+        .ok_or_else(|| ConnectError::NoPlugin(account_kind.to_string()))?;
+
+    // The form, under the plugin's own field names.
+    let mut fields = Map::new();
+    for (form_key, value) in values {
+        let field = schema_field_for(kind, form_key).unwrap_or(form_key.as_str());
+        fields.insert(field.to_string(), value.clone());
+    }
+
+    let oauth = match schema.oauth.as_ref() {
+        Some(oauth) => Some(
+            choose_oauth_client(
+                oauth,
+                fields.get(&oauth.client_id_field).and_then(Value::as_str),
+                oauth
+                    .client_secret_field
+                    .as_deref()
+                    .and_then(|key| fields.get(key))
+                    .and_then(Value::as_str),
+            )
+            .map_err(|err| ConnectError::Invalid(err.to_string()))?,
+        ),
+        None => None,
+    };
+
+    let plan = plan_new_account(&schema, &fields, oauth.as_ref())
+        .map_err(|err| ConnectError::Invalid(err.to_string()))?;
+
+    // `probe_config_json` merges this device's half back in; the secrets are
+    // still only in the plan, so they go in here under the keys the schema
+    // gave them. On the committed path the keychain does this, which is why
+    // that path has no equivalent line.
+    let mut config: Value = serde_json::from_str(&plan.probe_config_json())
+        .map_err(|err| ConnectError::Invalid(err.to_string()))?;
+    let obj = config
+        .as_object_mut()
+        .ok_or_else(|| ConnectError::Invalid("config is not a JSON object".into()))?;
+    for field in &schema.fields {
+        let Some(slot) = field.secret_slot.map(host_slot) else {
+            continue;
+        };
+        if let Some((_, value)) = plan.secrets.iter().find(|(s, _)| *s == slot) {
+            obj.insert(field.key.clone(), Value::String(value.clone()));
+        }
+    }
+
+    let mut config_json = config.to_string();
+    if let Some(pin) = schema.host_key_pin.as_ref() {
+        config_json = super::from_account::merge_pin_for_preview(&config_json, pin, pins)
+            .map_err(|host_port| ConnectError::HostKeyNotTrusted { host_port })?;
+    }
+
+    plugins
+        .open(&plugin_id, config_json)
+        .map_err(ConnectError::PluginRefused)
+}
+
 pub fn connect(
     prefs: &UserPrefsRepo<'_>,
     accounts: &AccountsRepo<'_>,

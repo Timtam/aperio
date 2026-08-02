@@ -168,6 +168,24 @@ pub fn from_account(
 /// rule, same reason, on the path that opens a sync adapter rather than a
 /// calendar one. With an empty pin the plugin does not fail: it accepts
 /// whatever key the network presents and remembers it, silently.
+/// [`merge_pin`] for the path that has no account yet.
+///
+/// Same rule and the same refusal; only the error shape differs, because the
+/// onboarding caller reports a `ConnectError` and has no business building an
+/// `Unbuildable`. Returns the `host:port` that needs confirming.
+pub(super) fn merge_pin_for_preview(
+    config: &str,
+    pin: &plugin_core::account_schema::AccountHostKeyPin,
+    pins: &dyn HostKeyPins,
+) -> Result<String, String> {
+    merge_pin(config, pin, pins).map_err(|err| match err {
+        Unbuildable::HostKeyNotTrusted { host_port } => host_port,
+        // Anything else here means the config had no host or port to look one
+        // up by, which for a form the user just filled in is a missing field.
+        other => other.to_string(),
+    })
+}
+
 fn merge_pin(
     config: &str,
     pin: &plugin_core::account_schema::AccountHostKeyPin,

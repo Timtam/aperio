@@ -656,6 +656,22 @@ fn connect_err(err: host_core::sync_target::ConnectError) -> CommandError {
             code: "internal",
             message: err.to_string(),
         },
+        // Its own code, because the repair is a GESTURE rather than a message:
+        // an unconfirmed host key is fixed by looking at a fingerprint and
+        // accepting it, and printing the sentence alone leaves the user with
+        // nothing to press. Same reasoning as `unbuildable_err`'s.
+        E::HostKeyNotTrusted { .. } => CommandError {
+            code: "host_key_not_trusted",
+            message: err.to_string(),
+        },
+        // The plugin's own complaint, kept verbatim: it names what it disliked,
+        // which is more than a code could, and NOT `plugin_missing` — a plugin
+        // that rejected a config is installed, and telling someone to install
+        // it would send them looking for something they have.
+        E::PluginRefused(_) => CommandError {
+            code: "invalid_input",
+            message: err.to_string(),
+        },
     }
 }
 
