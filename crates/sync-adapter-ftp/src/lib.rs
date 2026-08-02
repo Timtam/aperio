@@ -1283,7 +1283,7 @@ mod tests {
 
     // ── Selection (append-miss fix) ──────────────────────────────
 
-    /// Mirrors sync-adapter-local's
+    /// Mirrors cal-adapter-local's
     /// `grown_file_at_the_cursor_is_refetched`: a peer's live
     /// session file gains events AFTER we applied it; its
     /// timestamp sits at the cursor, but the listed size exceeds

@@ -12,6 +12,11 @@ use plugin_core::manager::PluginManager;
 /// manifests `register_all_static` embeds. Kept here independently so
 /// the test fails loudly if a plugin silently drops out of the
 /// registry or its id changes.
+///
+/// The built-in store is deliberately absent: it declares itself in a manifest
+/// like everything else, but it is linked in rather than registered — both
+/// halves of it, since folder sync folded in. See
+/// `host_core::builtin_adapters`.
 const EXPECTED_IDS: &[&str] = &[
     "com.aperio.cal-adapter-caldav",
     "com.aperio.cal-adapter-ical",
@@ -20,7 +25,6 @@ const EXPECTED_IDS: &[&str] = &[
     "com.aperio.cal-adapter-ews",
     "com.aperio.cal-adapter-vikunja",
     "com.aperio.cal-adapter-todoist",
-    "com.aperio.sync-adapter-local",
     "com.aperio.sync-adapter-webdav",
     "com.aperio.sync-adapter-ftp",
     "com.aperio.sync-adapter-sftp",
@@ -85,7 +89,11 @@ fn every_bundled_plugin_declares_the_family_it_serves() {
             data += 1;
         }
     }
-    assert_eq!(sync, 6, "six bundled sync backends");
+    // Five PLUGINS can hold a dataset. The sixth place it can live is the
+    // built-in store, which is not a plugin and so is not counted here — and
+    // Google is among these five because Drive folded into it, which is why the
+    // number did not fall by two when two crates went.
+    assert_eq!(sync, 5, "five bundled sync backends that are plugins");
     assert_eq!(vc, 1, "one bundled meeting provider");
     assert_eq!(data, 7, "seven bundled calendar/task/contact adapters");
 }

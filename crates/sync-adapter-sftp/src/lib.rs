@@ -1241,7 +1241,7 @@ mod tests {
 
     #[test]
     fn grown_file_at_the_cursor_is_refetched() {
-        // The append-miss fix (mirrors sync-adapter-local's test of
+        // The append-miss fix (mirrors cal-adapter-local's test of
         // the same name): a peer's live session file gains events
         // AFTER we applied it; its timestamp sits AT the cursor, but
         // the listed READDIR size exceeds the recorded applied

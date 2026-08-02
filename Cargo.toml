@@ -38,8 +38,6 @@ members = [
     "crates/sync-adapter-sftp",
     "crates/sync-adapter-dropbox",
     "crates/sync-adapter-googledrive",
-    "crates/sync-adapter-local",
-    "crates/sync-adapter-local-plugin",
     "crates/sync-adapter-webdav-plugin",
     "crates/sync-adapter-ftp-plugin",
     "crates/sync-adapter-sftp-plugin",
@@ -60,7 +58,6 @@ members = [
     "crates/cal-adapter-ews-cdylib",
     "crates/cal-adapter-vikunja-cdylib",
     "crates/cal-adapter-todoist-cdylib",
-    "crates/sync-adapter-local-cdylib",
     "crates/sync-adapter-webdav-cdylib",
     "crates/sync-adapter-ftp-cdylib",
     "crates/sync-adapter-sftp-cdylib",
@@ -130,7 +127,7 @@ cal-adapter-local = { path = "crates/cal-adapter-local" }
 cal-adapter-device-calendar = { path = "crates/cal-adapter-device-calendar" }
 host-core = { path = "crates/host-core" }
 # default-features off: the sole consumer (cal-ffi) selects adapters per-feature
-# so the mobile build can drop adapters it doesn't ship (e.g. sync-adapter-local).
+# so the mobile build can drop adapters it does not ship.
 host-plugins = { path = "crates/host-plugins", default-features = false }
 plugin-core = { path = "crates/plugin-core" }
 plugin-sdk = { path = "crates/plugin-sdk" }

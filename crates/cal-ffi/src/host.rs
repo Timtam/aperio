@@ -1804,6 +1804,15 @@ fn open_sync_plugin(
     plugin_id: &str,
     config_json: String,
 ) -> Result<Arc<dyn SyncAdapter>, StoreError> {
+    // The built-in store's sync half is linked in, not loaded. Every path that
+    // opens a sync adapter comes through here — the schema path, the legacy
+    // preferences, the onboarding preview — so this is the one gate it needs.
+    if let Some(built) = host_core::builtin_adapters::open_sync(plugin_id, &config_json) {
+        return built.map_err(|detail| StoreError::InvalidField {
+            field: "remote_root".to_string(),
+            detail,
+        });
+    }
     let plugin = plugin_manager
         .get(plugin_id)
         .ok_or_else(|| StoreError::Storage {

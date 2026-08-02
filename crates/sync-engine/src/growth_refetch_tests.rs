@@ -22,8 +22,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use cal_adapter_local::LocalFsSyncAdapter;
 use chrono::{DateTime, TimeZone, Utc};
-use sync_adapter_local::LocalFsSyncAdapter;
 use sync_core::{
     DeviceCursor, DeviceId, EncryptingAdapter, EventEnvelope, IdPayload, KnownLogLength, LogFile,
     LogFileName, MetaJson, Snapshot, SyncAdapter, SyncError, SyncEvent, SyncResult, KEY_LEN,

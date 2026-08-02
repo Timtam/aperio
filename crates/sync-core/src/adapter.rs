@@ -17,7 +17,7 @@
 //!
 //! Implementations:
 //!
-//! - `sync-adapter-local` — local filesystem / NAS mount
+//! - `cal-adapter-local` — local filesystem / NAS mount
 //! - `sync-adapter-webdav` — Nextcloud, ownCloud, generic WebDAV
 //! - `sync-adapter-sftp` — SFTP over SSH
 //! - `sync-adapter-ftp` — FTPS

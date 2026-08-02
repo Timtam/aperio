@@ -121,12 +121,23 @@ pub const SECRET_ACCOUNT_GOOGLEDRIVE: &str = "sync.adapter.googledrive";
 /// rejoin an existing sync at all — a wiped install can only start a new one.
 pub const SECRET_ACCOUNT_E2E: &str = "sync.adapter.e2e";
 
-/// Which plugin serves each kind.
+/// Which adapter serves each LEGACY kind.
 ///
-/// Temporary. It exists because the sync plugins declare no `adapter_kind` in
-/// their manifests yet; once they do, the manifest answers this and the table
-/// goes away — along with the last place the host names a sync adapter.
-pub const PLUGIN_ID_LOCAL: &str = "com.aperio.sync-adapter-local";
+/// Only the pre-account path reads it now: a device whose `sync.adapter.*`
+/// preferences have not been migrated into an account row yet. Everything else
+/// resolves through the manifests, which declare their kinds.
+///
+/// Two of the six no longer name a plugin of their own, and their doc comments
+/// say so — that is the shape a consolidation leaves behind, and it is why the
+/// table is a table rather than an assumption that id equals kind.
+///
+/// Folder sync folded into the built-in store, which serves it without a
+/// plugin at all. The constant keeps its name — it still answers "who serves
+/// the `local` kind" — and its value is now the id
+/// [`crate::builtin_adapters::open_sync`] answers to, so a device still on the
+/// old `sync.adapter.*` preferences reaches the mirror through the same call
+/// every other path uses.
+pub const PLUGIN_ID_LOCAL: &str = crate::builtin_adapters::BUILTIN_SYNC_ID;
 pub const PLUGIN_ID_WEBDAV: &str = "com.aperio.sync-adapter-webdav";
 pub const PLUGIN_ID_FTP: &str = "com.aperio.sync-adapter-ftp";
 pub const PLUGIN_ID_SFTP: &str = "com.aperio.sync-adapter-sftp";

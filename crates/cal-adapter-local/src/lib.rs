@@ -18,11 +18,14 @@ mod calendars;
 mod color_labels;
 mod contacts;
 mod mapping;
+/// Mirroring the dataset into a filesystem directory — the store's sync half.
+pub mod mirror;
 mod search;
 mod sync_apply;
 mod sync_snapshot;
 mod tasks;
 
+pub use mirror::LocalFsSyncAdapter;
 pub use search::{prepare_fts_query, EventTypeFilter, SearchFilters, SearchKind, SearchResults};
 pub use sync_snapshot::{SnapshotApplyReport, SnapshotDump};
 

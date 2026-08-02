@@ -145,12 +145,9 @@ pub fn register_all_static(manager: &PluginManager) -> PluginResult<()> {
         "../../cal-adapter-todoist-plugin/plugin.json"
     );
 
-    // Sync adapters.
-    #[cfg(feature = "sync-local")]
-    register!(
-        sync_adapter_local_plugin,
-        "../../sync-adapter-local-plugin/plugin.json"
-    );
+    // Sync adapters. The folder mirror is not among them: it folded into the
+    // built-in store, is linked in like the store, and reaches the orchestrator
+    // without a manifest or a vtable — see `host_core::builtin_adapters`.
     #[cfg(feature = "sync-webdav")]
     register!(
         sync_adapter_webdav_plugin,
@@ -201,7 +198,6 @@ pub const BUNDLED_PLUGIN_COUNT: usize = cfg!(feature = "caldav") as usize
     + cfg!(feature = "ews") as usize
     + cfg!(feature = "vikunja") as usize
     + cfg!(feature = "todoist") as usize
-    + cfg!(feature = "sync-local") as usize
     + cfg!(feature = "sync-webdav") as usize
     + cfg!(feature = "sync-ftp") as usize
     + cfg!(feature = "sync-sftp") as usize

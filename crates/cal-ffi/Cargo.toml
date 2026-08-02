@@ -51,11 +51,11 @@ rusqlite.workspace = true
 # which iOS forbids). plugin-core + sync-engine bring the PluginManager + the
 # SecretStore seam the registry routes credentials through.
 #
-# We enable every bundled adapter EXCEPT sync-adapter-local (default-features
-# off drops the `static` umbrella; the per-adapter features are listed
-# explicitly): a device-local sync target only writes into the app sandbox no
-# other device can reach, so mobile never offers it — no point building or
-# embedding it. cal-adapter-local (the local DATA store) is separate + always on.
+# The adapters are listed one by one (default-features off drops the `static`
+# umbrella) so this build embeds only what it ships. The built-in store is not
+# among them and never was: it is not a plugin, and it arrives through
+# `cal-adapter-local` below — including, since folder sync folded into it, its
+# mirror half.
 host-core.workspace = true
 vc-core.workspace = true
 host-plugins = { workspace = true, features = [
@@ -108,12 +108,6 @@ uniffi = "0.31.1"
 # Host integration tests open a real on-disk SQLite file (the DbHandle read
 # pool needs a file, not `:memory:`).
 tempfile = "3"
-# The sync / E2E host tests drive two-host sync through the local FS target —
-# the natural no-network test double. The production build excludes
-# sync-adapter-local (see [dependencies]); re-enable just that adapter for the
-# test build so those fixtures still register it. resolver = "2" keeps this
-# dev-only feature out of the shipped cdylib/staticlib.
-host-plugins = { workspace = true, features = ["sync-local"] }
 
 [lints]
 workspace = true

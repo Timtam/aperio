@@ -146,7 +146,6 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
- "sync-adapter-local",
  "sync-core",
  "sync-engine",
  "tauri",
@@ -963,6 +962,8 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sync-core",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -2925,7 +2926,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "sync-adapter-local",
  "sync-adapter-webdav-plugin",
  "sync-core",
  "sync-engine",
@@ -2955,7 +2955,6 @@ dependencies = [
  "serde_json",
  "sync-adapter-dropbox-plugin",
  "sync-adapter-ftp-plugin",
- "sync-adapter-local-plugin",
  "sync-adapter-sftp-plugin",
  "sync-adapter-webdav-plugin",
  "sync-engine",
@@ -6563,46 +6562,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sync-adapter-local"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "serde",
- "serde_json",
- "sync-core",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "sync-adapter-local-cdylib"
-version = "0.1.0"
-dependencies = [
- "plugin-sdk",
- "sync-adapter-local-plugin",
-]
-
-[[package]]
-name = "sync-adapter-local-plugin"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "plugin-core",
- "plugin-sdk",
- "serde",
- "serde_json",
- "sync-adapter-local",
- "sync-core",
- "tempfile",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "sync-adapter-sftp"
 version = "0.1.0"
 dependencies = [
@@ -6715,7 +6674,6 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
- "sync-adapter-local",
  "sync-core",
  "tempfile",
  "thiserror 1.0.69",

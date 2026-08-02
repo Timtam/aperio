@@ -296,12 +296,10 @@ mod tests {
             "com.aperio.cal-adapter-ews",
             "com.aperio.cal-adapter-vikunja",
             "com.aperio.cal-adapter-todoist",
-            "com.aperio.sync-adapter-local",
             "com.aperio.sync-adapter-webdav",
             "com.aperio.sync-adapter-ftp",
             "com.aperio.sync-adapter-sftp",
             "com.aperio.sync-adapter-dropbox",
-            "com.aperio.sync-adapter-googledrive",
             "com.aperio.vc-adapter-webex",
         ];
         for id in EXPECTED {

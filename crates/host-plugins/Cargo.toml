@@ -22,7 +22,6 @@ cal-adapter-microsoft-graph-plugin = { path = "../cal-adapter-microsoft-graph-pl
 cal-adapter-ews-plugin = { path = "../cal-adapter-ews-plugin", optional = true }
 cal-adapter-vikunja-plugin = { path = "../cal-adapter-vikunja-plugin", optional = true }
 cal-adapter-todoist-plugin = { path = "../cal-adapter-todoist-plugin", optional = true }
-sync-adapter-local-plugin = { path = "../sync-adapter-local-plugin", optional = true }
 sync-adapter-webdav-plugin = { path = "../sync-adapter-webdav-plugin", optional = true }
 sync-adapter-ftp-plugin = { path = "../sync-adapter-ftp-plugin", optional = true }
 sync-adapter-sftp-plugin = { path = "../sync-adapter-sftp-plugin", optional = true }
@@ -59,7 +58,6 @@ microsoft-graph = ["registry", "dep:cal-adapter-microsoft-graph-plugin"]
 ews = ["registry", "dep:cal-adapter-ews-plugin"]
 vikunja = ["registry", "dep:cal-adapter-vikunja-plugin"]
 todoist = ["registry", "dep:cal-adapter-todoist-plugin"]
-sync-local = ["registry", "dep:sync-adapter-local-plugin"]
 sync-webdav = ["registry", "dep:sync-adapter-webdav-plugin"]
 sync-ftp = ["registry", "dep:sync-adapter-ftp-plugin"]
 sync-sftp = ["registry", "dep:sync-adapter-sftp-plugin"]
@@ -75,7 +73,6 @@ static = [
     "ews",
     "vikunja",
     "todoist",
-    "sync-local",
     "sync-webdav",
     "sync-ftp",
     "sync-sftp",

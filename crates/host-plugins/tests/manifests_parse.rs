@@ -136,7 +136,7 @@ fn the_sync_adapters_declare_the_kinds_the_hosts_resolve() {
         // what names it, by plugin id.
         if manifest.adapter_kind.is_none() {
             assert!(
-                name == "sync-adapter-local-plugin",
+                name == "the built-in store",
                 "{name} declares no adapter kind; only the folder adapter may, \
                  because the built-in store declares its kind for it",
             );

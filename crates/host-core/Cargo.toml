@@ -52,7 +52,7 @@ tempfile = "3"
 # network I/O (the feed is only fetched on the first read).
 cal-adapter-ical-plugin = { path = "../cal-adapter-ical-plugin" }
 # The sound-asset sync test drives a real local-filesystem sync target.
-sync-adapter-local = { path = "../sync-adapter-local" }
+# (the folder mirror is part of `cal-adapter-local` above)
 # `travels_between_devices` has to be asked about a REAL sync-only adapter —
 # one whose manifest declares `capabilities: ["sync"]` and nothing else. A
 # hand-written twin would drift from the shipped manifests the way every

@@ -116,11 +116,6 @@ tokio = { workspace = true }
 # Lets the event-log applier's tests reuse the LocalAdapter's
 # in-memory migrated SQLite without duplicating the schema replay.
 cal-adapter-local = { workspace = true, features = ["test-support"] }
-# sound_assets's tests need a concrete SyncAdapter to drive
-# the manifest+sync round; LocalFsSyncAdapter is the natural
-# choice. Not needed by the main binary — the orchestrator
-# reaches it via the dlopen'd sync-adapter-local-plugin.
-sync-adapter-local = { path = "../crates/sync-adapter-local" }
 # The in-memory test doubles (FakeSecrets) for the applier tests —
 # they run against the real DesktopSyncStore but must not touch the OS
 # keychain. test-support only activates for the test build.

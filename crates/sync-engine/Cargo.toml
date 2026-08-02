@@ -37,11 +37,10 @@ test-support = []
 [dev-dependencies]
 tempfile = "3"
 # The engine-level growth-refetch round-trip test drives two full
-# orchestrator stacks against one shared on-disk remote; the local-FS
-# adapter is the only backend cheap enough to stand up in a unit test
-# (and it reports listing sizes, which the growth check needs).
-sync-adapter-local = { path = "../sync-adapter-local" }
-# Same test's applier side needs a real, migrated SQLite (in-memory).
+# orchestrator stacks against one shared on-disk remote; the folder mirror is
+# the only backend cheap enough to stand up in a unit test (and it reports
+# listing sizes, which the growth check needs). The same test's applier side
+# needs a real, migrated SQLite — both live in this one crate now.
 cal-adapter-local = { workspace = true, features = ["test-support"] }
 
 [lints]

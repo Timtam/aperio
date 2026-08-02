@@ -1,4 +1,14 @@
-//! Local filesystem `SyncAdapter` implementation.
+//! The store's other half: mirroring the dataset into a filesystem directory.
+//!
+//! It lived in its own crate, behind its own plugin, under its own adapter kind
+//! (`local_folder`) — a name that existed only to dodge a collision with this
+//! crate, which already owned `local`. Once folder sync folded into the
+//! built-in store the collision was gone, and so was the reason for the split:
+//! this is the same adapter, in its second role.
+//!
+//! It needs no plugin ABI either. [`LocalFsSyncAdapter`] implements
+//! `sync_core::SyncAdapter` directly, so the host constructs it exactly as it
+//! constructs [`crate::LocalAdapter`] — linked in, no vtable, no cdylib.
 //!
 //! Wraps a configurable directory path and maps the
 //! [`sync_core::SyncAdapter`] trait onto plain `tokio::fs`

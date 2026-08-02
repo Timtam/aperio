@@ -819,7 +819,7 @@ mod tests {
         }
     }
 
-    /// Drive twin of sync-adapter-local's
+    /// Drive twin of cal-adapter-local's
     /// `grown_file_at_the_cursor_is_refetched`: the listed size
     /// feeding `wants_sized` closes the append-miss class.
     #[test]

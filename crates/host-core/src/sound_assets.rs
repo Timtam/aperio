@@ -845,7 +845,7 @@ mod tests {
         // run, the local file is pushed to a "remote" (a temp
         // LocalFsSyncAdapter standing in for the sync store), AND
         // a different file we pre-seed on the remote is fetched.
-        use sync_adapter_local::LocalFsSyncAdapter;
+        use cal_adapter_local::LocalFsSyncAdapter;
         let (_tmp_db, db) = fresh_db();
         let shared = db.shared();
         let local_sounds = TempDir::new().unwrap();
@@ -911,7 +911,7 @@ mod tests {
         // A referenced hash that's nowhere on the remote — not
         // an error, just counted in `missing_on_remote` for the
         // call site to log.
-        use sync_adapter_local::LocalFsSyncAdapter;
+        use cal_adapter_local::LocalFsSyncAdapter;
         let (_tmp_db, db) = fresh_db();
         let shared = db.shared();
         let local_sounds = TempDir::new().unwrap();

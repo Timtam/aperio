@@ -90,27 +90,22 @@ pub fn builtin_adapter_kinds() -> Vec<AdapterKindInfo> {
     }]
 }
 
-/// The plugin that EXECUTES sync for a built-in kind, with the schema that
-/// describes it.
+/// The schema that describes a built-in kind's storage settings.
 ///
-/// The built-in store declares that it can hold the dataset; it has no vtable
-/// to do it with. `sync-adapter-local-plugin` has the vtable and, since the
-/// merge, no kind of its own — so the declaration and the execution are two
-/// halves of one adapter, joined here.
+/// The built-in store declares that it can hold the dataset AND implements it:
+/// [`cal_adapter_local::LocalFsSyncAdapter`] is a `SyncAdapter` like any other,
+/// so nothing here goes through the plugin ABI. It used to name a plugin id and
+/// let the manager open it — a seam that existed only because the folder mirror
+/// was still a separate crate behind a separate plugin. It is neither now.
 ///
-/// That split is the same one the store already lives with for calendars: it
-/// declares itself in a manifest and is CALLED as a linked-in type. Sync is the
-/// one capability whose execution does go through a plugin, so this is where
-/// the two are named in the same breath.
+/// `local_folder` answers too. It is the kind the folder sync carried as its
+/// own before the merge, adopted by the built-in store's manifest, so a row
+/// written back then still resolves — and, like every adoption, without
+/// anything persisted having to change.
 ///
-/// `local_folder` answers too. It is the kind the folder sync used to carry as
-/// its own, adopted by the built-in store's manifest, so an account row written
-/// before the merge still resolves — and, like every adoption, without anything
-/// that was persisted having to change.
-///
-/// Nothing else is here and nothing else should be: a second built-in adapter
-/// that wanted a plugin to execute for it would be adding a row above, not a
-/// branch somewhere else.
+/// The returned id is what [`open_sync`] recognises. It is deliberately not a
+/// plugin id: no plugin serves it, and a caller that took it to the plugin
+/// manager would find nothing.
 pub fn sync_plugin_for(
     adapter_kind: &str,
 ) -> Option<(String, plugin_core::account_schema::AccountSchema)> {
@@ -118,9 +113,55 @@ pub fn sync_plugin_for(
     if !m.serves_kind(adapter_kind) {
         return None;
     }
-    Some((
-        "com.aperio.sync-adapter-local".to_string(),
-        m.account.clone()?,
+    Some((BUILTIN_SYNC_ID.to_string(), m.account.clone()?))
+}
+
+/// The id [`sync_plugin_for`] hands back, and the only value [`open_sync`]
+/// answers to.
+///
+/// Kept as the built-in store's own plugin id rather than the retired folder
+/// plugin's: it names the adapter that DECLARES the capability, which is the
+/// one a log line or an error should mention.
+pub const BUILTIN_SYNC_ID: &str = "com.aperio.cal-adapter-local";
+
+/// Open the built-in store's sync half, or `None` when the id is not its own.
+///
+/// Both hosts call this from their `SyncPlugins::open` before consulting the
+/// plugin manager. Linked in, so there is no vtable, no cdylib, and no
+/// serialisation on the path — the same arrangement the store's calendar half
+/// has always had.
+pub fn open_sync(
+    plugin_id: &str,
+    config_json: &str,
+) -> Option<Result<std::sync::Arc<dyn sync_core::SyncAdapter>, String>> {
+    if plugin_id != BUILTIN_SYNC_ID {
+        return None;
+    }
+    Some(open_sync_inner(config_json))
+}
+
+fn open_sync_inner(
+    config_json: &str,
+) -> Result<std::sync::Arc<dyn sync_core::SyncAdapter>, String> {
+    #[derive(serde::Deserialize)]
+    struct Config {
+        #[serde(default)]
+        remote_root: String,
+    }
+    let cfg: Config =
+        serde_json::from_str(config_json).map_err(|e| format!("malformed init config: {e}"))?;
+    // The one thing that can be missing, and the one the user can fix. It is a
+    // device-local field, so an account restored from another device arrives
+    // without it — saying so beats an adapter pointed at the current directory.
+    if cfg.remote_root.trim().is_empty() {
+        return Err(
+            "this device has no folder set for the built-in store; choose one in the sync \
+             settings"
+                .to_string(),
+        );
+    }
+    Ok(std::sync::Arc::new(
+        cal_adapter_local::LocalFsSyncAdapter::new(cfg.remote_root.trim()),
     ))
 }
 
