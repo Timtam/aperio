@@ -25,13 +25,20 @@ Daten – führt dich ein kurzer, barrierefreier Assistent durch die
 wichtigsten Punkte:
 
 - **Sprache** der Oberfläche (Standard: deine Systemsprache).
-- **Synchronisierung** – stelle deine Daten von einem vorhandenen Sync-Ziel
-  wieder her, richte ein neues für die Synchronisierung über mehrere Geräte
-  ein, oder überspringe den Schritt vorerst. Verbindest du dich mit einem
-  Ziel, das bereits einen Aperio-Datensatz enthält, werden deine Daten und
-  Konten wiederhergestellt und der Assistent endet dort.
 - **Erstes Konto** (oder du überspringst das und legst später eines an –
   siehe [Kapitel 02](/de/guides/tutorial/02-konten-verbinden/)).
+- **Speicherort** – stelle deine Daten von einem vorhandenen Speicherort
+  wieder her, richte einen neuen für die Synchronisierung über mehrere
+  Geräte ein, oder überspringe den Schritt vorerst. Die abgefragten Felder
+  kommen vom jeweiligen Plugin selbst, sind also dieselben wie beim Anlegen
+  eines Kontos. Verbindest du dich mit einem Speicherort, der bereits einen
+  Aperio-Datensatz enthält, siehst du vorher, wann er zuletzt verdichtet
+  wurde und welche Geräte ihn nutzen; danach werden deine Daten und Konten
+  wiederhergestellt.
+
+Der Speicherort kommt zuletzt, und zwar in beiden Fällen: Übernimmst du
+einen vorhandenen Datensatz, bringt der die Konten ohnehin mit; beginnst du
+neu, hast du den Kontoschritt schon hinter dir.
 
 Du kannst alles später in den **Einstellungen** ändern.
 

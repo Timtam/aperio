@@ -44,6 +44,14 @@ Plugin –, sagt das Synchronisationsziel das bei diesem Konto und bietet
 bietet die Reparatur an, wo sie in einer Bestätigung besteht. **Trennen**
 bleibt ebenfalls erreichbar.
 
+Protokolle, die einen Server über seinen Schlüssel identifizieren – SFTP
+etwa –, lassen dich dessen Fingerabdruck beim ersten Mal bestätigen und
+lehnen danach alles ab, was nicht dazu passt. Der bestätigte Fingerabdruck
+steht beim Konto, daneben **Pin verwerfen**. Verwirf ihn, wenn der
+Server-Schlüssel bekanntermaßen aus gutem Grund gewechselt hat, etwa nach
+einer Neuinstallation: Die nächste Verbindung fragt dann nach dem neuen.
+Der Pin gehört allein diesem Gerät und wird nirgendwohin übertragen.
+
 Welches Konto ein Gerät verwendet, ist eine **gerätelokale** Entscheidung:
 Die Konten selbst wandern zwischen deinen Geräten, die Wahl des Ziels nicht.
 So kann ein Laptop über das Internet und ein Rechner über eine Freigabe im

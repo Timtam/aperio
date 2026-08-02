@@ -43,6 +43,14 @@ target says so on that account and offers **Try … again** for it. Pressing
 that names the actual reason and, where the repair is a confirmation, offers
 it right there. **Disconnect** stays available as well.
 
+Protocols that identify a server by its key — SFTP, for one — ask you to
+confirm its fingerprint the first time, and refuse anything that does not
+match afterwards. The confirmed fingerprint is shown on that account, with
+**Forget pin** next to it. Drop it when you know the server's key has
+changed for a legitimate reason, such as a reinstall: the next connection
+then asks you to confirm the new one. The pin belongs to this device alone
+and is never sent anywhere.
+
 Which account a device uses is a **device-local** decision: the accounts
 themselves travel between your devices, the choice of target does not. So a
 laptop can reach the same dataset over the internet while a desktop reaches
