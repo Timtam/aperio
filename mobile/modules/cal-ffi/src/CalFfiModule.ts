@@ -608,6 +608,11 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  at all". */
   previewSyncAccountHostKeyJson(accountId: string): Promise<string>;
   /** Pin a user-confirmed fingerprint for `hostPort` (first-use or key-change). */
+  /** What this device has confirmed about an account's server, without
+   *  touching the network: `null` when the adapter pins no host keys, otherwise
+   *  `{host, port, host_port, fingerprint}` with `fingerprint: null` when
+   *  nothing is confirmed yet. */
+  syncAccountHostKeyPinJson(accountId: string): Promise<string>;
   trustSftpHostKey(hostPort: string, fingerprint: string): Promise<void>;
   /** Drop the pinned fingerprint for `hostPort` (next connect re-prompts). */
   forgetSftpHostKey(hostPort: string): Promise<void>;

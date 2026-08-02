@@ -17,9 +17,12 @@ import {
   type AdapterKindInfo,
 } from '../../api/accounts';
 import {
+  forgetSftpHostKey,
   previewSyncAccountHostKey,
   selectSyncAccount,
+  syncAccountHostKeyPin,
   trustSftpHostKey,
+  type HostKeyPinInfo,
   type HostKeyPreview,
 } from '../../api/sync';
 import { useSyncErrorMessage } from '../../api/syncErrorMessage';
@@ -79,6 +82,11 @@ import { AppDialog } from '../AppDialog';
  *   an effect keyed on the message never re-runs when the same refusal is set
  *   twice, so a second press against the same dead server left the cursor
  *   standing where it was. Same arrangement as the desktop twin.
+ * - The pinned fingerprint (§19.5) rides on the row it belongs to, with the
+ *   action that drops it. A decision this device made about a server has to be
+ *   revocable, and it is read WITHOUT touching the network — the moment a user
+ *   most wants to withdraw trust is the moment that server is behaving oddly.
+ *   Dropping it is confirmed first, and the confirmation names the server.
  * - The START of a probe is announced. `accessibilityState.busy` has no
  *   VoiceOver equivalent and a changed label is not re-read for the element
  *   that already has focus — and on iOS the row is one accessible element, so
@@ -141,6 +149,13 @@ export function SyncTargetAccountPicker({
    *  refused instead of a message the user has no way to act on. */
   const [trustFor, setTrustFor] = useState<Account | null>(null);
   const [trustPreview, setTrustPreview] = useState<HostKeyPreview | null>(null);
+  /** Every listed account's host-key pin, keyed by account id. Absent = its
+   *  adapter pins none, or the read has not answered yet. Read for the whole
+   *  (short) list rather than per selection: this screen has no detail pane, so
+   *  the fingerprint has to ride on the row itself. */
+  const [pins, setPins] = useState<Record<string, HostKeyPinInfo>>({});
+  /** The account whose pin the user is about to drop. */
+  const [forgetFor, setForgetFor] = useState<Account | null>(null);
 
   // The one node that outlives every state change in here, and whose text IS
   // the state. See the component doc.
@@ -166,6 +181,21 @@ export function SyncTargetAccountPicker({
       setAccounts(accs);
       setSyncKinds(kinds.filter((k) => k.can_sync));
       setLoadError(null);
+      // The pins, alongside. Local reads, one per account, and a failure is
+      // simply an account with nothing to say here — never an error over a
+      // picker whose real job succeeded.
+      const found: Record<string, HostKeyPinInfo> = {};
+      await Promise.all(
+        accs.map(async (a) => {
+          try {
+            const info = await syncAccountHostKeyPin(a.id);
+            if (info?.fingerprint) found[a.id] = info;
+          } catch {
+            // See above.
+          }
+        }),
+      );
+      setPins(found);
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -297,8 +327,38 @@ export function SyncTargetAccountPicker({
       showError(messageForError(err));
       return;
     }
+    // The pin the user just confirmed is the one the row offers to drop —
+    // re-read it before the select, so the section appears whether or not the
+    // select that follows succeeds.
+    await reload();
     await runSelect(account);
-  }, [runSelect, showError, trustFor, trustPreview, messageForError]);
+  }, [reload, runSelect, showError, trustFor, trustPreview, messageForError]);
+
+  /** Drop the pin, then say so and land on the status note — the pressed
+   *  button is gone with the section it lived in. */
+  const runForget = useCallback(async () => {
+    const account = forgetFor;
+    const hostPort = account ? pins[account.id]?.host_port : null;
+    setForgetFor(null);
+    if (!account || !hostPort) return;
+    try {
+      await forgetSftpHostKey(hostPort);
+      await reload();
+      announce(t('dialogs.settings.sync.sftpForgetPinDone'));
+      requestAnimationFrame(() => focusOn(statusRef.current));
+    } catch (err) {
+      showError(messageForError(err));
+    }
+  }, [
+    announce,
+    focusOn,
+    forgetFor,
+    messageForError,
+    pins,
+    reload,
+    showError,
+    t,
+  ]);
 
   const cancelTrust = useCallback(() => {
     setTrustPreview(null);
@@ -415,88 +475,129 @@ export function SyncTargetAccountPicker({
                 const busyLabel = t('dialogs.settings.sync.targetUseBusy', {
                   name: account.display_name,
                 });
+                const pin = pins[account.id];
                 return (
-                  <View
-                    key={account.id}
-                    accessible
-                    accessibilityRole="text"
-                    // While a probe runs, the ROW says so. On iOS it is the
-                    // only element a VoiceOver user can reach — the button
-                    // inside it is not one — so leaving the row saying "does
-                    // not hold the sync dataset" meant swiping back to it
-                    // during a live network round trip and being told the
-                    // state it is in the middle of leaving.
-                    accessibilityLabel={
-                      busy
-                        ? busyLabel
-                        : t('dialogs.settings.sync.targetOptionLabel', {
-                            name: account.display_name,
-                            kind: group.label,
-                            summary,
-                          })
-                    }
-                    // Withdrawn while anything is in flight, so the rotor
-                    // does not offer an action that is about to be ignored.
-                    accessibilityActions={
-                      actionable && !blocked
-                        ? [{ name: 'use', label: useLabel }]
-                        : undefined
-                    }
-                    // Gate on ANY select being in flight, not just this row's,
-                    // exactly like the `Pressable` below and the desktop
-                    // twin. On iOS the row is one accessible element, so the
-                    // button inside it is NOT a VoiceOver element and this
-                    // rotor action is the only way a VoiceOver user can
-                    // activate anything here — a per-row gate left the two
-                    // concurrent `select_sync_account` calls that guard
-                    // exists to prevent reachable by exactly those users.
-                    onAccessibilityAction={(e) => {
-                      if (e.nativeEvent.actionName === 'use' && !blocked) {
-                        void runSelect(account);
+                  <View key={account.id} style={styles.rowGroup}>
+                    <View
+                      accessible
+                      accessibilityRole="text"
+                      // While a probe runs, the ROW says so. On iOS it is the
+                      // only element a VoiceOver user can reach — the button
+                      // inside it is not one — so leaving the row saying "does
+                      // not hold the sync dataset" meant swiping back to it
+                      // during a live network round trip and being told the
+                      // state it is in the middle of leaving.
+                      accessibilityLabel={
+                        busy
+                          ? busyLabel
+                          : t('dialogs.settings.sync.targetOptionLabel', {
+                              name: account.display_name,
+                              kind: group.label,
+                              summary,
+                            })
                       }
-                    }}
-                    style={[styles.row, isCurrent && styles.rowCurrent]}
-                  >
-                    <View style={styles.rowText}>
-                      <Text style={styles.accountName}>
-                        {account.display_name}
-                      </Text>
-                      <Text style={styles.accountKind}>{group.label}</Text>
-                      {/* The state marker a sighted user needs, and only on
-                          the row that has something to say: every other row
-                          already carries "Sync through …" next to it. Visible
-                          only — the row's own accessible name ends in this
-                          same state, and saying it twice is noise. */}
-                      {isCurrent && (
-                        <Text
-                          style={styles.rowNote}
-                          importantForAccessibility="no"
-                        >
-                          {t(
-                            broken
-                              ? 'dialogs.settings.sync.targetBrokenNote'
-                              : 'dialogs.settings.sync.targetCurrentNote',
-                            { name: account.display_name },
-                          )}
+                      // Withdrawn while anything is in flight, so the rotor
+                      // does not offer an action that is about to be ignored.
+                      accessibilityActions={
+                        actionable && !blocked
+                          ? [{ name: 'use', label: useLabel }]
+                          : undefined
+                      }
+                      // Gate on ANY select being in flight, not just this row's,
+                      // exactly like the `Pressable` below and the desktop
+                      // twin. On iOS the row is one accessible element, so the
+                      // button inside it is NOT a VoiceOver element and this
+                      // rotor action is the only way a VoiceOver user can
+                      // activate anything here — a per-row gate left the two
+                      // concurrent `select_sync_account` calls that guard
+                      // exists to prevent reachable by exactly those users.
+                      onAccessibilityAction={(e) => {
+                        if (e.nativeEvent.actionName === 'use' && !blocked) {
+                          void runSelect(account);
+                        }
+                      }}
+                      style={[styles.row, isCurrent && styles.rowCurrent]}
+                    >
+                      <View style={styles.rowText}>
+                        <Text style={styles.accountName}>
+                          {account.display_name}
                         </Text>
+                        <Text style={styles.accountKind}>{group.label}</Text>
+                        {/* The state marker a sighted user needs, and only on
+                            the row that has something to say: every other row
+                            already carries "Sync through …" next to it. Visible
+                            only — the row's own accessible name ends in this
+                            same state, and saying it twice is noise. */}
+                        {isCurrent && (
+                          <Text
+                            style={styles.rowNote}
+                            importantForAccessibility="no"
+                          >
+                            {t(
+                              broken
+                                ? 'dialogs.settings.sync.targetBrokenNote'
+                                : 'dialogs.settings.sync.targetCurrentNote',
+                              { name: account.display_name },
+                            )}
+                          </Text>
+                        )}
+                      </View>
+                      {actionable && (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityState={{ disabled: blocked, busy }}
+                          accessibilityLabel={busy ? busyLabel : useLabel}
+                          disabled={blocked}
+                          onPress={() => void runSelect(account)}
+                          style={({ pressed }) => [
+                            styles.smallButton,
+                            pressed && styles.pressed,
+                          ]}
+                        >
+                          <Text style={styles.smallButtonText}>
+                            {busy ? busyLabel : useLabel}
+                          </Text>
+                        </Pressable>
                       )}
                     </View>
-                    {actionable && (
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityState={{ disabled: blocked, busy }}
-                        accessibilityLabel={busy ? busyLabel : useLabel}
-                        disabled={blocked}
-                        onPress={() => void runSelect(account)}
-                        style={({ pressed }) => [
-                          styles.smallButton,
-                          pressed && styles.pressed,
-                        ]}
-                      >
-                        <Text style={styles.smallButtonText}>
-                          {busy ? busyLabel : useLabel}
+                    {/* §19.5 — what this device confirmed about this
+                        account's server, and the way back out of it.
+
+                        A SIBLING of the row, not a child: the row is one
+                        accessible element on iOS, so a fingerprint and a
+                        button inside it would be unreachable to VoiceOver —
+                        the same reason the row's own action is a rotor action
+                        as well. Out here both are ordinary stops on both
+                        platforms. */}
+                    {pin?.fingerprint && (
+                      <View style={styles.pinBlock}>
+                        <Text style={styles.rowNote} accessibilityRole="text">
+                          {t('dialogs.settings.sync.sftpPinCurrentWithValue', {
+                            fingerprint: pin.fingerprint,
+                          })}
                         </Text>
-                      </Pressable>
+                        <Text style={styles.rowNote} accessibilityRole="text">
+                          {t('dialogs.settings.sync.sftpPinHint')}
+                        </Text>
+                        <Pressable
+                          accessibilityRole="button"
+                          // Named after the SERVER: the button sits below a
+                          // row it is not part of, and "Forget pin" alone does
+                          // not say whose.
+                          accessibilityLabel={`${t(
+                            'dialogs.settings.sync.sftpForgetPin',
+                          )}: ${pin.host_port ?? account.display_name}`}
+                          onPress={() => setForgetFor(account)}
+                          style={({ pressed }) => [
+                            styles.smallButton,
+                            pressed && styles.pressed,
+                          ]}
+                        >
+                          <Text style={styles.smallButtonText}>
+                            {t('dialogs.settings.sync.sftpForgetPin')}
+                          </Text>
+                        </Pressable>
+                      </View>
                     )}
                   </View>
                 );
@@ -561,6 +662,21 @@ export function SyncTargetAccountPicker({
           {t('dialogs.settings.sync.sftpTrustVerifyHint')}
         </Text>
       </AppDialog>
+
+      {/* Dropping a pin is a security decision, so it is confirmed and the
+          confirmation NAMES the server it is about. */}
+      <AppDialog
+        visible={forgetFor != null}
+        title={t('dialogs.settings.sync.sftpForgetPin')}
+        message={t('dialogs.settings.sync.sftpForgetPinConfirm', {
+          hostPort: forgetFor ? (pins[forgetFor.id]?.host_port ?? '') : '',
+        })}
+        confirmLabel={t('dialogs.settings.sync.sftpForgetPin')}
+        cancelLabel={t('mobile.cancel')}
+        destructive
+        onConfirm={() => void runForget()}
+        onCancel={() => setForgetFor(null)}
+      />
     </>
   );
 }
@@ -588,6 +704,8 @@ const makeStyles = (c: ThemeColors) =>
     accountName: { fontSize: 18, color: c.textPrimary, fontWeight: '600' },
     accountKind: { fontSize: 14, color: c.textSecondary },
     rowNote: { fontSize: 13, color: c.textSecondary },
+    rowGroup: { gap: 8 },
+    pinBlock: { gap: 8, paddingHorizontal: 16 },
     smallButton: {
       paddingVertical: 12,
       paddingHorizontal: 14,

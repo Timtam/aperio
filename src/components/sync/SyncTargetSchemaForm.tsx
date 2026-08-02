@@ -21,11 +21,41 @@ import type {
   SyncPreview,
 } from '../../api/client';
 import type { Account } from '../../api/types';
+import { useDateFormat } from '../../intl/dateFormat';
 import { fetchAccountsNeedingConnect } from '../accountsNeedingConnect';
 import { AccountSchemaForm } from '../AccountSchemaForm';
 import { FocusableNote } from '../../a11y/FocusableNote';
 import { SyncSftpTrustDialog } from '../SyncSftpTrustDialog';
 import { useSyncErrorMessage } from './syncErrorMessage';
+
+/** The snapshot's date in the user's own format, falling back to the raw
+ *  timestamp when it cannot be parsed — a malformed date is still information,
+ *  and "Invalid Date" is not. */
+function formatSnapshotTime(
+  fmt: ReturnType<typeof useDateFormat>,
+  timestamp: string,
+): string {
+  try {
+    return fmt.format(new Date(timestamp), 'PPP');
+  } catch {
+    return timestamp;
+  }
+}
+
+/** The devices already on the dataset, with this one marked — the difference
+ *  between "somebody else's data" and "my other machine". */
+function deviceNames(
+  devices: readonly { id: string; name: string | null; is_this_device: boolean }[],
+  t: (key: string) => string,
+): string {
+  return devices
+    .map((d) =>
+      d.is_this_device
+        ? `${d.name ?? d.id} (${t('dialogs.settings.sync.previewThisDevice')})`
+        : (d.name ?? d.id),
+    )
+    .join(', ');
+}
 
 /** What a successful connect produced — handed to the caller so it can decide
  *  what to do next (refresh its summary card, advance a wizard, prompt for
@@ -69,6 +99,7 @@ export function SyncTargetSchemaForm({
   onConnected: (outcome: SyncConnectOutcome) => void;
 }) {
   const { t } = useTranslation();
+  const fmt = useDateFormat();
   const announce = useAnnouncer();
   const messageForError = useSyncErrorMessage();
 
@@ -285,9 +316,28 @@ export function SyncTargetSchemaForm({
       </label>
 
       {preview?.kind === 'existing' && (
-        <FocusableNote className="form__hint">
-          {t('dialogs.settings.sync.onboardPreviewExisting')}
-        </FocusableNote>
+        <div className="sync-panel__preview">
+          <FocusableNote className="form__hint">
+            {t('dialogs.settings.sync.onboardPreviewExisting')}
+          </FocusableNote>
+          {/* What is actually over there: when it was last compacted, and which
+              devices are already on it. A dataset the user does not recognise is
+              the one thing that should stop them joining, and "a dataset is
+              already there" does not let them tell. */}
+          <FocusableNote className="form__hint">
+            {preview.snapshot_timestamp !== null
+              ? t('dialogs.settings.sync.previewExisting', {
+                  time: formatSnapshotTime(fmt, preview.snapshot_timestamp),
+                })
+              : t('dialogs.settings.sync.previewNeverCompacted')}
+          </FocusableNote>
+          <FocusableNote className="form__hint">
+            {t('dialogs.settings.sync.previewDevices', {
+              count: preview.devices.length,
+              names: deviceNames(preview.devices, (key) => t(key)),
+            })}
+          </FocusableNote>
+        </div>
       )}
 
       {error && (

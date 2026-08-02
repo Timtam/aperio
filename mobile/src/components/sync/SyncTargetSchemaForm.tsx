@@ -32,10 +32,37 @@ import {
   type SyncPreview,
 } from '../../api/sync';
 import { useSyncErrorMessage } from '../../api/syncErrorMessage';
+import { formatLongDateTime } from '../../intl/dateFormat';
 import { useThemedStyles, type ThemeColors } from '../../theme';
 import { AccountSchemaForm } from '../AccountSchemaForm';
 import { AppDialog } from '../AppDialog';
 import { RadioGroup } from '../RadioGroup';
+
+/** The snapshot's date in the user's own format, falling back to the raw
+ *  timestamp when it cannot be parsed — a malformed date is still information,
+ *  and "Invalid Date" is not. */
+function formatSnapshotTime(timestamp: string, locale: string): string {
+  try {
+    return formatLongDateTime(new Date(timestamp), locale);
+  } catch {
+    return timestamp;
+  }
+}
+
+/** The devices already on the dataset, with this one marked — the difference
+ *  between "somebody else's data" and "my other machine". */
+function deviceNames(
+  devices: readonly { id: string; name: string | null; is_this_device: boolean }[],
+  t: (key: string) => string,
+): string {
+  return devices
+    .map((d) =>
+      d.is_this_device
+        ? `${d.name ?? d.id} (${t('dialogs.settings.sync.previewThisDevice')})`
+        : (d.name ?? d.id),
+    )
+    .join(', ');
+}
 
 /** What a successful connect produced — handed to the caller so it can decide
  *  what to do next (refresh its status, advance a wizard, …). */
@@ -360,9 +387,28 @@ export function SyncTargetSchemaForm({
       </View>
 
       {preview?.kind === 'existing' && (
-        <Text style={styles.hint} accessibilityRole="text">
-          {t('dialogs.settings.sync.onboardPreviewExisting')}
-        </Text>
+        <View style={styles.field}>
+          <Text style={styles.hint} accessibilityRole="text">
+            {t('dialogs.settings.sync.onboardPreviewExisting')}
+          </Text>
+          {/* What is actually over there: when it was last compacted, and which
+              devices are already on it. A dataset the user does not recognise is
+              the one thing that should stop them joining, and "a dataset is
+              already there" does not let them tell. */}
+          <Text style={styles.hint} accessibilityRole="text">
+            {preview.snapshot_timestamp !== null
+              ? t('dialogs.settings.sync.previewExisting', {
+                  time: formatSnapshotTime(preview.snapshot_timestamp, i18n.language),
+                })
+              : t('dialogs.settings.sync.previewNeverCompacted')}
+          </Text>
+          <Text style={styles.hint} accessibilityRole="text">
+            {t('dialogs.settings.sync.previewDevices', {
+              count: preview.devices.length,
+              names: deviceNames(preview.devices, (key) => t(key)),
+            })}
+          </Text>
+        </View>
       )}
 
       {/* Deliberately NOT a live region: every refusal here is already

@@ -759,6 +759,11 @@ public class CalFfiModule: Module {
       try self.coded { try self.host.previewSyncAccountHostKeyJson(accountId: accountId) }
     }.runOnQueue(slowQueue)
 
+    // Read-only, and no network: what this device already confirmed.
+    AsyncFunction("syncAccountHostKeyPinJson") { (accountId: String) -> String in
+      try self.coded { try self.host.syncAccountHostKeyPinJson(accountId: accountId) }
+    }
+
     AsyncFunction("trustSftpHostKey") { (hostPort: String, fingerprint: String) in
       try self.coded { try self.host.trustSftpHostKey(hostPort: hostPort, fingerprint: fingerprint) }
     }

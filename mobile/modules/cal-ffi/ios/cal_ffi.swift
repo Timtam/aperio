@@ -2723,6 +2723,21 @@ public protocol HostProtocol: AnyObject, Sendable {
     func setUserPref(key: String, value: String) throws 
     
     /**
+     * What this device has confirmed about an account's server — no network.
+     *
+     * The counterpart to [`Self::preview_sync_account_host_key_json`], which
+     * dials the server to see what it is presenting NOW. This one reports the
+     * decision the user already made, so the sync screen can show it and offer
+     * to revoke it while the server is unreachable — which is exactly when
+     * revoking matters.
+     *
+     * `null` for an account that is gone or whose adapter declares no
+     * `host_key_pin`; a `host_port` of `null` INSIDE a value means the row does
+     * not say which server, which is a different thing with a different repair.
+     */
+    func syncAccountHostKeyPinJson(accountId: String) throws  -> String
+    
+    /**
      * Count of unresolved conflicts — the cheap badge query.
      */
     func syncConflictCount() throws  -> UInt32
@@ -4804,6 +4819,28 @@ open func setUserPref(key: String, value: String)throws   {try rustCallWithError
         FfiConverterString.lower(value),$0
     )
 }
+}
+    
+    /**
+     * What this device has confirmed about an account's server — no network.
+     *
+     * The counterpart to [`Self::preview_sync_account_host_key_json`], which
+     * dials the server to see what it is presenting NOW. This one reports the
+     * decision the user already made, so the sync screen can show it and offer
+     * to revoke it while the server is unreachable — which is exactly when
+     * revoking matters.
+     *
+     * `null` for an account that is gone or whose adapter declares no
+     * `host_key_pin`; a `host_port` of `null` INSIDE a value means the row does
+     * not say which server, which is a different thing with a different repair.
+     */
+open func syncAccountHostKeyPinJson(accountId: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_sync_account_host_key_pin_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(accountId),$0
+    )
+})
 }
     
     /**
@@ -9116,6 +9153,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_set_user_pref() != 9799) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_sync_account_host_key_pin_json() != 3511) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_sync_conflict_count() != 12817) {

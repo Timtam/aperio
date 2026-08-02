@@ -7,10 +7,13 @@ import {
   isCommandError,
   listAccounts,
   listAdapterKinds,
+  forgetSftpHostKey,
   previewSyncAccountHostKey,
   selectSyncAccount,
+  syncAccountHostKeyPin,
   trustSftpHostKey,
   type AdapterKindInfo,
+  type HostKeyPinInfo,
   type HostKeyPreview,
 } from '../../api/client';
 import type { Account } from '../../api/types';
@@ -20,6 +23,7 @@ import {
   SettingsSelectorDetail,
   type SettingsSelectorGroup,
 } from '../SettingsSelectorDetail';
+import { ConfirmDialog } from '../ConfirmDialog';
 import { SyncSftpTrustDialog } from '../SyncSftpTrustDialog';
 import { useSyncErrorMessage } from './syncErrorMessage';
 
@@ -28,13 +32,23 @@ import { useSyncErrorMessage } from './syncErrorMessage';
  * holds the dataset.
  *
  * It used to ask a different question — what kind of target, and what are its
- * host, path and password — through a form with a block per backend.
- * That form still exists and the first-launch wizard still renders it, because
- * a fresh instance has no accounts yet and has to create its first one while
- * deciding whether to join a dataset or start one. Everywhere else the account
- * is already there: added under Settings → Accounts, or carried in by a
- * restore. So this asks the only question that is left, and it asks it about
- * rows rather than about protocols.
+ * host, path and password — through a form with a block per backend. The
+ * first-launch wizard still asks that, through
+ * [`SyncTargetSchemaForm`](./SyncTargetSchemaForm.tsx) and the plugin's own
+ * schema, because a fresh instance has no accounts yet and has to create its
+ * first one while deciding whether to join a dataset or start one. Everywhere
+ * else the account is already there: added under Settings → Accounts, or
+ * carried in by a restore. So this asks the only question that is left, and it
+ * asks it about rows rather than about protocols.
+ *
+ * ## The pinned fingerprint
+ *
+ * An account whose adapter pins host keys (§19.5) carries a decision this
+ * device made about a server, and a decision that can be made must be
+ * revocable. The detail pane therefore states the confirmed fingerprint and
+ * offers to drop it — read WITHOUT touching the network
+ * ([`syncAccountHostKeyPin`]), because the moment a user most wants to withdraw
+ * trust from a server is the moment that server is behaving strangely.
  *
  * ## Where the list comes from
  *
@@ -142,6 +156,12 @@ export function SyncTargetAccountPicker({
    *  user has no way to act on. */
   const [untrustedId, setUntrustedId] = useState<string | null>(null);
   const [trustPreview, setTrustPreview] = useState<HostKeyPreview | null>(null);
+  /** The selected account's host-key pin, or `null` when its adapter pins none
+   *  — read for the SELECTED account only, so switching rows costs one cheap
+   *  local read rather than one per account on every load. */
+  const [pin, setPin] = useState<HostKeyPinInfo | null>(null);
+  const [pinAccountId, setPinAccountId] = useState<string | null>(null);
+  const [confirmForget, setConfirmForget] = useState(false);
 
   // The one node that outlives every state change in here, and whose text IS
   // the state. See the component doc.
@@ -352,6 +372,31 @@ export function SyncTargetAccountPicker({
     [announce, messageForError, runSelect, showError, t],
   );
 
+  /** Re-read the selected account's pin. No network: it is this device's own
+   *  decision, and a screen that could only show it while the server answers
+   *  would hide it exactly when it matters. */
+  const reloadPin = useCallback(async () => {
+    const id = pinAccountId;
+    if (!id) {
+      setPin(null);
+      return;
+    }
+    try {
+      const info = await syncAccountHostKeyPin(id);
+      // Ignore an answer for an account the user has already left.
+      setPin((prev) => (pinAccountId === id ? info : prev));
+    } catch {
+      // A pin that cannot be read is not a failure of this screen: the account
+      // still works, and the section simply does not appear. Reporting it here
+      // would put an error over a picker whose real job succeeded.
+      setPin(null);
+    }
+  }, [pinAccountId]);
+
+  useEffect(() => {
+    void reloadPin();
+  }, [reloadPin]);
+
   const onTrustAccept = useCallback(
     async (fingerprint: string) => {
       const preview = trustPreview;
@@ -368,11 +413,16 @@ export function SyncTargetAccountPicker({
         );
         return;
       }
+      // The pin the user just confirmed is the one this pane offers to drop —
+      // read it again before the select, so the section appears whether or not
+      // the select that follows succeeds.
+      await reloadPin();
       await runSelect(account);
     },
     [
       accounts,
       messageForError,
+      reloadPin,
       runSelect,
       showError,
       t,
@@ -406,10 +456,32 @@ export function SyncTargetAccountPicker({
   // button away; the message has to go with it — and so does the fingerprint
   // button itself, which is rendered off `untrustedId` and outlived the
   // sentence that explained why it was there.
-  const onSelectionChange = useCallback(() => {
+  const onSelectionChange = useCallback((id: string | null) => {
     setError(null);
     setUntrustedId(null);
+    setPin(null);
+    setPinAccountId(id);
   }, []);
+
+  /** Drop the pin, then say so and land on the sentence that says it.
+   *
+   *  The button that was pressed is gone — the whole section it lived in is —
+   *  so focus goes to the status note, the one node that outlives this. */
+  const runForget = useCallback(async () => {
+    const hostPort = pin?.host_port;
+    setConfirmForget(false);
+    if (!hostPort) return;
+    try {
+      await forgetSftpHostKey(hostPort);
+      await reloadPin();
+      announce(t('dialogs.settings.sync.sftpForgetPinDone'), 'polite');
+      requestAnimationFrame(() => {
+        statusNoteRef.current?.focus({ preventScroll: true });
+      });
+    } catch (err) {
+      showError(messageForError(err));
+    }
+  }, [announce, messageForError, pin, reloadPin, showError, t]);
 
   // Sync → Accounts WITHOUT a second dialog frame. `openSettings('accounts')`
   // reconciles a new Settings frame into the same tree position, unmounting
@@ -590,6 +662,30 @@ export function SyncTargetAccountPicker({
                     </div>
                   </div>
                 )}
+                {/* §19.5 — what this device confirmed about this account's
+                    server, and the way back out of it. Only on the account
+                    whose pin was read, and only once there IS one: an adapter
+                    that pins nothing has nothing to say here. */}
+                {pinAccountId === account.id && pin?.fingerprint && (
+                  <div className="sync-panel__field">
+                    <FocusableNote className="sync-panel__hint">
+                      {t('dialogs.settings.sync.sftpPinCurrentWithValue', {
+                        fingerprint: pin.fingerprint,
+                      })}
+                    </FocusableNote>
+                    <FocusableNote className="sync-panel__hint">
+                      {t('dialogs.settings.sync.sftpPinHint')}
+                    </FocusableNote>
+                    <div className="sync-panel__actions">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmForget(true)}
+                      >
+                        {t('dialogs.settings.sync.sftpForgetPin')}
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {untrustedId === account.id && (
                   <div className="sync-panel__actions">
                     <button
@@ -623,6 +719,17 @@ export function SyncTargetAccountPicker({
         preview={trustPreview}
         onAccept={(fp) => void onTrustAccept(fp)}
         onCancel={onTrustCancel}
+      />
+
+      <ConfirmDialog
+        isOpen={confirmForget}
+        onClose={() => setConfirmForget(false)}
+        onConfirm={() => void runForget()}
+        title={t('dialogs.settings.sync.sftpForgetPin')}
+        message={t('dialogs.settings.sync.sftpForgetPinConfirm', {
+          hostPort: pin?.host_port ?? '',
+        })}
+        confirmLabel={t('dialogs.settings.sync.sftpForgetPin')}
       />
     </div>
   );

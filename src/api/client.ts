@@ -1803,6 +1803,33 @@ export const previewSftpHostKey = (host: string, port: number) =>
 export const previewSyncAccountHostKey = (accountId: string) =>
   invoke<HostKeyPreview>('preview_sync_account_host_key', { accountId });
 
+/** One account's host-key pin, as this device holds it. */
+export interface HostKeyPinInfo {
+  /** The host the row names, empty when it names none. */
+  host: string;
+  /** The port as text — a number in newer rows, a string in older ones. */
+  port: string;
+  /** The `host:port` the pin is keyed by, `null` when the row does not say. */
+  host_port: string | null;
+  /** The confirmed fingerprint, `null` when this device has confirmed none. */
+  fingerprint: string | null;
+}
+
+/** What this device has confirmed about an account's server, WITHOUT touching
+ *  the network.
+ *
+ *  The probe above asks what the server is presenting now; this asks what the
+ *  user already decided. That is what a screen offering to REVOKE the decision
+ *  needs — asking the network for it would mean the trust cannot be withdrawn
+ *  while the server is unreachable, which is exactly when withdrawing it
+ *  matters.
+ *
+ *  `null` when the account's adapter pins no host keys. A `host_port` of `null`
+ *  inside a value means the row does not say which server — a different thing,
+ *  with a different repair. */
+export const syncAccountHostKeyPin = (accountId: string) =>
+  invoke<HostKeyPinInfo | null>('sync_account_host_key_pin', { accountId });
+
 /** Pin a host-key fingerprint after the user has confirmed it
  *  in the trust dialog. Overwrites any prior pin for the same
  *  `host:port`, which is how the "key changed; accept new"

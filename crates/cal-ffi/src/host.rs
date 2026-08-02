@@ -5207,32 +5207,18 @@ impl Host {
         let Some(pin) = schema.host_key_pin else {
             return Ok("null".to_string());
         };
-
-        let stored: serde_json::Map<String, serde_json::Value> =
-            serde_json::from_str::<serde_json::Value>(&account.config_json)
-                .ok()
-                .and_then(|v| v.as_object().cloned())
-                .unwrap_or_default();
-        // This device's half layered ON TOP of the row's, in that order: a
-        // device-local field is this device's answer and the row's is every
-        // other device's.
-        let local = host_core::account_local::load(
+        // WHICH server, resolved the one way both hosts resolve it — the row
+        // plus this device's half, port as text either way.
+        let Some(info) = host_core::sync_target::account_host_key_pin(
+            &account,
             &UserPrefsRepo::new(&shared),
-            &account.id,
-            &[pin.host_field.clone(), pin.port_field.clone()],
-        );
-        // A port is a JSON number in the row and a string in some older ones;
-        // both mean the same thing, and a lookup key that disagrees makes a pin
-        // the user already confirmed invisible.
-        let text = |key: &str| -> String {
-            match local.get(key).or_else(|| stored.get(key)) {
-                Some(serde_json::Value::String(s)) => s.trim().to_string(),
-                Some(serde_json::Value::Number(n)) => n.to_string(),
-                _ => String::new(),
-            }
+            &UserPrefsHostKeyVerifier::new(shared.clone()),
+            &HostSyncPlugins(&self.plugin_manager),
+        ) else {
+            return Ok("null".to_string());
         };
-        let host = text(&pin.host_field);
-        let port = text(&pin.port_field);
+        let host = info.host.clone();
+        let port = info.port.clone();
         let parsed_port: u16 = port.parse().unwrap_or_default();
         if host.is_empty() || parsed_port == 0 {
             return Err(StoreError::InvalidField {
@@ -5267,6 +5253,37 @@ impl Host {
         // The same key `merge_pin` looks the pin up under, or a fingerprint the
         // user confirms here stays invisible to the build that needs it.
         Ok(classify_host_key(&shared, format!("{host}:{port}"), probe.fingerprint)?.to_string())
+    }
+
+    /// What this device has confirmed about an account's server — no network.
+    ///
+    /// The counterpart to [`Self::preview_sync_account_host_key_json`], which
+    /// dials the server to see what it is presenting NOW. This one reports the
+    /// decision the user already made, so the sync screen can show it and offer
+    /// to revoke it while the server is unreachable — which is exactly when
+    /// revoking matters.
+    ///
+    /// `null` for an account that is gone or whose adapter declares no
+    /// `host_key_pin`; a `host_port` of `null` INSIDE a value means the row does
+    /// not say which server, which is a different thing with a different repair.
+    pub fn sync_account_host_key_pin_json(&self, account_id: String) -> Result<String, StoreError> {
+        let account_id = account_id.trim().to_string();
+        let shared = self.db.shared();
+        let Some(account) = AccountsRepo::new(&shared)
+            .get(&account_id)
+            .map_err(storage_err)?
+        else {
+            return Ok("null".to_string());
+        };
+        match host_core::sync_target::account_host_key_pin(
+            &account,
+            &UserPrefsRepo::new(&shared),
+            &UserPrefsHostKeyVerifier::new(shared.clone()),
+            &HostSyncPlugins(&self.plugin_manager),
+        ) {
+            Some(info) => to_json(&info),
+            None => Ok("null".to_string()),
+        }
     }
 
     /// Pin a user-confirmed SFTP host-key fingerprint for `host_port` (§19.5 —

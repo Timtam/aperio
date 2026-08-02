@@ -806,6 +806,7 @@ pub fn run() {
             // protocol pins host keys, which the account connect flow never
             // performs.
             commands::preview_sync_account_host_key,
+            commands::sync_account_host_key_pin,
             commands::sync_now,
             commands::get_sync_status,
             commands::get_sync_adapter_summary,

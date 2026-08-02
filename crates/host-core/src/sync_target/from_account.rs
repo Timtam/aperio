@@ -106,6 +106,88 @@ pub fn select_account(prefs: &UserPrefsRepo<'_>, account_id: Option<&str>) -> Us
     }
 }
 
+/// Which server one account pins host keys for, and what this device has
+/// confirmed for it.
+///
+/// Three separate facts, because the callers need different ones: the probe
+/// needs the host and the port to dial, the pin store is keyed by the pair, and
+/// a screen offering to revoke the decision needs to know whether there is one.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HostKeyPinInfo {
+    /// The host the row names, empty when it names none.
+    pub host: String,
+    /// The port as TEXT — a JSON number in a `number` field, a string in older
+    /// rows, and the same lookup key either way.
+    pub port: String,
+    /// The `host:port` the pin is keyed by — the same key
+    /// [`crate::registry::HostKeyPins`] uses, so a caller can forget it.
+    /// Absent when the row does not say which server, because `":"` would name
+    /// somebody else's pin.
+    pub host_port: Option<String>,
+    /// The fingerprint this device has confirmed, or `None` when it has not.
+    pub fingerprint: Option<String>,
+}
+
+/// Which server an account pins host keys for, and what this device has
+/// confirmed for it — WITHOUT touching the network.
+///
+/// The probe (`preview_sftp_host_key`) answers a different question: what the
+/// server is presenting right now. This one answers what the user already
+/// decided, which is what a screen offering to REVOKE that decision needs — and
+/// asking the network for it would mean a screen that cannot say "you trust
+/// this key" while the server is unreachable.
+///
+/// `None` only for an adapter that declares no `host_key_pin` — a row that does
+/// not say which server is a DIFFERENT answer, and the two carry different
+/// repairs. Nothing here names a protocol: the fields come from the schema's
+/// own declaration.
+pub fn account_host_key_pin(
+    account: &Account,
+    prefs: &UserPrefsRepo<'_>,
+    pins: &dyn HostKeyPins,
+    plugins: &dyn SyncPlugins,
+) -> Option<HostKeyPinInfo> {
+    let (_, schema) = plugins.resolve(account.adapter_kind.as_str())?;
+    let pin = schema.host_key_pin?;
+
+    let stored: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str::<serde_json::Value>(&account.config_json)
+            .ok()
+            .and_then(|v| v.as_object().cloned())
+            .unwrap_or_default();
+    // This device's half on TOP of the row's: a device-local host or port is
+    // this device's answer and the row's is every other device's.
+    let local = crate::account_local::load(
+        prefs,
+        &account.id,
+        &[pin.host_field.clone(), pin.port_field.clone()],
+    );
+    // A port is a JSON number in a `number` field and a string in older rows;
+    // both must produce the same lookup key, or a pin the user confirmed
+    // becomes invisible.
+    let text = |key: &str| -> String {
+        match local.get(key).or_else(|| stored.get(key)) {
+            Some(serde_json::Value::String(s)) => s.trim().to_string(),
+            Some(serde_json::Value::Number(n)) => n.to_string(),
+            _ => String::new(),
+        }
+    };
+    let host = text(&pin.host_field);
+    let port = text(&pin.port_field);
+    let host_port = (!host.is_empty() && !port.is_empty()).then(|| format!("{host}:{port}"));
+    let fingerprint = host_port
+        .as_deref()
+        .and_then(|hp| pins.peek(hp))
+        .map(|f| f.trim().to_string())
+        .filter(|f| !f.is_empty());
+    Some(HostKeyPinInfo {
+        host,
+        port,
+        host_port,
+        fingerprint,
+    })
+}
+
 /// Build the sync adapter for one account.
 ///
 /// Everything provider-specific comes from the plugin's schema: which fields
@@ -443,6 +525,64 @@ mod tests {
         .err()
         .expect("must refuse");
         assert!(err.to_string().contains("sftp"), "{err}");
+    }
+
+    /// The pin a screen offers to forget is found without a network round
+    /// trip, under the field names the SCHEMA declares.
+    #[test]
+    fn the_confirmed_fingerprint_is_readable_without_probing() {
+        let db = DbHandle::open_in_memory().unwrap();
+        let shared = db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+        let plugins = Opened {
+            schema: Some(sftp_schema()),
+            ..Default::default()
+        };
+        let acc = account(r#"{"host":"files.example.com","port":22}"#);
+
+        let info = account_host_key_pin(&acc, &prefs, &Pinned("SHA256:abc"), &plugins)
+            .expect("the adapter pins host keys");
+        assert_eq!(info.host, "files.example.com");
+        assert_eq!(info.port, "22");
+        assert_eq!(info.host_port.as_deref(), Some("files.example.com:22"));
+        assert_eq!(info.fingerprint.as_deref(), Some("SHA256:abc"));
+
+        // Nothing confirmed yet is still a server worth naming — the screen
+        // says "not confirmed" rather than showing nothing at all.
+        let none = account_host_key_pin(&acc, &prefs, &NoPins, &plugins).expect("same server");
+        assert_eq!(none.host_port.as_deref(), Some("files.example.com:22"));
+        assert_eq!(none.fingerprint, None);
+
+        // A row that does not say which server has no lookup key at all: `":"`
+        // would name somebody else's pin, and forgetting it would revoke a
+        // trust decision the user made about a different server.
+        let blank = account_host_key_pin(&account("{}"), &prefs, &Pinned("SHA256:abc"), &plugins)
+            .expect("the adapter still pins host keys");
+        assert_eq!(blank.host_port, None);
+        assert_eq!(blank.fingerprint, None);
+    }
+
+    /// An adapter that pins nothing has nothing to show, even with a pin store
+    /// that would answer for any key.
+    #[test]
+    fn an_adapter_without_a_declared_pin_reports_none() {
+        let db = DbHandle::open_in_memory().unwrap();
+        let shared = db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+        let plugins = Opened {
+            schema: Some(AccountSchema {
+                fields: vec![field("url", AccountFieldKind::Text)],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(account_host_key_pin(
+            &account(r#"{"url":"https://dav.example.com"}"#),
+            &prefs,
+            &Pinned("SHA256:abc"),
+            &plugins,
+        )
+        .is_none());
     }
 
     #[test]

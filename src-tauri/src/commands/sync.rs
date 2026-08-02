@@ -2844,51 +2844,41 @@ pub async fn preview_sync_account_host_key(
             code: "not_found",
             message: format!("no account {account_id}"),
         })?;
-    let (plugin_id, schema) = host_core::sync_target::SyncPlugins::resolve(
-        &HostSyncPlugins(plugin_manager.inner()),
-        account.adapter_kind.as_str(),
-    )
-    .ok_or_else(|| CommandError {
-        code: "plugin_missing",
-        message: format!(
-            "no loaded plugin serves `{}`",
-            account.adapter_kind.as_str()
-        ),
-    })?;
-    let pin = schema.host_key_pin.ok_or(CommandError {
+    let plugins = HostSyncPlugins(plugin_manager.inner());
+    let (plugin_id, schema) =
+        host_core::sync_target::SyncPlugins::resolve(&plugins, account.adapter_kind.as_str())
+            .ok_or_else(|| CommandError {
+                code: "plugin_missing",
+                message: format!(
+                    "no loaded plugin serves `{}`",
+                    account.adapter_kind.as_str()
+                ),
+            })?;
+    let pin = schema.host_key_pin.clone().ok_or(CommandError {
         code: "invalid_input",
         message: "this account's protocol does not pin host keys".into(),
     })?;
-
-    let stored: serde_json::Map<String, serde_json::Value> =
-        serde_json::from_str::<serde_json::Value>(&account.config_json)
-            .ok()
-            .and_then(|v| v.as_object().cloned())
-            .unwrap_or_default();
-    let local = host_core::account_local::load(
+    // WHICH server, resolved the one way both hosts resolve it — row plus this
+    // device's half, port as text either way. See `account_host_key_pin`.
+    let info = host_core::sync_target::account_host_key_pin(
+        &account,
         &UserPrefsRepo::new(&shared),
-        &account.id,
-        &[pin.host_field.clone(), pin.port_field.clone()],
-    );
-    // A port is a JSON number in the row and a string in some older ones; both
-    // mean the same thing, and a lookup key that disagrees makes a pin the user
-    // already confirmed invisible.
-    let text = |key: &str| -> String {
-        match local.get(key).or_else(|| stored.get(key)) {
-            Some(serde_json::Value::String(s)) => s.trim().to_string(),
-            Some(serde_json::Value::Number(n)) => n.to_string(),
-            _ => String::new(),
-        }
-    };
-    let host = text(&pin.host_field);
-    let port = text(&pin.port_field);
-    let parsed_port: u16 = port.parse().unwrap_or_default();
-    if host.is_empty() || parsed_port == 0 {
+        &UserPrefsHostKeyVerifier::new(shared.clone()),
+        &plugins,
+    )
+    .ok_or(CommandError {
+        code: "invalid_input",
+        message: "this account's protocol does not pin host keys".into(),
+    })?;
+    let parsed_port: u16 = info.port.parse().unwrap_or_default();
+    if info.host.is_empty() || parsed_port == 0 {
         return Err(CommandError {
             code: "invalid_input",
             message: "this account does not say which server to probe".into(),
         });
     }
+    let host = info.host.clone();
+    let port = info.port.clone();
     // Under the plugin's own field names, and built by hand rather than through
     // `json!` because the keys are the declaration's, not literals.
     let mut args = serde_json::Map::new();
@@ -2906,6 +2896,35 @@ pub async fn preview_sync_account_host_key(
     // The same key `merge_pin` looks the pin up under, or a fingerprint the
     // user confirms here stays invisible to the build that needs it.
     classify_host_key(&shared, format!("{host}:{port}"), probe.fingerprint)
+}
+
+/// What this device has confirmed about an account's server — no network.
+///
+/// The counterpart to [`preview_sync_account_host_key`], which dials the server
+/// to see what it is presenting NOW. This one reports the decision the user
+/// already made, so Settings can show it and offer to revoke it while the
+/// server is unreachable — which is exactly when revoking matters.
+///
+/// `null` for an account whose adapter declares no `host_key_pin`; a
+/// `host_port` of `null` inside a value means the row does not say which
+/// server, which is a different thing and has a different repair.
+#[tauri::command]
+pub async fn sync_account_host_key_pin(
+    db: State<'_, DbHandle>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
+    account_id: String,
+) -> CommandResult<Option<host_core::sync_target::HostKeyPinInfo>> {
+    let account_id = account_id.trim().to_string();
+    let shared = db.shared();
+    let Some(account) = AccountsRepo::new(&shared).get(&account_id)? else {
+        return Ok(None);
+    };
+    Ok(host_core::sync_target::account_host_key_pin(
+        &account,
+        &UserPrefsRepo::new(&shared),
+        &UserPrefsHostKeyVerifier::new(shared.clone()),
+        &HostSyncPlugins(plugin_manager.inner()),
+    ))
 }
 
 /// JSON shape the SFTP plugin returns from

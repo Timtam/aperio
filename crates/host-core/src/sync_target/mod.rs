@@ -41,8 +41,8 @@ pub use connect::{
 };
 
 pub use from_account::{
-    build_selected, from_account, select_account, selected_account_id, SyncPlugins,
-    PREF_SELECTED_ACCOUNT,
+    account_host_key_pin, build_selected, from_account, select_account, selected_account_id,
+    HostKeyPinInfo, SyncPlugins, PREF_SELECTED_ACCOUNT,
 };
 
 pub use migrate::{migrate_to_account, MigrateError, PREF_MIGRATED_ACCOUNT};

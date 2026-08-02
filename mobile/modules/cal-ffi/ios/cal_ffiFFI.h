@@ -1232,6 +1232,11 @@ void uniffi_cal_ffi_fn_method_host_set_section_color(uint64_t ptr, RustBuffer se
 void uniffi_cal_ffi_fn_method_host_set_user_pref(uint64_t ptr, RustBuffer key, RustBuffer value, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SYNC_ACCOUNT_HOST_KEY_PIN_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SYNC_ACCOUNT_HOST_KEY_PIN_JSON
+RustBuffer uniffi_cal_ffi_fn_method_host_sync_account_host_key_pin_json(uint64_t ptr, RustBuffer account_id, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SYNC_CONFLICT_COUNT
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_FN_METHOD_HOST_SYNC_CONFLICT_COUNT
 uint32_t uniffi_cal_ffi_fn_method_host_sync_conflict_count(uint64_t ptr, RustCallStatus *_Nonnull out_status
@@ -2553,6 +2558,12 @@ uint16_t uniffi_cal_ffi_checksum_method_host_set_section_color(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SET_USER_PREF
 #define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SET_USER_PREF
 uint16_t uniffi_cal_ffi_checksum_method_host_set_user_pref(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SYNC_ACCOUNT_HOST_KEY_PIN_JSON
+#define UNIFFI_FFIDEF_UNIFFI_CAL_FFI_CHECKSUM_METHOD_HOST_SYNC_ACCOUNT_HOST_KEY_PIN_JSON
+uint16_t uniffi_cal_ffi_checksum_method_host_sync_account_host_key_pin_json(void
     
 );
 #endif
