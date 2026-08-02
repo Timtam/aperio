@@ -1566,6 +1566,51 @@ export const adoptLocalDataset = (
     passphrase,
   });
 
+/** The three onboarding calls again, asked with an adapter kind and the values
+ *  the shared schema form produced.
+ *
+ *  Same flow and same answers as the typed trio above. What differs is what
+ *  they leave behind on success: an account row and this device's pointer at
+ *  it, so a device onboarded through the wizard looks afterwards exactly like
+ *  one set up later in the settings.
+ *
+ *  Both sets exist while the two frontends move across one at a time. The
+ *  typed half goes with the last per-backend form.
+ *
+ *  `previewSyncTargetValues` rejects with `host_key_not_trusted` for a target
+ *  whose fingerprint this device has not confirmed — answer it with
+ *  [`previewSftpHostKey`] + [`trustSftpHostKey`] and try again. */
+export const previewSyncTargetValues = (
+  kind: string,
+  values: Record<string, string | boolean>,
+) => invoke<SyncPreview>('preview_sync_target_values', { kind, values });
+
+export const acceptRemoteDatasetValues = (
+  kind: string,
+  values: Record<string, string | boolean>,
+  deviceName: string | null,
+  passphrase: string | null = null,
+) =>
+  invoke<OnboardingReport>('accept_remote_dataset_values', {
+    kind,
+    values,
+    deviceName,
+    passphrase,
+  });
+
+export const adoptLocalDatasetValues = (
+  kind: string,
+  values: Record<string, string | boolean>,
+  deviceName: string | null,
+  passphrase: string | null = null,
+) =>
+  invoke<OnboardingReport>('adopt_local_dataset_values', {
+    kind,
+    values,
+    deviceName,
+    passphrase,
+  });
+
 /** §19.7 — rotate the dataset's E2E passphrase. Verifies the
  *  old passphrase via the wrap (or, on legacy v1 datasets, the
  *  direct-derived key), then rewraps the long-term data key
