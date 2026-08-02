@@ -229,6 +229,33 @@ export function SyncDevicesPanel({ configured }: SyncDevicesPanelProps) {
    *  falling back would resurrect the registry's stale copy of the name just
    *  deleted. `nameLoaded` gates it, because before the read answers
    *  `savedName` is `null` for "not asked" and would read as "no name". */
+  /** Everything a row has to say, in the row's accessible name.
+   *
+   *  The row is ONE accessible element — `accessible` on the wrapper swallows
+   *  its children — so whatever is not in this string is not spoken at all.
+   *  App version and the stale marker were rendered as `Text` inside the row
+   *  and therefore reached nobody using a screen reader. One swipe, one
+   *  sentence, and the judgement the list exists for is complete without
+   *  opening anything.
+   *
+   *  The full identifier stays out: thirty-two characters on every swipe, for
+   *  the one thing nobody scanning the list wants. An unnamed device already
+   *  carries its short id in the NAME, which is what actually tells two
+   *  anonymous rows apart. */
+  const optionSummary = useCallback(
+    (device: SyncDeviceSummary) =>
+      [
+        activityPhrase(device),
+        t('dialogs.settings.sync.deviceAppVersion', {
+          version: device.app_version,
+        }),
+        device.stale ? t('dialogs.settings.sync.deviceStaleNote') : null,
+      ]
+        .filter(Boolean)
+        .join(' '),
+    [activityPhrase, t],
+  );
+
   const displayName = useCallback(
     (device: SyncDeviceSummary) => {
       const local =
@@ -361,7 +388,7 @@ export function SyncDevicesPanel({ configured }: SyncDevicesPanelProps) {
         <View style={styles.list}>
           {devices.map((device) => {
             const rowName = displayName(device);
-            const summary = activityPhrase(device);
+            const summary = optionSummary(device);
             const removable = canForgetDevice(device as DeviceRegistryRow);
             // Gate on ANY removal in flight, not just this row's: two
             // concurrent writes of the same meta.json race each other, and on
@@ -392,8 +419,12 @@ export function SyncDevicesPanel({ configured }: SyncDevicesPanelProps) {
                 }}
                 style={[styles.row, device.is_this_device && styles.rowSelf]}
               >
+                {/* Visually one line per fact, because that is what reads
+                    well; the ACCESSIBLE name above joins them into a single
+                    sentence, because the row is one element and a swipe has to
+                    deliver the whole judgement at once. */}
                 <Text style={styles.deviceName}>{rowName}</Text>
-                <Text style={styles.rowNote}>{summary}</Text>
+                <Text style={styles.rowNote}>{activityPhrase(device)}</Text>
                 <Text style={styles.rowNote}>
                   {t('dialogs.settings.sync.deviceAppVersion', {
                     version: device.app_version,

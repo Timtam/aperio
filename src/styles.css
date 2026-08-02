@@ -981,6 +981,24 @@ button[aria-disabled='true'] {
   opacity: 0.65;
 }
 
+/* The selected plugin's pane inside the shared master/detail selector.
+ * A column, because the controls are no longer squeezed into a card header
+ * next to the name — the name is the detail region's own heading now. */
+.plugins-panel__detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+/* `.plugins-panel__toggle` carries `margin-left: auto` for the old card
+ * header, where it pushed the switch to the far right of a flex row. In the
+ * detail column that would be meaningless, so it is dropped here rather than
+ * removed from the shared rule the remote/failed cards still use. */
+.plugins-panel__detail .plugins-panel__toggle {
+  margin-left: 0;
+}
+
 .plugins-panel__row-header {
   display: flex;
   align-items: baseline;

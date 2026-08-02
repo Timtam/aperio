@@ -1,6 +1,6 @@
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import { FocusableNote } from '../a11y/FocusableNote';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -22,6 +22,14 @@ import type {
   RemotePluginAnnouncement,
 } from '../api/types';
 import { Modal } from './Modal';
+import {
+  SettingsSelectorDetail,
+  type SettingsSelectorGroup,
+} from './SettingsSelectorDetail';
+
+/** Module scope so the memos inside the shared selector stay stable. */
+const pluginId = (p: PluginInfo): string => p.id;
+const pluginName = (p: PluginInfo): string => p.name;
 
 /** Shape stored per-row in the toggle-error map. We keep the
  *  full envelope so the row can branch on the error code
@@ -55,9 +63,26 @@ interface ToggleErrorEntry {
  * uninstall, `.aperio` archive extractor (§20.7) for install.
  * Each is its own future iteration.
  *
- * The panel groups plugins by their `plugin_type` so calendar,
- * sync, and videoconference adapters render under separate
- * headings — matches the §20.2 mental model.
+ * ## Keyboard shape
+ *
+ * The installed plugins are ONE `SettingsSelectorDetail` — the accounts
+ * list's idiom: a single tab stop, arrow keys, selection follows focus, and
+ * only the selected plugin's controls in the tab order.
+ *
+ * They used to be a focusable card each, grouped under a heading per
+ * `plugin_type`. Every card was a focus stop carrying the row's summary, and
+ * inside it the switch, the description and the uninstall button were three
+ * more — so a dozen plugins put roughly forty stops between the top of the
+ * panel and the bottom, with no arrow keys and nothing to skip with. Reaching
+ * the last plugin's switch meant Tabbing through everything above it.
+ *
+ * The type grouping survives as the selector's visual sub-headers, which are
+ * presentational: each option's accessible name already carries its type, so
+ * arrow keys walk the whole list uninterrupted.
+ *
+ * The remote-announced and failed sections stay as focusable cards. A listbox
+ * earns its keep when a list is long and its rows have controls; those two are
+ * usually empty, never long, and carry no actions.
  */
 export function PluginsPanel() {
   const { t } = useTranslation();
@@ -340,6 +365,56 @@ export function PluginsPanel() {
   // stay in the backend's id-sorted order.
   const groups = useMemo(() => groupByType(plugins ?? []), [plugins]);
 
+  /** The same grouping, in the shared selector's shape. The group label is the
+   *  plugin TYPE, which the selector folds into every option's accessible name
+   *  — so arrowing says "Google, Kalender-Adapter, Version 1.2.0, …" without a
+   *  heading interrupting the walk. */
+  const selectorGroups: SettingsSelectorGroup<PluginInfo>[] = useMemo(
+    () =>
+      groups.map((g) => ({
+        id: g.type,
+        label: typeLabel(t, g.type),
+        items: g.plugins,
+      })),
+    [groups, t],
+  );
+
+  /** Everything needed to judge a plugin without opening it: version, where it
+   *  came from, and whether it is switched on. */
+  const pluginSummary = useCallback(
+    (p: PluginInfo) =>
+      [
+        t('dialogs.settings.plugins.version', { version: p.version }),
+        p.source === 'bundled'
+          ? t('dialogs.settings.plugins.source.bundled')
+          : t('dialogs.settings.plugins.source.user'),
+        p.enabled
+          ? t('dialogs.settings.plugins.toggle.enabled')
+          : t('dialogs.settings.plugins.toggle.disabled'),
+      ].join(', '),
+    [t],
+  );
+
+  /** The visible trailing text on each option. `aria-hidden` in the selector,
+   *  because the accessible name above already carries the same facts.
+   *
+   *  It carries the OFF state as well, and that is not decoration: the old
+   *  cards dimmed when a plugin was disabled, and moving to a list of options
+   *  took that cue away. A screen-reader user hears "deaktiviert" in the
+   *  option's name; without this a sighted user would have to select each row
+   *  in turn to find out the same thing. */
+  const pluginBadge = useCallback(
+    (p: PluginInfo) =>
+      p.enabled
+        ? t('dialogs.settings.plugins.version', { version: p.version })
+        : `${t('dialogs.settings.plugins.version', {
+            version: p.version,
+          })} · ${t('dialogs.settings.plugins.toggle.disabled')}`,
+    [t],
+  );
+
+  const installedHeadingId = useId();
+
   if (plugins === null) {
     return (
       <div className="settings-panel plugins-panel">
@@ -391,30 +466,54 @@ export function PluginsPanel() {
         <FocusableNote className="form__hint">{t('dialogs.settings.plugins.empty')}</FocusableNote>
       )}
 
-      {groups.map((group) => (
-        <section
-          key={group.type}
-          className="plugins-panel__group"
-          aria-label={t('dialogs.settings.plugins.groupAria', {
-            type: typeLabel(t, group.type),
-          })}
-        >
-          <h3 className="plugins-panel__type-heading">
-            {typeLabel(t, group.type)}
+      {selectorGroups.length > 0 && (
+        <section aria-labelledby={installedHeadingId}>
+          <h3
+            id={installedHeadingId}
+            className="plugins-panel__type-heading"
+          >
+            {t('dialogs.settings.plugins.installedHeading')}
           </h3>
-          <ul className="plugins-panel__list" role="list">
-            {group.plugins.map((p) => (
-              <PluginRow
-                key={p.id}
-                plugin={p}
+          {/* One listbox for every installed plugin, grouped by type — the
+              accounts list's idiom, and the reason this replaced a stack of
+              focusable cards. Each card was a focus stop carrying the row
+              summary, and then its switch, its description and its uninstall
+              button were three more; twelve plugins meant roughly forty Tab
+              presses to cross the panel, with no way to skip and no arrow
+              keys. Now the whole list is ONE stop, arrows walk it, and only
+              the selected plugin's controls are in the tab order. */}
+          <SettingsSelectorDetail<PluginInfo>
+            groups={selectorGroups}
+            getItemId={pluginId}
+            getItemName={pluginName}
+            getItemSummary={pluginSummary}
+            getItemBadge={pluginBadge}
+            selectorLabel={t('dialogs.settings.plugins.selectorLabel')}
+            optionLabel={({ account: type, name, summary }) =>
+              t('dialogs.settings.plugins.optionLabel', {
+                name,
+                type,
+                summary,
+              })
+            }
+            detailHeading={({ name }) =>
+              t('dialogs.settings.plugins.detailHeading', { name })
+            }
+            // The panel's own heading above is an <h3>; a second one in the
+            // same section would read as its sibling rather than as the
+            // selected plugin's detail.
+            detailHeadingLevel={4}
+            renderDetail={(plugin) => (
+              <PluginDetail
+                plugin={plugin}
                 onToggle={onToggle}
-                toggleError={toggleErrors[p.id] ?? null}
+                toggleError={toggleErrors[plugin.id] ?? null}
                 onUninstall={onClickUninstall}
               />
-            ))}
-          </ul>
+            )}
+          />
         </section>
-      ))}
+      )}
 
       {remotePlugins.length > 0 && (
         <section
@@ -465,11 +564,15 @@ export function PluginsPanel() {
                       {r.id}
                     </div>
                   )}
-                  <FocusableNote className="form__hint">
+                  {/* Plain, not a `FocusableNote`: this exact sentence is
+                      already the end of the row's own accessible name, so
+                      making it focusable spoke it twice and doubled the stops
+                      in this section for nothing. */}
+                  <p className="form__hint">
                     {t('dialogs.settings.plugins.remote.announcedBy', {
                       device: deviceLabel,
                     })}
-                  </FocusableNote>
+                  </p>
                 </li>
               );
             })}
@@ -602,10 +705,14 @@ function FailedPluginsSection({ failed }: FailedPluginsSectionProps) {
       <FocusableNote className="form__hint">{t('dialogs.settings.plugins.failed.hint')}</FocusableNote>
       <ul className="plugins-panel__list" role="list">
         {failed.map((f) => {
-          // Same "focusable card" pattern as PluginRow:
-          // tabindex=0 + full aria-label so the per-row
-          // reason is reachable in focus mode without the
-          // user having to switch into NVDA's browse mode.
+          // Still the focusable-card pattern the installed list has moved off:
+          // tabindex=0 + a full aria-label, so the per-row reason is reachable
+          // in focus mode without switching to NVDA's browse mode.
+          //
+          // Kept deliberately. A listbox earns its keep when the list is long
+          // and every row has controls; this one is usually empty, never long,
+          // and each row carries one disclosure and no actions. Converting it
+          // would add a level of indirection to reach strictly less.
           const displayName = f.name ?? f.id ?? basename(f.plugin_dir);
           const ariaLabel = [
             t('dialogs.settings.plugins.failed.rowAria', {
@@ -710,79 +817,69 @@ function reasonHint(
   }
 }
 
-interface PluginRowProps {
+interface PluginDetailProps {
   plugin: PluginInfo;
   onToggle: (pluginId: string, enabled: boolean) => void;
   toggleError: ToggleErrorEntry | null;
   onUninstall: (plugin: PluginInfo) => void;
 }
 
-function PluginRow({
+/**
+ * The selected plugin's controls and detail — the right-hand half of the
+ * master/detail selector.
+ *
+ * ## The focus order, and why the switch comes first
+ *
+ * This used to be a focusable card per plugin, with the switch, the
+ * description and the uninstall button as further stops inside it. So reaching
+ * the twelfth plugin's switch meant Tabbing past eleven plugins' worth of
+ * everything, and there were no arrow keys to skip with.
+ *
+ * Now only the SELECTED plugin's controls are in the tab order, and they are
+ * ordered by what a user came here to do:
+ *
+ * 1. the enable switch — the reason this panel exists;
+ * 2. Uninstall, for user-installed plugins;
+ * 3. the description;
+ * 4. the technical metadata, behind a disclosure, because author / ABI /
+ *    minimum version / signature are looked up once in a blue moon and would
+ *    otherwise be four more stops between the list and the switch.
+ *
+ * Name, version, type, source and on/off are NOT repeated as focus stops here:
+ * they are already the selected option's accessible name, so a screen reader
+ * has just spoken them. They still render, for the same reason they always
+ * did — a sighted user is looking at this pane, not at the option's label.
+ */
+function PluginDetail({
   plugin,
   onToggle,
   toggleError,
   onUninstall,
-}: PluginRowProps) {
+}: PluginDetailProps) {
   const { t } = useTranslation();
   const toggleId = `plugin-toggle-${plugin.id}`;
-  // Comprehensive aria-label so a focus-mode screen reader
-  // user gets the full row state on focus without entering
-  // browse mode. Inner controls (toggle, uninstall button)
-  // remain their own tab stops + announce themselves
-  // independently when reached — same "card with controls"
-  // pattern as native settings UIs.
-  const ariaLabel = [
-    plugin.name,
-    t('dialogs.settings.plugins.version', { version: plugin.version }),
-    typeLabel(t, plugin.plugin_type),
-    plugin.source === 'bundled'
-      ? t('dialogs.settings.plugins.source.bundled')
-      : t('dialogs.settings.plugins.source.user'),
-    plugin.enabled
-      ? t('dialogs.settings.plugins.toggle.enabled')
-      : t('dialogs.settings.plugins.toggle.disabled'),
-  ].join(', ');
   return (
-    <li
-      // tabindex=0 turns the row into a real focus stop so
-      // NVDA/JAWS/VoiceOver announce the full aria-label
-      // without the user having to switch into browse mode.
-      // The pattern is conventional for "card with controls"
-      // lists (iOS Settings, Windows 11 Settings, …).
-      tabIndex={0}
+    <div
       className={
-        'plugins-panel__row' +
+        'plugins-panel__detail' +
         (plugin.enabled ? '' : ' plugins-panel__row--disabled')
       }
-      aria-label={ariaLabel}
     >
-      <div className="plugins-panel__row-header">
-        <span className="plugins-panel__name">{plugin.name}</span>
-        <span className="plugins-panel__version">
-          {t('dialogs.settings.plugins.version', { version: plugin.version })}
-        </span>
-        <div className="plugins-panel__toggle">
-          <label htmlFor={toggleId} className="plugins-panel__toggle-label">
-            {plugin.enabled
-              ? t('dialogs.settings.plugins.toggle.enabled')
-              : t('dialogs.settings.plugins.toggle.disabled')}
-          </label>
-          <input
-            id={toggleId}
-            type="checkbox"
-            role="switch"
-            checked={plugin.enabled}
-            aria-checked={plugin.enabled}
-            onChange={(e) => onToggle(plugin.id, e.target.checked)}
-          />
-        </div>
+      <div className="plugins-panel__toggle">
+        <label htmlFor={toggleId} className="plugins-panel__toggle-label">
+          {plugin.enabled
+            ? t('dialogs.settings.plugins.toggle.enabled')
+            : t('dialogs.settings.plugins.toggle.disabled')}
+        </label>
+        <input
+          id={toggleId}
+          type="checkbox"
+          role="switch"
+          checked={plugin.enabled}
+          aria-checked={plugin.enabled}
+          onChange={(e) => onToggle(plugin.id, e.target.checked)}
+        />
       </div>
-      <div className="plugins-panel__id" aria-hidden="true">
-        {plugin.id}
-      </div>
-      {plugin.description && (
-        <FocusableNote className="plugins-panel__description">{plugin.description}</FocusableNote>
-      )}
       {toggleError && (
         <p className="form__error" role="alert">
           {toggleError.code === 'active_sync_conflict'
@@ -792,31 +889,6 @@ function PluginRow({
               })}
         </p>
       )}
-      <dl className="plugins-panel__meta">
-        {plugin.author && (
-          <>
-            <dt>{t('dialogs.settings.plugins.author')}</dt>
-            <dd>{plugin.author}</dd>
-          </>
-        )}
-        <dt>{t('dialogs.settings.plugins.abiVersion')}</dt>
-        <dd>{plugin.abi_version}</dd>
-        <dt>{t('dialogs.settings.plugins.minAppVersion')}</dt>
-        <dd>{plugin.min_app_version}</dd>
-        <dt>{t('dialogs.settings.plugins.signed.label')}</dt>
-        <dd>
-          {plugin.signed
-            ? t('dialogs.settings.plugins.signed.yes')
-            : t('dialogs.settings.plugins.signed.no')}
-        </dd>
-        <dt>{t('dialogs.settings.plugins.source.label')}</dt>
-        <dd>
-          {plugin.source === 'bundled'
-            ? t('dialogs.settings.plugins.source.bundled')
-            : t('dialogs.settings.plugins.source.user')}
-        </dd>
-      </dl>
-      <PluginBadges plugin={plugin} />
       {plugin.source === 'user' && (
         <div className="plugins-panel__row-actions">
           <button
@@ -828,7 +900,45 @@ function PluginRow({
           </button>
         </div>
       )}
-    </li>
+      {plugin.description && (
+        <FocusableNote className="plugins-panel__description">
+          {plugin.description}
+        </FocusableNote>
+      )}
+      <PluginBadges plugin={plugin} />
+      {/* One disclosure rather than four focus stops. `<details>` gives a
+          real, conventional expander whose summary is the only stop until
+          the user asks for the rest. */}
+      <details className="plugins-panel__failed-details">
+        <summary>{t('dialogs.settings.plugins.technicalSummary')}</summary>
+        <dl className="plugins-panel__meta">
+          <dt>{t('dialogs.settings.plugins.failed.idLabel')}</dt>
+          <dd>{plugin.id}</dd>
+          {plugin.author && (
+            <>
+              <dt>{t('dialogs.settings.plugins.author')}</dt>
+              <dd>{plugin.author}</dd>
+            </>
+          )}
+          <dt>{t('dialogs.settings.plugins.abiVersion')}</dt>
+          <dd>{plugin.abi_version}</dd>
+          <dt>{t('dialogs.settings.plugins.minAppVersion')}</dt>
+          <dd>{plugin.min_app_version}</dd>
+          <dt>{t('dialogs.settings.plugins.signed.label')}</dt>
+          <dd>
+            {plugin.signed
+              ? t('dialogs.settings.plugins.signed.yes')
+              : t('dialogs.settings.plugins.signed.no')}
+          </dd>
+          <dt>{t('dialogs.settings.plugins.source.label')}</dt>
+          <dd>
+            {plugin.source === 'bundled'
+              ? t('dialogs.settings.plugins.source.bundled')
+              : t('dialogs.settings.plugins.source.user')}
+          </dd>
+        </dl>
+      </details>
+    </div>
   );
 }
 

@@ -242,6 +242,32 @@ export function SyncDevicesPanel({ configured }: SyncDevicesPanelProps) {
    *
    *  `nameLoaded` gates the whole thing, because before the read answers,
    *  `savedName` is `null` for "not asked yet" and would read as "no name". */
+  /** Everything a row has to say, in the option's accessible name.
+   *
+   *  One arrow press, one sentence: when the device was last here, what it is
+   *  running, and whether it has fallen behind. This used to be three separate
+   *  `FocusableNote`s in the detail pane, so learning what a row was cost three
+   *  or four Tab presses per device — on a list whose entire purpose is
+   *  comparing eight rows against each other.
+   *
+   *  The full identifier is deliberately NOT in here. Spoken it is
+   *  thirty-two characters, on every single arrow press, and it is the one
+   *  thing nobody scanning the list is looking for. It lives in the detail
+   *  pane, behind the action rather than in front of it. */
+  const optionSummary = useCallback(
+    (device: SyncDeviceSummary) =>
+      [
+        activityPhrase(device),
+        t('dialogs.settings.sync.deviceAppVersion', {
+          version: device.app_version,
+        }),
+        device.stale ? t('dialogs.settings.sync.deviceStaleNote') : null,
+      ]
+        .filter(Boolean)
+        .join(' '),
+    [activityPhrase, t],
+  );
+
   const displayName = useCallback(
     (device: SyncDeviceSummary) => {
       const local =
@@ -389,7 +415,11 @@ export function SyncDevicesPanel({ configured }: SyncDevicesPanelProps) {
           groups={groups}
           getItemId={deviceId}
           getItemName={displayName}
-          getItemSummary={activityPhrase}
+          // Everything needed to JUDGE a row rides in its accessible name, so
+          // arrowing down the list is the whole gesture. The detail pane used
+          // to carry it as four focusable notes, which meant three or four Tab
+          // presses per device to learn what one arrow press can say.
+          getItemSummary={optionSummary}
           selectorLabel={t('dialogs.settings.sync.devicesSelectorLabel')}
           optionLabel={({ name: rowName, summary }) =>
             t('dialogs.settings.sync.deviceOptionLabel', {
@@ -413,25 +443,22 @@ export function SyncDevicesPanel({ configured }: SyncDevicesPanelProps) {
             const blocked = busyId !== null;
             return (
               <>
-                <FocusableNote className="sync-panel__hint">
-                  {activityPhrase(device)}
-                </FocusableNote>
-                <FocusableNote className="sync-panel__hint">
+                {/* Plain paragraphs, deliberately NOT `FocusableNote`s: this
+                    text is already the selected option's accessible name, so a
+                    screen reader has just spoken it. Making it focusable too
+                    would say it a second time AND put two Tab presses between
+                    the list and the only thing there is to do here. A sighted
+                    user still reads it, which is the whole reason it renders. */}
+                <p className="sync-panel__hint">{activityPhrase(device)}</p>
+                <p className="sync-panel__hint">
                   {t('dialogs.settings.sync.deviceAppVersion', {
                     version: device.app_version,
                   })}
-                </FocusableNote>
-                {/* The full id. Spoken it is thirty-two characters, which is
-                    why it is not the row's name — but it is what a user
-                    matching this list against another device's settings needs,
-                    so it is reachable here rather than nowhere. */}
-                <FocusableNote className="sync-panel__hint">
-                  {t('dialogs.settings.sync.deviceIdFull', { id: device.id })}
-                </FocusableNote>
+                </p>
                 {device.stale && (
-                  <FocusableNote className="sync-panel__hint">
+                  <p className="sync-panel__hint">
                     {t('dialogs.settings.sync.deviceStaleNote')}
-                  </FocusableNote>
+                  </p>
                 )}
                 {canForgetDevice(device as DeviceRegistryRow) && (
                   <div className="sync-panel__actions">
@@ -449,6 +476,15 @@ export function SyncDevicesPanel({ configured }: SyncDevicesPanelProps) {
                     </button>
                   </div>
                 )}
+                {/* The full identifier, AFTER the action rather than before it.
+                    It is reference material — what you read once when matching
+                    this list against another device's settings — while removing
+                    is what the pane is for. In front of the button it was one
+                    more thing to Tab past every single time; behind it, one Tab
+                    from the list reaches Remove and a second reaches this. */}
+                <FocusableNote className="sync-panel__hint">
+                  {t('dialogs.settings.sync.deviceIdFull', { id: device.id })}
+                </FocusableNote>
               </>
             );
           }}
