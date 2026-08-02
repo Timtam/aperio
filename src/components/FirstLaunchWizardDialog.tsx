@@ -14,12 +14,9 @@ import {
   type LanguagePref,
 } from '../intl/language';
 import { useDialogState } from '../state/dialogStateContext';
-import { useSync } from '../state/useSync';
 import { Modal } from './Modal';
-import {
-  SyncTargetConfigForm,
-  type SyncConnectOutcome,
-} from './sync/SyncTargetConfigForm';
+import type { SyncConnectOutcome } from './sync/SyncTargetConfigForm';
+import { SyncTargetSchemaForm } from './sync/SyncTargetSchemaForm';
 
 interface FirstLaunchWizardDialogProps {
   isOpen: boolean;
@@ -35,11 +32,12 @@ const LANGUAGE_OPTIONS: readonly LanguagePref[] = ['system', 'de', 'en'];
  * multi-step dialog shown once on a fresh instance:
  *
  *   1. **Language** — reuse the synced `locale` pref (default = system).
- *   2. **Sync** — restore from / create / skip a sync target via the shared
- *      [`SyncTargetConfigForm`](./sync/SyncTargetConfigForm.tsx). RESTORING an
- *      existing dataset brings back data + accounts, so the wizard ENDS;
- *      CREATING a fresh one (or skipping) continues to the account step.
- *   3. **First account** — hand off to the add-account flow, or skip.
+ *   2. **First account** — hand off to the add-account flow, or skip.
+ *   3. **Sync** — restore from / create / skip a sync target via
+ *      [`SyncTargetSchemaForm`](./sync/SyncTargetSchemaForm.tsx), whose fields
+ *      come from the chosen backend's own account schema. Last either way:
+ *      restoring brings the accounts down with the dataset, and creating has
+ *      already been through the account step.
  *
  * Gated by [`FirstLaunchWizardChecker`](./FirstLaunchWizardChecker.tsx) so it
  * only ever appears on a genuinely fresh instance.
@@ -50,7 +48,6 @@ export function FirstLaunchWizardDialog({
 }: FirstLaunchWizardDialogProps) {
   const { t } = useTranslation();
   const { openAccounts, openSyncAccountsConnect } = useDialogState();
-  const { status } = useSync();
 
   const [step, setStep] = useState<WizardStep>('language');
   const [language, setLanguage] = useState<LanguagePref>('system');
@@ -175,7 +172,7 @@ export function FirstLaunchWizardDialog({
             <FocusableNote className="first-launch-wizard__hint">
               {t('dialogs.firstLaunchWizard.syncHint')}
             </FocusableNote>
-            <SyncTargetConfigForm status={status} onConnected={onSyncConnected} />
+            <SyncTargetSchemaForm onConnected={onSyncConnected} />
             <div className="first-launch-wizard__actions">
               <button type="button" onClick={() => setStep('account')}>
                 {t('dialogs.firstLaunchWizard.back')}
