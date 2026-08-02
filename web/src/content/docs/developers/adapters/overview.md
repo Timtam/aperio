@@ -3,9 +3,9 @@ title: "Adapters"
 ---
 
 An **adapter** turns one provider's API into Aperio's `cal-core` vocabulary.
-Each lives in `crates/cal-adapter-<provider>` as a normal Rust library and
+Each lives in `crates/adapter-<provider>` as a normal Rust library and
 implements the `cal-core` feature traits it can support; a matching
-`crates/cal-adapter-<provider>-plugin` exposes it over the plugin ABI.
+`crates/adapter-<provider>-plugin` exposes it over the plugin ABI.
 
 ## The capability model
 
@@ -109,15 +109,15 @@ when caching:
 
 | Adapter | Crate | Capabilities | Protocol |
 |---|---|---|---|
-| [Local store](/developers/adapters/local/) | `cal-adapter-local` | calendars, tasks, contacts | host SQLite (source of truth) |
-| [CalDAV / iCloud](/developers/adapters/caldav/) | `cal-adapter-caldav` | calendars, tasks, contacts | CalDAV / CardDAV |
-| [Google](/developers/adapters/google/) | `cal-adapter-google` | calendars, tasks, contacts | Google REST APIs (OAuth2) |
-| [Microsoft Graph](/developers/adapters/microsoft/) | `cal-adapter-microsoft-graph` | calendars, tasks, contacts | Microsoft Graph (OAuth2) |
-| [Exchange (EWS)](/developers/adapters/ews/) | `cal-adapter-ews` | calendars, tasks, contacts | Exchange Web Services (SOAP) |
-| [Vikunja](/developers/adapters/vikunja/) | `cal-adapter-vikunja` | tasks | Vikunja REST API |
-| [Todoist](/developers/adapters/todoist/) | `cal-adapter-todoist` | tasks | Todoist REST v2 (+ Sync API) |
+| [Local store](/developers/adapters/local/) | `adapter-local` | calendars, tasks, contacts | host SQLite (source of truth) |
+| [CalDAV / iCloud](/developers/adapters/caldav/) | `adapter-caldav` | calendars, tasks, contacts | CalDAV / CardDAV |
+| [Google](/developers/adapters/google/) | `adapter-google` | calendars, tasks, contacts | Google REST APIs (OAuth2) |
+| [Microsoft Graph](/developers/adapters/microsoft/) | `adapter-microsoft-graph` | calendars, tasks, contacts | Microsoft Graph (OAuth2) |
+| [Exchange (EWS)](/developers/adapters/ews/) | `adapter-ews` | calendars, tasks, contacts | Exchange Web Services (SOAP) |
+| [Vikunja](/developers/adapters/vikunja/) | `adapter-vikunja` | tasks | Vikunja REST API |
+| [Todoist](/developers/adapters/todoist/) | `adapter-todoist` | tasks | Todoist REST v2 (+ Sync API) |
 
-There is also an iCal/ICS subscription adapter (`cal-adapter-ical`,
+There is also an iCal/ICS subscription adapter (`adapter-ical`,
 read-only calendar feeds).
 
 Each page below covers the protocol, the authentication flow, provider

@@ -11,11 +11,11 @@ description = "Aperio — platform-agnostic sync engine (event-log writer/applie
 [dependencies]
 async-trait.workspace = true
 # The snapshot body's row sections (SnapshotDump / SnapshotApplyReport)
-# are owned by cal-adapter-local — the shared local SQLite adapter used
+# are owned by adapter-local — the shared local SQLite adapter used
 # on desktop AND mobile, so depending on it here keeps the engine
 # platform-agnostic. Only the snapshot wire types are referenced; the
 # desktop SQL stays in the SyncStore impl.
-cal-adapter-local.workspace = true
+adapter-local.workspace = true
 # The applier deserialises event payloads into cal-core row types
 # (Event / Task / TaskList / Section / Calendar / ColorLabel) before
 # handing them to the adapter's `*_from_sync` upserts.
@@ -41,7 +41,7 @@ tempfile = "3"
 # the only backend cheap enough to stand up in a unit test (and it reports
 # listing sizes, which the growth check needs). The same test's applier side
 # needs a real, migrated SQLite — both live in this one crate now.
-cal-adapter-local = { workspace = true, features = ["test-support"] }
+adapter-local = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true

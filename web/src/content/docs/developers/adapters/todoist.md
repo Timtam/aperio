@@ -2,7 +2,7 @@
 title: "Todoist"
 ---
 
-**Crate:** `cal-adapter-todoist` · **Capabilities:** tasks
+**Crate:** `adapter-todoist` · **Capabilities:** tasks
 
 Todoist is a hosted task service. The adapter is **tasks-only** and is the
 second collaborative-tasks backend (alongside Vikunja), but Todoist is more

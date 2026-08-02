@@ -15,7 +15,7 @@ aperio-db.workspace = true
 base64 = "0.22"
 builtin-oauth.workspace = true
 cal-core.workspace = true
-cal-adapter-local.workspace = true
+adapter-local.workspace = true
 plugin-core.workspace = true
 sync-core.workspace = true
 sync-engine.workspace = true
@@ -50,20 +50,20 @@ tempfile = "3"
 # The registry tests need ONE real plugin to register an account against.
 # iCal is the cheapest: no keychain secret, and opening an instance does no
 # network I/O (the feed is only fetched on the first read).
-cal-adapter-ical-plugin = { path = "../cal-adapter-ical-plugin" }
+adapter-ical-plugin = { path = "../adapter-ical-plugin" }
 # The sound-asset sync test drives a real local-filesystem sync target.
-# (the folder mirror is part of `cal-adapter-local` above)
+# (the folder mirror is part of `adapter-local` above)
 # `travels_between_devices` has to be asked about a REAL sync-only adapter —
 # one whose manifest declares `capabilities: ["sync"]` and nothing else. A
 # hand-written twin would drift from the shipped manifests the way every
 # hand-written twin in this workspace has. WebDAV, because the folder adapter
 # folded into the built-in store and stopped being sync-ONLY in that sense.
-sync-adapter-webdav-plugin = { path = "../sync-adapter-webdav-plugin" }
+adapter-webdav-plugin = { path = "../adapter-webdav-plugin" }
 # Re-declare the engine + local adapter with their test-support features so the
 # moved applier/onboarding/sync tests reach FakeSecrets / the in-memory store.
 # Dev-only: the normal (mobile) build never enables these.
 sync-engine = { workspace = true, features = ["test-support"] }
-cal-adapter-local = { workspace = true, features = ["test-support"] }
+adapter-local = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true

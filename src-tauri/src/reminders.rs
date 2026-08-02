@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use cal_adapter_local::{LocalAdapter, SharedConn};
+use adapter_local::{LocalAdapter, SharedConn};
 use cal_core::SoundSource;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use tauri::{AppHandle, Runtime};

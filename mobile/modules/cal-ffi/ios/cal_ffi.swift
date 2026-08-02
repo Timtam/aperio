@@ -2578,7 +2578,7 @@ public protocol HostProtocol: AnyObject, Sendable {
     /**
      * Local full-text search (FTS5) over events + tasks, as a JSON
      * `SearchResults { events, tasks }`. Mirrors the desktop `search` command's
-     * LOCAL half — the engine already lives in `cal-adapter-local`. The external
+     * LOCAL half — the engine already lives in `adapter-local`. The external
      * snapshot-cache half needs the SWR cache the mobile host lacks, so it's
      * omitted (a known parity gap). `filters_json` is a JSON `SearchFilters`, or
      * `""` for no filters (default = both kinds, no restrictions).
@@ -4573,7 +4573,7 @@ open func searchContactsJson(query: String)throws  -> String  {
     /**
      * Local full-text search (FTS5) over events + tasks, as a JSON
      * `SearchResults { events, tasks }`. Mirrors the desktop `search` command's
-     * LOCAL half — the engine already lives in `cal-adapter-local`. The external
+     * LOCAL half — the engine already lives in `adapter-local`. The external
      * snapshot-cache half needs the SWR cache the mobile host lacks, so it's
      * omitted (a known parity gap). `filters_json` is a JSON `SearchFilters`, or
      * `""` for no filters (default = both kinds, no restrictions).
@@ -5634,7 +5634,7 @@ public func FfiConverterTypeKeychainBridge_lower(_ value: KeychainBridge) -> UIn
  *
  * Opens (and migrates, via the shared [`aperio_db`] runner) the database
  * at `db_path`, then serves task CRUD through the same
- * [`cal_adapter_local::LocalAdapter`] the desktop backend uses. The UI
+ * [`adapter_local::LocalAdapter`] the desktop backend uses. The UI
  * holds one instance per launch and passes an app-sandbox path (e.g.
  * `<Documents>/aperio.sqlite`).
  */
@@ -5765,7 +5765,7 @@ public protocol LocalStoreProtocol: AnyObject, Sendable {
  *
  * Opens (and migrates, via the shared [`aperio_db`] runner) the database
  * at `db_path`, then serves task CRUD through the same
- * [`cal_adapter_local::LocalAdapter`] the desktop backend uses. The UI
+ * [`adapter_local::LocalAdapter`] the desktop backend uses. The UI
  * holds one instance per launch and passes an app-sandbox path (e.g.
  * `<Documents>/aperio.sqlite`).
  */

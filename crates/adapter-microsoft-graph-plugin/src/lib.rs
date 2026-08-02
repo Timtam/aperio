@@ -1,0 +1,941 @@
+//! Microsoft Graph adapter packaged as a plugin (DESIGN.md §20).
+//!
+//! ## Init config
+//!
+//! ```json
+//! {
+//!   "client_id": "…",
+//!   "authority": "common",
+//!   "access_token": "eyJ…",
+//!   "refresh_token": "M.C5…",
+//!   "expires_at": "2030-01-01T00:00:00Z",
+//!   "scope": null
+//! }
+//! ```
+//!
+//! `client_id` and `authority` are the two things the user is asked for; they
+//! come from the account row. The tokens come from the keychain, merged in at
+//! open time under the keys `plugin.json`'s `account.oauth` block names.
+//! `expires_at` and `scope` are neither — no host path has anything to say
+//! about them, so both are optional here.
+
+use std::os::raw::{c_char, c_void};
+
+use adapter_microsoft_graph::{MicrosoftGraphAdapter, TokenSet, DEFAULT_AUTHORITY};
+use cal_core::adapter::{Capability, Credentials as CalCredentials};
+use cal_core::types::{AttendeeStatus, ContactPhoto, DateRange, NewContact, NewEvent, NewTask};
+use cal_core::{CalendarFeature, ContactsFeature, TasksFeature};
+use chrono::{DateTime, Utc};
+use plugin_sdk::plugin_core::abi::OpenInstanceResult;
+use plugin_sdk::plugin_core::ffi::PluginCallResult;
+use plugin_sdk::plugin_core::vtables::{
+    AdapterVtable, CalendarVtable, ContactsVtable, TasksVtable,
+};
+use plugin_sdk::{decode_args, ok_response, open_instance_with, PluginInstance};
+use serde::Deserialize;
+
+plugin_sdk::cal_dispatch_helpers!(MicrosoftGraphAdapter);
+
+fn default_authority() -> String {
+    DEFAULT_AUTHORITY.to_string()
+}
+
+/// When the host hands over no expiry.
+///
+/// The schema-driven open path merges the token slots the `account.oauth`
+/// block names — a refresh token and an access token — and there is no slot to
+/// name an expiry with, so the value has to come from here. The epoch is what
+/// the host's older per-kind path wrote for the same reason, and for the same
+/// reason it is harmless: the API client refreshes on a 401 rather than on a
+/// clock, so an expiry in the past costs one extra round trip on the first call
+/// after a restart and nothing else.
+fn already_expired() -> DateTime<Utc> {
+    DateTime::UNIX_EPOCH
+}
+
+#[derive(Debug, Deserialize)]
+struct InitConfig {
+    client_id: String,
+    #[serde(default = "default_authority")]
+    authority: String,
+    access_token: String,
+    #[serde(default)]
+    refresh_token: Option<String>,
+    #[serde(default = "already_expired")]
+    expires_at: DateTime<Utc>,
+    #[serde(default)]
+    scope: Option<String>,
+}
+
+/// # Safety
+/// FFI export; `config_json` must be NUL-terminated UTF-8.
+pub unsafe extern "C" fn plugin_open_instance(config_json: *const c_char) -> OpenInstanceResult {
+    open_instance_with(config_json, |json| {
+        let cfg: InitConfig =
+            serde_json::from_str(json).map_err(|e| format!("malformed init config: {e}"))?;
+        if cfg.client_id.trim().is_empty() || cfg.access_token.trim().is_empty() {
+            return Err("client_id and access_token must not be empty".to_string());
+        }
+        let tokens = TokenSet {
+            access_token: cfg.access_token,
+            refresh_token: cfg.refresh_token,
+            expires_at: cfg.expires_at,
+            scope: cfg.scope,
+        };
+        Ok(MicrosoftGraphAdapter::new(
+            cfg.client_id,
+            cfg.authority,
+            tokens,
+        ))
+    })
+}
+
+/// # Safety
+/// FFI export; `handle` must be the pointer returned by
+/// [`plugin_open_instance`].
+pub unsafe extern "C" fn plugin_close_instance(handle: *mut c_void) {
+    PluginInstance::<MicrosoftGraphAdapter>::drop_handle(handle);
+}
+
+// ── Adapter base ───────────────────────────────────────────
+
+unsafe extern "C" fn ffi_authenticate(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let creds: CalCredentials = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        cal_core::Adapter::authenticate(p, creds).await
+    })
+}
+
+unsafe extern "C" fn ffi_capabilities(
+    h: *mut c_void,
+    _a: *const u8,
+    _l: usize,
+) -> PluginCallResult {
+    let inst = match instance(h) {
+        Ok(i) => i,
+        Err(r) => return r,
+    };
+    let caps: Vec<Capability> = cal_core::Adapter::capabilities(inst.plugin()).to_vec();
+    ok_response(&caps)
+}
+
+// ── CalendarFeature ────────────────────────────────────────
+
+unsafe extern "C" fn ffi_list_calendars(
+    h: *mut c_void,
+    _a: *const u8,
+    _l: usize,
+) -> PluginCallResult {
+    dispatch(h, |p| async move { p.list_calendars().await })
+}
+
+#[derive(Debug, Deserialize)]
+struct GetEventsArgs {
+    calendar_id: String,
+    range: DateRange,
+}
+
+unsafe extern "C" fn ffi_get_events(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let args: GetEventsArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.get_events(&args.calendar_id, args.range).await
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct GetEventsDeltaArgs {
+    calendar_id: String,
+    range: DateRange,
+    since_token: Option<String>,
+}
+
+unsafe extern "C" fn ffi_get_events_delta(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: GetEventsDeltaArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.get_events_delta(&args.calendar_id, args.range, args.since_token.as_deref())
+            .await
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateEventArgs {
+    calendar_id: String,
+    event: NewEvent,
+}
+
+unsafe extern "C" fn ffi_create_event(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let args: CreateEventArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.create_event(&args.calendar_id, args.event).await
+    })
+}
+
+unsafe extern "C" fn ffi_update_event(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let event: cal_core::Event = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move { p.update_event(event).await })
+}
+
+#[derive(Debug, Deserialize)]
+struct DeleteEventArgs {
+    event_id: String,
+    #[serde(default)]
+    send_cancellations: bool,
+}
+
+unsafe extern "C" fn ffi_delete_event(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let args: DeleteEventArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(h, move |p| async move {
+        p.delete_event(&args.event_id, args.send_cancellations)
+            .await
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct GetFreeBusyArgs {
+    emails: Vec<String>,
+    range: DateRange,
+}
+
+unsafe extern "C" fn ffi_get_free_busy(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let args: GetFreeBusyArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        let refs: Vec<&str> = args.emails.iter().map(|s| s.as_str()).collect();
+        p.get_free_busy(&refs, args.range).await
+    })
+}
+
+unsafe extern "C" fn ffi_calendar_color(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let calendar_id: String = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let inst = match instance(h) {
+        Ok(i) => i,
+        Err(r) => return r,
+    };
+    let color = inst.plugin().calendar_color(&calendar_id);
+    ok_response(&color)
+}
+
+#[derive(Debug, Deserialize)]
+struct AddExdateArgs {
+    event_id: String,
+    occurrence: DateTime<Utc>,
+    #[serde(default)]
+    send_cancellations: bool,
+}
+
+unsafe extern "C" fn ffi_add_event_exdate(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: AddExdateArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(h, move |p| async move {
+        p.add_event_exdate(&args.event_id, args.occurrence, args.send_cancellations)
+            .await
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct RenameCalendarArgs {
+    calendar_id: String,
+    new_name: String,
+}
+
+unsafe extern "C" fn ffi_rename_calendar(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: RenameCalendarArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(h, move |p| async move {
+        p.rename_calendar(&args.calendar_id, &args.new_name).await
+    })
+}
+
+// ── TasksFeature ───────────────────────────────────────────
+
+unsafe extern "C" fn ffi_list_task_lists(
+    h: *mut c_void,
+    _a: *const u8,
+    _l: usize,
+) -> PluginCallResult {
+    dispatch(h, |p| async move { p.list_task_lists().await })
+}
+
+unsafe extern "C" fn ffi_get_tasks(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let list_id: String = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move { p.get_tasks(&list_id).await })
+}
+
+#[derive(Debug, Deserialize)]
+struct GetTasksDeltaArgs {
+    list_id: String,
+    since_token: Option<String>,
+}
+
+unsafe extern "C" fn ffi_get_tasks_delta(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: GetTasksDeltaArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.get_tasks_delta(&args.list_id, args.since_token.as_deref())
+            .await
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateTaskArgs {
+    list_id: String,
+    task: NewTask,
+}
+
+unsafe extern "C" fn ffi_create_task(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let args: CreateTaskArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.create_task(&args.list_id, args.task).await
+    })
+}
+
+unsafe extern "C" fn ffi_update_task(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let task: cal_core::Task = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move { p.update_task(task).await })
+}
+
+unsafe extern "C" fn ffi_delete_task(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let task_id: String = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(h, move |p| async move { p.delete_task(&task_id).await })
+}
+
+#[derive(Debug, Deserialize)]
+struct RenameTaskListArgs {
+    list_id: String,
+    new_name: String,
+}
+
+unsafe extern "C" fn ffi_rename_task_list(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: RenameTaskListArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(h, move |p| async move {
+        p.rename_task_list(&args.list_id, &args.new_name).await
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateTaskListArgs {
+    name: String,
+    parent_id: Option<String>,
+}
+
+unsafe extern "C" fn ffi_create_task_list(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: CreateTaskListArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.create_task_list(&args.name, args.parent_id.as_deref())
+            .await
+    })
+}
+
+unsafe extern "C" fn ffi_delete_task_list(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let list_id: String = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(
+        h,
+        move |p| async move { p.delete_task_list(&list_id).await },
+    )
+}
+
+// ── ContactsFeature ────────────────────────────────────────
+
+unsafe extern "C" fn ffi_list_contact_lists(
+    h: *mut c_void,
+    _a: *const u8,
+    _l: usize,
+) -> PluginCallResult {
+    dispatch(h, |p| async move { p.list_contact_lists().await })
+}
+
+unsafe extern "C" fn ffi_get_contacts(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let list_id: String = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move { p.get_contacts(&list_id).await })
+}
+
+#[derive(Debug, Deserialize)]
+struct GetContactsDeltaArgs {
+    list_id: String,
+    since_token: Option<String>,
+}
+
+unsafe extern "C" fn ffi_get_contacts_delta(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: GetContactsDeltaArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.get_contacts_delta(&args.list_id, args.since_token.as_deref())
+            .await
+    })
+}
+
+unsafe extern "C" fn ffi_search_contacts(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let query: String = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move { p.search_contacts(&query).await })
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateContactArgs {
+    list_id: String,
+    contact: NewContact,
+}
+
+unsafe extern "C" fn ffi_create_contact(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: CreateContactArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.create_contact(&args.list_id, args.contact).await
+    })
+}
+
+unsafe extern "C" fn ffi_update_contact(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let contact: cal_core::Contact = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move { p.update_contact(contact).await })
+}
+
+unsafe extern "C" fn ffi_delete_contact(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let contact_id: String = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(
+        h,
+        move |p| async move { p.delete_contact(&contact_id).await },
+    )
+}
+
+#[derive(Debug, Deserialize)]
+struct RenameContactListArgs {
+    list_id: String,
+    new_name: String,
+}
+
+unsafe extern "C" fn ffi_rename_contact_list(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: RenameContactListArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(h, move |p| async move {
+        p.rename_contact_list(&args.list_id, &args.new_name).await
+    })
+}
+
+unsafe extern "C" fn ffi_get_contact_photo(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let contact_id: String = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(
+        h,
+        move |p| async move { p.get_contact_photo(&contact_id).await },
+    )
+}
+
+#[derive(Debug, Deserialize)]
+struct SetContactPhotoArgs {
+    contact_id: String,
+    photo: ContactPhoto,
+}
+
+unsafe extern "C" fn ffi_set_contact_photo(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: SetContactPhotoArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(h, move |p| async move {
+        p.set_contact_photo(&args.contact_id, args.photo).await
+    })
+}
+
+unsafe extern "C" fn ffi_delete_contact_photo(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let contact_id: String = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(h, move |p| async move {
+        p.delete_contact_photo(&contact_id).await
+    })
+}
+
+unsafe extern "C" fn ffi_invalidate_contacts_cache(
+    h: *mut c_void,
+    _a: *const u8,
+    _l: usize,
+) -> PluginCallResult {
+    dispatch_unit(h, |p| async move { p.invalidate_contacts_cache().await })
+}
+
+unsafe extern "C" fn ffi_current_user_email(
+    h: *mut c_void,
+    _a: *const u8,
+    _l: usize,
+) -> PluginCallResult {
+    dispatch(h, |p| async move { p.current_user_email().await })
+}
+
+#[derive(Debug, Deserialize)]
+struct RespondToEventArgs {
+    event_id: String,
+    status: AttendeeStatus,
+    send_response: bool,
+}
+
+unsafe extern "C" fn ffi_respond_to_event(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: RespondToEventArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(h, move |p| async move {
+        p.respond_to_event(&args.event_id, args.status, args.send_response)
+            .await
+    })
+}
+
+// ── Vtables ────────────────────────────────────────────────
+
+pub static CALENDAR_VTABLE: CalendarVtable = CalendarVtable {
+    authenticate: Some(ffi_authenticate),
+    capabilities: Some(ffi_capabilities),
+    list_calendars: Some(ffi_list_calendars),
+    get_events: Some(ffi_get_events),
+    create_event: Some(ffi_create_event),
+    update_event: Some(ffi_update_event),
+    delete_event: Some(ffi_delete_event),
+    get_free_busy: Some(ffi_get_free_busy),
+    calendar_color: Some(ffi_calendar_color),
+    add_event_exdate: Some(ffi_add_event_exdate),
+    rename_calendar: Some(ffi_rename_calendar),
+    get_events_delta: Some(ffi_get_events_delta),
+    current_user_email: Some(ffi_current_user_email),
+    respond_to_event: Some(ffi_respond_to_event),
+    ..CalendarVtable::empty()
+};
+
+pub static TASKS_VTABLE: TasksVtable = TasksVtable {
+    authenticate: Some(ffi_authenticate),
+    capabilities: Some(ffi_capabilities),
+    list_task_lists: Some(ffi_list_task_lists),
+    get_tasks: Some(ffi_get_tasks),
+    create_task: Some(ffi_create_task),
+    update_task: Some(ffi_update_task),
+    delete_task: Some(ffi_delete_task),
+    rename_task_list: Some(ffi_rename_task_list),
+    create_task_list: Some(ffi_create_task_list),
+    delete_task_list: Some(ffi_delete_task_list),
+    get_tasks_delta: Some(ffi_get_tasks_delta),
+    ..TasksVtable::empty()
+};
+
+pub static CONTACTS_VTABLE: ContactsVtable = ContactsVtable {
+    authenticate: Some(ffi_authenticate),
+    capabilities: Some(ffi_capabilities),
+    list_contact_lists: Some(ffi_list_contact_lists),
+    get_contacts: Some(ffi_get_contacts),
+    search_contacts: Some(ffi_search_contacts),
+    create_contact: Some(ffi_create_contact),
+    update_contact: Some(ffi_update_contact),
+    delete_contact: Some(ffi_delete_contact),
+    rename_contact_list: Some(ffi_rename_contact_list),
+    get_contact_photo: Some(ffi_get_contact_photo),
+    set_contact_photo: Some(ffi_set_contact_photo),
+    delete_contact_photo: Some(ffi_delete_contact_photo),
+    invalidate_contacts_cache: Some(ffi_invalidate_contacts_cache),
+    get_contacts_delta: Some(ffi_get_contacts_delta),
+    ..ContactsVtable::empty()
+};
+
+pub static ADAPTER_VTABLE: AdapterVtable = AdapterVtable {
+    calendar: &CALENDAR_VTABLE,
+    tasks: &TASKS_VTABLE,
+    contacts: &CONTACTS_VTABLE,
+    ..AdapterVtable::empty()
+};
+
+plugin_sdk::declare_lifecycle! {
+    id: "com.aperio.cal-adapter-microsoft-graph",
+    name: "Aperio Microsoft 365",
+    version: "0.1.0",
+    plugin_type: "adapter",
+    vtable: ADAPTER_VTABLE,
+    open_instance: plugin_open_instance,
+    close_instance: plugin_close_instance,
+}
+
+// ─────────────────────────────────────────────────────────────
+// Interactive auth (OAuth 2.0 PKCE flow against Microsoft
+// Identity Platform v2.0)
+// ─────────────────────────────────────────────────────────────
+//
+// The handler supports the desktop "full" loopback dance (no `phase`, the
+// historical contract — backward compatible) AND a host-driven split for
+// mobile: `phase:"authorize"` returns {authorize_url, pkce_verifier, state} for
+// the host to open in a native auth session; `phase:"exchange"` swaps the
+// returned code for tokens. The host holds verifier/state between the two calls
+// (the adapter is stateless across phases). Microsoft is a PKCE public client —
+// there is NO `client_secret` in any phase; `authority` selects the v2.0 tenant
+// and must be the same across authorize + exchange.
+#[derive(Debug, serde::Deserialize)]
+struct InteractiveAuthArgs {
+    client_id: String,
+    /// Absent/null/empty → `common`. Carried verbatim from authorize through
+    /// exchange so a pinned tenant stays consistent.
+    #[serde(default)]
+    authority: Option<String>,
+    /// `"authorize"` | `"exchange"` | absent/`"full"` (desktop loopback).
+    #[serde(default)]
+    phase: Option<String>,
+    /// authorize + exchange: the caller-supplied redirect URI (mobile scheme).
+    #[serde(default)]
+    redirect_uri: Option<String>,
+    /// exchange: the auth code + the verifier/state from the authorize phase.
+    #[serde(default)]
+    code: Option<String>,
+    #[serde(default)]
+    pkce_verifier: Option<String>,
+    #[serde(default)]
+    state: Option<String>,
+    #[serde(default)]
+    returned_state: Option<String>,
+}
+
+/// Validate the OAuth CSRF `state`: the redirect's returned state must be
+/// present, non-empty, and equal to the one issued at authorize. Fails CLOSED —
+/// a missing or empty value on either side is rejected, since this guards the
+/// token exchange + account creation.
+fn verify_oauth_state(issued: Option<&str>, returned: Option<&str>) -> Result<(), String> {
+    let issued = issued.unwrap_or_default().trim();
+    let returned = returned.unwrap_or_default().trim();
+    if issued.is_empty() || returned.is_empty() || issued != returned {
+        return Err("OAuth state mismatch (possible CSRF) — aborting".to_string());
+    }
+    Ok(())
+}
+
+async fn plugin_interactive_auth(args_json: String) -> Result<Vec<u8>, String> {
+    let args: InteractiveAuthArgs = serde_json::from_str(&args_json)
+        .map_err(|e| format!("malformed interactive_auth args: {e}"))?;
+    let client_id = args.client_id.trim();
+    if client_id.is_empty() {
+        return Err("client_id must not be empty".to_string());
+    }
+    // Tolerate absent/null/empty (cal-ffi forwards `authority: null` for non-MS
+    // providers) by falling back to the default `common` tenant.
+    let authority = args
+        .authority
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(DEFAULT_AUTHORITY);
+    match args.phase.as_deref() {
+        Some("authorize") => {
+            let redirect_uri = args
+                .redirect_uri
+                .ok_or_else(|| "redirect_uri is required in the authorize phase".to_string())?;
+            let authz = MicrosoftGraphAdapter::oauth_authorize(client_id, authority, &redirect_uri)
+                .map_err(|e| format!("Microsoft Graph authorize: {e}"))?;
+            serde_json::to_vec(&authz).map_err(|e| format!("serialise authorize response: {e}"))
+        }
+        Some("exchange") => {
+            let code = args
+                .code
+                .ok_or_else(|| "code is required in the exchange phase".to_string())?;
+            let verifier = args
+                .pkce_verifier
+                .ok_or_else(|| "pkce_verifier is required in the exchange phase".to_string())?;
+            let redirect_uri = args
+                .redirect_uri
+                .ok_or_else(|| "redirect_uri is required in the exchange phase".to_string())?;
+            // CSRF: the redirect's `state` must equal the one issued at authorize.
+            // Fail CLOSED — this guards token minting + account creation, so a
+            // missing/empty state on either side aborts (see verify_oauth_state).
+            verify_oauth_state(args.state.as_deref(), args.returned_state.as_deref())?;
+            let tokens = MicrosoftGraphAdapter::oauth_exchange(
+                client_id,
+                authority,
+                code.trim(),
+                verifier.trim(),
+                &redirect_uri,
+            )
+            .await
+            .map_err(|e| format!("Microsoft Graph exchange: {e}"))?;
+            serde_json::to_vec(&tokens).map_err(|e| format!("serialise TokenSet: {e}"))
+        }
+        None | Some("full") => {
+            let tokens = MicrosoftGraphAdapter::authenticate_interactive(client_id, authority)
+                .await
+                .map_err(|e| format!("Microsoft Graph OAuth: {e}"))?;
+            serde_json::to_vec(&tokens).map_err(|e| format!("serialise TokenSet: {e}"))
+        }
+        Some(other) => Err(format!("unknown interactive_auth phase: {other}")),
+    }
+}
+
+plugin_sdk::declare_interactive_auth! {
+    handler: plugin_interactive_auth,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The manifest ships beside this crate and is the ONLY thing that tells
+    /// the host how to set up a Microsoft 365 account. Parsing it here means a
+    /// typo fails the build rather than the first user who tries to connect.
+    fn manifest() -> plugin_sdk::plugin_core::manifest::PluginManifest {
+        plugin_sdk::plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
+            "../plugin.json"
+        ))
+        .expect("plugin.json parses and its account schema validates")
+    }
+
+    #[test]
+    fn every_schema_field_is_a_key_the_init_config_actually_reads() {
+        // The schema and `InitConfig` are two descriptions of the same thing,
+        // in two languages, and nothing but this test connects them. A field
+        // the host faithfully collects and merges under a name the plugin does
+        // not deserialise is silently dropped — the account connects, and then
+        // behaves as though the setting were never set.
+        let schema = manifest()
+            .account
+            .expect("Microsoft 365 declares an account schema");
+        let known = [
+            "client_id",
+            "authority",
+            "access_token",
+            "refresh_token",
+            "expires_at",
+            "scope",
+        ];
+        for field in &schema.fields {
+            assert!(
+                known.contains(&field.key.as_str()),
+                "schema field `{}` is not read by InitConfig",
+                field.key
+            );
+        }
+        let oauth = schema.oauth.expect("Microsoft 365 signs in via OAuth");
+        for key in [
+            Some(oauth.client_id_field.as_str()),
+            oauth.client_secret_field.as_deref(),
+            oauth.refresh_token_field.as_deref(),
+            oauth.access_token_field.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            assert!(
+                known.contains(&key),
+                "oauth key `{key}` is not read by InitConfig"
+            );
+        }
+    }
+
+    #[test]
+    fn the_tenant_the_form_prefills_is_the_one_the_plugin_falls_back_to() {
+        // Two defaults for one setting: the manifest prefills the field, and
+        // `InitConfig` fills in for an account that never carried it. They
+        // disagree at the user's expense — the form would promise one tenant
+        // and a blanked field would quietly sign in against another.
+        use plugin_sdk::plugin_core::account_schema::AccountFieldDefault;
+        let schema = manifest().account.unwrap();
+        let authority = schema.field("authority").expect("the tenant is asked for");
+        assert_eq!(
+            authority.default,
+            Some(AccountFieldDefault::Text(DEFAULT_AUTHORITY.to_string()))
+        );
+        assert_eq!(default_authority(), DEFAULT_AUTHORITY);
+    }
+
+    #[test]
+    fn nothing_on_this_form_is_a_secret() {
+        // Microsoft registers Aperio as a PUBLIC client: the flow is PKCE and
+        // there is no client secret in any phase, so the form asks for none and
+        // the OAuth block names none. The client id is not a secret either — it
+        // travels in every authorization URL the user's own browser visits, and
+        // the host needs it in the row to record which registration an account
+        // belongs to.
+        let schema = manifest().account.unwrap();
+        assert_eq!(schema.oauth.as_ref().unwrap().client_secret_field, None);
+        assert!(schema.fields.iter().all(|f| !f.is_secret()));
+    }
+
+    #[test]
+    fn the_config_the_host_merges_is_one_the_plugin_can_open() {
+        // What `account_setup::init_config` produces: the row's non-secret
+        // fields under their own keys, plus the two tokens under the keys the
+        // OAuth block named. Nothing supplies an expiry or a scope, which is
+        // the whole reason both are optional.
+        let schema = manifest().account.unwrap();
+        let merged = serde_json::json!({
+            "client_id": "12345678-1234-1234-1234-123456789abc",
+            "authority": "organizations",
+            "refresh_token": "M.C5.test",
+            "access_token": "eyJ.test",
+        });
+        for field in &schema.fields {
+            assert!(
+                merged.get(&field.key).is_some(),
+                "the host would collect `{}`; this test should carry it too",
+                field.key
+            );
+        }
+        let cfg: InitConfig =
+            serde_json::from_str(&merged.to_string()).expect("the merged config deserialises");
+        assert_eq!(cfg.client_id, "12345678-1234-1234-1234-123456789abc");
+        assert_eq!(cfg.authority, "organizations");
+        assert_eq!(cfg.refresh_token.as_deref(), Some("M.C5.test"));
+        assert_eq!(cfg.expires_at, DateTime::UNIX_EPOCH);
+        assert_eq!(cfg.scope, None);
+    }
+
+    #[test]
+    fn the_form_speaks_both_languages_the_app_ships() {
+        let strings = manifest().strings;
+        assert_eq!(strings.languages(), vec!["de".to_string(), "en".into()]);
+        assert!(strings.has_fallback());
+        let schema = manifest().account.unwrap();
+        for field in &schema.fields {
+            for key in [field.label_key.as_deref(), field.hint_key.as_deref()]
+                .into_iter()
+                .flatten()
+            {
+                for lang in ["en", "de"] {
+                    assert!(
+                        strings.lookup(key, lang).is_some(),
+                        "`{key}` has no {lang} translation"
+                    );
+                }
+            }
+        }
+    }
+}

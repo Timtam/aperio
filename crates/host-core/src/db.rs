@@ -180,7 +180,7 @@ impl DbHandle {
         )?;
 
         // Bring the schema up to date BEFORE sharing the connection — the
-        // cal-adapter-local / sync-engine layers assume a migrated DB. The
+        // adapter-local / sync-engine layers assume a migrated DB. The
         // runner lives in the shared `aperio-db` crate (so desktop and
         // mobile run the same migrations).
         aperio_db::run(&mut conn)?;
@@ -193,7 +193,7 @@ impl DbHandle {
     }
 
     /// Borrow the shared connection so it can be handed to subsystems that
-    /// want their own `Arc` clone (e.g. `cal-adapter-local`).
+    /// want their own `Arc` clone (e.g. `adapter-local`).
     pub fn shared(&self) -> SharedConn {
         self.conn.clone()
     }
@@ -244,7 +244,7 @@ impl DbHandle {
 /// transaction currently holds the writer mutex — at app start that is
 /// the launch sync's apply writes, which used to stall the first paint's
 /// local event/task reads.
-impl cal_adapter_local::ReadConnProvider for DbHandle {
+impl adapter_local::ReadConnProvider for DbHandle {
     fn with_read(&self, f: &mut dyn FnMut(&rusqlite::Connection)) {
         self.with_read_conn(|c| f(c));
     }

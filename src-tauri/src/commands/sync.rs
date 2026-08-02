@@ -57,7 +57,7 @@ use crate::secrets::{self, SecretSlot};
 use crate::sftp_host_keys::UserPrefsHostKeyVerifier;
 use crate::sync_log::{SyncLogEntry, SyncLogRepo, MAX_LOG_ROWS};
 use crate::user_prefs::UserPrefsRepo;
-use cal_adapter_local::LocalAdapter;
+use adapter_local::LocalAdapter;
 use cal_core::CalendarFeature;
 
 // ── Plugin-id constants ──────────────────────────────────────
@@ -2879,7 +2879,7 @@ pub async fn sync_account_host_key_pin(
 
 /// JSON shape the SFTP plugin returns from
 /// `aperio_plugin_probe_host_key`. Mirrors
-/// `sync_adapter_sftp_plugin::ProbeResult`.
+/// `adapter_sftp_plugin::ProbeResult`.
 #[derive(Debug, Deserialize)]
 struct HostKeyProbeResult {
     fingerprint: String,

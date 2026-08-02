@@ -2,7 +2,7 @@
 title: "Google"
 ---
 
-**Crate:** `cal-adapter-google` · **Capabilities:** calendars, tasks, contacts
+**Crate:** `adapter-google` · **Capabilities:** calendars, tasks, contacts
 
 Talks to the Google Calendar, Tasks, and People (Contacts) REST APIs.
 

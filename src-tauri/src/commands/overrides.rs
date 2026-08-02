@@ -18,7 +18,7 @@
 //!   - `clear_container_name_override(id, kind)` — drop the
 //!     override. The next read uses the source name.
 
-use cal_adapter_local::LocalAdapter;
+use adapter_local::LocalAdapter;
 use cal_core::{CalendarFeature, ColorLabelId, TasksFeature};
 use std::sync::Arc;
 use sync_core::{EventPayload, SyncEvent};

@@ -1,0 +1,30 @@
+[package]
+name = "adapter-microsoft-graph-plugin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aperio — Microsoft Graph (Outlook/To Do/Contacts) adapter packaged as a plugin (DESIGN.md §20)."
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+plugin-sdk.workspace = true
+adapter-microsoft-graph = { path = "../adapter-microsoft-graph" }
+cal-core.workspace = true
+
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+plugin-core.workspace = true
+tokio = { workspace = true }
+
+[lints]
+workspace = true

@@ -19,7 +19,7 @@
 
 use std::sync::Arc;
 
-use cal_adapter_local::LocalAdapter;
+use adapter_local::LocalAdapter;
 use serde::Deserialize;
 use sync_core::{EventPayload, SyncEvent};
 use tauri::{AppHandle, Emitter, Runtime, State};

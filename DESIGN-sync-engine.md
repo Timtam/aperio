@@ -12,7 +12,7 @@ Die mobile App (React Native + geteilter Rust-Core via UniFFI) soll am **selben 
 
 Das **Modell** (`sync-core`) und die **Sync-Adapter** (WebDAV/SFTP/FTP/Dropbox/GoogleDrive/Local) sind bereits pures, portierbares Rust. Die **Orchestrierung** der Engine liegt aber heute in `src-tauri/src/event_log/` und ist an die Desktop-App gekoppelt:
 
-- SQLite über `SharedConn` (`Arc<Mutex<rusqlite::Connection>>`) + `cal-adapter-local`,
+- SQLite über `SharedConn` (`Arc<Mutex<rusqlite::Connection>>`) + `adapter-local`,
 - Dateisystem über `tokio::fs`/`std::fs` (Pending-Logs, Sound-Assets) + `paths::resolve_data_dir()`,
 - Secrets über das `keyring`-Crate (`src-tauri/src/secrets.rs`),
 - Zeit über `Utc::now()`,
@@ -63,7 +63,7 @@ Die größte Nahtstelle. Kapselt sowohl die sync-eigenen Tabellen als auch den l
 - **Geräte-ID:** `load_or_mint_device_id`, `set_device_id` (in `user_prefs`).
 - **Einstellungen:** `get/set/delete_user_pref`, `dump_synced_prefs` (Whitelist, §19.2.1).
 - **Konflikte:** `record_conflict(...)` (Tabelle `sync_conflicts`).
-- **Lokale Daten (Upsert/Get/Delete je Typ):** Events, Tasks, Task-Lists, Calendars, Color-Labels, Sections — spiegelt die `*_from_sync`-Helfer von `cal-adapter-local`.
+- **Lokale Daten (Upsert/Get/Delete je Typ):** Events, Tasks, Task-Lists, Calendars, Color-Labels, Sections — spiegelt die `*_from_sync`-Helfer von `adapter-local`.
 - **Accounts:** `upsert_account`, `delete_account`, `dump_accounts` (nur Nicht-Secrets).
 - **Snapshot:** `dump_for_snapshot`, `apply_snapshot_dump`.
 - **Kompaktierung:** Zähler lesen/erhöhen/zurücksetzen.

@@ -32,7 +32,7 @@
 //!   in `src-tauri/src/event_log.rs` (Phase Sc).
 //! - Materialising events from local mutations: the writer hooks in
 //!   the LocalAdapter / user_prefs / shortcut layer (Phase Sb).
-//! - Implementing any particular adapter: every `sync-adapter-*`
+//! - Implementing any particular adapter: every `adapter-*`
 //!   crate consumes this trait surface and writes its own wire code.
 //! - Snapshot compaction: that's its own phase (Sg) and lives in the
 //!   command layer where it has cross-table read access.

@@ -1,0 +1,35 @@
+[package]
+name = "adapter-ical"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aperio iCal feed adapter — read-only HTTP fetch of static .ics URLs."
+
+[dependencies]
+async-trait.workspace = true
+cal-core.workspace = true
+# The CalDAV adapter already owns the VCALENDAR → cal_core::Event
+# mapping. The iCal feed adapter reuses it via `mapping::parse_calendar_data`
+# so the two read paths can't drift. If a third consumer shows up
+# (Google ICS export, Microsoft .ics import), this is the moment to
+# extract the parser into its own crate.
+adapter-caldav = { path = "../adapter-caldav" }
+chrono.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+sha2 = "0.10"
+hex = "0.4"
+thiserror.workspace = true
+tracing.workspace = true
+url = "2"
+base64 = "0.22"
+
+[dev-dependencies]
+tokio = { workspace = true }
+mockito = "1"
+
+[lints]
+workspace = true

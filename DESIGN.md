@@ -432,22 +432,19 @@ Aperio/
 │   ├── plugin-core/                  # Plugin-ABI (C-Header), Plugin-Manager
 │   ├── plugin-sdk/                   # Rust-SDK für Plugin-Entwickler
 │   ├── sync-core/                    # Sync-Adapter-Trait & Event-Log-Typen
-│   ├── cal-adapter-google/           # Google Calendar + Tasks + Contacts (nativ gebundelt)
-│   ├── cal-adapter-microsoft-graph/  # Outlook + MS To Do + Contacts (nativ gebundelt)
-│   ├── cal-adapter-ews/              # Exchange on-premise (Kalender + Tasks + Contacts, nativ gebundelt)
-│   ├── cal-adapter-caldav/           # CalDAV + CardDAV, inkl. iCloud (nativ gebundelt)
-│   ├── cal-adapter-ical/             # .ics-Dateien (nativ gebundelt)
-│   ├── cal-adapter-local/            # Lokaler Kalender (host-intern, kein Plugin — siehe §20.2)
-│   ├── cal-adapter-vikunja/          # Vikunja REST API (nativ gebundelt)
-│   ├── cal-adapter-todoist/          # Todoist REST API (nativ gebundelt)
-│   ├── sync-adapter-webdav/          # WebDAV (nativ gebundelt)
-│   ├── sync-adapter-ftp/             # FTPS (nativ gebundelt)
-│   ├── sync-adapter-sftp/            # SFTP (nativ gebundelt)
-│   ├── sync-adapter-dropbox/         # Dropbox API v2 (nativ gebundelt)
-│   ├── sync-adapter-googledrive/     # Google Drive API v3 (nativ gebundelt)
-│   ├── sync-adapter-local/           # Lokales Dateisystem / NAS (nativ gebundelt)
-│   ├── vc-adapter-zoom/              # Zoom (Rumpf, NICHT gebundelt)
-│   └── vc-adapter-webex/             # Cisco WebEx (nativ gebundelt)
+│   ├── adapter-google/           # Google Calendar + Tasks + Contacts (nativ gebundelt)
+│   ├── adapter-microsoft-graph/  # Outlook + MS To Do + Contacts (nativ gebundelt)
+│   ├── adapter-ews/              # Exchange on-premise (Kalender + Tasks + Contacts, nativ gebundelt)
+│   ├── adapter-caldav/           # CalDAV + CardDAV, inkl. iCloud (nativ gebundelt)
+│   ├── adapter-ical/             # .ics-Dateien (nativ gebundelt)
+│   ├── adapter-local/            # Lokaler Kalender (host-intern, kein Plugin — siehe §20.2)
+│   ├── adapter-vikunja/          # Vikunja REST API (nativ gebundelt)
+│   ├── adapter-todoist/          # Todoist REST API (nativ gebundelt)
+│   ├── adapter-webdav/          # WebDAV (nativ gebundelt)
+│   ├── adapter-ftp/             # FTPS (nativ gebundelt)
+│   ├── adapter-sftp/            # SFTP (nativ gebundelt)
+│   ├── adapter-dropbox/         # Dropbox API v2 (nativ gebundelt)
+│   └── adapter-webex/           # Cisco WebEx (nativ gebundelt)
 └── src-tauri/                        # Tauri-App
 ```
 
@@ -539,31 +536,30 @@ Ein Adapter implementiert immer das `Adapter`-Basis-Trait plus eine beliebige Ko
 
 | Adapter | Implementierte Traits | Capabilities |
 |---|---|---|
-| `cal-adapter-caldav` | `Adapter`, `CalendarFeature`, `TasksFeature`, `ContactsFeature` | `["calendar", "tasks", "contacts"]` |
-| `cal-adapter-google` | `Adapter`, `CalendarFeature`, `TasksFeature`, `ContactsFeature` | `["calendar", "tasks", "contacts"]` |
-| `cal-adapter-microsoft-graph` | `Adapter`, `CalendarFeature`, `TasksFeature`, `ContactsFeature` | `["calendar", "tasks", "contacts"]` |
-| `cal-adapter-ews` | `Adapter`, `CalendarFeature`, `TasksFeature`, `ContactsFeature` | `["calendar", "tasks", "contacts"]` |
-| `cal-adapter-ical` | `Adapter`, `CalendarFeature` | `["calendar"]` |
-| `cal-adapter-local` | `Adapter`, `CalendarFeature`, `TasksFeature` | `["calendar", "tasks"]` |
-| `cal-adapter-vikunja` | `Adapter`, `TasksFeature` | `["tasks"]` |
-| `cal-adapter-todoist` | `Adapter`, `TasksFeature` | `["tasks"]` |
+| `adapter-caldav` | `Adapter`, `CalendarFeature`, `TasksFeature`, `ContactsFeature` | `["calendar", "tasks", "contacts"]` |
+| `adapter-google` | `Adapter`, `CalendarFeature`, `TasksFeature`, `ContactsFeature` | `["calendar", "tasks", "contacts"]` |
+| `adapter-microsoft-graph` | `Adapter`, `CalendarFeature`, `TasksFeature`, `ContactsFeature` | `["calendar", "tasks", "contacts"]` |
+| `adapter-ews` | `Adapter`, `CalendarFeature`, `TasksFeature`, `ContactsFeature` | `["calendar", "tasks", "contacts"]` |
+| `adapter-ical` | `Adapter`, `CalendarFeature` | `["calendar"]` |
+| `adapter-local` | `Adapter`, `CalendarFeature`, `TasksFeature` | `["calendar", "tasks"]` |
+| `adapter-vikunja` | `Adapter`, `TasksFeature` | `["tasks"]` |
+| `adapter-todoist` | `Adapter`, `TasksFeature` | `["tasks"]` |
 
 #### Abhängigkeiten je Adapter-Crate
 
-> **Hinweis:** Die Videokonferenz-Adapter (`vc-adapter-*`) sind eigenständige Plugin-Crates im Workspace. Sie sind hier der Vollständigkeit halber aufgeführt; inhaltlich gehören sie zu Abschnitt 11.
+> **Hinweis:** Die Videokonferenz-Adapter sind eigenständige Plugin-Crates im Workspace. Sie sind hier der Vollständigkeit halber aufgeführt; inhaltlich gehören sie zu Abschnitt 11.
 
 | Crate | Externe Abhängigkeiten |
 |---|---|
-| `cal-adapter-google` | `google-apis-rs`, `oauth2` |
-| `cal-adapter-microsoft-graph` | `graph-rs-sdk`, `oauth2` |
-| `cal-adapter-ews` | `reqwest`, `quick-xml` (keine externen SDKs) |
-| `cal-adapter-caldav` | `reqwest`, `quick-xml`, `icalendar` (CalDAV + CardDAV) |
-| `cal-adapter-ical` | `icalendar` |
-| `cal-adapter-local` | Keine (nur SQLite via `rusqlite`) |
-| `cal-adapter-vikunja` | `reqwest`, `oauth2` |
-| `cal-adapter-todoist` | `reqwest`, `oauth2` |
-| `vc-adapter-zoom` | `reqwest`, `oauth2` |
-| `vc-adapter-webex` | `reqwest`, `oauth2` |
+| `adapter-google` | `google-apis-rs`, `oauth2` |
+| `adapter-microsoft-graph` | `graph-rs-sdk`, `oauth2` |
+| `adapter-ews` | `reqwest`, `quick-xml` (keine externen SDKs) |
+| `adapter-caldav` | `reqwest`, `quick-xml`, `icalendar` (CalDAV + CardDAV) |
+| `adapter-ical` | `icalendar` |
+| `adapter-local` | Keine (nur SQLite via `rusqlite`) |
+| `adapter-vikunja` | `reqwest`, `oauth2` |
+| `adapter-todoist` | `reqwest`, `oauth2` |
+| `adapter-webex` | `reqwest`, `oauth2` |
 
 ### 6.2 Geplante Adapter (v1.0)
 
@@ -581,7 +577,7 @@ Ein Adapter implementiert immer das `Adapter`-Basis-Trait plus eine beliebige Ko
 
 > **Lokaler Kalender:** Termine und Aufgaben werden ausschließlich in der lokalen SQLite-Datenbank gespeichert und haben kein API-Gegenstück. Geräteübergreifende Synchronisation erfolgt vollständig über das Event Log (Abschnitt 19) – `event.*`-, `task.*`- und `task_list.*`-Ereignisse werden wie bei externen Kalendern ins Log geschrieben, jedoch nie an eine externe API weitergeleitet. Lokale Kalender sind beliebig oft anlegbar (siehe Abschnitt 6.4) und immer aufgabenfähig. Sie eignen sich für private Termine und Aufgaben, die bewusst keinem Cloud-Dienst anvertraut werden sollen.
 
-> **Hinweis EWS:** Exchange Web Services ist ein älteres SOAP-basiertes Protokoll für on-premise Exchange-Server (2010–2019). Da kein ausgereiftes Rust-Crate existiert, wird `cal-adapter-ews` als native Eigenimplementierung auf Basis von `reqwest` + `quick-xml` entwickelt. Auf eine externe Brücke (z.B. DavMail) wird bewusst verzichtet, um die portable Einzelbinary-Anforderung zu wahren.
+> **Hinweis EWS:** Exchange Web Services ist ein älteres SOAP-basiertes Protokoll für on-premise Exchange-Server (2010–2019). Da kein ausgereiftes Rust-Crate existiert, wird `adapter-ews` als native Eigenimplementierung auf Basis von `reqwest` + `quick-xml` entwickelt. Auf eine externe Brücke (z.B. DavMail) wird bewusst verzichtet, um die portable Einzelbinary-Anforderung zu wahren.
 
 ### 6.3 Hinweis: Bereits abgedeckte Dienste
 
@@ -589,11 +585,11 @@ Viele bekannte Kalenderdienste sind über die v1.0-Adapter bereits vollständig 
 
 | Dienst | Abgedeckt durch |
 |---|---|
-| **Nextcloud Calendar** | `cal-adapter-caldav` (CalDAV) |
-| **Fastmail** | `cal-adapter-caldav` (CalDAV) |
-| **Radicale / Baikal** | `cal-adapter-caldav` (CalDAV) |
-| **Exchange Online (Microsoft 365)** | `cal-adapter-microsoft-graph` (Graph API) |
-| **Zoho Calendar** | `cal-adapter-caldav` (CalDAV, sofern Zoho CalDAV-Zugang aktiviert) |
+| **Nextcloud Calendar** | `adapter-caldav` (CalDAV) |
+| **Fastmail** | `adapter-caldav` (CalDAV) |
+| **Radicale / Baikal** | `adapter-caldav` (CalDAV) |
+| **Exchange Online (Microsoft 365)** | `adapter-microsoft-graph` (Graph API) |
+| **Zoho Calendar** | `adapter-caldav` (CalDAV, sofern Zoho CalDAV-Zugang aktiviert) |
 
 Eigene Adapter für v2.0+ sind daher nur dann sinnvoll, wenn ein Dienst proprietäre Funktionen hat, die über die v1.0-Adapter (CalDAV/Graph/REST) nicht erreichbar sind.
 
@@ -607,7 +603,7 @@ Eigene Adapter für v2.0+ sind daher nur dann sinnvoll, wenn ein Dienst propriet
 
 #### Lokale Kalender
 
-Der lokale Kalender-Adapter (`cal-adapter-local`) ist die einzige Datenquelle ohne externes Backend. Für ihn gilt:
+Der lokale Kalender-Adapter (`adapter-local`) ist die einzige Datenquelle ohne externes Backend. Für ihn gilt:
 
 - **Unbegrenzte Anzahl:** Der Nutzer kann beliebig viele lokale Kalender anlegen, umbenennen, einfärben und löschen
 - **Aufgabenfähig:** Jeder lokale Kalender enthält automatisch eine Aufgabenliste mit derselben ID – Termine und Aufgaben können in demselben lokalen Container abgelegt werden
@@ -918,7 +914,7 @@ Ein einzelner Termin lässt sich umfärben — per Rechtsklick auf den Termin-Ch
 
 Capability-Lookup im Host: aus dem gecachten Kalender-Listing (`cache.read_calendars`); unbekannt → `false` (sichere Voreinstellung: Override). Das Frontend routet identisch (`account_id === 'local' || calendar.supports_event_color`).
 
-**Ungemappte Native-Farben (read-only).** Trägt ein Termin ein `color_hex`, das der Host **keinem** bestehenden Label zuordnen kann (kein Ad-hoc-Label beim Lesen, s. o.), bleibt der Hex am Event und wird im Frontend **direkt** gerendert — die Auflösung in `resolveEventColor` ist `color_label` (benannt) → `color_hex` (roh, namenlos) → Kalenderfarbe. Das betrifft v. a. **abonnierte iCal-Feeds** (deren Adapter sich `cal_adapter_caldav::mapping` teilt und so `COLOR` mitliest) sowie **fremde** Farben auf farbfähigen CalDAV-Kalendern (ein anderer Client hat den Termin gefärbt). Reine Anzeige: ein Feed ist nicht schreibbar; eine fremde CalDAV-Farbe wird beim nächsten Aperio-Edit durch das aufgelöste Label ersetzt. Bewusst **kein** Ad-hoc-Label beim Lesen (sonst DB-Writes + `color_label.created`-Events bei jedem Refresh, geflutete Palette).
+**Ungemappte Native-Farben (read-only).** Trägt ein Termin ein `color_hex`, das der Host **keinem** bestehenden Label zuordnen kann (kein Ad-hoc-Label beim Lesen, s. o.), bleibt der Hex am Event und wird im Frontend **direkt** gerendert — die Auflösung in `resolveEventColor` ist `color_label` (benannt) → `color_hex` (roh, namenlos) → Kalenderfarbe. Das betrifft v. a. **abonnierte iCal-Feeds** (deren Adapter sich `adapter_caldav::mapping` teilt und so `COLOR` mitliest) sowie **fremde** Farben auf farbfähigen CalDAV-Kalendern (ein anderer Client hat den Termin gefärbt). Reine Anzeige: ein Feed ist nicht schreibbar; eine fremde CalDAV-Farbe wird beim nächsten Aperio-Edit durch das aufgelöste Label ersetzt. Bewusst **kein** Ad-hoc-Label beim Lesen (sonst DB-Writes + `color_label.created`-Events bei jedem Refresh, geflutete Palette).
 
 Eine Custom-Farbe wird als `ColorLabel` realisiert — dadurch greift die gesamte bestehende Mechanik (Binding über `color_label`, Auflösung im `CalendarStore`, Sync via `color_label.*`, Container-Override-Tabelle) unverändert. `ColorLabel` trägt dazu ein Flag `ad_hoc: bool`:
 
@@ -1101,11 +1097,11 @@ frequency: Weekly, interval: 3, day_of_week: [Saturday]
 
 ### 9.7 Kollaborative Aufgaben: Adapter
 
-#### CalDAV/VTODO (Standard, im `cal-adapter-caldav` enthalten)
+#### CalDAV/VTODO (Standard, im `adapter-caldav` enthalten)
 
 Aufgaben als VTODO über CalDAV – kompatibel mit Nextcloud Tasks, Radicale, Baikal. Capability: `tasks`.
 
-#### Vikunja (`cal-adapter-vikunja`, nativ gebundelt)
+#### Vikunja (`adapter-vikunja`, nativ gebundelt)
 
 Vikunja ist eine selbst-hostbare Open-Source-Aufgabenverwaltung (AGPLv3) mit REST-API, Multi-User-Support, CalDAV-Sync, wiederkehrenden Aufgaben, Unteraufgaben und Farb-Labels. Capability: `tasks`.
 
@@ -1117,9 +1113,9 @@ Vikunja ist eine selbst-hostbare Open-Source-Aufgabenverwaltung (AGPLv3) mit RES
 | Selbst-hostbar | ✅ | ✅ |
 | Lizenz | – | AGPLv3 |
 
-> **Hinweis Lizenz:** Da Vikunja AGPLv3 ist, wird die Anbindung als reiner REST-Client implementiert – kein Vikunja-Code wird verlinkt oder mitausgeliefert. Die HTTP-Aufrufe bleiben in einem isolierten Crate (`cal-adapter-vikunja`), das nur Aperios eigene Lizenz benötigt. Diese Trennung erlaubt zudem, das Crate problemlos auszukoppeln, falls die enge Verzahnung mit dem Aperio-Release-Zyklus später unerwünscht wird.
+> **Hinweis Lizenz:** Da Vikunja AGPLv3 ist, wird die Anbindung als reiner REST-Client implementiert – kein Vikunja-Code wird verlinkt oder mitausgeliefert. Die HTTP-Aufrufe bleiben in einem isolierten Crate (`adapter-vikunja`), das nur Aperios eigene Lizenz benötigt. Diese Trennung erlaubt zudem, das Crate problemlos auszukoppeln, falls die enge Verzahnung mit dem Aperio-Release-Zyklus später unerwünscht wird.
 
-#### Todoist (`cal-adapter-todoist`, nativ gebundelt)
+#### Todoist (`adapter-todoist`, nativ gebundelt)
 
 Todoist ist ein kommerzieller, weit verbreiteter Aufgabendienst mit REST-API. Capability: `tasks`. Authentifizierung per OAuth2 oder API-Token.
 
@@ -1413,7 +1409,7 @@ aperio:1:<base64(json)>
 
 ### 10.1 Designprinzip: Kontakte als Teil bestehender Adapter
 
-Kontaktzugriff wird direkt in die bestehenden Kalender-Adapter integriert. Der `cal-adapter-caldav`-Adapter vereint CalDAV (Kalender und Aufgaben) und CardDAV (Kontakte) in einem Plugin – beide Protokolle sind WebDAV-Erweiterungen, laufen typischerweise auf demselben Server und teilen dieselbe Authentifizierung. CalDAV und CardDAV können im Plugin unabhängig voneinander aktiviert werden:
+Kontaktzugriff wird direkt in die bestehenden Kalender-Adapter integriert. Der `adapter-caldav`-Adapter vereint CalDAV (Kalender und Aufgaben) und CardDAV (Kontakte) in einem Plugin – beide Protokolle sind WebDAV-Erweiterungen, laufen typischerweise auf demselben Server und teilen dieselbe Authentifizierung. CalDAV und CardDAV können im Plugin unabhängig voneinander aktiviert werden:
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -1448,10 +1444,10 @@ Für Google, Microsoft und iCloud gilt dasselbe Prinzip – Kalender, Aufgaben u
 
 | Adapter | Kalender-API | Aufgaben-API | Kontakte-API | Authentifizierung |
 |---|---|---|---|---|
-| `cal-adapter-google` | Google Calendar API | Google Tasks API | Google People API | Selbes OAuth2-Token |
-| `cal-adapter-microsoft-graph` | Microsoft Graph Calendar | Microsoft To Do API | Microsoft Graph Contacts | Selbes OAuth2-Token |
-| `cal-adapter-caldav` | CalDAV RFC 4791 | VTODO via CalDAV | CardDAV RFC 6352 | Selbe Zugangsdaten |
-| `cal-adapter-ews` | EWS Calendar | EWS Tasks | EWS Contacts | Selbe Zugangsdaten |
+| `adapter-google` | Google Calendar API | Google Tasks API | Google People API | Selbes OAuth2-Token |
+| `adapter-microsoft-graph` | Microsoft Graph Calendar | Microsoft To Do API | Microsoft Graph Contacts | Selbes OAuth2-Token |
+| `adapter-caldav` | CalDAV RFC 4791 | VTODO via CalDAV | CardDAV RFC 6352 | Selbe Zugangsdaten |
+| `adapter-ews` | EWS Calendar | EWS Tasks | EWS Contacts | Selbe Zugangsdaten |
 
 Auch bei diesen Adaptern sind Kalender-, Aufgaben- und Kontakt-Sync unabhängig voneinander aktivierbar – ein Nutzer kann z.B. Google Kalender synchronisieren, aber Google Contacts deaktivieren.
 
@@ -1563,8 +1559,8 @@ Beim ersten Verbinden eines Kontaktbuchs wird der Nutzer darauf hingewiesen, das
 |---|---|---|
 | **Cisco WebEx** | Link generieren + Raum buchen | WebEx OAuth2 |
 | **Zoom** | geplant — Adapter ist ein Rumpf und wird nicht gebundelt | Zoom OAuth2 |
-| **Microsoft Teams** | geplant, als Capability von `cal-adapter-microsoft-graph` | dasselbe Konto |
-| **Google Meet** | geplant, als Capability von `cal-adapter-google` | dasselbe Konto |
+| **Microsoft Teams** | geplant, als Capability von `adapter-microsoft-graph` | dasselbe Konto |
+| **Google Meet** | geplant, als Capability von `adapter-google` | dasselbe Konto |
 
 ### 11.2 Funktionsumfang
 
@@ -1579,10 +1575,9 @@ Jeder Anbieter wird als Plugin mit der Capability `videoconference` implementier
 
 | Crate | API-Basis | Besonderheit |
 |---|---|---|
-| `vc-adapter-zoom` | Zoom Meeting API v2 | Eigener OAuth2-Flow — Rumpf, nicht gebundelt |
-| `cal-adapter-microsoft-graph` (Capability `videoconference`) | Microsoft Graph API (Online Meetings) | Dasselbe Konto, dasselbe Token — kein eigener Adapter |
-| `cal-adapter-google` (Capability `videoconference`) | Google Calendar API (conferenceData) | Dasselbe Konto, dasselbe Token — kein eigener Adapter |
-| `vc-adapter-webex` | Cisco WebEx Meetings REST API | Eigener OAuth2-Flow |
+| `adapter-microsoft-graph` (Capability `videoconference`) | Microsoft Graph API (Online Meetings) | Dasselbe Konto, dasselbe Token — kein eigener Adapter |
+| `adapter-google` (Capability `videoconference`) | Google Calendar API (conferenceData) | Dasselbe Konto, dasselbe Token — kein eigener Adapter |
+| `adapter-webex` | Cisco WebEx Meetings REST API | Eigener OAuth2-Flow |
 
 Teams und Meet teilen das OAuth2-Token des jeweiligen Kalender-Adapters – es ist keine separate Anmeldung nötig, wenn der Nutzer bereits Google Calendar oder Outlook verbunden hat.
 
@@ -1590,7 +1585,7 @@ Teams und Meet teilen das OAuth2-Token des jeweiligen Kalender-Adapters – es i
 
 ## 12. Feiertage (per iCal-Abonnement)
 
-Eine eigene Feiertags-API ist nicht vorgesehen. Der `cal-adapter-ical` deckt den Use Case vollständig ab: die User abonnieren einen öffentlichen Feiertags-Feed ihrer Wahl als read-only Kalender und sehen Feiertage in allen Ansichten wie jeden anderen Kalender. Beispiele:
+Eine eigene Feiertags-API ist nicht vorgesehen. Der `adapter-ical` deckt den Use Case vollständig ab: die User abonnieren einen öffentlichen Feiertags-Feed ihrer Wahl als read-only Kalender und sehen Feiertage in allen Ansichten wie jeden anderen Kalender. Beispiele:
 
 - `https://www.feiertage-deutschland.de/feiertage-de.ics` (alle deutschen Bundesländer)
 - `https://www.officeholidays.com/ics/germany` (offizielle Feiertage Deutschland)
@@ -2185,7 +2180,7 @@ Alle Registrierungen erfolgen benutzerspezifisch (kein Admin-Recht nötig) und w
 
 Wenn die App eine `.ics`-Datei öffnet:
 
-1. Datei wird geparst (`cal-adapter-ical`)
+1. Datei wird geparst (`adapter-ical`)
 2. Enthaltene Termine werden in einer **Vorschau** angezeigt (Titel, Datum, Beschreibung)
 3. Nutzer wählt den **Ziel-Kalender** aus einem Dropdown
 4. Bestätigung → Termine werden importiert und synchronisiert
@@ -2556,13 +2551,15 @@ Analog zu den Daten-Adaptern (Abschnitt 6.1) wird jeder Sync-Adapter als **eigen
 ```
 crates/
 ├── sync-core/                  # Gemeinsames Trait & Ereignisformat
-├── sync-adapter-webdav/        # WebDAV (verschlüsselt & unverschlüsselt)
-├── sync-adapter-ftp/           # FTPS
-├── sync-adapter-sftp/          # SFTP
-├── sync-adapter-dropbox/       # Dropbox API v2
-├── sync-adapter-googledrive/   # Google Drive API v3
-└── sync-adapter-local/         # Lokales Dateisystem / NAS
+├── adapter-webdav/        # WebDAV (verschlüsselt & unverschlüsselt)
+├── adapter-ftp/           # FTPS
+├── adapter-sftp/          # SFTP
+└── adapter-dropbox/       # Dropbox API v2
 ```
+
+Google Drive und der Ordner-Spiegel stehen nicht in dieser Liste: Drive ist
+`adapter-google::drive`, der Spiegel ist `adapter-local::mirror`. Ein Adapter
+je Anbieter, und beide Anbieter tragen zwei Rollen.
 
 #### Das `sync-core`-Crate
 
@@ -2997,7 +2994,7 @@ Neue Plugin-Typen können in zukünftigen Versionen hinzugefügt werden, ohne be
 
 > **Hinweis:** Es gibt **keine** Plugin-Typen pro Oberfläche. Reine Aufgabenlisten-Anbieter (Vikunja, Todoist, Google Tasks etc.) sind ein `adapter` mit `"capabilities": ["tasks"]`, ein Sync-Backend eines mit `["sync"]` – siehe Abschnitt 10.2. Die früheren Tags `calendar-adapter`, `sync-adapter` und `videoconference-adapter` sind entfallen: sie beantworteten eine Frage, die den `capabilities` gehört, und ließen pro Plugin genau **eine** Oberfläche zu.
 
-> **Hinweis:** Der **lokale Kalender-Adapter** (`cal-adapter-local`) ist bewusst **kein** Plugin. Er teilt sich die SQLite-Datenbank des Hosts (Termine, Aufgaben, Kontakte, Einstellungen) und gehört damit zur Identität der App selbst, nicht zur austauschbaren Plugin-Schicht. Ein Plugin lebt in einer separaten shared library und kann die `Arc<Mutex<Connection>>` des Hosts nicht über die FFI-Grenze hinweg teilen; gleichzeitig ergäben "Lokal deaktivieren" / "Lokal deinstallieren" im Plugin-Manager-UI keinen sinnvollen Use Case (es ist die Heimat der lokal angelegten Daten des Nutzers). Der `LocalAdapter` wird daher direkt von src-tauri als gewöhnlicher Rust-Trait-Impl konstruiert und über alle Stellen gereicht, die ihn brauchen. Das Plugin-System (`PluginManager`, `plugins/bundled/`, Settings → Plugins) bedient ausschließlich **externe Datenquellen**.
+> **Hinweis:** Der **lokale Kalender-Adapter** (`adapter-local`) ist bewusst **kein** Plugin. Er teilt sich die SQLite-Datenbank des Hosts (Termine, Aufgaben, Kontakte, Einstellungen) und gehört damit zur Identität der App selbst, nicht zur austauschbaren Plugin-Schicht. Ein Plugin lebt in einer separaten shared library und kann die `Arc<Mutex<Connection>>` des Hosts nicht über die FFI-Grenze hinweg teilen; gleichzeitig ergäben "Lokal deaktivieren" / "Lokal deinstallieren" im Plugin-Manager-UI keinen sinnvollen Use Case (es ist die Heimat der lokal angelegten Daten des Nutzers). Der `LocalAdapter` wird daher direkt von src-tauri als gewöhnlicher Rust-Trait-Impl konstruiert und über alle Stellen gereicht, die ihn brauchen. Das Plugin-System (`PluginManager`, `plugins/bundled/`, Settings → Plugins) bedient ausschließlich **externe Datenquellen**.
 
 ### 20.3 Plugin-ABI: Stabiles C-Interface
 
@@ -3313,24 +3310,22 @@ Für mobile Plattformen (iOS, Android), wo dynamisches Nachladen von Bibliotheke
 [features]
 dynamic-plugins = []          # Desktop: dynamisch laden
 static-plugins  = [           # Mobile: statisch einkompilieren
-    "cal-adapter-google",
-    "cal-adapter-microsoft-graph",
-    "cal-adapter-ews",
-    "cal-adapter-caldav",
-    "cal-adapter-ical",
-    "cal-adapter-vikunja",
-    "cal-adapter-todoist",
-    "sync-adapter-webdav",
-    "sync-adapter-ftp",
-    "sync-adapter-sftp",
-    "sync-adapter-dropbox",
-    "sync-adapter-googledrive",
-    "sync-adapter-local",
-    "vc-adapter-webex",
+    "adapter-google",
+    "adapter-microsoft-graph",
+    "adapter-ews",
+    "adapter-caldav",
+    "adapter-ical",
+    "adapter-vikunja",
+    "adapter-todoist",
+    "adapter-webdav",
+    "adapter-ftp",
+    "adapter-sftp",
+    "adapter-dropbox",
+    "adapter-webex",
 ]
 ```
 
-`cal-adapter-local` taucht in dieser Liste bewusst nicht auf — er ist host-intern (siehe Hinweis in §20.2) und wird direkt von src-tauri als gewöhnliche Bibliothek genutzt, nicht über den Plugin-Manager. Auf Mobile gilt dasselbe wie auf Desktop: der `LocalAdapter` ist Teil der App-Binary, nicht ein zu ladendes Artefakt.
+`adapter-local` taucht in dieser Liste bewusst nicht auf — er ist host-intern (siehe Hinweis in §20.2) und wird direkt von src-tauri als gewöhnliche Bibliothek genutzt, nicht über den Plugin-Manager. Auf Mobile gilt dasselbe wie auf Desktop: der `LocalAdapter` ist Teil der App-Binary, nicht ein zu ladendes Artefakt.
 
 Der Plugin-Manager erkennt zur Laufzeit, welcher Modus aktiv ist, und lädt Plugins entsprechend. Die Plugin-API bleibt für den Rest der App identisch.
 
@@ -3605,21 +3600,19 @@ Aperio-[VERSION]-[PLATFORM].zip
 ├── Aperio              # Linux / macOS
 ├── plugins/
 │   └── bundled/            # Nativ gebundelte Plugins (.dll / .dylib / .so)
-│       ├── cal-adapter-google.[ext]
-│       ├── cal-adapter-microsoft-graph.[ext]
-│       ├── cal-adapter-ews.[ext]
-│       ├── cal-adapter-caldav.[ext]
-│       ├── cal-adapter-ical.[ext]
-│       ├── cal-adapter-local.[ext]
-│       ├── cal-adapter-vikunja.[ext]
-│       ├── cal-adapter-todoist.[ext]
-│       ├── sync-adapter-webdav.[ext]
-│       ├── sync-adapter-ftp.[ext]
-│       ├── sync-adapter-sftp.[ext]
-│       ├── sync-adapter-dropbox.[ext]
-│       ├── sync-adapter-googledrive.[ext]
-│       ├── sync-adapter-local.[ext]
-│       └── vc-adapter-webex.[ext]
+│       ├── adapter-google.[ext]
+│       ├── adapter-microsoft-graph.[ext]
+│       ├── adapter-ews.[ext]
+│       ├── adapter-caldav.[ext]
+│       ├── adapter-ical.[ext]
+│       ├── adapter-local.[ext]
+│       ├── adapter-vikunja.[ext]
+│       ├── adapter-todoist.[ext]
+│       ├── adapter-webdav.[ext]
+│       ├── adapter-ftp.[ext]
+│       ├── adapter-sftp.[ext]
+│       ├── adapter-dropbox.[ext]
+│       └── adapter-webex.[ext]
 └── README.txt              # Kurzanleitung, WebView2-Hinweis (Windows)
 ```
 
@@ -3706,46 +3699,43 @@ Aperio/
 │   │   └── src/lib.rs
 │   │
 │   │── # Kalender- und Aufgaben-Adapter (nativ gebundelt)
-│   ├── cal-adapter-google/                # Google Calendar API v3 + Google Tasks
+│   ├── adapter-google/                # Google Calendar API v3 + Google Tasks
 │   │   └── src/lib.rs
-│   ├── cal-adapter-microsoft-graph/       # Outlook / Exchange Online + MS To Do
+│   ├── adapter-microsoft-graph/       # Outlook / Exchange Online + MS To Do
 │   │   └── src/lib.rs
-│   ├── cal-adapter-ews/                   # Exchange on-premise (SOAP/EWS)
+│   ├── adapter-ews/                   # Exchange on-premise (SOAP/EWS)
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── soap.rs                    # SOAP-Envelope-Builder
 │   │       └── xml.rs                     # XML-Parsing via quick-xml
-│   ├── cal-adapter-caldav/                # CalDAV + CardDAV (inkl. iCloud, Nextcloud)
+│   ├── adapter-caldav/                # CalDAV + CardDAV (inkl. iCloud, Nextcloud)
 │   │   └── src/lib.rs
-│   ├── cal-adapter-ical/                  # Lokale / URL-basierte .ics-Dateien
+│   ├── adapter-ical/                  # Lokale / URL-basierte .ics-Dateien
 │   │   └── src/lib.rs
-│   ├── cal-adapter-local/                 # Lokaler Kalender (kein externes Protokoll)
+│   ├── adapter-local/                 # Lokaler Kalender (kein externes Protokoll)
 │   │   └── src/lib.rs
-│   ├── cal-adapter-vikunja/               # Vikunja (REST API, nur tasks)
+│   ├── adapter-vikunja/               # Vikunja (REST API, nur tasks)
 │   │   └── src/lib.rs
-│   ├── cal-adapter-todoist/               # Todoist (REST API, nur tasks)
+│   ├── adapter-todoist/               # Todoist (REST API, nur tasks)
 │   │   └── src/lib.rs
 │   │
 │   │── # Sync-Adapter (nativ gebundelt)
-│   ├── sync-adapter-webdav/               # WebDAV (verschlüsselt & unverschlüsselt)
+│   ├── adapter-webdav/               # WebDAV (verschlüsselt & unverschlüsselt)
 │   │   └── src/lib.rs
-│   ├── sync-adapter-ftp/                  # FTPS
+│   ├── adapter-ftp/                  # FTPS
 │   │   └── src/lib.rs
-│   ├── sync-adapter-sftp/                 # SFTP
+│   ├── adapter-sftp/                 # SFTP
 │   │   └── src/lib.rs
-│   ├── sync-adapter-dropbox/              # Dropbox API v2
+│   ├── adapter-dropbox/              # Dropbox API v2
 │   │   └── src/lib.rs
-│   ├── sync-adapter-googledrive/          # Google Drive API v3
 │   │   └── src/lib.rs
-│   ├── sync-adapter-local/                # Lokales Dateisystem / NAS
 │   │   └── src/lib.rs
 │   │
 │   │── # Videokonferenz-Adapter (nativ gebundelt)
-│   ├── vc-adapter-zoom/                   # Zoom API (Rumpf, NICHT gebundelt)
 │   │   └── src/lib.rs
 │   │   └── src/lib.rs
 │   │   └── src/lib.rs
-│   └── vc-adapter-webex/                  # Cisco WebEx API
+│   └── adapter-webex/                  # Cisco WebEx API
 │       └── src/lib.rs
 │
 ├── src-tauri/                             # Tauri-App (Rust Backend)

@@ -1,0 +1,37 @@
+[package]
+name = "adapter-google-plugin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aperio — Google Calendar/Tasks/Contacts adapter packaged as a plugin (DESIGN.md §20)."
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+plugin-sdk.workspace = true
+adapter-google = { path = "../adapter-google" }
+cal-core.workspace = true
+# Google Drive as a sync target rides on the same account: one sign-in, one
+# row, two roles — and, since the fold, one crate. Drive is
+# `adapter-google::drive`.
+sync-core.workspace = true
+base64 = "0.22"
+# `interactive_auth` runs the OAuth token exchange over HTTP.
+reqwest.workspace = true
+
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+plugin-core.workspace = true
+tokio = { workspace = true }
+
+[lints]
+workspace = true

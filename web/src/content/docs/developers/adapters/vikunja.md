@@ -2,7 +2,7 @@
 title: "Vikunja"
 ---
 
-**Crate:** `cal-adapter-vikunja` · **Capabilities:** tasks
+**Crate:** `adapter-vikunja` · **Capabilities:** tasks
 
 Vikunja is an open-source, self-hosted task manager. The adapter is
 **tasks-only** and is one of the two "collaborative tasks" backends

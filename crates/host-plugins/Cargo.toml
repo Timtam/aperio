@@ -15,18 +15,18 @@ plugin-core.workspace = true
 # dlopen-ed. Optional + gated behind the `static` feature so a consumer that
 # only wants the dlopen path (the desktop host) can depend on this crate with
 # `default-features = false` and not drag the 17 rlibs into its binary.
-cal-adapter-caldav-plugin = { path = "../cal-adapter-caldav-plugin", optional = true }
-cal-adapter-ical-plugin = { path = "../cal-adapter-ical-plugin", optional = true }
-cal-adapter-google-plugin = { path = "../cal-adapter-google-plugin", optional = true }
-cal-adapter-microsoft-graph-plugin = { path = "../cal-adapter-microsoft-graph-plugin", optional = true }
-cal-adapter-ews-plugin = { path = "../cal-adapter-ews-plugin", optional = true }
-cal-adapter-vikunja-plugin = { path = "../cal-adapter-vikunja-plugin", optional = true }
-cal-adapter-todoist-plugin = { path = "../cal-adapter-todoist-plugin", optional = true }
-sync-adapter-webdav-plugin = { path = "../sync-adapter-webdav-plugin", optional = true }
-sync-adapter-ftp-plugin = { path = "../sync-adapter-ftp-plugin", optional = true }
-sync-adapter-sftp-plugin = { path = "../sync-adapter-sftp-plugin", optional = true }
-sync-adapter-dropbox-plugin = { path = "../sync-adapter-dropbox-plugin", optional = true }
-vc-adapter-webex-plugin = { path = "../vc-adapter-webex-plugin", optional = true }
+adapter-caldav-plugin = { path = "../adapter-caldav-plugin", optional = true }
+adapter-ical-plugin = { path = "../adapter-ical-plugin", optional = true }
+adapter-google-plugin = { path = "../adapter-google-plugin", optional = true }
+adapter-microsoft-graph-plugin = { path = "../adapter-microsoft-graph-plugin", optional = true }
+adapter-ews-plugin = { path = "../adapter-ews-plugin", optional = true }
+adapter-vikunja-plugin = { path = "../adapter-vikunja-plugin", optional = true }
+adapter-todoist-plugin = { path = "../adapter-todoist-plugin", optional = true }
+adapter-webdav-plugin = { path = "../adapter-webdav-plugin", optional = true }
+adapter-ftp-plugin = { path = "../adapter-ftp-plugin", optional = true }
+adapter-sftp-plugin = { path = "../adapter-sftp-plugin", optional = true }
+adapter-dropbox-plugin = { path = "../adapter-dropbox-plugin", optional = true }
+adapter-webex-plugin = { path = "../adapter-webex-plugin", optional = true }
 
 [dev-dependencies]
 # The credential-layer tests assert what the SHIPPED manifests imply about
@@ -49,20 +49,20 @@ registry = []
 # Per-adapter selection — link + register exactly the adapters a consumer ships.
 # This is the seam that lets the mobile build (cal-ffi) drop an adapter it does
 # not offer simply by not enabling its feature, the static-link counterpart to
-# the desktop omitting a cdylib from `plugins/bundled/`. `cal-adapter-local` is
+# the desktop omitting a cdylib from `plugins/bundled/`. `adapter-local` is
 # deliberately absent: it is the hardwired local store, not a bundled plugin.
-caldav = ["registry", "dep:cal-adapter-caldav-plugin"]
-ical = ["registry", "dep:cal-adapter-ical-plugin"]
-google = ["registry", "dep:cal-adapter-google-plugin"]
-microsoft-graph = ["registry", "dep:cal-adapter-microsoft-graph-plugin"]
-ews = ["registry", "dep:cal-adapter-ews-plugin"]
-vikunja = ["registry", "dep:cal-adapter-vikunja-plugin"]
-todoist = ["registry", "dep:cal-adapter-todoist-plugin"]
-sync-webdav = ["registry", "dep:sync-adapter-webdav-plugin"]
-sync-ftp = ["registry", "dep:sync-adapter-ftp-plugin"]
-sync-sftp = ["registry", "dep:sync-adapter-sftp-plugin"]
-sync-dropbox = ["registry", "dep:sync-adapter-dropbox-plugin"]
-vc-webex = ["registry", "dep:vc-adapter-webex-plugin"]
+caldav = ["registry", "dep:adapter-caldav-plugin"]
+ical = ["registry", "dep:adapter-ical-plugin"]
+google = ["registry", "dep:adapter-google-plugin"]
+microsoft-graph = ["registry", "dep:adapter-microsoft-graph-plugin"]
+ews = ["registry", "dep:adapter-ews-plugin"]
+vikunja = ["registry", "dep:adapter-vikunja-plugin"]
+todoist = ["registry", "dep:adapter-todoist-plugin"]
+webdav = ["registry", "dep:adapter-webdav-plugin"]
+ftp = ["registry", "dep:adapter-ftp-plugin"]
+sftp = ["registry", "dep:adapter-sftp-plugin"]
+dropbox = ["registry", "dep:adapter-dropbox-plugin"]
+webex = ["registry", "dep:adapter-webex-plugin"]
 
 # Convenience: link + register ALL 17 bundled adapter plugins (the default).
 static = [
@@ -73,11 +73,11 @@ static = [
     "ews",
     "vikunja",
     "todoist",
-    "sync-webdav",
-    "sync-ftp",
-    "sync-sftp",
-    "sync-dropbox",
-    "vc-webex",
+    "webdav",
+    "ftp",
+    "sftp",
+    "dropbox",
+    "webex",
 ]
 
 [lints]

@@ -3,6 +3,568 @@
 version = 4
 
 [[package]]
+name = "adapter-caldav"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "cal-core",
+ "chrono",
+ "chrono-tz 0.9.0",
+ "icalendar",
+ "mockito",
+ "quick-xml 0.36.2",
+ "reqwest 0.12.28",
+ "serde",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "adapter-caldav-cdylib"
+version = "0.1.0"
+dependencies = [
+ "adapter-caldav-plugin",
+ "plugin-sdk",
+]
+
+[[package]]
+name = "adapter-caldav-plugin"
+version = "0.1.0"
+dependencies = [
+ "adapter-caldav",
+ "async-trait",
+ "cal-core",
+ "chrono",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "adapter-device-calendar"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cal-core",
+ "chrono",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "adapter-dropbox"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "futures",
+ "hex",
+ "open",
+ "rand 0.8.6",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sync-core",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "adapter-dropbox-cdylib"
+version = "0.1.0"
+dependencies = [
+ "adapter-dropbox-plugin",
+ "plugin-sdk",
+]
+
+[[package]]
+name = "adapter-dropbox-plugin"
+version = "0.1.0"
+dependencies = [
+ "adapter-dropbox",
+ "async-trait",
+ "base64 0.22.1",
+ "plugin-core",
+ "plugin-sdk",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sync-core",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "adapter-ews"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "cal-core",
+ "chrono",
+ "futures",
+ "mockito",
+ "quick-xml 0.36.2",
+ "reqwest 0.12.28",
+ "rrule",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "adapter-ews-cdylib"
+version = "0.1.0"
+dependencies = [
+ "adapter-ews-plugin",
+ "plugin-sdk",
+]
+
+[[package]]
+name = "adapter-ews-plugin"
+version = "0.1.0"
+dependencies = [
+ "adapter-ews",
+ "async-trait",
+ "cal-core",
+ "chrono",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "adapter-ftp"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "rustls",
+ "serde",
+ "suppaftp",
+ "sync-core",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "webpki-roots 0.26.11",
+]
+
+[[package]]
+name = "adapter-ftp-cdylib"
+version = "0.1.0"
+dependencies = [
+ "adapter-ftp-plugin",
+ "plugin-sdk",
+]
+
+[[package]]
+name = "adapter-ftp-plugin"
+version = "0.1.0"
+dependencies = [
+ "adapter-ftp",
+ "async-trait",
+ "base64 0.22.1",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "sync-core",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "adapter-google"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "cal-core",
+ "chrono",
+ "futures",
+ "hex",
+ "mockito",
+ "open",
+ "rand 0.8.6",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sync-core",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "adapter-google-cdylib"
+version = "0.1.0"
+dependencies = [
+ "adapter-google-plugin",
+ "plugin-sdk",
+]
+
+[[package]]
+name = "adapter-google-plugin"
+version = "0.1.0"
+dependencies = [
+ "adapter-google",
+ "async-trait",
+ "base64 0.22.1",
+ "cal-core",
+ "chrono",
+ "plugin-core",
+ "plugin-sdk",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sync-core",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "adapter-ical"
+version = "0.1.0"
+dependencies = [
+ "adapter-caldav",
+ "async-trait",
+ "base64 0.22.1",
+ "cal-core",
+ "chrono",
+ "hex",
+ "mockito",
+ "reqwest 0.12.28",
+ "serde",
+ "sha2",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "adapter-ical-cdylib"
+version = "0.1.0"
+dependencies = [
+ "adapter-ical-plugin",
+ "plugin-sdk",
+]
+
+[[package]]
+name = "adapter-ical-plugin"
+version = "0.1.0"
+dependencies = [
+ "adapter-ical",
+ "async-trait",
+ "cal-core",
+ "chrono",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "adapter-local"
+version = "0.1.0"
+dependencies = [
+ "aperio-db",
+ "async-trait",
+ "cal-core",
+ "chrono",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sync-core",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "adapter-microsoft-graph"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "cal-core",
+ "chrono",
+ "chrono-tz 0.9.0",
+ "hex",
+ "mockito",
+ "open",
+ "rand 0.8.6",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "adapter-microsoft-graph-cdylib"
+version = "0.1.0"
+dependencies = [
+ "adapter-microsoft-graph-plugin",
+ "plugin-sdk",
+]
+
+[[package]]
+name = "adapter-microsoft-graph-plugin"
+version = "0.1.0"
+dependencies = [
+ "adapter-microsoft-graph",
+ "async-trait",
+ "cal-core",
+ "chrono",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "adapter-sftp"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "futures",
+ "russh",
+ "russh-sftp",
+ "serde",
+ "sync-core",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "adapter-sftp-cdylib"
+version = "0.1.0"
+dependencies = [
+ "adapter-sftp-plugin",
+ "plugin-sdk",
+]
+
+[[package]]
+name = "adapter-sftp-plugin"
+version = "0.1.0"
+dependencies = [
+ "adapter-sftp",
+ "async-trait",
+ "base64 0.22.1",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "sync-core",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "adapter-todoist"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cal-core",
+ "chrono",
+ "mockito",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "adapter-todoist-cdylib"
+version = "0.1.0"
+dependencies = [
+ "adapter-todoist-plugin",
+ "plugin-sdk",
+]
+
+[[package]]
+name = "adapter-todoist-plugin"
+version = "0.1.0"
+dependencies = [
+ "adapter-todoist",
+ "async-trait",
+ "cal-core",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "adapter-vikunja"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cal-core",
+ "chrono",
+ "mockito",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "adapter-vikunja-cdylib"
+version = "0.1.0"
+dependencies = [
+ "adapter-vikunja-plugin",
+ "plugin-sdk",
+]
+
+[[package]]
+name = "adapter-vikunja-plugin"
+version = "0.1.0"
+dependencies = [
+ "adapter-vikunja",
+ "async-trait",
+ "cal-core",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "adapter-webdav"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "futures",
+ "mockito",
+ "quick-xml 0.36.2",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sync-core",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "adapter-webdav-cdylib"
+version = "0.1.0"
+dependencies = [
+ "adapter-webdav-plugin",
+ "plugin-sdk",
+]
+
+[[package]]
+name = "adapter-webdav-plugin"
+version = "0.1.0"
+dependencies = [
+ "adapter-webdav",
+ "async-trait",
+ "base64 0.22.1",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "sync-core",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "adapter-webex"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "hex",
+ "mockito",
+ "open",
+ "rand 0.8.6",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "sha2",
+ "tokio",
+ "tracing",
+ "url",
+ "vc-core",
+]
+
+[[package]]
+name = "adapter-webex-cdylib"
+version = "0.1.0"
+dependencies = [
+ "adapter-webex-plugin",
+ "plugin-sdk",
+]
+
+[[package]]
+name = "adapter-webex-plugin"
+version = "0.1.0"
+dependencies = [
+ "adapter-webex",
+ "async-trait",
+ "chrono",
+ "plugin-core",
+ "plugin-sdk",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "vc-core",
+]
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -126,12 +688,12 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 name = "aperio"
 version = "0.1.0"
 dependencies = [
+ "adapter-local",
  "anyhow",
  "aperio-db",
  "async-trait",
  "base64 0.22.1",
  "builtin-oauth",
- "cal-adapter-local",
  "cal-core",
  "chrono",
  "chrono-tz 0.9.0",
@@ -757,349 +1319,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cal-adapter-caldav"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "cal-core",
- "chrono",
- "chrono-tz 0.9.0",
- "icalendar",
- "mockito",
- "quick-xml 0.36.2",
- "reqwest 0.12.28",
- "serde",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "url",
- "uuid",
-]
-
-[[package]]
-name = "cal-adapter-caldav-cdylib"
-version = "0.1.0"
-dependencies = [
- "cal-adapter-caldav-plugin",
- "plugin-sdk",
-]
-
-[[package]]
-name = "cal-adapter-caldav-plugin"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "cal-adapter-caldav",
- "cal-core",
- "chrono",
- "plugin-core",
- "plugin-sdk",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "cal-adapter-device-calendar"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "cal-core",
- "chrono",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "cal-adapter-ews"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "cal-core",
- "chrono",
- "futures",
- "mockito",
- "quick-xml 0.36.2",
- "reqwest 0.12.28",
- "rrule",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "cal-adapter-ews-cdylib"
-version = "0.1.0"
-dependencies = [
- "cal-adapter-ews-plugin",
- "plugin-sdk",
-]
-
-[[package]]
-name = "cal-adapter-ews-plugin"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "cal-adapter-ews",
- "cal-core",
- "chrono",
- "plugin-core",
- "plugin-sdk",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "cal-adapter-google"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "cal-core",
- "chrono",
- "futures",
- "hex",
- "mockito",
- "open",
- "rand 0.8.6",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "sync-core",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "cal-adapter-google-cdylib"
-version = "0.1.0"
-dependencies = [
- "cal-adapter-google-plugin",
- "plugin-sdk",
-]
-
-[[package]]
-name = "cal-adapter-google-plugin"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "cal-adapter-google",
- "cal-core",
- "chrono",
- "plugin-core",
- "plugin-sdk",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sync-core",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "cal-adapter-ical"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "cal-adapter-caldav",
- "cal-core",
- "chrono",
- "hex",
- "mockito",
- "reqwest 0.12.28",
- "serde",
- "sha2",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "cal-adapter-ical-cdylib"
-version = "0.1.0"
-dependencies = [
- "cal-adapter-ical-plugin",
- "plugin-sdk",
-]
-
-[[package]]
-name = "cal-adapter-ical-plugin"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "cal-adapter-ical",
- "cal-core",
- "chrono",
- "plugin-core",
- "plugin-sdk",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "cal-adapter-local"
-version = "0.1.0"
-dependencies = [
- "aperio-db",
- "async-trait",
- "cal-core",
- "chrono",
- "rusqlite",
- "serde",
- "serde_json",
- "sync-core",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "cal-adapter-microsoft-graph"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "cal-core",
- "chrono",
- "chrono-tz 0.9.0",
- "hex",
- "mockito",
- "open",
- "rand 0.8.6",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "cal-adapter-microsoft-graph-cdylib"
-version = "0.1.0"
-dependencies = [
- "cal-adapter-microsoft-graph-plugin",
- "plugin-sdk",
-]
-
-[[package]]
-name = "cal-adapter-microsoft-graph-plugin"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "cal-adapter-microsoft-graph",
- "cal-core",
- "chrono",
- "plugin-core",
- "plugin-sdk",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "cal-adapter-todoist"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "cal-core",
- "chrono",
- "mockito",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "url",
- "uuid",
-]
-
-[[package]]
-name = "cal-adapter-todoist-cdylib"
-version = "0.1.0"
-dependencies = [
- "cal-adapter-todoist-plugin",
- "plugin-sdk",
-]
-
-[[package]]
-name = "cal-adapter-todoist-plugin"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "cal-adapter-todoist",
- "cal-core",
- "plugin-core",
- "plugin-sdk",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "cal-adapter-vikunja"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "cal-core",
- "chrono",
- "mockito",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "cal-adapter-vikunja-cdylib"
-version = "0.1.0"
-dependencies = [
- "cal-adapter-vikunja-plugin",
- "plugin-sdk",
-]
-
-[[package]]
-name = "cal-adapter-vikunja-plugin"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "cal-adapter-vikunja",
- "cal-core",
- "plugin-core",
- "plugin-sdk",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "cal-core"
 version = "0.1.0"
 dependencies = [
@@ -1117,10 +1336,10 @@ dependencies = [
 name = "cal-ffi"
 version = "0.1.0"
 dependencies = [
+ "adapter-device-calendar",
+ "adapter-local",
  "aperio-db",
  "base64 0.22.1",
- "cal-adapter-device-calendar",
- "cal-adapter-local",
  "cal-core",
  "chrono",
  "host-core",
@@ -2911,12 +3130,13 @@ dependencies = [
 name = "host-core"
 version = "0.1.0"
 dependencies = [
+ "adapter-ical-plugin",
+ "adapter-local",
+ "adapter-webdav-plugin",
  "aperio-db",
  "async-trait",
  "base64 0.22.1",
  "builtin-oauth",
- "cal-adapter-ical-plugin",
- "cal-adapter-local",
  "cal-core",
  "chrono",
  "dirs 5.0.1",
@@ -2927,7 +3147,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "sync-adapter-webdav-plugin",
  "sync-core",
  "sync-engine",
  "tempfile",
@@ -2944,22 +3163,22 @@ dependencies = [
 name = "host-plugins"
 version = "0.1.0"
 dependencies = [
- "cal-adapter-caldav-plugin",
- "cal-adapter-ews-plugin",
- "cal-adapter-google-plugin",
- "cal-adapter-ical-plugin",
- "cal-adapter-microsoft-graph-plugin",
- "cal-adapter-todoist-plugin",
- "cal-adapter-vikunja-plugin",
+ "adapter-caldav-plugin",
+ "adapter-dropbox-plugin",
+ "adapter-ews-plugin",
+ "adapter-ftp-plugin",
+ "adapter-google-plugin",
+ "adapter-ical-plugin",
+ "adapter-microsoft-graph-plugin",
+ "adapter-sftp-plugin",
+ "adapter-todoist-plugin",
+ "adapter-vikunja-plugin",
+ "adapter-webdav-plugin",
+ "adapter-webex-plugin",
  "host-core",
  "plugin-core",
  "serde_json",
- "sync-adapter-dropbox-plugin",
- "sync-adapter-ftp-plugin",
- "sync-adapter-sftp-plugin",
- "sync-adapter-webdav-plugin",
  "sync-engine",
- "vc-adapter-webex-plugin",
 ]
 
 [[package]]
@@ -6454,178 +6673,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sync-adapter-dropbox"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "chrono",
- "futures",
- "hex",
- "open",
- "rand 0.8.6",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "sync-core",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "sync-adapter-dropbox-cdylib"
-version = "0.1.0"
-dependencies = [
- "plugin-sdk",
- "sync-adapter-dropbox-plugin",
-]
-
-[[package]]
-name = "sync-adapter-dropbox-plugin"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "plugin-core",
- "plugin-sdk",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sync-adapter-dropbox",
- "sync-core",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "sync-adapter-ftp"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "rustls",
- "serde",
- "suppaftp",
- "sync-core",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "webpki-roots 0.26.11",
-]
-
-[[package]]
-name = "sync-adapter-ftp-cdylib"
-version = "0.1.0"
-dependencies = [
- "plugin-sdk",
- "sync-adapter-ftp-plugin",
-]
-
-[[package]]
-name = "sync-adapter-ftp-plugin"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "plugin-core",
- "plugin-sdk",
- "serde",
- "serde_json",
- "sync-adapter-ftp",
- "sync-core",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "sync-adapter-sftp"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "futures",
- "russh",
- "russh-sftp",
- "serde",
- "sync-core",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "sync-adapter-sftp-cdylib"
-version = "0.1.0"
-dependencies = [
- "plugin-sdk",
- "sync-adapter-sftp-plugin",
-]
-
-[[package]]
-name = "sync-adapter-sftp-plugin"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "plugin-core",
- "plugin-sdk",
- "serde",
- "serde_json",
- "sync-adapter-sftp",
- "sync-core",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "sync-adapter-webdav"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "chrono",
- "futures",
- "mockito",
- "quick-xml 0.36.2",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sync-core",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "sync-adapter-webdav-cdylib"
-version = "0.1.0"
-dependencies = [
- "plugin-sdk",
- "sync-adapter-webdav-plugin",
-]
-
-[[package]]
-name = "sync-adapter-webdav-plugin"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "plugin-core",
- "plugin-sdk",
- "serde",
- "serde_json",
- "sync-adapter-webdav",
- "sync-core",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "sync-core"
 version = "0.1.0"
 dependencies = [
@@ -6647,8 +6694,8 @@ dependencies = [
 name = "sync-engine"
 version = "0.1.0"
 dependencies = [
+ "adapter-local",
  "async-trait",
- "cal-adapter-local",
  "cal-core",
  "chrono",
  "serde",
@@ -7795,53 +7842,6 @@ name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
-
-[[package]]
-name = "vc-adapter-webex"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "chrono",
- "hex",
- "mockito",
- "open",
- "rand 0.8.6",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "sha2",
- "tokio",
- "tracing",
- "url",
- "vc-core",
-]
-
-[[package]]
-name = "vc-adapter-webex-cdylib"
-version = "0.1.0"
-dependencies = [
- "plugin-sdk",
- "vc-adapter-webex-plugin",
-]
-
-[[package]]
-name = "vc-adapter-webex-plugin"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "plugin-core",
- "plugin-sdk",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "vc-adapter-webex",
- "vc-core",
-]
 
 [[package]]
 name = "vc-core"

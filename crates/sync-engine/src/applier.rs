@@ -48,7 +48,7 @@
 
 use std::sync::Arc;
 
-use cal_adapter_local::LocalAdapter;
+use adapter_local::LocalAdapter;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::Value;

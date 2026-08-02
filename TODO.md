@@ -47,7 +47,7 @@
 - [ ] `vc_meeting_id`-Feld am Event-Model; `create_meeting` erzeugt + speichert den Meeting-Link (§11.2)
 - [ ] Frontend: „Meeting erstellen" + „Direkt beitreten"-Button (§11.2)
 - [ ] (optional) Raumverwaltung als zusätzliche Capability (§11.2)
-- Einstieg: `crates/vc-adapter-{meet,teams,webex,zoom}/src/lib.rs`, `crates/vc-core`, `EventDialog.tsx`.
+- Einstieg: `crates/adapter-webex/src/lib.rs`, `crates/vc-core`, `EventDialog.tsx`.
 
 ### A5 · Benachrichtigungs-Aktionen (§14.3)
 - [ ] Action-Buttons in Toasts: **Öffnen** / **Snooze** (konfigurierbare Dauer) / **Erledigt** (nur Aufgaben)

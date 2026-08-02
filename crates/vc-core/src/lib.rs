@@ -6,7 +6,7 @@
 //! for the current join URL. Each provider — Zoom, Microsoft
 //! Teams, Google Meet, Cisco WebEx — implements this trait
 //! once; the implementation is then packaged as a
-//! `videoconference-adapter` plugin (see `vc-adapter-*-plugin`
+//! `videoconference-adapter` plugin (see `adapter-*-plugin`
 //! crates) so the host loads + invokes it through the same
 //! C-ABI surface that cal- and sync-adapters use.
 //!

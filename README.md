@@ -138,9 +138,9 @@ aperio/
 │   ├── vc-core/            # Video-conferencing trait surface
 │   ├── plugin-core/        # Plugin C ABI + manager
 │   ├── plugin-sdk/         # Rust SDK for plugin authors
-│   ├── cal-adapter-*/      # Calendar/task/contact adapters (+ -plugin crates)
-│   ├── sync-adapter-*/     # Sync-storage adapters (+ -plugin crates)
-│   └── vc-adapter-*/       # Video-conferencing adapters (stubs, + -plugin crates)
+│   └── adapter-*/          # One crate per provider, whatever it serves —
+│                           #   calendars, tasks, contacts, storage, meetings
+│                           #   (+ the -plugin and -cdylib crates around it)
 ├── web/                    # Astro Starlight site: landing + docs (user de/en, dev, plugin)
 ├── src-tauri/              # Tauri backend (commands, sync engine, reminders)
 └── src/                    # React/TypeScript frontend

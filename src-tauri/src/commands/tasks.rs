@@ -1,6 +1,6 @@
 //! Task list and task commands.
 
-use cal_adapter_local::LocalAdapter;
+use adapter_local::LocalAdapter;
 use cal_core::{
     MemberRight, NewTask, Section, Task, TaskList, TaskListShare, TaskUser, TasksFeature,
 };

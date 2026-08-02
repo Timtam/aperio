@@ -8,7 +8,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Mutex;
 
-use cal_adapter_local::{SnapshotApplyReport, SnapshotDump};
+use adapter_local::{SnapshotApplyReport, SnapshotDump};
 
 use crate::whitelist::is_synced_key;
 use crate::{

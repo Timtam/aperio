@@ -2,7 +2,7 @@ import type { ContactList } from '../api/types';
 
 /** Sentinel id the EWS adapter emits for its synthetic
  *  "Globale Adressliste" entry (see Rust `GAL_LIST_ID` constant
- *  in `crates/cal-adapter-ews/src/contacts.rs`). Mirroring it
+ *  in `crates/adapter-ews/src/contacts.rs`). Mirroring it
  *  here lets the frontend swap the backend's hardcoded English
  *  label for a localized one without changing the wire shape. */
 export const EWS_GAL_LIST_ID = 'ews-gal';

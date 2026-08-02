@@ -37,7 +37,7 @@ use std::sync::OnceLock;
 fn local_manifest() -> &'static PluginManifest {
     static MANIFEST: OnceLock<PluginManifest> = OnceLock::new();
     MANIFEST.get_or_init(|| {
-        PluginManifest::from_bytes(include_bytes!("../../cal-adapter-local/plugin.json"))
+        PluginManifest::from_bytes(include_bytes!("../../adapter-local/plugin.json"))
             .expect("the built-in store's manifest parses and validates")
     })
 }
@@ -93,7 +93,7 @@ pub fn builtin_adapter_kinds() -> Vec<AdapterKindInfo> {
 /// The schema that describes a built-in kind's storage settings.
 ///
 /// The built-in store declares that it can hold the dataset AND implements it:
-/// [`cal_adapter_local::LocalFsSyncAdapter`] is a `SyncAdapter` like any other,
+/// [`adapter_local::LocalFsSyncAdapter`] is a `SyncAdapter` like any other,
 /// so nothing here goes through the plugin ABI. It used to name a plugin id and
 /// let the manager open it — a seam that existed only because the folder mirror
 /// was still a separate crate behind a separate plugin. It is neither now.
@@ -160,9 +160,9 @@ fn open_sync_inner(
                 .to_string(),
         );
     }
-    Ok(std::sync::Arc::new(
-        cal_adapter_local::LocalFsSyncAdapter::new(cfg.remote_root.trim()),
-    ))
+    Ok(std::sync::Arc::new(adapter_local::LocalFsSyncAdapter::new(
+        cfg.remote_root.trim(),
+    )))
 }
 
 /// The plugin kinds plus the built-in ones, sorted and deduplicated the same

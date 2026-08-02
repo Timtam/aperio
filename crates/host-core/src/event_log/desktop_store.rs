@@ -16,7 +16,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use cal_adapter_local::{LocalAdapter, SnapshotApplyReport, SnapshotDump};
+use adapter_local::{LocalAdapter, SnapshotApplyReport, SnapshotDump};
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
 use sync_engine::whitelist::{is_synced_key, SYNC_WHITELIST};
@@ -482,7 +482,7 @@ mod tests {
         // the built-in store, whose account holds calendars and therefore does
         // not answer the question this test asks.)
         let manifest = plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
-            "../../../sync-adapter-webdav-plugin/plugin.json"
+            "../../../adapter-webdav-plugin/plugin.json"
         ))
         .expect("the shipped WebDAV sync manifest parses");
         let sync_kind = manifest
@@ -490,9 +490,9 @@ mod tests {
             .clone()
             .expect("the sync manifest declares a kind");
         let plugins = Arc::new(plugin_core::PluginManager::new("0.1.0"));
-        let descriptor = unsafe { sync_adapter_webdav_plugin::build_descriptor() };
+        let descriptor = unsafe { adapter_webdav_plugin::build_descriptor() };
         plugins
-            .register_static(manifest, descriptor, sync_adapter_webdav_plugin::DESTROY_FN)
+            .register_static(manifest, descriptor, adapter_webdav_plugin::DESTROY_FN)
             .expect("register the static WebDAV sync plugin");
 
         let (_tmp, db, adapter) = fresh();

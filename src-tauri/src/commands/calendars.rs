@@ -1,6 +1,6 @@
 //! Calendar and event commands.
 
-use cal_adapter_local::LocalAdapter;
+use adapter_local::LocalAdapter;
 use cal_core::{
     AttendeeStatus, Calendar, CalendarFeature, ColorLabelId, DateRange, Event, FreeBusy, NewEvent,
 };
@@ -1059,14 +1059,14 @@ pub async fn add_event_exdate(
 mod tests {
     use super::*;
     use crate::commands::CommandError;
-    use cal_adapter_local::LocalAdapter;
+    use adapter_local::LocalAdapter;
     use chrono::Duration;
 
     fn fresh_adapter() -> LocalAdapter {
         // Use the shared test schema so it tracks later migrations (e.g.
         // the container color-label columns from 0022) without each test
         // helper having to re-list every CREATE/ALTER.
-        LocalAdapter::new(cal_adapter_local::test_support::open_test_db())
+        LocalAdapter::new(adapter_local::test_support::open_test_db())
     }
 
     #[tokio::test]

@@ -383,12 +383,12 @@ mod tests {
     fn manager_with_ical() -> plugin_core::PluginManager {
         let manager = plugin_core::PluginManager::new("0.1.0");
         let manifest = plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
-            "../../cal-adapter-ical-plugin/plugin.json"
+            "../../adapter-ical-plugin/plugin.json"
         ))
         .expect("the shipped iCal manifest parses");
-        let descriptor = unsafe { cal_adapter_ical_plugin::build_descriptor() };
+        let descriptor = unsafe { adapter_ical_plugin::build_descriptor() };
         manager
-            .register_static(manifest, descriptor, cal_adapter_ical_plugin::DESTROY_FN)
+            .register_static(manifest, descriptor, adapter_ical_plugin::DESTROY_FN)
             .expect("register the static iCal plugin");
         manager
     }

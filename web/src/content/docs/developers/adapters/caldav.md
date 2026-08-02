@@ -2,7 +2,7 @@
 title: "CalDAV / iCloud"
 ---
 
-**Crate:** `cal-adapter-caldav` · **Capabilities:** calendars, tasks, contacts
+**Crate:** `adapter-caldav` · **Capabilities:** calendars, tasks, contacts
 
 CalDAV/CardDAV is the open standard behind Apple iCloud and many
 self-hosted servers (Nextcloud, Radicale, …). One adapter serves them all;

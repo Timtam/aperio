@@ -1238,7 +1238,7 @@ mod tests {
     /// through to a per-kind arm that no longer exists. A copy of a manifest is
     /// a manifest that will disagree with the manifest.
     fn ical_manifest() -> PluginManifest {
-        PluginManifest::from_bytes(include_bytes!("../../cal-adapter-ical-plugin/plugin.json"))
+        PluginManifest::from_bytes(include_bytes!("../../adapter-ical-plugin/plugin.json"))
             .expect("the shipped iCal manifest parses")
     }
 
@@ -1247,13 +1247,9 @@ mod tests {
     /// register path runs for real without any fixture server.
     fn ical_registry() -> AdapterRegistry {
         let manager = Arc::new(PluginManager::new("0.1.0"));
-        let descriptor = unsafe { cal_adapter_ical_plugin::build_descriptor() };
+        let descriptor = unsafe { adapter_ical_plugin::build_descriptor() };
         manager
-            .register_static(
-                ical_manifest(),
-                descriptor,
-                cal_adapter_ical_plugin::DESTROY_FN,
-            )
+            .register_static(ical_manifest(), descriptor, adapter_ical_plugin::DESTROY_FN)
             .expect("register the static iCal plugin");
         AdapterRegistry::new(
             manager,

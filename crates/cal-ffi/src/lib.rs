@@ -573,12 +573,12 @@ impl TryFrom<Reminder> for cal_core::Reminder {
 //
 // The on-device data layer. Opens the app-sandbox SQLite (migrated by the
 // shared `aperio-db` runner) and serves task CRUD through the same
-// `cal_adapter_local::LocalAdapter` the desktop backend uses — engine reuse,
+// `adapter_local::LocalAdapter` the desktop backend uses — engine reuse,
 // not a re-implementation.
 
 use std::sync::{Arc, Mutex};
 
-use cal_adapter_local::LocalAdapter;
+use adapter_local::LocalAdapter;
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 
 /// A task list as it crosses the FFI boundary. Minimal first slice —
@@ -957,7 +957,7 @@ fn from_json<T: serde::de::DeserializeOwned>(field: &str, json: &str) -> Result<
 ///
 /// Opens (and migrates, via the shared [`aperio_db`] runner) the database
 /// at `db_path`, then serves task CRUD through the same
-/// [`cal_adapter_local::LocalAdapter`] the desktop backend uses. The UI
+/// [`adapter_local::LocalAdapter`] the desktop backend uses. The UI
 /// holds one instance per launch and passes an app-sandbox path (e.g.
 /// `<Documents>/aperio.sqlite`).
 #[derive(uniffi::Object)]

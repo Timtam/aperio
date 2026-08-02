@@ -24,7 +24,7 @@
 
 use std::sync::Arc;
 
-use cal_adapter_local::LocalAdapter;
+use adapter_local::LocalAdapter;
 use cal_core::Event;
 use host_core::meetings::{
     attendee_addresses, should_provider_announce_removal, should_provider_notify, EventMeeting,

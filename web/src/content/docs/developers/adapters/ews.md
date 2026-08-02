@@ -2,7 +2,7 @@
 title: "Exchange (EWS)"
 ---
 
-**Crate:** `cal-adapter-ews` · **Capabilities:** calendars, tasks, contacts
+**Crate:** `adapter-ews` · **Capabilities:** calendars, tasks, contacts
 
 Exchange Web Services is the older SOAP/XML API for on-premises Exchange and
 older Microsoft 365 tenants — used where Graph isn't available.

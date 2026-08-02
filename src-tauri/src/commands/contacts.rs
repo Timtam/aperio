@@ -17,7 +17,7 @@
 //!     attendees picker (§10.4) will consume the surface in
 //!     10a-3.
 
-use cal_adapter_local::LocalAdapter;
+use adapter_local::LocalAdapter;
 use cal_core::{Contact, ContactList, ContactPhoto, ContactsFeature, NewContact};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

@@ -24,7 +24,7 @@
 
 use std::collections::BTreeMap;
 
-use cal_adapter_local::{SnapshotApplyReport, SnapshotDump};
+use adapter_local::{SnapshotApplyReport, SnapshotDump};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

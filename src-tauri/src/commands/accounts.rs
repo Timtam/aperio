@@ -594,7 +594,7 @@ pub struct DiscoverEwsRequest {
     pub password: String,
 }
 
-/// Host-side mirror of `cal_adapter_ews::DiscoveredEndpoints`.
+/// Host-side mirror of `adapter_ews::DiscoveredEndpoints`.
 /// Field names + types match the plugin's serialised shape so
 /// `serde_json` round-trips cleanly and the frontend's existing
 /// `{ ews_url, account_email }` payload stays byte-identical.

@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use cal_adapter_local::LocalAdapter;
+use adapter_local::LocalAdapter;
 use cal_core::{Calendar, ColorLabel, Event, Reminder};
 use chrono::{TimeZone, Utc};
 use rusqlite::params;
@@ -26,7 +26,7 @@ use crate::user_prefs::UserPrefsRepo;
 /// including 0012 (sync_applied_events), so the applier can
 /// write its idempotency rows.
 fn fixture() -> (Arc<LocalAdapter>, SharedConn) {
-    let shared = cal_adapter_local::test_support::open_test_db();
+    let shared = adapter_local::test_support::open_test_db();
     let adapter = Arc::new(LocalAdapter::new(shared.clone()));
     (adapter, shared)
 }

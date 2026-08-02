@@ -71,7 +71,7 @@ Pick the layer that matches your interest:
 | Domain types & traits shared by everything | `crates/cal-core` |
 | The host: Tauri commands, DB, sync, plugin host | `src-tauri/src` |
 | The UI | `src/` (React/TS) |
-| A specific provider (Google, iCloud, …) | `crates/cal-adapter-*` — see [Adapters](/developers/adapters/overview/) |
+| A specific provider (Google, iCloud, …) | `crates/adapter-*` — see [Adapters](/developers/adapters/overview/) |
 | The sync engine (event log, CRDT-ish merge) | `crates/sync-core`, `src-tauri/src/event_log`, `src-tauri/src/sync` |
 | Writing a *new* provider as a plugin | the [Plugin Developer docs](/plugins/) |
 

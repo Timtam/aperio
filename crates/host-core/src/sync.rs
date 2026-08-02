@@ -12,7 +12,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use cal_adapter_local::LocalAdapter;
+use adapter_local::LocalAdapter;
 use chrono::{DateTime, Utc};
 use sync_core::DeviceId;
 use sync_engine::{

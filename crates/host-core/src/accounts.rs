@@ -23,7 +23,7 @@ use uuid::Uuid;
 use crate::db::SharedConn;
 
 /// The hard-coded account id of the implicit local adapter. Matches
-/// `cal-adapter-local::SOURCE_ID` so existing rows that carry
+/// `adapter-local::SOURCE_ID` so existing rows that carry
 /// `source = "local"` can be attached without rewriting them.
 pub const LOCAL_ACCOUNT_ID: &str = "local";
 
@@ -587,12 +587,12 @@ mod tests {
     fn manager_with_ical() -> plugin_core::PluginManager {
         let manager = plugin_core::PluginManager::new("0.1.0");
         let manifest = plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
-            "../../cal-adapter-ical-plugin/plugin.json"
+            "../../adapter-ical-plugin/plugin.json"
         ))
         .expect("the shipped iCal manifest parses");
-        let descriptor = unsafe { cal_adapter_ical_plugin::build_descriptor() };
+        let descriptor = unsafe { adapter_ical_plugin::build_descriptor() };
         manager
-            .register_static(manifest, descriptor, cal_adapter_ical_plugin::DESTROY_FN)
+            .register_static(manifest, descriptor, adapter_ical_plugin::DESTROY_FN)
             .expect("register the static iCal plugin");
         manager
     }
@@ -618,7 +618,7 @@ mod tests {
     fn manager_with_sync_only() -> plugin_core::PluginManager {
         let manager = plugin_core::PluginManager::new("0.1.0");
         let manifest = plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
-            "../../sync-adapter-webdav-plugin/plugin.json"
+            "../../adapter-webdav-plugin/plugin.json"
         ))
         .expect("the shipped WebDAV sync manifest parses");
         // Read off the manifest rather than assumed: if the shipped kind is
@@ -629,9 +629,9 @@ mod tests {
             Some(SYNC_ONLY_KIND),
             "the shipped WebDAV sync manifest changed its kind",
         );
-        let descriptor = unsafe { sync_adapter_webdav_plugin::build_descriptor() };
+        let descriptor = unsafe { adapter_webdav_plugin::build_descriptor() };
         manager
-            .register_static(manifest, descriptor, sync_adapter_webdav_plugin::DESTROY_FN)
+            .register_static(manifest, descriptor, adapter_webdav_plugin::DESTROY_FN)
             .expect("register the static WebDAV sync plugin");
         manager
     }
@@ -696,13 +696,13 @@ mod tests {
         const RETIRED: &str = "retired-folder-sync";
         let manager = plugin_core::PluginManager::new("0.1.0");
         let mut manifest = plugin_core::manifest::PluginManifest::from_bytes(include_bytes!(
-            "../../sync-adapter-webdav-plugin/plugin.json"
+            "../../adapter-webdav-plugin/plugin.json"
         ))
         .expect("the shipped WebDAV sync manifest parses");
         manifest.adopts_adapter_kinds = vec![RETIRED.to_string()];
-        let descriptor = unsafe { sync_adapter_webdav_plugin::build_descriptor() };
+        let descriptor = unsafe { adapter_webdav_plugin::build_descriptor() };
         manager
-            .register_static(manifest, descriptor, sync_adapter_webdav_plugin::DESTROY_FN)
+            .register_static(manifest, descriptor, adapter_webdav_plugin::DESTROY_FN)
             .expect("register the static WebDAV sync plugin");
 
         // Unadopted, it would travel — that is the default for a kind nothing

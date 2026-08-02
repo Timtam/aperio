@@ -973,8 +973,8 @@ fn sort_logs_chronologically(logs: &mut [LogFile]) {
 mod tests {
     use super::*;
     use crate::db::DbHandle;
+    use adapter_local::LocalAdapter;
     use async_trait::async_trait;
-    use cal_adapter_local::LocalAdapter;
     use std::sync::{Arc, Mutex};
     use sync_core::{LogFile, LogFileName, Snapshot};
     use tempfile::TempDir;

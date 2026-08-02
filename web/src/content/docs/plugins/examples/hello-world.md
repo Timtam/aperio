@@ -149,7 +149,7 @@ plugin_sdk::declare_lifecycle! {
 ```
 
 > This is illustrative — exact helper names (`instance`, `ok_response`,
-> `dispatch`) come from `plugin-sdk`; check the bundled `cal-adapter-*-plugin`
+> `dispatch`) come from `plugin-sdk`; check the bundled `adapter-*-plugin`
 > crates for the current spelling, which is the authoritative reference.
 
 ## Build & try

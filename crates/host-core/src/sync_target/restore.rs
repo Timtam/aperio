@@ -223,12 +223,10 @@ mod tests {
         /// The shipped WebDAV schema, so the account path resolves the way it
         /// does on a real device rather than against a hand-written twin.
         fn schema() -> AccountSchema {
-            PluginManifest::from_bytes(include_bytes!(
-                "../../../sync-adapter-webdav-plugin/plugin.json"
-            ))
-            .expect("the shipped manifest parses")
-            .account
-            .expect("it declares an account schema")
+            PluginManifest::from_bytes(include_bytes!("../../../adapter-webdav-plugin/plugin.json"))
+                .expect("the shipped manifest parses")
+                .account
+                .expect("it declares an account schema")
         }
 
         fn opened(&self) -> Vec<String> {

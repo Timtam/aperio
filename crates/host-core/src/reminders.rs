@@ -1375,7 +1375,7 @@ mod tests {
         use crate::cache::CacheStore;
         use crate::db::DbHandle;
         use crate::user_prefs::UserPrefsRepo;
-        use cal_adapter_local::LocalAdapter;
+        use adapter_local::LocalAdapter;
         use cal_core::{ContactsFeature, NewContact};
         use chrono::Datelike;
 

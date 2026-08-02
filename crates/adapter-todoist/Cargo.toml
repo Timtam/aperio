@@ -1,0 +1,29 @@
+[package]
+name = "adapter-todoist"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aperio Todoist adapter — tasks-only REST API v2 client."
+
+[dependencies]
+async-trait.workspace = true
+cal-core.workspace = true
+chrono.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json = "1"
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tracing.workspace = true
+url = "2"
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+mockito = "1"
+
+[lints]
+workspace = true

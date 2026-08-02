@@ -615,7 +615,7 @@ macro_rules! declare_probe_host_key {
 /// ## Arguments (fixed order)
 ///
 ///   - `plugin_crate` — path to the `-plugin` rlib crate
-///     (e.g. `cal_adapter_google_plugin`). Always calls its
+///     (e.g. `adapter_google_plugin`). Always calls its
 ///     `build_descriptor()` + `DESTROY_FN`.
 ///   - `interactive_auth: yes` — also re-export the OAuth symbol
 ///     (delegates to `<crate>::__aperio_interactive_auth_impl`).
@@ -629,9 +629,9 @@ macro_rules! declare_probe_host_key {
 /// ## Example
 ///
 /// ```ignore
-/// // cal-adapter-google-cdylib/src/lib.rs
+/// // adapter-google-cdylib/src/lib.rs
 /// plugin_sdk::declare_cdylib_exports! {
-///     plugin_crate: cal_adapter_google_plugin,
+///     plugin_crate: adapter_google_plugin,
 ///     interactive_auth: yes,
 /// }
 /// ```

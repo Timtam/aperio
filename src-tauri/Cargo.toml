@@ -48,7 +48,7 @@ anyhow.workspace = true
 
 aperio-db.workspace = true
 cal-core.workspace = true
-cal-adapter-local.workspace = true
+adapter-local.workspace = true
 builtin-oauth.workspace = true
 host-core.workspace = true
 sync-core.workspace = true
@@ -67,7 +67,7 @@ plugin-core.workspace = true
 #   - `aperio_plugin_discover` (Iteration 8): EWS Autodiscover.
 #   - `aperio_plugin_probe_host_key` (Iteration 9): SFTP TOFU
 #     first-use trust dialog probe.
-# The local adapter (cal-adapter-local) stays as a workspace
+# The local adapter (adapter-local) stays as a workspace
 # dep because the host uses its in-memory SQLite directly for
 # the read-side (it IS the cache layer, not a remote service).
 
@@ -115,7 +115,7 @@ tempfile = "3"
 tokio = { workspace = true }
 # Lets the event-log applier's tests reuse the LocalAdapter's
 # in-memory migrated SQLite without duplicating the schema replay.
-cal-adapter-local = { workspace = true, features = ["test-support"] }
+adapter-local = { workspace = true, features = ["test-support"] }
 # The in-memory test doubles (FakeSecrets) for the applier tests —
 # they run against the real DesktopSyncStore but must not touch the OS
 # keychain. test-support only activates for the test build.

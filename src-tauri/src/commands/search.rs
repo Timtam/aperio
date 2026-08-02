@@ -1,7 +1,7 @@
 //! Full-text search command.
 //!
 //! Merges two halves (§13.1 — search covers EVERY locally cached item):
-//!   1. the LOCAL events/tasks tables via `cal-adapter-local`'s FTS
+//!   1. the LOCAL events/tasks tables via `adapter-local`'s FTS
 //!      indexes, and
 //!   2. the EXTERNAL snapshot cache (iCloud, Google, EWS, Vikunja,
 //!      Todoist, …) via the `cache_*_fts` mirrors from migration 0027.
@@ -13,7 +13,7 @@
 
 use std::sync::Arc;
 
-use cal_adapter_local::{prepare_fts_query, LocalAdapter, SearchFilters, SearchResults};
+use adapter_local::{prepare_fts_query, LocalAdapter, SearchFilters, SearchResults};
 use tauri::State;
 
 use super::CommandResult;

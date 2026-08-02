@@ -108,66 +108,60 @@ pub fn register_all_static(manager: &PluginManager) -> PluginResult<()> {
     // Calendar / task adapters.
     #[cfg(feature = "caldav")]
     register!(
-        cal_adapter_caldav_plugin,
-        "../../cal-adapter-caldav-plugin/plugin.json"
+        adapter_caldav_plugin,
+        "../../adapter-caldav-plugin/plugin.json"
     );
     #[cfg(feature = "ical")]
-    register!(
-        cal_adapter_ical_plugin,
-        "../../cal-adapter-ical-plugin/plugin.json"
-    );
+    register!(adapter_ical_plugin, "../../adapter-ical-plugin/plugin.json");
     #[cfg(feature = "google")]
     register!(
-        cal_adapter_google_plugin,
-        "../../cal-adapter-google-plugin/plugin.json",
+        adapter_google_plugin,
+        "../../adapter-google-plugin/plugin.json",
         interactive_auth
     );
     #[cfg(feature = "microsoft-graph")]
     register!(
-        cal_adapter_microsoft_graph_plugin,
-        "../../cal-adapter-microsoft-graph-plugin/plugin.json",
+        adapter_microsoft_graph_plugin,
+        "../../adapter-microsoft-graph-plugin/plugin.json",
         interactive_auth
     );
     #[cfg(feature = "ews")]
     register!(
-        cal_adapter_ews_plugin,
-        "../../cal-adapter-ews-plugin/plugin.json",
+        adapter_ews_plugin,
+        "../../adapter-ews-plugin/plugin.json",
         discover
     );
     #[cfg(feature = "vikunja")]
     register!(
-        cal_adapter_vikunja_plugin,
-        "../../cal-adapter-vikunja-plugin/plugin.json"
+        adapter_vikunja_plugin,
+        "../../adapter-vikunja-plugin/plugin.json"
     );
     #[cfg(feature = "todoist")]
     register!(
-        cal_adapter_todoist_plugin,
-        "../../cal-adapter-todoist-plugin/plugin.json"
+        adapter_todoist_plugin,
+        "../../adapter-todoist-plugin/plugin.json"
     );
 
     // Sync adapters. The folder mirror is not among them: it folded into the
     // built-in store, is linked in like the store, and reaches the orchestrator
     // without a manifest or a vtable — see `host_core::builtin_adapters`.
-    #[cfg(feature = "sync-webdav")]
+    #[cfg(feature = "webdav")]
     register!(
-        sync_adapter_webdav_plugin,
-        "../../sync-adapter-webdav-plugin/plugin.json"
+        adapter_webdav_plugin,
+        "../../adapter-webdav-plugin/plugin.json"
     );
-    #[cfg(feature = "sync-ftp")]
+    #[cfg(feature = "ftp")]
+    register!(adapter_ftp_plugin, "../../adapter-ftp-plugin/plugin.json");
+    #[cfg(feature = "sftp")]
     register!(
-        sync_adapter_ftp_plugin,
-        "../../sync-adapter-ftp-plugin/plugin.json"
-    );
-    #[cfg(feature = "sync-sftp")]
-    register!(
-        sync_adapter_sftp_plugin,
-        "../../sync-adapter-sftp-plugin/plugin.json",
+        adapter_sftp_plugin,
+        "../../adapter-sftp-plugin/plugin.json",
         probe_host_key
     );
-    #[cfg(feature = "sync-dropbox")]
+    #[cfg(feature = "dropbox")]
     register!(
-        sync_adapter_dropbox_plugin,
-        "../../sync-adapter-dropbox-plugin/plugin.json",
+        adapter_dropbox_plugin,
+        "../../adapter-dropbox-plugin/plugin.json",
         interactive_auth
     );
 
@@ -177,10 +171,10 @@ pub fn register_all_static(manager: &PluginManager) -> PluginResult<()> {
     // calendar adapter's tokens, so the auth hook has to be wired for the
     // statically-embedded build too — without it a mobile sign-in has nothing
     // to call.
-    #[cfg(feature = "vc-webex")]
+    #[cfg(feature = "webex")]
     register!(
-        vc_adapter_webex_plugin,
-        "../../vc-adapter-webex-plugin/plugin.json",
+        adapter_webex_plugin,
+        "../../adapter-webex-plugin/plugin.json",
         interactive_auth
     );
 
@@ -198,8 +192,8 @@ pub const BUNDLED_PLUGIN_COUNT: usize = cfg!(feature = "caldav") as usize
     + cfg!(feature = "ews") as usize
     + cfg!(feature = "vikunja") as usize
     + cfg!(feature = "todoist") as usize
-    + cfg!(feature = "sync-webdav") as usize
-    + cfg!(feature = "sync-ftp") as usize
-    + cfg!(feature = "sync-sftp") as usize
-    + cfg!(feature = "sync-dropbox") as usize
-    + cfg!(feature = "vc-webex") as usize;
+    + cfg!(feature = "webdav") as usize
+    + cfg!(feature = "ftp") as usize
+    + cfg!(feature = "sftp") as usize
+    + cfg!(feature = "dropbox") as usize
+    + cfg!(feature = "webex") as usize;

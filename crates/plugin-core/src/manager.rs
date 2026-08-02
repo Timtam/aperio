@@ -387,7 +387,7 @@ impl Drop for LoadedPlugin {
 /// A live instance of a loaded plugin (DESIGN.md §6.4).
 ///
 /// One [`LoadedPlugin`] can back N instances at the same time —
-/// e.g. three CalDAV accounts share the same `cal-adapter-caldav`
+/// e.g. three CalDAV accounts share the same `adapter-caldav`
 /// library but each gets its own [`LoadedInstance`] with its own
 /// handle. Vtable methods take the handle as their first
 /// argument so the plugin can route work to the right per-

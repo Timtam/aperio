@@ -1,0 +1,35 @@
+[package]
+name = "adapter-sftp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aperio sync adapter targeting SFTP over SSH (pure-Rust, mobile-tauglich)."
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+futures.workspace = true
+serde.workspace = true
+sync-core.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "sync", "io-util"] }
+tracing.workspace = true
+
+# Pure-Rust SSH + SFTP. russh is the mobile-tauglich choice
+# (no libssh2 system dep); russh-sftp gives us the higher-level
+# SftpSession that wraps subsystem channels.
+russh = "0.51"
+russh-sftp = "2"
+# Used to decode the base path safely + URL-like helpers if we
+# ever take a sftp://-style URL on the wire. v1 takes host/port/
+# path separately so this is currently just for the helpers.
+url = "2"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

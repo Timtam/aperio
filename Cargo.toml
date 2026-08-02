@@ -12,56 +12,56 @@ members = [
     "crates/vc-core",
 
     # Kalender- und Aufgaben-Adapter
-    "crates/cal-adapter-google",
-    "crates/cal-adapter-microsoft-graph",
-    "crates/cal-adapter-ews",
-    "crates/cal-adapter-caldav",
-    "crates/cal-adapter-ical",
-    "crates/cal-adapter-local",
+    "crates/adapter-google",
+    "crates/adapter-microsoft-graph",
+    "crates/adapter-ews",
+    "crates/adapter-caldav",
+    "crates/adapter-ical",
+    "crates/adapter-local",
     # Device-local calendar + reminders (iOS EventKit / Android CalendarProvider).
-    # Host-internal like cal-adapter-local (no -plugin/-cdylib split): it needs the
+    # Host-internal like adapter-local (no -plugin/-cdylib split): it needs the
     # native EventStore bridge the cal-ffi host injects, so it is never dlopen-ed.
-    "crates/cal-adapter-device-calendar",
-    "crates/cal-adapter-vikunja",
-    "crates/cal-adapter-todoist",
-    "crates/cal-adapter-ical-plugin",
-    "crates/cal-adapter-todoist-plugin",
-    "crates/cal-adapter-vikunja-plugin",
-    "crates/cal-adapter-caldav-plugin",
-    "crates/cal-adapter-google-plugin",
-    "crates/cal-adapter-microsoft-graph-plugin",
-    "crates/cal-adapter-ews-plugin",
+    "crates/adapter-device-calendar",
+    "crates/adapter-vikunja",
+    "crates/adapter-todoist",
+    "crates/adapter-ical-plugin",
+    "crates/adapter-todoist-plugin",
+    "crates/adapter-vikunja-plugin",
+    "crates/adapter-caldav-plugin",
+    "crates/adapter-google-plugin",
+    "crates/adapter-microsoft-graph-plugin",
+    "crates/adapter-ews-plugin",
 
     # Sync-Adapter
-    "crates/sync-adapter-webdav",
-    "crates/sync-adapter-ftp",
-    "crates/sync-adapter-sftp",
-    "crates/sync-adapter-dropbox",
-    "crates/sync-adapter-webdav-plugin",
-    "crates/sync-adapter-ftp-plugin",
-    "crates/sync-adapter-sftp-plugin",
-    "crates/sync-adapter-dropbox-plugin",
+    "crates/adapter-webdav",
+    "crates/adapter-ftp",
+    "crates/adapter-sftp",
+    "crates/adapter-dropbox",
+    "crates/adapter-webdav-plugin",
+    "crates/adapter-ftp-plugin",
+    "crates/adapter-sftp-plugin",
+    "crates/adapter-dropbox-plugin",
 
     # Videokonferenz-Adapter
-    "crates/vc-adapter-webex",
-    "crates/vc-adapter-webex-plugin",
+    "crates/adapter-webex",
+    "crates/adapter-webex-plugin",
 
     # cdylib FFI shells: emit the #[no_mangle] C-ABI exports the desktop
     # dlopen loader resolves. The -plugin crates are rlib-only so the mobile
     # build can statically link them all into one binary (dlopen is
     # impossible on iOS) without colliding on duplicate plugin symbols.
-    "crates/cal-adapter-caldav-cdylib",
-    "crates/cal-adapter-ical-cdylib",
-    "crates/cal-adapter-google-cdylib",
-    "crates/cal-adapter-microsoft-graph-cdylib",
-    "crates/cal-adapter-ews-cdylib",
-    "crates/cal-adapter-vikunja-cdylib",
-    "crates/cal-adapter-todoist-cdylib",
-    "crates/sync-adapter-webdav-cdylib",
-    "crates/sync-adapter-ftp-cdylib",
-    "crates/sync-adapter-sftp-cdylib",
-    "crates/sync-adapter-dropbox-cdylib",
-    "crates/vc-adapter-webex-cdylib",
+    "crates/adapter-caldav-cdylib",
+    "crates/adapter-ical-cdylib",
+    "crates/adapter-google-cdylib",
+    "crates/adapter-microsoft-graph-cdylib",
+    "crates/adapter-ews-cdylib",
+    "crates/adapter-vikunja-cdylib",
+    "crates/adapter-todoist-cdylib",
+    "crates/adapter-webdav-cdylib",
+    "crates/adapter-ftp-cdylib",
+    "crates/adapter-sftp-cdylib",
+    "crates/adapter-dropbox-cdylib",
+    "crates/adapter-webex-cdylib",
 
     # Tauri-free host logic shared by the desktop backend and the mobile
     # UniFFI host (SQLite handle, paths, accounts, secrets, registry, …).
@@ -122,8 +122,8 @@ type_complexity = "allow"
 aperio-db = { path = "crates/aperio-db" }
 cal-core = { path = "crates/cal-core" }
 builtin-oauth = { path = "crates/builtin-oauth" }
-cal-adapter-local = { path = "crates/cal-adapter-local" }
-cal-adapter-device-calendar = { path = "crates/cal-adapter-device-calendar" }
+adapter-local = { path = "crates/adapter-local" }
+adapter-device-calendar = { path = "crates/adapter-device-calendar" }
 host-core = { path = "crates/host-core" }
 # default-features off: the sole consumer (cal-ffi) selects adapters per-feature
 # so the mobile build can drop adapters it does not ship.

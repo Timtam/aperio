@@ -2,7 +2,7 @@
 title: "Microsoft Graph"
 ---
 
-**Crate:** `cal-adapter-microsoft-graph` · **Capabilities:** calendars, tasks, contacts
+**Crate:** `adapter-microsoft-graph` · **Capabilities:** calendars, tasks, contacts
 
 The modern Microsoft API for Outlook/Microsoft 365 — calendars + events,
 Microsoft To Do (`todoTask`), and Outlook contacts.

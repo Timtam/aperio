@@ -8,7 +8,7 @@ Every workspace crate carries its own unit tests:
 
 ```sh
 cargo test --workspace            # everything
-cargo test -p cal-adapter-todoist # one crate
+cargo test -p adapter-todoist # one crate
 cargo test -p aperio cache::      # one module in the host
 ```
 
@@ -37,7 +37,7 @@ The `aperio` (host) crate tests cover the database migrations, the snapshot
 cache range/overlap logic, the override layer, and the **event-log
 applier** — including conflict detection and convergence (applying the same
 envelopes in any order reaches the same state). The local adapter's tests
-build an in-memory SQLite database via `cal_adapter_local::test_support`,
+build an in-memory SQLite database via `adapter_local::test_support`,
 which replays the migration SQL so the schema matches a real run.
 
 ## Frontend tests

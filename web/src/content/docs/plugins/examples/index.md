@@ -16,7 +16,7 @@ Both follow the structure from [The Rust SDK](/plugins/examples/rust-sdk/): a li
 with your trait impl, plus a `cdylib` plugin crate with the SDK macros and
 a `plugin.json`.
 
-> The bundled adapters under `crates/cal-adapter-*` (and their
+> The bundled adapters under `crates/adapter-*` (and their
 > `-plugin` wrappers) are themselves excellent, real-world references —
-> `cal-adapter-todoist` is a compact tasks-only example;
-> `cal-adapter-google` shows a full calendars+tasks+contacts provider.
+> `adapter-todoist` is a compact tasks-only example;
+> `adapter-google` shows a full calendars+tasks+contacts provider.

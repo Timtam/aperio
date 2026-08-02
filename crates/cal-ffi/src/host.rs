@@ -42,10 +42,10 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
+use adapter_device_calendar::{DeviceAdapter, DeviceCalendarProvider};
+use adapter_local::{prepare_fts_query, LocalAdapter, SearchFilters};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use cal_adapter_device_calendar::{DeviceAdapter, DeviceCalendarProvider};
-use cal_adapter_local::{prepare_fts_query, LocalAdapter, SearchFilters};
 use cal_core::{
     Calendar, CalendarFeature, ColorLabelId, ContactList, ContactsFeature, DateRange, Event,
     NewEvent, TaskList, TasksFeature,
@@ -3081,7 +3081,7 @@ impl Host {
 
     /// Local full-text search (FTS5) over events + tasks, as a JSON
     /// `SearchResults { events, tasks }`. Mirrors the desktop `search` command's
-    /// LOCAL half — the engine already lives in `cal-adapter-local`. The external
+    /// LOCAL half — the engine already lives in `adapter-local`. The external
     /// snapshot-cache half needs the SWR cache the mobile host lacks, so it's
     /// omitted (a known parity gap). `filters_json` is a JSON `SearchFilters`, or
     /// `""` for no filters (default = both kinds, no restrictions).

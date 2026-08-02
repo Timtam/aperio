@@ -7,7 +7,7 @@ the `cal-core` traits, and a few macros generate the `extern "C"` glue, the
 JSON marshalling, and the lifecycle exports. You should rarely touch a raw
 pointer.
 
-This mirrors how the bundled adapters (e.g. `cal-adapter-todoist-plugin`)
+This mirrors how the bundled adapters (e.g. `adapter-todoist-plugin`)
 are written — read one of those crates alongside this page.
 
 ## The shape of a plugin crate

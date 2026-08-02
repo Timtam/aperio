@@ -17,12 +17,12 @@
 //!
 //! Implementations:
 //!
-//! - `cal-adapter-local` — local filesystem / NAS mount
-//! - `sync-adapter-webdav` — Nextcloud, ownCloud, generic WebDAV
-//! - `sync-adapter-sftp` — SFTP over SSH
-//! - `sync-adapter-ftp` — FTPS
-//! - `sync-adapter-dropbox` — Dropbox API v2
-//! - `cal-adapter-google::drive` — Google Drive API v3, the storage role
+//! - `adapter-local` — local filesystem / NAS mount
+//! - `adapter-webdav` — Nextcloud, ownCloud, generic WebDAV
+//! - `adapter-sftp` — SFTP over SSH
+//! - `adapter-ftp` — FTPS
+//! - `adapter-dropbox` — Dropbox API v2
+//! - `adapter-google::drive` — Google Drive API v3, the storage role
 //!   of the same account that serves its calendars
 //!
 //! ## Layering: encryption sits ABOVE the adapter

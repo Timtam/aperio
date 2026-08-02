@@ -2,7 +2,7 @@
 title: "Local store"
 ---
 
-**Crate:** `cal-adapter-local` · **Capabilities:** calendars, tasks, contacts
+**Crate:** `adapter-local` · **Capabilities:** calendars, tasks, contacts
 
 The local adapter is special: it is the **source of truth** for
 user-created data, not a cache of someone else's API. It reads and writes
@@ -39,7 +39,7 @@ merge in the applier treats it like any other column.
   half-open interval overlap *plus* a clause that keeps any recurring
   master whose series begins before the range end, so a weekly meeting
   created long ago still expands into the current view.
-- **Test schema.** `cal_adapter_local::test_support::open_test_db()` builds
+- **Test schema.** `adapter_local::test_support::open_test_db()` builds
   an in-memory database by replaying the migration SQL. When a migration
   adds a column the adapter reads, add the new `SCHEMA_V<n>` const there.
 

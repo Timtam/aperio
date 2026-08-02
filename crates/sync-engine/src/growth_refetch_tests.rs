@@ -22,7 +22,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use cal_adapter_local::LocalFsSyncAdapter;
+use adapter_local::LocalFsSyncAdapter;
 use chrono::{DateTime, TimeZone, Utc};
 use sync_core::{
     DeviceCursor, DeviceId, EncryptingAdapter, EventEnvelope, IdPayload, KnownLogLength, LogFile,
@@ -81,8 +81,8 @@ fn build_stack(local_root: &Path, device: &str, adapter: Arc<dyn SyncAdapter>) -
     let applier = Arc::new(EventLogApplier::new(
         Arc::clone(&store),
         Arc::new(FakeSecrets::default()),
-        Arc::new(cal_adapter_local::LocalAdapter::new(
-            cal_adapter_local::test_support::open_test_db(),
+        Arc::new(adapter_local::LocalAdapter::new(
+            adapter_local::test_support::open_test_db(),
         )),
         device_id.clone(),
     ));

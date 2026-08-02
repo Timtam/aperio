@@ -29,7 +29,7 @@ pub use host_core::{
     remote_plugins, sftp_host_keys, sound_assets, sync_log, user_prefs,
 };
 
-use cal_adapter_local::LocalAdapter;
+use adapter_local::LocalAdapter;
 use contact_sync::ContactSyncScheduler;
 // The sync-engine assembly (writer / applier / snapshot / compactor /
 // orchestrator) is now built by host_core::sync::build_orchestrator; lib.rs

@@ -24,7 +24,7 @@ title: "Architecture"
                 │  cal_core traits           │  C ABI vtables
                 │  (in-process, local store) │  (FFI, plugins)
 ┌───────────────┴────────────┐  ┌────────────▼──────────────────┐
-│  cal-core (crates/cal-core) │  │  Adapters (crates/cal-adapter-│
+│  cal-core (crates/cal-core) │  │  Adapters (crates/adapter-│
 │  Domain types + feature     │  │  *) — Google, CalDAV, Graph,  │
 │  traits (CalendarFeature,   │  │  EWS, Vikunja, Todoist, local │
 │  TasksFeature, …)           │  │  …, each behind a plugin.     │
@@ -39,11 +39,11 @@ The repository is one Cargo workspace. Key members:
   `Calendar`, `TaskList`, `Contact`, colour types, and the feature traits
   (`Adapter`, `CalendarFeature`, `TasksFeature`, `ContactsFeature`). Every
   adapter implements a subset of these; the host speaks only `cal-core`.
-- **`crates/cal-adapter-*`** — one crate per provider (`-local`,
+- **`crates/adapter-*`** — one crate per provider (`-local`,
   `-google`, `-caldav`, `-microsoft-graph`, `-ews`, `-vikunja`,
   `-todoist`, `-ical`). Each is a normal Rust library implementing the
   relevant `cal-core` traits.
-- **`crates/cal-adapter-*-plugin`** — a thin wrapper that exposes an
+- **`crates/adapter-*-plugin`** — a thin wrapper that exposes an
   adapter over the C ABI as a loadable plugin (see below).
 - **`crates/plugin-core`** — the ABI contract: the `#[repr(C)]` vtable
   layouts, the call/marshalling shim, and the C header.

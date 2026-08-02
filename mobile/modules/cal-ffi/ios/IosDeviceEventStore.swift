@@ -4,7 +4,7 @@ import Foundation
 
 /// iOS implementation of the Rust `DeviceEventStoreBridge` foreign trait — the
 /// platform half of the device-local calendar + reminders adapter
-/// (cal-adapter-device-calendar). It reaches the device's own EventKit store
+/// (adapter-device-calendar). It reaches the device's own EventKit store
 /// (`EKEvent` / `EKReminder`); the Rust adapter maps the small intermediate JSON
 /// it exchanges here onto the full `cal_core` types, exactly as `IosKeychain`
 /// backs the `SecretStore` seam.

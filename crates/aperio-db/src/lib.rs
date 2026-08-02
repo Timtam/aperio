@@ -5,7 +5,7 @@
 //! (`src-tauri`) and the mobile app share one source of truth: each opens
 //! its own [`rusqlite::Connection`] (desktop via the file DB + read pool,
 //! mobile in the app sandbox), then calls [`run`] to bring it up to
-//! [`CURRENT_SCHEMA_VERSION`]. The higher layers (`cal-adapter-local`,
+//! [`CURRENT_SCHEMA_VERSION`]. The higher layers (`adapter-local`,
 //! the sync engine) only ever operate on an already-migrated connection.
 //!
 //! Migrations are append-only. Never edit a published migration — add a

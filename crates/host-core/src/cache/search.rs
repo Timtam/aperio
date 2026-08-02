@@ -2,18 +2,18 @@
 //!
 //! §13.1 promises search across "alle lokal gecachten Termine und
 //! Aufgaben über alle Konten und Container hinweg". The LOCAL tables are
-//! covered by `cal-adapter-local`'s FTS indexes (migration 0002); this
+//! covered by `adapter-local`'s FTS indexes (migration 0002); this
 //! module queries the cache mirrors from migration 0027
 //! (`cache_events_fts` / `cache_tasks_fts`) so items living on external
 //! providers (iCloud, Google, EWS, Vikunja, Todoist, …) are findable
 //! too. The host `search` command merges both result sets.
 //!
 //! Both halves consume the SAME prepared MATCH string
-//! ([`cal_adapter_local::prepare_fts_query`]) and the same
+//! ([`adapter_local::prepare_fts_query`]) and the same
 //! [`SearchFilters`], so query semantics (prefix match, AND-combined
 //! terms, filter behaviour) stay in lock-step with the local search.
 
-use cal_adapter_local::{EventTypeFilter, SearchFilters, SearchKind};
+use adapter_local::{EventTypeFilter, SearchFilters, SearchKind};
 use cal_core::{Event, Task};
 
 use super::CacheStore;

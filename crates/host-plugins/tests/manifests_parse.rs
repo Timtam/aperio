@@ -88,66 +88,53 @@ fn manifests_in_tree() -> Vec<(String, plugin_core::PluginManifest)> {
     found
 }
 
-/// The six sync backends and the kind each one answers to, spelled out here so
-/// a rename has to be made twice — once in the manifest, once in front of
-/// somebody reading this list.
+/// Every adapter that can hold a dataset, and the kind it answers to, spelled
+/// out here so a rename has to be made twice — once in the manifest, once in
+/// front of somebody reading this list.
 ///
 /// These strings are not internal. They are written into `accounts.adapter_kind`
 /// and travel in the sync payload, so changing one orphans every account row a
-/// user already has. `local_folder` in particular is not `local`: that name is
-/// already taken by the built-in store, which is `AdapterKind::LOCAL` and
-/// host-internal — an adapter claiming it would be unregisterable, and the two
-/// frontends would each have a different idea of what the row meant.
+/// user already has.
+///
+/// Two of the six are not storage backends in the old sense, and that is the
+/// point of the consolidations: `google` holds a dataset in Drive with the same
+/// account that serves its calendars, and `local` is the built-in store
+/// mirroring into a folder. Both got here by folding a separate adapter in.
 const SYNC_ADAPTER_KINDS: &[(&str, &str)] = &[
-    ("sync-adapter-webdav-plugin", "webdav"),
-    ("sync-adapter-sftp-plugin", "sftp"),
-    ("sync-adapter-ftp-plugin", "ftp"),
-    ("sync-adapter-dropbox-plugin", "dropbox"),
+    ("adapter-webdav-plugin", "webdav"),
+    ("adapter-sftp-plugin", "sftp"),
+    ("adapter-ftp-plugin", "ftp"),
+    ("adapter-dropbox-plugin", "dropbox"),
+    ("adapter-google-plugin", "google"),
+    ("adapter-local", "local"),
 ];
 
-/// The sync adapters are published: each declares the kind above, and nothing
-/// else in the tree answers to it.
+/// Every adapter that declares the sync capability declares a kind with it, and
+/// that kind is the one the hosts resolve.
 ///
-/// This replaces the tripwire that used to fail the moment any of them declared
-/// a kind at all. `adapter_kind` is what binds a schema to the Add-account
-/// picker and to `schema_for_kind`, so declaring it is the act of publishing;
-/// the two things that had to be true first are the host-key pin
-/// (`AccountHostKeyPin`, which the SFTP schema now carries, so the plugin no
-/// longer reads an empty pin as "trust whatever answers") and sync restoring
-/// from an account rather than from `user_prefs`.
+/// The walk is by CAPABILITY, not by directory name. It used to filter on a
+/// `sync-adapter-` prefix, which stopped meaning anything the moment the
+/// prefixes came off — and a test that silently walks nothing is worse than no
+/// test, so the count at the bottom is what catches that.
 ///
-/// What is left to guard is the naming itself, which is why this test kept the
-/// walk: a seventh sync adapter added tomorrow lands here without anyone
-/// remembering this file, and it has to be given a kind and a label before it
-/// can ship.
+/// What this guards is the naming: a seventh backend added tomorrow lands here
+/// without anyone remembering this file, and it has to be given a kind and a
+/// label before it can ship.
 #[test]
 fn the_sync_adapters_declare_the_kinds_the_hosts_resolve() {
     let manifests = manifests_in_tree();
     let mut seen = 0usize;
 
     for (name, manifest) in &manifests {
-        if !name.starts_with("sync-adapter-") {
-            continue;
-        }
-        // The folder adapter is the exception, and deliberately: it folded into
-        // the built-in store, which declares the kind AND the field. This crate
-        // kept only the vtable, so it has no kind of its own to check and no
-        // schema to lose — `host_core::builtin_adapters::sync_plugin_for` is
-        // what names it, by plugin id.
-        if manifest.adapter_kind.is_none() {
-            assert!(
-                name == "the built-in store",
-                "{name} declares no adapter kind; only the folder adapter may, \
-                 because the built-in store declares its kind for it",
-            );
-            assert!(
-                manifest.account.is_none(),
-                "{name} declares no kind, so a schema on it could never be reached",
-            );
+        if !manifest.has_capability(&plugin_core::Capability::Sync) {
             continue;
         }
         seen += 1;
-        assert!(manifest.account.is_some(), "{name} lost its account schema");
+        assert!(
+            manifest.account.is_some(),
+            "{name} can hold a dataset but declares no account schema, so nothing \
+             can ask the user where to put it",
+        );
 
         let expected = SYNC_ADAPTER_KINDS
             .iter()
@@ -155,10 +142,10 @@ fn the_sync_adapters_declare_the_kinds_the_hosts_resolve() {
             .map(|(_, kind)| *kind)
             .unwrap_or_else(|| {
                 panic!(
-                    "{name} is a sync adapter this test has never heard of. Give it a \
-                     kind, add it to SYNC_ADAPTER_KINDS, and give that kind a label in \
-                     both locale files — otherwise it reaches a screen reader as the \
-                     raw key string.",
+                    "{name} can hold a dataset and this test has never heard of it. \
+                     Add it to SYNC_ADAPTER_KINDS and give its kind a label in both \
+                     locale files — otherwise it reaches a screen reader as the raw \
+                     key string.",
                 )
             });
         assert_eq!(
@@ -170,11 +157,13 @@ fn the_sync_adapters_declare_the_kinds_the_hosts_resolve() {
         );
     }
 
-    // A test that passes because it found nothing is not a test.
+    // A test that passes because it found nothing is not a test — and this one
+    // walked nothing for exactly one commit, when the prefix it filtered on
+    // stopped existing.
     assert_eq!(
         seen,
         SYNC_ADAPTER_KINDS.len(),
-        "expected {} sync adapter manifests, walked {seen}",
+        "expected {} adapters that can hold a dataset, walked {seen}",
         SYNC_ADAPTER_KINDS.len(),
     );
 }
@@ -224,7 +213,7 @@ fn no_two_adapters_in_the_tree_share_a_kind() {
     // would be a plugin that could never be registered.
     assert_eq!(
         by_kind.get("local").map(Vec::as_slice),
-        Some(&["cal-adapter-local".to_string()][..]),
+        Some(&["adapter-local".to_string()][..]),
         "`local` belongs to the built-in store's own manifest and nothing else",
     );
 

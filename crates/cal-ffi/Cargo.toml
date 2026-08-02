@@ -34,16 +34,16 @@ cli = ["uniffi/cli"]
 [dependencies]
 cal-core = { workspace = true }
 # The on-device local store: the migrated SQLite schema (aperio-db) + the
-# shared local calendar/task adapter (cal-adapter-local) the desktop uses,
+# shared local calendar/task adapter (adapter-local) the desktop uses,
 # so the mobile app reads and writes through the same engine, not a
 # re-implementation. `rusqlite` (bundled) opens the sandbox database file.
 aperio-db.workspace = true
-cal-adapter-local.workspace = true
+adapter-local.workspace = true
 # The device-local calendar + reminders adapter (iOS EventKit / Android
 # CalendarProvider). Host-internal — the cal-ffi host builds it over the native
 # `DeviceEventStoreBridge` and inserts it into the registry directly (it can't be
 # a dlopen plugin; it needs the injected native seam). Mobile-only by living here.
-cal-adapter-device-calendar.workspace = true
+adapter-device-calendar.workspace = true
 rusqlite.workspace = true
 # The shared, Tauri-free host (DbHandle + AccountsRepo + AdapterRegistry) and
 # the static plugin registry. `host-plugins` links the bundled adapter `-plugin`
@@ -54,7 +54,7 @@ rusqlite.workspace = true
 # The adapters are listed one by one (default-features off drops the `static`
 # umbrella) so this build embeds only what it ships. The built-in store is not
 # among them and never was: it is not a plugin, and it arrives through
-# `cal-adapter-local` below — including, since folder sync folded into it, its
+# `adapter-local` below — including, since folder sync folded into it, its
 # mirror half.
 host-core.workspace = true
 vc-core.workspace = true
@@ -66,11 +66,11 @@ host-plugins = { workspace = true, features = [
     "ews",
     "vikunja",
     "todoist",
-    "sync-webdav",
-    "sync-ftp",
-    "sync-sftp",
-    "sync-dropbox",
-            "vc-webex",
+    "webdav",
+    "ftp",
+    "sftp",
+    "dropbox",
+            "webex",
 ] }
 plugin-core.workspace = true
 sync-core.workspace = true

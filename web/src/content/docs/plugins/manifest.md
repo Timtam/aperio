@@ -281,7 +281,8 @@ authority nobody requested is authority nobody audited.
 ## Where the host looks
 
 The bundled plugins keep their manifest at
-`crates/cal-adapter-*-plugin/plugin.json`, `crates/vc-adapter-*-plugin/` and
-`crates/sync-adapter-*-plugin/` — the crate names still say what each one is
-for, even though the manifests no longer do. A distributed plugin ships the
-manifest inside its `.aperio` archive alongside the shared library.
+`crates/adapter-<provider>-plugin/plugin.json` — one crate per provider,
+whatever it serves, because an adapter is no longer a calendar thing or a
+storage thing but whichever of those its capabilities say. A distributed
+plugin ships the manifest inside its `.aperio` archive alongside the shared
+library.

@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use cal_adapter_local::LocalAdapter;
+use adapter_local::LocalAdapter;
 use cal_core::ColorLabel;
 use serde::Deserialize;
 use sync_core::{EventPayload, IdPayload, SyncEvent};

@@ -37,7 +37,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use cal_adapter_local::SnapshotDump;
+use adapter_local::SnapshotDump;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sync_core::{Snapshot, SyncError, SyncResult};
@@ -52,7 +52,7 @@ use crate::{SecretSlot, SecretStore, SyncStore};
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AperioSnapshotBody {
     /// Calendar/event/task/list/label dump from
-    /// [`SyncStore::dump_for_snapshot`]. The cal-adapter-local
+    /// [`SyncStore::dump_for_snapshot`]. The adapter-local
     /// crate owns the schema for each section.
     #[serde(flatten)]
     pub dump: SnapshotDump,
@@ -110,7 +110,7 @@ pub struct SnapshotAccount {
 }
 
 /// Result of applying a snapshot body. Merges
-/// [`cal_adapter_local::SnapshotApplyReport`] from cal-adapter-local plus
+/// [`adapter_local::SnapshotApplyReport`] from adapter-local plus
 /// settings/account counters.
 #[derive(Debug, Default, Clone, Copy, Serialize)]
 pub struct SnapshotApplyOutcome {
@@ -123,7 +123,7 @@ pub struct SnapshotApplyOutcome {
 }
 
 impl SnapshotApplyOutcome {
-    fn merge_rows(&mut self, r: cal_adapter_local::SnapshotApplyReport) {
+    fn merge_rows(&mut self, r: adapter_local::SnapshotApplyReport) {
         self.rows_applied += r.applied;
         self.rows_failed += r.failed;
     }

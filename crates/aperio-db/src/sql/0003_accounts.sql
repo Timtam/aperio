@@ -24,7 +24,7 @@ CREATE TABLE accounts (
 CREATE INDEX accounts_adapter_kind_idx ON accounts(adapter_kind);
 
 -- Seed the implicit local account. Its id matches the AdapterSource
--- the local adapter has hard-coded (`cal-adapter-local::SOURCE_ID`),
+-- the local adapter has hard-coded (`adapter-local::SOURCE_ID`),
 -- so existing rows that already carry `source = 'local'` can be
 -- attached without a value rewrite.
 INSERT INTO accounts (id, adapter_kind, display_name, config_json, created_at, updated_at)

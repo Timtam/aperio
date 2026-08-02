@@ -1193,7 +1193,7 @@ fn refresh_coordinator_dedups_until_released() {
 
 // ── External-cache full-text search (migration 0027 + cache/search.rs) ──
 
-use cal_adapter_local::SearchFilters;
+use adapter_local::SearchFilters;
 
 #[test]
 fn search_finds_cached_external_event_by_prefix() {

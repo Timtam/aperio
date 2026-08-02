@@ -747,14 +747,14 @@ mod tests {
         let bytes: &[u8] = match stored_kind {
             // Folder sync folded into the built-in store, which is
             // where the folder field is declared now.
-            "local" => include_bytes!("../../../cal-adapter-local/plugin.json"),
-            "webdav" => include_bytes!("../../../sync-adapter-webdav-plugin/plugin.json"),
-            "sftp" => include_bytes!("../../../sync-adapter-sftp-plugin/plugin.json"),
-            "ftp" => include_bytes!("../../../sync-adapter-ftp-plugin/plugin.json"),
-            "dropbox" => include_bytes!("../../../sync-adapter-dropbox-plugin/plugin.json"),
+            "local" => include_bytes!("../../../adapter-local/plugin.json"),
+            "webdav" => include_bytes!("../../../adapter-webdav-plugin/plugin.json"),
+            "sftp" => include_bytes!("../../../adapter-sftp-plugin/plugin.json"),
+            "ftp" => include_bytes!("../../../adapter-ftp-plugin/plugin.json"),
+            "dropbox" => include_bytes!("../../../adapter-dropbox-plugin/plugin.json"),
             // Adopted by the Google adapter, which is where its schema
             // lives now — see `adopts_adapter_kinds`.
-            "googledrive" => include_bytes!("../../../cal-adapter-google-plugin/plugin.json"),
+            "googledrive" => include_bytes!("../../../adapter-google-plugin/plugin.json"),
             other => panic!("no shipped manifest for {other}"),
         };
         PluginManifest::from_bytes(bytes).expect("the shipped manifest parses")
