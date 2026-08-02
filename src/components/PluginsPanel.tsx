@@ -906,40 +906,57 @@ function PluginDetail({
         </FocusableNote>
       )}
       <PluginBadges plugin={plugin} />
-      {/* One disclosure rather than four focus stops. `<details>` gives a
-          real, conventional expander whose summary is the only stop until
-          the user asks for the rest. */}
-      <details className="plugins-panel__failed-details">
-        <summary>{t('dialogs.settings.plugins.technicalSummary')}</summary>
-        <dl className="plugins-panel__meta">
-          <dt>{t('dialogs.settings.plugins.failed.idLabel')}</dt>
-          <dd>{plugin.id}</dd>
-          {plugin.author && (
-            <>
-              <dt>{t('dialogs.settings.plugins.author')}</dt>
-              <dd>{plugin.author}</dd>
-            </>
-          )}
-          <dt>{t('dialogs.settings.plugins.abiVersion')}</dt>
-          <dd>{plugin.abi_version}</dd>
-          <dt>{t('dialogs.settings.plugins.minAppVersion')}</dt>
-          <dd>{plugin.min_app_version}</dd>
-          <dt>{t('dialogs.settings.plugins.signed.label')}</dt>
-          <dd>
-            {plugin.signed
-              ? t('dialogs.settings.plugins.signed.yes')
-              : t('dialogs.settings.plugins.signed.no')}
-          </dd>
-          <dt>{t('dialogs.settings.plugins.source.label')}</dt>
-          <dd>
-            {plugin.source === 'bundled'
-              ? t('dialogs.settings.plugins.source.bundled')
-              : t('dialogs.settings.plugins.source.user')}
-          </dd>
-        </dl>
-      </details>
+      {/* One focusable line, not a `<details>` around a `<dl>`.
+
+          The disclosure looked right and was unreadable. This panel lives
+          inside the Settings modal, whose body is `role="application"`, where
+          NVDA stays in focus mode and stops ONLY on focusable elements — so
+          `<dt>`/`<dd>` are invisible to it. Expanding the disclosure revealed
+          markup a screen-reader user could not get into, which is worse than
+          not offering it: the affordance says there is something there and
+          then there is no way to reach it.
+
+          `FocusableNote` carries the text as the element's accessible name,
+          which is the pattern the rest of the settings panels use for exactly
+          this reason. One stop, always readable, and the sighted user reads
+          the same string. See FocusableNote.tsx. */}
+      <FocusableNote className="plugins-panel__technical">
+        {technicalLine(t, plugin)}
+      </FocusableNote>
     </div>
   );
+}
+
+/** The technical facts as one readable line.
+ *
+ *  Joined with " · " rather than rendered as a definition list: the list was
+ *  prettier and could not be read by a screen reader in this dialog (see the
+ *  call site). Each fact keeps its own label so the line stays parseable by
+ *  ear — "Kennung: com.aperio.… · ABI-Version: 3 · …". */
+function technicalLine(
+  t: ReturnType<typeof useTranslation>['t'],
+  plugin: PluginInfo,
+): string {
+  return [
+    `${t('dialogs.settings.plugins.failed.idLabel')}: ${plugin.id}`,
+    plugin.author
+      ? `${t('dialogs.settings.plugins.author')}: ${plugin.author}`
+      : null,
+    `${t('dialogs.settings.plugins.abiVersion')}: ${plugin.abi_version}`,
+    `${t('dialogs.settings.plugins.minAppVersion')}: ${plugin.min_app_version}`,
+    `${t('dialogs.settings.plugins.signed.label')}: ${
+      plugin.signed
+        ? t('dialogs.settings.plugins.signed.yes')
+        : t('dialogs.settings.plugins.signed.no')
+    }`,
+    `${t('dialogs.settings.plugins.source.label')}: ${
+      plugin.source === 'bundled'
+        ? t('dialogs.settings.plugins.source.bundled')
+        : t('dialogs.settings.plugins.source.user')
+    }`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 interface ConfirmUninstallModalProps {

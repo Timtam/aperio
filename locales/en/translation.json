@@ -363,6 +363,7 @@
     "connectedAnnouncement": "Account {{name}} reconnected.",
     "kind": {
       "local": "Local",
+      "device_calendar": "This device",
       "caldav": "CalDAV",
       "ical": "iCal",
       "google": "Google",
@@ -603,7 +604,6 @@
         "selectorLabel": "Installed plugins",
         "optionLabel": "{{name}}, {{type}}, {{summary}}",
         "detailHeading": "{{name}}",
-        "technicalSummary": "Technical details",
         "version": "Version {{version}}",
         "author": "Author",
         "abiVersion": "ABI version",

@@ -5469,3 +5469,14 @@ button[aria-disabled='true'] {
   box-shadow: var(--focus-ring);
   border-radius: 0.25rem;
 }
+
+/* The plugin detail's technical line. One focusable paragraph rather than a
+ * definition list — a `<dl>` cannot be read inside the Settings modal's
+ * role="application" (see PluginsPanel). Small and muted, and allowed to wrap
+ * because the plugin id alone is long. */
+.plugins-panel__technical {
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-muted);
+  word-break: break-word;
+  margin: 0;
+}

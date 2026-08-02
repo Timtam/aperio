@@ -2318,7 +2318,7 @@ impl Host {
         // bridge to register. Bail early if the bridge isn't installed (e.g. the
         // kind was requested on a platform without one) so we never persist a row
         // that can't come up.
-        let is_device = req.adapter_kind == "device_calendar";
+        let is_device = req.adapter_kind == host_core::builtin_adapters::device_calendar_kind();
         let device_provider = if is_device {
             Some(
                 self.device_provider()
@@ -4004,7 +4004,10 @@ impl Host {
             .list()
             .unwrap_or_default()
             .into_iter()
-            .any(|a| a.id == account_id && a.adapter_kind == "device_calendar")
+            .any(|a| {
+                a.id == account_id
+                    && a.adapter_kind == host_core::builtin_adapters::device_calendar_kind()
+            })
     }
 
     /// Delete a task, routed by the optional `list_id` (the desktop `delete_task`
@@ -5960,7 +5963,7 @@ impl Host {
         let repo = AccountsRepo::new(&shared);
         if let Ok(accounts) = repo.list() {
             for account in accounts {
-                if account.adapter_kind == "device_calendar" {
+                if account.adapter_kind == host_core::builtin_adapters::device_calendar_kind() {
                     self.register_device_adapter(&account.id, Arc::clone(&provider));
                 }
             }

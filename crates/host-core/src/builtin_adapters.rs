@@ -42,6 +42,67 @@ fn local_manifest() -> &'static PluginManifest {
     })
 }
 
+/// The device adapter's declaration, parsed once.
+///
+/// Same arrangement as the built-in store, for the same reason: it is written
+/// as an adapter and CALLED directly — the mobile host injects a native
+/// provider and holds the typed adapter — but until it had a manifest, its kind
+/// existed only as the string `"device_calendar"` repeated in four places in
+/// `cal-ffi`. Declaring it puts the name in one file that the tree tests walk.
+fn device_manifest() -> &'static PluginManifest {
+    static MANIFEST: OnceLock<PluginManifest> = OnceLock::new();
+    MANIFEST.get_or_init(|| {
+        PluginManifest::from_bytes(include_bytes!("../../adapter-device-calendar/plugin.json"))
+            .expect("the device adapter's manifest parses and validates")
+    })
+}
+
+/// The adapter kind the phone's own calendars and reminders answer to.
+///
+/// Read from the manifest rather than written here. It is persisted in
+/// `accounts.adapter_kind`, so it is not an internal name that can be changed
+/// on a whim — which is exactly why it should have one home.
+pub fn device_calendar_kind() -> &'static str {
+    device_manifest()
+        .adapter_kind
+        .as_deref()
+        .expect("the device adapter's manifest declares its kind")
+}
+
+/// The device adapter as a kind the frontends can describe.
+///
+/// Deliberately NOT part of [`all_adapter_kinds`] — see [`builtin_adapter_kinds`].
+/// The mobile accounts screen asks for this one by name, because whether it can
+/// be offered at all is a question about the operating system and a permission,
+/// not about which plugins are loaded.
+pub fn device_adapter_kind_info() -> AdapterKindInfo {
+    let m = device_manifest();
+    AdapterKindInfo {
+        kind: device_calendar_kind().to_string(),
+        name: m.name.clone(),
+        plugin_id: m.id.clone(),
+        // It holds no dataset: the phone's own store is not somewhere Aperio
+        // can put its sync payload.
+        can_sync: false,
+        // Offered, but only where it exists and only once the OS has said yes.
+        // The mobile host gates both; nothing here can.
+        offered: true,
+        // Not implicit: unlike the built-in store there is no such account
+        // until the user grants access, and on a desktop there can be none.
+        implicit: false,
+        owns_containers: m.has_data_family(),
+        // Its account carries no fields at all: the "connect form" is an OS
+        // permission prompt. So there is no schema to drive one from.
+        declares_account_schema: m.account.is_some(),
+        // It signs in nowhere — the OS decides.
+        declares_oauth: false,
+        holds_data: m
+            .capabilities
+            .iter()
+            .any(|c| *c != plugin_core::capability::Capability::Sync),
+    }
+}
+
 /// One [`AdapterKindInfo`] per adapter the host implements itself.
 ///
 /// Appended to `PluginManager::adapter_kinds()` by both hosts, so a caller sees
@@ -188,6 +249,54 @@ pub fn all_adapter_kinds(manager: &plugin_core::PluginManager) -> Vec<AdapterKin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::accounts::AdapterKind;
+
+    /// The two host-internal kinds are persisted in `accounts.adapter_kind` and
+    /// declared in a manifest, and the two spellings must be the same one.
+    ///
+    /// `AdapterKind`'s constants are what the rest of the core compares
+    /// against; the manifests are where a rename would be made. Nothing else
+    /// connects them, so this does — a manifest edited without the constant
+    /// (or the reverse) orphans every account row a user already has, and
+    /// would otherwise fail somewhere far away and much later.
+    #[test]
+    fn the_host_internal_kinds_match_their_manifests() {
+        assert_eq!(
+            local_manifest().adapter_kind.as_deref(),
+            Some(AdapterKind::LOCAL),
+            "the built-in store's manifest and AdapterKind::LOCAL disagree",
+        );
+        assert_eq!(
+            device_calendar_kind(),
+            AdapterKind::DEVICE_CALENDAR,
+            "the device adapter's manifest and AdapterKind::DEVICE_CALENDAR disagree",
+        );
+        // And both are recognised as host-internal, which is what keeps their
+        // accounts off the sync log.
+        assert!(AdapterKind::new(AdapterKind::LOCAL).is_host_internal());
+        assert!(AdapterKind::new(device_calendar_kind()).is_host_internal());
+    }
+
+    /// The device adapter is describable like any other, and still not in the
+    /// built-in list — those are two different questions and the second one is
+    /// about the operating system.
+    #[test]
+    fn the_device_adapter_declares_itself_without_joining_the_builtin_list() {
+        let info = device_adapter_kind_info();
+        assert_eq!(info.kind, "device_calendar");
+        assert!(!info.can_sync, "the phone's own store holds no dataset");
+        assert!(info.owns_containers, "it owns calendars and reminder lists");
+        assert!(
+            !info.implicit,
+            "it exists only once access has been granted"
+        );
+        assert!(
+            !builtin_adapter_kinds().iter().any(|k| k.kind == info.kind),
+            "device_calendar must not appear in the built-in list — it is \
+             platform-conditional and permission-gated, and the mobile accounts \
+             screen offers it on its own terms",
+        );
+    }
 
     /// The declaration says what the built-in store actually is, read off the
     /// shipped manifest rather than restated here.

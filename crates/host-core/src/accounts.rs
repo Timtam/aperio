@@ -56,10 +56,17 @@ pub const LOCAL_ACCOUNT_ID: &str = "local";
 ///
 /// ## The two host-internal kinds
 ///
-/// [`Self::LOCAL`] and [`Self::DEVICE_CALENDAR`] are not plugins and never will
-/// be: the first is the built-in store, the second is built in the cal-ffi
-/// layer over a native bridge. They are recognised by value, and they are the
-/// only two values this module knows by name.
+/// [`Self::LOCAL`] and [`Self::DEVICE_CALENDAR`] are not loaded as plugins and
+/// never will be: the first is the built-in store, the second reaches the
+/// phone's own calendars through a native bridge the mobile host injects. Both
+/// are CALLED directly rather than over the ABI.
+///
+/// They do both declare themselves, though — a real `plugin.json` in each
+/// crate, parsed by [`crate::builtin_adapters`]. The two constants below are
+/// the persisted spellings, and a test in that module pins them to the
+/// manifests, so a rename is made in the manifest and this fails loudly if it
+/// was not carried across. They are the only two values this module knows by
+/// name.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct AdapterKind(String);

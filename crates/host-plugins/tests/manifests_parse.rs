@@ -217,14 +217,19 @@ fn no_two_adapters_in_the_tree_share_a_kind() {
         "`local` belongs to the built-in store's own manifest and nothing else",
     );
 
-    // `device_calendar` is the native bridge, built in the cal-ffi layer over
-    // whatever the OS provides. Nothing declares it, and an adapter claiming it
-    // could never be reached.
-    assert!(
-        !by_kind.contains_key("device_calendar"),
-        "device_calendar is host-internal \u{2014} an adapter claiming it can never be \
-         registered, and {:?} tried",
-        by_kind.get("device_calendar"),
+    // `device_calendar` is the phone's own store, reached through a native
+    // bridge the mobile host injects. Same shape as `local`: it declares itself
+    // in a manifest and is CALLED directly rather than through the ABI, so
+    // exactly one directory may claim the kind.
+    //
+    // It used to declare nothing at all, and the string lived as a literal in
+    // four places in `cal-ffi`. That is what this pins now — one manifest, one
+    // claimant — rather than the old "nobody may claim it", which was only ever
+    // true because nothing had been written down.
+    assert_eq!(
+        by_kind.get("device_calendar").map(Vec::as_slice),
+        Some(&["adapter-device-calendar".to_string()][..]),
+        "`device_calendar` belongs to the device adapter's own manifest and nothing else",
     );
 }
 

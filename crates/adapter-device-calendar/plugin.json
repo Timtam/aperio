@@ -1,0 +1,30 @@
+{
+  "id": "com.aperio.adapter-device-calendar",
+  "name": "This device",
+  "version": "0.1.0",
+  "plugin_type": "adapter",
+  "capabilities": ["calendar", "tasks"],
+  "abi_version": 3,
+  "min_app_version": "0.1.0",
+  "author": "Aperio Contributors",
+  "description": "The calendars and reminders the phone itself keeps — iOS EventKit, Android CalendarProvider. Everything here belongs to the device and never travels to your other ones.",
+  "adapter_kind": "device_calendar",
+  "signed": false,
+  "tasks": {
+    "nested_projects": false,
+    "sections": false,
+    "manageable_sections": false,
+    "subtasks": false,
+    "move_between_projects": false,
+    "create_lists": false,
+    "delete_lists": false
+  },
+  "strings": {
+    "en": {
+      "kind.name": "This device"
+    },
+    "de": {
+      "kind.name": "Dieses Gerät"
+    }
+  }
+}
