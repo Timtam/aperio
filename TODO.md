@@ -42,10 +42,15 @@
 - [ ] Fehlende Einzelkürzel implementieren: **Ctrl+R** (Sync), **Ctrl+E** (Fokussiertes bearbeiten), **Ctrl+H**, **Ctrl+Q** (§15.7)
 - Einstieg: `src/state/useDialogShortcuts.ts`, `src-tauri/src/event_log/applier.rs` (shortcut.*), neue Settings-Sektion „Tastaturkürzel".
 
-### A4 · Videokonferenz-Adapter (§11) — alle vier sind Stubs
-- [ ] Echte REST-/OAuth-Implementierung für Zoom / Teams / Meet / WebEx statt `VcError::Unsupported` (§11.1)
-- [ ] `vc_meeting_id`-Feld am Event-Model; `create_meeting` erzeugt + speichert den Meeting-Link (§11.2)
-- [ ] Frontend: „Meeting erstellen" + „Direkt beitreten"-Button (§11.2)
+### A4 · Videokonferenz-Adapter (§11) — WebEx steht, der Rest ist offen
+Die Rümpfe für Zoom / Teams / Meet wurden entfernt, statt sie als „geplant" zu
+führen: drei leere Crates sind keine Roadmap. WebEx ist echt implementiert
+(OAuth, Meetings anlegen/beitreten), die Join-Details stecken in
+`cal-core::conferencing` und beide Frontends haben ihre `MeetingControls`.
+- [x] Echte REST-/OAuth-Implementierung für WebEx statt `VcError::Unsupported` (§11.1)
+- [x] Meeting-Link am Event; `create_meeting` erzeugt + speichert ihn (§11.2)
+- [x] Frontend: „Meeting erstellen" + „Direkt beitreten"-Button (§11.2)
+- [ ] Zoom / Teams / Meet: je ein Adapter, wenn sie gebraucht werden (§11.1)
 - [ ] (optional) Raumverwaltung als zusätzliche Capability (§11.2)
 - Einstieg: `crates/adapter-webex/src/lib.rs`, `crates/vc-core`, `EventDialog.tsx`.
 
