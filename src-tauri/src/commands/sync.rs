@@ -1657,6 +1657,114 @@ pub async fn accept_remote_dataset(
     Ok(report)
 }
 
+/// "Datensatz übernehmen", asked with a kind and the shared form's values.
+///
+/// The twin of [`accept_remote_dataset`], and the same flow up to the last
+/// step: reach the target, read `meta.json`, derive the key if the dataset is
+/// encrypted, apply it, and only then commit. What differs is WHAT is
+/// committed — the typed one writes the legacy preferences, this one writes an
+/// account row and points this device at it, which is what every other path in
+/// the app now does.
+///
+/// The commit runs after `accept_remote` has succeeded, deliberately: a join
+/// that fails must leave a device exactly as it was, and a row written first
+/// would survive it.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn accept_remote_dataset_values(
+    db: State<'_, DbHandle>,
+    orchestrator: State<'_, Arc<SyncOrchestrator>>,
+    scheduler: State<'_, Arc<SyncScheduler>>,
+    onboarding: State<'_, Arc<OnboardingService>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
+    refresher: State<'_, Arc<CacheRefresher>>,
+    registry: State<'_, Arc<AdapterRegistry>>,
+    kind: String,
+    values: serde_json::Map<String, serde_json::Value>,
+    device_name: Option<String>,
+    passphrase: Option<String>,
+) -> CommandResult<OnboardingReport> {
+    let shared = db.shared();
+    let plugins = HostSyncPlugins(plugin_manager.inner());
+    let plain = host_core::sync_target::preview_adapter(
+        &plugins,
+        &UserPrefsHostKeyVerifier::new(shared.clone()),
+        &kind,
+        &values,
+    )
+    .map_err(connect_err)?;
+    plain.test_connection().await.map_err(sync_err)?;
+
+    let meta = plain.fetch_meta().await.map_err(sync_err)?;
+    let e2e_active = meta.as_ref().map(|m| m.e2e_enabled).unwrap_or(false);
+    let key: Option<[u8; KEY_LEN]> = if e2e_active {
+        let pp = passphrase
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or(CommandError {
+                code: "encryption_required",
+                message: "this dataset is encrypted; a passphrase is required".into(),
+            })?;
+        let params = meta
+            .as_ref()
+            .and_then(|m| m.e2e_params.clone())
+            .ok_or(CommandError {
+                code: "protocol",
+                message: "meta.json says e2e but carries no params".into(),
+            })?;
+        Some(resolve_data_key(pp, &params).map_err(sync_err)?)
+    } else {
+        None
+    };
+    let adapter = wrap_if_encrypted(Arc::clone(&plain), key);
+    let prefs = UserPrefsRepo::new(&shared);
+
+    // Set before applying, and reverted on failure. The snapshot's credential
+    // restore is gated on this device's flag, so an E2E dataset applied while
+    // it is still false drops every account's password on the floor and
+    // re-prompts for all of them. Same reasoning as the typed twin's.
+    if e2e_active {
+        prefs.set(PREF_E2E_ENABLED, "true").map_err(internal)?;
+    }
+
+    let trimmed = device_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let report = match onboarding.accept_remote(adapter.as_ref(), trimmed).await {
+        Ok(report) => report,
+        Err(err) => {
+            if e2e_active {
+                let _ = prefs.delete(PREF_E2E_ENABLED);
+            }
+            return Err(sync_err(err));
+        }
+    };
+
+    orchestrator.configure(Arc::clone(&adapter));
+    // The account row, its secrets and the pointer — the same write the
+    // settings path makes, so a device onboarded here is indistinguishable
+    // afterwards from one set up later.
+    host_core::sync_target::connect(
+        &prefs,
+        &AccountsRepo::new(&shared),
+        &crate::secrets::KeyringSecretStore,
+        &plugins,
+        &kind,
+        &values,
+    )
+    .map_err(connect_err)?;
+    if let Some(k) = key {
+        store_e2e_key(&k)?;
+    } else {
+        let _ = prefs.delete(PREF_E2E_ENABLED);
+    }
+    scheduler.kick();
+    register_onboarded_accounts(&shared, &registry, &refresher);
+    Ok(report)
+}
+
 /// "Neu beginnen" path of the §19.11 onboarding flow.
 ///
 /// Overwrites the remote `meta.json` with a fresh one naming only
@@ -1737,6 +1845,90 @@ pub async fn adopt_local_dataset(
     // list exists, so lists created later (but still before sync was turned
     // on) would otherwise never be re-emitted. Force a replay now so a
     // second device actually receives them; receivers dedupe.
+    crate::commands::force_backfill_local_task_events(db.inner(), event_log.inner());
+    scheduler.kick();
+    Ok(report)
+}
+
+/// "Neu beginnen", asked with a kind and the shared form's values.
+///
+/// The twin of [`adopt_local_dataset`], differing in the same one place as the
+/// accept twin: the commit writes an account row and the pointer instead of
+/// the legacy preferences.
+///
+/// Note what this does NOT do differently. It still mints a fresh v2 key pair
+/// when a passphrase is given, still overwrites the remote `meta.json`, and
+/// still forces the local task backfill afterwards — a device that turns sync
+/// on after creating lists would otherwise never send them, and the one-shot
+/// gate on the boot backfill has long since fired.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn adopt_local_dataset_values(
+    db: State<'_, DbHandle>,
+    orchestrator: State<'_, Arc<SyncOrchestrator>>,
+    scheduler: State<'_, Arc<SyncScheduler>>,
+    onboarding: State<'_, Arc<OnboardingService>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
+    event_log: State<'_, Arc<crate::event_log::EventLogWriter>>,
+    kind: String,
+    values: serde_json::Map<String, serde_json::Value>,
+    device_name: Option<String>,
+    passphrase: Option<String>,
+) -> CommandResult<OnboardingReport> {
+    let shared = db.shared();
+    let plugins = HostSyncPlugins(plugin_manager.inner());
+    let plain = host_core::sync_target::preview_adapter(
+        &plugins,
+        &UserPrefsHostKeyVerifier::new(shared.clone()),
+        &kind,
+        &values,
+    )
+    .map_err(connect_err)?;
+    plain.test_connection().await.map_err(sync_err)?;
+
+    let trimmed_pp = passphrase
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let (key, e2e_params) = match trimmed_pp {
+        Some(pp) => {
+            let mut params = EncryptionParams::fresh();
+            let kek = derive_key(pp, &params).map_err(sync_err)?;
+            let dek = fresh_data_key();
+            let wrapped = wrap_key(&kek, &dek).map_err(sync_err)?;
+            params.wrapped_data_key = Some(wrapped);
+            (Some(dek), Some(params))
+        }
+        None => (None, None),
+    };
+    let adapter = wrap_if_encrypted(Arc::clone(&plain), key);
+
+    let trimmed = device_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let report = onboarding
+        .adopt_local(adapter.as_ref(), trimmed, e2e_params)
+        .await
+        .map_err(sync_err)?;
+
+    orchestrator.configure(Arc::clone(&adapter));
+    let prefs = UserPrefsRepo::new(&shared);
+    host_core::sync_target::connect(
+        &prefs,
+        &AccountsRepo::new(&shared),
+        &crate::secrets::KeyringSecretStore,
+        &plugins,
+        &kind,
+        &values,
+    )
+    .map_err(connect_err)?;
+    if let Some(k) = key {
+        store_e2e_key(&k)?;
+        prefs.set(PREF_E2E_ENABLED, "true").map_err(internal)?;
+    } else {
+        let _ = prefs.delete(PREF_E2E_ENABLED);
+    }
     crate::commands::force_backfill_local_task_events(db.inner(), event_log.inner());
     scheduler.kick();
     Ok(report)

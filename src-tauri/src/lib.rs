@@ -813,6 +813,8 @@ pub fn run() {
             // Phase Sf (DESIGN.md §19.11): onboarding flow.
             commands::preview_sync_target,
             commands::preview_sync_target_values,
+            commands::accept_remote_dataset_values,
+            commands::adopt_local_dataset_values,
             commands::accept_remote_dataset,
             commands::adopt_local_dataset,
             // §19.11: first-launch wizard gate (fresh-instance detection).
