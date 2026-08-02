@@ -206,7 +206,14 @@ export function AccountsPanel() {
         // target IS an account here — you add it on this screen and then pick
         // it in the sync settings, which is what `can_sync` is for. Filtering
         // them out would leave no way to create one.
-        const offered = kinds.filter((k) => !HOST_INTERNAL_KINDS.has(k.kind));
+        //
+        // `k.offered` drops the kinds a plugin only ADOPTED: an account that
+        // already carries one keeps working and stays listed everywhere else,
+        // but the adapter it was created with is gone, so this screen must not
+        // offer to make another.
+        const offered = kinds.filter(
+          (k) => k.offered && !HOST_INTERNAL_KINDS.has(k.kind),
+        );
         setAvailableKinds(offered);
         // Preselect the first one, but never overwrite a choice the user has
         // already made — this effect re-runs whenever a plugin is toggled.

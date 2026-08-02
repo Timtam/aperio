@@ -127,9 +127,12 @@ What you take on with them:
   does not translate between the two shapes and could not — it does not know
   what your fields mean. Accept both, or migrate inside your own plugin where
   you know what a value means.
-- **Adopted kinds are for resolution, not for offering.** They never appear in
-  the Add-account picker, and they need no display name in the app's locale
-  files. A merged adapter is offered once, under one name.
+- **Adopted kinds are for resolution, not for offering.** They still appear
+  wherever the app DESCRIBES accounts — an account that already carries one has
+  to stay visible, groupable and repairable — but never where it CREATES one.
+  The Add-account picker and the sync-target form both skip them, so a merged
+  adapter is offered once, under one name. They need no display name in the
+  app's locale files.
 - **Delete the plugin you adopted from.** While both are installed the one that
   declares the kind as its own keeps it, so the adopting half serves nothing —
   and which one a user's accounts bind to depends on what they have installed.

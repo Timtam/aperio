@@ -270,6 +270,20 @@ impl Default for TaskCapabilities {
 pub struct AdapterKindInfo {
     /// The value accounts of this adapter carry in `accounts.adapter_kind`.
     pub kind: String,
+    /// Whether a NEW account of this kind may be offered.
+    ///
+    /// False for a kind a plugin only ADOPTED
+    /// ([`PluginManifest::adopts_adapter_kinds`]). Such a kind is still listed
+    /// here, and deliberately so: accounts that already carry it have to stay
+    /// visible, groupable and repairable, and a screen that quietly dropped
+    /// them would hide a working sync target with no way for the user to find
+    /// out where it went. But nobody should be able to create another one — the
+    /// adapter it belonged to is gone.
+    ///
+    /// So the rule for a caller is simply: filter on this wherever the surface
+    /// CREATES something, and ignore it wherever the surface DESCRIBES what
+    /// already exists.
+    pub offered: bool,
     /// The plugin's display name — the label to use when the app has no
     /// translation for this kind, which is the normal case for a third-party
     /// plugin.

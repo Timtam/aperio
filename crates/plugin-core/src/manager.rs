@@ -1204,42 +1204,63 @@ impl PluginManager {
     /// The plugin's own `name` rides along as the fallback label: the app has
     /// translations for the adapters it ships, and a third-party plugin's own
     /// name beats a missing-key marker.
+    ///
+    /// A kind a plugin merely ADOPTED is listed too, with `offered: false`. It
+    /// has to be: the accounts carrying it are real, and every surface that
+    /// groups or describes accounts builds its groups from this list — one that
+    /// left them out would make a working sync target vanish from the picker
+    /// instead of saying anything. Creating a NEW account of such a kind is
+    /// what [`AdapterKindInfo::offered`] forbids.
     pub fn adapter_kinds(&self) -> Vec<AdapterKindInfo> {
         let inner = self.inner.read().expect("manager poisoned");
         let mut kinds: Vec<AdapterKindInfo> = inner
             .plugins
             .values()
             .filter(|p| !inner.disabled.contains(&p.manifest.id))
-            .filter_map(|p| {
-                p.manifest.adapter_kind.clone().map(|kind| AdapterKindInfo {
-                    kind,
-                    name: p.manifest.name.clone(),
-                    plugin_id: p.manifest.id.clone(),
-                    owns_containers: p.manifest.has_data_family(),
-                    declares_account_schema: p.manifest.account.is_some(),
-                    declares_oauth: p
-                        .manifest
-                        .account
-                        .as_ref()
-                        .is_some_and(|a| a.oauth.is_some()),
-                    // Decided here rather than in two frontends, because it is
-                    // read off the capability list and the frontends must not
-                    // grow one. `holds_data` is deliberately "anything but
-                    // sync" rather than `has_data_family()`: a meeting provider
-                    // has no calendars and still needs an account.
-                    holds_data: p
-                        .manifest
-                        .capabilities
-                        .iter()
-                        .any(|c| *c != crate::capability::Capability::Sync),
-                    can_sync: p
-                        .manifest
-                        .capabilities
-                        .contains(&crate::capability::Capability::Sync),
-                })
+            .flat_map(|p| {
+                let own = p.manifest.adapter_kind.iter().map(|k| (k.clone(), true));
+                let adopted = p
+                    .manifest
+                    .adopts_adapter_kinds
+                    .iter()
+                    .map(|k| (k.clone(), false));
+                own.chain(adopted)
+                    .map(|(kind, offered)| AdapterKindInfo {
+                        kind,
+                        offered,
+                        name: p.manifest.name.clone(),
+                        plugin_id: p.manifest.id.clone(),
+                        owns_containers: p.manifest.has_data_family(),
+                        declares_account_schema: p.manifest.account.is_some(),
+                        declares_oauth: p
+                            .manifest
+                            .account
+                            .as_ref()
+                            .is_some_and(|a| a.oauth.is_some()),
+                        // Decided here rather than in two frontends, because it
+                        // is read off the capability list and the frontends must
+                        // not grow one. `holds_data` is deliberately "anything
+                        // but sync" rather than `has_data_family()`: a meeting
+                        // provider has no calendars and still needs an account.
+                        holds_data: p
+                            .manifest
+                            .capabilities
+                            .iter()
+                            .any(|c| *c != crate::capability::Capability::Sync),
+                        can_sync: p
+                            .manifest
+                            .capabilities
+                            .contains(&crate::capability::Capability::Sync),
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect();
-        kinds.sort_by(|a, b| a.kind.cmp(&b.kind));
+        // Offered before adopted within one kind, so the dedup below keeps the
+        // same entry the RESOLVER would pick — see `plugin_for_adapter_kind`.
+        // Without the second key the survivor would follow hash-map order and
+        // the list could describe one kind differently on two launches of the
+        // same build.
+        kinds.sort_by(|a, b| a.kind.cmp(&b.kind).then(b.offered.cmp(&a.offered)));
         kinds.dedup_by(|a, b| a.kind == b.kind);
         kinds
     }
@@ -2043,19 +2064,73 @@ mod tests {
         );
     }
 
-    /// Adopted kinds resolve; they are not OFFERED. A merged adapter appears
-    /// once in the Add-account picker, under one name — the entry for the thing
-    /// it absorbed must not survive it.
+    /// Adopted kinds are LISTED but not OFFERED.
+    ///
+    /// Both halves matter and they pull in opposite directions. Listing them is
+    /// what keeps an account that already carries one visible: every surface
+    /// that groups accounts builds its groups from this list, so an omitted
+    /// kind makes a working sync target vanish from the picker with nothing
+    /// said. `offered: false` is what stops the Add-account screen from
+    /// offering to create another one against an adapter that is gone.
     #[test]
-    fn an_adopted_kind_is_not_offered_as_its_own_adapter() {
+    fn an_adopted_kind_is_listed_but_not_offered() {
         let mgr = PluginManager::new("0.1.0");
         let mut merged = stub_manifest("test.merged");
         merged.adapter_kind = Some("google".into());
         merged.adopts_adapter_kinds = vec!["googledrive".into()];
         mgr.insert_stub_for_tests("test.merged", merged);
 
-        let offered: Vec<String> = mgr.adapter_kinds().into_iter().map(|k| k.kind).collect();
-        assert_eq!(offered, vec!["google".to_string()]);
+        let listed: Vec<(String, bool)> = mgr
+            .adapter_kinds()
+            .into_iter()
+            .map(|k| (k.kind, k.offered))
+            .collect();
+        assert_eq!(
+            listed,
+            vec![
+                ("google".to_string(), true),
+                ("googledrive".to_string(), false),
+            ],
+        );
+        // The adopted entry describes the plugin that serves it, so a group
+        // built from it carries that plugin's name and capabilities.
+        let adopted = mgr
+            .adapter_kinds()
+            .into_iter()
+            .find(|k| k.kind == "googledrive")
+            .expect("listed");
+        assert_eq!(adopted.plugin_id, "test.merged");
+        assert_eq!(adopted.name, "Stub");
+    }
+
+    /// One kind, one entry — and the surviving entry is the one the RESOLVER
+    /// picks, not whichever the hash map yielded first.
+    #[test]
+    fn a_kind_claimed_twice_keeps_the_entry_that_resolves() {
+        let mgr = PluginManager::new("0.1.0");
+        let mut merged = stub_manifest("test.merged");
+        merged.adapter_kind = Some("google".into());
+        merged.adopts_adapter_kinds = vec!["googledrive".into()];
+        mgr.insert_stub_for_tests("test.merged", merged);
+        let mut legacy = stub_manifest("test.legacy");
+        legacy.adapter_kind = Some("googledrive".into());
+        mgr.insert_stub_for_tests("test.legacy", legacy);
+
+        let entry = mgr
+            .adapter_kinds()
+            .into_iter()
+            .find(|k| k.kind == "googledrive")
+            .expect("listed once");
+        assert!(entry.offered, "the plugin that OWNS the kind describes it");
+        assert_eq!(entry.plugin_id, "test.legacy");
+        assert_eq!(
+            entry.plugin_id,
+            mgr.plugin_for_adapter_kind("googledrive")
+                .expect("resolves")
+                .manifest
+                .id,
+            "the list and the resolver must name the same plugin",
+        );
     }
 
     /// A disabled plugin does not resolve the kinds it adopted either —

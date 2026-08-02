@@ -217,8 +217,11 @@ export default function AccountsScreen() {
     listAdapterKinds()
       .then((kinds) => {
         if (!cancelled) {
-          // Storage backends belong here too — see the desktop twin.
-          setAvailableKinds(kinds.filter((k) => !HOST_INTERNAL_KINDS.has(k.kind)));
+          // Storage backends belong here too, and adopted kinds do not —
+          // see the desktop twin.
+          setAvailableKinds(
+            kinds.filter((k) => k.offered && !HOST_INTERNAL_KINDS.has(k.kind)),
+          );
         }
       })
       .catch(() => {

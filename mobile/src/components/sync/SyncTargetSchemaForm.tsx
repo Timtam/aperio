@@ -160,7 +160,11 @@ export function SyncTargetSchemaForm({
     listAdapterKinds()
       .then((all) => {
         if (cancelled) return;
-        const usable = all.filter((k) => k.can_sync);
+        // `offered` as well as `can_sync`: this form CREATES the account,
+        // and a kind its plugin only adopted has no adapter left to create one
+        // with. Existing accounts of such a kind stay selectable on the sync
+        // screen, which is a different question and a different list.
+        const usable = all.filter((k) => k.can_sync && k.offered);
         setKinds(usable);
         setKind((current) =>
           usable.some((k) => k.kind === current)

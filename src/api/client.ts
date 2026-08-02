@@ -637,6 +637,14 @@ import type { AccountFormSpec } from '@aperio/shared';
 /** One adapter this build can connect an account for. */
 export interface AdapterKindInfo {
   kind: AdapterKind;
+  /** Whether a NEW account of this kind may be offered. False for a kind its
+   *  plugin only ADOPTED from an adapter it replaced: the accounts that carry
+   *  it stay listed, groupable and repairable, but there is nothing left to
+   *  create another one with.
+   *
+   *  Filter on it wherever a surface CREATES something; ignore it wherever a
+   *  surface DESCRIBES what already exists. */
+  offered: boolean;
   /** The plugin's own display name — the label to use when the app has no
    *  translation for this kind, which is the normal case for a third-party
    *  plugin. */
