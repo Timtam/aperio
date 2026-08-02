@@ -133,6 +133,10 @@ export function SyncTargetAccountPicker({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Set when the refusal was `encryption_key_mismatch`, so the passphrase
+   *  field appears on that account — the only way out of that state. */
+  const [keyMismatchId, setKeyMismatchId] = useState<string | null>(null);
+  const [passphraseDraft, setPassphraseDraft] = useState('');
   /** Set when the refusal was `host_key_not_trusted`, so the §19.5 trust
    *  gesture can be offered for exactly that account instead of a message the
    *  user has no way to act on. */
@@ -215,9 +219,10 @@ export function SyncTargetAccountPicker({
   );
 
   const runSelect = useCallback(
-    async (account: Account) => {
+    async (account: Account, passphrase?: string) => {
       setError(null);
       setUntrustedId(null);
+      setKeyMismatchId(null);
       setBusyId(account.id);
       // Say that the probe STARTED. The button's name changes to the same
       // sentence, but a screen reader does not re-read the element that
@@ -231,7 +236,7 @@ export function SyncTargetAccountPicker({
         'polite',
       );
       try {
-        await selectSyncAccount(account.id);
+        await selectSyncAccount(account.id, passphrase);
         await onChanged();
         announce(
           t('dialogs.settings.sync.targetSelected', {
@@ -253,6 +258,19 @@ export function SyncTargetAccountPicker({
           // offered right here.
           setUntrustedId(account.id);
           showError(t('dialogs.settings.sync.targetHostKeyUntrusted'));
+          return;
+        }
+        if (
+          isCommandError(err) &&
+          (err.code === 'encryption_key_mismatch' ||
+            // A passphrase was offered and did not open the dataset either.
+            // Same gesture, so the field stays rather than disappearing under
+            // the user with only a sentence left behind.
+            (err.code === 'decryption_failed' && passphrase))
+        ) {
+          setKeyMismatchId(account.id);
+          setPassphraseDraft('');
+          showError(messageForError(err));
           return;
         }
         if (isCommandError(err) && err.code === 'plugin_missing') {
@@ -513,6 +531,34 @@ export function SyncTargetAccountPicker({
                               name: account.display_name,
                             })}
                     </button>
+                  </div>
+                )}
+                {keyMismatchId === account.id && (
+                  <div className="sync-panel__field">
+                    <label>
+                      {t('dialogs.settings.sync.targetKeyPassphraseLabel')}
+                      <input
+                        type="password"
+                        value={passphraseDraft}
+                        onChange={(e) => setPassphraseDraft(e.target.value)}
+                        autoComplete="current-password"
+                      />
+                    </label>
+                    <div className="sync-panel__actions">
+                      <button
+                        type="button"
+                        aria-disabled={blocked || !passphraseDraft.trim()}
+                        aria-busy={busy}
+                        onClick={() => {
+                          if (blocked || !passphraseDraft.trim()) return;
+                          void runSelect(account, passphraseDraft.trim());
+                        }}
+                      >
+                        {t('dialogs.settings.sync.targetKeyPassphraseUse', {
+                          name: account.display_name,
+                        })}
+                      </button>
+                    </div>
                   </div>
                 )}
                 {untrustedId === account.id && (

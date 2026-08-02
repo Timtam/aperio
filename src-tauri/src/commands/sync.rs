@@ -894,6 +894,9 @@ async fn probe_activate_and_persist(
     orchestrator: &SyncOrchestrator,
     scheduler: &SyncScheduler,
     onboarding: &OnboardingService,
+    // Supplied only when the caller is answering an `encryption_key_mismatch`
+    // — see the E2E block below.
+    passphrase: Option<&str>,
     persist: impl FnOnce() -> CommandResult<()>,
 ) -> CommandResult<()> {
     // Probe the connection before keeping the adapter active —
@@ -926,16 +929,43 @@ async fn probe_activate_and_persist(
         // it fails on the next round with a message about an unreadable record,
         // and nothing connects that to a key left behind by an earlier install.
         match verify_stored_key(&plain, k).await {
+            StoredKeyVerdict::Opens | StoredKeyVerdict::NothingToTry => Some(k),
+            // The way out, and the only one that exists: the passphrase for
+            // THIS dataset. Deriving from it replaces the stale key rather
+            // than sitting beside it, because two keys for one slot is the
+            // state that produced this refusal in the first place.
             StoredKeyVerdict::Mismatch => {
-                return Err(CommandError {
-                    code: "encryption_key_mismatch",
-                    message: "this device holds an encryption key from an earlier setup, and it                               does not open this dataset"
-                        .into(),
-                })
+                let pp = passphrase
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .ok_or(CommandError {
+                        code: "encryption_key_mismatch",
+                        message: "this device holds an encryption key from an earlier setup,                                   and it does not open this dataset"
+                            .into(),
+                    })?;
+                let params = target_meta
+                    .as_ref()
+                    .and_then(|m| m.e2e_params.clone())
+                    .ok_or(CommandError {
+                        code: "protocol",
+                        message: "meta.json says e2e but carries no params".into(),
+                    })?;
+                let dek = resolve_data_key(pp, &params).map_err(sync_err)?;
+                // Checked the same way the stored one was, so a passphrase that
+                // is merely wrong is refused here rather than at the next round.
+                if matches!(
+                    verify_stored_key(&plain, dek).await,
+                    StoredKeyVerdict::Mismatch
+                ) {
+                    return Err(CommandError {
+                        code: "decryption_failed",
+                        message: "that passphrase does not open this dataset".into(),
+                    });
+                }
+                store_e2e_key(&dek)?;
+                Some(dek)
             }
-            StoredKeyVerdict::Opens | StoredKeyVerdict::NothingToTry => {}
         }
-        Some(k)
     } else {
         None
     };
@@ -1014,6 +1044,7 @@ pub async fn configure_sync_adapter(
                 &orchestrator,
                 &scheduler,
                 &onboarding,
+                None,
                 || persist_adapter_config(&shared, plugin_manager.inner(), &config),
             )
             .await?;
@@ -1061,6 +1092,10 @@ pub async fn select_sync_account(
     onboarding: State<'_, Arc<OnboardingService>>,
     plugin_manager: State<'_, Arc<PluginManager>>,
     account_id: String,
+    // Only ever sent as the answer to an `encryption_key_mismatch`: the
+    // passphrase for the dataset ON THE TARGET, which replaces the stale key
+    // this device was holding. Absent on a first attempt.
+    passphrase: Option<String>,
 ) -> CommandResult<()> {
     let account_id = account_id.trim().to_string();
     if account_id.is_empty() {
@@ -1109,6 +1144,7 @@ pub async fn select_sync_account(
         &orchestrator,
         &scheduler,
         &onboarding,
+        passphrase.as_deref(),
         || {
             // The one thing this command writes: which account this device
             // syncs through. The row itself is the user's, added elsewhere and

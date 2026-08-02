@@ -1501,9 +1501,14 @@ export const configureSyncAdapter = (config: SyncAdapterConfig) =>
  *   - `plugin_missing` — no loaded plugin serves this account's adapter.
  *   - `auth` — the credential is not in this device's keychain.
  *   - `encryption_required` — the target holds an encrypted dataset this
- *     device has no key for; joining it is the onboarding flow's job. */
-export const selectSyncAccount = (accountId: string) =>
-  invoke<void>('select_sync_account', { accountId });
+ *     device has no key for; joining it is the onboarding flow's job.
+ *   - `encryption_key_mismatch` — this device holds a key from an earlier
+ *     setup that does not open this dataset. Re-send with `passphrase` to
+ *     replace it; without one, nothing is changed.
+ *   - `decryption_failed` — a `passphrase` was sent and does not open the
+ *     dataset either. */
+export const selectSyncAccount = (accountId: string, passphrase?: string) =>
+  invoke<void>('select_sync_account', { accountId, passphrase: passphrase ?? null });
 
 /** Update the periodic interval (in minutes). Clamps to ≥1 on the
  *  backend; returns the value actually persisted. */

@@ -922,6 +922,8 @@
         "errorNotFound": "No dataset found at the path.",
         "errorSchemaTooOld": "Sync dataset needs a newer Aperio version.",
         "errorEncryption": "Encrypted dataset, but no password configured.",
+        "targetKeyPassphraseLabel": "Passphrase for the dataset on this target",
+        "targetKeyPassphraseUse": "Use this passphrase for {{name}}",
         "errorKeyMismatch": "This device still holds an encryption key from an earlier setup — the system keychain keeps it even when Aperio's data folder is deleted — and it does not open this dataset. Nothing was changed.",
         "errorDecryption": "Wrong sync passphrase.",
         "e2eActive": "🔒 End-to-end encryption active",
