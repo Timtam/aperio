@@ -1169,14 +1169,21 @@ pub fn account_form_spec(
 /// picker has no business knowing that in advance. Enabling or disabling a
 /// plugin changes the answer on the next call.
 ///
-/// The host-internal kinds are NOT in here — the local store is implicit and
-/// the device calendar is offered through its own OS permission flow, so each
-/// frontend adds its own entry for those where it makes sense.
+/// The built-in store is in here too, from its own manifest — see
+/// [`host_core::builtin_adapters`]. It is not a plugin and never will be on
+/// this path, but that is a fact about how it is CALLED; a caller asking what
+/// adapters exist should not have to know it, and both frontends used to.
+///
+/// The device calendar is still not here: it exists only on the phone
+/// platforms and is added by granting an OS permission rather than by being
+/// there, so the mobile accounts screen offers it on its own terms.
 #[tauri::command]
 pub fn list_adapter_kinds(
     plugin_manager: State<'_, Arc<PluginManager>>,
 ) -> CommandResult<Vec<plugin_core::AdapterKindInfo>> {
-    Ok(plugin_manager.adapter_kinds())
+    Ok(host_core::builtin_adapters::all_adapter_kinds(
+        plugin_manager.inner(),
+    ))
 }
 
 #[derive(Debug, Deserialize)]

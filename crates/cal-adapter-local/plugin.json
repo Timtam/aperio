@@ -1,0 +1,22 @@
+{
+  "id": "com.aperio.cal-adapter-local",
+  "name": "Aperio Local",
+  "version": "0.1.0",
+  "plugin_type": "adapter",
+  "capabilities": ["calendar", "tasks", "contacts"],
+  "abi_version": 3,
+  "min_app_version": "0.1.0",
+  "author": "Aperio Contributors",
+  "description": "The built-in store: calendars, task lists and address books that live in Aperio's own database rather than at a provider.",
+  "adapter_kind": "local",
+  "signed": false,
+  "tasks": {
+    "nested_projects": true,
+    "sections": true,
+    "manageable_sections": true,
+    "subtasks": true,
+    "move_between_projects": true,
+    "create_lists": true,
+    "delete_lists": true
+  }
+}

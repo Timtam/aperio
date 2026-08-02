@@ -73,15 +73,17 @@ const CONTACTS_CAPABLE_KINDS: ReadonlySet<AdapterKind> = new Set([
  * not-yet-implemented entries disabled and labelled "coming soon".
  */
 
-/** The kinds the host has no plugin for because it implements them itself.
+/** The kinds this screen must not offer even though the host lists them.
  *
- *  `local` is the built-in store; it is created during bootstrap and is not
- *  offered in the picker. Everything else in the picker comes from
- *  `listAdapterKinds()`, i.e. from the plugins that are actually installed. */
-const HOST_INTERNAL_KINDS: ReadonlySet<AdapterKind> = new Set([
-  'local',
-  'device_calendar',
-]);
+ *  Only the device calendar is left. It is added by granting an OS permission
+ *  rather than by filling in a form, so the mobile screen offers it on its own
+ *  terms and this one not at all.
+ *
+ *  `local` used to be here too. It is now declared like every other adapter
+ *  (`host_core::builtin_adapters`) and carries `offered: false`, so the filter
+ *  below drops it for a reason the host stated rather than one this file
+ *  remembered. */
+const HOST_INTERNAL_KINDS: ReadonlySet<AdapterKind> = new Set(['device_calendar']);
 
 
 

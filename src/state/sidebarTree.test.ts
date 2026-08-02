@@ -312,13 +312,32 @@ describe('parentTriState / accountTriState', () => {
       taskLists: [],
       selectedCalendarIds: new Set<string>(),
       selectedTaskListIds: new Set<string>(),
-      dataHoldingKinds: new Set(['caldav']),
+      dataHoldingKinds: new Set(['caldav', 'local']),
     });
     expect(tree.map((n) => n.accountId)).not.toContain('a2');
     expect(tree.map((n) => n.accountId)).toContain('a1');
-    // The built-in store is not a plugin and answers no capability question,
-    // so it must survive the filter on its id.
+    // The built-in store survives because it DECLARES that it holds data, like
+    // every other adapter — `host_core::builtin_adapters` puts `local` in the
+    // list the host returns. It used to survive through an exception on its id,
+    // which is what made this filter unable to answer for the one account every
+    // user has.
     expect(tree.map((n) => n.accountId)).toContain('local');
+  });
+
+  it('drops the built-in store when the host does not list it', () => {
+    // The other half of the same rule, and the reason the id exception had to
+    // go rather than stay as a belt-and-braces: with the exception in place
+    // this filter had no way to express "not a data account", so a future
+    // built-in that holds nothing would have been drawn anyway.
+    const tree = buildSidebarTree({
+      accounts: [makeAccount('a1', 'Fastmail', 'caldav')],
+      calendars: [],
+      taskLists: [],
+      selectedCalendarIds: new Set<string>(),
+      selectedTaskListIds: new Set<string>(),
+      dataHoldingKinds: new Set(['caldav']),
+    });
+    expect(tree.map((n) => n.accountId)).not.toContain('local');
   });
 
   it('keeps every account until the capability answer arrives', () => {

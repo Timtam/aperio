@@ -65,14 +65,14 @@ import { FormScrollView } from '../components/FormScrollView';
 // visible button and a custom accessibility action; results are announced and
 // screen-reader focus is moved to the new row after a create/connect.
 
-/** Kinds the host implements itself, so no plugin declares them. `local` is the
- *  built-in store (created at bootstrap, never offered); `device_calendar` is
- *  offered separately because it is added through an OS permission grant rather
- *  than a form. */
-const HOST_INTERNAL_KINDS: ReadonlySet<AdapterKind> = new Set([
-  'local',
-  'device_calendar',
-]);
+/** The kinds this screen must not offer through the ordinary form, even
+ *  though the host lists them.
+ *
+ *  Only the device calendar is left: it is added through an OS permission
+ *  grant, and gets its own picker entry below. `local` used to be here; the
+ *  built-in store declares itself now (`host_core::builtin_adapters`) and
+ *  carries `offered: false`, so it drops out for a reason the host stated. */
+const HOST_INTERNAL_KINDS: ReadonlySet<AdapterKind> = new Set(['device_calendar']);
 
 /** The device-local calendar adapter ships on both phone platforms — iOS
  *  (EventKit: calendars + reminders) and Android (CalendarProvider: calendars

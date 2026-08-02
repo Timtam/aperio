@@ -7693,13 +7693,20 @@ impl Host {
         to_json(&found)
     }
 
-    /// Every adapter this build can connect an account for, as JSON.
+    /// Every adapter this build knows, as JSON.
     ///
     /// Assembled from the loaded manifests rather than from a list in the UI:
     /// which adapters exist is decided by which plugins are embedded, and the
     /// connect picker has no business knowing that in advance.
+    ///
+    /// The built-in store rides along from its own manifest — see
+    /// [`host_core::builtin_adapters`]. The device calendar does not: it exists
+    /// only where the native bridge does and is added by granting a permission,
+    /// so the accounts screen offers it on its own terms.
     pub fn list_adapter_kinds_json(&self) -> Result<String, StoreError> {
-        to_json(&self.plugin_manager.adapter_kinds())
+        to_json(&host_core::builtin_adapters::all_adapter_kinds(
+            &self.plugin_manager,
+        ))
     }
 
     /// Begin a schema-driven OAuth sign-in: build the consent URL for the

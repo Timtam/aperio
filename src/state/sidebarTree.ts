@@ -231,13 +231,16 @@ export function buildSidebarTree(input: {
   // Storage backends drop out here rather than at the render site, so nothing
   // downstream has to know they existed: the tri-state roll-ups, the keyboard
   // order and the expansion state are all derived from this list.
+  //
+  // No exception for the built-in store any more: it declares itself like
+  // every other adapter (`host_core::builtin_adapters`), so `local` is in
+  // `dataHoldingKinds` and the capability filter answers for it. The `a.id ===
+  // LOCAL_ACCOUNT_ID ||` that used to sit here was the filter admitting it
+  // could not answer for the one account every user has.
   const shown =
     dataHoldingKinds === undefined
       ? allAccounts
-      : allAccounts.filter(
-          (a) =>
-            a.id === LOCAL_ACCOUNT_ID || dataHoldingKinds.has(a.adapter_kind),
-        );
+      : allAccounts.filter((a) => dataHoldingKinds.has(a.adapter_kind));
 
   // Stable order: local first, then alphabetical by display name.
   const sortedAccounts = [...shown].sort((a, b) => {

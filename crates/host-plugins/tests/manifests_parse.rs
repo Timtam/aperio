@@ -200,17 +200,27 @@ fn no_two_adapters_in_the_tree_share_a_kind() {
          binds to whichever plugin registered first: {clashes:?}",
     );
 
-    // `local` is the built-in store and `device_calendar` the native bridge;
-    // both are recognised by value in `host_core::accounts::AdapterKind` and
-    // resolve to no plugin at all.
-    for reserved in ["local", "device_calendar"] {
-        assert!(
-            !by_kind.contains_key(reserved),
-            "{reserved} is host-internal — an adapter claiming it can never be \
-             registered, and {:?} tried",
-            by_kind.get(reserved),
-        );
-    }
+    // `local` is the built-in store. It DOES declare itself now — a manifest in
+    // its own crate, read by `host_core::builtin_adapters` so every surface can
+    // describe it like any other adapter — but it is not loaded as a plugin,
+    // and `AdapterKind::is_host_internal` short-circuits its registration. So
+    // exactly one directory may claim it, and it is that one; a second claimant
+    // would be a plugin that could never be registered.
+    assert_eq!(
+        by_kind.get("local").map(Vec::as_slice),
+        Some(&["cal-adapter-local".to_string()][..]),
+        "`local` belongs to the built-in store's own manifest and nothing else",
+    );
+
+    // `device_calendar` is the native bridge, built in the cal-ffi layer over
+    // whatever the OS provides. Nothing declares it, and an adapter claiming it
+    // could never be reached.
+    assert!(
+        !by_kind.contains_key("device_calendar"),
+        "device_calendar is host-internal \u{2014} an adapter claiming it can never be \
+         registered, and {:?} tried",
+        by_kind.get("device_calendar"),
+    );
 }
 
 /// An adopted kind belongs to exactly one adapter too — and never to a plugin
