@@ -95,6 +95,11 @@ export function SyncDevicesPanel({ configured }: SyncDevicesPanelProps) {
   const [name, setName] = useState('');
   const [suggested, setSuggested] = useState<string | null>(null);
   const [savedName, setSavedName] = useState<string | null>(null);
+  /** Whether `savedName` has been read yet. Until it has, `null` means "not
+   *  asked", which is not the same as "no name" — and this device's row is
+   *  rendered from `savedName`, so treating the two alike would flash
+   *  "Unbenannt (a1b2c3d4…)" over a device that has been named for months. */
+  const [nameLoaded, setNameLoaded] = useState(false);
   const [savingName, setSavingName] = useState(false);
 
   const [devices, setDevices] = useState<SyncDeviceSummary[]>([]);
@@ -135,6 +140,7 @@ export function SyncDevicesPanel({ configured }: SyncDevicesPanelProps) {
       setName(info.configured ?? '');
       setSavedName(info.configured);
       setSuggested(info.suggested);
+      setNameLoaded(true);
     } catch {
       // A name that cannot be read is not a failure of this screen — the field
       // starts empty and saving still works. Reporting it would put an error
@@ -209,13 +215,32 @@ export function SyncDevicesPanel({ configured }: SyncDevicesPanelProps) {
     [i18n.language, t],
   );
 
+  /** What to call a device in the list.
+   *
+   *  For THIS device the local preference wins over the registry, and that is
+   *  the only correct reading rather than a nicety. Renaming writes the
+   *  preference; the registry copy is published by the next heartbeat, which
+   *  can be a quarter of an hour away. Rendering our own row from the registry
+   *  meant saving a name and watching the list go on showing the old one, with
+   *  nothing on screen to explain it.
+   *
+   *  The fallback deliberately does not run through `device.name` when the
+   *  local name is empty: clearing a name has to show the id straight away, and
+   *  falling back would resurrect the registry's stale copy of the name just
+   *  deleted. `nameLoaded` gates it, because before the read answers
+   *  `savedName` is `null` for "not asked" and would read as "no name". */
   const displayName = useCallback(
-    (device: SyncDeviceSummary) =>
-      device.name?.trim() ||
-      t('dialogs.settings.sync.deviceUnnamed', {
-        id: shortDeviceId(device.id),
-      }),
-    [t],
+    (device: SyncDeviceSummary) => {
+      const local =
+        device.is_this_device && nameLoaded ? (savedName ?? '') : device.name;
+      return (
+        local?.trim() ||
+        t('dialogs.settings.sync.deviceUnnamed', {
+          id: shortDeviceId(device.id),
+        })
+      );
+    },
+    [nameLoaded, savedName, t],
   );
 
   const runForget = useCallback(async () => {
