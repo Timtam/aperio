@@ -734,7 +734,14 @@ fn emit_item_events(
                 continue;
             }
             let mut override_ev = ev.clone();
-            override_ev.id = format!("{}#override:{}", ev.id, ov.original_start.to_rfc3339());
+            // `{master}::rid::{original_start}` — the shape CalDAV and Google
+            // already emit and the only one the shared frontend recognises as
+            // an override. It used to be `#override:`, a marker nothing read:
+            // the editor took these rows for standalone events and never
+            // offered the occurrence-or-series prompt, and the write path
+            // parsed the suffix into the ChangeKey. See
+            // `mapping::RECURRENCE_ID_MARKER`.
+            override_ev.id = crate::mapping::encode_override_event_id(&ev.id, ov.original_start);
             override_ev.recurrence = None;
             // Anchor an all-day override to LOCAL midnight, exactly as `to_event`
             // does for the master and its EXDATEs, so the override lands on the

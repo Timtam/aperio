@@ -860,6 +860,18 @@ async fn resolve_write_target(
     client: &EwsClient,
     decoded: &DecodedEventId,
 ) -> EwsResult<WriteTarget> {
+    // An override id — `{master}::rid::{original_start}`. Its `item_id` is the
+    // SERIES head, so writing against it as-is edits or deletes every
+    // occurrence. Resolve the exception's own item instead.
+    //
+    // This branch has to come first, and it has to be an error rather than a
+    // fallback when the occurrence cannot be found. The id says the user is
+    // acting on one instance; silently widening that to the series is the one
+    // outcome nobody would ask for, and it is unrecoverable — Exchange does not
+    // keep the pre-edit occurrences.
+    if let Some(original_start) = decoded.recurrence_id {
+        return resolve_override_target(client, decoded, original_start).await;
+    }
     if !decoded.kind.is_occurrence_like() {
         return Ok(WriteTarget {
             kind: decoded.kind,
@@ -875,6 +887,55 @@ async fn resolve_write_target(
         item_id: master.id,
         change_key: master.change_key,
     })
+}
+
+/// The exception item behind a `…::rid::…` override id.
+///
+/// One `GetItem` against the series head, whose `ModifiedOccurrences` carry
+/// each exception's own ItemId and ChangeKey — already parsed, see
+/// [`crate::mapping::ModifiedOccurrence`]. Matched on `original_start`, the
+/// RRULE slot the override displaces, which is the one value that stays put
+/// when somebody moves the occurrence to another day.
+///
+/// Read live rather than baked into the id on purpose: a ChangeKey is an
+/// optimistic-concurrency token that goes stale the moment anything else
+/// touches the item, and an id that carried one would start failing writes
+/// after any unrelated edit from Outlook.
+async fn resolve_override_target(
+    client: &EwsClient,
+    decoded: &DecodedEventId,
+    original_start: chrono::DateTime<chrono::Utc>,
+) -> EwsResult<WriteTarget> {
+    // The series head's own ChangeKey rides along: GetItem accepts it and a
+    // stale one is answered with the current item rather than a failure, so it
+    // costs nothing and saves a round trip when it is fresh.
+    let envelope = crate::soap::get_calendar_items_with_recurrence(&[(
+        decoded.item_id.clone(),
+        decoded.change_key.clone(),
+    )]);
+    let response = client.post_soap(envelope).await?;
+    let items = crate::mapping::parse_get_calendar_items_response(&response)?;
+    let occurrence = items
+        .iter()
+        .flat_map(|item| item.modified_occurrences.iter())
+        .find(|ov| ov.original_start == original_start);
+    match occurrence {
+        Some(ov) => Ok(WriteTarget {
+            kind: EventIdKind::Exception,
+            item_id: ov.item_id.clone(),
+            change_key: ov.change_key.clone(),
+        }),
+        // Refused, not widened. The occurrence is gone from the series — someone
+        // deleted it, or the series was rewritten — and the only other thing
+        // this function could return is the series head, which would turn "edit
+        // this one" into "edit all of them".
+        None => Err(EwsError::Protocol(format!(
+            "the occurrence of {} at {} is no longer an exception in the series; \
+             refusing to write to the whole series instead",
+            decoded.item_id,
+            original_start.to_rfc3339(),
+        ))),
+    }
 }
 
 /// Helper: the resolved (id, change_key) pair plus the kind we

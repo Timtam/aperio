@@ -265,6 +265,40 @@ pub fn encode_event_id(kind: EventIdKind, id: &str, change_key: Option<&str>) ->
     }
 }
 
+/// Separates a series id from the occurrence instant an override replaces.
+///
+/// The SAME string the CalDAV adapter uses (`mapping::RECURRENCE_ID_MARKER`
+/// there) and the same one the shared frontend reads
+/// (`RECURRENCE_ID_MARKER` in `shared/recurrence.ts`). That is the entire
+/// point: an override id is only an override if every layer agrees on how to
+/// spot one.
+///
+/// This adapter used to write `#override:` here — a marker written in one place
+/// and read in none. The consequences were not cosmetic. The frontend saw a
+/// plain standalone event, so opening an edited occurrence never offered the
+/// "this one or the series?" prompt; and because the suffix was glued onto an
+/// id that still carried the MASTER's change key, `decode_event_id` handed the
+/// write path `ck#override:2026-05-30T08:00:00+00:00` as a ChangeKey — a
+/// corrupt optimistic-concurrency token aimed at the series head.
+pub const RECURRENCE_ID_MARKER: &str = "::rid::";
+
+/// Pack an override's id: the MASTER's encoded id, then the marker, then the
+/// occurrence it replaces.
+///
+/// The master id goes in front deliberately. The frontend derives the series
+/// from everything before the marker (`overrideSeriesId`), and that is what
+/// makes "edit the whole series" reachable from an occurrence the user opened.
+/// The exception's own ItemId is NOT in here — it is resolved at write time
+/// from the master's `ModifiedOccurrences`, keyed by this instant, because a
+/// ChangeKey baked into an id goes stale the moment anything else touches the
+/// item.
+pub fn encode_override_event_id(master_event_id: &str, original_start: DateTime<Utc>) -> String {
+    format!(
+        "{master_event_id}{RECURRENCE_ID_MARKER}{}",
+        original_start.to_rfc3339()
+    )
+}
+
 /// Decoded Aperio event id: split apart into a CalendarItem kind,
 /// the raw ItemId, and the optional ChangeKey.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -272,19 +306,47 @@ pub struct DecodedEventId {
     pub kind: EventIdKind,
     pub item_id: String,
     pub change_key: Option<String>,
+    /// The occurrence instant this id overrides, for a
+    /// `…::rid::<rfc3339>` override id; `None` for a master, a plain
+    /// occurrence or a single event.
+    ///
+    /// When set, `item_id`/`change_key` still address the SERIES — the
+    /// exception's own item is resolved from it. Writers must branch on this
+    /// before deciding what they are about to overwrite.
+    pub recurrence_id: Option<DateTime<Utc>>,
 }
 
 /// Decode an Aperio event id. Falls back to `Single` if the string
 /// has no prefix (compat path for ids minted before 6f.1c).
 pub fn decode_event_id(s: &str) -> DecodedEventId {
+    // The override suffix comes OFF FIRST, before anything looks for the
+    // change-key separator. It sits at the very end of an id whose change key
+    // is in the middle, so splitting on `|` first swallows the marker into the
+    // ChangeKey — which is exactly the bug this function used to have, and it
+    // aimed a malformed concurrency token at the series head.
+    let (base, recurrence_id) = match s.split_once(RECURRENCE_ID_MARKER) {
+        Some((base, iso)) => (
+            base,
+            DateTime::parse_from_rfc3339(iso)
+                .ok()
+                .map(|dt| dt.with_timezone(&Utc)),
+        ),
+        None => (s, None),
+    };
+    // An id that carries the marker but not a readable timestamp is NOT
+    // silently treated as a master: the base is still the series, and
+    // `recurrence_id: None` would tell a writer it may overwrite the whole
+    // thing. Keeping the base and losing only the instant means the write path
+    // refuses (it cannot find an occurrence to target) instead of guessing.
+
     // The prefix is one character followed by `:`. Anything else is
     // treated as an un-prefixed legacy id.
-    let mut chars = s.chars();
+    let mut chars = base.chars();
     let first = chars.next();
     let second = chars.next();
     if let (Some(p), Some(':')) = (first, second) {
         if let Some(kind) = EventIdKind::from_prefix(p) {
-            let rest = &s[2..];
+            let rest = &base[2..];
             let (item_id, change_key) = match rest.split_once('|') {
                 Some((id, ck)) => (id.to_string(), Some(ck.to_string())),
                 None => (rest.to_string(), None),
@@ -293,19 +355,30 @@ pub fn decode_event_id(s: &str) -> DecodedEventId {
                 kind,
                 item_id,
                 change_key,
+                recurrence_id,
             };
         }
     }
     // Legacy / unprefixed path.
-    let (item_id, change_key) = match s.split_once('|') {
+    let (item_id, change_key) = match base.split_once('|') {
         Some((id, ck)) => (id.to_string(), Some(ck.to_string())),
-        None => (s.to_string(), None),
+        None => (base.to_string(), None),
     };
     DecodedEventId {
         kind: EventIdKind::Single,
         item_id,
         change_key,
+        recurrence_id,
     }
+}
+
+/// Whether an id names one occurrence of a series rather than the series.
+///
+/// True for a `…::rid::…` override AND for the `O:`/`E:` ids the server hands
+/// back from a `CalendarView`. Writers that must not touch a whole series ask
+/// this, not the kind alone.
+pub fn addresses_single_occurrence(decoded: &DecodedEventId) -> bool {
+    decoded.recurrence_id.is_some() || decoded.kind.is_occurrence_like()
 }
 
 /// One calendar item pulled from a `FindItem` response.
