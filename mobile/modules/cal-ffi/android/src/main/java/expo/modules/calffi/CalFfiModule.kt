@@ -18,7 +18,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import expo.modules.kotlin.exception.CodedException
 import uniffi.cal_ffi.Host
+import uniffi.cal_ffi.StoreException
 import uniffi.cal_ffi.parseAttendee as uniffiParseAttendee
 
 class CalFfiModule : Module() {
@@ -116,6 +118,27 @@ class CalFfiModule : Module() {
       this@CalFfiModule.sendEvent("onContactsSynced", mapOf("payload" to payloadJson))
     }
   }
+
+  /**
+   * Re-throw a sync failure with its code intact.
+   *
+   * A `StoreException.Sync` carries the engine's own stable code, but Expo
+   * turns an unmapped exception into a JS error whose message is Kotlin's
+   * `toString()` — "code=auth, detail=..." — which the JS side can only show
+   * verbatim. So the phone printed the engine's English while the desktop,
+   * branching on that same code, showed a translated sentence.
+   *
+   * `CodedException` is the shape Expo surfaces as `error.code`, so the mobile
+   * frontend can map it exactly the way `useSyncErrorMessage` does on desktop.
+   * Everything else falls through untouched — a `StoreException.NotFound` was
+   * never the problem.
+   */
+  private inline fun <T> coded(block: () -> T): T =
+    try {
+      block()
+    } catch (e: StoreException.Sync) {
+      throw CodedException(e.code, e.detail, e)
+    }
 
   override fun definition() = ModuleDefinition {
     Name("CalFfi")
@@ -336,22 +359,22 @@ class CalFfiModule : Module() {
     // report; a thrown StoreException rejects the JS promise.
 
     AsyncFunction("configureSyncAdapterJson") { configJson: String ->
-      host.configureSyncAdapterJson(configJson)
+      coded { host.configureSyncAdapterJson(configJson) }
     }.runOnQueue(slowScope)
 
     // The sync SCREEN's verb: point this device at an account it already has.
     // Probes the target before it commits, so it belongs on the slow queue with
     // the other network-touching calls.
     AsyncFunction("selectSyncAccount") { accountId: String ->
-      host.selectSyncAccount(accountId)
+      coded { host.selectSyncAccount(accountId) }
     }.runOnQueue(slowScope)
 
     AsyncFunction("syncStatusJson") {
-      host.syncStatusJson()
+      coded { host.syncStatusJson() }
     }
 
     AsyncFunction("syncNowJson") { trigger: String ->
-      host.syncNowJson(trigger)
+      coded { host.syncNowJson(trigger) }
     }.runOnQueue(slowScope)
 
     AsyncFunction("disconnectSync") {
@@ -375,7 +398,7 @@ class CalFfiModule : Module() {
     }
 
     AsyncFunction("compactNowJson") {
-      host.compactNowJson()
+      coded { host.compactNowJson() }
     }.runOnQueue(slowScope)
 
     AsyncFunction("refreshExternalCache") {
@@ -398,7 +421,7 @@ class CalFfiModule : Module() {
     // Contact sync (§10.5). The pass is driven from JS (manual button /
     // foreground); the interval + include-read-only prefs are device-local.
     AsyncFunction("syncContactsNow") { includeReadOnly: Boolean? ->
-      host.syncContactsNow(includeReadOnly)
+      coded { host.syncContactsNow(includeReadOnly) }
     }.runOnQueue(slowScope)
 
     AsyncFunction("getContactsSyncStatusJson") {
@@ -443,7 +466,7 @@ class CalFfiModule : Module() {
     }
 
     AsyncFunction("syncConflictCount") {
-      host.syncConflictCount().toInt()
+      coded { host.syncConflictCount().toInt() }
     }
 
     AsyncFunction("listSyncConflictsJson") {
@@ -766,26 +789,26 @@ class CalFfiModule : Module() {
     // write the encrypted dataset, encrypt every subsequent round).
 
     AsyncFunction("enableSyncEncryptionJson") { passphrase: String ->
-      host.enableSyncEncryptionJson(passphrase)
+      coded { host.enableSyncEncryptionJson(passphrase) }
     }.runOnQueue(slowScope)
 
     // disableSyncEncryptionJson turns E2E OFF: rewrites every log + snapshot as
     // plaintext, flips the meta, drops the device key (other devices re-onboard).
     AsyncFunction("disableSyncEncryptionJson") { passphrase: String ->
-      host.disableSyncEncryptionJson(passphrase)
+      coded { host.disableSyncEncryptionJson(passphrase) }
     }.runOnQueue(slowScope)
 
     // changeSyncPassphraseJson rotates the E2E passphrase (re-wraps the same
     // data key; existing devices keep working, future joins need the new one).
     AsyncFunction("changeSyncPassphraseJson") { oldPassphrase: String, newPassphrase: String ->
-      host.changeSyncPassphraseJson(oldPassphrase, newPassphrase)
+      coded { host.changeSyncPassphraseJson(oldPassphrase, newPassphrase) }
     }.runOnQueue(slowScope)
 
     // adoptRemoteEncryptionJson: a peer turned E2E on while this device synced
     // plaintext; derive the key from the passphrase + swap to an encrypting
     // adapter so the next round (which had failed with encryption_required) works.
     AsyncFunction("adoptRemoteEncryptionJson") { passphrase: String ->
-      host.adoptRemoteEncryptionJson(passphrase)
+      coded { host.adoptRemoteEncryptionJson(passphrase) }
     }.runOnQueue(slowScope)
 
     // ─── Onboarding: preview + join an existing dataset (§19.11) ──────────────
@@ -794,21 +817,21 @@ class CalFfiModule : Module() {
     // dataset (deriving the E2E key from the passphrase when it's encrypted).
 
     AsyncFunction("previewSyncTargetJson") { configJson: String ->
-      host.previewSyncTargetJson(configJson)
+      coded { host.previewSyncTargetJson(configJson) }
     }.runOnQueue(slowScope)
 
     AsyncFunction("acceptRemoteDatasetJson") { configJson: String, deviceName: String?, passphrase: String? ->
-      host.acceptRemoteDatasetJson(configJson, deviceName, passphrase)
+      coded { host.acceptRemoteDatasetJson(configJson, deviceName, passphrase) }
     }.runOnQueue(slowScope)
 
     // adoptLocalDatasetJson initialises a FRESH dataset (the unified Connect
     // button's empty-target path), optionally enabling E2E at creation.
     AsyncFunction("adoptLocalDatasetJson") { configJson: String, deviceName: String?, passphrase: String? ->
-      host.adoptLocalDatasetJson(configJson, deviceName, passphrase)
+      coded { host.adoptLocalDatasetJson(configJson, deviceName, passphrase) }
     }.runOnQueue(slowScope)
 
     AsyncFunction("resumeStaleDeviceJson") {
-      host.resumeStaleDeviceJson()
+      coded { host.resumeStaleDeviceJson() }
     }.runOnQueue(slowScope)
 
     // ─── SFTP host-key trust (§19.5 TOFU) ─────────────────────────────────────
@@ -817,18 +840,18 @@ class CalFfiModule : Module() {
     // pinned manage the pin (no network). The JS layer shows the trust dialog.
 
     AsyncFunction("previewSftpHostKeyJson") { argsJson: String ->
-      host.previewSftpHostKeyJson(argsJson)
+      coded { host.previewSftpHostKeyJson(argsJson) }
     }.runOnQueue(slowScope)
 
     // The same probe for an account the user is about to sync through — the
     // repair for a selectSyncAccount that refused an unconfirmed host key.
     // Returns the JSON `null` (no network) when the adapter pins no host key.
     AsyncFunction("previewSyncAccountHostKeyJson") { accountId: String ->
-      host.previewSyncAccountHostKeyJson(accountId)
+      coded { host.previewSyncAccountHostKeyJson(accountId) }
     }.runOnQueue(slowScope)
 
     AsyncFunction("trustSftpHostKey") { hostPort: String, fingerprint: String ->
-      host.trustSftpHostKey(hostPort, fingerprint)
+      coded { host.trustSftpHostKey(hostPort, fingerprint) }
     }
 
     AsyncFunction("forgetSftpHostKey") { hostPort: String ->

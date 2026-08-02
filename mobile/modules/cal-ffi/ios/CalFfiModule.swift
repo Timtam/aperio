@@ -91,6 +91,34 @@ public class CalFfiModule: Module {
     return opened
   }
 
+  /// The shape Expo surfaces to JS as `error.code`.
+  ///
+  /// Carries the engine's own stable sync code so the mobile frontend can map
+  /// it the way the desktop's `useSyncErrorMessage` does. Without it the phone
+  /// showed the engine's English `Display` text, because an unmapped Swift
+  /// error reaches JS as its description and nothing else.
+  final class SyncCodedError: Exception {
+    let syncCode: String
+    let syncDetail: String
+    init(code: String, detail: String) {
+      self.syncCode = code
+      self.syncDetail = detail
+      super.init()
+    }
+    override var code: String { syncCode }
+    override var reason: String { syncDetail }
+  }
+
+  /// Re-throw a sync failure with its code intact. Everything else falls
+  /// through untouched — a `StoreError.NotFound` was never the problem.
+  private func coded<T>(_ block: () throws -> T) throws -> T {
+    do {
+      return try block()
+    } catch let StoreError.Sync(code, detail) {
+      throw SyncCodedError(code: code, detail: detail)
+    }
+  }
+
   public func definition() -> ModuleDefinition {
     Name("CalFfi")
 
@@ -273,22 +301,22 @@ public class CalFfiModule: Module {
     // ─── Sync ───
 
     AsyncFunction("configureSyncAdapterJson") { (configJson: String) in
-      try self.host.configureSyncAdapterJson(configJson: configJson)
+      try self.coded { try self.host.configureSyncAdapterJson(configJson: configJson) }
     }.runOnQueue(slowQueue)
 
     // The sync SCREEN's verb: point this device at an account it already has.
     // Probes the target before it commits, so it belongs on the slow queue with
     // the other network-touching calls.
     AsyncFunction("selectSyncAccount") { (accountId: String) in
-      try self.host.selectSyncAccount(accountId: accountId)
+      try self.coded { try self.host.selectSyncAccount(accountId: accountId) }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("syncStatusJson") { () -> String in
-      try self.host.syncStatusJson()
+      try self.coded { try self.host.syncStatusJson() }
     }
 
     AsyncFunction("syncNowJson") { (trigger: String) -> String in
-      try self.host.syncNowJson(trigger: trigger)
+      try self.coded { try self.host.syncNowJson(trigger: trigger) }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("disconnectSync") { () in
@@ -312,7 +340,7 @@ public class CalFfiModule: Module {
     }
 
     AsyncFunction("compactNowJson") { () -> String in
-      try self.host.compactNowJson()
+      try self.coded { try self.host.compactNowJson() }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("refreshExternalCache") {
@@ -335,7 +363,7 @@ public class CalFfiModule: Module {
     // Contact sync (§10.5). The pass is driven from JS (manual button /
     // foreground); the interval + include-read-only prefs are device-local.
     AsyncFunction("syncContactsNow") { (includeReadOnly: Bool?) -> Bool in
-      try self.host.syncContactsNow(includeReadOnly: includeReadOnly)
+      try self.coded { try self.host.syncContactsNow(includeReadOnly: includeReadOnly) }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("getContactsSyncStatusJson") { () -> String in
@@ -380,7 +408,7 @@ public class CalFfiModule: Module {
     }
 
     AsyncFunction("syncConflictCount") { () -> Int in
-      Int(try self.host.syncConflictCount())
+      Int(try self.coded { try self.host.syncConflictCount() })
     }
 
     AsyncFunction("listSyncConflictsJson") { () -> String in
@@ -652,59 +680,65 @@ public class CalFfiModule: Module {
     // ─── E2E sync encryption (§19.7) ──────────────────────────────────────────
 
     AsyncFunction("enableSyncEncryptionJson") { (passphrase: String) -> String in
-      try self.host.enableSyncEncryptionJson(passphrase: passphrase)
+      try self.coded { try self.host.enableSyncEncryptionJson(passphrase: passphrase) }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("disableSyncEncryptionJson") { (passphrase: String) -> String in
-      try self.host.disableSyncEncryptionJson(passphrase: passphrase)
+      try self.coded { try self.host.disableSyncEncryptionJson(passphrase: passphrase) }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("changeSyncPassphraseJson") { (oldPassphrase: String, newPassphrase: String) in
-      try self.host.changeSyncPassphraseJson(
-        oldPassphrase: oldPassphrase, newPassphrase: newPassphrase)
+      try self.coded {
+        try self.host.changeSyncPassphraseJson(
+          oldPassphrase: oldPassphrase, newPassphrase: newPassphrase)
+      }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("adoptRemoteEncryptionJson") { (passphrase: String) in
-      try self.host.adoptRemoteEncryptionJson(passphrase: passphrase)
+      try self.coded { try self.host.adoptRemoteEncryptionJson(passphrase: passphrase) }
     }.runOnQueue(slowQueue)
 
     // ─── Onboarding: preview + join an existing dataset (§19.11) ──────────────
 
     AsyncFunction("previewSyncTargetJson") { (configJson: String) -> String in
-      try self.host.previewSyncTargetJson(configJson: configJson)
+      try self.coded { try self.host.previewSyncTargetJson(configJson: configJson) }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("acceptRemoteDatasetJson") { (configJson: String, deviceName: String?, passphrase: String?) -> String in
-      try self.host.acceptRemoteDatasetJson(
-        configJson: configJson, deviceName: deviceName, passphrase: passphrase)
+      try self.coded {
+        try self.host.acceptRemoteDatasetJson(
+          configJson: configJson, deviceName: deviceName, passphrase: passphrase)
+      }
     }.runOnQueue(slowQueue)
 
     // adoptLocalDatasetJson initialises a FRESH dataset (the unified Connect
     // button's empty-target path), optionally enabling E2E at creation.
     AsyncFunction("adoptLocalDatasetJson") { (configJson: String, deviceName: String?, passphrase: String?) -> String in
-      try self.host.adoptLocalDatasetJson(
-        configJson: configJson, deviceName: deviceName, passphrase: passphrase)
+      try self.coded {
+        try self.host.adoptLocalDatasetJson(
+          configJson: configJson, deviceName: deviceName, passphrase: passphrase)
+      }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("resumeStaleDeviceJson") { () -> String in
-      try self.host.resumeStaleDeviceJson()
+      try self.coded { try self.host.resumeStaleDeviceJson() }
     }.runOnQueue(slowQueue)
 
     // ─── SFTP host-key trust (§19.5 TOFU) ─────────────────────────────────────
 
     AsyncFunction("previewSftpHostKeyJson") { (argsJson: String) -> String in
-      try self.host.previewSftpHostKeyJson(argsJson: argsJson)
+      try self.coded { try self.host.previewSftpHostKeyJson(argsJson: argsJson) }
     }.runOnQueue(slowQueue)
 
     // The same probe for an account the user is about to sync through — the
     // repair for a selectSyncAccount that refused an unconfirmed host key.
     // Returns the JSON `null` (no network) when the adapter pins no host key.
     AsyncFunction("previewSyncAccountHostKeyJson") { (accountId: String) -> String in
-      try self.host.previewSyncAccountHostKeyJson(accountId: accountId)
+      try self.coded { try self.host.previewSyncAccountHostKeyJson(accountId: accountId) }
     }.runOnQueue(slowQueue)
 
     AsyncFunction("trustSftpHostKey") { (hostPort: String, fingerprint: String) in
-      try self.host.trustSftpHostKey(hostPort: hostPort, fingerprint: fingerprint)
+      try self.coded { try self.host.trustSftpHostKey(hostPort: hostPort, fingerprint: fingerprint) }
     }
 
     AsyncFunction("forgetSftpHostKey") { (hostPort: String) in

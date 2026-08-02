@@ -22,6 +22,7 @@ import {
   trustSftpHostKey,
   type HostKeyPreview,
 } from '../../api/sync';
+import { useSyncErrorMessage } from '../../api/syncErrorMessage';
 import { useThemedStyles, type ThemeColors } from '../../theme';
 import { AppDialog } from '../AppDialog';
 
@@ -103,6 +104,9 @@ export interface SyncTargetAccountPickerProps {
   onChanged: () => void | Promise<void>;
 }
 
+/** Loading the account list is not a sync failure — it never carries a code,
+ *  so it keeps the plain message. Everything the engine raises goes through
+ *  `useSyncErrorMessage` instead. */
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -113,6 +117,7 @@ export function SyncTargetAccountPicker({
   onChanged,
 }: SyncTargetAccountPickerProps) {
   const { t } = useTranslation();
+  const messageForError = useSyncErrorMessage();
   const navigation = useNavigation();
   const styles = useThemedStyles(makeStyles);
 
@@ -270,12 +275,12 @@ export function SyncTargetAccountPicker({
           setTrustPreview(preview);
           return;
         }
-        showError(t('mobile.error', { message: errorMessage(err) }));
+        showError(messageForError(err));
       } finally {
         setBusyId(null);
       }
     },
-    [announce, focusOn, onChanged, showError, t],
+    [announce, focusOn, onChanged, showError, t, messageForError],
   );
 
   const acceptTrust = useCallback(async () => {
@@ -287,11 +292,11 @@ export function SyncTargetAccountPicker({
     try {
       await trustSftpHostKey(preview.host_port, preview.fingerprint);
     } catch (err) {
-      showError(t('mobile.error', { message: errorMessage(err) }));
+      showError(messageForError(err));
       return;
     }
     await runSelect(account);
-  }, [runSelect, showError, t, trustFor, trustPreview]);
+  }, [runSelect, showError, trustFor, trustPreview, messageForError]);
 
   const cancelTrust = useCallback(() => {
     setTrustPreview(null);

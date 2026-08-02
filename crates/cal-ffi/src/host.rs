@@ -127,7 +127,8 @@ use host_core::sync_target::{
 use host_core::sync_target::PLUGIN_ID_LOCAL as PLUGIN_ID_SYNC_LOCAL;
 
 fn sync_err(e: SyncError) -> StoreError {
-    StoreError::Storage {
+    StoreError::Sync {
+        code: e.code().to_string(),
         detail: e.to_string(),
     }
 }

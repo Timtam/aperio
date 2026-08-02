@@ -10900,6 +10900,28 @@ sealed class StoreException: kotlin.Exception() {
             get() = "detail=${ `detail` }"
     }
     
+    /**
+     * A synchronisation failure, carrying the engine's own stable code.
+     *
+     * Everything sync used to arrive as `Storage`, so the phone showed the
+     * engine's English `Display` text while the desktop, branching on the same
+     * code, showed a translated sentence. The code travels now, and the mobile
+     * side maps it the way the desktop's `useSyncErrorMessage` does.
+     *
+     * `code` is one of `SyncError::code()`'s values: `io`, `network`, `auth`,
+     * `protocol`, `encryption_required`, `decryption_failed`, `not_found`,
+     * `schema_too_old`, `stale_device`, `internal`.
+     */
+    class Sync(
+        
+        val `code`: kotlin.String, 
+        
+        val `detail`: kotlin.String
+        ) : StoreException() {
+        override val message
+            get() = "code=${ `code` }, detail=${ `detail` }"
+    }
+    
 
     
 
@@ -10946,6 +10968,10 @@ public object FfiConverterTypeStoreError : FfiConverterRustBuffer<StoreException
                 FfiConverterString.read(buf),
                 )
             10 -> StoreException.Unsupported(
+                FfiConverterString.read(buf),
+                )
+            11 -> StoreException.Sync(
+                FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
@@ -11004,6 +11030,12 @@ public object FfiConverterTypeStoreError : FfiConverterRustBuffer<StoreException
                 4UL
                 + FfiConverterString.allocationSize(value.`detail`)
             )
+            is StoreException.Sync -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`code`)
+                + FfiConverterString.allocationSize(value.`detail`)
+            )
         }
     }
 
@@ -11056,6 +11088,12 @@ public object FfiConverterTypeStoreError : FfiConverterRustBuffer<StoreException
             }
             is StoreException.Unsupported -> {
                 buf.putInt(10)
+                FfiConverterString.write(value.`detail`, buf)
+                Unit
+            }
+            is StoreException.Sync -> {
+                buf.putInt(11)
+                FfiConverterString.write(value.`code`, buf)
                 FfiConverterString.write(value.`detail`, buf)
                 Unit
             }

@@ -838,6 +838,18 @@ pub enum StoreError {
     /// The adapter doesn't support this operation.
     #[error("operation not supported: {detail}")]
     Unsupported { detail: String },
+    /// A synchronisation failure, carrying the engine's own stable code.
+    ///
+    /// Everything sync used to arrive as `Storage`, so the phone showed the
+    /// engine's English `Display` text while the desktop, branching on the same
+    /// code, showed a translated sentence. The code travels now, and the mobile
+    /// side maps it the way the desktop's `useSyncErrorMessage` does.
+    ///
+    /// `code` is one of `SyncError::code()`'s values: `io`, `network`, `auth`,
+    /// `protocol`, `encryption_required`, `decryption_failed`, `not_found`,
+    /// `schema_too_old`, `stale_device`, `internal`.
+    #[error("{detail}")]
+    Sync { code: String, detail: String },
 }
 
 impl From<RecurrenceError> for StoreError {

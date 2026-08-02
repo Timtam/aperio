@@ -7636,6 +7636,20 @@ public enum StoreError: Swift.Error, Equatable, Hashable, Foundation.LocalizedEr
      */
     case Unsupported(detail: String
     )
+    /**
+     * A synchronisation failure, carrying the engine's own stable code.
+     *
+     * Everything sync used to arrive as `Storage`, so the phone showed the
+     * engine's English `Display` text while the desktop, branching on the same
+     * code, showed a translated sentence. The code travels now, and the mobile
+     * side maps it the way the desktop's `useSyncErrorMessage` does.
+     *
+     * `code` is one of `SyncError::code()`'s values: `io`, `network`, `auth`,
+     * `protocol`, `encryption_required`, `decryption_failed`, `not_found`,
+     * `schema_too_old`, `stale_device`, `internal`.
+     */
+    case Sync(code: String, detail: String
+    )
 
     
 
@@ -7692,6 +7706,10 @@ public struct FfiConverterTypeStoreError: FfiConverterRustBuffer {
             detail: try FfiConverterString.read(from: &buf)
             )
         case 10: return .Unsupported(
+            detail: try FfiConverterString.read(from: &buf)
+            )
+        case 11: return .Sync(
+            code: try FfiConverterString.read(from: &buf), 
             detail: try FfiConverterString.read(from: &buf)
             )
 
@@ -7753,6 +7771,12 @@ public struct FfiConverterTypeStoreError: FfiConverterRustBuffer {
         
         case let .Unsupported(detail):
             writeInt(&buf, Int32(10))
+            FfiConverterString.write(detail, into: &buf)
+            
+        
+        case let .Sync(code,detail):
+            writeInt(&buf, Int32(11))
+            FfiConverterString.write(code, into: &buf)
             FfiConverterString.write(detail, into: &buf)
             
         }
