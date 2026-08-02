@@ -182,18 +182,47 @@ export function SyncTargetAccountPicker({
     void reload();
   }, [currentAccountId, dataVersion, reload]);
 
-  /** Say a refusal once, out loud, and park focus on it so it stays
-   *  re-readable. Imperative on purpose — see the component doc. */
-  const showError = useCallback(
-    (message: string) => {
-      setError(message);
-      announce(message, 'assertive');
+  /** After a disconnect, land on the sentence that says so.
+   *
+   *  The panel used to announce "Sync target disconnected" and, a frame later,
+   *  move focus to its own heading — which reads "Sync target". Two channels
+   *  carrying two different sentences, the second interrupting the first, and
+   *  the user left on a landmark that says nothing about what just happened.
+   *
+   *  This note's text has by then become "This device syncs through no
+   *  account", which is the outcome. So the component that owns the node owns
+   *  the focus, and the panel does neither. */
+  const hadAccount = useRef(currentAccountId !== null);
+  useEffect(() => {
+    const has = currentAccountId !== null;
+    // Only the transition, and only downwards: opening the panel with no
+    // account chosen is not an event, and must not steal focus from wherever
+    // the user actually is.
+    if (hadAccount.current && !has) {
       requestAnimationFrame(() => {
-        errorRef.current?.focus({ preventScroll: true });
+        statusNoteRef.current?.focus({ preventScroll: true });
       });
-    },
-    [announce],
-  );
+    }
+    hadAccount.current = has;
+  }, [currentAccountId]);
+
+  /** Park focus on the refusal, which both speaks it and leaves it
+   *  re-readable.
+   *
+   *  Deliberately NOT announced as well. The node focus lands on carries the
+   *  message as its accessible name, so announcing the same string first meant
+   *  hearing every refusal twice — once from the live region, once from the
+   *  element. One channel, and the one that leaves the user somewhere useful.
+   *
+   *  Imperative rather than an effect keyed on `error`: an identical message
+   *  twice in a row is a no-op re-render, so an effect would not fire and the
+   *  second press would be answered with silence. */
+  const showError = useCallback((message: string) => {
+    setError(message);
+    requestAnimationFrame(() => {
+      errorRef.current?.focus({ preventScroll: true });
+    });
+  }, []);
 
   /** One group per adapter kind that can hold a dataset, in the host's order,
    *  keeping only the kinds the user actually has an account for.

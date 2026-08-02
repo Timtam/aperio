@@ -413,12 +413,27 @@ export function SyncTargetAccountPicker({
                     key={account.id}
                     accessible
                     accessibilityRole="text"
-                    accessibilityLabel={t(
-                      'dialogs.settings.sync.targetOptionLabel',
-                      { name: account.display_name, kind: group.label, summary },
-                    )}
+                    // While a probe runs, the ROW says so. On iOS it is the
+                    // only element a VoiceOver user can reach — the button
+                    // inside it is not one — so leaving the row saying "does
+                    // not hold the sync dataset" meant swiping back to it
+                    // during a live network round trip and being told the
+                    // state it is in the middle of leaving.
+                    accessibilityLabel={
+                      busy
+                        ? busyLabel
+                        : t('dialogs.settings.sync.targetOptionLabel', {
+                            name: account.display_name,
+                            kind: group.label,
+                            summary,
+                          })
+                    }
+                    // Withdrawn while anything is in flight, so the rotor
+                    // does not offer an action that is about to be ignored.
                     accessibilityActions={
-                      actionable ? [{ name: 'use', label: useLabel }] : undefined
+                      actionable && !blocked
+                        ? [{ name: 'use', label: useLabel }]
+                        : undefined
                     }
                     // Gate on ANY select being in flight, not just this row's,
                     // exactly like the `Pressable` below and the desktop

@@ -149,7 +149,6 @@ export function SyncPanel() {
     try {
       await configureSyncAdapter({ kind: 'none' });
       setAdapterSummary(null);
-      announce(t('dialogs.settings.sync.adapterDisconnected'), 'assertive');
       // The summary is only half of what this panel renders. "Encrypted
       // dataset", "Sync now" and "Compact now" all hang off the sync STATUS,
       // which is pulled once on mount and refreshed only by engine events —
@@ -158,12 +157,13 @@ export function SyncPanel() {
       // connected and encrypted, with both action buttons live; pressing "Sync
       // now" then failed, because it was acting on a target that no longer
       // existed.
+      // React unmounts the summary — and the Disconnect button inside it — on
+      // the state change above. Focus is NOT moved here: the picker below
+      // watches the same transition and lands on its status note, whose text
+      // has become "this device syncs through no account". Saying it here as
+      // well, and landing on a heading that reads only "Sync target", meant two
+      // sentences racing and neither of them the answer.
       await refreshStatus();
-      // React unmounts the summary — and the Disconnect button inside it —
-      // on the state change above; land focus once that has committed.
-      requestAnimationFrame(() => {
-        adapterHeadingRef.current?.focus({ preventScroll: true });
-      });
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('configure_sync_adapter(none) failed', err);
