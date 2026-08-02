@@ -99,20 +99,16 @@ export function FirstLaunchWizardDialog({
     }
   }, []);
 
-  // The shared form connected. RESTORE (joined an existing dataset) ends the
-  // wizard — data + accounts are already back; any missing credentials are
-  // handed to the §19.11 reconnect dialog. CREATE (fresh dataset) continues to
-  // the account step.
+  // The shared form connected, and storage is the last step either way, so the
+  // wizard is done. What differs is only what comes after: a JOINED dataset can
+  // carry accounts whose credentials are not on this device, and those go to
+  // the §19.11 reconnect dialog.
   const onSyncConnected = useCallback(
     (outcome: SyncConnectOutcome) => {
-      if (outcome.joined) {
-        onClose();
-        if (outcome.accountsNeedingConnect.length > 0) {
-          openSyncAccountsConnect(outcome.accountsNeedingConnect);
-        }
-        return;
+      onClose();
+      if (outcome.joined && outcome.accountsNeedingConnect.length > 0) {
+        openSyncAccountsConnect(outcome.accountsNeedingConnect);
       }
-      setStep('account');
     },
     [onClose, openSyncAccountsConnect],
   );
@@ -122,7 +118,7 @@ export function FirstLaunchWizardDialog({
     openAccounts();
   }, [onClose, openAccounts]);
 
-  const stepNumber = step === 'language' ? 1 : step === 'sync' ? 2 : 3;
+  const stepNumber = step === 'language' ? 1 : step === 'account' ? 2 : 3;
 
   return (
     <Modal
@@ -164,7 +160,7 @@ export function FirstLaunchWizardDialog({
               ))}
             </fieldset>
             <div className="first-launch-wizard__actions">
-              <button type="button" onClick={() => setStep('sync')}>
+              <button type="button" onClick={() => setStep('account')}>
                 {t('dialogs.firstLaunchWizard.next')}
               </button>
             </div>
@@ -181,10 +177,12 @@ export function FirstLaunchWizardDialog({
             </FocusableNote>
             <SyncTargetConfigForm status={status} onConnected={onSyncConnected} />
             <div className="first-launch-wizard__actions">
-              <button type="button" onClick={() => setStep('language')}>
+              <button type="button" onClick={() => setStep('account')}>
                 {t('dialogs.firstLaunchWizard.back')}
               </button>
-              <button type="button" onClick={() => setStep('account')}>
+              {/* Last step now, so skipping storage ends the wizard rather
+                  than moving to one the user has already been through. */}
+              <button type="button" onClick={onClose}>
                 {t('dialogs.firstLaunchWizard.syncSkip')}
               </button>
             </div>
@@ -200,14 +198,14 @@ export function FirstLaunchWizardDialog({
               {t('dialogs.firstLaunchWizard.accountHint')}
             </FocusableNote>
             <div className="first-launch-wizard__actions">
-              <button type="button" onClick={() => setStep('sync')}>
+              <button type="button" onClick={() => setStep('language')}>
                 {t('dialogs.firstLaunchWizard.back')}
               </button>
               <button type="button" onClick={onAddAccount}>
                 {t('dialogs.firstLaunchWizard.accountAdd')}
               </button>
-              <button type="button" onClick={onClose}>
-                {t('dialogs.firstLaunchWizard.finish')}
+              <button type="button" onClick={() => setStep('sync')}>
+                {t('dialogs.firstLaunchWizard.next')}
               </button>
             </div>
           </section>
