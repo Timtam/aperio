@@ -12,6 +12,7 @@ import {
   type SelectionSlice,
 } from './selectionReconcile';
 
+import { sortSections } from '@aperio/shared';
 import {
   getSections,
   listAccounts,
@@ -279,7 +280,11 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadSections = useCallback(async (listId: string) => {
-    const secs = await getSections(listId);
+    // Sorted HERE, once, rather than at each of the half-dozen places that
+    // render `sectionsByList` — the task view, the backlog rail, the day and
+    // month grids, the task editor, the section editor. A comparator repeated
+    // per consumer is a comparator that ends up applied in five of six.
+    const secs = sortSections(await getSections(listId));
     setSectionsByList((prev) => ({ ...prev, [listId]: secs }));
     return secs;
   }, []);

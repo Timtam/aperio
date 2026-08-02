@@ -8,6 +8,7 @@ import {
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { sortSections } from '@aperio/shared';
 import type { ColorLabel, Section, TaskList } from '@aperio/shared';
 
 import { listColorLabels } from '../api/colorLabels';
@@ -96,7 +97,10 @@ export function TaskStoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadSections = useCallback(async (listId: string) => {
-    const secs = await getSections(listId);
+    // Sorted HERE, once — every screen that renders sections reads this cache
+    // (the tasks screen, the task editor, the list editor), so a comparator
+    // repeated per screen is one that ends up applied in most of them.
+    const secs = sortSections(await getSections(listId));
     setSectionsByList((prev) => ({ ...prev, [listId]: secs }));
     return secs;
   }, []);

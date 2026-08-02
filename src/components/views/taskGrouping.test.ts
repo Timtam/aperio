@@ -148,6 +148,74 @@ describe('buildEntries group-by list', () => {
   });
 });
 
+describe('section ordering', () => {
+  const lists = new Map([['L1', { name: 'Inbox' }]]);
+
+  /** Sections read A→Z, not in the order they happened to be created.
+   *
+   *  `Section.order` used to decide this, and it is not a preference: nothing
+   *  in either frontend can move a section, so the field is assigned once at
+   *  creation as "append" and never again. The `order` values below are
+   *  deliberately the REVERSE of the alphabet, so a test that passed on the
+   *  old behaviour cannot pass on this one. */
+  it('orders sections by name, ignoring the creation order in `Section.order`', () => {
+    const sections = [
+      section('s1', 'Zuletzt', 0),
+      section('s2', 'Anfang', 1),
+      section('s3', 'Mitte', 2),
+    ];
+    const tasks = [
+      baseTask({ id: 'a', list_id: 'L1', section_id: 's1' }),
+      baseTask({ id: 'b', list_id: 'L1', section_id: 's2' }),
+      baseTask({ id: 'c', list_id: 'L1', section_id: 's3' }),
+    ];
+    const hs = headers(
+      buildEntries(tasks, lists, t, new Set(), { L1: sections }, TODAY, {}, 'list'),
+    );
+    expect(
+      hs.filter((h) => h.kind === 'section').map((h) => h.label),
+    ).toEqual(['Anfang (1)', 'Mitte (1)', 'Zuletzt (1)']);
+  });
+
+  /** Numeric-aware, like the task titles inside them: "Sprint 2" before
+   *  "Sprint 10", which a plain string compare gets backwards. */
+  it('compares numbers in names the way a human reads them', () => {
+    const sections = [
+      section('s1', 'Sprint 10', 0),
+      section('s2', 'Sprint 2', 1),
+    ];
+    const tasks = [
+      baseTask({ id: 'a', list_id: 'L1', section_id: 's1' }),
+      baseTask({ id: 'b', list_id: 'L1', section_id: 's2' }),
+    ];
+    const hs = headers(
+      buildEntries(tasks, lists, t, new Set(), { L1: sections }, TODAY, {}, 'list'),
+    );
+    expect(
+      hs.filter((h) => h.kind === 'section').map((h) => h.label),
+    ).toEqual(['Sprint 2 (1)', 'Sprint 10 (1)']);
+  });
+
+  /** The sort must not reorder the caller's array: stores hand out the same
+   *  reference every render, and sorting it in place mutates state another
+   *  component is already rendering from. */
+  it('leaves the caller’s array alone', () => {
+    const sections = [section('s1', 'Zuletzt', 0), section('s2', 'Anfang', 1)];
+    const order = sections.map((s) => s.id);
+    buildEntries(
+      [baseTask({ id: 'a', list_id: 'L1', section_id: 's1' })],
+      lists,
+      t,
+      new Set(),
+      { L1: sections },
+      TODAY,
+      {},
+      'list',
+    );
+    expect(sections.map((s) => s.id)).toEqual(order);
+  });
+});
+
 describe('buildEntries time groups (state mode)', () => {
   it('splits scheduled tasks into Überfällig / Heute / Zukünftig by day, in order', () => {
     const tasks = [
@@ -275,7 +343,7 @@ describe('buildEntries cancelled group', () => {
 });
 
 describe('buildEntries section grouping', () => {
-  it('groups tasks by section in declared order, ungrouped first', () => {
+  it('groups tasks by section, alphabetically, ungrouped first', () => {
     const tasks = [
       baseTask({ id: 'a', section_id: 's2' }),
       baseTask({ id: 'b', section_id: 's1' }),
@@ -286,18 +354,24 @@ describe('buildEntries section grouping', () => {
     });
 
     // Backlog head (depth 0), the list head (depth 1), then the section
-    // sub-headers in order (depth 2). No sub-header precedes the ungrouped task —
-    // it just follows the list head, one level in. Headers carry their
+    // sub-headers (depth 2). No sub-header precedes the ungrouped task — it
+    // just follows the list head, one level in. Headers carry their
     // contained-task count, like Done / Zukünftig.
+    //
+    // "Doing" before "To Do": BY NAME, not by `Section.order`. This case is
+    // the honest cost of that rule — a To Do / Doing / Done board reads out of
+    // sequence — and it is the rule anyway, because nothing in Aperio can
+    // reorder a section, so `order` was creation order everywhere except on
+    // the two providers that set it themselves.
     expect(headers(result)).toEqual([
       { label: 'views.tasks.backlog (3)', level: 0, kind: 'backlog' },
       { label: 'Inbox (3)', level: 1, kind: 'list' },
-      { label: 'To Do (1)', level: 2, kind: 'section' },
       { label: 'Doing (1)', level: 2, kind: 'section' },
+      { label: 'To Do (1)', level: 2, kind: 'section' },
     ]);
 
-    // Task order: ungrouped (c), then s1 (b), then s2 (a).
-    expect(taskRows(result).map((e) => e.task.id)).toEqual(['c', 'b', 'a']);
+    // Task order: ungrouped (c), then Doing (a), then To Do (b).
+    expect(taskRows(result).map((e) => e.task.id)).toEqual(['c', 'a', 'b']);
   });
 
   it('annotates group + section headers with the contained-task count', () => {

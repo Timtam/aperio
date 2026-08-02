@@ -49,6 +49,7 @@ import {
   multiDayInfo,
   prioritySuffix,
   recurringSeriesTaskId,
+  sortSections,
   statusI18nKey,
   statusMarker,
   subtaskParentSuffix,
@@ -647,8 +648,13 @@ export function CalendarDayList({
           lists.map((l) =>
             getSections(l.id).then(
               (batch) => {
-                if (isCurrent()) perListSectionsCache.set(l.id, batch);
-                return batch;
+                // This screen reads the API directly rather than through the
+                // task store, so the store's sort does not reach it — see
+                // `sortSections`. Sorted on the way INTO the cache so a cache
+                // hit and a fresh fetch read the same.
+                const sorted = sortSections(batch);
+                if (isCurrent()) perListSectionsCache.set(l.id, sorted);
+                return sorted;
               },
               (err) => {
                 console.warn('getSections failed for list', l.id, err);

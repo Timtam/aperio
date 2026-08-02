@@ -155,6 +155,37 @@ export function taskOrder(a: Task, b: Task): number {
   );
 }
 
+/**
+ * THE section ordering: by name, the same natural compare the tasks inside
+ * them use.
+ *
+ * `Section.order` is what this replaces, and it was never a user's choice.
+ * Nothing in either frontend lets a section be dragged or renumbered — the
+ * field is assigned once at creation as "append to the end" and never touched
+ * again. So it is creation order wearing the name of a preference, and reading
+ * a list meant remembering which evening you happened to add which section.
+ *
+ * Applied at DISPLAY time rather than in the core: the field stays as the
+ * providers send it, so a backend that grows a real reorder gesture later has
+ * something to reorder, and nothing that writes `order` has to change today.
+ *
+ * The one place this must be applied and cannot be reached from here is a
+ * caller that reads sections straight from the API instead of the store cache.
+ */
+export function sectionOrder(
+  a: { name: string },
+  b: { name: string },
+): number {
+  return naturalCompare(a.name, b.name);
+}
+
+/** `sections`, sorted for display. A copy — callers hold arrays that came out
+ *  of a store or an API response, and sorting those in place mutates state
+ *  somebody else is rendering from. */
+export function sortSections<T extends { name: string }>(sections: T[]): T[] {
+  return [...sections].sort(sectionOrder);
+}
+
 export function buildEntries(
   tasks: Task[],
   taskListById: Map<string, { name: string }>,
@@ -333,9 +364,11 @@ export function buildEntries(
       }
     });
     const out: GNode[] = ungrouped.map((task) => ({ t: 'task', task }) as GNode);
-    [...sections]
-      .sort((a, b) => a.order - b.order)
-      .forEach((section) => {
+    // By NAME, like the tasks inside them — see `sectionOrder`. This used to
+    // sort on `Section.order`, which reads like a preference and is not one:
+    // nothing lets a section be moved, so it was the order they happened to be
+    // created in.
+    sortSections(sections).forEach((section) => {
         const secTasks = bySection.get(section.id);
         if (!secTasks || secTasks.length === 0) return;
         out.push({
