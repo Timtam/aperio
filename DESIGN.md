@@ -2659,12 +2659,14 @@ sync/
     "device-a": {
       "name": "Desktop-PC",
       "last_seen_log": "2025-05-12T09:14:22Z",
+      "last_seen": "2025-05-12T09:14:25Z",
       "app_version": "1.2.0",
       "stale": false
     },
     "device-b": {
       "name": "MacBook",
       "last_seen_log": "2025-05-10T14:22:11Z",
+      "last_seen": "2025-05-12T07:03:40Z",
       "app_version": "1.1.3",
       "stale": false
     }
@@ -2673,6 +2675,26 @@ sync/
 ```
 
 Nach jedem erfolgreichen Sync-Durchlauf aktualisiert ein Gerät seinen eigenen `last_seen_log`- und `app_version`-Eintrag. `last_seen_log` ist der **„held horizon"** des Geräts — `max(Fetch-Cursor, eigenes neuestes Log)`, also der Zeitpunkt, bis zu dem es jedes Ereignis hält (angewendete fremde + selbst geschriebene). `stale: true` wird gesetzt, wenn der `last_seen_log` eines Geräts unter den `gc_horizon` fällt — die Logs, die es zum inkrementellen Aufholen bräuchte, sind bereits gelöscht (Schritt 6 des Kompaktierungs-Algorithmus). `gc_horizon` ist die (monoton steigende) **GC-Obergrenze**: jede Log-Datei mit `timestamp < gc_horizon` wurde gelöscht und kann nicht mehr inkrementell nachgeladen werden — abwesend (`null`) bedeutet, dass noch nie ein Log gelöscht wurde (frischer ODER Alt-Datensatz), sodass die Stale-Prüfung niemandem auslöst. `min_app_version` wird bei einem Schema-Upgrade auf die aktuelle App-Version gesetzt (Abschnitt 19.13).
+
+#### `last_seen` — die Wanduhr neben dem Horizont
+
+`last_seen_log` klingt wie ein Lebenszeichen und ist keins: es ist ein **Inhalts**-Horizont. Auf einem Datensatz, auf dem gerade nichts passiert, bewegt es sich nicht, egal wie oft ein Gerät synchronisiert — ein Laptop, der alle 15 Minuten einen Durchlauf macht, und einer, der zuletzt im März geöffnet wurde, veröffentlichen denselben unveränderten Zeitstempel. Die Frage „ist dieser Eintrag noch ein Gerät oder ein Überbleibsel" kann `last_seen_log` also nicht beantworten.
+
+`last_seen` beantwortet genau sie: die Wanduhr des letzten abgeschlossenen Durchlaufs, geschrieben vom Heartbeat und vom Compactor. Das Feld ist **additiv und optional** — kein `SCHEMA_VERSION`-Bump, ältere Aperio-Versionen ignorieren den Schlüssel. Fehlt es, ist die Antwort „unbekannt" und ausdrücklich **nicht** der Inhalts-Horizont ersatzweise: genau diese Verwechslung soll das Feld beenden.
+
+Der Heartbeat vergleicht den Stempel **grob** — nur wenn er älter als das Auffrischungsfenster (12 Stunden) ist, gilt der Eintrag als veraltet. Jede andere Bedingung dort ist eine Gleichheit; eine Wanduhr gleich zu behandeln würde den Push-Skip unerreichbar machen (der Stempel unterscheidet sich per Definition in jedem Durchlauf), und ein ruhiger Datensatz wäre wieder bei einem GET plus PUT je Gerät und Durchlauf.
+
+#### Ein Gerät aus der Registry entfernen
+
+Einträge von Neuinstallationen und Testgeräten bleiben stehen. Das ist nicht nur unordentlich: der Compactor deckelt seinen GC-Schnitt auf den **niedrigsten** held horizon über alle **registrierten** Geräte, ein toter Eintrag hält also Logdateien am Leben, die nie jemand liest.
+
+`MetaJson::remove_device` / `OnboardingService::forget_device` nehmen den Eintrag und sonst nichts:
+
+- Die **Logdateien bleiben**. Sie sind Datensatz-Inhalt, nicht Gerätezustand — der Compactor löscht jede, sobald der Snapshot sie abdeckt. Sie hier von Hand zu entfernen würde Ereignisse löschen, die noch kein Gerät eingearbeitet hat.
+- Es ist **kein Entzug**. Ein noch laufendes Gerät trägt sich beim nächsten Durchlauf wieder ein. Schlimmster Fall eines Irrtums: es lädt den Snapshot statt Logs nachzuspielen — langsamer, nicht verlustbehaftet.
+- Das **eigene** Gerät wird abgelehnt. Der nächste Heartbeat würde den Eintrag sofort zurückschreiben, die Geste läse sich also als kaputter Knopf statt als abgelehnte Entscheidung. Wer sie sucht, meint „nicht mehr synchronisieren" — das ist Trennen.
+
+Beide Oberflächen zeigen das unter Einstellungen → Synchronisation → Geräte, zusammen mit dem Namen, unter dem **dieses** Gerät auftaucht (`sync.deviceName`, gerätelokal, absichtlich **nicht** in der `SYNC_WHITELIST` — ein synchronisierter Gerätename gäbe allen Geräten denselben). Der Desktop schlägt den Rechnernamen vor, Mobil `Constants.deviceName`; beides nur ein Vorschlag, gespeichert wird erst beim Speichern.
 
 #### Kompaktierungs-Trigger
 

@@ -68,6 +68,38 @@ selben Netz auf denselben Datensatz zugreifen.
   und löst ihn nachvollziehbar auf bzw. fragt nach, welche Fassung gelten
   soll.
 
+## Deine Geräte
+
+Jedes Gerät, das sich mit deinem Datensatz verbindet, trägt sich dort ein. Unter
+**Einstellungen → Synchronisation → Geräte** siehst du die Liste und kannst sie
+in Ordnung halten.
+
+**Gerätename.** Trag hier ein, wie dieses Gerät auf deinen anderen Geräten heißen
+soll – „Arbeitsrechner", „Telefon". Ohne Namen steht dort nur eine lange
+Zeichenkette, die niemandem sagt, welches Gerät gemeint ist. Aperio schlägt den
+Namen vor, den dein Rechner bzw. Telefon ohnehin trägt; gespeichert wird er erst,
+wenn du auf **Gerätenamen speichern** gehst. Der Name gilt nur für dieses Gerät
+und erreicht die anderen beim nächsten Abgleich.
+
+**Zuletzt gesehen.** Jede Zeile sagt, wann das Gerät zuletzt einen Abgleich
+abgeschlossen hat. Bei Geräten, die sich noch nie mit einer Version gemeldet
+haben, die das festhält, steht „unbekannt" – nie ein erfundenes Datum.
+
+**Geräte entfernen.** Nach ein paar Neuinstallationen oder Testgeräten stehen
+Einträge in der Liste, hinter denen kein Gerät mehr steckt. Die kannst du
+entfernen. Was dabei passiert – und was nicht:
+
+- Es werden **keine Daten gelöscht**. Nur der Eintrag verschwindet, der dieses
+  Gerät als Teilnehmer führt.
+- Alte Einträge kosten tatsächlich etwas: Aperio hebt beim Aufräumen alte
+  Protokolldateien so lange auf, bis **jedes** eingetragene Gerät sie gelesen
+  hat. Ein Eintrag, hinter dem nichts mehr steckt, hält sie damit für immer.
+- Du kannst dich nicht ernsthaft vertun. Läuft das Gerät noch, trägt es sich beim
+  nächsten Abgleich einfach wieder ein.
+- Das Gerät, an dem du gerade sitzt, lässt sich nicht entfernen – es würde sich
+  sofort wieder eintragen. Wenn du dieses Gerät aus der Synchronisation nehmen
+  willst, ist **Trennen** der richtige Weg.
+
 ## Ende-zu-Ende-Verschlüsselung & Zugangsdaten
 
 In den Synchronisations-Einstellungen kannst du **Ende-zu-Ende-Verschlüsselung**

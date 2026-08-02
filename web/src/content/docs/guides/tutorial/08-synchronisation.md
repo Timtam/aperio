@@ -68,6 +68,36 @@ it over a share on the local network.
 - If two devices edit the same entry, Aperio detects the **conflict** and
   resolves it in a comprehensible way, or asks which version should win.
 
+## Your devices
+
+Every device that connects to your dataset registers itself there. **Settings →
+Synchronization → Devices** shows you the list and lets you keep it in order.
+
+**Device name.** Enter what this device should be called on your other devices —
+"Work PC", "Phone". Without a name it shows up as a long string that tells
+nobody which device is meant. Aperio suggests the name your computer or phone
+already goes by; it is only stored once you press **Save device name**. The name
+belongs to this device alone and reaches the others on the next round.
+
+**Last seen.** Each row says when that device last completed a round. Devices
+that have never reported in from a version that records it read as "unknown" —
+never as an invented date.
+
+**Removing devices.** After a few reinstalls or test devices, the list holds
+entries with no device behind them any more. Those you can remove. What happens,
+and what does not:
+
+- **No data is deleted.** Only the entry that counts this device as a
+  participant goes.
+- Old entries genuinely cost something: when Aperio cleans up, it keeps old log
+  files until **every** registered device has read them. An entry with nothing
+  behind it keeps them forever.
+- You cannot really get this wrong. If the device is still running, it simply
+  registers again on its next round.
+- The device you are sitting at cannot be removed — it would register itself
+  again immediately. To take this device out of syncing, **Disconnect** is the
+  right route.
+
 ## End-to-end encryption & credentials
 
 In the synchronization settings you can turn on **end-to-end encryption** with a
