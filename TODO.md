@@ -95,11 +95,24 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       Eintrag, kennt es nur die App. Eine Target-Auswahl gibt es dabei nicht:
       „All: Set up all the required credentials" läuft über ALLE Targets, die
       es kennt. Erkennbar an zwei „Setting up credentials for target …"-Blöcken.
-- [ ] **Schritt 2** — Datenbank-Umzug (kopieren, testweise öffnen, erst dann die
-      Originale löschen; scheitert ein Schritt, bleibt alles am alten Platz),
-      schmaler Lesepfad in `cal-ffi` (`upcoming_json(limit, now)` statt des
-      vollen `Host` — Widget-Extensions haben ein knappes Speicherbudget),
-      Widget 1 mit echten Daten.
+- [~] **Schritt 2a** — Datenbank-Umzug in den App-Group-Container
+      (`modules/cal-ffi/ios/SharedDatabase.swift`): kopieren, testweise öffnen,
+      erst dann die Originale löschen. Scheitert irgendetwas, bleibt alles am
+      alten Platz und die App läuft weiter. Eigener Bau, weil er als einziger
+      Schritt ECHTE Nutzerdaten anfasst — ein zweiter gleichzeitiger Umbau
+      würde die Fehlersuche vernebeln.
+      ⚠️ Einseitig: eine ältere App-Version sucht wieder in Application Support
+      und findet nichts. Sieht aus wie Datenverlust, ist keiner.
+- [ ] **Schritt 2b** — schmaler Lesepfad in `cal-ffi` (`upcoming_json(limit,
+      now)` statt des vollen `Host` — eine Widget-Extension hat ein knappes
+      Speicherbudget und darf weder Beobachter noch den Geräte-Kalender-Bridge
+      hochfahren).
+- [ ] **Schritt 2c** — Rust-Bibliothek in die Extension linken und Widget 1 mit
+      echten Daten. Der Weg dafür steht: `@bacons/apple-targets` lädt
+      `targets/<name>/pods.rb` in einen Podfile-Target-Block. Unser `CalFfi`-Pod
+      taugt dort NICHT — er hängt an `ExpoModulesCore` und am Expo-Modul. Es
+      braucht einen zweiten, schlanken Podspec: nur das XCFramework und
+      `cal_ffi.swift`.
 - [ ] **Schritt 3** — Countdown. `Text(timerInterval:)` rendert das System
       selbst, ohne Zeitachsen-Neuladen. Eigenes, gröberes `accessibilityLabel`
       („in etwa 20 Minuten"), sonst redet VoiceOver sekundenweise.
