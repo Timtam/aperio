@@ -236,6 +236,44 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       Terminierte Einträge sortieren weiterhin nach Start, auch laufende: ein
       Termin, in dem man gerade sitzt, ist das Unmittelbarste, was es gibt.
       ⚠️ Ungeprüft auf dem Gerät.
+### A8 · Sprachbefehle (Siri / Kurzbefehle, iOS zuerst) `[~]`
+Termine und Aufgaben per Sprache anlegen, mit Kalender- bzw. Listenwahl.
+
+WARUM NUR iOS: Google bietet **keinen** Built-in Intent für Kalendertermine
+(Referenz geprüft — Produktivität kennt nur Listen). Der Assistant schreibt in
+Google Kalender, eine Drittanbieter-App kann sich dafür nicht anmelden. Unter
+iOS löst Siri getippte `Date`-Parameter dagegen selbst auf — kein NL-Parser
+nötig. Für Deutsch gäbe es auch keinen: die Rust-Crates sind Englisch-only,
+`chrono-node` führt Deutsch nur als TEILWEISE unterstützt.
+
+GRENZE, die die Form bestimmt: ein `Date` darf NICHT in der Kurzbefehl-Phrase
+stehen. „Termin morgen um 11 in Aperio" in einem Satz geht nicht; Siri fragt die
+Parameter nach. Für einen Screenreader-Nutzer ist der geführte Dialog eher ein
+Vorteil.
+
+- [~] **Schritt 1** — beweisen, dass App-Target-Swift Siri überhaupt erreicht:
+      `plugins/withAppShortcuts.js` kopiert `mobile/ios-app/AperioShortcuts.swift`
+      ins generierte App-Target und trägt es ins Xcode-Projekt ein. Inhalt: EIN
+      Kurzbefehl, der nur die App öffnet.
+      Der `AppShortcutsProvider` MUSS im Haupt-App-Target liegen — Apples
+      Framework-Ausweg (`AppIntentsPackage`) gilt nur für Frameworks, nicht für
+      die statischen Bibliotheken, zu denen Expo-Module übersetzen. Ein Pod
+      scheidet damit aus.
+      ⚠️ Ungeprüft.
+- [ ] **Schritt 2** — Parameter: Titel + `Date`. Siri parst, wir schreiben nur.
+- [ ] **Schritt 3** — Kalender und Aufgabenliste als `AppEntity` mit
+      `EntityQuery`. Die Liste kommt über dieselbe Snapshot-Datei-Mechanik wie
+      beim Widget (eine `calendars.json` in der App Group) — der Intent-Prozess
+      kommt so wenig an die Datenbank wie die Widget-Extension.
+- [ ] **Schritt 4** — tatsächlich anlegen. Der Intent reiht die Aktion ein wie
+      der Widget-Haken; OFFEN ist, ob die App sich dabei öffnet
+      (`openAppWhenRun`) oder still im Hintergrund abgearbeitet wird. Beim Haken
+      ist Verzögerung unsichtbar, beim ANLEGEN nicht — man sagt etwas und findet
+      minutenlang nichts.
+      Den Rust-Kern direkt aus dem Intent zu öffnen ist bewusst KEINE Option:
+      zweiter schreibender Prozess auf einer Datenbank, plus ein teurer
+      Host-Start pro Sprachbefehl.
+
 - [~] **Android** — „Als Nächstes" über **Glance**
       (`modules/cal-ffi/android/.../AperioWidget.kt`). Liest denselben Snapshot;
       kein App Group nötig, ein Android-Widget läuft im Prozess der App unter
