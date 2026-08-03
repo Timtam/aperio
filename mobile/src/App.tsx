@@ -37,6 +37,7 @@ import { navigationRef } from './navigation/navigationRef';
 import type { RootStackParamList, RootTabParamList } from './navigation/types';
 import { useReminderTriggers } from './reminders/scheduler';
 import { useAppBadge } from './state/useAppBadge';
+import { useWidgetSnapshot } from './state/widgetSnapshot';
 import { useDayStartChecks } from './state/useDayStartChecks';
 import { startRefreshErrorsWatcher } from './state/useRefreshErrors';
 import { useStoredLanguage } from './settings/language';
@@ -472,6 +473,13 @@ function AppBadge() {
   return null;
 }
 
+/** Keeps the home-screen widgets fed with what is next. Same reason it lives
+ *  here as the badge: it reads the task store's dataVersion. */
+function WidgetSnapshot() {
+  useWidgetSnapshot();
+  return null;
+}
+
 function AppContent() {
   const { t } = useTranslation();
   const theme = useTheme();
@@ -647,6 +655,7 @@ function AppContent() {
           <FirstLaunchWizardGate />
           {/* App-icon badge: today's open tasks + upcoming events. */}
           <AppBadge />
+          <WidgetSnapshot />
           {/* Shared event-scope chooser (delete/edit "this occurrence / this and
               all following / whole series"). App-global so the row handlers can
               open it imperatively; overlays whatever tab/editor is focused. */}

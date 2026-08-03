@@ -639,6 +639,15 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  files stay, and a device that still runs re-registers on its next round.
    *  Rejects for this device's own id. */
   forgetSyncDevice(deviceId: string): Promise<void>;
+
+  // ── Widgets ──
+  /** Hand the home-screen widgets a fresh snapshot (a `WidgetSnapshot` JSON) and
+   *  ask WidgetKit to redraw.
+   *
+   *  Best-effort by design: it resolves even when there is no App Group
+   *  container and no widget on the home screen. iOS only for now — the Android
+   *  side accepts the call and drops it, so callers need no platform check. */
+  writeWidgetSnapshot(json: string): Promise<void>;
 }
 
 export default requireNativeModule<CalFfiModule>('CalFfi');

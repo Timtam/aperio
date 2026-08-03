@@ -798,5 +798,20 @@ public class CalFfiModule: Module {
     AsyncFunction("forgetSyncDevice") { (deviceId: String) in
       try self.coded { try self.host.forgetSyncDevice(deviceId: deviceId) }
     }
+
+    // ── Widgets ──
+    // The JS side derives WHAT the widget shows (it owns the per-device
+    // visibility settings and the same helpers the views render from); this only
+    // puts the finished document where the extension can reach it.
+    AsyncFunction("writeWidgetSnapshot") { (json: String) in
+      do {
+        try WidgetSnapshotStore.write(json)
+      } catch {
+        // A build signed without the App Group has no container, and a phone
+        // with no widget placed has nothing to reload. Neither is a reason to
+        // fail a caller that is only keeping a convenience up to date.
+        NSLog("[Aperio] the widget snapshot was not written: \(error)")
+      }
+    }
   }
 }

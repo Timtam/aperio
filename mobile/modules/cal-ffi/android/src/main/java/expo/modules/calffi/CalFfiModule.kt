@@ -898,5 +898,14 @@ class CalFfiModule : Module() {
     AsyncFunction("forgetSyncDevice") { deviceId: String ->
       coded { host.forgetSyncDevice(deviceId) }
     }
+
+    // ── Widgets ──
+    // Accepted and dropped. Android widgets are a separate build (Glance, a
+    // different delivery mechanism than a shared-container file), and until they
+    // exist the JS side should not have to know which platform it is on — a
+    // `Platform.OS` check at the call site would be one more thing to remember
+    // to remove.
+    AsyncFunction("writeWidgetSnapshot") { _: String ->
+    }
   }
 }

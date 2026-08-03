@@ -6,6 +6,7 @@ import * as TaskManager from 'expo-task-manager';
 import { getUserPref } from '../api/prefs';
 import { syncNow, syncStatus } from '../api/sync';
 import { rescheduleReminders } from '../reminders/scheduler';
+import { refreshWidgetSnapshot } from './widgetSnapshot';
 
 // OS-scheduled background sync — the piece syncTriggers.ts explicitly deferred:
 // wake the app while it's backgrounded/closed to run a sync round, so a peer's
@@ -48,6 +49,11 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
     // their notifications still fire on time. Best-effort: a reminder hiccup
     // must not fail the (successful) sync round.
     await rescheduleReminders().catch(() => undefined);
+    // Same reasoning for the home-screen widgets, and this is the ONLY path that
+    // reaches them without the user opening the app — the in-app triggers all
+    // need a foreground. Without it a phone left alone overnight would show
+    // yesterday's agenda until it was next unlocked and the app opened.
+    await refreshWidgetSnapshot().catch(() => undefined);
     return BackgroundTask.BackgroundTaskResult.Success;
   } catch {
     return BackgroundTask.BackgroundTaskResult.Failed;
