@@ -8,6 +8,8 @@ import android.media.AudioAttributes
 import android.os.Build
 import android.util.Log
 import androidx.core.content.FileProvider
+// An extension function on GlanceAppWidget — see AperioWidget.kt.
+import androidx.glance.appwidget.updateAll
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.File

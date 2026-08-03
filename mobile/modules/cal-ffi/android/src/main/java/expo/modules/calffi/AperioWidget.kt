@@ -6,8 +6,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.dp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
-import androidx.glance.GlanceTheme
-import androidx.glance.LocalContext
 import androidx.glance.Image
 import androidx.glance.ImageProvider
 import androidx.glance.action.ActionParameters
@@ -18,6 +16,9 @@ import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.provideContent
+// `update` and `updateAll` are EXTENSION functions on GlanceAppWidget, not
+// members — calling them without importing the package compiles nowhere.
+import androidx.glance.appwidget.update
 import androidx.glance.layout.Alignment
 import androidx.glance.layout.Column
 import androidx.glance.layout.Row
@@ -29,7 +30,6 @@ import androidx.glance.layout.width
 import androidx.glance.semantics.contentDescription
 import androidx.glance.semantics.semantics
 import androidx.glance.text.Text
-import androidx.glance.text.TextStyle
 import java.util.Date
 import java.util.Locale
 import org.json.JSONObject
@@ -57,12 +57,20 @@ class AperioWidget : GlanceAppWidget() {
     // file should be opened once per update rather than once per frame.
     val snapshot = WidgetStore.readSnapshot(context)
     val ticked = WidgetStore.pendingTaps(context)
-    provideContent { GlanceTheme { Body(snapshot, ticked, Date()) } }
+    // The fallback wording is resolved HERE, where a Context is in hand, rather
+    // than reached for from inside the composition.
+    val fallback = context.getString(R.string.aperio_widget_no_data)
+    provideContent { Body(snapshot, ticked, Date(), fallback) }
   }
 }
 
 @Composable
-private fun Body(snapshot: JSONObject?, ticked: Set<String>, now: Date) {
+private fun Body(
+  snapshot: JSONObject?,
+  ticked: Set<String>,
+  now: Date,
+  fallback: String,
+) {
   val usable = snapshot?.takeIf { it.optInt("version") == SUPPORTED_VERSION }
   val strings = usable?.optJSONObject("strings")
   val locale = WidgetStore.localeFor(usable?.optString("locale"))
@@ -74,8 +82,7 @@ private fun Body(snapshot: JSONObject?, ticked: Set<String>, now: Date) {
       // must never render the same way.
       val exhausted = usable == null || isExhausted(usable, now)
       val key = if (exhausted) "stale" else "empty"
-      val message = strings?.optString(key)?.takeIf { it.isNotEmpty() }
-        ?: LocalContext.current.getString(R.string.aperio_widget_no_data)
+      val message = strings?.optString(key)?.takeIf { it.isNotEmpty() } ?: fallback
       Text(text = message, modifier = GlanceModifier.semantics { contentDescription = message })
     } else {
       for (item in rows) {
@@ -133,10 +140,10 @@ private fun ItemRow(item: JSONObject, strings: JSONObject?, locale: Locale) {
         modifier = GlanceModifier.size(12.dp),
       )
       Spacer(modifier = GlanceModifier.width(6.dp))
-      Text(
-        text = (listOf(title) + whenParts).joinToString(" · "),
-        style = TextStyle(color = GlanceTheme.colors.onSurface),
-      )
+      // No explicit colour: the widget's default text colour already follows
+      // the launcher's light/dark rendering, and overriding it would mean
+      // pulling in the separate glance-material3 artifact to name one.
+      Text(text = (listOf(title) + whenParts).joinToString(" · "))
     }
   }
 }
