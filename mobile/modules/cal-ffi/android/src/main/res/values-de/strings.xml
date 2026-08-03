@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="aperio_widget_name">Als Nächstes</string>
+  <string name="aperio_widget_description">Die nächsten Termine und fälligen Aufgaben.</string>
+  <string name="aperio_widget_no_data">Keine aktuellen Daten. Öffne Aperio.</string>
+</resources>

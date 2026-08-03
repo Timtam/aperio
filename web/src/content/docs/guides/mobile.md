@@ -161,4 +161,14 @@ The countdown itself is not spoken as it ticks. A number that changes every
 second would interrupt continuously; the spoken form is the coarse one you hear
 when you focus the widget.
 
-Android widgets are not available yet.
+## Home-screen widget (Android)
+
+**Up Next** exists on Android too, on the home screen: touch and hold an empty
+spot, choose **Widgets**, find **Aperio**. It reads the same snapshot and shows
+the same rows, and a task row is likewise a checkbox — TalkBack announces it as
+one, with its state.
+
+Android has no lock-screen widgets (they were dropped after Android 11), so the
+countdown widget has no Android counterpart. Everything else — hidden calendars,
+tasks from all lists, what a tap does under each check-off mode — behaves exactly
+as it does on iOS.

@@ -900,18 +900,32 @@ class CalFfiModule : Module() {
     }
 
     // ── Widgets ──
-    // Accepted and dropped. Android widgets are a separate build (Glance, a
-    // different delivery mechanism than a shared-container file), and until they
-    // exist the JS side should not have to know which platform it is on — a
-    // `Platform.OS` check at the call site would be one more thing to remember
-    // to remove.
-    AsyncFunction("writeWidgetSnapshot") { _: String ->
+    // The same snapshot document iOS uses, in the app's own internal storage —
+    // an Android widget runs in this very process under the same uid, so there
+    // is no App Group to cross and no container to resolve.
+    AsyncFunction("writeWidgetSnapshot") { json: String ->
+      val context = appContext.reactContext?.applicationContext
+      if (context != null) {
+        WidgetStore.writeSnapshot(context, json)
+        // Redraw every placed instance. Without this the launcher would keep
+        // showing the previous timeline until the system next asked on its own.
+        slowScope.launch {
+          try {
+            AperioWidget().updateAll(context)
+          } catch (_: Throwable) {
+            // No widget placed, or the launcher declined — neither is a reason
+            // to fail a caller that is only keeping a convenience current.
+          }
+        }
+      }
     }
 
-    // Nothing can be queued while there is no Android widget to queue it.
-    AsyncFunction("pendingWidgetActionsJson") { -> "[]" }
+    AsyncFunction("pendingWidgetActionsJson") { ->
+      appContext.reactContext?.applicationContext?.let { WidgetStore.pendingJson(it) } ?: "[]"
+    }
 
-    AsyncFunction("clearWidgetAction") { _: String ->
+    AsyncFunction("clearWidgetAction") { id: String ->
+      appContext.reactContext?.applicationContext?.let { WidgetStore.clearAction(it, id) }
     }
   }
 }

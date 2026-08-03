@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The widget's registration with the launcher.
+
+  `updatePeriodMillis="0"`: the app pushes an update whenever the snapshot
+  changes, and the snapshot itself reaches a week ahead. A polling interval
+  would spend battery redrawing words that had not moved, and would still be
+  late for the ones that had.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/aperio_widget_description"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:minWidth="180dp"
+    android:minHeight="110dp"
+    android:targetCellWidth="3"
+    android:targetCellHeight="3"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

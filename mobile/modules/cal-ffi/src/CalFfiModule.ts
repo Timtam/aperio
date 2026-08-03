@@ -644,9 +644,10 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** Hand the home-screen widgets a fresh snapshot (a `WidgetSnapshot` JSON) and
    *  ask WidgetKit to redraw.
    *
-   *  Best-effort by design: it resolves even when there is no App Group
-   *  container and no widget on the home screen. iOS only for now — the Android
-   *  side accepts the call and drops it, so callers need no platform check. */
+   *  Best-effort by design: it resolves even when there is no container to
+   *  write to and no widget on the home screen. Both platforms implement it;
+   *  Android needs no App Group, because its widget runs in this same process
+   *  under the same uid. */
   writeWidgetSnapshot(json: string): Promise<void>;
 
   /** Taps queued by a widget button, as a JSON array of
@@ -655,7 +656,7 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  A widget cannot complete a task itself — completion cascades, self-assigns,
    *  advances a series and queues a sync push, none of which an extension can
    *  reach — so it records the request and the app performs it. Resolves to
-   *  `[]` when there is nothing queued, including on Android. */
+   *  `[]` when there is nothing queued. */
   pendingWidgetActionsJson(): Promise<string>;
 
   /** Drop one queued action by its `id`, after ATTEMPTING it. */

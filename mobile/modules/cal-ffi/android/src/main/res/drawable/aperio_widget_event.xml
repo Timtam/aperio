@@ -1,0 +1,12 @@
+<!-- A calendar page: what an event IS, drawn. Paired with the word in the row's
+     description, never standing for it alone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?android:attr/textColorSecondary">
+  <path
+      android:fillColor="@android:color/white"
+      android:pathData="M7,2v2H5.5A2.5,2.5 0,0 0,3 6.5v12A2.5,2.5 0,0 0,5.5 21h13a2.5,2.5 0,0 0,2.5 -2.5v-12A2.5,2.5 0,0 0,18.5 4H17V2h-2v2H9V2H7zM5,9h14v9.5a0.5,0.5 0,0 1,-0.5 0.5h-13a0.5,0.5 0,0 1,-0.5 -0.5V9z" />
+</vector>

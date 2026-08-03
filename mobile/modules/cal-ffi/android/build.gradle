@@ -1,7 +1,23 @@
-plugins {
-  id 'com.android.library'
-  id 'expo-module-gradle-plugin'
+// The Compose compiler, for Glance (see the widget sources). Applied the way
+// expo-modules-core applies it — `apply plugin:` after a buildscript classpath
+// entry rather than the `plugins {}` DSL, because that is the shape already
+// proven to resolve in this toolchain. `kotlinVersion` comes from the root
+// project, and expo-dev-launcher already pulls Compose into the tree, so this
+// adds a compiler plugin rather than a new world.
+buildscript {
+  repositories {
+    mavenCentral()
+  }
+  dependencies {
+    classpath(
+      "org.jetbrains.kotlin.plugin.compose:org.jetbrains.kotlin.plugin.compose.gradle.plugin:${kotlinVersion}"
+    )
+  }
 }
+
+apply plugin: 'com.android.library'
+apply plugin: 'expo-module-gradle-plugin'
+apply plugin: 'org.jetbrains.kotlin.plugin.compose'
 
 group = 'expo.modules.calffi'
 version = '0.1.0'
@@ -14,6 +30,9 @@ android {
   }
   lintOptions {
     abortOnError false
+  }
+  buildFeatures {
+    compose true
   }
 }
 
@@ -34,4 +53,9 @@ dependencies {
   // plaintext. The master key lives in the AndroidKeyStore (hardware-backed
   // where available); only the encrypted prefs file touches disk.
   implementation "androidx.security:security-crypto:1.1.0-alpha06"
+  // Glance builds the home-screen widget. It renders to RemoteViews under the
+  // hood, but gives us a real CheckBox — with the checkbox ROLE and state for
+  // TalkBack, which hand-built RemoteViews cannot express. On a surface whose
+  // whole point is "one element per task", that role is the feature.
+  implementation "androidx.glance:glance-appwidget:1.1.1"
 }

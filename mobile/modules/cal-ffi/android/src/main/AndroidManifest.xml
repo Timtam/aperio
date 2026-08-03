@@ -1,2 +1,28 @@
-<manifest>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <!--
+      The home-screen widget. Declared in the MODULE's manifest, which the
+      Android build merges into the app's — so no config plugin is needed to
+      reach into a generated file that only exists on the build machine.
+
+      `android:label` is what the widget picker lists it under; the description
+      below the name comes from the appwidget-provider XML.
+
+      `exported="true"` because an app-widget receiver is bound by the LAUNCHER,
+      which is another app — a widget declared unexported simply never appears.
+      It handles only the system's own APPWIDGET_UPDATE; the checkbox taps go
+      through Glance's internal receiver, not this one.
+    -->
+    <receiver
+        android:name="expo.modules.calffi.AperioWidgetReceiver"
+        android:label="@string/aperio_widget_name"
+        android:exported="true">
+      <intent-filter>
+        <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+      </intent-filter>
+      <meta-data
+          android:name="android.appwidget.provider"
+          android:resource="@xml/aperio_widget_info" />
+    </receiver>
+  </application>
 </manifest>

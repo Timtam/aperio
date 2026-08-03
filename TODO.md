@@ -225,8 +225,26 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       Terminierte Einträge sortieren weiterhin nach Start, auch laufende: ein
       Termin, in dem man gerade sitzt, ist das Unmittelbarste, was es gibt.
       ⚠️ Ungeprüft auf dem Gerät.
-- [ ] **Android** — dieselben drei Widgets über Glance. Zurückgestellt, nicht
-      verworfen: es gibt kein Testgerät.
+- [~] **Android** — „Als Nächstes" über **Glance**
+      (`modules/cal-ffi/android/.../AperioWidget.kt`). Liest denselben Snapshot;
+      kein App Group nötig, ein Android-Widget läuft im Prozess der App unter
+      derselben uid, also reicht `filesDir/widget/`.
+      GLANCE statt RemoteViews wegen EINER Sache: `CheckBox` trägt Rolle UND
+      Zustand zu TalkBack. RemoteViews kann einen Kreis zeichnen und eine
+      Beschreibung setzen, aber nicht sagen „das ist ein Kontrollkästchen, und
+      es ist nicht angehakt".
+      Der Compose-Compiler war KEINE neue Abhängigkeit: `expo-modules-core` legt
+      `org.jetbrains.kotlin.plugin.compose` bereits in den buildscript-Klassenpfad
+      und `expo-dev-launcher` zieht Compose ohnehin in den Baum. Angewendet im
+      selben Muster wie expo-modules-core (`apply plugin:` nach einem
+      buildscript-Block, nicht die `plugins {}`-DSL).
+      Der Receiver steht im MODUL-Manifest, das der Build ins App-Manifest
+      mergt — kein Config-Plugin nötig. `exported="true"`, sonst bindet der
+      Launcher ihn nie.
+      Sperrbildschirm-Widgets gibt es unter Android nicht (nach Android 11
+      entfernt), das Countdown-Widget hat also kein Gegenstück.
+      ⚠️ Ungeprüft — Toni hat kein Android-Gerät; ein Bau prüft nur, dass es
+      übersetzt.
 - Offen: Live Activities brauchen einen Start aus dem Vordergrund oder per Push;
   Aperio hat keinen Server und entfernt das Push-Entitlement bewusst. Ein
   Countdown „ohne Zutun" ist unter iOS damit nicht erreichbar, unter Android

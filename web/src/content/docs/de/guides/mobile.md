@@ -174,4 +174,14 @@ Der Countdown selbst wird nicht mitgesprochen, während er läuft. Eine Zahl, di
 sich jede Sekunde ändert, würde ununterbrochen unterbrechen; gesprochen wird die
 grobe Form, die du beim Fokussieren hörst.
 
-Widgets für Android gibt es noch nicht.
+## Widget auf dem Startbildschirm (Android)
+
+**Als Nächstes** gibt es auch unter Android, auf dem Startbildschirm: freie
+Stelle gedrückt halten, **Widgets** wählen, **Aperio** suchen. Es liest dieselbe
+Übersicht und zeigt dieselben Zeilen, und eine Aufgabenzeile ist auch dort ein
+Kontrollkästchen – TalkBack kündigt sie als solches an, mit ihrem Zustand.
+
+Widgets auf dem Sperrbildschirm gibt es unter Android nicht (sie wurden nach
+Android 11 entfernt), das Countdown-Widget hat dort also kein Gegenstück. Alles
+Übrige – ausgeblendete Kalender, Aufgaben aus allen Listen, was ein Tipp im
+jeweiligen Abhak-Modus bewirkt – verhält sich genau wie unter iOS.

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The only two strings this side owns. Everything else the widget says travels
+  in the snapshot, in the language chosen INSIDE Aperio — which can differ from
+  the device's and which no resource file can know.
+
+  These two cannot: the widget picker shows the description before the app has
+  ever run, and the no-data message is what appears when there is no snapshot to
+  take words from. Both fall back to the device language, which is all there is
+  at that point.
+-->
+<resources>
+  <string name="aperio_widget_name">Up Next</string>
+  <string name="aperio_widget_description">Your next events and due tasks.</string>
+  <string name="aperio_widget_no_data">No current data. Open Aperio.</string>
+</resources>
