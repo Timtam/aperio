@@ -104,6 +104,11 @@ Startbildschirm. Hinzufügen wie gewohnt: Startbildschirm gedrückt halten,
 VoiceOver liest jede Zeile als einen Satz – Titel, Tag, Uhrzeit – statt als
 einzelne Bruchstücke, zwischen denen du wischen musst.
 
+Die Widgets folgen **Aperios Sprache**, nicht der des Telefons – hast du Aperio
+also auf einem englischen Telefon auf Deutsch gestellt, sind auch die Widgets
+deutsch. Uhrzeitformat und Datumsreihenfolge bleiben die Regionseinstellungen des
+Telefons, so wie sich jede andere Uhr auf dem Startbildschirm verhält.
+
 Das Widget liest aus einer kleinen Übersicht, die die App aktuell hält und die
 die nächsten sieben Tage abdeckt. Sie wird jedes Mal erneuert, wenn die App
 läuft, und bei jeder Hintergrund-Synchronisation – so bleibt das Widget aktuell,

@@ -95,6 +95,11 @@ usual way: touch and hold the home screen, choose **Add widget**, find **Aperio*
 and pick a size. VoiceOver reads each row as one sentence – title, day, time –
 rather than as separate fragments you have to swipe between.
 
+Widgets follow **Aperio's language**, not the phone's — so if you have set
+Aperio to German on an English phone, the widgets are German too. Clock format
+and date order stay the phone's regional settings, the way every other clock on
+the home screen behaves.
+
 The widget draws from a small snapshot the app keeps up to date, covering the
 next seven days. That snapshot is refreshed whenever the app runs and on each
 background sync round, so the widget stays current without draining the battery.

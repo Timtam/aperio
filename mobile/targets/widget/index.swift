@@ -17,13 +17,18 @@ struct UpcomingEntry: TimelineEntry {
     /// The window ran out — an empty list no longer means "nothing planned".
     let exhausted: Bool
     let strings: WidgetStrings
+    /// Aperio's language paired with the phone's region — see `localeFor`.
+    let locale: Locale
 }
 
 struct UpcomingProvider: TimelineProvider {
     func placeholder(in context: Context) -> UpcomingEntry {
         // Empty rather than invented rows: in the gallery, plausible-looking
         // sample appointments are read out as if they were the user's own.
-        UpcomingEntry(date: Date(), items: [], exhausted: false, strings: fallbackStrings)
+        UpcomingEntry(
+            date: Date(), items: [], exhausted: false, strings: fallbackStrings,
+            locale: Locale.current
+        )
     }
 
     func getSnapshot(in context: Context, completion: @escaping (UpcomingEntry) -> Void) {
@@ -60,13 +65,18 @@ struct UpcomingProvider: TimelineProvider {
     private func entry(from snapshot: WidgetSnapshot?, at date: Date) -> UpcomingEntry {
         guard let snapshot else {
             // No snapshot is NOT an empty calendar, and must not read like one.
-            return UpcomingEntry(date: date, items: [], exhausted: true, strings: fallbackStrings)
+            // No snapshot means no language either; the device is all there is.
+            return UpcomingEntry(
+                date: date, items: [], exhausted: true, strings: fallbackStrings,
+                locale: Locale.current
+            )
         }
         return UpcomingEntry(
             date: date,
             items: snapshot.items(after: date),
             exhausted: snapshot.isExhausted(at: date),
-            strings: snapshot.strings
+            strings: snapshot.strings,
+            locale: snapshot.resolvedLocale
         )
     }
 }
@@ -74,6 +84,7 @@ struct UpcomingProvider: TimelineProvider {
 struct ItemRow: View {
     let item: WidgetItem
     let strings: WidgetStrings
+    let locale: Locale
     /// Lock-screen rendering: everything on ONE line.
     ///
     /// `.accessoryRectangular` is about two lines of text in total, so a row
@@ -92,13 +103,13 @@ struct ItemRow: View {
     /// does not have.
     private var whenParts: [String] {
         var parts: [String] = []
-        if let day = dayText(item.at) {
+        if let day = dayText(item.at, locale) {
             parts.append(day)
         } else if item.untimed && !isEvent(item) {
             parts.append(strings.today)
         }
         if !item.untimed {
-            parts.append(timeText(item.at))
+            parts.append(timeText(item.at, locale))
         } else if isEvent(item) {
             parts.append(strings.allDay)
         }
@@ -229,7 +240,10 @@ struct UpcomingWidgetView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(visible, id: \.id) { item in
-                    ItemRow(item: item, strings: entry.strings, compact: isAccessory)
+                    ItemRow(
+                        item: item, strings: entry.strings, locale: entry.locale,
+                        compact: isAccessory
+                    )
                 }
             }
             Spacer(minLength: 0)

@@ -113,6 +113,19 @@ export interface WidgetSnapshot {
   /** The end of the window this covers, RFC-3339. Past it the widget knows it
    *  has run out of data rather than run out of appointments. */
   horizonEnd: string;
+  /** The language Aperio is running in, as a BCP-47 tag ("de", "en").
+   *
+   *  A widget extension cannot work this out for itself, and its two obvious
+   *  guesses are both wrong. `Locale.current` is intersected with the
+   *  localizations the BUNDLE declares — and an extension with no `.lproj`
+   *  folders declares none, so it falls back to the development language and
+   *  says "in 17 hours" on a German phone. The device's preferred language is
+   *  closer but still not it: Aperio's language can be overridden in its own
+   *  settings, and the widget should follow the app it belongs to.
+   *
+   *  Only the LANGUAGE. Clock format and day-month order stay the phone's
+   *  regional settings — see `localeFor` on the Swift side. */
+  locale: string;
   strings: WidgetStrings;
   items: WidgetItem[];
 }
@@ -128,6 +141,8 @@ export interface WidgetSnapshotInput<E extends RecurringEventLike> {
   horizonDays: number;
   /** Hard cap on rows. */
   limit: number;
+  /** The language the caller translated `strings` into. */
+  locale: string;
   /** The non-data words, already translated by the caller. */
   strings: WidgetStrings;
   /** Container ids the user has hidden on THIS device. Visibility is a
@@ -198,6 +213,7 @@ export function buildWidgetSnapshot<E extends RecurringEventLike>(
     now,
     horizonDays,
     limit,
+    locale,
     strings,
     hiddenContainers,
     eventColorOf,
@@ -286,6 +302,7 @@ export function buildWidgetSnapshot<E extends RecurringEventLike>(
     version: WIDGET_SNAPSHOT_VERSION,
     generatedAt: now.toISOString(),
     horizonEnd: horizonEnd.toISOString(),
+    locale,
     strings,
     items: items.slice(0, limit),
   };

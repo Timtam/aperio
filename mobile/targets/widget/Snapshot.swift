@@ -18,6 +18,8 @@ struct WidgetSnapshot: Decodable {
     let version: Int
     let generatedAt: String
     let horizonEnd: String
+    /// BCP-47 language tag — the language APERIO is running in.
+    let locale: String
     let strings: WidgetStrings
     let items: [WidgetItem]
 }
@@ -90,6 +92,11 @@ func parseInstant(_ raw: String) -> Date? {
     let plain = ISO8601DateFormatter()
     plain.formatOptions = [.withInternetDateTime]
     return plain.date(from: raw)
+}
+
+extension WidgetSnapshot {
+    /// The locale every formatter in this widget should use.
+    var resolvedLocale: Locale { localeFor(locale) }
 }
 
 extension WidgetItem {

@@ -81,6 +81,7 @@ function build(
     now: patch.now ?? localAt(2026, 8, 3, 7, 0),
     horizonDays: patch.horizonDays ?? 7,
     limit: patch.limit ?? 20,
+    locale: 'de',
     strings: {
       empty: 'Nichts geplant.',
       noTimed: 'Nichts mit Uhrzeit.',

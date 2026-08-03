@@ -178,6 +178,18 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       verschluckt es den Knopf. Der Knopf trägt den Aufgabennamen im Label.
       Offen: der Intent-Titel („Complete task") ist unübersetzt, er taucht nur in
       der Kurzbefehle-App auf.
+- [x] **Sprache der Widgets** — Gerätetest zeigte „in 17 hours" auf einem
+      deutschen Telefon. URSACHE: `Locale.current` wird in einer Extension mit
+      den Lokalisierungen ihres BUNDLES verschnitten, und ein Widget-Target ohne
+      `.lproj`-Ordner deklariert keine — es fällt also auf die Entwicklersprache
+      zurück, egal was das Telefon eingestellt hat.
+      FIX: der Snapshot trägt Aperios Sprach-Tag; `localeFor` kombiniert die
+      SPRACHE der App mit der REGION des Telefons und wird jedem Formatter
+      explizit übergeben. Beides aus einem Tag zu ziehen würde die Wörter
+      reparieren und die Zahlen kaputtmachen — ein Deutscher in den USA will
+      12-Stunden-Zeiten.
+      Betraf nicht nur den Countdown, sondern auch Wochentage und Monate im
+      Listen-Widget.
       ⚠️ Ungeprüft auf dem Gerät.
 - [ ] **Android** — dieselben drei Widgets über Glance. Zurückgestellt, nicht
       verworfen: es gibt kein Testgerät.

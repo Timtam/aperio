@@ -43,18 +43,39 @@ var fallbackStrings: WidgetStrings {
         )
 }
 
-/// A time in the phone's regional format. Deliberately NOT translated by us:
-/// times follow the device's regional settings like every other clock on the
-/// home screen, while the words around them follow the app's language.
-func timeText(_ raw: String) -> String {
+/// Aperio's LANGUAGE with the phone's REGION.
+///
+/// The two answer different questions and must not be taken from one source.
+/// German or English is Aperio's own setting, which the user may have overridden
+/// against their device. A 24-hour clock and day-before-month are the phone's
+/// regional settings, which no app should override. Forcing both from one tag
+/// fixes the words by breaking the numbers.
+///
+/// Why the tag has to be shipped at all: `Locale.current` inside an extension is
+/// intersected with the localizations its BUNDLE declares, and a widget
+/// extension with no `.lproj` folders declares none — so it falls back to the
+/// development language and reads "in 17 hours" on a German phone.
+func localeFor(_ tag: String) -> Locale {
+    let language = tag.replacingOccurrences(of: "_", with: "-")
+        .split(separator: "-").first.map(String.init) ?? tag
+    guard let region = Locale.current.region?.identifier else {
+        return Locale(identifier: language)
+    }
+    return Locale(identifier: "\(language)_\(region)")
+}
+
+/// A time, in the given locale's format.
+func timeText(_ raw: String, _ locale: Locale) -> String {
     guard let date = parseInstant(raw) else { return "" }
-    return date.formatted(date: .omitted, time: .shortened)
+    return date.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(locale))
 }
 
 /// A spelled-out day ("Mi., 5. Aug."), or nil for today.
-func dayText(_ raw: String) -> String? {
+func dayText(_ raw: String, _ locale: Locale) -> String? {
     guard let date = parseInstant(raw), !Calendar.current.isDateInToday(date) else { return nil }
-    return date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+    return date.formatted(
+        .dateTime.weekday(.abbreviated).day().month(.abbreviated).locale(locale)
+    )
 }
 
 /// True for an event row. The wire format spells the kind as a string so a

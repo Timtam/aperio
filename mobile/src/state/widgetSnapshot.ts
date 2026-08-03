@@ -82,7 +82,9 @@ async function computeSnapshot(): Promise<string> {
       limit: MAX_ITEMS,
       // Translated HERE, not in the extension. The language is the one chosen in
       // the app's settings, which can differ from the device locale — and an
-      // extension has no way to read that choice.
+      // extension has no way to read that choice. The tag travels too, because
+      // the widget still has dates and countdowns of its own to format.
+      locale: i18n.language,
       strings: {
         empty: i18n.t('widgets.upcoming.empty'),
         noTimed: i18n.t('widgets.upcoming.noTimed'),

@@ -91,6 +91,7 @@ function fullSnapshot() {
     now: new Date(2026, 7, 3, 7, 0),
     horizonDays: 7,
     limit: 20,
+    locale: 'de',
     strings: {
       empty: 'e',
       noTimed: 'n',

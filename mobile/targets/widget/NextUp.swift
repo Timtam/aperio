@@ -21,11 +21,16 @@ struct NextUpEntry: TimelineEntry {
     let item: WidgetItem?
     let exhausted: Bool
     let strings: WidgetStrings
+    /// Aperio's language paired with the phone's region — see `localeFor`.
+    let locale: Locale
 }
 
 struct NextUpProvider: TimelineProvider {
     func placeholder(in context: Context) -> NextUpEntry {
-        NextUpEntry(date: Date(), item: nil, exhausted: false, strings: fallbackStrings)
+        NextUpEntry(
+            date: Date(), item: nil, exhausted: false, strings: fallbackStrings,
+            locale: Locale.current
+        )
     }
 
     func getSnapshot(in context: Context, completion: @escaping (NextUpEntry) -> Void) {
@@ -52,26 +57,34 @@ struct NextUpProvider: TimelineProvider {
 
     private func entry(from snapshot: WidgetSnapshot?, at date: Date) -> NextUpEntry {
         guard let snapshot else {
-            return NextUpEntry(date: date, item: nil, exhausted: true, strings: fallbackStrings)
+            // No snapshot means no language either; the device is all there is.
+            return NextUpEntry(
+                date: date, item: nil, exhausted: true, strings: fallbackStrings,
+                locale: Locale.current
+            )
         }
         return NextUpEntry(
             date: date,
             item: snapshot.timedItems(after: date).first,
             exhausted: snapshot.isExhausted(at: date),
-            strings: snapshot.strings
+            strings: snapshot.strings,
+            locale: snapshot.resolvedLocale
         )
     }
 }
 
 /// How long until `date`, spelled out ("in 25 Minuten").
 ///
-/// Formatted by the SYSTEM, in the device's language — not by us in the app's.
-/// The two can differ, and this is a deliberate exception on the same grounds as
-/// clock times: it is temporal formatting, with plural rules for every language
-/// iOS ships, and hand-rolling it for two would be worse in both of them.
-private func relativeText(to date: Date, from now: Date) -> String {
+/// The SYSTEM does the wording — it carries plural rules for every language iOS
+/// ships, and hand-rolling those for two would be worse in both. But it is told
+/// WHICH language explicitly: left to its own devices it uses `Locale.current`,
+/// which inside a widget extension resolves against the bundle's declared
+/// localizations rather than the phone's, and reads "in 17 hours" on a German
+/// one.
+private func relativeText(to date: Date, from now: Date, locale: Locale) -> String {
     let formatter = RelativeDateTimeFormatter()
     formatter.unitsStyle = .full
+    formatter.locale = locale
     return formatter.localizedString(for: date, relativeTo: now)
 }
 
@@ -88,10 +101,10 @@ struct NextUpView: View {
         guard let start = parseInstant(item.at) else { return "" }
         if start <= entry.date, let end = item.end.flatMap(parseInstant), end > entry.date {
             return entry.strings.runningUntil.replacingOccurrences(
-                of: "{time}", with: timeText(item.end ?? "")
+                of: "{time}", with: timeText(item.end ?? "", entry.locale)
             )
         }
-        return relativeText(to: start, from: entry.date)
+        return relativeText(to: start, from: entry.date, locale: entry.locale)
     }
 
     /// One sentence for the whole widget. On a lock screen there is nothing
