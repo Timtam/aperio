@@ -83,9 +83,13 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       ohne Widget und ohne Datenbank-Umzug. Beantwortet: signiert die
       Capability überhaupt gegen unser Profil? Genau daran scheiterte Bau #5
       mit `aps-environment` (siehe `withoutPushEntitlement.js`).
-- [x] **Schritt 1** — Widget-Target über `@bacons/apple-targets`
+- [~] **Schritt 1** — Widget-Target über `@bacons/apple-targets`
       (`mobile/targets/widget/`), feste Zeile, keine Daten. Beweist, dass das
       Target angelegt, signiert und installiert wird.
+      **Eine Extension ist eine ZWEITE App-ID** (`com.aperio.mobile.widget`)
+      mit eigenem Profil und eigener App-Groups-Berechtigung. EAS kann sie
+      nicht unbeaufsichtigt anlegen — einmal `eas credentials` interaktiv für
+      dieses Target, sonst: „Credentials are not set up".
 - [ ] **Schritt 2** — Datenbank-Umzug (kopieren, testweise öffnen, erst dann die
       Originale löschen; scheitert ein Schritt, bleibt alles am alten Platz),
       schmaler Lesepfad in `cal-ffi` (`upcoming_json(limit, now)` statt des

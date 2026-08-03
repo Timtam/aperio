@@ -23,6 +23,15 @@ module.exports = {
   name: 'AperioWidgets',
   // Shown under the app's name in the widget gallery.
   displayName: 'Aperio',
+  // `com.aperio.mobile.widget` — the leading dot appends to the app's id.
+  //
+  // Written down rather than derived, because this string is not only ours: an
+  // extension is a SECOND app id at Apple, with its own App ID registration,
+  // its own provisioning profile, and its own App Groups capability. The first
+  // build with this target failed for exactly that — EAS found no credentials
+  // for it and cannot mint them without an interactive login. Whatever is
+  // registered in the developer account has to match this line.
+  bundleIdentifier: '.widget',
   frameworks: ['SwiftUI', 'WidgetKit'],
   entitlements: {
     'com.apple.security.application-groups': [APP_GROUP],
