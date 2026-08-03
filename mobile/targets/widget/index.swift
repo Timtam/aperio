@@ -221,7 +221,10 @@ struct UpcomingWidgetView: View {
     private var visible: [WidgetItem] {
         let count: Int
         switch family {
-        case .accessoryRectangular: count = 2
+        // Three, which is what Apple's own rectangular accessory holds — its
+        // documented example is "the top three to-dos". Each row is one line
+        // here, so they fit.
+        case .accessoryRectangular: count = 3
         case .systemSmall: count = 3
         default: count = 5
         }

@@ -328,3 +328,79 @@ describe('buildWidgetSnapshot — what the widget may act on', () => {
     expect(projections.every((i) => i.completable === undefined)).toBe(true);
   });
 });
+
+describe('buildWidgetSnapshot — an ongoing all-day event is not "next"', () => {
+  it('sorts a long holiday by its end, not its start', () => {
+    // Reported from the device: a 42-day holiday entered as one all-day event
+    // sorted ahead of everything for six weeks, and on a three-row lock screen
+    // it and its like crowded out every actual appointment.
+    const holiday: TestEvent = {
+      ...baseEvent,
+      id: 'urlaub',
+      all_day: true,
+      start: localAt(2026, 7, 20).toISOString(),
+      end: localAt(2026, 8, 31).toISOString(),
+    };
+    const meeting: TestEvent = {
+      ...baseEvent,
+      id: 'meeting',
+      start: localAt(2026, 8, 3, 9, 0).toISOString(),
+      end: localAt(2026, 8, 3, 10, 0).toISOString(),
+    };
+    const task: Task = { ...baseTask, id: 'task', scheduled_date: '2026-08-04' };
+    const snap = build({
+      events: [holiday, meeting],
+      tasks: [task],
+      now: localAt(2026, 8, 3, 7, 0),
+    });
+    // The holiday is still there — it is true, and on a roomy widget it is
+    // context — but it no longer stands in front of the week.
+    expect(snap.items.map((i) => i.id)).toEqual(['meeting', 'task', 'urlaub']);
+  });
+
+  it('keeps a single all-day event with its own day', () => {
+    const birthday: TestEvent = {
+      ...baseEvent,
+      id: 'geburtstag',
+      all_day: true,
+      start: localAt(2026, 8, 3).toISOString(),
+      end: localAt(2026, 8, 4).toISOString(),
+    };
+    const today: TestEvent = {
+      ...baseEvent,
+      id: 'heute-termin',
+      start: localAt(2026, 8, 3, 15, 0).toISOString(),
+      end: localAt(2026, 8, 3, 16, 0).toISOString(),
+    };
+    const tomorrow: TestEvent = {
+      ...baseEvent,
+      id: 'morgen-termin',
+      start: localAt(2026, 8, 4, 9, 0).toISOString(),
+      end: localAt(2026, 8, 4, 10, 0).toISOString(),
+    };
+    const snap = build({
+      events: [birthday, today, tomorrow],
+      now: localAt(2026, 8, 3, 7, 0),
+    });
+    // Sorting by end does NOT exile a one-day event: it lands after that day's
+    // appointments and before the next day's, which is where it reads right.
+    expect(snap.items.map((i) => i.id)).toEqual([
+      'heute-termin',
+      'geburtstag',
+      'morgen-termin',
+    ]);
+  });
+
+  it('puts an undated task due today after today’s meetings', () => {
+    const meeting: TestEvent = {
+      ...baseEvent,
+      id: 'meeting',
+      start: localAt(2026, 8, 3, 15, 0).toISOString(),
+      end: localAt(2026, 8, 3, 16, 0).toISOString(),
+    };
+    const anytime: Task = { ...baseTask, id: 'anytime', scheduled_date: '2026-08-03' };
+    const snap = build({ events: [meeting], tasks: [anytime], now: localAt(2026, 8, 3, 7, 0) });
+    // A meeting owns an hour; the task owns the day.
+    expect(snap.items.map((i) => i.id)).toEqual(['meeting', 'anytime']);
+  });
+});

@@ -166,6 +166,37 @@ export interface WidgetSnapshotInput<E extends RecurringEventLike> {
 
 const DAY_MS = 86_400_000;
 
+/** Local midnight ENDING the day `at` falls in. */
+function endOfDay(at: Date): Date {
+  return new Date(at.getFullYear(), at.getMonth(), at.getDate() + 1, 0, 0, 0, 0);
+}
+
+/**
+ * The instant a row is ordered by — which is not always the instant it starts.
+ *
+ * A timed item sorts at its start, including one that is already running: a
+ * meeting in progress is the most immediate thing there is.
+ *
+ * An UNTIMED item sorts at its END instead, and that is the whole point. Their
+ * starts are useless for ordering: an all-day event's start is midnight, and a
+ * multi-day one started days or weeks ago, so by start they all sort ahead of
+ * everything. A fortnight's holiday would then answer "what is next" with
+ * "holiday" every day of the fortnight — and on a lock screen with room for
+ * three rows, it and its neighbours would crowd out every actual appointment.
+ *
+ * By END, an all-day event lands where it stops being true: a single day sits
+ * with that day's appointments, a six-week holiday drops six weeks down the
+ * list. The same reading puts an undated task due today after today's meetings
+ * rather than in front of them, which is also where it belongs — a meeting has
+ * an hour, the task has the day.
+ */
+function sortInstant(item: WidgetItem): number {
+  const at = new Date(item.at);
+  if (!item.untimed) return at.getTime();
+  if (item.end != null) return new Date(item.end).getTime();
+  return endOfDay(at).getTime();
+}
+
 /** Local midnight starting the day `key` (`YYYY-MM-DD`) names. */
 function dayStart(key: string): Date {
   const [y, m, d] = key.split('-').map(Number);
@@ -290,10 +321,12 @@ export function buildWidgetSnapshot<E extends RecurringEventLike>(
   }
 
   items.sort((a, b) => {
-    const d = a.at.localeCompare(b.at);
+    const d = sortInstant(a) - sortInstant(b);
     if (d !== 0) return d;
-    // Same instant: events first (a meeting is the harder commitment), then by
-    // title so the order is stable across refreshes rather than incidental.
+    // Same instant: a timed row first — it is the one with a commitment attached
+    // — then events before tasks, then by title so the order is stable across
+    // refreshes rather than incidental.
+    if (a.untimed !== b.untimed) return a.untimed ? 1 : -1;
     if (a.kind !== b.kind) return a.kind === 'event' ? -1 : 1;
     return a.title.localeCompare(b.title);
   });

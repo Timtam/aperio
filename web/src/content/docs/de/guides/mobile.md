@@ -142,7 +142,7 @@ Beide Widgets lassen sich auf den Sperrbildschirm legen, unter die Uhr:
 Sperrbildschirm gedrückt halten, **Anpassen** wählen, dann den Bereich unter der
 Uhrzeit.
 
-**Als Nächstes** – dieselbe Liste wie auf dem Startbildschirm, gekürzt: zwei
+**Als Nächstes** – dieselbe Liste wie auf dem Startbildschirm, gekürzt: drei
 Zeilen, jede einzeilig, jede mit demselben Abhak-Knopf. Eine Aufgabe lässt sich
 also direkt vom Sperrbildschirm aus erledigen, ohne das Telefon zu entsperren
 oder etwas zu öffnen.

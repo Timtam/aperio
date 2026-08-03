@@ -149,7 +149,8 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       nicht „Nichts geplant." — letzteres wäre schlicht falsch, während jemand
       im Urlaub ist.
       Widget 1 („Als Nächstes") liegt seit dem Gerätetest ebenfalls auf dem
-      Sperrbildschirm: `.accessoryRectangular`, zwei EINZEILIGE Zeilen — mit
+      Sperrbildschirm: `.accessoryRectangular`, DREI EINZEILIGE Zeilen (Apples
+      eigenes Beispiel für diese Familie sind „die drei obersten To-dos") — mit
       Abhak-Knopf (24pt statt 28pt). Interaktive Widgets laufen ab iOS 17 auch
       auf dem Sperrbildschirm; sie dort wegzulassen war eine Design-Entscheidung
       und keine Grenze, und sie war falsch: Apples eigene Erinnerungen können es.
@@ -190,6 +191,18 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       12-Stunden-Zeiten.
       Betraf nicht nur den Countdown, sondern auch Wochentage und Monate im
       Listen-Widget.
+- [x] **Sortierung: laufende Ganztagestermine sind nicht „als Nächstes"** —
+      Gerätetest: auf dem Sperrbildschirm standen NUR ganztägige Termine, keine
+      Aufgaben. Ursache: sortiert wurde nach `at`, und ein 42-Tage-Urlaub hat
+      seinen Start Wochen in der Vergangenheit — also ganz vorn, sechs Wochen
+      lang, und bei drei Zeilen verdrängt das alles Echte.
+      FIX: unterminierte Einträge sortieren nach ihrem ENDE. Ein Ganztagestermin
+      landet dort, wo er aufhört zu gelten: ein einzelner Tag bleibt bei den
+      Terminen dieses Tages, ein sechswöchiger Urlaub rutscht sechs Wochen
+      nach hinten. Dieselbe Lesart stellt eine unterminierte Aufgabe HINTER die
+      Termine des Tages — ein Termin besitzt eine Stunde, die Aufgabe den Tag.
+      Terminierte Einträge sortieren weiterhin nach Start, auch laufende: ein
+      Termin, in dem man gerade sitzt, ist das Unmittelbarste, was es gibt.
       ⚠️ Ungeprüft auf dem Gerät.
 - [ ] **Android** — dieselben drei Widgets über Glance. Zurückgestellt, nicht
       verworfen: es gibt kein Testgerät.

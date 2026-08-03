@@ -131,7 +131,7 @@ view.
 Both widgets can go on the lock screen, under the clock: touch and hold it,
 choose **Customise**, then the area below the time.
 
-**Up Next** – the same list as on the home screen, shortened to fit: two rows,
+**Up Next** – the same list as on the home screen, shortened to fit: three rows,
 each on a single line, and each with the same tick-off button. So a task can be
 completed straight from the lock screen, without unlocking the phone or opening
 anything.
