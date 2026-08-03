@@ -44,7 +44,37 @@ jobs:
       - name: Add iOS Rust targets
         run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
 
+      # Names and presence only — a credential must never reach a build log, so
+      # nothing here prints a value or even a length. Turns a later "still says
+      # no credentials stored" into one glance instead of a hunt.
+      - name: Which OAuth clients this build can bake in
+        env:
+          APERIO_OAUTH_WEBEX_CLIENT_ID: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_ID }}
+          APERIO_OAUTH_WEBEX_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_SECRET }}
+          APERIO_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_ID }}
+          APERIO_OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_SECRET }}
+          APERIO_OAUTH_MICROSOFT_CLIENT_ID: ${{ secrets.APERIO_OAUTH_MICROSOFT_CLIENT_ID }}
+        run: |
+          for v in APERIO_OAUTH_WEBEX_CLIENT_ID APERIO_OAUTH_WEBEX_CLIENT_SECRET                    APERIO_OAUTH_GOOGLE_CLIENT_ID APERIO_OAUTH_GOOGLE_CLIENT_SECRET                    APERIO_OAUTH_MICROSOFT_CLIENT_ID; do
+            if [ -n "${!v:-}" ]; then echo "$v: present"; else echo "$v: MISSING"; fi
+          done
+
       - name: Build cal-ffi static libs (release)
+        env:
+          # `crates/builtin-oauth/build.rs` bakes these in at RUST compile time
+          # via `option_env!`, so they have to exist in the environment of the
+          # cargo step — not merely in the repository's secrets. Adding them to
+          # GitHub without wiring them here leaves the app reporting "no
+          # credentials stored", which is exactly what it did.
+          #
+          # A secret that does not exist expands to the empty string, and
+          # `build.rs` treats empty as absent: the build still succeeds, with
+          # one provider fewer baked. So listing all of them costs nothing.
+          APERIO_OAUTH_WEBEX_CLIENT_ID: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_ID }}
+          APERIO_OAUTH_WEBEX_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_SECRET }}
+          APERIO_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_ID }}
+          APERIO_OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_SECRET }}
+          APERIO_OAUTH_MICROSOFT_CLIENT_ID: ${{ secrets.APERIO_OAUTH_MICROSOFT_CLIENT_ID }}
         run: |
           cargo build -p cal-ffi --release --target aarch64-apple-ios
           cargo build -p cal-ffi --release --target aarch64-apple-ios-sim

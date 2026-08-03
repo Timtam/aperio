@@ -49,7 +49,31 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
 
+      # Names and presence only — a credential must never reach a build log, so
+      # nothing here prints a value or even a length. Turns a later "still says
+      # no credentials stored" into one glance instead of a hunt.
+      - name: Which OAuth clients this build can bake in
+        env:
+          APERIO_OAUTH_WEBEX_CLIENT_ID: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_ID }}
+          APERIO_OAUTH_WEBEX_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_SECRET }}
+          APERIO_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_ID }}
+          APERIO_OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_SECRET }}
+          APERIO_OAUTH_MICROSOFT_CLIENT_ID: ${{ secrets.APERIO_OAUTH_MICROSOFT_CLIENT_ID }}
+        run: |
+          for v in APERIO_OAUTH_WEBEX_CLIENT_ID APERIO_OAUTH_WEBEX_CLIENT_SECRET                    APERIO_OAUTH_GOOGLE_CLIENT_ID APERIO_OAUTH_GOOGLE_CLIENT_SECRET                    APERIO_OAUTH_MICROSOFT_CLIENT_ID; do
+            if [ -n "${!v:-}" ]; then echo "$v: present"; else echo "$v: MISSING"; fi
+          done
+
       - name: Build cal-ffi .so for Android (release)
+        env:
+          # Baked at RUST compile time by crates/builtin-oauth/build.rs via
+          # `option_env!` — present in the repository's secrets is not enough,
+          # the cargo step's own environment is what gets read.
+          APERIO_OAUTH_WEBEX_CLIENT_ID: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_ID }}
+          APERIO_OAUTH_WEBEX_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_SECRET }}
+          APERIO_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_ID }}
+          APERIO_OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_SECRET }}
+          APERIO_OAUTH_MICROSOFT_CLIENT_ID: ${{ secrets.APERIO_OAUTH_MICROSOFT_CLIENT_ID }}
         run: |
           export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_ROOT}"
           cargo ndk -t arm64-v8a -t x86_64 \
