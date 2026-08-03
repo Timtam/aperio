@@ -88,8 +88,13 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       Target angelegt, signiert und installiert wird.
       **Eine Extension ist eine ZWEITE App-ID** (`com.aperio.mobile.widget`)
       mit eigenem Profil und eigener App-Groups-Berechtigung. EAS kann sie
-      nicht unbeaufsichtigt anlegen — einmal `eas credentials` interaktiv für
-      dieses Target, sonst: „Credentials are not set up".
+      nicht unbeaufsichtigt anlegen — einmal `eas credentials` interaktiv,
+      sonst: „Credentials are not set up".
+      Ohne `ios/`-Verzeichnis liest eas-cli die Targets NICHT per Prebuild,
+      sondern aus `extra.eas.build.experimental.ios.appExtensions` — fehlt der
+      Eintrag, kennt es nur die App. Eine Target-Auswahl gibt es dabei nicht:
+      „All: Set up all the required credentials" läuft über ALLE Targets, die
+      es kennt. Erkennbar an zwei „Setting up credentials for target …"-Blöcken.
 - [ ] **Schritt 2** — Datenbank-Umzug (kopieren, testweise öffnen, erst dann die
       Originale löschen; scheitert ein Schritt, bleibt alles am alten Platz),
       schmaler Lesepfad in `cal-ffi` (`upcoming_json(limit, now)` statt des
