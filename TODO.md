@@ -127,6 +127,22 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       („Als Nächstes" / „Up Next") können nicht aus dem Snapshot kommen — sie
       werden gelesen, bevor Daten existieren — und hängen deshalb an
       `Locale.preferredLanguages` statt an der App-Sprache.
+- [~] **Schritt 3** — Widget 3 „Nächster Termin" (`targets/widget/NextUp.swift`):
+      eine Zeile plus Countdown, Familien `.accessoryRectangular` und
+      `.accessoryInline` (Sperrbildschirm). `.accessoryCircular` bewusst NICHT —
+      es fasst einen Glyph oder eine Zahl, und beides kann nicht sagen, WAS
+      ansteht.
+      Der sichtbare Countdown tickt, die Sprachausgabe nicht: die Zeile ist EIN
+      Element mit festem Label, damit VoiceOver nicht im Sekundentakt
+      dazwischenredet.
+      Angefangene Termine kippen von „in 25 Minuten" auf „Läuft bis 11:00" — ein
+      Countdown allein würde negativ und damit unsinnig, genau in dem Moment, in
+      dem die Zeile am meisten zählt.
+      `RelativeDateTimeFormatter` formatiert in der GERÄTE-Sprache, nicht in der
+      App-Sprache. Bewusste Ausnahme auf derselben Grundlage wie Uhrzeiten: es
+      ist Zeitformatierung mit Pluralregeln für jede Sprache, die iOS mitbringt,
+      und selbstgebaut wäre es in beiden schlechter.
+      ⚠️ Ungeprüft auf dem Gerät.
 - [ ] **Schritt 3** — Countdown. `Text(timerInterval:)` rendert das System
       selbst, ohne Zeitachsen-Neuladen. Eigenes, gröberes `accessibilityLabel`
       („in etwa 20 Minuten"), sonst redet VoiceOver sekundenweise.
