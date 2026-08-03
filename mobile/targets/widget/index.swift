@@ -74,11 +74,12 @@ struct UpcomingProvider: TimelineProvider {
 struct ItemRow: View {
     let item: WidgetItem
     let strings: WidgetStrings
-    /// Lock-screen rendering: everything on ONE line, and no button.
+    /// Lock-screen rendering: everything on ONE line.
     ///
     /// `.accessoryRectangular` is about two lines of text in total, so a row
-    /// that spends two of them on itself leaves room for nothing else. The
-    /// spoken label is unchanged — only the drawing gets tighter.
+    /// that spends two of them on itself leaves room for nothing else. Only the
+    /// drawing gets tighter — the row keeps its button and its spoken label is
+    /// unchanged, so the lock screen reads and behaves like the home screen.
     var compact = false
 
     /// "When", in the order it reads: the day, then the time.
@@ -120,9 +121,9 @@ struct ItemRow: View {
         }
     }
 
-    /// One line: symbol, title, when. No tick button — there is no width for a
-    /// 28pt target beside two words of title, and a mis-tap on a lock screen
-    /// completes a task the user cannot see they were pointing at.
+    /// One line: symbol, title, when — and the same tick-off button the home
+    /// screen has. A widget you can only read is half a widget, and the lock
+    /// screen is where a phone gets looked at most.
     private var compactBody: some View {
         HStack(spacing: 4) {
             Image(systemName: kindSymbol(item))
@@ -131,10 +132,34 @@ struct ItemRow: View {
             Text(([item.title] + whenParts).joined(separator: " · "))
                 .font(.caption)
                 .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(spokenLabel)
+            if isCompletable(item) {
+                completeButton(size: 24)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(spokenLabel)
+    }
+
+    /// The tick-off control.
+    ///
+    /// `size` is the hit area, and it is a compromise both ways: the 44pt the
+    /// rest of the app holds to would leave a widget room for one row, and the
+    /// bare glyph would be a target only a steady hand could find. Smaller on
+    /// the lock screen, where a whole row is about 30pt tall.
+    private func completeButton(size: CGFloat) -> some View {
+        Button(intent: CompleteTaskIntent(itemId: item.id, containerId: item.containerId)) {
+            Image(systemName: "circle")
+                .font(.caption)
+                .frame(width: size, height: size)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // Names its target. Buttons all reading "Erledigt" on a surface with no
+        // headings and no order to fall back on would be a guess, and the guess
+        // completes the wrong task.
+        .accessibilityLabel("\(strings.complete), \(item.title)")
     }
 
     private var fullBody: some View {
@@ -165,23 +190,7 @@ struct ItemRow: View {
             .accessibilityLabel(spokenLabel)
             if isCompletable(item) {
                 Spacer(minLength: 4)
-                Button(
-                    intent: CompleteTaskIntent(itemId: item.id, containerId: item.containerId)
-                ) {
-                    Image(systemName: "circle")
-                        .font(.caption)
-                        // A wider hit area than the glyph. A widget cannot spare
-                        // the 44pt the rest of the app holds to — three rows
-                        // would not fit — so this is the largest that leaves the
-                        // list readable.
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                // Names its target. Three buttons all reading "Erledigt" on a
-                // surface with no headings and no order to fall back on would be
-                // a guess, and the guess completes the wrong task.
-                .accessibilityLabel("\(strings.complete), \(item.title)")
+                completeButton(size: 28)
             }
         }
     }

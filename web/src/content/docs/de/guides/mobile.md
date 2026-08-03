@@ -138,10 +138,9 @@ Sperrbildschirm gedrückt halten, **Anpassen** wählen, dann den Bereich unter d
 Uhrzeit.
 
 **Als Nächstes** – dieselbe Liste wie auf dem Startbildschirm, gekürzt: zwei
-Zeilen, jede einzeilig. Abhak-Knöpfe gibt es dort nicht. Ein 28-Punkt-Ziel neben
-zwei Wörtern Titel lässt für keines von beidem Platz, und ein Fehlgriff auf dem
-Sperrbildschirm hakt eine Aufgabe ab, von der man nicht sehen konnte, dass man
-auf sie zielte.
+Zeilen, jede einzeilig, jede mit demselben Abhak-Knopf. Eine Aufgabe lässt sich
+also direkt vom Sperrbildschirm aus erledigen, ohne das Telefon zu entsperren
+oder etwas zu öffnen.
 
 **Nächster Termin** ist das andere: eine einzelne Zeile, die sagt, was als
 Nächstes ansteht und in wie langer Zeit – „in 25 Minuten", und

@@ -149,11 +149,14 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       nicht „Nichts geplant." — letzteres wäre schlicht falsch, während jemand
       im Urlaub ist.
       Widget 1 („Als Nächstes") liegt seit dem Gerätetest ebenfalls auf dem
-      Sperrbildschirm: `.accessoryRectangular`, zwei EINZEILIGE Zeilen und keine
-      Abhak-Knöpfe — der Platz reicht schlicht nicht, und ein Fehlgriff dort
-      hakt etwas ab, das man nicht sehen konnte. `containerBackground` hängt
-      deshalb an der Familie und sitzt in der VIEW, nicht in der Configuration:
-      ein Accessory wird im System-Material gezeichnet.
+      Sperrbildschirm: `.accessoryRectangular`, zwei EINZEILIGE Zeilen — mit
+      Abhak-Knopf (24pt statt 28pt). Interaktive Widgets laufen ab iOS 17 auch
+      auf dem Sperrbildschirm; sie dort wegzulassen war eine Design-Entscheidung
+      und keine Grenze, und sie war falsch: Apples eigene Erinnerungen können es.
+      `containerBackground` hängt an der Familie und sitzt in der VIEW, nicht in
+      der Configuration: ein Accessory wird im System-Material gezeichnet.
+      „Nächster Termin" bleibt bewusst nur lesend — ein Countdown-Widget, das
+      überwiegend Termine zeigt, braucht keinen Haken.
       ⚠️ Der Rest ungeprüft auf dem Gerät.
 - [~] **Schritt 4** — Abhaken aus dem Widget (`targets/widget/Actions.swift`,
       `mobile/src/state/widgetActions.ts`). Die Extension schreibt NICHT die

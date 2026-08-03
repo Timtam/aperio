@@ -127,9 +127,9 @@ Both widgets can go on the lock screen, under the clock: touch and hold it,
 choose **Customise**, then the area below the time.
 
 **Up Next** – the same list as on the home screen, shortened to fit: two rows,
-each on a single line. It carries no tick-off buttons there. A 28-point target
-beside two words of title leaves room for neither, and a mis-tap on a lock screen
-would complete a task you could not see you were pointing at.
+each on a single line, and each with the same tick-off button. So a task can be
+completed straight from the lock screen, without unlocking the phone or opening
+anything.
 
 **Next Up** is the other one: a single line saying what is next and how
 long until it – "in 25 minutes", and once it has started, "Running until 11:00".
