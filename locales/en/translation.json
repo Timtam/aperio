@@ -2039,7 +2039,10 @@
       "empty": "Nothing planned.",
       "stale": "No current data. Open Aperio.",
       "allDay": "All day",
-      "today": "Today"
+      "today": "Today",
+      "runningUntil": "Running until {time}",
+      "kindEvent": "Event",
+      "kindTask": "Task"
     }
   }
 }

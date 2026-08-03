@@ -108,4 +108,19 @@ A widget only ever shows; it cannot change anything yet. Calendars you have
 hidden on this device stay hidden in the widget too. Tasks come from **all**
 your lists, not only the ones currently selected in the task view.
 
+## Lock-screen widget (iOS)
+
+**Next Up** is the lock-screen companion: one line, saying what is next and how
+long until it – "in 25 minutes", and once it has started, "Running until 11:00".
+Add it by touching and holding the lock screen, choosing **Customise**, then the
+area below the clock.
+
+It reads the same snapshot as the home-screen widget, so it needs no extra
+setup. VoiceOver reads it as one sentence, ending with whether the item is an
+event or a task – something neither the icon nor a colour can say on its own.
+
+The countdown itself is not spoken as it ticks. A number that changes every
+second would interrupt continuously; the spoken form is the coarse one you hear
+when you focus the widget.
+
 Android widgets are not available yet.

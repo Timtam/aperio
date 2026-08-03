@@ -70,6 +70,19 @@ export interface WidgetStrings {
    *  "Heute" — the widget cannot spell this itself without a calendar of the
    *  app's language. */
   today: string;
+  /** An event that has already started, as a TEMPLATE with a `{time}`
+   *  placeholder: "Läuft bis {time}".
+   *
+   *  A template rather than a finished sentence because WHICH item is running
+   *  depends on when the widget renders, which is hours after this was written —
+   *  but the wording still has to come from the app's language. The widget
+   *  substitutes the end time in the phone's regional format. */
+  runningUntil: string;
+  /** "Termin" / "Aufgabe". A row's title often does not say which it is, and
+   *  nothing else on the widget does either — a colour dot certainly does not.
+   *  Spoken at the END of a row, after the identifying content. */
+  kindEvent: string;
+  kindTask: string;
 }
 
 export interface WidgetSnapshot {

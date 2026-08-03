@@ -19,20 +19,6 @@ struct UpcomingEntry: TimelineEntry {
     let strings: WidgetStrings
 }
 
-/// Used when there is no snapshot at all — the gallery preview, and the window
-/// between installing the widget and the app first running. It has to say
-/// something true in a language nobody has told us yet, so it falls back to the
-/// device's preferred language, the only signal available before any data.
-private var fallbackStrings: WidgetStrings {
-    galleryLanguageIsGerman
-        ? WidgetStrings(
-            empty: "Nichts geplant.", stale: "Keine aktuellen Daten. Öffne Aperio.",
-            allDay: "Ganztägig", today: "Heute")
-        : WidgetStrings(
-            empty: "Nothing planned.", stale: "No current data. Open Aperio.",
-            allDay: "All day", today: "Today")
-}
-
 struct UpcomingProvider: TimelineProvider {
     func placeholder(in context: Context) -> UpcomingEntry {
         // Empty rather than invented rows: in the gallery, plausible-looking
@@ -85,20 +71,6 @@ struct UpcomingProvider: TimelineProvider {
     }
 }
 
-/// A time, in the phone's regional format. Deliberately NOT translated by us:
-/// times follow the device's regional settings like every other clock on the
-/// home screen, while the words around them follow the app's language.
-private func timeText(_ raw: String) -> String {
-    guard let date = parseInstant(raw) else { return "" }
-    return date.formatted(date: .omitted, time: .shortened)
-}
-
-/// A spelled-out day ("Mi., 5. Aug."), or nil for today.
-private func dayText(_ raw: String) -> String? {
-    guard let date = parseInstant(raw), !Calendar.current.isDateInToday(date) else { return nil }
-    return date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
-}
-
 struct ItemRow: View {
     let item: WidgetItem
     let strings: WidgetStrings
@@ -115,12 +87,12 @@ struct ItemRow: View {
         var parts: [String] = []
         if let day = dayText(item.at) {
             parts.append(day)
-        } else if item.untimed && item.kind != "event" {
+        } else if item.untimed && !isEvent(item) {
             parts.append(strings.today)
         }
         if !item.untimed {
             parts.append(timeText(item.at))
-        } else if item.kind == "event" {
+        } else if isEvent(item) {
             parts.append(strings.allDay)
         }
         return parts.filter { !$0.isEmpty }
@@ -131,16 +103,18 @@ struct ItemRow: View {
     /// splitting this into a title element and a time element would make
     /// VoiceOver read two fragments, neither of which is an appointment.
     private var spokenLabel: String {
-        ([item.title] + whenParts).joined(separator: ", ")
+        ([item.title] + whenParts + [kindWord(item, strings)]).joined(separator: ", ")
     }
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            // A colour dot, never the only carrier of meaning — the row reads
-            // completely without it.
-            if let hex = item.color, let colour = Color(hex: hex) {
-                Circle().fill(colour).frame(width: 6, height: 6)
-            }
+            // What KIND of row this is, as a glyph — the sighted half of the
+            // word the label speaks. Tinted with the item's colour when it has
+            // one, so the two cues share the space a colour dot used to take
+            // and neither is the only carrier of meaning.
+            Image(systemName: kindSymbol(item))
+                .font(.caption2)
+                .foregroundStyle(item.color.flatMap { Color(hex: $0) } ?? .secondary)
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.title)
                     .font(.caption)
@@ -202,13 +176,6 @@ extension Color {
     }
 }
 
-/// The two gallery strings, which are read BEFORE any snapshot exists and so
-/// cannot come from one. Picked off the device's preferred language — the only
-/// signal available this early — covering the two languages the app ships.
-private var galleryLanguageIsGerman: Bool {
-    (Locale.preferredLanguages.first ?? "en").hasPrefix("de")
-}
-
 struct UpcomingWidget: Widget {
     let kind = "AperioUpcoming"
 
@@ -235,5 +202,6 @@ struct UpcomingWidget: Widget {
 struct AperioWidgetBundle: WidgetBundle {
     var body: some Widget {
         UpcomingWidget()
+        NextUpWidget()
     }
 }

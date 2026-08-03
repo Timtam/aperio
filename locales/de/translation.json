@@ -2039,7 +2039,10 @@
       "empty": "Nichts geplant.",
       "stale": "Keine aktuellen Daten. Öffne Aperio.",
       "allDay": "Ganztägig",
-      "today": "Heute"
+      "today": "Heute",
+      "runningUntil": "Läuft bis {time}",
+      "kindEvent": "Termin",
+      "kindTask": "Aufgabe"
     }
   }
 }

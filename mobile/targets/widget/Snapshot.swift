@@ -30,6 +30,10 @@ struct WidgetStrings: Decodable {
     let stale: String
     let allDay: String
     let today: String
+    /// A template with a `{time}` placeholder — see `shared/widgetSnapshot.ts`.
+    let runningUntil: String
+    let kindEvent: String
+    let kindTask: String
 }
 
 struct WidgetItem: Decodable {

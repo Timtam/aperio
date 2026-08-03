@@ -87,6 +87,9 @@ async function computeSnapshot(): Promise<string> {
         stale: i18n.t('widgets.upcoming.stale'),
         allDay: i18n.t('widgets.upcoming.allDay'),
         today: i18n.t('widgets.upcoming.today'),
+        runningUntil: i18n.t('widgets.upcoming.runningUntil'),
+        kindEvent: i18n.t('widgets.upcoming.kindEvent'),
+        kindTask: i18n.t('widgets.upcoming.kindTask'),
       },
       hiddenContainers: hidden,
       // The same resolver the day view paints with, so a widget row is never a

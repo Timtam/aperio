@@ -117,4 +117,20 @@ Das Widget zeigt nur an, ändern kann es noch nichts. Kalender, die du auf diese
 Gerät ausgeblendet hast, bleiben auch im Widget ausgeblendet. Aufgaben kommen aus
 **allen** Listen, nicht nur aus den gerade in der Aufgabenansicht ausgewählten.
 
+## Widget auf dem Sperrbildschirm (iOS)
+
+**Nächster Termin** ist das Gegenstück für den Sperrbildschirm: eine Zeile, die
+sagt, was als Nächstes ansteht und in wie langer Zeit – „in 25 Minuten", und
+sobald es begonnen hat, „Läuft bis 11:00". Hinzufügen: Sperrbildschirm gedrückt
+halten, **Anpassen** wählen, dann den Bereich unter der Uhr.
+
+Es liest dieselbe Übersicht wie das Widget auf dem Startbildschirm, braucht also
+keine eigene Einrichtung. VoiceOver liest es als einen Satz, der damit endet, ob
+es sich um einen Termin oder eine Aufgabe handelt – etwas, das weder das Symbol
+noch eine Farbe für sich allein sagen kann.
+
+Der Countdown selbst wird nicht mitgesprochen, während er läuft. Eine Zahl, die
+sich jede Sekunde ändert, würde ununterbrochen unterbrechen; gesprochen wird die
+grobe Form, die du beim Fokussieren hörst.
+
 Widgets für Android gibt es noch nicht.
