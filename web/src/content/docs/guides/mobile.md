@@ -109,10 +109,11 @@ Two states are deliberately worded differently:
 - **"No current data. Open Aperio."** – the widget has run past what it knows.
   Opening the app refreshes it.
 
-Tasks can be **ticked off straight from the widget**: each task row carries a
-button, labelled with the task's own name so it stands alone – three buttons all
-reading "Mark done" would be a guess, and the guess completes the wrong task. The
-row disappears as soon as you tap it.
+Tasks can be **ticked off straight from the widget**: a task row *is* a
+checkbox – the whole row, not a separate button beside it. VoiceOver reads it as
+one item, ending with the checkbox and its state, so what the row is and what can
+be done with it arrive together in a single swipe. The row disappears as soon as
+you tick it.
 
 The tick is recorded immediately and carried out by the app the next time it
 runs – on opening it, or on a background sync round. That is not a delay you have
@@ -132,7 +133,7 @@ Both widgets can go on the lock screen, under the clock: touch and hold it,
 choose **Customise**, then the area below the time.
 
 **Up Next** – the same list as on the home screen, shortened to fit: three rows,
-each on a single line, and each with the same tick-off button. So a task can be
+each on a single line, and each a checkbox in the same way. So a task can be
 completed straight from the lock screen, without unlocking the phone or opening
 anything.
 

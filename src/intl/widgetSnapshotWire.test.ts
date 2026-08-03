@@ -97,7 +97,6 @@ function fullSnapshot() {
       noTimed: 'n',
       stale: 's',
       allDay: 'a',
-      complete: 'c',
       today: 't',
       runningUntil: 'r',
       kindEvent: 'ev',

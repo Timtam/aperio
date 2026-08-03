@@ -175,8 +175,18 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       tot. Eine Aktion wird nach dem VERSUCH gelöscht, nicht erst nach Erfolg —
       sonst bliebe eine unausführbare Aktion für immer stehen und mit ihr die
       unsichtbare Zeile.
-      A11y: `children: .ignore` sitzt am TEXT, nicht an der Zeile — an der Zeile
-      verschluckt es den Knopf. Der Knopf trägt den Aufgabennamen im Label.
+      A11y: die Aufgabenzeile IST das Kontrollkästchen — `Toggle(isOn:intent:)`
+      mit der ganzen Zeile als Label, nicht Text plus Knopf daneben. Ein Element
+      statt zwei, und VoiceOver liefert Inhalt, Rolle und Zustand in einem Wisch.
+      `Toggle(isOn:intent:)` nimmt einen NORMALEN `AppIntent` — `SetValueIntent`
+      braucht nur `ControlWidgetToggle` (Kontrollzentrum). Der gewünschte
+      Zielzustand steckt in den Intent-Parametern, nicht im Toggle.
+      Eigener `ToggleStyle` (Kreis statt Schalter): die Interaktion hängt am
+      `Toggle`, nicht am Style, also ändert ein Style, der nur zeichnet, nichts
+      am Verhalten.
+      `isOn` ist IMMER false — eine erledigte Aufgabe steht nicht im Snapshot,
+      eine gerade abgehakte blendet das Overlay aus. Es gibt hier keinen Zustand,
+      der mit der App auseinanderlaufen könnte.
       Offen: der Intent-Titel („Complete task") ist unübersetzt, er taucht nur in
       der Kurzbefehle-App auf.
 - [x] **Sprache der Widgets** — Gerätetest zeigte „in 17 hours" auf einem

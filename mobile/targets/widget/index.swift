@@ -81,15 +81,35 @@ struct UpcomingProvider: TimelineProvider {
     }
 }
 
+/// The tick-off control's look: a circle that fills when checked, exactly the
+/// shape every to-do list on the platform uses.
+///
+/// A custom style rather than the default switch. The interaction is bound by
+/// `Toggle(isOn:intent:)` itself, not by the style, so a style that draws and
+/// adds no gestures of its own leaves the behaviour untouched.
+struct ChecklistToggleStyle: ToggleStyle {
+    let tint: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: configuration.isOn ? "checkmark.circle.fill" : "circle")
+                .font(.caption)
+                .foregroundStyle(tint)
+            configuration.label
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 struct ItemRow: View {
     let item: WidgetItem
     let strings: WidgetStrings
     let locale: Locale
     /// Lock-screen rendering: everything on ONE line.
     ///
-    /// `.accessoryRectangular` is about two lines of text in total, so a row
-    /// that spends two of them on itself leaves room for nothing else. Only the
-    /// drawing gets tighter — the row keeps its button and its spoken label is
+    /// `.accessoryRectangular` is about three lines of text in total, so a row
+    /// that spends two of them on itself leaves room for one other row. Only the
+    /// drawing gets tighter — the row keeps its checkbox and its spoken label is
     /// unchanged, so the lock screen reads and behaves like the home screen.
     var compact = false
 
@@ -124,70 +144,55 @@ struct ItemRow: View {
         ([item.title] + whenParts + [kindWord(item, strings)]).joined(separator: ", ")
     }
 
+    private var tint: Color {
+        item.color.flatMap { Color(hex: $0) } ?? .secondary
+    }
+
     var body: some View {
-        if compact {
-            compactBody
+        if isCompletable(item) {
+            // The ROW is the checkbox — one element, not a label plus a button
+            // beside it. VoiceOver announces it with the checkbox trait and its
+            // state, so what it is and what can be done with it arrive together,
+            // in one stop instead of two.
+            //
+            // Always `isOn: false`: a completed task is not in the snapshot, and
+            // one just ticked is hidden by the pending-action overlay. There is
+            // no state here to get out of step with the app.
+            Toggle(
+                isOn: false,
+                intent: CompleteTaskIntent(itemId: item.id, containerId: item.containerId)
+            ) {
+                label
+            }
+            .toggleStyle(ChecklistToggleStyle(tint: tint))
+            // One sentence instead of the two Texts inside, which VoiceOver
+            // would otherwise read as fragments before the trait.
+            .accessibilityLabel(spokenLabel)
         } else {
-            fullBody
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                // An event cannot be ticked, so it keeps a plain glyph where a
+                // task has its circle — the sighted half of the word the label
+                // speaks, tinted with the item's colour. Hidden from VoiceOver
+                // because the label already says it in words.
+                Image(systemName: kindSymbol(item))
+                    .font(.caption2)
+                    .foregroundStyle(tint)
+                    .accessibilityHidden(true)
+                label
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(spokenLabel)
         }
     }
 
-    /// One line: symbol, title, when — and the same tick-off button the home
-    /// screen has. A widget you can only read is half a widget, and the lock
-    /// screen is where a phone gets looked at most.
-    private var compactBody: some View {
-        HStack(spacing: 4) {
-            Image(systemName: kindSymbol(item))
-                .font(.caption2)
-                .accessibilityHidden(true)
+    /// The row's text, in whichever density this family calls for.
+    @ViewBuilder private var label: some View {
+        if compact {
             Text(([item.title] + whenParts).joined(separator: " · "))
                 .font(.caption)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(spokenLabel)
-            if isCompletable(item) {
-                completeButton(size: 24)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// The tick-off control.
-    ///
-    /// `size` is the hit area, and it is a compromise both ways: the 44pt the
-    /// rest of the app holds to would leave a widget room for one row, and the
-    /// bare glyph would be a target only a steady hand could find. Smaller on
-    /// the lock screen, where a whole row is about 30pt tall.
-    private func completeButton(size: CGFloat) -> some View {
-        Button(intent: CompleteTaskIntent(itemId: item.id, containerId: item.containerId)) {
-            Image(systemName: "circle")
-                .font(.caption)
-                .frame(width: size, height: size)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        // Names its target. Buttons all reading "Erledigt" on a surface with no
-        // headings and no order to fall back on would be a guess, and the guess
-        // completes the wrong task.
-        .accessibilityLabel("\(strings.complete), \(item.title)")
-    }
-
-    private var fullBody: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            // What KIND of row this is, as a glyph — the sighted half of the
-            // word the label speaks. Tinted with the item's colour when it has
-            // one, so the two cues share the space a colour dot used to take
-            // and neither is the only carrier of meaning. Hidden from VoiceOver
-            // because the label below already says it in words.
-            Image(systemName: kindSymbol(item))
-                .font(.caption2)
-                .foregroundStyle(item.color.flatMap { Color(hex: $0) } ?? .secondary)
-                .accessibilityHidden(true)
-            // The text is ONE element; the button beside it is a second. The
-            // `children: .ignore` deliberately sits HERE and not on the row: on
-            // the row it would swallow the button and leave a control no screen
-            // reader could reach.
+        } else {
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.title)
                     .font(.caption)
@@ -197,12 +202,7 @@ struct ItemRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(spokenLabel)
-            if isCompletable(item) {
-                Spacer(minLength: 4)
-                completeButton(size: 28)
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

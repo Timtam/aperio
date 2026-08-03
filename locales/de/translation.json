@@ -2043,8 +2043,7 @@
       "today": "Heute",
       "runningUntil": "Läuft bis {time}",
       "kindEvent": "Termin",
-      "kindTask": "Aufgabe",
-      "complete": "Erledigt"
+      "kindTask": "Aufgabe"
     }
   }
 }

@@ -118,10 +118,11 @@ ohne den Akku zu belasten. Zwei Zustände sind bewusst unterschiedlich formulier
 - **„Keine aktuellen Daten. Öffne Aperio."** – das Widget ist über das hinaus,
   was es weiß. Ein Start der App frischt es auf.
 
-Aufgaben lassen sich **direkt im Widget abhaken**: jede Aufgabenzeile hat einen
-Knopf, der mit dem Namen der Aufgabe beschriftet ist und dadurch für sich steht –
-drei Knöpfe, die alle „Erledigt" heißen, wären ein Ratespiel, und geraten wird
-die falsche Aufgabe. Die Zeile verschwindet, sobald du tippst.
+Aufgaben lassen sich **direkt im Widget abhaken**: eine Aufgabenzeile *ist* ein
+Kontrollkästchen – die ganze Zeile, kein separater Knopf daneben. VoiceOver liest
+sie als einen Eintrag, der mit dem Kontrollkästchen und seinem Zustand endet – was
+die Zeile ist und was man mit ihr tun kann, kommen also in einem Wisch. Die Zeile
+verschwindet, sobald du sie abhakst.
 
 Der Haken wird sofort vermerkt und von der App ausgeführt, sobald sie das
 nächste Mal läuft – beim Öffnen oder bei einer Hintergrund-Synchronisation. Das
@@ -143,7 +144,7 @@ Sperrbildschirm gedrückt halten, **Anpassen** wählen, dann den Bereich unter d
 Uhrzeit.
 
 **Als Nächstes** – dieselbe Liste wie auf dem Startbildschirm, gekürzt: drei
-Zeilen, jede einzeilig, jede mit demselben Abhak-Knopf. Eine Aufgabe lässt sich
+Zeilen, jede einzeilig, jede genauso ein Kontrollkästchen. Eine Aufgabe lässt sich
 also direkt vom Sperrbildschirm aus erledigen, ohne das Telefon zu entsperren
 oder etwas zu öffnen.
 

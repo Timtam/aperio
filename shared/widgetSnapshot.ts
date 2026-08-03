@@ -83,8 +83,6 @@ export interface WidgetStrings {
   stale: string;
   /** An item with no clock time. "Ganztägig" */
   allDay: string;
-  /** The tick-off button's label. "Erledigt" */
-  complete: string;
   /** The current day, so a row with no clock time still answers "when".
    *  "Heute" — the widget cannot spell this itself without a calendar of the
    *  app's language. */

@@ -90,7 +90,6 @@ async function computeSnapshot(): Promise<string> {
         noTimed: i18n.t('widgets.upcoming.noTimed'),
         stale: i18n.t('widgets.upcoming.stale'),
         allDay: i18n.t('widgets.upcoming.allDay'),
-        complete: i18n.t('widgets.upcoming.complete'),
         today: i18n.t('widgets.upcoming.today'),
         runningUntil: i18n.t('widgets.upcoming.runningUntil'),
         kindEvent: i18n.t('widgets.upcoming.kindEvent'),

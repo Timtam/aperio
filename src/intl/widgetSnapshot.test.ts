@@ -87,7 +87,6 @@ function build(
       noTimed: 'Nichts mit Uhrzeit.',
       stale: 'Keine aktuellen Daten.',
       allDay: 'Ganztägig',
-      complete: 'Erledigt',
       today: 'Heute',
       runningUntil: 'Läuft bis {time}',
       kindEvent: 'Termin',
