@@ -260,8 +260,25 @@ Vorteil.
       Framework-Ausweg (`AppIntentsPackage`) gilt nur für Frameworks, nicht für
       die statischen Bibliotheken, zu denen Expo-Module übersetzen. Ein Pod
       scheidet damit aus.
+      ✅ Gerätetest: Kurzbefehl erscheint, „Hey Siri, öffne Aperio" startet die
+      App. Der Weg trägt.
+- [~] **Schritt 2** — `CreateEventIntent` mit Titel + `Date`. Siri löst die
+      gesprochene Zeit selbst auf; wir reihen die Anfrage in dieselbe
+      Aktions-Warteschlange wie der Widget-Haken und die App legt sie beim
+      Hereinkommen an.
+      `openAppWhenRun = true`, und das ist der Unterschied zum Widget: ein Haken,
+      der eine Zeile verschwinden lässt, darf Minuten später wirken; ein
+      gesprochenes „neuer Termin" nicht — man sagt es, schaut nach und findet
+      nichts.
+      Dauer fest 60 Minuten (Siri gibt einen Moment, keine Spanne), Kalender =
+      zuletzt genutzter, sonst der erste beschreibbare.
+      `state/widgetActions.ts` → `queuedActions.ts` umbenannt: es bedient jetzt
+      zwei Absender, der alte Name hätte gelogen.
       ⚠️ Ungeprüft.
-- [ ] **Schritt 2** — Parameter: Titel + `Date`. Siri parst, wir schreiben nur.
+- [ ] **Schritt 2b** — deutsche Phrasen. Kurzbefehl-Phrasen lokalisieren über
+      eine `AppShortcuts.strings` im App-Target, NICHT über unseren i18n-Katalog.
+      Bewusst von Schritt 2 getrennt gehalten: ein eigener Mechanismus, dessen
+      Fehlschlag sonst die Diagnose des Anlegens vernebelt hätte.
 - [ ] **Schritt 3** — Kalender und Aufgabenliste als `AppEntity` mit
       `EntityQuery`. Die Liste kommt über dieselbe Snapshot-Datei-Mechanik wie
       beim Widget (eine `calendars.json` in der App Group) — der Intent-Prozess

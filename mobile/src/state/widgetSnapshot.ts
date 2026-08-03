@@ -13,7 +13,7 @@ import { resolveEventColor } from '../intl/eventColor';
 import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
 import { getHiddenCalendars } from './calendarVisibility';
 import { currentUserForList } from './currentUser';
-import { consumeWidgetActionsApplied, drainWidgetActions } from './widgetActions';
+import { consumeQueuedActionsApplied, drainQueuedActions } from './queuedActions';
 import { useCacheReload } from './cacheObserver';
 import { subscribeCalendarChanged } from './calendarMutations';
 import { whenStartupSettled } from './startupGate';
@@ -154,7 +154,7 @@ export async function refreshWidgetSnapshot(): Promise<void> {
     do {
       rerun = false;
       try {
-        await drainWidgetActions();
+        await drainQueuedActions();
         await CalFfi.writeWidgetSnapshot(await computeSnapshot());
       } catch {
         // A bridge hiccup, a missing container, an account that failed to list:
@@ -184,7 +184,7 @@ export function useWidgetSnapshot(): void {
       void refreshWidgetSnapshot().then(() => {
         // A tap performed here — or by the background pass, which had no React
         // to tell — is a task the open views are now wrong about.
-        if (consumeWidgetActionsApplied()) invalidateData();
+        if (consumeQueuedActionsApplied()) invalidateData();
       });
     });
   }, [invalidateData]);
