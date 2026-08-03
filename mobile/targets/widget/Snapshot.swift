@@ -47,6 +47,10 @@ struct WidgetItem: Decodable {
     let untimed: Bool
     let containerId: String
     let color: String?
+    /// The app is willing to accept a completion for this row. Absent means no —
+    /// an event, or a recurring projection, whose rules the app owns and the
+    /// extension deliberately does not re-derive.
+    let completable: Bool?
 }
 
 /// The version this build understands. A snapshot from a newer app is refused
@@ -115,9 +119,12 @@ extension WidgetSnapshot {
     /// RENDER time — not the write time — is what makes one snapshot serve a
     /// whole day of timeline entries.
     func items(after date: Date) -> [WidgetItem] {
-        items.filter { item in
-            guard let expiry = item.expiresAt else { return false }
-            return expiry > date
+        // A tap the app has not drained yet is still in the snapshot, and a row
+        // that stays put after being ticked reads as a dead button.
+        let ticked = ActionQueue.pendingCompletions()
+        return items.filter { item in
+            guard let expiry = item.expiresAt, expiry > date else { return false }
+            return !ticked.contains(item.id)
         }
     }
 

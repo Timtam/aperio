@@ -32,7 +32,9 @@ module.exports = {
   // for it and cannot mint them without an interactive login. Whatever is
   // registered in the developer account has to match this line.
   bundleIdentifier: '.widget',
-  frameworks: ['SwiftUI', 'WidgetKit'],
+  // AppIntents is what makes a widget button do something without opening
+  // the app — see Actions.swift.
+  frameworks: ['SwiftUI', 'WidgetKit', 'AppIntents'],
   entitlements: {
     'com.apple.security.application-groups': [APP_GROUP],
   },

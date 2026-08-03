@@ -70,3 +70,7 @@ func kindWord(_ item: WidgetItem, _ strings: WidgetStrings) -> String {
 func kindSymbol(_ item: WidgetItem) -> String {
     isEvent(item) ? "calendar" : "checkmark.circle"
 }
+
+/// Whether the widget may offer a tick-off for this row. The app decides and
+/// says so in the snapshot; this only reads the answer.
+func isCompletable(_ item: WidgetItem) -> Bool { item.completable == true }

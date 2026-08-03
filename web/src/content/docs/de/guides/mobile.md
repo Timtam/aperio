@@ -113,9 +113,23 @@ ohne den Akku zu belasten. Zwei Zustände sind bewusst unterschiedlich formulier
 - **„Keine aktuellen Daten. Öffne Aperio."** – das Widget ist über das hinaus,
   was es weiß. Ein Start der App frischt es auf.
 
-Das Widget zeigt nur an, ändern kann es noch nichts. Kalender, die du auf diesem
-Gerät ausgeblendet hast, bleiben auch im Widget ausgeblendet. Aufgaben kommen aus
-**allen** Listen, nicht nur aus den gerade in der Aufgabenansicht ausgewählten.
+Aufgaben lassen sich **direkt im Widget abhaken**: jede Aufgabenzeile hat einen
+Knopf, der mit dem Namen der Aufgabe beschriftet ist und dadurch für sich steht –
+drei Knöpfe, die alle „Erledigt" heißen, wären ein Ratespiel, und geraten wird
+die falsche Aufgabe. Die Zeile verschwindet, sobald du tippst.
+
+Der Haken wird sofort vermerkt und von der App ausgeführt, sobald sie das
+nächste Mal läuft – beim Öffnen oder bei einer Hintergrund-Synchronisation. Das
+ist keine Verzögerung, um die du dich kümmern musst: eine Aufgabe abzuschließen
+wirkt in Aperio auf Eltern- und Unteraufgaben, schaltet eine Wiederholung weiter
+und stellt eine Synchronisation in die Warteschlange – und ein Widget hat weder
+den Speicher noch den Zugriff, um das selbst zu tun. Termine haben keinen Knopf,
+und künftige Vorkommen einer wiederkehrenden Aufgabe auch nicht: abgehakt wird
+das aktuelle, denn das schaltet die Reihe weiter.
+
+Kalender, die du auf diesem Gerät ausgeblendet hast, bleiben auch im Widget
+ausgeblendet. Aufgaben kommen aus **allen** Listen, nicht nur aus den gerade in
+der Aufgabenansicht ausgewählten.
 
 ## Widget auf dem Sperrbildschirm (iOS)
 

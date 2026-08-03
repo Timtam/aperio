@@ -2043,7 +2043,8 @@
       "today": "Today",
       "runningUntil": "Running until {time}",
       "kindEvent": "Event",
-      "kindTask": "Task"
+      "kindTask": "Task",
+      "complete": "Mark done"
     }
   }
 }

@@ -813,5 +813,16 @@ public class CalFfiModule: Module {
         NSLog("[Aperio] the widget snapshot was not written: \(error)")
       }
     }
+
+    // Taps queued by a widget button, which cannot perform them itself. The JS
+    // side runs each through the app's ordinary completion path and then clears
+    // it — see WidgetActionStore for why they arrive one file at a time.
+    AsyncFunction("pendingWidgetActionsJson") { () -> String in
+      WidgetActionStore.pendingJson()
+    }
+
+    AsyncFunction("clearWidgetAction") { (id: String) in
+      WidgetActionStore.clear(id)
+    }
   }
 }

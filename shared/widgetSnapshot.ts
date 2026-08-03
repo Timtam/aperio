@@ -16,7 +16,10 @@
 // and has to answer "what is next" at a time nobody knew when it was written.
 
 import { localDateKey } from './dateKey';
-import { expandScheduledRecurringTasks } from './expandTaskOccurrences';
+import {
+  expandScheduledRecurringTasks,
+  isRecurringProjection,
+} from './expandTaskOccurrences';
 import { expandAll, type RecurringEventLike } from './recurrence';
 import { filterTasksOnDay, taskTimeOnDay } from './taskDay';
 import type { Task } from './types';
@@ -48,6 +51,14 @@ export interface WidgetItem {
   /** `#rrggbb`, when the item resolves to one. For the sighted UI only — never
    *  the sole carrier of meaning. */
   color?: string;
+  /** The widget may offer to tick this row off.
+   *
+   *  Decided HERE, not in the extension, because the rules are the app's: only
+   *  tasks, and never a recurring PROJECTION — a future occurrence is a preview,
+   *  and completion belongs on the current instance, which is what advances the
+   *  series. The app's own lists apply exactly this rule; the widget must not
+   *  offer an action the app would refuse. */
+  completable?: boolean;
 }
 
 /** The handful of words a widget has to say that are not data.
@@ -72,6 +83,8 @@ export interface WidgetStrings {
   stale: string;
   /** An item with no clock time. "Ganztägig" */
   allDay: string;
+  /** The tick-off button's label. "Erledigt" */
+  complete: string;
   /** The current day, so a row with no clock time still answers "when".
    *  "Heute" — the widget cannot spell this itself without a calendar of the
    *  app's language. */
@@ -255,6 +268,7 @@ export function buildWidgetSnapshot<E extends RecurringEventLike>(
         untimed: time == null,
         containerId: task.list_id,
         ...(color ? { color } : {}),
+        ...(isRecurringProjection(task) ? {} : { completable: true }),
       });
     }
   }

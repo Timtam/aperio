@@ -111,10 +111,16 @@ struct ItemRow: View {
             // What KIND of row this is, as a glyph — the sighted half of the
             // word the label speaks. Tinted with the item's colour when it has
             // one, so the two cues share the space a colour dot used to take
-            // and neither is the only carrier of meaning.
+            // and neither is the only carrier of meaning. Hidden from VoiceOver
+            // because the label below already says it in words.
             Image(systemName: kindSymbol(item))
                 .font(.caption2)
                 .foregroundStyle(item.color.flatMap { Color(hex: $0) } ?? .secondary)
+                .accessibilityHidden(true)
+            // The text is ONE element; the button beside it is a second. The
+            // `children: .ignore` deliberately sits HERE and not on the row: on
+            // the row it would swallow the button and leave a control no screen
+            // reader could reach.
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.title)
                     .font(.caption)
@@ -124,9 +130,29 @@ struct ItemRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(spokenLabel)
+            if isCompletable(item) {
+                Spacer(minLength: 4)
+                Button(
+                    intent: CompleteTaskIntent(itemId: item.id, containerId: item.containerId)
+                ) {
+                    Image(systemName: "circle")
+                        .font(.caption)
+                        // A wider hit area than the glyph. A widget cannot spare
+                        // the 44pt the rest of the app holds to — three rows
+                        // would not fit — so this is the largest that leaves the
+                        // list readable.
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                // Names its target. Three buttons all reading "Erledigt" on a
+                // surface with no headings and no order to fall back on would be
+                // a guess, and the guess completes the wrong task.
+                .accessibilityLabel("\(strings.complete), \(item.title)")
+            }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(spokenLabel)
     }
 }
 

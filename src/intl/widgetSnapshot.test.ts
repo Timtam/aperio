@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  TASK_RECURRENCE_DEFAULT,
   WIDGET_SNAPSHOT_VERSION,
   buildWidgetSnapshot,
+  isRecurringProjection,
+  toBackend,
   type RecurringEventLike,
 } from '@aperio/shared';
 
@@ -83,6 +86,7 @@ function build(
       noTimed: 'Nichts mit Uhrzeit.',
       stale: 'Keine aktuellen Daten.',
       allDay: 'Ganztägig',
+      complete: 'Erledigt',
       today: 'Heute',
       runningUntil: 'Läuft bis {time}',
       kindEvent: 'Termin',
@@ -283,5 +287,43 @@ describe('buildWidgetSnapshot — ordering and cap', () => {
     }));
     const snap = build({ tasks, now: localAt(2026, 8, 3, 7, 0), limit: 2 });
     expect(snap.items.map((i) => i.id)).toEqual(['t0', 't1']);
+  });
+});
+
+describe('buildWidgetSnapshot — what the widget may act on', () => {
+  it('marks a real task completable and an event not', () => {
+    const task: Task = { ...baseTask, id: 'real', scheduled_date: '2026-08-04' };
+    const ev: TestEvent = {
+      ...baseEvent,
+      id: 'ev',
+      start: localAt(2026, 8, 4, 9, 0).toISOString(),
+      end: localAt(2026, 8, 4, 10, 0).toISOString(),
+    };
+    const byId = new Map(
+      build({ events: [ev], tasks: [task], now: localAt(2026, 8, 3, 7, 0) }).items.map((i) => [
+        i.id,
+        i,
+      ]),
+    );
+    expect(byId.get('real')?.completable).toBe(true);
+    // An event has no completion; the widget must not offer one.
+    expect(byId.get('ev')?.completable).toBeUndefined();
+  });
+
+  it('does not offer to tick off a recurring projection', () => {
+    // A future occurrence is a preview. Completion belongs on the current
+    // instance — that is what advances the series — and the app's own lists
+    // refuse it here too, so the widget must not present a button the app
+    // would not honour.
+    const recurring: Task = {
+      ...baseTask,
+      id: 'series',
+      scheduled_date: '2026-08-04',
+      recurrence: toBackend({ ...TASK_RECURRENCE_DEFAULT, freq: 'DAILY' }),
+    };
+    const items = build({ tasks: [recurring], now: localAt(2026, 8, 3, 7, 0) }).items;
+    const projections = items.filter((i) => isRecurringProjection(i.id));
+    expect(projections.length).toBeGreaterThan(0);
+    expect(projections.every((i) => i.completable === undefined)).toBe(true);
   });
 });

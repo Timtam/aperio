@@ -648,6 +648,18 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  container and no widget on the home screen. iOS only for now — the Android
    *  side accepts the call and drops it, so callers need no platform check. */
   writeWidgetSnapshot(json: string): Promise<void>;
+
+  /** Taps queued by a widget button, as a JSON array of
+   *  `{id, version, action, itemId, containerId, at}`.
+   *
+   *  A widget cannot complete a task itself — completion cascades, self-assigns,
+   *  advances a series and queues a sync push, none of which an extension can
+   *  reach — so it records the request and the app performs it. Resolves to
+   *  `[]` when there is nothing queued, including on Android. */
+  pendingWidgetActionsJson(): Promise<string>;
+
+  /** Drop one queued action by its `id`, after ATTEMPTING it. */
+  clearWidgetAction(id: string): Promise<void>;
 }
 
 export default requireNativeModule<CalFfiModule>('CalFfi');

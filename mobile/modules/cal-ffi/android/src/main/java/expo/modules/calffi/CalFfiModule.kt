@@ -907,5 +907,11 @@ class CalFfiModule : Module() {
     // to remove.
     AsyncFunction("writeWidgetSnapshot") { _: String ->
     }
+
+    // Nothing can be queued while there is no Android widget to queue it.
+    AsyncFunction("pendingWidgetActionsJson") { -> "[]" }
+
+    AsyncFunction("clearWidgetAction") { _: String ->
+    }
   }
 }

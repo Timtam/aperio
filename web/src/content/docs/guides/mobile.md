@@ -104,9 +104,22 @@ Two states are deliberately worded differently:
 - **"No current data. Open Aperio."** – the widget has run past what it knows.
   Opening the app refreshes it.
 
-A widget only ever shows; it cannot change anything yet. Calendars you have
-hidden on this device stay hidden in the widget too. Tasks come from **all**
-your lists, not only the ones currently selected in the task view.
+Tasks can be **ticked off straight from the widget**: each task row carries a
+button, labelled with the task's own name so it stands alone – three buttons all
+reading "Mark done" would be a guess, and the guess completes the wrong task. The
+row disappears as soon as you tap it.
+
+The tick is recorded immediately and carried out by the app the next time it
+runs – on opening it, or on a background sync round. That is not a delay you have
+to manage: completing a task in Aperio cascades to parents and subtasks,
+advances a recurring series and queues a sync push, and a widget has neither the
+memory nor the access to do that work itself. Events have no button, and neither
+do future occurrences of a recurring task: completion belongs on the current
+one, which is what moves the series forward.
+
+Calendars you have hidden on this device stay hidden in the widget too. Tasks
+come from **all** your lists, not only the ones currently selected in the task
+view.
 
 ## Lock-screen widget (iOS)
 

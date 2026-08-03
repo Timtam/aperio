@@ -12,6 +12,7 @@ import { listColorLabels } from '../api/colorLabels';
 import { resolveEventColor } from '../intl/eventColor';
 import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
 import { getHiddenCalendars } from './calendarVisibility';
+import { consumeWidgetActionsApplied, drainWidgetActions } from './widgetActions';
 import { useCacheReload } from './cacheObserver';
 import { subscribeCalendarChanged } from './calendarMutations';
 import { whenStartupSettled } from './startupGate';
@@ -87,6 +88,7 @@ async function computeSnapshot(): Promise<string> {
         noTimed: i18n.t('widgets.upcoming.noTimed'),
         stale: i18n.t('widgets.upcoming.stale'),
         allDay: i18n.t('widgets.upcoming.allDay'),
+        complete: i18n.t('widgets.upcoming.complete'),
         today: i18n.t('widgets.upcoming.today'),
         runningUntil: i18n.t('widgets.upcoming.runningUntil'),
         kindEvent: i18n.t('widgets.upcoming.kindEvent'),
@@ -112,7 +114,12 @@ async function computeSnapshot(): Promise<string> {
 let inFlight = false;
 let rerun = false;
 
-/** Recompute and hand over the snapshot. Never throws. */
+/** Drain anything the widget queued, then recompute and hand over the snapshot.
+ *  Never throws.
+ *
+ *  Draining FIRST is the whole ordering: a tap the widget queued has to become a
+ *  completed task before the snapshot is built, or the pass would helpfully
+ *  write the task back out as still pending. */
 export async function refreshWidgetSnapshot(): Promise<void> {
   if (inFlight) {
     rerun = true;
@@ -123,6 +130,7 @@ export async function refreshWidgetSnapshot(): Promise<void> {
     do {
       rerun = false;
       try {
+        await drainWidgetActions();
         await CalFfi.writeWidgetSnapshot(await computeSnapshot());
       } catch {
         // A bridge hiccup, a missing container, an account that failed to list:
@@ -140,7 +148,7 @@ export async function refreshWidgetSnapshot(): Promise<void> {
  * can change what is next.
  */
 export function useWidgetSnapshot(): void {
-  const { dataVersion } = useTaskStore();
+  const { dataVersion, invalidateData } = useTaskStore();
   const dayKey = useCurrentDayKey();
 
   // Through the startup gate like every other app-global scan: during launch the
@@ -148,8 +156,14 @@ export function useWidgetSnapshot(): void {
   // full-catalog fan-out never queues ahead of the visible screen's first read
   // on the serial native queue.
   const refresh = useCallback(() => {
-    whenStartupSettled('widgetSnapshot', () => void refreshWidgetSnapshot());
-  }, []);
+    whenStartupSettled('widgetSnapshot', () => {
+      void refreshWidgetSnapshot().then(() => {
+        // A tap performed here — or by the background pass, which had no React
+        // to tell — is a task the open views are now wrong about.
+        if (consumeWidgetActionsApplied()) invalidateData();
+      });
+    });
+  }, [invalidateData]);
 
   // Local task mutation + the local-midnight flip (yesterday's rows are no
   // longer next).
