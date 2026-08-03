@@ -1,0 +1,30 @@
+/* German phrases for Aperio's Siri shortcuts.
+ *
+ * The file NAME is fixed. Only `AppShortcuts.strings` is read for App Shortcut
+ * phrases; putting them in `Localizable.strings` compiles and then silently
+ * does nothing.
+ *
+ * Keys are the English phrases exactly as written in `AperioShortcuts.swift` —
+ * that is the development language, and it is what Siri looks the translation
+ * up by. Editing a phrase there without editing the key here does not fail the
+ * build; it just quietly drops the German wording.
+ *
+ * `${applicationName}` is the app-name placeholder — the `${...}` spelling here,
+ * `\(.applicationName)` in Swift. It is MANDATORY in every phrase: a phrase
+ * without it fails the build with "Every App Shortcut utterance should have
+ * '${applicationName}' in it".
+ *
+ * Several shapes per intent on purpose. Siri has to match a spoken sentence to
+ * one of these nearly exactly, and people do not say the same thing twice — the
+ * "mit"-forms are here because that is what was actually said to the phone when
+ * only the "in"-form existed, and the request went to Apple's Calendar instead.
+ */
+
+"Open ${applicationName}" = "Öffne ${applicationName}";
+
+"New event in ${applicationName}" = "Neuer Termin in ${applicationName}";
+"Create an event in ${applicationName}" = "Erstelle einen Termin mit ${applicationName}";
+"Create a new event in ${applicationName}" = "Erstelle einen neuen Termin mit ${applicationName}";
+"Add an event to ${applicationName}" = "Neuen Termin in ${applicationName} anlegen";
+"Schedule an event in ${applicationName}" = "Termin in ${applicationName} eintragen";
+"New appointment in ${applicationName}" = "Neuen Termin mit ${applicationName} erstellen";

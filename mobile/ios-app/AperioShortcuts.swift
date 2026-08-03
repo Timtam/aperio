@@ -23,6 +23,19 @@ import Foundation
 // tap that vanishes a row can afford to be applied minutes later; a spoken "make
 // an appointment tomorrow at eleven" cannot. You would say it, look, and find
 // nothing. So the app comes forward, drains the queue and shows the result.
+//
+// LANGUAGE. Every phrase below is ENGLISH, and that is not an oversight — this
+// file is the development language, and translations do not belong in it. Siri
+// matches against the phrase set for the language IT is set to, and reads that
+// set from `<lang>.lproj/AppShortcuts.strings` in the app bundle, keyed by the
+// English phrase. A German phrase written as a literal here would be registered
+// as an English one and never offered to a German Siri.
+//
+// Which is what happened: with only the literals, "erstelle einen neuen Termin
+// mit Aperio" reached Apple's Calendar instead of us. So the German wording now
+// lives in `ios-app/de.lproj/AppShortcuts.strings`, and the phrases come in
+// several shapes per language, because a spoken sentence has to hit one of them
+// almost exactly and nobody says the same thing twice.
 
 @available(iOS 16.0, *)
 struct OpenAperioIntent: AppIntent {
@@ -43,20 +56,33 @@ struct AperioShortcuts: AppShortcutsProvider {
             intent: OpenAperioIntent(),
             // Every phrase MUST contain `\(.applicationName)` — Siri refuses to
             // hand a bare verb to a third-party app, which is also why "create
-            // an event" alone can never reach us.
+            // an event" alone can never reach us. The build fails outright on a
+            // phrase that leaves it out.
             phrases: [
-                "Open \(.applicationName)",
-                "Öffne \(.applicationName)",
+                "Open \(.applicationName)"
             ],
             shortTitle: "Open Aperio",
             systemImageName: "calendar"
         )
         AppShortcut(
             intent: CreateEventIntent(),
-            // No date in the phrase — Siri refuses a `Date` there. It asks.
+            // No date in the phrase — Siri refuses a `Date` there, and a free
+            // `String` is no better: a phrase parameter has to come from a
+            // finite set (an `AppEnum` or an `AppEntity`). So the title and the
+            // time are both asked for, and the phrase only has to get us the
+            // handover.
+            //
+            // Which makes the RANGE of phrasings the whole game. Each one is a
+            // separate way in, and the German translations in
+            // `de.lproj/AppShortcuts.strings` are keyed by these exact strings —
+            // change one here and the matching key must change with it.
             phrases: [
                 "New event in \(.applicationName)",
-                "Neuer Termin in \(.applicationName)",
+                "Create an event in \(.applicationName)",
+                "Create a new event in \(.applicationName)",
+                "Add an event to \(.applicationName)",
+                "Schedule an event in \(.applicationName)",
+                "New appointment in \(.applicationName)",
             ],
             shortTitle: "New event",
             systemImageName: "calendar.badge.plus"

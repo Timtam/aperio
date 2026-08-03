@@ -1,0 +1,22 @@
+/* German wording for everything about the shortcuts that is NOT a phrase:
+ * the action names Siri and the Shortcuts app show, and the questions Siri
+ * reads out while collecting the parameters.
+ *
+ * Phrases live in `AppShortcuts.strings` and only there. Everything else — the
+ * intent titles, their descriptions, the parameter labels and every
+ * `requestValueDialog` — is an ordinary `LocalizedStringResource` and is looked
+ * up here, keyed by the English literal in `AperioShortcuts.swift`.
+ *
+ * These are spoken aloud, so they are written to be heard rather than read.
+ */
+
+"Open Aperio" = "Aperio öffnen";
+"Opens Aperio." = "Öffnet Aperio.";
+
+"New event" = "Neuer Termin";
+"Creates an event in Aperio." = "Erstellt einen Termin in Aperio.";
+
+"Title" = "Titel";
+"What should the event be called?" = "Wie soll der Termin heißen?";
+"Date" = "Datum";
+"When?" = "Wann?";

@@ -274,11 +274,33 @@ Vorteil.
       zuletzt genutzter, sonst der erste beschreibbare.
       `state/widgetActions.ts` → `queuedActions.ts` umbenannt: es bedient jetzt
       zwei Absender, der alte Name hätte gelogen.
-      ⚠️ Ungeprüft.
-- [ ] **Schritt 2b** — deutsche Phrasen. Kurzbefehl-Phrasen lokalisieren über
-      eine `AppShortcuts.strings` im App-Target, NICHT über unseren i18n-Katalog.
-      Bewusst von Schritt 2 getrennt gehalten: ein eigener Mechanismus, dessen
-      Fehlschlag sonst die Diagnose des Anlegens vernebelt hätte.
+      ⚠️ Ungeprüft. Das beim Gerätetest gemeldete „Aperio crashed" kam NICHT von
+      hier — es war `0xdead10cc` (siehe Schritt 2a der Widgets). Der Kurzbefehl
+      startet die App in den Hintergrund und lässt sie kurz darauf suspendieren,
+      also traf er das Muster nur besonders zuverlässig.
+- [~] **Schritt 2b** — deutsche Phrasen.
+      GERÄTEBEFUND, der die Notwendigkeit belegt: „erstelle einen neuen Termin
+      mit Aperio" landete im APPLE-Kalender — erkennbar daran, dass dessen
+      Rückfrage bei Terminüberschneidung kam.
+      Zwei Ursachen, beide behoben. Erstens stand die deutsche Phrase als
+      LITERAL im Swift-Array. Das ist die Entwicklungssprache; Siri sucht den
+      Phrasensatz für SEINE Sprache in `<lang>.lproj/AppShortcuts.strings`,
+      verschlüsselt nach der ENGLISCHEN Phrase. Ein deutscher String im Array
+      wird als englischer registriert und einem deutschen Siri nie angeboten.
+      Zweitens gab es je Intent nur EINE Formulierung. Siri muss den gesprochenen
+      Satz fast wörtlich treffen; „mit" statt „in" genügt zum Verfehlen.
+      Gebaut: `mobile/ios-app/de.lproj/AppShortcuts.strings` (nur Phrasen — der
+      Dateiname ist fest, in `Localizable.strings` wirken sie nicht) und
+      `de.lproj/Localizable.strings` (Titel, Beschreibungen, Parameternamen,
+      Siris Rückfragen). Sechs Formulierungen für den Termin-Intent, „in"- UND
+      „mit"-Formen. `withAppShortcuts.js` kopiert das `.lproj` und trägt es als
+      Bundle-Ressource ein; das `.lproj` im PFAD macht die Lokalisierung, keine
+      Variant-Group — dieselbe Form, die Expos eigenes `locales` benutzt.
+      `${applicationName}` ist in JEDER Phrase Pflicht, sonst bricht der Bau ab.
+      `src/intl/shortcutLocalization.test.ts` hält beide Seiten zusammen und
+      schlägt nachweislich fehl, wenn eine Phrase ohne ihren Schlüssel wandert.
+      ⚠️ Ungeprüft. Falls Siri weiter danebengreift, ist der nächste Hebel
+      `INAlternativeAppNames` — dann hört es „Aperio" schlicht nicht.
 - [~] **Apple Intelligence (Assistant Schemas)** — der Weg, der Siri FREIE Rede
       erlaubt statt einer festen Phrase: `@AssistantIntent(schema:
       .calendar.createEvent)`. Es gibt eine Kalender-Domäne, `createEvent` ist
