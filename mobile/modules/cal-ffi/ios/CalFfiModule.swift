@@ -71,13 +71,18 @@ public class CalFfiModule: Module {
   }
 
   private func openHost() -> Host {
-    let dir = try! FileManager.default.url(
-      for: .applicationSupportDirectory,
-      in: .userDomainMask,
-      appropriateFor: nil,
-      create: true
-    )
-    let dbPath = dir.appendingPathComponent("aperio.sqlite").path
+    // The path comes from `SharedDatabase`, which also performs the one-time
+    // move out of the sandbox and into the App Group container — the only
+    // place a widget extension can read. It hands us a verification closure so
+    // the originals are deleted ONLY after the migrated copy has been proven
+    // to open; see SharedDatabase.swift for why that ordering is the whole
+    // safety argument.
+    let dbPath = SharedDatabase.resolvePath { candidate in
+      // Opened and dropped again immediately. This is a probe, not the
+      // instance the app runs on — that one is opened below, once, from
+      // whichever path the migration settled on.
+      _ = try Host.open(dbPath: candidate, keychain: IosKeychain())
+    }
     let opened = try! Host.open(dbPath: dbPath, keychain: IosKeychain())
     // Forward external-cache refresh callbacks to JS as Expo events (live-update
     // the open view + a polite announcement). Mirrors the Android module.
