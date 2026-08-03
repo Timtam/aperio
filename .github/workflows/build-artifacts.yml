@@ -113,6 +113,22 @@ jobs:
       # target/release/ + src-tauri/build.rs stages them under
       # target/release/plugins/bundled/<id>/.
       - name: tauri build
+        env:
+          # Same reason as the mobile workflows: `builtin-oauth`'s build.rs bakes
+          # these at RUST compile time via `option_env!`, so the cargo step's own
+          # environment is what counts. A local desktop build reads
+          # `oauth-clients.local.env` instead, which is why the gap went
+          # unnoticed here — the CI artefacts shipped with nothing baked.
+          #
+          # A secret that does not exist expands to empty, and build.rs treats
+          # empty as absent, so the build succeeds either way. Presence is
+          # reported by the mobile workflows' check step; these are the same
+          # secrets, so it covers both.
+          APERIO_OAUTH_WEBEX_CLIENT_ID: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_ID }}
+          APERIO_OAUTH_WEBEX_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_SECRET }}
+          APERIO_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_ID }}
+          APERIO_OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_SECRET }}
+          APERIO_OAUTH_MICROSOFT_CLIENT_ID: ${{ secrets.APERIO_OAUTH_MICROSOFT_CLIENT_ID }}
         run: npm run tauri -- build
 
       # Sanity-check the staging step worked: the release zip is
@@ -255,6 +271,22 @@ jobs:
       # `cargo:rerun-if-changed=<cdylib>` so the now-present cdylibs
       # get staged into target/<triple>/release/plugins/bundled/<id>/.
       - name: Build workspace for both macOS arches
+        env:
+          # Same reason as the mobile workflows: `builtin-oauth`'s build.rs bakes
+          # these at RUST compile time via `option_env!`, so the cargo step's own
+          # environment is what counts. A local desktop build reads
+          # `oauth-clients.local.env` instead, which is why the gap went
+          # unnoticed here — the CI artefacts shipped with nothing baked.
+          #
+          # A secret that does not exist expands to empty, and build.rs treats
+          # empty as absent, so the build succeeds either way. Presence is
+          # reported by the mobile workflows' check step; these are the same
+          # secrets, so it covers both.
+          APERIO_OAUTH_WEBEX_CLIENT_ID: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_ID }}
+          APERIO_OAUTH_WEBEX_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_WEBEX_CLIENT_SECRET }}
+          APERIO_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_ID }}
+          APERIO_OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.APERIO_OAUTH_GOOGLE_CLIENT_SECRET }}
+          APERIO_OAUTH_MICROSOFT_CLIENT_ID: ${{ secrets.APERIO_OAUTH_MICROSOFT_CLIENT_ID }}
         run: |
           cargo build --workspace --release --target x86_64-apple-darwin
           cargo build -p aperio --release --target x86_64-apple-darwin
