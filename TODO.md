@@ -236,6 +236,7 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       Terminierte Einträge sortieren weiterhin nach Start, auch laufende: ein
       Termin, in dem man gerade sitzt, ist das Unmittelbarste, was es gibt.
       ⚠️ Ungeprüft auf dem Gerät.
+
 ### A8 · Sprachbefehle (Siri / Kurzbefehle, iOS zuerst) `[~]`
 Termine und Aufgaben per Sprache anlegen, mit Kalender- bzw. Listenwahl.
 
