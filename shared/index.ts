@@ -28,3 +28,4 @@ export * from './accountSchema';
 export * from './conferencing';
 export * from './meetingEvents';
 export * from './deviceRegistry';
+export * from './widgetSnapshot';

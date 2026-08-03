@@ -2031,5 +2031,15 @@
       "lastSynced": "Last synced: {{time}}",
       "neverSynced": "No sync run yet."
     }
+  },
+  "widgets": {
+    "upcoming": {
+      "name": "Up Next",
+      "description": "Your next events and due tasks.",
+      "empty": "Nothing planned.",
+      "stale": "No current data. Open Aperio.",
+      "allDay": "All day",
+      "today": "Today"
+    }
   }
 }
