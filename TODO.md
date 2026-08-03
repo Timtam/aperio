@@ -149,6 +149,27 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       nicht „Nichts geplant." — letzteres wäre schlicht falsch, während jemand
       im Urlaub ist.
       ⚠️ Der Rest ungeprüft auf dem Gerät.
+- [~] **Schritt 4** — Abhaken aus dem Widget (`targets/widget/Actions.swift`,
+      `mobile/src/state/widgetActions.ts`). Die Extension schreibt NICHT die
+      Antwort, sondern die FRAGE: eine Datei pro Tipp in die App Group, die die
+      App über `setTaskStatusTo` abarbeitet — denselben Aufruf, den die
+      Tagesstart-Übersicht nutzt. Abschließen kaskadiert auf Eltern und Kinder,
+      weist auf geteilten Listen zu, schaltet Wiederholungen weiter und stellt
+      einen Sync-Push ein; nichts davon ist aus einem Extension-Prozess
+      erreichbar, und es hier nachzubauen wäre der Weg, auf dem Widget und App
+      auseinanderlaufen.
+      EINE Datei pro Aktion, nie eine gemeinsame: zwei Prozesse schreiben da
+      hinein, und ein read-modify-write verliert den Tipp, der das Rennen
+      verliert.
+      Das Widget blendet bereits eingereihte Zeilen aus, sonst wirkt der Knopf
+      tot. Eine Aktion wird nach dem VERSUCH gelöscht, nicht erst nach Erfolg —
+      sonst bliebe eine unausführbare Aktion für immer stehen und mit ihr die
+      unsichtbare Zeile.
+      A11y: `children: .ignore` sitzt am TEXT, nicht an der Zeile — an der Zeile
+      verschluckt es den Knopf. Der Knopf trägt den Aufgabennamen im Label.
+      Offen: der Intent-Titel („Complete task") ist unübersetzt, er taucht nur in
+      der Kurzbefehle-App auf.
+      ⚠️ Ungeprüft auf dem Gerät.
 - [ ] **Schritt 3** — Countdown. `Text(timerInterval:)` rendert das System
       selbst, ohne Zeitachsen-Neuladen. Eigenes, gröberes `accessibilityLabel`
       („in etwa 20 Minuten"), sonst redet VoiceOver sekundenweise.
