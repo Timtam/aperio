@@ -61,6 +61,12 @@ export interface WidgetItem {
 export interface WidgetStrings {
   /** The window holds nothing. "Nichts geplant." */
   empty: string;
+  /** The window holds nothing WITH A CLOCK TIME — the empty state of the
+   *  countdown widget, which shows only timed items. Distinct from `empty`
+   *  because a running all-day event is not "nothing planned", and saying so
+   *  while someone is on holiday would be plainly false.
+   *  "Nichts mit Uhrzeit." */
+  noTimed: string;
   /** The snapshot is older than its own horizon, so an empty list can no longer
    *  be trusted to mean "nothing planned". "Keine aktuellen Daten." */
   stale: string;

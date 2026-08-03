@@ -21,6 +21,7 @@ var fallbackStrings: WidgetStrings {
     galleryLanguageIsGerman
         ? WidgetStrings(
             empty: "Nichts geplant.",
+            noTimed: "Nichts mit Uhrzeit.",
             stale: "Keine aktuellen Daten. Öffne Aperio.",
             allDay: "Ganztägig",
             today: "Heute",
@@ -30,6 +31,7 @@ var fallbackStrings: WidgetStrings {
         )
         : WidgetStrings(
             empty: "Nothing planned.",
+            noTimed: "Nothing with a time.",
             stale: "No current data. Open Aperio.",
             allDay: "All day",
             today: "Today",

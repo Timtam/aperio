@@ -115,6 +115,13 @@ long until it – "in 25 minutes", and once it has started, "Running until 11:00
 Add it by touching and holding the lock screen, choosing **Customise**, then the
 area below the clock.
 
+It shows **only items that have a clock time**. All-day entries are left out on
+purpose: there is no moment to count down to, and a long one – a fortnight's
+holiday, say – would otherwise answer "what is next" with "holiday" for the whole
+fortnight, straight through every appointment you still have to keep. When
+nothing timed is coming up it says **"Nothing with a time."**, which is not the
+same claim as "nothing planned".
+
 It reads the same snapshot as the home-screen widget, so it needs no extra
 setup. VoiceOver reads it as one sentence, ending with whether the item is an
 event or a task – something neither the icon nor a colour can say on its own.

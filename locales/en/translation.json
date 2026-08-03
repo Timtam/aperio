@@ -2037,6 +2037,7 @@
       "name": "Up Next",
       "description": "Your next events and due tasks.",
       "empty": "Nothing planned.",
+      "noTimed": "Nothing with a time.",
       "stale": "No current data. Open Aperio.",
       "allDay": "All day",
       "today": "Today",

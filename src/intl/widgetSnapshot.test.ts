@@ -80,6 +80,7 @@ function build(
     limit: patch.limit ?? 20,
     strings: {
       empty: 'Nichts geplant.',
+      noTimed: 'Nichts mit Uhrzeit.',
       stale: 'Keine aktuellen Daten.',
       allDay: 'Ganztägig',
       today: 'Heute',

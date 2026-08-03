@@ -142,7 +142,13 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       App-Sprache. Bewusste Ausnahme auf derselben Grundlage wie Uhrzeiten: es
       ist Zeitformatierung mit Pluralregeln für jede Sprache, die iOS mitbringt,
       und selbstgebaut wäre es in beiden schlechter.
-      ⚠️ Ungeprüft auf dem Gerät.
+      NUR terminierte Einträge — ganztägige sind gefiltert. Gerätetest 2026-08-03:
+      ein 42-Tage-Urlaub als ganztägiger Termin besetzte das Widget für 42 Tage.
+      Ein Countdown auf etwas Ganztägiges hat keinen Moment, auf den er zählt.
+      Der leere Zustand ist deshalb ein eigener Satz („Nichts mit Uhrzeit.") und
+      nicht „Nichts geplant." — letzteres wäre schlicht falsch, während jemand
+      im Urlaub ist.
+      ⚠️ Der Rest ungeprüft auf dem Gerät.
 - [ ] **Schritt 3** — Countdown. `Text(timerInterval:)` rendert das System
       selbst, ohne Zeitachsen-Neuladen. Eigenes, gröberes `accessibilityLabel`
       („in etwa 20 Minuten"), sonst redet VoiceOver sekundenweise.

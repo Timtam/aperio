@@ -84,6 +84,7 @@ async function computeSnapshot(): Promise<string> {
       // extension has no way to read that choice.
       strings: {
         empty: i18n.t('widgets.upcoming.empty'),
+        noTimed: i18n.t('widgets.upcoming.noTimed'),
         stale: i18n.t('widgets.upcoming.stale'),
         allDay: i18n.t('widgets.upcoming.allDay'),
         today: i18n.t('widgets.upcoming.today'),

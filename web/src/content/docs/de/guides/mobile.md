@@ -124,6 +124,13 @@ sagt, was als Nächstes ansteht und in wie langer Zeit – „in 25 Minuten", un
 sobald es begonnen hat, „Läuft bis 11:00". Hinzufügen: Sperrbildschirm gedrückt
 halten, **Anpassen** wählen, dann den Bereich unter der Uhr.
 
+Es zeigt **nur Einträge mit Uhrzeit**. Ganztägige bleiben bewusst außen vor: es
+gibt keinen Moment, auf den heruntergezählt werden könnte, und ein langer –
+etwa ein zweiwöchiger Urlaub – würde sonst zwei Wochen lang auf „was steht als
+Nächstes an" mit „Urlaub" antworten, quer durch jeden Termin, den du trotzdem
+einhalten musst. Steht nichts mit Uhrzeit an, heißt es **„Nichts mit Uhrzeit."** –
+was etwas anderes behauptet als „nichts geplant".
+
 Es liest dieselbe Übersicht wie das Widget auf dem Startbildschirm, braucht also
 keine eigene Einrichtung. VoiceOver liest es als einen Satz, der damit endet, ob
 es sich um einen Termin oder eine Aufgabe handelt – etwas, das weder das Symbol

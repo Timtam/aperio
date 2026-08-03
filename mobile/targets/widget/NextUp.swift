@@ -9,6 +9,11 @@ import WidgetKit
 //
 // Lock-screen families only. The home screen already has the list; putting the
 // same thing there twice would only make the gallery harder to choose from.
+//
+// TIMED items only. An all-day event has no moment to count down to, and a long
+// one takes the widget hostage: a 42-day holiday sorts ahead of everything and
+// then answers "what is next" with "holiday" for six weeks — through every
+// appointment the user actually has to make.
 
 struct NextUpEntry: TimelineEntry {
     let date: Date
@@ -37,7 +42,7 @@ struct NextUpProvider: TimelineProvider {
         // Far fewer entries than the list widget needs, which matters: a lock
         // screen redraw is the most frequently rendered thing we ship.
         var moments: Set<Date> = []
-        for item in snapshot?.items(after: now) ?? [] {
+        for item in snapshot?.timedItems(after: now) ?? [] {
             if let at = parseInstant(item.at), at > now { moments.insert(at) }
             if let expiry = item.expiresAt, expiry > now { moments.insert(expiry) }
         }
@@ -51,7 +56,7 @@ struct NextUpProvider: TimelineProvider {
         }
         return NextUpEntry(
             date: date,
-            item: snapshot.items(after: date).first,
+            item: snapshot.timedItems(after: date).first,
             exhausted: snapshot.isExhausted(at: date),
             strings: snapshot.strings
         )
@@ -77,14 +82,10 @@ struct NextUpView: View {
     /// The second line: a countdown, or — once it has started — how long the
     /// event still runs. A bare countdown would go negative and read as nonsense
     /// at exactly the moment the row matters most.
+    ///
+    /// Untimed rows never reach here; the provider filters them out.
     private func detail(for item: WidgetItem) -> String {
         guard let start = parseInstant(item.at) else { return "" }
-        if item.untimed {
-            // Nothing to count down to; the day is the whole answer.
-            return Calendar.current.isDateInToday(start)
-                ? entry.strings.today
-                : (dayText(item.at) ?? "")
-        }
         if start <= entry.date, let end = item.end.flatMap(parseInstant), end > entry.date {
             return entry.strings.runningUntil.replacingOccurrences(
                 of: "{time}", with: timeText(item.end ?? "")
@@ -97,7 +98,7 @@ struct NextUpView: View {
     /// around it to give it context, so it has to be complete on its own.
     private var spokenLabel: String {
         guard let item = entry.item else {
-            return entry.exhausted ? entry.strings.stale : entry.strings.empty
+            return entry.exhausted ? entry.strings.stale : entry.strings.noTimed
         }
         return "\(item.title), \(detail(for: item)), \(kindWord(item, entry.strings))"
     }
@@ -126,7 +127,7 @@ struct NextUpView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
-                Text(entry.exhausted ? entry.strings.stale : entry.strings.empty)
+                Text(entry.exhausted ? entry.strings.stale : entry.strings.noTimed)
                     .lineLimit(2)
             }
         }

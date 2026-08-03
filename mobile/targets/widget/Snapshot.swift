@@ -27,6 +27,8 @@ struct WidgetSnapshot: Decodable {
 /// extension cannot read.
 struct WidgetStrings: Decodable {
     let empty: String
+    /// The empty state of a widget that shows only TIMED items.
+    let noTimed: String
     let stale: String
     let allDay: String
     let today: String
@@ -117,6 +119,17 @@ extension WidgetSnapshot {
             guard let expiry = item.expiresAt else { return false }
             return expiry > date
         }
+    }
+
+    /// Items with a clock time only, soonest first.
+    ///
+    /// What the countdown widget is allowed to show. A counter running down to
+    /// an ALL-DAY event is meaningless — it has no moment to arrive at — and a
+    /// long one is worse than meaningless: a 42-day holiday sorts to the front
+    /// and then owns the widget for six weeks, which is exactly the six weeks
+    /// the user still has appointments to keep.
+    func timedItems(after date: Date) -> [WidgetItem] {
+        items(after: date).filter { !$0.untimed }
     }
 
     /// True once the covered window has run out, so an empty list means "nothing

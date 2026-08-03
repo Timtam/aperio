@@ -2037,6 +2037,7 @@
       "name": "Als Nächstes",
       "description": "Die nächsten Termine und fälligen Aufgaben.",
       "empty": "Nichts geplant.",
+      "noTimed": "Nichts mit Uhrzeit.",
       "stale": "Keine aktuellen Daten. Öffne Aperio.",
       "allDay": "Ganztägig",
       "today": "Heute",
