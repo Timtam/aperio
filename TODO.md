@@ -103,16 +103,30 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       würde die Fehlersuche vernebeln.
       ⚠️ Einseitig: eine ältere App-Version sucht wieder in Application Support
       und findet nichts. Sieht aus wie Datenverlust, ist keiner.
-- [ ] **Schritt 2b** — schmaler Lesepfad in `cal-ffi` (`upcoming_json(limit,
-      now)` statt des vollen `Host` — eine Widget-Extension hat ein knappes
-      Speicherbudget und darf weder Beobachter noch den Geräte-Kalender-Bridge
-      hochfahren).
-- [ ] **Schritt 2c** — Rust-Bibliothek in die Extension linken und Widget 1 mit
-      echten Daten. Der Weg dafür steht: `@bacons/apple-targets` lädt
-      `targets/<name>/pods.rb` in einen Podfile-Target-Block. Unser `CalFfi`-Pod
-      taugt dort NICHT — er hängt an `ExpoModulesCore` und am Expo-Modul. Es
-      braucht einen zweiten, schlanken Podspec: nur das XCFramework und
-      `cal_ffi.swift`.
+- [~] **Schritt 2b/2c** — Widget 1 mit echten Daten, über eine SNAPSHOT-Datei
+      statt über den mitgelinkten Rust-Kern. Beim Ausarbeiten von 2b fiel die
+      Annahme, auf der der Linking-Plan stand:
+
+      Die Datenbank ändert sich NUR, wenn die App läuft oder ihr
+      Hintergrund-Sync läuft — ein anderer Schreiber existiert nicht. Ein Widget,
+      das die Datenbank selbst liest, sähe also exakt dieselben Bytes wie eine
+      Datei, die die App beim Hinausgehen schreibt. Der Linking-Weg kaufte
+      dieselbe Aktualität für 21 MB Bibliothek ein ZWEITES Mal im Bundle, plus
+      SQLite-Migrationen in einem Prozess, den iOS jederzeit abschießt.
+
+      Gebaut ist deshalb: `shared/widgetSnapshot.ts` leitet ab (getestet),
+      `mobile/src/state/widgetSnapshot.ts` sammelt an denselben Auslösern wie
+      Erinnerungen und App-Badge, `WidgetSnapshotStore.swift` legt die Datei
+      atomar in die App Group und stößt WidgetKit an, `targets/widget/` decodiert
+      nur noch.
+
+      Die Texte reisen MIT dem Snapshot: die Sprache ist die in der App
+      gewählte, und die kann eine Extension nicht lesen.
+
+      ⚠️ Noch ungeprüft auf dem Gerät. Offen bleibt außerdem: die Galerie-Namen
+      („Als Nächstes" / „Up Next") können nicht aus dem Snapshot kommen — sie
+      werden gelesen, bevor Daten existieren — und hängen deshalb an
+      `Locale.preferredLanguages` statt an der App-Sprache.
 - [ ] **Schritt 3** — Countdown. `Text(timerInterval:)` rendert das System
       selbst, ohne Zeitachsen-Neuladen. Eigenes, gröberes `accessibilityLabel`
       („in etwa 20 Minuten"), sonst redet VoiceOver sekundenweise.

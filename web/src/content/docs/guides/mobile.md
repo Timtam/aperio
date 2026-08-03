@@ -87,3 +87,25 @@ Reminders are delivered as **local notifications**. On first use the app asks fo
 **notification permission** – grant it so reminders (and the app icon badge) can
 appear. Reminder sounds, lead times and snooze work as described under
 [Notifications](/guides/tutorial/06-benachrichtigungen/).
+
+## Home-screen widget (iOS)
+
+**Up Next** shows your next events and due tasks on the home screen. Add it the
+usual way: touch and hold the home screen, choose **Add widget**, find **Aperio**
+and pick a size. VoiceOver reads each row as one sentence – title, day, time –
+rather than as separate fragments you have to swipe between.
+
+The widget draws from a small snapshot the app keeps up to date, covering the
+next seven days. That snapshot is refreshed whenever the app runs and on each
+background sync round, so the widget stays current without draining the battery.
+Two states are deliberately worded differently:
+
+- **"Nothing planned."** – there genuinely is nothing in the next seven days.
+- **"No current data. Open Aperio."** – the widget has run past what it knows.
+  Opening the app refreshes it.
+
+A widget only ever shows; it cannot change anything yet. Calendars you have
+hidden on this device stay hidden in the widget too. Tasks come from **all**
+your lists, not only the ones currently selected in the task view.
+
+Android widgets are not available yet.

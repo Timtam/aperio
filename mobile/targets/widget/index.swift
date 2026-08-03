@@ -1,73 +1,232 @@
 import SwiftUI
 import WidgetKit
 
-// Aperio's widget extension — step 1: it renders, it signs, it installs.
+// Aperio's "Up Next" widget: the next events and due tasks, read from the
+// snapshot the app leaves in the App Group (see Snapshot.swift for the shape and
+// why the derivation happens on the app's side).
 //
-// Nothing here reads data. The database still lives in the app's sandbox,
-// where an extension cannot reach it; moving it into the App Group container
-// and giving cal-ffi a lean read path is step 2. What this build answers is
-// only whether the target is generated and signed correctly at all, because
-// that question costs a 30-minute EAS round trip and nothing further should be
-// stacked on an unverified answer.
+// Nothing here queries anything. The provider's whole job is to turn ONE
+// snapshot into a series of moments — because WidgetKit renders on its own
+// schedule, hours after this ran, and asks "what is next" at times nobody knew
+// when the file was written.
 
-/// One entry, no data, no refresh.
-///
-/// A real provider will hand WidgetKit a timeline of upcoming items; this one
-/// returns a single entry with a distant refresh date, because there is nothing
-/// yet that could change.
-struct PlaceholderEntry: TimelineEntry {
+struct UpcomingEntry: TimelineEntry {
     let date: Date
+    /// What is next AT `date`, already filtered. Empty is a legitimate state.
+    let items: [WidgetItem]
+    /// The window ran out — an empty list no longer means "nothing planned".
+    let exhausted: Bool
+    let strings: WidgetStrings
 }
 
-struct PlaceholderProvider: TimelineProvider {
-    func placeholder(in context: Context) -> PlaceholderEntry {
-        PlaceholderEntry(date: Date())
+/// Used when there is no snapshot at all — the gallery preview, and the window
+/// between installing the widget and the app first running. It has to say
+/// something true in a language nobody has told us yet, so it falls back to the
+/// device's preferred language, the only signal available before any data.
+private var fallbackStrings: WidgetStrings {
+    galleryLanguageIsGerman
+        ? WidgetStrings(
+            empty: "Nichts geplant.", stale: "Keine aktuellen Daten. Öffne Aperio.",
+            allDay: "Ganztägig", today: "Heute")
+        : WidgetStrings(
+            empty: "Nothing planned.", stale: "No current data. Open Aperio.",
+            allDay: "All day", today: "Today")
+}
+
+struct UpcomingProvider: TimelineProvider {
+    func placeholder(in context: Context) -> UpcomingEntry {
+        // Empty rather than invented rows: in the gallery, plausible-looking
+        // sample appointments are read out as if they were the user's own.
+        UpcomingEntry(date: Date(), items: [], exhausted: false, strings: fallbackStrings)
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (PlaceholderEntry) -> Void) {
-        completion(PlaceholderEntry(date: Date()))
+    func getSnapshot(in context: Context, completion: @escaping (UpcomingEntry) -> Void) {
+        completion(entry(from: SnapshotLoader.load(), at: Date()))
     }
 
-    func getTimeline(in context: Context, completion: @escaping (Timeline<PlaceholderEntry>) -> Void) {
-        // `.never`: there is no data behind this yet, so asking WidgetKit to
-        // come back would spend refresh budget on redrawing the same words.
-        completion(Timeline(entries: [PlaceholderEntry(date: Date())], policy: .never))
+    func getTimeline(in context: Context, completion: @escaping (Timeline<UpcomingEntry>) -> Void) {
+        let now = Date()
+        // Read and decoded ONCE for the whole timeline. Doing it per entry would
+        // re-open and re-parse the same file up to two dozen times inside a
+        // process that is measured on how little it does.
+        let snapshot = SnapshotLoader.load()
+        let current = entry(from: snapshot, at: now)
+        // One entry per moment the DISPLAY changes — each row's start and each
+        // row's expiry — so a finished meeting disappears at the instant it
+        // ends, without spending a refresh on anything else. Widgets get a small
+        // daily budget of system-initiated reloads; a fixed interval would spend
+        // it redrawing unchanged words and still be late for the change.
+        var moments: Set<Date> = []
+        for item in current.items {
+            if let at = parseInstant(item.at), at > now { moments.insert(at) }
+            if let expiry = item.expiresAt, expiry > now { moments.insert(expiry) }
+        }
+        // A cap: a busy week would otherwise produce dozens of entries, and
+        // WidgetKit keeps only the first handful anyway.
+        let entries =
+            [current] + moments.sorted().prefix(24).map { entry(from: snapshot, at: $0) }
+        // `.atEnd`: come back once the last known moment has passed. The app
+        // reloads the timeline itself whenever the data changes, so this is only
+        // the floor under a phone nobody has opened.
+        completion(Timeline(entries: entries, policy: .atEnd))
+    }
+
+    private func entry(from snapshot: WidgetSnapshot?, at date: Date) -> UpcomingEntry {
+        guard let snapshot else {
+            // No snapshot is NOT an empty calendar, and must not read like one.
+            return UpcomingEntry(date: date, items: [], exhausted: true, strings: fallbackStrings)
+        }
+        return UpcomingEntry(
+            date: date,
+            items: snapshot.items(after: date),
+            exhausted: snapshot.isExhausted(at: date),
+            strings: snapshot.strings
+        )
+    }
+}
+
+/// A time, in the phone's regional format. Deliberately NOT translated by us:
+/// times follow the device's regional settings like every other clock on the
+/// home screen, while the words around them follow the app's language.
+private func timeText(_ raw: String) -> String {
+    guard let date = parseInstant(raw) else { return "" }
+    return date.formatted(date: .omitted, time: .shortened)
+}
+
+/// A spelled-out day ("Mi., 5. Aug."), or nil for today.
+private func dayText(_ raw: String) -> String? {
+    guard let date = parseInstant(raw), !Calendar.current.isDateInToday(date) else { return nil }
+    return date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+}
+
+struct ItemRow: View {
+    let item: WidgetItem
+    let strings: WidgetStrings
+
+    /// "When", in the order it reads: the day, then the time.
+    ///
+    /// Today's day label is normally left off — a bare time reads as today when
+    /// the rows after it carry dates, the same convention the app's day view
+    /// uses. The exception is a row with NO time: an untimed task due today
+    /// would otherwise answer "when" with silence, so it says so in words.
+    /// "Ganztägig" is reserved for all-day EVENTS, which is a property a task
+    /// does not have.
+    private var whenParts: [String] {
+        var parts: [String] = []
+        if let day = dayText(item.at) {
+            parts.append(day)
+        } else if item.untimed && item.kind != "event" {
+            parts.append(strings.today)
+        }
+        if !item.untimed {
+            parts.append(timeText(item.at))
+        } else if item.kind == "event" {
+            parts.append(strings.allDay)
+        }
+        return parts.filter { !$0.isEmpty }
+    }
+
+    /// The whole row as one sentence. A widget has no headings and no
+    /// surrounding context, so every addressable element has to stand alone —
+    /// splitting this into a title element and a time element would make
+    /// VoiceOver read two fragments, neither of which is an appointment.
+    private var spokenLabel: String {
+        ([item.title] + whenParts).joined(separator: ", ")
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            // A colour dot, never the only carrier of meaning — the row reads
+            // completely without it.
+            if let hex = item.color, let colour = Color(hex: hex) {
+                Circle().fill(colour).frame(width: 6, height: 6)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.title)
+                    .font(.caption)
+                    .lineLimit(1)
+                Text(whenParts.joined(separator: " · "))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spokenLabel)
     }
 }
 
 struct UpcomingWidgetView: View {
-    var entry: PlaceholderEntry
+    var entry: UpcomingEntry
+    @Environment(\.widgetFamily) private var family
+
+    /// Rows that fit. A small widget shows fewer than a medium one; anything
+    /// past this is still IN the snapshot, driving the timeline as the day
+    /// advances.
+    private var visible: [WidgetItem] {
+        Array(entry.items.prefix(family == .systemSmall ? 3 : 5))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Aperio")
-                .font(.headline)
-            Text("Termine und Aufgaben folgen.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if visible.isEmpty {
+                // "Nothing planned" and "I have no current data" are different
+                // facts and must never render the same way.
+                Text(entry.exhausted ? entry.strings.stale : entry.strings.empty)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(visible, id: \.id) { item in
+                    ItemRow(item: item, strings: entry.strings)
+                }
+            }
+            Spacer(minLength: 0)
         }
-        // One label for the whole widget rather than two elements a VoiceOver
-        // user has to swipe between. A widget has no heading structure and no
-        // context around it, so each addressable thing has to be a complete
-        // sentence on its own.
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Aperio. Termine und Aufgaben folgen.")
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
+
+extension Color {
+    /// `#rrggbb` as the app writes it. Returns nil for anything else rather than
+    /// guessing a colour.
+    init?(hex: String) {
+        var value = hex
+        if value.hasPrefix("#") { value.removeFirst() }
+        guard value.count == 6, let rgb = UInt32(value, radix: 16) else { return nil }
+        self.init(
+            .sRGB,
+            red: Double((rgb >> 16) & 0xFF) / 255,
+            green: Double((rgb >> 8) & 0xFF) / 255,
+            blue: Double(rgb & 0xFF) / 255
+        )
+    }
+}
+
+/// The two gallery strings, which are read BEFORE any snapshot exists and so
+/// cannot come from one. Picked off the device's preferred language — the only
+/// signal available this early — covering the two languages the app ships.
+private var galleryLanguageIsGerman: Bool {
+    (Locale.preferredLanguages.first ?? "en").hasPrefix("de")
 }
 
 struct UpcomingWidget: Widget {
     let kind = "AperioUpcoming"
 
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: PlaceholderProvider()) { entry in
+        StaticConfiguration(kind: kind, provider: UpcomingProvider()) { entry in
             UpcomingWidgetView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
         }
         // Both strings are read out in the widget gallery, which is where a
-        // screen-reader user picks this. "Aperio" alone would be indistinguishable
-        // from the app's other widgets once there are more than one.
-        .configurationDisplayName("Als Nächstes")
-        .description("Die nächsten Termine und fälligen Aufgaben.")
+        // screen-reader user picks this. "Aperio" alone would be
+        // indistinguishable from the app's other widgets once there is more
+        // than one.
+        .configurationDisplayName(galleryLanguageIsGerman ? "Als Nächstes" : "Up Next")
+        .description(
+            galleryLanguageIsGerman
+                ? "Die nächsten Termine und fälligen Aufgaben."
+                : "Your next events and due tasks."
+        )
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }

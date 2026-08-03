@@ -95,3 +95,26 @@ Nutzung fragt die App nach der **Benachrichtigungsberechtigung** – erteile sie
 damit Erinnerungen (und das App-Symbol-Badge) erscheinen können. Erinnerungstöne,
 Vorlaufzeiten und Schlummern funktionieren wie unter
 [Benachrichtigungen](/de/guides/tutorial/06-benachrichtigungen/) beschrieben.
+
+## Widget auf dem Startbildschirm (iOS)
+
+**Als Nächstes** zeigt die nächsten Termine und fälligen Aufgaben auf dem
+Startbildschirm. Hinzufügen wie gewohnt: Startbildschirm gedrückt halten,
+**Widget hinzufügen** wählen, **Aperio** suchen und eine Größe auswählen.
+VoiceOver liest jede Zeile als einen Satz – Titel, Tag, Uhrzeit – statt als
+einzelne Bruchstücke, zwischen denen du wischen musst.
+
+Das Widget liest aus einer kleinen Übersicht, die die App aktuell hält und die
+die nächsten sieben Tage abdeckt. Sie wird jedes Mal erneuert, wenn die App
+läuft, und bei jeder Hintergrund-Synchronisation – so bleibt das Widget aktuell,
+ohne den Akku zu belasten. Zwei Zustände sind bewusst unterschiedlich formuliert:
+
+- **„Nichts geplant."** – in den nächsten sieben Tagen steht wirklich nichts an.
+- **„Keine aktuellen Daten. Öffne Aperio."** – das Widget ist über das hinaus,
+  was es weiß. Ein Start der App frischt es auf.
+
+Das Widget zeigt nur an, ändern kann es noch nichts. Kalender, die du auf diesem
+Gerät ausgeblendet hast, bleiben auch im Widget ausgeblendet. Aufgaben kommen aus
+**allen** Listen, nicht nur aus den gerade in der Aufgabenansicht ausgewählten.
+
+Widgets für Android gibt es noch nicht.
