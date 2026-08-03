@@ -31,6 +31,7 @@ struct WidgetStrings: Decodable {
     let noTimed: String
     let stale: String
     let allDay: String
+    let complete: String
     let today: String
     /// A template with a `{time}` placeholder — see `shared/widgetSnapshot.ts`.
     let runningUntil: String
