@@ -118,6 +118,20 @@ jobs:
         with:
           node-version: 20
 
+      # `npm ci` is exact on purpose, and that makes it sensitive to WHICH npm
+      # wrote the lockfile. Node 20 above pins npm 10 here; a lockfile written
+      # by npm 11 omits nested entries npm 10 insists on, and the build dies in
+      # 27 seconds with "Missing: <pkg> from lock file" — which happened the
+      # first time a dependency was added from a machine on npm 11.
+      #
+      # So after touching mobile/package.json, regenerate with the matching
+      # major and verify before pushing:
+      #
+      #   cd mobile
+      #   npx npm@10 install --package-lock-only
+      #   npx npm@10 ci --dry-run
+      #
+      # The dry run is the whole check — it is what this step does.
       - name: Install JS deps
         working-directory: mobile
         run: npm ci
