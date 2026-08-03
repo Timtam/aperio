@@ -25,7 +25,9 @@ let actionsDirectoryName = "actions"
 /// queue outlives both across an update.
 struct PendingAction: Codable {
     let version: Int
-    /// Only `complete` for now. A string, so an older app reading a newer
+    /// `toggle` — advance the task one step. NOT "complete": under the cycling
+    /// check-off mode one tap moves open → in progress, and the app is what
+    /// decides that, not the widget. A string, so an older app reading a newer
     /// queue skips the entry instead of failing to decode the file.
     let action: String
     /// The task id exactly as the snapshot carried it.
@@ -59,12 +61,12 @@ enum ActionQueue {
         try? data.write(to: file, options: .atomic)
     }
 
-    /// Item ids with a queued completion.
+    /// Item ids with a queued tap.
     ///
     /// The widget renders against this as well as the snapshot: the snapshot
     /// still lists a task the app has not processed yet, and a row that stays
     /// put after being tapped reads as a button that does nothing.
-    static func pendingCompletions() -> Set<String> {
+    static func pendingTaps() -> Set<String> {
         guard
             let directory,
             let files = try? FileManager.default.contentsOfDirectory(
@@ -78,7 +80,7 @@ enum ActionQueue {
             guard
                 let data = try? Data(contentsOf: file),
                 let action = try? JSONDecoder().decode(PendingAction.self, from: data),
-                action.action == "complete"
+                action.action == "toggle"
             else {
                 continue
             }
@@ -94,7 +96,7 @@ enum ActionQueue {
 /// the whole point on a lock or home screen, and it is also why `perform` must
 /// stay this small.
 struct CompleteTaskIntent: AppIntent {
-    static var title: LocalizedStringResource = "Complete task"
+    static var title: LocalizedStringResource = "Check off task"
     /// Explicitly false: opening the app would defeat the purpose, and would
     /// pull a screen-reader user out of the home screen they were reading.
     static var openAppWhenRun: Bool = false
@@ -113,7 +115,7 @@ struct CompleteTaskIntent: AppIntent {
         ActionQueue.enqueue(
             PendingAction(
                 version: currentActionVersion,
-                action: "complete",
+                action: "toggle",
                 itemId: itemId,
                 containerId: containerId,
                 at: ISO8601DateFormatter().string(from: Date())

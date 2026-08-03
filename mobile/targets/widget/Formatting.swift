@@ -27,7 +27,9 @@ var fallbackStrings: WidgetStrings {
             today: "Heute",
             runningUntil: "Läuft bis {time}",
             kindEvent: "Termin",
-            kindTask: "Aufgabe"
+            kindTask: "Aufgabe",
+            statusOpen: "Offen",
+            statusInProgress: "In Arbeit"
         )
         : WidgetStrings(
             empty: "Nothing planned.",
@@ -37,7 +39,9 @@ var fallbackStrings: WidgetStrings {
             today: "Today",
             runningUntil: "Running until {time}",
             kindEvent: "Event",
-            kindTask: "Task"
+            kindTask: "Task",
+            statusOpen: "Open",
+            statusInProgress: "In progress"
         )
 }
 
@@ -80,16 +84,36 @@ func dayText(_ raw: String, _ locale: Locale) -> String? {
 /// future kind does not break older widgets on decode.
 func isEvent(_ item: WidgetItem) -> Bool { item.kind == "event" }
 
-/// The word for what this row IS, spoken at the end of its label.
+/// The word closing a row's label: what an event IS, and what a task's state is.
+///
+/// A task says "Offen" or "In Arbeit" rather than "Aufgabe", because the state
+/// implies the kind and the kind does not imply the state — and the state is the
+/// half a title cannot carry. Both states are named; leaving one to be inferred
+/// from silence is a convention nobody on a home screen was ever told.
 func kindWord(_ item: WidgetItem, _ strings: WidgetStrings) -> String {
-    isEvent(item) ? strings.kindEvent : strings.kindTask
+    if isEvent(item) { return strings.kindEvent }
+    switch item.status {
+    case "in_progress": return strings.statusInProgress
+    case "open": return strings.statusOpen
+    // A task with no state at all — not a shape the app writes, but the
+    // fallback keeps the row from ending mid-sentence.
+    default: return strings.kindTask
+    }
 }
+
+/// True for a task already underway.
+func isInProgress(_ item: WidgetItem) -> Bool { item.status == "in_progress" }
 
 /// The matching SF Symbol — the sighted half of the same information. Paired
 /// with the word above rather than replacing it: an icon alone is exactly the
 /// kind of meaning-by-picture a screen reader cannot recover.
 func kindSymbol(_ item: WidgetItem) -> String {
-    isEvent(item) ? "calendar" : "checkmark.circle"
+    if isEvent(item) { return "calendar" }
+    // A read-only projection — a future occurrence of a recurring task — gets
+    // the recurrence marker, NOT a circle. A circle that cannot be ticked is a
+    // control that lies, and the app's own lists make the same substitution.
+    if !isCompletable(item) { return "arrow.triangle.2.circlepath" }
+    return isInProgress(item) ? "circle.lefthalf.filled" : "circle"
 }
 
 /// Whether the widget may offer a tick-off for this row. The app decides and

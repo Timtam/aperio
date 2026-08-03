@@ -91,6 +91,8 @@ function build(
       runningUntil: 'Läuft bis {time}',
       kindEvent: 'Termin',
       kindTask: 'Aufgabe',
+      statusOpen: 'Offen',
+      statusInProgress: 'In Arbeit',
     },
     hiddenContainers: patch.hiddenContainers,
     eventColorOf: patch.eventColorOf,
@@ -401,5 +403,34 @@ describe('buildWidgetSnapshot — an ongoing all-day event is not "next"', () =>
     const snap = build({ events: [meeting], tasks: [anytime], now: localAt(2026, 8, 3, 7, 0) });
     // A meeting owns an hour; the task owns the day.
     expect(snap.items.map((i) => i.id)).toEqual(['meeting', 'anytime']);
+  });
+});
+
+describe('buildWidgetSnapshot — task state', () => {
+  it('carries open and in-progress so the widget can tell them apart', () => {
+    const open: Task = { ...baseTask, id: 'offen', scheduled_date: '2026-08-04' };
+    const running: Task = {
+      ...baseTask,
+      id: 'laeuft',
+      status: 'in_progress',
+      scheduled_date: '2026-08-04',
+    };
+    const byId = new Map(
+      build({ tasks: [open, running], now: localAt(2026, 8, 3, 7, 0) }).items.map((i) => [
+        i.id,
+        i,
+      ]),
+    );
+    expect(byId.get('offen')?.status).toBe('open');
+    expect(byId.get('laeuft')?.status).toBe('in_progress');
+  });
+
+  it('leaves events without a status', () => {
+    const ev: TestEvent = {
+      ...baseEvent,
+      start: localAt(2026, 8, 4, 9, 0).toISOString(),
+      end: localAt(2026, 8, 4, 10, 0).toISOString(),
+    };
+    expect(build({ events: [ev], now: localAt(2026, 8, 3, 7, 0) }).items[0]?.status).toBeUndefined();
   });
 });

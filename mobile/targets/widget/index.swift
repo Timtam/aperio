@@ -89,10 +89,14 @@ struct UpcomingProvider: TimelineProvider {
 /// adds no gestures of its own leaves the behaviour untouched.
 struct ChecklistToggleStyle: ToggleStyle {
     let tint: Color
+    /// The unchecked glyph — an empty circle for an open task, a half-filled one
+    /// for a task already underway. The state is drawn as well as spoken; a
+    /// sighted user has no VoiceOver to tell them which is which.
+    let unchecked: String
 
     func makeBody(configuration: Configuration) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Image(systemName: configuration.isOn ? "checkmark.circle.fill" : "circle")
+            Image(systemName: configuration.isOn ? "checkmark.circle.fill" : unchecked)
                 .font(.caption)
                 .foregroundStyle(tint)
             configuration.label
@@ -164,7 +168,7 @@ struct ItemRow: View {
             ) {
                 label
             }
-            .toggleStyle(ChecklistToggleStyle(tint: tint))
+            .toggleStyle(ChecklistToggleStyle(tint: tint, unchecked: kindSymbol(item)))
             // One sentence instead of the two Texts inside, which VoiceOver
             // would otherwise read as fragments before the trait.
             .accessibilityLabel(spokenLabel)

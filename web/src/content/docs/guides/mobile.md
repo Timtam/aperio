@@ -115,6 +115,13 @@ one item, ending with the checkbox and its state, so what the row is and what ca
 be done with it arrive together in a single swipe. The row disappears as soon as
 you tick it.
 
+A tap does exactly what a tap in the app does, including under the **cycling**
+check-off mode: there one tap moves a task from open to in progress, and the next
+one completes it. The widget does not decide that — it asks for a check-off and
+the app applies your setting. Which state a task is in is on the row itself: an
+empty circle for open, a half-filled one for in progress, and the word is spoken
+too, so neither cue stands alone.
+
 The tick is recorded immediately and carried out by the app the next time it
 runs – on opening it, or on a background sync round. That is not a delay you have
 to manage: completing a task in Aperio cascades to parents and subtasks,

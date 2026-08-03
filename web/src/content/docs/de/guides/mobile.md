@@ -124,6 +124,14 @@ sie als einen Eintrag, der mit dem Kontrollkästchen und seinem Zustand endet �
 die Zeile ist und was man mit ihr tun kann, kommen also in einem Wisch. Die Zeile
 verschwindet, sobald du sie abhakst.
 
+Ein Tipp bewirkt genau das, was ein Tipp in der App bewirkt – auch im
+**durchlaufenden** Abhak-Modus: dort schaltet ein Tipp eine Aufgabe von offen auf
+in Arbeit, der nächste schließt sie ab. Das entscheidet nicht das Widget, es bittet
+um ein Abhaken und die App wendet deine Einstellung an. In welchem Zustand eine
+Aufgabe ist, steht an der Zeile selbst: ein leerer Kreis für offen, ein halb
+gefüllter für in Arbeit – und das Wort wird zusätzlich vorgelesen, damit keines
+der beiden Signale allein steht.
+
 Der Haken wird sofort vermerkt und von der App ausgeführt, sobald sie das
 nächste Mal läuft – beim Öffnen oder bei einer Hintergrund-Synchronisation. Das
 ist keine Verzögerung, um die du dich kümmern musst: eine Aufgabe abzuschließen

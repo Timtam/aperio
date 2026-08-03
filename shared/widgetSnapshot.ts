@@ -51,6 +51,13 @@ export interface WidgetItem {
   /** `#rrggbb`, when the item resolves to one. For the sighted UI only — never
    *  the sole carrier of meaning. */
   color?: string;
+  /** A task's current state, `open` or `in_progress`. Absent on events.
+   *
+   *  Completed and cancelled never reach the snapshot, so those two are the
+   *  whole range. Carried because a widget row that shows only a title cannot
+   *  say whether the thing is untouched or already underway — and with the
+   *  cycling check-off mode, that is also what decides what one tap does. */
+  status?: 'open' | 'in_progress';
   /** The widget may offer to tick this row off.
    *
    *  Decided HERE, not in the extension, because the rules are the app's: only
@@ -97,9 +104,18 @@ export interface WidgetStrings {
   runningUntil: string;
   /** "Termin" / "Aufgabe". A row's title often does not say which it is, and
    *  nothing else on the widget does either — a colour dot certainly does not.
-   *  Spoken at the END of a row, after the identifying content. */
+   *  Spoken at the END of a row, after the identifying content.
+   *
+   *  `kindTask` is the fallback for a task row carrying no status; a task that
+   *  has one says its state instead, which implies the kind. */
   kindEvent: string;
   kindTask: string;
+  /** "Offen" / "In Arbeit" — a task's state, spoken where an event says its
+   *  kind. Both are named rather than one being signalled by silence: on a
+   *  surface with no legend, "no word here" is a convention the listener has to
+   *  have been told. */
+  statusOpen: string;
+  statusInProgress: string;
 }
 
 export interface WidgetSnapshot {
@@ -313,6 +329,9 @@ export function buildWidgetSnapshot<E extends RecurringEventLike>(
         untimed: time == null,
         containerId: task.list_id,
         ...(color ? { color } : {}),
+        ...(task.status === 'in_progress'
+          ? { status: 'in_progress' as const }
+          : { status: 'open' as const }),
         ...(isRecurringProjection(task) ? {} : { completable: true }),
       });
     }

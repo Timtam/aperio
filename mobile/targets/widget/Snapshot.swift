@@ -38,6 +38,8 @@ struct WidgetStrings: Decodable {
     let runningUntil: String
     let kindEvent: String
     let kindTask: String
+    let statusOpen: String
+    let statusInProgress: String
 }
 
 struct WidgetItem: Decodable {
@@ -49,6 +51,8 @@ struct WidgetItem: Decodable {
     let untimed: Bool
     let containerId: String
     let color: String?
+    /// `open` or `in_progress` for a task; absent on an event.
+    let status: String?
     /// The app is willing to accept a completion for this row. Absent means no —
     /// an event, or a recurring projection, whose rules the app owns and the
     /// extension deliberately does not re-derive.
@@ -128,7 +132,7 @@ extension WidgetSnapshot {
     func items(after date: Date) -> [WidgetItem] {
         // A tap the app has not drained yet is still in the snapshot, and a row
         // that stays put after being ticked reads as a dead button.
-        let ticked = ActionQueue.pendingCompletions()
+        let ticked = ActionQueue.pendingTaps()
         return items.filter { item in
             guard let expiry = item.expiresAt, expiry > date else { return false }
             return !ticked.contains(item.id)

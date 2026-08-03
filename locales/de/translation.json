@@ -2043,7 +2043,9 @@
       "today": "Heute",
       "runningUntil": "Läuft bis {time}",
       "kindEvent": "Termin",
-      "kindTask": "Aufgabe"
+      "kindTask": "Aufgabe",
+      "statusOpen": "Offen",
+      "statusInProgress": "In Arbeit"
     }
   }
 }

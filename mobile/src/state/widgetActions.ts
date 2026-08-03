@@ -2,7 +2,7 @@ import type { Task, TaskList } from '@aperio/shared';
 
 import CalFfi from '../../modules/cal-ffi';
 import { getTasks, listTaskLists } from '../api/client';
-import { setTaskStatusTo } from './taskToggle';
+import { applyTaskToggle } from './taskToggle';
 
 // The app's end of the widget's action queue.
 //
@@ -13,15 +13,20 @@ import { setTaskStatusTo } from './taskToggle';
 // of megabytes and no bridge.
 //
 // So the widget records the REQUEST and this drains it, through
-// `setTaskStatusTo` — the same call the day-start review's "Mark done" uses.
-// Re-implementing completion here to save a fan-out would be how the widget and
-// the app quietly start disagreeing about what "done" means.
+// `applyTaskToggle` — the one shared check-off path every other surface uses.
+// That matters beyond tidiness: the check-off MODE is a synced setting, and
+// under "cycle" one tap moves open → in progress → done rather than straight to
+// done. Sending the widget's taps anywhere else would make it the one surface
+// that ignores the user's own setting.
 
 /** One queued tap, as `WidgetActionStore` hands it over. */
 interface WidgetAction {
   /** The queue file's name, for clearing exactly this one. */
   id: string;
   version: number;
+  /** `toggle` — advance this task one step, whatever the check-off mode says
+   *  that is. Deliberately not "complete": the widget asks for the same thing a
+   *  tap in the app asks for, and the app decides what it means. */
   action: string;
   itemId: string;
   containerId: string;
@@ -102,14 +107,18 @@ export async function drainWidgetActions(): Promise<boolean> {
     let applied = false;
     for (const action of pending) {
       try {
-        if (action.version === SUPPORTED_VERSION && action.action === 'complete') {
+        if (action.version === SUPPORTED_VERSION && action.action === 'toggle') {
           const task = byId.get(action.itemId);
-          // Already gone, or already completed elsewhere: both are the state the
-          // user asked for, so neither is a failure.
-          if (task != null && task.status !== 'completed') {
-            await setTaskStatusTo(task, 'completed', listById.get(task.list_id), allTasks);
-            applied = true;
-            appliedUnseen = true;
+          // Gone, or already terminal: both are a state the tap cannot improve
+          // on, so neither is a failure.
+          if (task != null && task.status !== 'completed' && task.status !== 'cancelled') {
+            // Reads the synced check-off mode fresh and applies the cascade —
+            // exactly what a tap on the row in the app would have done.
+            const next = await applyTaskToggle(task, listById.get(task.list_id), allTasks);
+            if (next != null) {
+              applied = true;
+              appliedUnseen = true;
+            }
           }
         }
       } catch {

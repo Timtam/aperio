@@ -94,6 +94,10 @@ async function computeSnapshot(): Promise<string> {
         runningUntil: i18n.t('widgets.upcoming.runningUntil'),
         kindEvent: i18n.t('widgets.upcoming.kindEvent'),
         kindTask: i18n.t('widgets.upcoming.kindTask'),
+        // The canonical status wording, shared with the editor and the
+        // chip menu — a widget inventing its own would be a third spelling.
+        statusOpen: i18n.t('dialogs.task.status.open'),
+        statusInProgress: i18n.t('dialogs.task.status.inProgress'),
       },
       hiddenContainers: hidden,
       // The same resolver the day view paints with, so a widget row is never a

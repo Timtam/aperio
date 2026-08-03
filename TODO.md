@@ -187,8 +187,19 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       `isOn` ist IMMER false — eine erledigte Aufgabe steht nicht im Snapshot,
       eine gerade abgehakte blendet das Overlay aus. Es gibt hier keinen Zustand,
       der mit der App auseinanderlaufen könnte.
-      Offen: der Intent-Titel („Complete task") ist unübersetzt, er taucht nur in
-      der Kurzbefehle-App auf.
+      Der Tipp läuft über `applyTaskToggle`, NICHT über `setTaskStatusTo(…,
+      'completed')`. Der Abhak-MODUS ist eine gesynct Einstellung: unter „cycle"
+      geht ein Tipp offen → in Arbeit → erledigt. Hart auf erledigt zu schreiben
+      hätte das Widget zur einzigen Oberfläche gemacht, die die Einstellung des
+      Nutzers ignoriert. Die eingereihte Aktion heißt darum `toggle`, nicht
+      `complete` — das Widget bittet um dasselbe wie ein Tipp in der App, und die
+      App entscheidet, was das heißt.
+      Der Zustand steht an der Zeile: leerer Kreis = offen, halb gefüllt = in
+      Arbeit, plus das Wort in der Ansage. Eine schreibgeschützte Projektion
+      bekommt das Wiederholungs-Symbol statt eines Kreises — ein Kreis, den man
+      nicht anhaken kann, ist ein lügendes Bedienelement.
+      Offen: der Intent-Titel („Check off task") ist unübersetzt, er taucht nur
+      in der Kurzbefehle-App auf.
 - [x] **Sprache der Widgets** — Gerätetest zeigte „in 17 hours" auf einem
       deutschen Telefon. URSACHE: `Locale.current` wird in einer Extension mit
       den Lokalisierungen ihres BUNDLES verschnitten, und ein Widget-Target ohne

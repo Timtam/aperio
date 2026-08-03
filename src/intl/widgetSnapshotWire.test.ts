@@ -101,6 +101,8 @@ function fullSnapshot() {
       runningUntil: 'r',
       kindEvent: 'ev',
       kindTask: 'tk',
+      statusOpen: 'Offen',
+      statusInProgress: 'In Arbeit',
     },
     eventColorOf: () => '#3b82f6',
     taskColorOf: () => '#3b82f6',
