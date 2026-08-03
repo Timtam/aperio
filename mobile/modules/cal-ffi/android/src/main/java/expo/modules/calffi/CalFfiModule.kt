@@ -12,6 +12,7 @@ import androidx.core.content.FileProvider
 import androidx.glance.appwidget.updateAll
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import expo.modules.kotlin.modules.ModuleDefinitionBuilder
 import java.io.File
 import java.util.concurrent.Executors
 import kotlinx.coroutines.CoroutineName
@@ -142,6 +143,11 @@ class CalFfiModule : Module() {
       throw CodedException(e.code, e.detail, e)
     }
 
+  // Split across several `ModuleDefinitionBuilder` extensions rather than one
+  // lambda. The JVM caps a single method's bytecode at 64 KB, and 139 function
+  // registrations went past it: "Method too large:
+  // CalFfiModule.definition()". Each extension compiles to its own method, so
+  // the ceiling applies per group instead of to the module as a whole.
   override fun definition() = ModuleDefinition {
     Name("CalFfi")
 
@@ -356,6 +362,197 @@ class CalFfiModule : Module() {
       host.addEventExdateJson(id, occurrence, calendarId, sendCancellations)
     }
 
+    syncFunctions()
+
+    // ─── Reminders ────────────────────────────────────────────────────────────
+    // Upcoming reminder triggers (local + external) within a horizon, for the JS
+    // layer to schedule as expo-notifications. `horizonMinutes` arrives as a JS
+    // Number → widen the Int to the Rust u32.
+
+    AsyncFunction("upcomingRemindersJson") { horizonMinutes: Int ->
+      host.upcomingRemindersJson(horizonMinutes.toUInt())
+    }
+
+    soundFunctions()
+
+    // ─── User preferences (generic key/value; synced-key whitelist) ───────────
+    // Opaque string values; a whitelisted key change appends a SettingsUpdated
+    // sync event Rust-side so it propagates across devices.
+
+    AsyncFunction("getUserPref") { key: String ->
+      host.getUserPref(key)
+    }
+
+    AsyncFunction("setUserPref") { key: String, value: String ->
+      host.setUserPref(key, value)
+    }
+
+    AsyncFunction("deleteUserPref") { key: String ->
+      host.deleteUserPref(key)
+    }
+
+    // ─── Colour labels (app-wide palette; local-only, always synced) ──────────
+
+    AsyncFunction("listColorLabelsJson") { ->
+      host.listColorLabelsJson()
+    }
+
+    AsyncFunction("createColorLabelJson") { name: String, hex: String ->
+      host.createColorLabelJson(name, hex)
+    }
+
+    AsyncFunction("getOrCreateAdHocColorLabelJson") { hex: String ->
+      host.getOrCreateAdHocColorLabelJson(hex)
+    }
+
+    AsyncFunction("updateColorLabelJson") { labelJson: String ->
+      host.updateColorLabelJson(labelJson)
+    }
+
+    AsyncFunction("deleteColorLabel") { id: String ->
+      host.deleteColorLabel(id)
+    }
+
+    AsyncFunction("setContainerColorLabel") { containerId: String, kind: String, colorLabelId: String? ->
+      host.setContainerColorLabel(containerId, kind, colorLabelId)
+    }
+
+    AsyncFunction("renameContainer") { containerId: String, kind: String, name: String ->
+      host.renameContainer(containerId, kind, name)
+    }
+
+    AsyncFunction("setSectionColor") { sectionId: String, listId: String, colorLabelId: String? ->
+      host.setSectionColor(sectionId, listId, colorLabelId)
+    }
+
+    AsyncFunction("setEventColor") { eventId: String, calendarId: String, colorLabelId: String? ->
+      host.setEventColor(eventId, calendarId, colorLabelId)
+    }
+
+    AsyncFunction("searchJson") { query: String, filtersJson: String ->
+      host.searchJson(query, filtersJson)
+    }
+
+    AsyncFunction("searchContactsJson") { query: String ->
+      host.searchContactsJson(query)
+    }
+
+    contactFunctions()
+
+    // ─── Collaboration: RSVP (§7.3) + task-list members/sharing (§9.7) ────────
+    // Routed Rust-side to the owning external adapter; reads degrade to empty /
+    // null for local + unroutable accounts (the UI hides the affordance), writes
+    // throw. respondToEvent invalidates the event cache so the next read shows
+    // the new status.
+
+    AsyncFunction("calendarCurrentUserEmail") { calendarId: String ->
+      host.calendarCurrentUserEmail(calendarId)
+    }
+
+    AsyncFunction("respondToEvent") { calendarId: String, eventId: String, status: String, sendResponse: Boolean ->
+      host.respondToEvent(calendarId, eventId, status, sendResponse)
+    }
+
+    AsyncFunction("taskListMembersJson") { listId: String ->
+      host.taskListMembersJson(listId)
+    }
+
+    AsyncFunction("taskCurrentUserJson") { listId: String ->
+      host.taskCurrentUserJson(listId)
+    }
+
+    AsyncFunction("taskListSharesJson") { listId: String ->
+      host.taskListSharesJson(listId)
+    }
+
+    AsyncFunction("taskSearchUsersJson") { listId: String, query: String ->
+      host.taskSearchUsersJson(listId, query)
+    }
+
+    AsyncFunction("taskAddMember") { listId: String, memberRef: String, right: String? ->
+      host.taskAddMember(listId, memberRef, right)
+    }
+
+    AsyncFunction("taskRemoveMember") { listId: String, memberRef: String ->
+      host.taskRemoveMember(listId, memberRef)
+    }
+
+    AsyncFunction("taskSetMemberRight") { listId: String, memberRef: String, right: String ->
+      host.taskSetMemberRight(listId, memberRef, right)
+    }
+
+    // ─── Schema-driven accounts ──────────────────────────────────────────────
+    // The generic connect path: the adapter declares its form in its
+    // plugin.json and the host executes the declaration, so adding an adapter
+    // adds no code here either.
+
+    meetingFunctions()
+
+    // ─── OAuth (host-driven; mobile opens authorize_url in a native session) ──
+    // beginOauthJson runs the pure authorize phase (no network) → returns
+    // {authorize_url, pkce_verifier, state}. complete (network exchange + account
+    // creation) follows in a later phase.
+
+    AsyncFunction("beginOauthJson") { pluginId: String, argsJson: String ->
+      host.beginOauthJson(pluginId, argsJson)
+    }
+
+
+
+    // ─── Discovery (EWS Autodiscover; host-driven, like the desktop) ──────────
+    // discoverJson runs a plugin's endpoint discovery (EWS: {email, password} →
+    // {ews_url, account_email}); the network call hits the provider, so a thrown
+    // StoreException rejects the JS promise with the plugin's actionable message.
+
+    AsyncFunction("discoverJson") { pluginId: String, argsJson: String ->
+      host.discoverJson(pluginId, argsJson)
+    }.runOnQueue(slowScope)
+
+    // ─── Sync-target OAuth (Dropbox / Google Drive) ───────────────────────────
+    // completeSyncOauthJson exchanges the redirect's code for tokens (network)
+    // and stores the refresh token in the adapter's keychain slot; the JS layer
+    // then calls configureSyncAdapterJson({kind:"dropbox"|"googledrive", …}).
+
+    AsyncFunction("completeSyncOauthJson") { pluginId: String, requestJson: String ->
+      host.completeSyncOauthJson(pluginId, requestJson)
+    }.runOnQueue(slowScope)
+
+    // ─── E2E sync encryption (§19.7) ──────────────────────────────────────────
+    // enableSyncEncryptionJson turns on E2E for the configured target (mint key,
+    // write the encrypted dataset, encrypt every subsequent round).
+
+    AsyncFunction("enableSyncEncryptionJson") { passphrase: String ->
+      coded { host.enableSyncEncryptionJson(passphrase) }
+    }.runOnQueue(slowScope)
+
+    // disableSyncEncryptionJson turns E2E OFF: rewrites every log + snapshot as
+    // plaintext, flips the meta, drops the device key (other devices re-onboard).
+    AsyncFunction("disableSyncEncryptionJson") { passphrase: String ->
+      coded { host.disableSyncEncryptionJson(passphrase) }
+    }.runOnQueue(slowScope)
+
+    // changeSyncPassphraseJson rotates the E2E passphrase (re-wraps the same
+    // data key; existing devices keep working, future joins need the new one).
+    AsyncFunction("changeSyncPassphraseJson") { oldPassphrase: String, newPassphrase: String ->
+      coded { host.changeSyncPassphraseJson(oldPassphrase, newPassphrase) }
+    }.runOnQueue(slowScope)
+
+    // adoptRemoteEncryptionJson: a peer turned E2E on while this device synced
+    // plaintext; derive the key from the passphrase + swap to an encrypting
+    // adapter so the next round (which had failed with encryption_required) works.
+    AsyncFunction("adoptRemoteEncryptionJson") { passphrase: String ->
+      coded { host.adoptRemoteEncryptionJson(passphrase) }
+    }.runOnQueue(slowScope)
+
+    onboardingFunctions()
+
+    sftpFunctions()
+
+    widgetFunctions()
+  }
+
+  /** Lifted out of `definition()` — see the note there. */
+  private fun ModuleDefinitionBuilder.syncFunctions() {
     // ─── Sync (full desktop peer: same engine, statically-embedded adapters) ──
     // configure sets the active sync target; sync_now runs a round + returns the
     // report; a thrown StoreException rejects the JS promise.
@@ -478,16 +675,10 @@ class CalFfiModule : Module() {
     AsyncFunction("resolveSyncConflict") { id: Int, choice: String ->
       host.resolveSyncConflict(id.toLong(), choice)
     }
+  }
 
-    // ─── Reminders ────────────────────────────────────────────────────────────
-    // Upcoming reminder triggers (local + external) within a horizon, for the JS
-    // layer to schedule as expo-notifications. `horizonMinutes` arrives as a JS
-    // Number → widen the Int to the Rust u32.
-
-    AsyncFunction("upcomingRemindersJson") { horizonMinutes: Int ->
-      host.upcomingRemindersJson(horizonMinutes.toUInt())
-    }
-
+  /** Lifted out of `definition()` — see the note there. */
+  private fun ModuleDefinitionBuilder.soundFunctions() {
     // ─── Custom reminder sounds (§14.4 / §19.2.2) ─────────────────────────────
     // Content-addressed audio store behind SoundSource::Custom; the sync round
     // push/fetches it already. Bytes don't cross the bridge — the JS plays +
@@ -551,69 +742,10 @@ class CalFfiModule : Module() {
       channel.setSound(uri, attrs)
       nm.createNotificationChannel(channel)
     }
+  }
 
-    // ─── User preferences (generic key/value; synced-key whitelist) ───────────
-    // Opaque string values; a whitelisted key change appends a SettingsUpdated
-    // sync event Rust-side so it propagates across devices.
-
-    AsyncFunction("getUserPref") { key: String ->
-      host.getUserPref(key)
-    }
-
-    AsyncFunction("setUserPref") { key: String, value: String ->
-      host.setUserPref(key, value)
-    }
-
-    AsyncFunction("deleteUserPref") { key: String ->
-      host.deleteUserPref(key)
-    }
-
-    // ─── Colour labels (app-wide palette; local-only, always synced) ──────────
-
-    AsyncFunction("listColorLabelsJson") { ->
-      host.listColorLabelsJson()
-    }
-
-    AsyncFunction("createColorLabelJson") { name: String, hex: String ->
-      host.createColorLabelJson(name, hex)
-    }
-
-    AsyncFunction("getOrCreateAdHocColorLabelJson") { hex: String ->
-      host.getOrCreateAdHocColorLabelJson(hex)
-    }
-
-    AsyncFunction("updateColorLabelJson") { labelJson: String ->
-      host.updateColorLabelJson(labelJson)
-    }
-
-    AsyncFunction("deleteColorLabel") { id: String ->
-      host.deleteColorLabel(id)
-    }
-
-    AsyncFunction("setContainerColorLabel") { containerId: String, kind: String, colorLabelId: String? ->
-      host.setContainerColorLabel(containerId, kind, colorLabelId)
-    }
-
-    AsyncFunction("renameContainer") { containerId: String, kind: String, name: String ->
-      host.renameContainer(containerId, kind, name)
-    }
-
-    AsyncFunction("setSectionColor") { sectionId: String, listId: String, colorLabelId: String? ->
-      host.setSectionColor(sectionId, listId, colorLabelId)
-    }
-
-    AsyncFunction("setEventColor") { eventId: String, calendarId: String, colorLabelId: String? ->
-      host.setEventColor(eventId, calendarId, colorLabelId)
-    }
-
-    AsyncFunction("searchJson") { query: String, filtersJson: String ->
-      host.searchJson(query, filtersJson)
-    }
-
-    AsyncFunction("searchContactsJson") { query: String ->
-      host.searchContactsJson(query)
-    }
-
+  /** Lifted out of `definition()` — see the note there. */
+  private fun ModuleDefinitionBuilder.contactFunctions() {
     // ─── Contacts (local address book + external CardDAV/Google/EWS providers) ─
     // JSON passthrough, routed Rust-side; contacts are NOT on the sync event log
     // (local = device-local, external = provider-synced).
@@ -657,54 +789,10 @@ class CalFfiModule : Module() {
     AsyncFunction("deleteContactList") { id: String ->
       host.deleteContactList(id)
     }
+  }
 
-    // ─── Collaboration: RSVP (§7.3) + task-list members/sharing (§9.7) ────────
-    // Routed Rust-side to the owning external adapter; reads degrade to empty /
-    // null for local + unroutable accounts (the UI hides the affordance), writes
-    // throw. respondToEvent invalidates the event cache so the next read shows
-    // the new status.
-
-    AsyncFunction("calendarCurrentUserEmail") { calendarId: String ->
-      host.calendarCurrentUserEmail(calendarId)
-    }
-
-    AsyncFunction("respondToEvent") { calendarId: String, eventId: String, status: String, sendResponse: Boolean ->
-      host.respondToEvent(calendarId, eventId, status, sendResponse)
-    }
-
-    AsyncFunction("taskListMembersJson") { listId: String ->
-      host.taskListMembersJson(listId)
-    }
-
-    AsyncFunction("taskCurrentUserJson") { listId: String ->
-      host.taskCurrentUserJson(listId)
-    }
-
-    AsyncFunction("taskListSharesJson") { listId: String ->
-      host.taskListSharesJson(listId)
-    }
-
-    AsyncFunction("taskSearchUsersJson") { listId: String, query: String ->
-      host.taskSearchUsersJson(listId, query)
-    }
-
-    AsyncFunction("taskAddMember") { listId: String, memberRef: String, right: String? ->
-      host.taskAddMember(listId, memberRef, right)
-    }
-
-    AsyncFunction("taskRemoveMember") { listId: String, memberRef: String ->
-      host.taskRemoveMember(listId, memberRef)
-    }
-
-    AsyncFunction("taskSetMemberRight") { listId: String, memberRef: String, right: String ->
-      host.taskSetMemberRight(listId, memberRef, right)
-    }
-
-    // ─── Schema-driven accounts ──────────────────────────────────────────────
-    // The generic connect path: the adapter declares its form in its
-    // plugin.json and the host executes the declaration, so adding an adapter
-    // adds no code here either.
-
+  /** Lifted out of `definition()` — see the note there. */
+  private fun ModuleDefinitionBuilder.meetingFunctions() {
     // ─── Meetings (network: they talk to the provider) ───────────────────────
 
     AsyncFunction("attachMeetingJson") { requestJson: String ->
@@ -756,63 +844,10 @@ class CalFfiModule : Module() {
     AsyncFunction("completeAccountReconnectJson") { accountId: String, requestJson: String ->
       host.completeAccountReconnectJson(accountId, requestJson)
     }.runOnQueue(slowScope)
+  }
 
-    // ─── OAuth (host-driven; mobile opens authorize_url in a native session) ──
-    // beginOauthJson runs the pure authorize phase (no network) → returns
-    // {authorize_url, pkce_verifier, state}. complete (network exchange + account
-    // creation) follows in a later phase.
-
-    AsyncFunction("beginOauthJson") { pluginId: String, argsJson: String ->
-      host.beginOauthJson(pluginId, argsJson)
-    }
-
-
-
-    // ─── Discovery (EWS Autodiscover; host-driven, like the desktop) ──────────
-    // discoverJson runs a plugin's endpoint discovery (EWS: {email, password} →
-    // {ews_url, account_email}); the network call hits the provider, so a thrown
-    // StoreException rejects the JS promise with the plugin's actionable message.
-
-    AsyncFunction("discoverJson") { pluginId: String, argsJson: String ->
-      host.discoverJson(pluginId, argsJson)
-    }.runOnQueue(slowScope)
-
-    // ─── Sync-target OAuth (Dropbox / Google Drive) ───────────────────────────
-    // completeSyncOauthJson exchanges the redirect's code for tokens (network)
-    // and stores the refresh token in the adapter's keychain slot; the JS layer
-    // then calls configureSyncAdapterJson({kind:"dropbox"|"googledrive", …}).
-
-    AsyncFunction("completeSyncOauthJson") { pluginId: String, requestJson: String ->
-      host.completeSyncOauthJson(pluginId, requestJson)
-    }.runOnQueue(slowScope)
-
-    // ─── E2E sync encryption (§19.7) ──────────────────────────────────────────
-    // enableSyncEncryptionJson turns on E2E for the configured target (mint key,
-    // write the encrypted dataset, encrypt every subsequent round).
-
-    AsyncFunction("enableSyncEncryptionJson") { passphrase: String ->
-      coded { host.enableSyncEncryptionJson(passphrase) }
-    }.runOnQueue(slowScope)
-
-    // disableSyncEncryptionJson turns E2E OFF: rewrites every log + snapshot as
-    // plaintext, flips the meta, drops the device key (other devices re-onboard).
-    AsyncFunction("disableSyncEncryptionJson") { passphrase: String ->
-      coded { host.disableSyncEncryptionJson(passphrase) }
-    }.runOnQueue(slowScope)
-
-    // changeSyncPassphraseJson rotates the E2E passphrase (re-wraps the same
-    // data key; existing devices keep working, future joins need the new one).
-    AsyncFunction("changeSyncPassphraseJson") { oldPassphrase: String, newPassphrase: String ->
-      coded { host.changeSyncPassphraseJson(oldPassphrase, newPassphrase) }
-    }.runOnQueue(slowScope)
-
-    // adoptRemoteEncryptionJson: a peer turned E2E on while this device synced
-    // plaintext; derive the key from the passphrase + swap to an encrypting
-    // adapter so the next round (which had failed with encryption_required) works.
-    AsyncFunction("adoptRemoteEncryptionJson") { passphrase: String ->
-      coded { host.adoptRemoteEncryptionJson(passphrase) }
-    }.runOnQueue(slowScope)
-
+  /** Lifted out of `definition()` — see the note there. */
+  private fun ModuleDefinitionBuilder.onboardingFunctions() {
     // ─── Onboarding: preview + join an existing dataset (§19.11) ──────────────
     // previewSyncTargetJson reads the target's meta.json WITHOUT committing →
     // {kind: empty | existing, …}. acceptRemoteDatasetJson joins an existing
@@ -849,7 +884,10 @@ class CalFfiModule : Module() {
     AsyncFunction("resumeStaleDeviceJson") {
       coded { host.resumeStaleDeviceJson() }
     }.runOnQueue(slowScope)
+  }
 
+  /** Lifted out of `definition()` — see the note there. */
+  private fun ModuleDefinitionBuilder.sftpFunctions() {
     // ─── SFTP host-key trust (§19.5 TOFU) ─────────────────────────────────────
     // previewSftpHostKeyJson probes the server's fingerprint (network) + compares
     // it to the device pin store → {host_port, fingerprint, status}; trust/forget/
@@ -900,7 +938,10 @@ class CalFfiModule : Module() {
     AsyncFunction("forgetSyncDevice") { deviceId: String ->
       coded { host.forgetSyncDevice(deviceId) }
     }
+  }
 
+  /** Lifted out of `definition()` — see the note there. */
+  private fun ModuleDefinitionBuilder.widgetFunctions() {
     // ── Widgets ──
     // The same snapshot document iOS uses, in the app's own internal storage —
     // an Android widget runs in this very process under the same uid, so there
