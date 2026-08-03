@@ -131,14 +131,21 @@ Kalender, die du auf diesem Gerät ausgeblendet hast, bleiben auch im Widget
 ausgeblendet. Aufgaben kommen aus **allen** Listen, nicht nur aus den gerade in
 der Aufgabenansicht ausgewählten.
 
-## Widget auf dem Sperrbildschirm (iOS)
+## Widgets auf dem Sperrbildschirm (iOS)
 
-**Nächster Termin** ist das Gegenstück für den Sperrbildschirm: eine Zeile, die
-sagt, was als Nächstes ansteht und in wie langer Zeit – „in 25 Minuten", und
-sobald es begonnen hat, „Läuft bis 11:00". Hinzufügen: Sperrbildschirm gedrückt
-halten, **Anpassen** wählen, dann den Bereich unter der Uhr.
+Beide Widgets lassen sich auf den Sperrbildschirm legen, unter die Uhr:
+Sperrbildschirm gedrückt halten, **Anpassen** wählen, dann den Bereich unter der
+Uhrzeit.
 
-Es zeigt **nur Einträge mit Uhrzeit**. Ganztägige bleiben bewusst außen vor: es
+**Als Nächstes** – dieselbe Liste wie auf dem Startbildschirm, gekürzt: zwei
+Zeilen, jede einzeilig. Abhak-Knöpfe gibt es dort nicht. Ein 28-Punkt-Ziel neben
+zwei Wörtern Titel lässt für keines von beidem Platz, und ein Fehlgriff auf dem
+Sperrbildschirm hakt eine Aufgabe ab, von der man nicht sehen konnte, dass man
+auf sie zielte.
+
+**Nächster Termin** ist das andere: eine einzelne Zeile, die sagt, was als
+Nächstes ansteht und in wie langer Zeit – „in 25 Minuten", und
+sobald es begonnen hat, „Läuft bis 11:00". Es zeigt **nur Einträge mit Uhrzeit**. Ganztägige bleiben bewusst außen vor: es
 gibt keinen Moment, auf den heruntergezählt werden könnte, und ein langer –
 etwa ein zweiwöchiger Urlaub – würde sonst zwei Wochen lang auf „was steht als
 Nächstes an" mit „Urlaub" antworten, quer durch jeden Termin, den du trotzdem

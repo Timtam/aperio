@@ -148,6 +148,12 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       Der leere Zustand ist deshalb ein eigener Satz („Nichts mit Uhrzeit.") und
       nicht „Nichts geplant." — letzteres wäre schlicht falsch, während jemand
       im Urlaub ist.
+      Widget 1 („Als Nächstes") liegt seit dem Gerätetest ebenfalls auf dem
+      Sperrbildschirm: `.accessoryRectangular`, zwei EINZEILIGE Zeilen und keine
+      Abhak-Knöpfe — der Platz reicht schlicht nicht, und ein Fehlgriff dort
+      hakt etwas ab, das man nicht sehen konnte. `containerBackground` hängt
+      deshalb an der Familie und sitzt in der VIEW, nicht in der Configuration:
+      ein Accessory wird im System-Material gezeichnet.
       ⚠️ Der Rest ungeprüft auf dem Gerät.
 - [~] **Schritt 4** — Abhaken aus dem Widget (`targets/widget/Actions.swift`,
       `mobile/src/state/widgetActions.ts`). Die Extension schreibt NICHT die
@@ -170,13 +176,6 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       Offen: der Intent-Titel („Complete task") ist unübersetzt, er taucht nur in
       der Kurzbefehle-App auf.
       ⚠️ Ungeprüft auf dem Gerät.
-- [ ] **Schritt 3** — Countdown. `Text(timerInterval:)` rendert das System
-      selbst, ohne Zeitachsen-Neuladen. Eigenes, gröberes `accessibilityLabel`
-      („in etwa 20 Minuten"), sonst redet VoiceOver sekundenweise.
-- [ ] **Schritt 4** — Abhaken per `AppIntent`. Der einzige Teil, der aus der
-      Extension SCHREIBT. Vorher zu klären, ob Ereignis-Log und Sync-Warteschlange
-      einen zweiten schreibenden Prozess vertragen — WAL kann Mehrprozess, das
-      sagt nichts über die Schicht darüber.
 - [ ] **Android** — dieselben drei Widgets über Glance. Zurückgestellt, nicht
       verworfen: es gibt kein Testgerät.
 - Offen: Live Activities brauchen einen Start aus dem Vordergrund oder per Push;

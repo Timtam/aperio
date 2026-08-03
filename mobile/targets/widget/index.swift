@@ -74,6 +74,12 @@ struct UpcomingProvider: TimelineProvider {
 struct ItemRow: View {
     let item: WidgetItem
     let strings: WidgetStrings
+    /// Lock-screen rendering: everything on ONE line, and no button.
+    ///
+    /// `.accessoryRectangular` is about two lines of text in total, so a row
+    /// that spends two of them on itself leaves room for nothing else. The
+    /// spoken label is unchanged — only the drawing gets tighter.
+    var compact = false
 
     /// "When", in the order it reads: the day, then the time.
     ///
@@ -107,6 +113,31 @@ struct ItemRow: View {
     }
 
     var body: some View {
+        if compact {
+            compactBody
+        } else {
+            fullBody
+        }
+    }
+
+    /// One line: symbol, title, when. No tick button — there is no width for a
+    /// 28pt target beside two words of title, and a mis-tap on a lock screen
+    /// completes a task the user cannot see they were pointing at.
+    private var compactBody: some View {
+        HStack(spacing: 4) {
+            Image(systemName: kindSymbol(item))
+                .font(.caption2)
+                .accessibilityHidden(true)
+            Text(([item.title] + whenParts).joined(separator: " · "))
+                .font(.caption)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spokenLabel)
+    }
+
+    private var fullBody: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             // What KIND of row this is, as a glyph — the sighted half of the
             // word the label speaks. Tinted with the item's colour when it has
@@ -160,15 +191,27 @@ struct UpcomingWidgetView: View {
     var entry: UpcomingEntry
     @Environment(\.widgetFamily) private var family
 
-    /// Rows that fit. A small widget shows fewer than a medium one; anything
-    /// past this is still IN the snapshot, driving the timeline as the day
-    /// advances.
+    /// Lock-screen placement. Narrow, monochrome, and drawn in the system's own
+    /// material — so no background of ours and no buttons.
+    private var isAccessory: Bool { family == .accessoryRectangular }
+
+    /// Rows that fit. Anything past this is still IN the snapshot, driving the
+    /// timeline as the day advances — it is the drawing that is capped, not the
+    /// data.
     private var visible: [WidgetItem] {
-        Array(entry.items.prefix(family == .systemSmall ? 3 : 5))
+        let count: Int
+        switch family {
+        case .accessoryRectangular: count = 2
+        case .systemSmall: count = 3
+        default: count = 5
+        }
+        return Array(entry.items.prefix(count))
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        // Tighter on the lock screen: the rectangular accessory is roughly two
+        // lines tall in total, so 4pt between rows is a row's worth of space.
+        VStack(alignment: .leading, spacing: isAccessory ? 1 : 4) {
             if visible.isEmpty {
                 // "Nothing planned" and "I have no current data" are different
                 // facts and must never render the same way.
@@ -177,12 +220,20 @@ struct UpcomingWidgetView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(visible, id: \.id) { item in
-                    ItemRow(item: item, strings: entry.strings)
+                    ItemRow(item: item, strings: entry.strings, compact: isAccessory)
                 }
             }
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Applied HERE rather than in the configuration, because it depends on
+        // the family: a lock-screen accessory is drawn in the system's own
+        // material and a fill of ours would fight it.
+        .containerBackground(for: .widget) {
+            if !isAccessory {
+                Rectangle().fill(.fill.tertiary)
+            }
+        }
     }
 }
 
@@ -208,7 +259,6 @@ struct UpcomingWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: UpcomingProvider()) { entry in
             UpcomingWidgetView(entry: entry)
-                .containerBackground(.fill.tertiary, for: .widget)
         }
         // Both strings are read out in the widget gallery, which is where a
         // screen-reader user picks this. "Aperio" alone would be
@@ -220,7 +270,11 @@ struct UpcomingWidget: Widget {
                 ? "Die nächsten Termine und fälligen Aufgaben."
                 : "Your next events and due tasks."
         )
-        .supportedFamilies([.systemSmall, .systemMedium])
+        // Home screen AND lock screen. The rectangular accessory holds two
+        // one-line rows — fewer than the home screen, but a list all the same,
+        // which is what the lock screen was missing next to the single-row
+        // countdown widget.
+        .supportedFamilies([.systemSmall, .systemMedium, .accessoryRectangular])
     }
 }
 
