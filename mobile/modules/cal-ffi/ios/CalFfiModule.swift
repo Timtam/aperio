@@ -71,13 +71,14 @@ public class CalFfiModule: Module {
   }
 
   private func openHost() -> Host {
-    // The path comes from `SharedDatabase`, which also performs the one-time
-    // move out of the sandbox and into the App Group container — the only
-    // place a widget extension can read. It hands us a verification closure so
-    // the originals are deleted ONLY after the migrated copy has been proven
-    // to open; see SharedDatabase.swift for why that ordering is the whole
-    // safety argument.
-    let dbPath = SharedDatabase.resolvePath { candidate in
+    // The path comes from `DatabaseLocation`, which also performs the one-time
+    // move back OUT of the App Group container: a WAL connection held open on a
+    // file in a shared container gets the app killed with 0xdead10cc the moment
+    // iOS suspends it, and nothing needs the database there any more. It hands
+    // us a verification closure so the container copy is deleted ONLY after the
+    // recovered one has been proven to open; see DatabaseLocation.swift for why
+    // that ordering is the whole safety argument.
+    let dbPath = DatabaseLocation.resolvePath { candidate in
       // Opened and dropped again immediately. This is a probe, not the
       // instance the app runs on — that one is opened below, once, from
       // whichever path the migration settled on.

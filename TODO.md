@@ -69,9 +69,10 @@ schlechter zu erfassen als drei mit je einem Zweck:
 3. **Nächster Termin** — eine Zeile plus Countdown (Sperrbildschirm).
 
 Ein Widget läuft in einem eigenen Prozess und kommt weder an die React-Native-
-Schicht noch an die App-Sandbox. Gewählter Weg: der Rust-Kern wird in die
-Extension mitgelinkt und liest die Datenbank direkt — dafür muss sie aus
-`applicationSupportDirectory` in einen App-Group-Container umziehen. Das
+Schicht noch an die App-Sandbox. URSPRÜNGLICH geplanter Weg: der Rust-Kern wird
+in die Extension mitgelinkt und liest die Datenbank direkt — dafür müsste sie aus
+`applicationSupportDirectory` in einen App-Group-Container umziehen. Beides ist
+in 2b/2c verworfen worden; was wirklich gebaut wurde, steht dort. Das
 `CalFfi.xcframework` liegt bereits versioniert im Repo, es muss nichts Neues
 gebaut werden.
 
@@ -95,14 +96,24 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       Eintrag, kennt es nur die App. Eine Target-Auswahl gibt es dabei nicht:
       „All: Set up all the required credentials" läuft über ALLE Targets, die
       es kennt. Erkennbar an zwei „Setting up credentials for target …"-Blöcken.
-- [~] **Schritt 2a** — Datenbank-Umzug in den App-Group-Container
-      (`modules/cal-ffi/ios/SharedDatabase.swift`): kopieren, testweise öffnen,
-      erst dann die Originale löschen. Scheitert irgendetwas, bleibt alles am
-      alten Platz und die App läuft weiter. Eigener Bau, weil er als einziger
-      Schritt ECHTE Nutzerdaten anfasst — ein zweiter gleichzeitiger Umbau
-      würde die Fehlersuche vernebeln.
-      ⚠️ Einseitig: eine ältere App-Version sucht wieder in Application Support
-      und findet nichts. Sieht aus wie Datenverlust, ist keiner.
+- [x] **Schritt 2a — ZURÜCKGENOMMEN.** Die Datenbank zog in den
+      App-Group-Container und ist inzwischen wieder heraus
+      (`modules/cal-ffi/ios/DatabaseLocation.swift`).
+      Gegenstandslos wurde der Umzug schon durch 2b/2c: das Widget liest den
+      Snapshot, nicht die Datenbank. Er war aber nicht bloß überflüssig, sondern
+      tödlich — iOS beendet eine App mit `0xdead10cc`, wenn sie beim
+      Suspendieren eine Dateisperre auf etwas im GETEILTEN Container hält, und
+      genau das tut eine offene WAL-Verbindung, prozesslebenslang. Dieselbe
+      Verbindung im eigenen Sandbox-Container wird gar nicht beobachtet.
+      Im Absturzbericht steht kein Code von uns: der Haupt-Thread wartet
+      untätig in seiner Run-Loop. `RUNNINGBOARD`-Code `3735883980` =
+      `0xdead10cc` ist der ganze Befund.
+      Der Rückweg trägt dieselbe Beweislast wie der Hinweg: kopieren, Größen
+      vergleichen, testweise öffnen, DANN die Marker-Datei löschen (der
+      Umschaltpunkt), zuletzt die Container-Kopie. Die Marker-Datei — und nicht
+      die Existenz einer Datei — entscheidet weiterhin, welche Kopie lebt.
+      ⚠️ Weiterhin einseitig: eine App-Version VOR dem Umzug sucht in
+      Application Support, findet dort aber jetzt wieder alles.
 - [~] **Schritt 2b/2c** — Widget 1 mit echten Daten, über eine SNAPSHOT-Datei
       statt über den mitgelinkten Rust-Kern. Beim Ausarbeiten von 2b fiel die
       Annahme, auf der der Linking-Plan stand:

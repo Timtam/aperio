@@ -13,7 +13,7 @@ import WidgetKit
 /// way out. A widget reading the database directly would see the very same
 /// bytes, having linked a second copy of the engine to get at them.
 enum WidgetSnapshotStore {
-  /// Must match `SharedDatabase.appGroup`, `plugins/withAppGroup.js` and the
+  /// Must match `DatabaseLocation.appGroup`, `plugins/withAppGroup.js` and the
   /// widget's `expo-target.config.js`.
   static let appGroup = "group.com.aperio.mobile"
   /// The widget side hardcodes this same name — the two targets share no source.
