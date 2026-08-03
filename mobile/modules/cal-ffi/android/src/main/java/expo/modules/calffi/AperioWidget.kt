@@ -16,9 +16,6 @@ import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.provideContent
-// `update` and `updateAll` are EXTENSION functions on GlanceAppWidget, not
-// members — calling them without importing the package compiles nowhere.
-import androidx.glance.appwidget.update
 import androidx.glance.layout.Alignment
 import androidx.glance.layout.Column
 import androidx.glance.layout.Row
@@ -236,6 +233,10 @@ class ToggleTaskAction : ActionCallback {
     WidgetStore.enqueue(context, id, parameters[containerId] ?: "")
     // Redraw now so the row disappears under the finger, rather than whenever
     // the app next happens to run.
+    // `update` is a MEMBER of GlanceAppWidget — no import, and importing one
+    // is an unresolved reference. Its sibling `updateAll` IS an extension and
+    // does need importing (see CalFfiModule.kt). Two calls that read alike and
+    // are shaped differently.
     AperioWidget().update(context, glanceId)
   }
 
