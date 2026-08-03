@@ -785,3 +785,63 @@ describe('buildEntries deferred (Zukünftig) grouping', () => {
     ).toBe(true);
   });
 });
+
+describe('Done group order', () => {
+  const under = (result: ReturnType<typeof build>) => {
+    const start = result.entries.findIndex((e) => e.task.id === DONE_GROUP_ID);
+    return result.entries
+      .slice(start + 1)
+      .filter((e) => e.group === undefined)
+      .map((e) => e.task.id);
+  };
+
+  it('puts the most recently completed first', () => {
+    const older = baseTask({
+      id: 'older',
+      status: 'completed',
+      completed_at: '2026-05-19T10:00:00Z',
+    });
+    const newer = baseTask({
+      id: 'newer',
+      status: 'completed',
+      completed_at: '2026-05-20T10:00:00Z',
+    });
+    expect(under(build([older, newer]))).toEqual(['newer', 'older']);
+  });
+
+  it('falls back to updated_at when the provider gave no completion time', () => {
+    // Vikunja stamps `done_at` when a task FLIPS to done, so one created
+    // already-done — which is exactly what a completion record for a repeating
+    // task is — arrives without one. The empty-string fallback this replaces
+    // sorted those to the very END of a descending comparison: filed as the
+    // oldest thing in the list seconds after being ticked off.
+    const stamped = baseTask({
+      id: 'stamped',
+      status: 'completed',
+      completed_at: '2026-05-18T10:00:00Z',
+      updated_at: '2026-05-18T10:00:00Z',
+    });
+    const justRecorded = baseTask({
+      id: 'just-recorded',
+      status: 'completed',
+      completed_at: null,
+      updated_at: '2026-05-20T10:00:00Z',
+    });
+    expect(under(build([stamped, justRecorded]))).toEqual(['just-recorded', 'stamped']);
+  });
+
+  it('does not let a missing timestamp jump a genuinely newer completion', () => {
+    const newest = baseTask({
+      id: 'newest',
+      status: 'completed',
+      completed_at: '2026-05-21T10:00:00Z',
+    });
+    const undated = baseTask({
+      id: 'undated',
+      status: 'completed',
+      completed_at: null,
+      updated_at: '2026-05-20T10:00:00Z',
+    });
+    expect(under(build([undated, newest]))).toEqual(['newest', 'undated']);
+  });
+});

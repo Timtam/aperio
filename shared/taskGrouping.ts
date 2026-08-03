@@ -4,6 +4,29 @@ import { priorityRank } from './taskStatus';
 
 /** Sentinel id of the synthetic "Done (N)" group row. */
 export const DONE_GROUP_ID = '__aperio_done_group__';
+
+/**
+ * What a done task sorts by inside the Done group.
+ *
+ * `completed_at` when the provider gave one, and `updated_at` when it did not —
+ * NOT the empty string, which is what this used to fall back to. An empty key
+ * sorts to the very end of a descending comparison, so a task with no
+ * completion time was filed as the oldest thing in the list no matter when it
+ * was actually ticked off.
+ *
+ * That is not a hypothetical. Vikunja stamps its `done_at` when a task FLIPS to
+ * done, so a task created already-done — which is exactly what a completion
+ * record for a repeating task is — never gets one. Those turned up at the
+ * bottom of "Erledigt" seconds after being completed, while ordinarily ticked
+ * tasks sorted correctly, which is what made it look arbitrary.
+ *
+ * `updated_at` is a proxy, and an honest one: for a task that was just created
+ * done it IS the completion moment. A done task edited later would drift
+ * upwards, which is a far smaller error than being pinned to the end.
+ */
+function doneOrderKey(task: Task): string {
+  return task.completed_at ?? task.updated_at ?? '';
+}
 /** Sentinel id of the synthetic "Backlog" group row. */
 export const BACKLOG_GROUP_ID = '__aperio_backlog_group__';
 /** Sentinel id of the synthetic "Zukünftig (N)" group row — tasks waiting for a
@@ -476,9 +499,7 @@ export function buildEntries(
 
   // Done group last, most-recently-completed first.
   if (doneTopLevel.length > 0) {
-    doneTopLevel.sort((a, b) =>
-      (b.completed_at ?? '').localeCompare(a.completed_at ?? ''),
-    );
+    doneTopLevel.sort((a, b) => doneOrderKey(b).localeCompare(doneOrderKey(a)));
     // Split the count into mine (unassigned OR assigned to me) vs others
     // (assigned to a concrete other user) when at least one done task is
     // someone else's; otherwise a single count (personal lists never split).
