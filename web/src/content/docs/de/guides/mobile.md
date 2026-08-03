@@ -143,7 +143,11 @@ das aktuelle, denn das schaltet die Reihe weiter.
 
 Kalender, die du auf diesem Gerät ausgeblendet hast, bleiben auch im Widget
 ausgeblendet. Aufgaben kommen aus **allen** Listen, nicht nur aus den gerade in
-der Aufgabenansicht ausgewählten.
+der Aufgabenansicht ausgewählten – aber nie eine, die jemand anderem zugewiesen
+ist. Eine Aufgabe auf einer geteilten Liste, die den Namen einer anderen Person
+trägt und nicht deinen, ist deren Arbeit; das Widget lässt sie genauso weg wie
+die Kalenderansichten. Nicht zugewiesene Aufgaben und solche, die unter anderem
+dir zugewiesen sind, bleiben.
 
 ## Widgets auf dem Sperrbildschirm (iOS)
 

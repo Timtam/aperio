@@ -132,7 +132,10 @@ one, which is what moves the series forward.
 
 Calendars you have hidden on this device stay hidden in the widget too. Tasks
 come from **all** your lists, not only the ones currently selected in the task
-view.
+view – but never one assigned to somebody else. A task on a shared list that
+carries another person's name and not yours is their work, and the widget leaves
+it out exactly as the calendar views do. Unassigned tasks, and ones shared with
+you among others, stay.
 
 ## Lock-screen widgets (iOS)
 

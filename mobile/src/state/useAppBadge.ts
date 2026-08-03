@@ -12,6 +12,7 @@ import type { Task } from '@aperio/shared';
 
 import { getEvents, listCalendars, type CalendarEvent } from '../api/calendar';
 import { getTasks, listTaskLists } from '../api/client';
+import { currentUserForList } from './currentUser';
 import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
 import { appBadgeEnabled, loadAppBadgePref, subscribeAppBadge } from './appBadge';
 import { useCacheReload } from './cacheObserver';
@@ -38,12 +39,19 @@ import { useTaskStore } from './taskStoreContext';
 /** Open tasks (across every list) that land on today. */
 async function countTodayTasks(today: string): Promise<number> {
   const lists = await listTaskLists();
-  const per = await Promise.all(
-    lists.map((l) => getTasks(l.id).catch(() => [] as Task[])),
-  );
+  const [per, me] = await Promise.all([
+    Promise.all(lists.map((l) => getTasks(l.id).catch(() => [] as Task[]))),
+    // `list_id → connected user`, for the ownership filter below.
+    Promise.all(lists.map(async (l) => [l.id, await currentUserForList(l.id)] as const)),
+  ]);
+  const meByList = Object.fromEntries(me);
   // isCompletedVisible => false so completed (and cancelled) never count; the
-  // helper also drops subtasks (parent_id set).
-  return filterTasksOnDay(per.flat(), today, () => false).length;
+  // helper also drops subtasks (parent_id set). The fourth argument applies the
+  // OWNERSHIP rule (DESIGN §9.7): a task assigned to a concrete other person is
+  // not on my plate, and the calendar views have always left it out. The badge
+  // counted it — a number on the app icon for work that was never mine.
+  return filterTasksOnDay(per.flat(), today, () => false, (listId) => meByList[listId] ?? null)
+    .length;
 }
 
 /** Today's events that are all-day or still ahead (running or upcoming), across

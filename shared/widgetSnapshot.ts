@@ -22,7 +22,7 @@ import {
 } from './expandTaskOccurrences';
 import { expandAll, type RecurringEventLike } from './recurrence';
 import { filterTasksOnDay, taskTimeOnDay } from './taskDay';
-import type { Task } from './types';
+import type { Task, TaskUser } from './types';
 
 /** Bumped when the shape changes incompatibly. The widget refuses a version it
  *  does not know rather than rendering guesses — an app and its extension are
@@ -159,6 +159,15 @@ export interface WidgetSnapshotInput<E extends RecurringEventLike> {
   locale: string;
   /** The non-data words, already translated by the caller. */
   strings: WidgetStrings;
+  /** The connected user for a list's account, or null where the backend has no
+   *  identity (a local list).
+   *
+   *  Drives the OWNERSHIP filter: a task assigned to a concrete other person and
+   *  not to me is someone else's work, and the calendar views already leave it
+   *  out. A widget that showed it would be quietly answering a different
+   *  question — "what is on this shared board" instead of "what is next for
+   *  you". Omitted ⇒ no ownership filtering at all. */
+  meFor?: (listId: string) => TaskUser | null;
   /** Container ids the user has hidden on THIS device. Visibility is a
    *  per-device concern the core deliberately does not know about, so it is
    *  applied here, the same way the reminder scheduler applies it. */
@@ -260,6 +269,7 @@ export function buildWidgetSnapshot<E extends RecurringEventLike>(
     limit,
     locale,
     strings,
+    meFor,
     hiddenContainers,
     eventColorOf,
     taskColorOf,
@@ -310,8 +320,9 @@ export function buildWidgetSnapshot<E extends RecurringEventLike>(
   const seenTasks = new Set<string>();
   for (const key of dayKeys) {
     // `() => false` — completed tasks never belong on a "what is next" surface,
-    // regardless of a list's show-completed setting.
-    for (const task of filterTasksOnDay(expandedTasks, key, () => false)) {
+    // regardless of a list's show-completed setting. `meFor` applies the
+    // ownership rule the calendar views apply.
+    for (const task of filterTasksOnDay(expandedTasks, key, () => false, meFor)) {
       if (seenTasks.has(task.id)) continue;
       const time = taskTimeOnDay(task, key);
       const at = time ? atTimeOn(key, time) : dayStart(key);

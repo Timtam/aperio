@@ -9,7 +9,7 @@ import {
   type RecurringEventLike,
 } from '@aperio/shared';
 
-import type { Task } from '../api/types';
+import type { Task, TaskUser } from '../api/types';
 
 /** A minimal event the builder can consume, plus the two fields the accessors
  *  pull out (the frontends spell them differently, hence the accessors). */
@@ -72,6 +72,7 @@ function build(
     horizonDays?: number;
     limit?: number;
     hiddenContainers?: ReadonlySet<string>;
+    meFor?: (listId: string) => TaskUser | null;
     eventColorOf?: (event: TestEvent) => string | null;
   } = {},
 ) {
@@ -95,6 +96,7 @@ function build(
       statusInProgress: 'In Arbeit',
     },
     hiddenContainers: patch.hiddenContainers,
+    meFor: patch.meFor,
     eventColorOf: patch.eventColorOf,
     calendarIdOf: (e) => e.calendar_id,
     titleOf: (e) => e.title,
@@ -432,5 +434,63 @@ describe('buildWidgetSnapshot — task state', () => {
       end: localAt(2026, 8, 4, 10, 0).toISOString(),
     };
     expect(build({ events: [ev], now: localAt(2026, 8, 3, 7, 0) }).items[0]?.status).toBeUndefined();
+  });
+});
+
+describe('buildWidgetSnapshot — whose work it is', () => {
+  const me: TaskUser = { id: 'me', name: 'Toni', email: null };
+  const other: TaskUser = { id: 'other', name: 'Someone else', email: null };
+
+  function withOwner(patch: { tasks: Task[] }) {
+    return build({ ...patch, now: localAt(2026, 8, 3, 7, 0), meFor: () => me });
+  }
+
+  it('leaves out a task assigned only to someone else', () => {
+    // The calendar views have always applied this (DESIGN §9.7). A widget that
+    // showed it would answer a different question — "what is on this shared
+    // board" instead of "what is next for you".
+    const theirs: Task = {
+      ...baseTask,
+      id: 'theirs',
+      scheduled_date: '2026-08-04',
+      assignees: [other],
+    };
+    expect(withOwner({ tasks: [theirs] }).items).toEqual([]);
+  });
+
+  it('keeps mine, unassigned, and shared-with-me', () => {
+    const mine: Task = {
+      ...baseTask,
+      id: 'mine',
+      scheduled_date: '2026-08-04',
+      assignees: [me],
+    };
+    const nobody: Task = { ...baseTask, id: 'nobody', scheduled_date: '2026-08-04' };
+    const shared: Task = {
+      ...baseTask,
+      id: 'shared',
+      scheduled_date: '2026-08-04',
+      assignees: [other, me],
+    };
+    const ids = withOwner({ tasks: [mine, nobody, shared] }).items.map((i) => i.id);
+    expect(ids.sort()).toEqual(['mine', 'nobody', 'shared']);
+  });
+
+  it('filters nothing when the backend has no identity', () => {
+    // A local list resolves "me" to null, and a null identity must not start
+    // hiding tasks that nobody was ever assigned to on a backend that cannot
+    // assign at all.
+    const theirs: Task = {
+      ...baseTask,
+      id: 'theirs',
+      scheduled_date: '2026-08-04',
+      assignees: [other],
+    };
+    const snap = build({
+      tasks: [theirs],
+      now: localAt(2026, 8, 3, 7, 0),
+      meFor: () => null,
+    });
+    expect(snap.items.map((i) => i.id)).toEqual(['theirs']);
   });
 });

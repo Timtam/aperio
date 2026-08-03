@@ -2,7 +2,7 @@ import { useCallback, useEffect } from 'react';
 import { AppState } from 'react-native';
 
 import { buildWidgetSnapshot } from '@aperio/shared';
-import type { ColorLabel, Task } from '@aperio/shared';
+import type { ColorLabel, Task, TaskList, TaskUser } from '@aperio/shared';
 
 import CalFfi from '../../modules/cal-ffi';
 import i18n from '../../i18n';
@@ -12,6 +12,7 @@ import { listColorLabels } from '../api/colorLabels';
 import { resolveEventColor } from '../intl/eventColor';
 import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
 import { getHiddenCalendars } from './calendarVisibility';
+import { currentUserForList } from './currentUser';
 import { consumeWidgetActionsApplied, drainWidgetActions } from './widgetActions';
 import { useCacheReload } from './cacheObserver';
 import { subscribeCalendarChanged } from './calendarMutations';
@@ -50,7 +51,7 @@ async function collectEvents(now: Date, calendars: Calendar[]): Promise<Calendar
   return per.flat();
 }
 
-async function collectTasks(): Promise<Task[]> {
+async function collectTasks(): Promise<{ tasks: Task[]; lists: TaskList[] }> {
   const lists = await listTaskLists();
   // Across ALL lists, not just the ones selected in the task view. Hiding a
   // CALENDAR is an explicit "don't show me this"; the task-list selection is a
@@ -58,7 +59,17 @@ async function collectTasks(): Promise<Task[]> {
   // items from a surface whose whole job is to be complete. Same call the
   // app-icon badge makes.
   const per = await Promise.all(lists.map((l) => getTasks(l.id).catch(() => [] as Task[])));
-  return per.flat();
+  return { tasks: per.flat(), lists };
+}
+
+/** `list_id → connected user`, for the ownership filter. Session-memoized per
+ *  list by `currentUserForList`, so this costs a bridge call once per list per
+ *  app run and nothing thereafter. */
+async function resolveMe(lists: TaskList[]): Promise<Record<string, TaskUser | null>> {
+  const entries = await Promise.all(
+    lists.map(async (l) => [l.id, await currentUserForList(l.id)] as const),
+  );
+  return Object.fromEntries(entries);
 }
 
 async function computeSnapshot(): Promise<string> {
@@ -68,7 +79,12 @@ async function computeSnapshot(): Promise<string> {
     listColorLabels().catch(() => [] as ColorLabel[]),
     getHiddenCalendars(),
   ]);
-  const [events, tasks] = await Promise.all([collectEvents(now, calendars), collectTasks()]);
+  const [events, collected] = await Promise.all([
+    collectEvents(now, calendars),
+    collectTasks(),
+  ]);
+  const { tasks, lists } = collected;
+  const meByList = await resolveMe(lists);
 
   const calendarsById = new Map(calendars.map((c) => [c.id, c]));
   const labelsById = new Map(labels.map((l) => [l.id, l]));
@@ -99,6 +115,9 @@ async function computeSnapshot(): Promise<string> {
         statusOpen: i18n.t('dialogs.task.status.open'),
         statusInProgress: i18n.t('dialogs.task.status.inProgress'),
       },
+      // Someone else's work is not what is next for YOU — the same rule the
+      // calendar views apply.
+      meFor: (listId) => meByList[listId] ?? null,
       hiddenContainers: hidden,
       // The same resolver the day view paints with, so a widget row is never a
       // different colour from the row behind it in the app.
