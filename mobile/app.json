@@ -44,7 +44,24 @@
     },
     "extra": {
       "eas": {
-        "projectId": "56442678-7da3-4046-96e3-d2da1e17c487"
+        "projectId": "56442678-7da3-4046-96e3-d2da1e17c487",
+        "build": {
+          "experimental": {
+            "ios": {
+              "appExtensions": [
+                {
+                  "targetName": "AperioWidgets",
+                  "bundleIdentifier": "com.aperio.mobile.widget",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.com.aperio.mobile"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
       }
     },
     "owner": "tonirbarth",
