@@ -1,0 +1,63 @@
+name: Probe App Intents schema
+
+# Asks the iOS SDK what Apple's calendar assistant schema actually requires.
+#
+# `@AssistantIntent(schema:)` validates conformance at COMPILE time: the wrong
+# property names are a build error, not a warning. Written from guesswork that
+# costs one full EAS build (~25 minutes) per guess — and the feature it unlocks
+# cannot even be observed without an Apple Intelligence device.
+#
+# So instead of guessing: the SDK on this runner contains the declarations. Two
+# minutes of macOS time replaces a guessing loop, and the answer is durable —
+# paste the output into the TODO and the implementation is written from facts.
+#
+# Manual only. Nothing here builds or ships anything.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: What does .calendar.createEvent require?
+    runs-on: macos-latest
+    steps:
+      - name: Locate the SDK
+        id: sdk
+        run: echo "path=$(xcrun --sdk iphoneos --show-sdk-path)" >> "$GITHUB_OUTPUT"
+
+      # The public declarations live in the module's swiftinterface. This is the
+      # authoritative answer: property names, types, and which are optional.
+      - name: Dump the calendar schema declarations
+        run: |
+          set -uo pipefail
+          MODULE="${{ steps.sdk.outputs.path }}/System/Library/Frameworks/AppIntents.framework/Modules/AppIntents.swiftmodule"
+          ls "$MODULE" || echo "no swiftmodule directory"
+          for f in "$MODULE"/*.swiftinterface; do
+            [ -e "$f" ] || continue
+            echo "───── $f"
+            grep -n -A 30 -i "calendar" "$f" | grep -iE "createEvent|struct|var |let |protocol |CalendarIntent|CalendarEntity" | head -120
+          done
+
+      # Second opinion, in case the interface is stripped: give the macro an
+      # EMPTY conformance on purpose. Its diagnostics name every property the
+      # schema wanted — the failure IS the output we came for, so the step must
+      # not fail the job.
+      - name: Let the macro list what is missing
+        run: |
+          set -uo pipefail
+          cat > /tmp/Probe.swift <<'SWIFT'
+          import AppIntents
+
+          @available(iOS 18.0, *)
+          @AssistantIntent(schema: .calendar.createEvent)
+          struct ProbeCreateEvent: AppIntent {
+              func perform() async throws -> some IntentResult { .result() }
+          }
+          SWIFT
+          xcrun swiftc \
+            -sdk "${{ steps.sdk.outputs.path }}" \
+            -target arm64-apple-ios18.0 \
+            -typecheck /tmp/Probe.swift 2>&1 | head -80 || true

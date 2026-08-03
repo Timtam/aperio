@@ -279,6 +279,29 @@ Vorteil.
       eine `AppShortcuts.strings` im App-Target, NICHT über unseren i18n-Katalog.
       Bewusst von Schritt 2 getrennt gehalten: ein eigener Mechanismus, dessen
       Fehlschlag sonst die Diagnose des Anlegens vernebelt hätte.
+- [~] **Apple Intelligence (Assistant Schemas)** — der Weg, der Siri FREIE Rede
+      erlaubt statt einer festen Phrase: `@AssistantIntent(schema:
+      .calendar.createEvent)`. Es gibt eine Kalender-Domäne, `createEvent` ist
+      Teil davon. Damit wäre „erstelle einen Termin am Montag von 11 bis 13 mit
+      dem Titel Essen kochen" erreichbar — das, was Apples eigener Kalender kann.
+      BLOCKER, warum es noch nicht gebaut ist: das Makro prüft die Form beim
+      ÜBERSETZEN. Falsche Property-Namen sind ein Build-Fehler, und Apples Doku
+      gibt die Form online nicht her (Xcode hat dafür ein Code-Snippet, das uns
+      unter Windows nichts nützt). Blind raten kostet je Versuch einen vollen
+      EAS-Bau, für ein Feature, das ohne Apple-Intelligence-Gerät nicht einmal
+      beobachtbar ist.
+      LÖSUNG: `.github/workflows/probe-app-intents-schema.yml` — fragt den
+      iOS-SDK auf dem macOS-Runner nach den Deklarationen und lässt zusätzlich
+      das Makro an einer ABSICHTLICH leeren Konformanz scheitern, damit seine
+      Diagnose die verlangten Felder aufzählt. Zwei Minuten Runner-Zeit statt
+      einer Rateschleife. Ergebnis hier eintragen, dann ist die Umsetzung
+      Fleißarbeit.
+      Zu erwarten ist außerdem ein ganzer Entitäten-Graph, nicht nur ein Makro:
+      `perform()` muss das angelegte Objekt als `@AssistantEntity(schema:
+      .calendar.event)` zurückgeben, was vermutlich eine Kalender-Entität nach
+      sich zieht.
+      Tonis Gerät hat noch KEIN Apple Intelligence — der Dialog aus Schritt 2
+      bleibt also der Weg, der bei ihm wirkt; das hier ist für neuere Geräte.
 - [ ] **Schritt 3** — Kalender und Aufgabenliste als `AppEntity` mit
       `EntityQuery`. Die Liste kommt über dieselbe Snapshot-Datei-Mechanik wie
       beim Widget (eine `calendars.json` in der App Group) — der Intent-Prozess
