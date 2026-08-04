@@ -11,6 +11,20 @@ name: Probe App Intents schema
 # minutes of macOS time replaces a guessing loop, and the answer is durable —
 # paste the output into the TODO and the implementation is written from facts.
 #
+# ROUND 1 said: `type 'AssistantSchemas.Intent' has no member 'calendar'`.
+# Apple's documentation says the opposite — it names `.calendar.createEvent`
+# outright, alongside `.calendar.event`, `.calendar.attendee` and the rest, and
+# refers to them as `AppSchema.CalendarIntent`. `AppSchema` is not the namespace
+# the compiler named, so one of three things is true: the domain is declared
+# somewhere other than `AppIntents.framework`, it needs a deployment target
+# above the 18.0 round 1 used, or the shorthand resolves against a type that was
+# renamed. Round 1 could not tell those apart because it only ever asked ONE
+# question, in one spelling, at one target.
+#
+# So this round stops guessing the spelling and goes looking instead: find which
+# module in the SDK actually declares the thing, print that namespace, and try
+# the candidate spellings side by side so the compiler says which resolves.
+#
 # Manual only. Nothing here builds or ships anything.
 
 on:
@@ -21,43 +35,87 @@ permissions:
 
 jobs:
   probe:
-    name: What does .calendar.createEvent require?
+    name: Where do the calendar schemas live?
     runs-on: macos-latest
     steps:
       - name: Locate the SDK
         id: sdk
-        run: echo "path=$(xcrun --sdk iphoneos --show-sdk-path)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "path=$(xcrun --sdk iphoneos --show-sdk-path)" >> "$GITHUB_OUTPUT"
+          xcodebuild -version
 
-      # The public declarations live in the module's swiftinterface. This is the
-      # authoritative answer: property names, types, and which are optional.
-      - name: Dump the calendar schema declarations
+      # Round 1 looked only inside AppIntents.framework. If the schemas are
+      # declared anywhere else in the SDK, that is precisely what it could not
+      # see — so ask the whole SDK which module mentions them at all.
+      - name: Which module declares the calendar schemas?
         run: |
           set -uo pipefail
-          MODULE="${{ steps.sdk.outputs.path }}/System/Library/Frameworks/AppIntents.framework/Modules/AppIntents.swiftmodule"
-          ls "$MODULE" || echo "no swiftmodule directory"
-          for f in "$MODULE"/*.swiftinterface; do
-            [ -e "$f" ] || continue
-            echo "───── $f"
-            grep -n -A 30 -i "calendar" "$f" | grep -iE "createEvent|struct|var |let |protocol |CalendarIntent|CalendarEntity" | head -120
+          SDK="${{ steps.sdk.outputs.path }}"
+          echo "───── interfaces mentioning CalendarIntent / AppSchema / AssistantSchemas"
+          grep -rl -E "CalendarIntent|AppSchema|AssistantSchemas" \
+            "$SDK"/System/Library/Frameworks/*/Modules/*.swiftmodule/*.swiftinterface \
+            2>/dev/null | head -40 || echo "(none)"
+          echo
+          echo "───── the same across PrivateFrameworks, in case it is not public yet"
+          grep -rl -E "CalendarIntent|AppSchema" \
+            "$SDK"/System/Library/PrivateFrameworks/*/Modules/*.swiftmodule/*.swiftinterface \
+            2>/dev/null | head -20 || echo "(none)"
+
+      # What round 1 should have printed: the members that DO exist, rather than
+      # a filtered view of the one member we hoped for.
+      - name: Enumerate the schema namespaces
+        run: |
+          set -uo pipefail
+          SDK="${{ steps.sdk.outputs.path }}"
+          IFACE="$SDK/System/Library/Frameworks/AppIntents.framework/Modules/AppIntents.swiftmodule/arm64e-apple-ios.swiftinterface"
+          echo "───── every enum/struct under the schema namespaces"
+          grep -n -E "(enum|struct) (AssistantSchemas|AppSchema)" "$IFACE" | head -40 || true
+          echo
+          echo "───── every domain shorthand declared on the intent schema type"
+          # The domains are static members on the type the macro takes. Print all
+          # of them: whatever calendar is called, it is in this list or nowhere.
+          grep -n -B 2 -A 2 -E "extension (AssistantSchemas|AppSchema)\.(Intent|Entity|Enum)" \
+            "$IFACE" | head -80 || true
+          echo
+          echo "───── static schema members, by name"
+          grep -n -oE "public static (var|let|func) [a-zA-Z]+" "$IFACE" \
+            | grep -iE "calendar|event|reminder|mail|photo|note|clock" | head -60 || true
+          echo
+          echo "───── raw counts (0 for calendar means it is simply not in this module)"
+          for needle in calendar Calendar CalendarIntent AppSchema AssistantSchemas createEvent; do
+            printf '%s: %s\n' "$needle" "$(grep -c "$needle" "$IFACE" 2>/dev/null || echo 0)"
           done
 
-      # Second opinion, in case the interface is stripped: give the macro an
-      # EMPTY conformance on purpose. Its diagnostics name every property the
-      # schema wanted — the failure IS the output we came for, so the step must
-      # not fail the job.
-      - name: Let the macro list what is missing
+      # Same question, four spellings, so the compiler picks. Each is ~7s.
+      # A failure is not a job failure — the diagnostic IS the output.
+      - name: Which spelling resolves?
         run: |
           set -uo pipefail
-          cat > /tmp/Probe.swift <<'SWIFT'
+          SDK="${{ steps.sdk.outputs.path }}"
+
+          try() {
+            local label="$1" target="$2" available="$3" schema="$4"
+            echo "═════ $label"
+            cat > /tmp/Probe.swift <<SWIFT
           import AppIntents
 
-          @available(iOS 18.0, *)
-          @AssistantIntent(schema: .calendar.createEvent)
+          @available(iOS $available, *)
+          @AssistantIntent(schema: $schema)
           struct ProbeCreateEvent: AppIntent {
               func perform() async throws -> some IntentResult { .result() }
           }
           SWIFT
-          xcrun swiftc \
-            -sdk "${{ steps.sdk.outputs.path }}" \
-            -target arm64-apple-ios18.0 \
-            -typecheck /tmp/Probe.swift 2>&1 | head -80 || true
+            xcrun swiftc -sdk "$SDK" -target "arm64-apple-ios$target" \
+              -typecheck /tmp/Probe.swift 2>&1 | head -40 || true
+            echo
+          }
+
+          # Round 1, repeated so this log stands alone.
+          try "iOS 18 target, .calendar.createEvent" 18.0 18.0 ".calendar.createEvent"
+          # The likeliest miss in round 1: a domain added long after iOS 18.
+          try "iOS 26 target, .calendar.createEvent" 26.0 26.0 ".calendar.createEvent"
+          # The name Apple's own documentation uses for these.
+          try "iOS 26 target, AppSchema.CalendarIntent" 26.0 26.0 "AppSchema.CalendarIntent.createEvent"
+          # A control: a domain that has existed since iOS 18. If THIS fails too,
+          # the problem is the probe, not the calendar domain.
+          try "iOS 26 target, .mail.createDraft (control)" 26.0 26.0 ".mail.createDraft"
