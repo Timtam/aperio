@@ -661,6 +661,16 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
 
   /** Drop one queued action by its `id`, after ATTEMPTING it. */
   clearWidgetAction(id: string): Promise<void>;
+
+  /** Hand the Siri intents the calendars and task lists they may offer, as a
+   *  `{calendars, taskLists}` JSON document of `{id, name}` rows.
+   *
+   *  iOS ONLY — there is no counterpart on Android, so callers must check the
+   *  platform rather than rely on a rejected promise. An intent has to resolve
+   *  "which calendar?" before it runs, with no bridge to this layer and no
+   *  business opening the database, so it reads the answer from a file the same
+   *  way the widget reads its agenda. */
+  writeVoicePickers(json: string): Promise<void>;
 }
 
 export default requireNativeModule<CalFfiModule>('CalFfi');

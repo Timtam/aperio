@@ -116,11 +116,20 @@ describe('the spoken and displayed wording has German translations', () => {
   for (const pattern of [
     /LocalizedStringResource\s*=\s*"([^"]+)"/g,
     /IntentDescription\("([^"]+)"\)/g,
+    /TypeDisplayRepresentation\(name:\s*"([^"]+)"/g,
+    /String\(localized:\s*"([^"]+)"\)/g,
     /\btitle:\s*"([^"]+)"/g,
     /shortTitle:\s*"([^"]+)"/g,
     /requestValueDialog:\s*"([^"]+)"/g,
   ]) {
-    for (const match of source.matchAll(pattern)) spoken.add(match[1]!);
+    for (const match of source.matchAll(pattern)) {
+      const literal = match[1]!;
+      // A Swift interpolation is a runtime value — a calendar's own name, say —
+      // and has no business in a translation catalogue. Demanding a key for
+      // `\(name)` would be a failure that cannot be fixed.
+      if (literal.includes('\\(')) continue;
+      spoken.add(literal);
+    }
   }
 
   it('found the wording at all', () => {

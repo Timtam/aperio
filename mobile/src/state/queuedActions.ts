@@ -1,9 +1,11 @@
+import { localDateKey } from '@aperio/shared';
 import type { Task, TaskList } from '@aperio/shared';
 
 import CalFfi from '../../modules/cal-ffi';
 import { createEvent, listCalendars } from '../api/calendar';
-import { getTasks, listTaskLists } from '../api/client';
+import { createTask, getTasks, listTaskLists } from '../api/client';
 import { readLastUsedCalendar } from './lastUsedCalendar';
+import { readLastUsedTaskList } from './lastUsedTaskList';
 import { applyTaskToggle } from './taskToggle';
 
 // The app's end of the action queue — requests other processes leave for it.
@@ -33,15 +35,27 @@ interface QueuedAction {
    *  is. Deliberately not "complete": the caller asks for the same thing a tap
    *  in the app asks for, and the app decides what it means.
    *
-   *  `createEvent` — make an event from a spoken title and time. */
+   *  `createEvent` — make an event from a spoken title and time.
+   *
+   *  `createTask` — make a task from a spoken title. */
   action: string;
   at: string;
   /** `toggle` only. */
   itemId?: string;
   containerId?: string;
-  /** `createEvent` only. `startsAt` is RFC-3339, as Siri resolved it. */
+  /** `createEvent` and `createTask`. */
   title?: string;
+  /** `createEvent` only. RFC-3339, as Siri resolved the spoken time. */
   startsAt?: string;
+  /** `createTask` only, and optional even there — Siri does not ask for a day,
+   *  so a spoken task lands in the backlog unless a hand-built shortcut set
+   *  one. */
+  scheduledAt?: string;
+  /** Where it goes. ABSENT means the speaker answered "Default", which is the
+   *  intent's way of saying "decide for me" — the app then falls back to the
+   *  last-used container, exactly as it did before there was a choice at all. */
+  calendarId?: string;
+  listId?: string;
 }
 
 /** The shape this build understands. An action from a newer widget is dropped
@@ -141,6 +155,11 @@ export async function drainQueuedActions(): Promise<boolean> {
             applied = true;
             appliedUnseen = true;
           }
+        } else if (action.version === SUPPORTED_VERSION && action.action === 'createTask') {
+          if (await createSpokenTask(action)) {
+            applied = true;
+            appliedUnseen = true;
+          }
         }
       } catch {
         // Attempted and failed. Cleared below all the same — see the note above.
@@ -164,9 +183,19 @@ const SPOKEN_EVENT_MINUTES = 60;
 /**
  * Create the event a voice request asked for.
  *
- * The calendar is the last one used — the same default the editor offers, so a
- * spoken event lands where a typed one would. Falls back to the first writable
- * calendar, because "no calendar chosen yet" must not swallow the request.
+ * The calendar is the one the speaker NAMED. Falling back only when they did
+ * not: to the last-used calendar, then to the first writable one, because "no
+ * calendar chosen yet" must not swallow the request.
+ *
+ * That fallback used to be the whole story, and it was the wrong story. The
+ * last-used calendar is whatever was last touched in the EDITOR — a fine
+ * default for a button standing next to a calendar picker, and a bad one for a
+ * sentence spoken across the room, where the event kept landing somewhere the
+ * speaker had not chosen and could not see.
+ *
+ * A named calendar that no longer exists is deliberately NOT an error. It
+ * cannot be asked about again — the utterance is over — so the request lands on
+ * the default rather than being dropped in silence.
  */
 async function createSpokenEvent(action: QueuedAction): Promise<boolean> {
   const title = action.title?.trim();
@@ -176,9 +205,9 @@ async function createSpokenEvent(action: QueuedAction): Promise<boolean> {
   const calendars = await listCalendars();
   const writable = calendars.filter((c) => !c.read_only);
   if (writable.length === 0) return false;
-  const preferred = await readLastUsedCalendar().catch(() => null);
-  const target =
-    writable.find((c) => c.id === preferred) ?? writable[0];
+  const spoken = action.calendarId ? writable.find((c) => c.id === action.calendarId) : undefined;
+  const preferred = spoken ? null : await readLastUsedCalendar().catch(() => null);
+  const target = spoken ?? writable.find((c) => c.id === preferred) ?? writable[0];
   if (target == null) return false;
 
   await createEvent({
@@ -194,6 +223,60 @@ async function createSpokenEvent(action: QueuedAction): Promise<boolean> {
     reminders: [],
     sound: null,
     attendees: [],
+  });
+  return true;
+}
+
+/**
+ * Create the task a voice request asked for.
+ *
+ * The list is picked the same way the calendar is: the one named, else the last
+ * one used, else the first that exists.
+ *
+ * Defaults match quick-add rather than the full editor — open, medium priority,
+ * medium effort — because that is the surface this most resembles: a title and
+ * a home, with everything else left for later.
+ */
+async function createSpokenTask(action: QueuedAction): Promise<boolean> {
+  const title = action.title?.trim();
+  if (!title) return false;
+
+  const lists = await listTaskLists();
+  if (lists.length === 0) return false;
+  const spoken = action.listId ? lists.find((l) => l.id === action.listId) : undefined;
+  const preferred = spoken ? null : await readLastUsedTaskList().catch(() => null);
+  const target = spoken ?? lists.find((l) => l.id === preferred) ?? lists[0];
+  if (target == null) return false;
+
+  const asked = action.scheduledAt ? new Date(action.scheduledAt) : null;
+  const day = asked != null && !Number.isNaN(asked.getTime()) ? asked : null;
+
+  await createTask({
+    list_id: target.id,
+    title,
+    description: null,
+    status: 'open',
+    priority: 'medium',
+    effort: 'medium',
+    // The DAY only, never the time — and `localDateKey`, never the UTC date,
+    // or a task asked for late in the evening lands on tomorrow.
+    //
+    // Dropping the time is deliberate. An iOS date parameter always carries
+    // one, and a shortcut built by picking a day alone hands over midnight;
+    // storing that would turn "sometime on Tuesday" into a task due at 00:00.
+    // A day with no time is the shape quick-add produces too.
+    scheduled_date: day ? localDateKey(day) : null,
+    scheduled_time: null,
+    deadline_date: null,
+    deadline_time: null,
+    deadline_reminder_days: null,
+    recurrence: null,
+    parent_id: null,
+    section_id: null,
+    color_label: null,
+    reminders: [],
+    assignees: [],
+    sound: null,
   });
   return true;
 }

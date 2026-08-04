@@ -1,5 +1,5 @@
 import { useCallback, useEffect } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
 import { buildWidgetSnapshot } from '@aperio/shared';
 import type { ColorLabel, Task, TaskList, TaskUser } from '@aperio/shared';
@@ -72,7 +72,15 @@ async function resolveMe(lists: TaskList[]): Promise<Record<string, TaskUser | n
   return Object.fromEntries(entries);
 }
 
-async function computeSnapshot(): Promise<string> {
+/** What one pass produces: the widgets' agenda, and the lists a Siri intent may
+ *  offer. Derived together because they need the same two catalogues, and a
+ *  second pass to fetch them again would be pure waste. */
+interface SnapshotPass {
+  snapshot: string;
+  pickers: string;
+}
+
+async function computeSnapshot(): Promise<SnapshotPass> {
   const now = new Date();
   const [calendars, labels, hidden] = await Promise.all([
     listCalendars(),
@@ -89,7 +97,21 @@ async function computeSnapshot(): Promise<string> {
   const calendarsById = new Map(calendars.map((c) => [c.id, c]));
   const labelsById = new Map(labels.map((l) => [l.id, l]));
 
-  return JSON.stringify(
+  const pickers = JSON.stringify({
+    // Writable only — offering a read-only calendar as an answer to "which
+    // calendar?" is offering a request that cannot be carried out. Hidden ones
+    // are left out too: hiding a calendar is an explicit "don't show me this",
+    // and Siri reading it aloud as an option would contradict that.
+    calendars: calendars
+      .filter((c) => !c.read_only && !hidden.has(c.id))
+      .map((c) => ({ id: c.id, name: c.name })),
+    // All lists, unlike calendars. The task view's list selection is a focus
+    // control inside one screen, not a statement about what exists — the same
+    // distinction `collectTasks` above is built on.
+    taskLists: lists.map((l) => ({ id: l.id, name: l.name })),
+  });
+
+  const snapshot = JSON.stringify(
     buildWidgetSnapshot<CalendarEvent>({
       events,
       tasks,
@@ -129,6 +151,8 @@ async function computeSnapshot(): Promise<string> {
       allDayOf: (ev) => ev.all_day,
     }),
   );
+
+  return { snapshot, pickers };
 }
 
 // One pass at a time; a trigger arriving mid-pass sets `rerun` so the guard
@@ -155,7 +179,14 @@ export async function refreshWidgetSnapshot(): Promise<void> {
       rerun = false;
       try {
         await drainQueuedActions();
-        await CalFfi.writeWidgetSnapshot(await computeSnapshot());
+        const { snapshot, pickers } = await computeSnapshot();
+        await CalFfi.writeWidgetSnapshot(snapshot);
+        // iOS only — there is no Siri on the other platform and no native
+        // counterpart to call. Kept after the widget write and in its own
+        // guard so a failure here cannot cost the widgets their update.
+        if (Platform.OS === 'ios') {
+          await CalFfi.writeVoicePickers(pickers).catch(() => undefined);
+        }
       } catch {
         // A bridge hiccup, a missing container, an account that failed to list:
         // the widget keeps its previous snapshot, which is stale but coherent.

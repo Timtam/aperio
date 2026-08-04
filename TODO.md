@@ -299,8 +299,8 @@ Vorteil.
       `${applicationName}` ist in JEDER Phrase Pflicht, sonst bricht der Bau ab.
       `src/intl/shortcutLocalization.test.ts` hält beide Seiten zusammen und
       schlägt nachweislich fehl, wenn eine Phrase ohne ihren Schlüssel wandert.
-      ⚠️ Ungeprüft. Falls Siri weiter danebengreift, ist der nächste Hebel
-      `INAlternativeAppNames` — dann hört es „Aperio" schlicht nicht.
+      ✅ Gerätetest: Termine per Sprache landen jetzt in Aperio statt im
+      Apple-Kalender. `INAlternativeAppNames` wird also nicht gebraucht.
 - [~] **Apple Intelligence (Assistant Schemas)** — der Weg, der Siri FREIE Rede
       erlaubt statt einer festen Phrase: `@AssistantIntent(schema:
       .calendar.createEvent)`. Es gibt eine Kalender-Domäne, `createEvent` ist
@@ -316,23 +316,59 @@ Vorteil.
       iOS-SDK auf dem macOS-Runner nach den Deklarationen und lässt zusätzlich
       das Makro an einer ABSICHTLICH leeren Konformanz scheitern, damit seine
       Diagnose die verlangten Felder aufzählt. Zwei Minuten Runner-Zeit statt
-      einer Rateschleife. Ergebnis hier eintragen, dann ist die Umsetzung
-      Fleißarbeit.
+      einer Rateschleife.
+      **Runde 1 (Lauf 30853152407, Xcode 26.6 / iPhoneOS26.5.sdk):**
+      `error: type 'AssistantSchemas.Intent' has no member 'calendar'`.
+      Der Interface-Auszug blieb leer — der Filter war zu eng gestellt.
+      Das WIDERSPRICHT Apples Dokumentation, die `.calendar.createEvent`,
+      `.calendar.deleteEvent`, `.calendar.updateEvent` sowie die Entitäten
+      `.calendar.event`, `.calendar.calendar`, `.calendar.attendee` und vier
+      Enums ausdrücklich aufführt — und sie dabei `AppSchema.CalendarIntent`
+      nennt, NICHT `AssistantSchemas`. Also entweder anderes Modul, anderer
+      Namensraum, oder eine Domäne, die weit nach iOS 18 dazukam; Runde 1
+      konnte das nicht auseinanderhalten, weil sie nur EINE Schreibweise bei
+      EINEM Ziel-Betriebssystem gefragt hat.
+      Runde 2 sucht deshalb, statt zu raten: welches Modul im SDK die Schemata
+      überhaupt nennt, welche Domänen-Kürzel wirklich deklariert sind, und vier
+      Schreibweisen nebeneinander (iOS 18 vs. 26, `AssistantSchemas` vs.
+      `AppSchema`) mit `.mail.createDraft` als Kontrolle — schlägt die auch
+      fehl, liegt es an der Probe und nicht an der Domäne.
       Zu erwarten ist außerdem ein ganzer Entitäten-Graph, nicht nur ein Makro:
       `perform()` muss das angelegte Objekt als `@AssistantEntity(schema:
       .calendar.event)` zurückgeben, was vermutlich eine Kalender-Entität nach
       sich zieht.
       Tonis Gerät hat noch KEIN Apple Intelligence — der Dialog aus Schritt 2
       bleibt also der Weg, der bei ihm wirkt; das hier ist für neuere Geräte.
-- [ ] **Schritt 3** — Kalender und Aufgabenliste als `AppEntity` mit
-      `EntityQuery`. Die Liste kommt über dieselbe Snapshot-Datei-Mechanik wie
-      beim Widget (eine `calendars.json` in der App Group) — der Intent-Prozess
-      kommt so wenig an die Datenbank wie die Widget-Extension.
-- [ ] **Schritt 4** — tatsächlich anlegen. Der Intent reiht die Aktion ein wie
-      der Widget-Haken; OFFEN ist, ob die App sich dabei öffnet
-      (`openAppWhenRun`) oder still im Hintergrund abgearbeitet wird. Beim Haken
-      ist Verzögerung unsichtbar, beim ANLEGEN nicht — man sagt etwas und findet
-      minutenlang nichts.
+- [~] **Schritt 3** — Kalender und Aufgabenliste als `AppEntity` mit
+      `EntityStringQuery` (nicht `EntityQuery`: nur die String-Variante kann
+      einen GESPROCHENEN Namen auflösen, und genau darum geht es).
+      AUSLÖSER war ein Gerätebefund: Termine per Sprache landeten immer im
+      falschen Kalender. Kein Zufall — die App nahm den zuletzt im EDITOR
+      benutzten. Für einen Knopf neben einer Kalenderauswahl ist das ein guter
+      Standard, für einen quer durch den Raum gesprochenen Satz ein schlechter.
+      Die Liste reist über dieselbe Snapshot-Mechanik wie beim Widget
+      (`pickers.json` in der App Group, `VoicePickerStore.swift`) — der Intent
+      kommt so wenig an die Datenbank wie die Widget-Extension, und das ist nach
+      `0xdead10cc` kein Stilfrage mehr.
+      ERSTER Eintrag ist immer „Standardkalender" / „Standardliste" mit der
+      reservierten id `__default__`. Ein Pflichtparameter mit leerer Liste wäre
+      eine Sackgasse — Siri fragt etwas, das nicht beantwortbar ist —, und leer
+      IST sie auf einem Telefon, das noch keinen Durchlauf hatte. Die App liest
+      eine fehlende id weiterhin als „such du aus".
+      Nur beschreibbare und nicht ausgeblendete Kalender; bei Aufgabenlisten
+      dagegen ALLE, weil die Listenauswahl in der Aufgabenansicht ein Fokus-
+      Werkzeug ist und keine Aussage darüber, was existiert.
+- [~] **Schritt 4** — tatsächlich anlegen, jetzt auch Aufgaben.
+      `CreateTaskIntent`: Titel + Liste werden gefragt, der Tag NICHT — optionale
+      Parameter fragt Siri nicht ab, und das ist richtig so: die meisten
+      gesprochenen Aufgaben sind „merk dir das" und gehören ins Backlog, nicht
+      auf einen Tag. Über die Kurzbefehle-App ist der Tag trotzdem setzbar.
+      Gespeichert wird nur das DATUM, nie die Uhrzeit: ein iOS-Datumsparameter
+      trägt immer eine mit, und eine per Tagesauswahl gebaute Aktion liefert
+      Mitternacht — das würde „irgendwann am Dienstag" zu „fällig um 0:00".
+      `openAppWhenRun` bleibt bei beiden: beim Haken ist Verzögerung unsichtbar,
+      beim ANLEGEN nicht — man sagt etwas und findet minutenlang nichts.
+      ⚠️ Ungeprüft.
       Den Rust-Kern direkt aus dem Intent zu öffnen ist bewusst KEINE Option:
       zweiter schreibender Prozess auf einer Datenbank, plus ein teurer
       Host-Start pro Sprachbefehl.

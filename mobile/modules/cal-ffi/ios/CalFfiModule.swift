@@ -825,5 +825,19 @@ public class CalFfiModule: Module {
     AsyncFunction("clearWidgetAction") { (id: String) in
       WidgetActionStore.clear(id)
     }
+
+    // The calendars and task lists a Siri intent may offer. Same handover as the
+    // widget snapshot and for the same reason — the intent resolves "which
+    // calendar?" before `perform()` runs, with no bridge and no database.
+    AsyncFunction("writeVoicePickers") { (json: String) in
+      do {
+        try VoicePickerStore.write(json)
+      } catch {
+        // No container means a build signed without the App Group. The intents
+        // then fall back to their built-in "Default" entry, which is exactly
+        // what this list's first row says anyway.
+        NSLog("[Aperio] the voice picker list was not written: \(error)")
+      }
+    }
   }
 }

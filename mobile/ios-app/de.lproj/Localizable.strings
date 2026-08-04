@@ -1,11 +1,12 @@
 /* German wording for everything about the shortcuts that is NOT a phrase:
- * the action names Siri and the Shortcuts app show, and the questions Siri
- * reads out while collecting the parameters.
+ * the action names Siri and the Shortcuts app show, the questions Siri reads
+ * out while collecting the parameters, and the names of the things it offers.
  *
  * Phrases live in `AppShortcuts.strings` and only there. Everything else — the
- * intent titles, their descriptions, the parameter labels and every
- * `requestValueDialog` — is an ordinary `LocalizedStringResource` and is looked
- * up here, keyed by the English literal in `AperioShortcuts.swift`.
+ * intent titles, their descriptions, the parameter labels, every
+ * `requestValueDialog` and every `String(localized:)` — is an ordinary
+ * `LocalizedStringResource` and is looked up here, keyed by the English literal
+ * in `AperioShortcuts.swift`.
  *
  * These are spoken aloud, so they are written to be heard rather than read.
  */
@@ -15,8 +16,23 @@
 
 "New event" = "Neuer Termin";
 "Creates an event in Aperio." = "Erstellt einen Termin in Aperio.";
+"What should the event be called?" = "Wie soll der Termin heißen?";
+
+"New task" = "Neue Aufgabe";
+"Creates a task in Aperio." = "Erstellt eine Aufgabe in Aperio.";
+"What should the task be called?" = "Wie soll die Aufgabe heißen?";
 
 "Title" = "Titel";
-"What should the event be called?" = "Wie soll der Termin heißen?";
 "Date" = "Datum";
 "When?" = "Wann?";
+"Scheduled date" = "Geplant für";
+
+"Calendar" = "Kalender";
+"Which calendar?" = "Welcher Kalender?";
+"Task list" = "Aufgabenliste";
+"Which list?" = "Welche Liste?";
+
+/* The first entry in each picker: "whatever the app would have chosen".
+ * Spoken as an answer, so it has to sound like one. */
+"Default calendar" = "Standardkalender";
+"Default list" = "Standardliste";

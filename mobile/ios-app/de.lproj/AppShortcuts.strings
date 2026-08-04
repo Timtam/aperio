@@ -28,3 +28,9 @@
 "Add an event to ${applicationName}" = "Neuen Termin in ${applicationName} anlegen";
 "Schedule an event in ${applicationName}" = "Termin in ${applicationName} eintragen";
 "New appointment in ${applicationName}" = "Neuen Termin mit ${applicationName} erstellen";
+
+"New task in ${applicationName}" = "Neue Aufgabe in ${applicationName}";
+"Create a task in ${applicationName}" = "Erstelle eine Aufgabe mit ${applicationName}";
+"Create a new task in ${applicationName}" = "Erstelle eine neue Aufgabe mit ${applicationName}";
+"Add a task to ${applicationName}" = "Neue Aufgabe in ${applicationName} anlegen";
+"New to-do in ${applicationName}" = "Neue Aufgabe mit ${applicationName} erstellen";
