@@ -73,16 +73,26 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
 });
 
 /** Longest we will sit waiting for the provider pass before writing the
- *  snapshot anyway.
+ *  snapshot anyway — a budget, not a completion check.
  *
- *  A budget rather than a completion check, because the shorter of the two OS
- *  task classes gives about thirty seconds in total and being killed mid-round
- *  is worse than being a little stale: iOS counts an expired task as a failure
- *  and hands out less time next time. Whatever has landed by then is written;
- *  the containers still in flight are picked up by the following round, since
- *  the warm pass persists each one as it completes rather than all at the end. */
-const EXTERNAL_REFRESH_BUDGET_MS = 15_000;
-const EXTERNAL_REFRESH_POLL_MS = 500;
+ *  Running out of it is not a failure. Whatever has landed is written, and the
+ *  containers still in flight are picked up by the following round, because the
+ *  warm pass persists each one as it completes rather than all at the end.
+ *
+ *  iOS is the tight side, and it sets the shape: the SHORT task class gives
+ *  about thirty seconds in total, nothing tells us which class launched us, and
+ *  an expired task counts as a failure that costs future scheduling. So the
+ *  number has to hold for the worst case even when we happen to be in the
+ *  generous one.
+ *
+ *  Android has no such trap. WorkManager is the right class from the start and
+ *  allows roughly ten minutes, so a pass over several accounts can simply
+ *  finish. Sharing iOS's number there was caution borrowed from the wrong
+ *  platform: it cut rounds short that had minutes to spare. */
+const EXTERNAL_REFRESH_BUDGET_MS = Platform.OS === 'android' ? 120_000 : 15_000;
+/** Coarser where the wait is long: the status read crosses the bridge, and two
+ *  minutes at twice a second is a few hundred calls to learn one boolean. */
+const EXTERNAL_REFRESH_POLL_MS = Platform.OS === 'android' ? 1_000 : 500;
 /** How long "not refreshing" still means "has not started yet".
  *
  *  The kick returns before the pass does anything, so an immediate status read
