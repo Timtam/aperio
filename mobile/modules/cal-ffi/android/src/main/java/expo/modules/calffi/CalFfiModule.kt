@@ -946,6 +946,11 @@ class CalFfiModule : Module() {
     // The same snapshot document iOS uses, in the app's own internal storage —
     // an Android widget runs in this very process under the same uid, so there
     // is no App Group to cross and no container to resolve.
+    // One line into the app's own rolling log — the twin of the iOS registration.
+    AsyncFunction("logLine") { level: String, message: String ->
+      host.logLine(level, message)
+    }
+
     AsyncFunction("writeWidgetSnapshot") { json: String ->
       val context = appContext.reactContext?.applicationContext
       if (context != null) {

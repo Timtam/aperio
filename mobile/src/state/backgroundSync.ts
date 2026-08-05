@@ -8,6 +8,7 @@ import CalFfi from '../../modules/cal-ffi';
 
 import { getUserPref } from '../api/prefs';
 import { cacheRefreshStatus, refreshExternalCache, syncNow, syncStatus } from '../api/sync';
+import { logLine } from '../api/logs';
 import { rescheduleReminders } from '../reminders/scheduler';
 import { refreshWidgetSnapshot } from './widgetSnapshot';
 
@@ -52,11 +53,19 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
     // background round refreshed nothing from the accounts and then wrote a
     // widget snapshot out of an untouched cache. Correct-looking, and always one
     // warm pass behind.
+    //
+    // What the round did is gathered as it goes and written as ONE line at the
+    // end. This is the only path nobody can watch happen, and it used to leave
+    // no trace of its two most interesting steps — the sync log records the peer
+    // round and nothing else, so "the pull worked but the widget was wrong" had
+    // evidence on neither side of it.
+    const started = Date.now();
+    let applied = 0;
     await refreshExternalCache().catch(() => undefined);
     if ((await syncStatus()).configured) {
-      await syncNow('background');
+      applied = (await syncNow('background')).applied;
     }
-    await waitForExternalRefresh();
+    const refreshFinished = await waitForExternalRefresh();
     // A pull may have added/changed events → reschedule the local reminders so
     // their notifications still fire on time. Best-effort: a reminder hiccup
     // must not fail the (successful) sync round.
@@ -65,9 +74,24 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
     // reaches them without the user opening the app — the in-app triggers all
     // need a foreground. Without it a phone left alone overnight would show
     // yesterday's agenda until it was next unlocked and the app opened.
-    await refreshWidgetSnapshot().catch(() => undefined);
+    let snapshotWritten = true;
+    await refreshWidgetSnapshot().catch(() => {
+      snapshotWritten = false;
+    });
+    await logLine(
+      'info',
+      `background round: applied=${applied}, providers=${
+        refreshFinished ? 'complete' : 'budget'
+      }, widget=${snapshotWritten ? 'written' : 'failed'}, ${
+        Date.now() - started
+      }ms`,
+    );
     return BackgroundTask.BackgroundTaskResult.Success;
-  } catch {
+  } catch (err) {
+    await logLine(
+      'warn',
+      `background round failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
     return BackgroundTask.BackgroundTaskResult.Failed;
   }
 });
@@ -102,9 +126,13 @@ const EXTERNAL_REFRESH_POLL_MS = Platform.OS === 'android' ? 1_000 : 500;
  *  at all. */
 const EXTERNAL_REFRESH_START_GRACE_MS = 2_000;
 
-/** Wait for the warm pass to finish, or for the budget to run out. Never
- *  throws; a status read that fails simply ends the wait. */
-async function waitForExternalRefresh(): Promise<void> {
+/** Wait for the warm pass to finish, or for the budget to run out.
+ *
+ *  Returns whether the pass actually FINISHED. Running out is not a failure,
+ *  but it is the difference between "the providers had nothing new" and "we
+ *  stopped asking" — and without it in the log those two look identical from
+ *  the outside. Never throws; a status read that fails ends the wait. */
+async function waitForExternalRefresh(): Promise<boolean> {
   const deadline = Date.now() + EXTERNAL_REFRESH_BUDGET_MS;
   const startedBy = Date.now() + EXTERNAL_REFRESH_START_GRACE_MS;
   let seenRunning = false;
@@ -113,15 +141,16 @@ async function waitForExternalRefresh(): Promise<void> {
     try {
       refreshing = (await cacheRefreshStatus()).refreshing;
     } catch {
-      return;
+      return false;
     }
     if (refreshing) {
       seenRunning = true;
     } else if (seenRunning || Date.now() > startedBy) {
-      return;
+      return true;
     }
     await new Promise((resolve) => setTimeout(resolve, EXTERNAL_REFRESH_POLL_MS));
   }
+  return false;
 }
 
 async function backgroundIntervalMinutes(): Promise<number> {

@@ -255,6 +255,15 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   clearLogs(): Promise<void>;
   /** The on-disk logs directory, for display. */
   logsDirPath(): Promise<string>;
+
+  /** Write one line into that same rolling log.
+   *
+   *  The JS layer could read the log but never add to it, which left the
+   *  background round — the one path nobody can watch happen — with no way to
+   *  say whether the provider warm pass finished or the widget snapshot was
+   *  rewritten. `level` takes the same names as the log filter; anything else
+   *  is logged at info rather than dropped. */
+  logLine(level: string, message: string): Promise<void>;
   /** Count of unresolved sync conflicts (the badge). */
   syncConflictCount(): Promise<number>;
   /** Every unresolved conflict as a JSON `ConflictRecord[]`. */

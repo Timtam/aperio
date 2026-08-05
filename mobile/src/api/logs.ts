@@ -25,3 +25,8 @@ export const clearLogs = (): Promise<void> => CalFfi.clearLogs();
 
 /** The on-disk logs directory, for display. */
 export const logsDirPath = (): Promise<string> => CalFfi.logsDirPath();
+
+/** Write one line into the app's rolling log. Never throws — a diagnostic that
+ *  can fail the thing it is diagnosing is worse than no diagnostic. */
+export const logLine = (level: LogLevel, message: string): Promise<void> =>
+  CalFfi.logLine(level, message).catch(() => undefined);

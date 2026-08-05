@@ -5889,6 +5889,29 @@ impl Host {
         });
     }
 
+    /// Write one line into the app's own rolling log — the file the Logs
+    /// screen shows and the support bundle exports.
+    ///
+    /// The JS layer had no way in, and the gap was only visible from the
+    /// outside: the background round is the one code path a user cannot watch
+    /// happen, and its two most interesting steps — did the provider warm pass
+    /// finish, was the widget snapshot rewritten — left no trace anywhere. The
+    /// sync log records the peer round and nothing else, so "the pull worked
+    /// but the widget was wrong" had no evidence on either side of it.
+    ///
+    /// Level names match the filter the user picks; anything unrecognised is
+    /// logged at info rather than dropped, because losing a diagnostic to a
+    /// typo in the diagnostic is the worst possible trade.
+    pub fn log_line(&self, level: String, message: String) {
+        match level.as_str() {
+            "error" => tracing::error!(target: "aperio::app", "{message}"),
+            "warn" => tracing::warn!(target: "aperio::app", "{message}"),
+            "debug" => tracing::debug!(target: "aperio::app", "{message}"),
+            "trace" => tracing::trace!(target: "aperio::app", "{message}"),
+            _ => tracing::info!(target: "aperio::app", "{message}"),
+        }
+    }
+
     /// The warm-pass status (`{refreshing, last_refreshed_at}`) as JSON — the
     /// "last updated" / spinner surface. Mirrors `get_cache_refresh_status`.
     pub fn get_cache_refresh_status_json(&self) -> Result<String, StoreError> {

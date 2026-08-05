@@ -826,6 +826,13 @@ public class CalFfiModule: Module {
       WidgetActionStore.clear(id)
     }
 
+    // One line into the app's own rolling log — the file the Logs screen shows.
+    // The background round is the one path a user cannot watch happen, so it has
+    // to be able to say what it did.
+    AsyncFunction("logLine") { (level: String, message: String) in
+      self.host.logLine(level: level, message: message)
+    }
+
     // ── The second background wake-up ──
     // See BackgroundRefresh.swift: expo-background-task only ever asks for the
     // overnight class, so this adds the short one that iOS schedules through the
