@@ -110,6 +110,34 @@ export interface AccountFormSpec {
   owns_containers: boolean;
 }
 
+/**
+ * Whether "test connection" can mean anything for this adapter before the
+ * account exists.
+ *
+ * A probe opens an adapter from the form's own values and asks it to list
+ * something. That needs a credential the form can actually supply — a password,
+ * an API token. An adapter that signs in purely by OAuth has none: the thing it
+ * authenticates with is a token the browser dance produces, and the dance has
+ * not happened. Webex is exactly that, and pressing Test there used to reach
+ * the adapter and fail on a missing `client_id` — which is not the user's
+ * client id at all, but the one this BUILD carries and deliberately never
+ * writes into the account (see `resolve_oauth_client` in host-core).
+ *
+ * So the button is left out rather than answered. A control that cannot succeed
+ * is worse than no control: it invites the press and then explains itself in
+ * the vocabulary of the code.
+ *
+ * Read off the declaration, naming no adapter: a required secret field that is
+ * not the OAuth client secret is a credential a probe can use.
+ */
+export function supportsCredentialTest(spec: AccountFormSpec): boolean {
+  const clientSecret = spec.oauth?.client_secret_field ?? null;
+  return spec.fields.some(
+    (field) =>
+      field.kind === 'secret' && field.required && field.key !== clientSecret,
+  );
+}
+
 /** Which fields the OAuth posture makes optional, if any. */
 function optionalUnderBuiltinCredentials(spec: AccountFormSpec): Set<string> {
   const optional = new Set<string>();

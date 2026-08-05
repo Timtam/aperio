@@ -42,6 +42,7 @@ import { useRefreshErrors } from '../state/useRefreshErrors';
 import {
   collectValues,
   firstMissingField,
+  supportsCredentialTest,
   type AccountFormSpec,
 } from '@aperio/shared';
 
@@ -978,7 +979,10 @@ export default function AccountsScreen() {
             </Text>
           </Pressable>
         ))}
-        {formSpec != null && (
+        {/* Left out entirely for an adapter with nothing a probe could use —
+            see `supportsCredentialTest`. A button that can only fail is worse
+            than no button, and it failed in the vocabulary of the code. */}
+        {formSpec != null && supportsCredentialTest(formSpec) && (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={t('dialogs.accounts.testConnection')}

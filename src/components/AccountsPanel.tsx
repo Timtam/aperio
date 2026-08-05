@@ -10,7 +10,11 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/announcerContext';
-import { collectValues, firstMissingField } from '@aperio/shared';
+import {
+  collectValues,
+  firstMissingField,
+  supportsCredentialTest,
+} from '@aperio/shared';
 import type { AccountFormAction } from '@aperio/shared';
 
 import { FocusableNote } from '../a11y/FocusableNote';
@@ -1227,10 +1231,13 @@ export function AccountsPanel() {
                     : action.label}
                 </button>
               ))}
-                {/* Offered for any adapter that declares a schema — the host can
-                  probe it generically — plus the shrinking list of kinds still
-                  on the older path. No name here once that list is gone. */}
-              {(formSpec ||
+                {/* Offered for any adapter that declares a schema AND something
+                  a probe could authenticate with — plus the shrinking list of
+                  kinds still on the older path. No name here once that list is
+                  gone. An OAuth-only adapter is left out rather than allowed to
+                  fail: its credential is a token the sign-in produces, and the
+                  sign-in has not happened yet. */}
+              {((formSpec && supportsCredentialTest(formSpec)) ||
                 kind === 'caldav' ||
                 kind === 'ical' ||
                 kind === 'ews' ||
