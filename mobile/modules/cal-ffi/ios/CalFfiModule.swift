@@ -826,6 +826,18 @@ public class CalFfiModule: Module {
       WidgetActionStore.clear(id)
     }
 
+    // ── The second background wake-up ──
+    // See BackgroundRefresh.swift: expo-background-task only ever asks for the
+    // overnight class, so this adds the short one that iOS schedules through the
+    // day. Driven from JS so it follows the same preference as the sync task.
+    AsyncFunction("enableBackgroundRefresh") { (minutes: Int) in
+      BackgroundRefresh.enable(minutes: minutes)
+    }
+
+    AsyncFunction("disableBackgroundRefresh") {
+      BackgroundRefresh.disable()
+    }
+
     // The calendars and task lists a Siri intent may offer. Same handover as the
     // widget snapshot and for the same reason — the intent resolves "which
     // calendar?" before `perform()` runs, with no bridge and no database.

@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as BackgroundTask from 'expo-background-task';
 import * as TaskManager from 'expo-task-manager';
 
+import CalFfi from '../../modules/cal-ffi';
+
 import { getUserPref } from '../api/prefs';
-import { syncNow, syncStatus } from '../api/sync';
+import { cacheRefreshStatus, refreshExternalCache, syncNow, syncStatus } from '../api/sync';
 import { rescheduleReminders } from '../reminders/scheduler';
 import { refreshWidgetSnapshot } from './widgetSnapshot';
 
@@ -40,11 +43,20 @@ let cached = DEFAULT_ENABLED;
 // a missing target or a transient error must never surface.
 TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
   try {
-    if (!(await syncStatus()).configured) {
-      // No sync target configured — nothing to do, but not a failure.
-      return BackgroundTask.BackgroundTaskResult.Success;
+    // Ask the calendar and task PROVIDERS for anything new, first, because it is
+    // the slowest part and everything below reads what it lands.
+    //
+    // This used to be missing entirely, and its absence is easy to miss: the
+    // round ran `syncNow`, which is the DEVICE-TO-DEVICE engine — it carries a
+    // peer's edits over WebDAV and knows nothing about iCloud or Google. So a
+    // background round refreshed nothing from the accounts and then wrote a
+    // widget snapshot out of an untouched cache. Correct-looking, and always one
+    // warm pass behind.
+    await refreshExternalCache().catch(() => undefined);
+    if ((await syncStatus()).configured) {
+      await syncNow('background');
     }
-    await syncNow('background');
+    await waitForExternalRefresh();
     // A pull may have added/changed events → reschedule the local reminders so
     // their notifications still fire on time. Best-effort: a reminder hiccup
     // must not fail the (successful) sync round.
@@ -59,6 +71,48 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
     return BackgroundTask.BackgroundTaskResult.Failed;
   }
 });
+
+/** Longest we will sit waiting for the provider pass before writing the
+ *  snapshot anyway.
+ *
+ *  A budget rather than a completion check, because the shorter of the two OS
+ *  task classes gives about thirty seconds in total and being killed mid-round
+ *  is worse than being a little stale: iOS counts an expired task as a failure
+ *  and hands out less time next time. Whatever has landed by then is written;
+ *  the containers still in flight are picked up by the following round, since
+ *  the warm pass persists each one as it completes rather than all at the end. */
+const EXTERNAL_REFRESH_BUDGET_MS = 15_000;
+const EXTERNAL_REFRESH_POLL_MS = 500;
+/** How long "not refreshing" still means "has not started yet".
+ *
+ *  The kick returns before the pass does anything, so an immediate status read
+ *  says `refreshing: false` — which is indistinguishable from "finished" and
+ *  would make the wait a no-op. After this, "not refreshing" is taken at face
+ *  value, which is also the honest answer on a device with no external accounts
+ *  at all. */
+const EXTERNAL_REFRESH_START_GRACE_MS = 2_000;
+
+/** Wait for the warm pass to finish, or for the budget to run out. Never
+ *  throws; a status read that fails simply ends the wait. */
+async function waitForExternalRefresh(): Promise<void> {
+  const deadline = Date.now() + EXTERNAL_REFRESH_BUDGET_MS;
+  const startedBy = Date.now() + EXTERNAL_REFRESH_START_GRACE_MS;
+  let seenRunning = false;
+  while (Date.now() < deadline) {
+    let refreshing: boolean;
+    try {
+      refreshing = (await cacheRefreshStatus()).refreshing;
+    } catch {
+      return;
+    }
+    if (refreshing) {
+      seenRunning = true;
+    } else if (seenRunning || Date.now() > startedBy) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, EXTERNAL_REFRESH_POLL_MS));
+  }
+}
 
 async function backgroundIntervalMinutes(): Promise<number> {
   let minutes = MIN_BACKGROUND_INTERVAL_MINUTES;
@@ -80,9 +134,18 @@ export async function registerBackgroundSync(): Promise<void> {
   try {
     const status = await BackgroundTask.getStatusAsync();
     if (status !== BackgroundTask.BackgroundTaskStatus.Available) return;
+    const minutes = await backgroundIntervalMinutes();
     await BackgroundTask.registerTaskAsync(BACKGROUND_SYNC_TASK, {
-      minimumInterval: await backgroundIntervalMinutes(),
+      minimumInterval: minutes,
     });
+    // iOS only, and the reason it exists is worth stating where it is called:
+    // expo-background-task asks for a PROCESSING task, the class iOS runs when
+    // the device is idle and preferably charging — overnight, in practice. This
+    // arms a second wake-up of the SHORT class, which the system spreads across
+    // the day. Both run the same handler above.
+    if (Platform.OS === 'ios') {
+      await CalFfi.enableBackgroundRefresh(minutes).catch(() => undefined);
+    }
   } catch {
     // Best-effort; registration can fail on an unsupported platform.
   }
@@ -96,6 +159,11 @@ export async function unregisterBackgroundSync(): Promise<void> {
     }
   } catch {
     // Best-effort.
+  }
+  // Outside the guard above: the short wake-up is armed separately, so it has to
+  // be cancelled even when unregistering the OS task threw or found nothing.
+  if (Platform.OS === 'ios') {
+    await CalFfi.disableBackgroundRefresh().catch(() => undefined);
   }
 }
 

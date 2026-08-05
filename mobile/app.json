@@ -13,6 +13,8 @@
       "bundleIdentifier": "com.aperio.mobile",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": ["fetch"],
+        "BGTaskSchedulerPermittedIdentifiers": ["com.aperio.mobile.refresh"],
         "NSCalendarsUsageDescription": "Aperio shows and edits the events in your device calendars alongside your other accounts.",
         "NSCalendarsFullAccessUsageDescription": "Aperio shows and edits the events in your device calendars alongside your other accounts.",
         "NSRemindersUsageDescription": "Aperio shows and edits your Reminders lists as tasks alongside your other accounts.",

@@ -16,10 +16,13 @@ Pod::Spec.new do |s|
   # Rust static libs (device + simulator) + the UniFFI C header & modulemap.
   s.vendored_frameworks = 'CalFfi.xcframework'
 
-  # Only our own Swift sources (the Expo module + the UniFFI Swift bindings).
+  # Only our own sources (the Expo module + the UniFFI Swift bindings).
   # Scoped to top-level *.swift so it does NOT recurse into the XCFramework's
-  # headers (which would otherwise be picked up and break the build).
-  s.source_files = '*.swift'
+  # headers (which would otherwise be picked up and break the build) — and the
+  # one Objective-C pair is named EXPLICITLY for the same reason: a blanket
+  # '*.{h,m}' would sweep up `cal_ffiFFI.h`, which arrives with the vendored
+  # framework and must not be compiled a second time.
+  s.source_files = ['*.swift', 'AperioTaskServiceHelper.h', 'AperioTaskServiceHelper.m']
 
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',

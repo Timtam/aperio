@@ -671,6 +671,20 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  business opening the database, so it reads the answer from a file the same
    *  way the widget reads its agenda. */
   writeVoicePickers(json: string): Promise<void>;
+
+  /** Arm a second, SHORT background wake-up — `BGAppRefreshTask`, the class iOS
+   *  schedules across the day — alongside the long overnight one that
+   *  `expo-background-task` asks for.
+   *
+   *  iOS ONLY; callers must check the platform. `minutes` is a floor the system
+   *  is free to exceed, never a schedule. Resolves even when nothing was armed
+   *  (Background App Refresh off, identifier not permitted) — an unavailable
+   *  convenience is not an error. */
+  enableBackgroundRefresh(minutes: number): Promise<void>;
+
+  /** Cancel it, so switching background sync off takes effect at once rather
+   *  than after the next wake-up. iOS only. */
+  disableBackgroundRefresh(): Promise<void>;
 }
 
 export default requireNativeModule<CalFfiModule>('CalFfi');

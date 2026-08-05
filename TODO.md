@@ -59,6 +59,53 @@ führen: drei leere Crates sind keine Roadmap. WebEx ist echt implementiert
 - [ ] Handler: snooze (neu planen), mark-done, open-from-notification
 - Einstieg: `src-tauri/src/reminders.rs` (`fire()`), Notification-Builder um `.action()` erweitern.
 
+### A7a · Wie oft die Daten hinter den Widgets frisch werden `[~]`
+Gerätebefund: das Widget hing tagelang hinterher, geschätzt ein bis zwei
+Aktualisierungen am Tag. ZWEI unabhängige Ursachen, beide behoben.
+
+**Erstens holte die Hintergrundrunde die Kalender überhaupt nicht.** Sie rief
+`syncNow` — das ist die GERÄT-ZU-GERÄT-Maschine, die die Änderungen eines Peers
+über WebDAV trägt und von iCloud oder Google nichts weiß. `refreshExternalCache`
+hing ausschließlich an manuellen Knöpfen. Eine Hintergrundrunde hat also nie
+etwas von den Konten geholt und danach einen Widget-Snapshot aus einem
+unberührten Cache geschrieben — sieht richtig aus, ist immer einen Warm-Durchlauf
+alt. Jetzt: Warm-Durchlauf anstoßen, Peer-Sync währenddessen, dann höchstens
+15 Sekunden auf den Durchlauf warten, dann erst Erinnerungen und Snapshot. Ein
+BUDGET, kein Abwarten bis zum Ende: die kurze Task-Klasse hat rund 30 Sekunden
+insgesamt, und ein abgelaufener Task zählt bei iOS als Fehlschlag und kostet
+künftige Zeit. Was liegt, wird geschrieben; der Rest kommt in der nächsten Runde,
+weil der Warm-Durchlauf je Container speichert und nicht erst am Ende.
+
+**Zweitens war es die falsche Task-Klasse.** `expo-background-task` reicht einen
+`BGProcessingTaskRequest` ein — im Quelltext nachgelesen, `BackgroundTaskScheduler.swift`,
+Kennung `com.expo.modules.backgroundtask.processing`, Info.plist nur
+`UIBackgroundModes: ["processing"]`. Das ist Apples Klasse für lange
+Wartungsarbeit („can take minutes to complete"), die das System bei UNTÄTIGEM
+Gerät ausführt, bevorzugt am Ladekabel, praktisch also nachts; nimmt man das
+Telefon in die Hand, bricht sie ab. `BGAppRefreshTask` ist die andere Klasse —
+rund 30 Sekunden, dafür über den Tag verteilt nach Nutzungsmuster, und von Apple
+ausdrücklich für „fetching new content, updating widgets" vorgesehen.
+Gebaut ist deshalb ein ZWEITER Wecker unter eigener Kennung
+(`modules/cal-ffi/ios/BackgroundRefresh.swift`): der Processing-Task macht
+weiter die schwere Nachtrunde, der neue ist die kurze Aufholrunde. Eine gemeinsame
+Kennung ginge nicht — ein zweites `submit` ersetzt den offenen Request, die
+beiden Klassen würden sich gegenseitig löschen.
+Er führt DIESELBE Arbeit aus: `runTasks` startet jede registrierte
+TaskManager-Aufgabe für diesen Launch-Grund, also unsere Hintergrund-Sync-Aufgabe.
+Kein zweiter Codepfad.
+`AperioTaskServiceHelper.h/.m` findet Expos `EXTaskService` per Namen zur
+LAUFZEIT, damit dieses Modul nicht gegen ExpoTaskManager linken muss; fehlt es,
+kommt nil zurück und der Wecker tut still nichts.
+Alles scheitert weich: kein Task-Service, keine erlaubte Kennung, ein abgelehntes
+`submit` — jeweils eine Logzeile, und die App ist wie vorher.
+⚠️ Ungeprüft, und der native Teil ist hier nicht übersetzbar.
+GRENZE, die zu kennen wichtig ist: auch BGAppRefreshTask ist keine Zusage. Apple
+schreibt, eine selten benutzte App bekommt unter Umständen GAR KEINE Refresh-Zeit.
+Realistisch mehrmals täglich statt ein- bis zweimal — nicht alle 15 Minuten.
+Was NICHT geht: stille Push-Nachrichten bräuchten einen Server und sind auf
+wenige pro Gerät und Tag gedrosselt; iOS 26 bringt mit `BGContinuedProcessingTask`
+nur eine Klasse für vom Nutzer angestoßene Vordergrundarbeit.
+
 ### A7 · Mobile Widgets (iOS zuerst) `[~]`
 Termine und Aufgaben auf dem Home- und Sperrbildschirm, mit Abhaken. Drei
 Widgets statt eines mit Umschalter — ein Widget mit Modi ist per Screenreader
