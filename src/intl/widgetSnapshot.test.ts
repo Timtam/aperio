@@ -481,6 +481,27 @@ describe('buildWidgetSnapshot — a running event does not hide what is inside i
     expect(snap.items.map((i) => i.id)).toEqual(['zuerst', 'danach']);
   });
 
+  it('generates the occurrence of a SERIES that is running right now', () => {
+    // Separate from the block cases above, and a different fault: expansion
+    // picks occurrences by their START, so expanding from `now` skips the one
+    // already under way. A daily "working hours" rule was therefore invisible
+    // all day while TOMORROW's occurrence answered "what is next".
+    const daily: TestEvent = {
+      ...baseEvent,
+      id: 'arbeitszeit',
+      title: 'Arbeitszeit',
+      start: localAt(2026, 8, 3, 10, 0).toISOString(),
+      end: localAt(2026, 8, 3, 15, 30).toISOString(),
+      recurrence: { rrule: 'FREQ=DAILY', tzid: null, exceptions: [] },
+    };
+    const snap = build({ events: [daily], now: localAt(2026, 8, 3, 13, 0) });
+    const first = snap.items[0];
+    expect(first, 'the running occurrence was not generated at all').toBeDefined();
+    expect(first?.at).toBe(localAt(2026, 8, 3, 10, 0).toISOString());
+    // And tomorrow's is still there, behind it.
+    expect(snap.items[1]?.at).toBe(localAt(2026, 8, 4, 10, 0).toISOString());
+  });
+
   it('still shows a running event when nothing else is on', () => {
     const snap = build({ events: [block], now: localAt(2026, 8, 3, 13, 30) });
     expect(snap.items.map((i) => i.id)).toEqual(['arbeitszeit']);

@@ -189,6 +189,31 @@ export interface WidgetSnapshotInput<E extends RecurringEventLike> {
 
 const DAY_MS = 86_400_000;
 
+/** Ceiling on how far before `now` the event expansion reaches back.
+ *
+ *  The lookback is normally the longest event's own duration, which is exact.
+ *  This only guards the pathological input: one row with a corrupt or absurd
+ *  span would otherwise widen the recurrence window for EVERY series, and a
+ *  daily rule expanded across years is a lot of occurrences to build and throw
+ *  away. A recurring event longer than a month that is "running right now" is
+ *  not an answer to "what is next" anyway. */
+const MAX_RUNNING_LOOKBACK_MS = 31 * 86_400_000;
+
+/** How far back the expansion has to start so a series occurrence that is
+ *  running right now is generated at all.
+ *
+ *  Every occurrence of a series carries the master's duration, so one still
+ *  running began at most that long ago. Taking the longest across the whole set
+ *  is therefore sufficient for all of them, and needs no per-series pass. */
+function runningLookbackMs<E extends RecurringEventLike>(events: E[]): number {
+  let longest = 0;
+  for (const ev of events) {
+    const span = new Date(ev.end).getTime() - new Date(ev.start).getTime();
+    if (Number.isFinite(span) && span > longest) longest = span;
+  }
+  return Math.min(longest, MAX_RUNNING_LOOKBACK_MS);
+}
+
 /** Local midnight ENDING the day `at` falls in. */
 function endOfDay(at: Date): Date {
   return new Date(at.getFullYear(), at.getMonth(), at.getDate() + 1, 0, 0, 0, 0);
@@ -303,10 +328,22 @@ export function buildWidgetSnapshot<E extends RecurringEventLike>(
   const items: WidgetItem[] = [];
 
   // ── Events ─────────────────────────────────────────────────────────────
-  // Expanded over the same window the widget will ask about, so a daily series
-  // contributes each of its occurrences and not just its master.
+  // Expanded over the window the widget will ask about, so a daily series
+  // contributes each of its occurrences and not just its master — but starting
+  // BEFORE `now`, and that part is load-bearing.
+  //
+  // `expandEvent` selects occurrences by their START. Expanding from `now`
+  // therefore skips the occurrence that is running right now, because it began
+  // earlier. A daily "working hours, 10 to 16" block was invisible all day
+  // while TOMORROW's occurrence — which has not begun, so its start is inside
+  // the window — came through and answered "what is next". The filter below
+  // already keeps running events; it never got one to keep.
+  //
+  // How far back is not a guess. Every occurrence of a series carries the
+  // master's duration, so anything still running began at most that long ago.
   const visibleEvents = events.filter((ev) => !hidden.has(calendarIdOf(ev)));
-  for (const ev of expandAll(visibleEvents, { start: now, end: horizonEnd })) {
+  const expandFrom = new Date(nowMs - runningLookbackMs(visibleEvents));
+  for (const ev of expandAll(visibleEvents, { start: expandFrom, end: horizonEnd })) {
     // Over, not merely started. An all-day event needs no special case: its end
     // is the EXCLUSIVE next midnight, so this keeps it for the whole of its day
     // and drops it exactly when the day turns.
