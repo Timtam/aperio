@@ -987,6 +987,10 @@ pub struct AccountFormSpec {
     /// and whose catalog calls have a blocking cold path — without keeping its
     /// own list of which adapters those are.
     pub owns_containers: bool,
+    /// Whether "test connection" can mean anything before the account exists.
+    /// Answered by the core rather than re-derived here, so the button and the
+    /// probe cannot disagree — see `account_setup::supports_credential_test`.
+    pub supports_credential_test: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1159,6 +1163,7 @@ pub fn account_form_spec(
             client_secret_field: o.client_secret_field.clone(),
         }),
         owns_containers: plugin.manifest.has_data_family(),
+        supports_credential_test: host_core::account_setup::supports_credential_test(&schema),
     }))
 }
 

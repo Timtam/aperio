@@ -42,7 +42,6 @@ import { useRefreshErrors } from '../state/useRefreshErrors';
 import {
   collectValues,
   firstMissingField,
-  supportsCredentialTest,
   type AccountFormSpec,
 } from '@aperio/shared';
 
@@ -979,10 +978,11 @@ export default function AccountsScreen() {
             </Text>
           </Pressable>
         ))}
-        {/* Left out entirely for an adapter with nothing a probe could use —
-            see `supportsCredentialTest`. A button that can only fail is worse
-            than no button, and it failed in the vocabulary of the code. */}
-        {formSpec != null && supportsCredentialTest(formSpec) && (
+        {/* Left out entirely for an adapter with nothing a probe could use.
+            The core answers that — see `supports_credential_test` — because the
+            same rule decides whether the probe refuses. A button that can only
+            fail is worse than no button. */}
+        {formSpec?.supports_credential_test && (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={t('dialogs.accounts.testConnection')}

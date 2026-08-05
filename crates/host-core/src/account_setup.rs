@@ -200,6 +200,37 @@ pub fn has_builtin_client(oauth: &AccountOauth) -> bool {
         .is_some_and(builtin_oauth::has_builtin_client)
 }
 
+/// Whether a credential probe can mean anything for this schema before the
+/// account exists — what a connect form asks before offering "test connection"
+/// at all, and what [`crate::registry::AdapterRegistry::probe_account`] refuses
+/// on.
+///
+/// A probe opens the adapter from the form's own values and asks it to list
+/// something. That needs something the FORM can supply. An adapter that signs
+/// in purely by OAuth has nothing: what it authenticates with is a token the
+/// browser dance produces, and the dance has not happened yet. Webex is exactly
+/// that shape, and the failure it produced named `client_id` — which is not a
+/// field the user fills at all but the built-in client this build carries and
+/// [`resolve_oauth_client`] deliberately never writes into the account.
+///
+/// The test is "OAuth and nothing else", NOT "has a required secret". A public
+/// iCal feed declares no OAuth and its password is optional, yet testing it is
+/// entirely meaningful — the feed URL is the thing being checked. Getting that
+/// backwards would have taken the button away from the one adapter whose test
+/// costs nothing.
+pub fn supports_credential_test(schema: &AccountSchema) -> bool {
+    let Some(oauth) = schema.oauth.as_ref() else {
+        return true;
+    };
+    // A second way in — a password beside the sign-in — is still probeable.
+    let client_secret = oauth.client_secret_field.as_deref();
+    schema.fields.iter().any(|field| {
+        field.kind == AccountFieldKind::Secret
+            && field.required
+            && Some(field.key.as_str()) != client_secret
+    })
+}
+
 /// The keychain slots an account of this schema must have populated to count as
 /// connected.
 ///
@@ -741,6 +772,70 @@ fn resolve_oauth_client(
 
 #[cfg(test)]
 mod tests {
+    /// Webex's shape: the only secret it declares IS the OAuth client secret,
+    /// which belongs to the build. Nothing here a probe could authenticate
+    /// with, so the form must not offer to try — that attempt failed naming
+    /// `client_id`, a field the user never fills.
+    #[test]
+    fn an_oauth_only_adapter_has_nothing_to_probe() {
+        let schema = AccountSchema {
+            fields: vec![
+                field("client_id", AccountFieldKind::Text, None, true),
+                field("client_secret", AccountFieldKind::Secret, None, true),
+                field("site_url", AccountFieldKind::Text, None, false),
+            ],
+            oauth: Some(AccountOauth {
+                builtin_provider: Some("webex".into()),
+                client_id_field: "client_id".into(),
+                client_secret_field: Some("client_secret".into()),
+                refresh_token_field: Some("refresh_token".into()),
+                access_token_field: None,
+                app_redirect_uri: "aperio://oauth-callback".into(),
+            }),
+            ..Default::default()
+        };
+        assert!(!supports_credential_test(&schema));
+    }
+
+    /// A password beside the sign-in is still a way in, so the probe keeps its
+    /// meaning. The rule asks what a probe can USE, not whether OAuth exists.
+    #[test]
+    fn oauth_plus_a_password_is_still_probeable() {
+        let schema = AccountSchema {
+            fields: vec![
+                field("client_id", AccountFieldKind::Text, None, true),
+                field("client_secret", AccountFieldKind::Secret, None, true),
+                field("password", AccountFieldKind::Secret, None, true),
+            ],
+            oauth: Some(AccountOauth {
+                builtin_provider: None,
+                client_id_field: "client_id".into(),
+                client_secret_field: Some("client_secret".into()),
+                refresh_token_field: Some("refresh_token".into()),
+                access_token_field: None,
+                app_redirect_uri: "aperio://oauth-callback".into(),
+            }),
+            ..Default::default()
+        };
+        assert!(supports_credential_test(&schema));
+    }
+
+    /// The case that makes "has a required secret" the WRONG rule: a public
+    /// iCal feed needs no credential at all, and testing it is exactly what
+    /// checks the URL. Requiring a secret would have taken the button away from
+    /// the one adapter whose test is free.
+    #[test]
+    fn a_credential_free_adapter_is_still_worth_testing() {
+        let schema = AccountSchema {
+            fields: vec![
+                field("feed_url", AccountFieldKind::Url, None, true),
+                field("password", AccountFieldKind::Secret, None, false),
+            ],
+            ..Default::default()
+        };
+        assert!(supports_credential_test(&schema));
+    }
+
     /// The adapter must see one configuration, not two halves.
     #[test]
     fn the_local_half_arrives_alongside_the_travelling_one() {

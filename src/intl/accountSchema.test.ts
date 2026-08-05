@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   collectValues,
   firstMissingField,
-  supportsCredentialTest,
   type AccountFormField,
   type AccountFormSpec,
 } from '@aperio/shared';
@@ -41,6 +40,7 @@ const OAUTH_SPEC: AccountFormSpec = {
     client_secret_field: 'client_secret',
   },
   owns_containers: false,
+  supports_credential_test: false,
 };
 
 const BASIC_SPEC: AccountFormSpec = {
@@ -52,6 +52,7 @@ const BASIC_SPEC: AccountFormSpec = {
   ],
   oauth: null,
   owns_containers: true,
+  supports_credential_test: true,
 };
 
 describe('firstMissingField', () => {
@@ -159,45 +160,5 @@ describe('collectValues', () => {
     const out = collectValues(OAUTH_SPEC, {});
     expect('client_id' in out).toBe(false);
     expect('client_secret' in out).toBe(false);
-  });
-});
-
-describe('supportsCredentialTest', () => {
-  it('offers no test for an adapter that signs in only by OAuth', () => {
-    // Webex's shape. Its `client_secret` is the OAUTH client secret — a
-    // property of the build, not a credential the user can be probed with — and
-    // the token it would authenticate with does not exist until the sign-in has
-    // run. Pressing Test here reached the adapter and failed on a missing
-    // `client_id`, which named something the user never types.
-    expect(supportsCredentialTest(OAUTH_SPEC)).toBe(false);
-  });
-
-  it('offers it when the form asks for a real credential', () => {
-    expect(supportsCredentialTest(BASIC_SPEC)).toBe(true);
-  });
-
-  it('offers it for an adapter that has BOTH OAuth and a password', () => {
-    // The rule is about what a probe can use, not about whether OAuth exists.
-    expect(
-      supportsCredentialTest({
-        ...OAUTH_SPEC,
-        fields: [
-          ...OAUTH_SPEC.fields,
-          field('password', { kind: 'secret', required: true }),
-        ],
-      }),
-    ).toBe(true);
-  });
-
-  it('ignores an optional secret', () => {
-    // Optional means the account works without it, so a probe cannot count on
-    // having one to try.
-    expect(
-      supportsCredentialTest({
-        ...BASIC_SPEC,
-        fields: [field('token', { kind: 'secret', required: false })],
-        oauth: null,
-      }),
-    ).toBe(false);
   });
 });

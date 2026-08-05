@@ -108,34 +108,21 @@ export interface AccountFormSpec {
    *  catalog refresh after connecting one without keeping its own list of which
    *  adapters those are. */
   owns_containers: boolean;
-}
-
-/**
- * Whether "test connection" can mean anything for this adapter before the
- * account exists.
- *
- * A probe opens an adapter from the form's own values and asks it to list
- * something. That needs a credential the form can actually supply — a password,
- * an API token. An adapter that signs in purely by OAuth has none: the thing it
- * authenticates with is a token the browser dance produces, and the dance has
- * not happened. Webex is exactly that, and pressing Test there used to reach
- * the adapter and fail on a missing `client_id` — which is not the user's
- * client id at all, but the one this BUILD carries and deliberately never
- * writes into the account (see `resolve_oauth_client` in host-core).
- *
- * So the button is left out rather than answered. A control that cannot succeed
- * is worse than no control: it invites the press and then explains itself in
- * the vocabulary of the code.
- *
- * Read off the declaration, naming no adapter: a required secret field that is
- * not the OAuth client secret is a credential a probe can use.
- */
-export function supportsCredentialTest(spec: AccountFormSpec): boolean {
-  const clientSecret = spec.oauth?.client_secret_field ?? null;
-  return spec.fields.some(
-    (field) =>
-      field.kind === 'secret' && field.required && field.key !== clientSecret,
-  );
+  /**
+   * Whether "test connection" can mean anything before the account exists —
+   * whether to offer the button at all.
+   *
+   * Decided by the core, not re-derived here, because the same rule decides
+   * whether the probe will refuse: two copies could disagree, and the shape of
+   * the disagreement is a button that always fails. See
+   * `account_setup::supports_credential_test`.
+   *
+   * False for an adapter that signs in purely by OAuth: what it authenticates
+   * with is a token the browser dance produces, and the dance has not happened.
+   * True for a public iCal feed even though its password is optional — there
+   * the URL is what a test checks.
+   */
+  supports_credential_test: boolean;
 }
 
 /** Which fields the OAuth posture makes optional, if any. */

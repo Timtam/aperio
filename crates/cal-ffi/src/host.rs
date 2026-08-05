@@ -7499,6 +7499,11 @@ impl Host {
             // without keeping its own list of which adapters those are.
             "owns_containers":
                 plugin.manifest.has_data_family(),
+            // Whether "test connection" can mean anything before the account
+            // exists. Answered HERE rather than re-derived in each frontend, so
+            // the button and the probe cannot disagree about it.
+            "supports_credential_test":
+                host_core::account_setup::supports_credential_test(&schema),
         });
         Ok(spec.to_string())
     }

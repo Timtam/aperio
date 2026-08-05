@@ -866,6 +866,18 @@ impl AdapterRegistry {
             .clone()
             .ok_or_else(|| RegistryError::Unsupported(adapter_kind.as_str().to_string()))?;
 
+        // Nothing the form could authenticate with — see
+        // `account_setup::supports_credential_test`. Refused here as
+        // UNSUPPORTED, which is the answer this function's own contract
+        // promised and could never reach: construction failed first, and its
+        // message named the built-in `client_id` that the user never enters and
+        // the account never carries.
+        if !crate::account_setup::supports_credential_test(&schema) {
+            return Err(RegistryError::Unsupported(
+                adapter_kind.as_str().to_string(),
+            ));
+        }
+
         // A probe never persists, so it reads the secret straight from the
         // caller rather than from the keychain: the account does not exist yet.
         // An adapter whose credential is genuinely optional — a public iCal
