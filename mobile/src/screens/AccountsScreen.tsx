@@ -164,6 +164,9 @@ export default function AccountsScreen() {
   // does not carry the list, because installed plugins decide it.
   const [availableKinds, setAvailableKinds] = useState<AdapterKindInfo[]>([]);
 
+  // The connect form's own name box, so a refused submit can put the cursor
+  // where the problem is instead of only saying so.
+  const nameInput = useRef<TextInput>(null);
   const rowTags = useRef<Record<string, number | null>>({});
   const pendingFocusId = useRef<string | null>(null);
 
@@ -356,6 +359,13 @@ export default function AccountsScreen() {
     if (name.length === 0) {
       setError(t('dialogs.accounts.nameRequired'));
       announce(t('dialogs.accounts.nameRequired'));
+      // Moving FOCUS is the part that makes this land. The message renders as
+      // plain text, and iOS has no live region — `announceForAccessibility` is
+      // the only channel, and it is routinely swallowed while focus sits on the
+      // button that was just pressed. So the button read as doing nothing at
+      // all. Focusing the box speaks its label and puts the cursor in the one
+      // place the user has to go next.
+      nameInput.current?.focus();
       return;
     }
     if (!formSpec || !schemaKind) return;
@@ -942,6 +952,7 @@ export default function AccountsScreen() {
         <View style={styles.field}>
           <Text style={styles.label}>{t('dialogs.accounts.nameLabel')}</Text>
           <TextInput
+            ref={nameInput}
             style={styles.input}
             value={displayName}
             onChangeText={setDisplayName}
