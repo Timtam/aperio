@@ -11,6 +11,22 @@ name: Probe App Intents schema
 # minutes of macOS time replaces a guessing loop, and the answer is durable —
 # paste the output into the TODO and the implementation is written from facts.
 #
+# ANSWERED. Round 2 (run 30996369787, Xcode 26.6 / iPhoneOS26.5.sdk) settled it:
+# there is NO calendar domain in the SDK. `.mail.createDraft` compiles in the
+# same run, so the probe is sound; `.calendar.createEvent` fails at both the
+# iOS 18 and the iOS 26 target, and `AppSchema` — the name Apple's own
+# documentation uses — is not in scope at all. Counts in the module interface:
+# calendar 0, CalendarIntent 0, AppSchema 0, createEvent 0, against
+# AssistantSchemas 422.
+#
+# This workflow stays anyway, and not as leftovers. It is the RE-CHECK: Apple
+# ships SDKs, and the day a calendar domain appears this answers in two minutes
+# what would otherwise be a guessing loop at twenty-five minutes a build. Run
+# it against a new Xcode and read the last step.
+#
+# Noted while here: `@AssistantIntent(schema:)` is deprecated, renamed to
+# `@AppIntent`. Whatever uses a domain one day uses the new name.
+#
 # ROUND 1 said: `type 'AssistantSchemas.Intent' has no member 'calendar'`.
 # Apple's documentation says the opposite — it names `.calendar.createEvent`
 # outright, alongside `.calendar.event`, `.calendar.attendee` and the rest, and

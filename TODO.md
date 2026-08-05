@@ -360,44 +360,39 @@ Vorteil.
       schlägt nachweislich fehl, wenn eine Phrase ohne ihren Schlüssel wandert.
       ✅ Gerätetest: Termine per Sprache landen jetzt in Aperio statt im
       Apple-Kalender. `INAlternativeAppNames` wird also nicht gebraucht.
-- [~] **Apple Intelligence (Assistant Schemas)** — der Weg, der Siri FREIE Rede
-      erlaubt statt einer festen Phrase: `@AssistantIntent(schema:
-      .calendar.createEvent)`. Es gibt eine Kalender-Domäne, `createEvent` ist
-      Teil davon. Damit wäre „erstelle einen Termin am Montag von 11 bis 13 mit
-      dem Titel Essen kochen" erreichbar — das, was Apples eigener Kalender kann.
-      BLOCKER, warum es noch nicht gebaut ist: das Makro prüft die Form beim
-      ÜBERSETZEN. Falsche Property-Namen sind ein Build-Fehler, und Apples Doku
-      gibt die Form online nicht her (Xcode hat dafür ein Code-Snippet, das uns
-      unter Windows nichts nützt). Blind raten kostet je Versuch einen vollen
-      EAS-Bau, für ein Feature, das ohne Apple-Intelligence-Gerät nicht einmal
-      beobachtbar ist.
-      LÖSUNG: `.github/workflows/probe-app-intents-schema.yml` — fragt den
-      iOS-SDK auf dem macOS-Runner nach den Deklarationen und lässt zusätzlich
-      das Makro an einer ABSICHTLICH leeren Konformanz scheitern, damit seine
-      Diagnose die verlangten Felder aufzählt. Zwei Minuten Runner-Zeit statt
-      einer Rateschleife.
-      **Runde 1 (Lauf 30853152407, Xcode 26.6 / iPhoneOS26.5.sdk):**
-      `error: type 'AssistantSchemas.Intent' has no member 'calendar'`.
-      Der Interface-Auszug blieb leer — der Filter war zu eng gestellt.
-      Das WIDERSPRICHT Apples Dokumentation, die `.calendar.createEvent`,
-      `.calendar.deleteEvent`, `.calendar.updateEvent` sowie die Entitäten
-      `.calendar.event`, `.calendar.calendar`, `.calendar.attendee` und vier
-      Enums ausdrücklich aufführt — und sie dabei `AppSchema.CalendarIntent`
-      nennt, NICHT `AssistantSchemas`. Also entweder anderes Modul, anderer
-      Namensraum, oder eine Domäne, die weit nach iOS 18 dazukam; Runde 1
-      konnte das nicht auseinanderhalten, weil sie nur EINE Schreibweise bei
-      EINEM Ziel-Betriebssystem gefragt hat.
-      Runde 2 sucht deshalb, statt zu raten: welches Modul im SDK die Schemata
-      überhaupt nennt, welche Domänen-Kürzel wirklich deklariert sind, und vier
-      Schreibweisen nebeneinander (iOS 18 vs. 26, `AssistantSchemas` vs.
-      `AppSchema`) mit `.mail.createDraft` als Kontrolle — schlägt die auch
-      fehl, liegt es an der Probe und nicht an der Domäne.
-      Zu erwarten ist außerdem ein ganzer Entitäten-Graph, nicht nur ein Makro:
-      `perform()` muss das angelegte Objekt als `@AssistantEntity(schema:
-      .calendar.event)` zurückgeben, was vermutlich eine Kalender-Entität nach
-      sich zieht.
-      Tonis Gerät hat noch KEIN Apple Intelligence — der Dialog aus Schritt 2
-      bleibt also der Weg, der bei ihm wirkt; das hier ist für neuere Geräte.
+- [x] **Apple Intelligence (Assistant Schemas) — GESCHLOSSEN, mit Beleg.**
+      Das wäre der Weg gewesen, der Siri FREIE Rede erlaubt statt einer festen
+      Phrase: `@AssistantIntent(schema: .calendar.createEvent)`, und damit
+      „erstelle einen Termin am Montag von 11 bis 13 mit dem Titel Essen kochen".
+      **Es gibt im iOS-SDK keine Kalender-Domäne.** Nicht „falsch geschrieben",
+      nicht „später dazugekommen" — sie ist nicht da.
+      BEWEIS (Lauf 30996369787, Xcode 26.6 / iPhoneOS26.5.sdk):
+      `.mail.createDraft` übersetzt im selben Lauf sauber durch — die Probe
+      taugt also. `.calendar.createEvent` scheitert bei iOS-18- UND
+      iOS-26-Ziel gleichermaßen an `type 'AssistantSchemas.Intent' has no
+      member 'calendar'`. `AppSchema` existiert überhaupt nicht („cannot find
+      'AppSchema' in scope"). Zählung im Modul-Interface: `calendar` 0,
+      `CalendarIntent` 0, `AppSchema` 0, `createEvent` 0 — bei
+      `AssistantSchemas` 422. Nur EIN Interface im ganzen SDK nennt die
+      Namensräume; PrivateFrameworks: nichts.
+      Apples Dokumentationsseite führt eine Kalender-Domäne (createEvent,
+      deleteEvent, updateEvent, dazu Entitäten und Enums) und nennt sie
+      `AppSchema.CalendarIntent`. Ausgeliefert ist davon nichts. Die Doku
+      beschreibt hier etwas, das im SDK nicht steht.
+      NEBENFUND: `@AssistantIntent(schema:)` ist VERALTET, umbenannt zu
+      `@AppIntent`. Falls je eine Domäne benutzt wird, unter dem neuen Namen.
+      Der Probe-Workflow BLEIBT liegen — nicht als offene Aufgabe, sondern als
+      Nachprüfung: er beantwortet dieselbe Frage in zwei Minuten neu, sobald
+      Apple ein SDK nachlegt. Ein Lauf ersetzt eine Rateschleife aus
+      25-Minuten-Bauten.
+      LEHRE, die über diesen Punkt hinausgeht: Runde 1 stellte EINE Frage in
+      EINER Schreibweise bei EINEM Ziel-Betriebssystem und ohne Kontrollfall —
+      und ihr Ergebnis war deshalb nicht auswertbar, weil „Domäne fehlt" und
+      „Frage falsch gestellt" identisch aussahen. Erst der Kontrollfall machte
+      die Antwort zu einem Befund.
+      Für Toni ändert sich ohnehin nichts: sein Gerät meldet
+      `deviceNotCapable`. Der geführte Dialog aus Schritt 2 ist der Weg, der
+      bei ihm wirkt.
 - [~] **Schritt 3** — Kalender und Aufgabenliste als `AppEntity` mit
       `EntityStringQuery` (nicht `EntityQuery`: nur die String-Variante kann
       einen GESPROCHENEN Namen auflösen, und genau darum geht es).
