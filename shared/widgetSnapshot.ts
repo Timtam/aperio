@@ -194,18 +194,35 @@ function endOfDay(at: Date): Date {
   return new Date(at.getFullYear(), at.getMonth(), at.getDate() + 1, 0, 0, 0, 0);
 }
 
+/** A timed event that has begun and not yet finished. */
+function isRunning(item: WidgetItem, nowMs: number): boolean {
+  return !item.untimed && item.end != null && new Date(item.at).getTime() <= nowMs;
+}
+
 /**
  * The instant a row is ordered by — which is not always the instant it starts.
  *
- * A timed item sorts at its start, including one that is already running: a
- * meeting in progress is the most immediate thing there is.
+ * A timed item that has NOT started sorts at its start. Nothing surprising.
  *
- * An UNTIMED item sorts at its END instead, and that is the whole point. Their
- * starts are useless for ordering: an all-day event's start is midnight, and a
- * multi-day one started days or weeks ago, so by start they all sort ahead of
- * everything. A fortnight's holiday would then answer "what is next" with
- * "holiday" every day of the fortnight — and on a lock screen with room for
- * three rows, it and its neighbours would crowd out every actual appointment.
+ * One that is already RUNNING sorts at its end, because its start has stopped
+ * being information: it is in the past, and the longer the thing has been going
+ * the further ahead it sorts, which is backwards. What is still true about a
+ * running event is when it STOPS.
+ *
+ * That is what makes nesting work. A calendar with "working hours, 10 to 16"
+ * blocked out every day is an event like any other, and by start it beats every
+ * real appointment inside it for six hours at a stretch — so the one widget
+ * that shows a single row showed the block all morning and afternoon and never
+ * the meeting actually happening. Ordered by end, the innermost thing comes
+ * first: the 13:00 meeting ends before the block does, so it wins while it
+ * runs, and the block returns the moment it is over.
+ *
+ * An UNTIMED item sorts at its END too, for the same reason one step further
+ * on. Their starts are useless for ordering: an all-day event's start is
+ * midnight, and a multi-day one started days or weeks ago. A fortnight's
+ * holiday would answer "what is next" with "holiday" every day of the
+ * fortnight — and on a lock screen with room for three rows, it and its
+ * neighbours would crowd out every actual appointment.
  *
  * By END, an all-day event lands where it stops being true: a single day sits
  * with that day's appointments, a six-week holiday drops six weeks down the
@@ -213,9 +230,11 @@ function endOfDay(at: Date): Date {
  * rather than in front of them, which is also where it belongs — a meeting has
  * an hour, the task has the day.
  */
-function sortInstant(item: WidgetItem): number {
+function sortInstant(item: WidgetItem, nowMs: number): number {
   const at = new Date(item.at);
-  if (!item.untimed) return at.getTime();
+  if (!item.untimed) {
+    return isRunning(item, nowMs) ? new Date(item.end as string).getTime() : at.getTime();
+  }
   if (item.end != null) return new Date(item.end).getTime();
   return endOfDay(at).getTime();
 }
@@ -349,11 +368,17 @@ export function buildWidgetSnapshot<E extends RecurringEventLike>(
   }
 
   items.sort((a, b) => {
-    const d = sortInstant(a) - sortInstant(b);
+    const d = sortInstant(a, nowMs) - sortInstant(b, nowMs);
     if (d !== 0) return d;
-    // Same instant: a timed row first — it is the one with a commitment attached
-    // — then events before tasks, then by title so the order is stable across
-    // refreshes rather than incidental.
+    // Same instant, and one of them is already under way: that one. This is the
+    // back-to-back case — a meeting ending at 14:00 and the next starting at
+    // 14:00 both sort to 14:00 — where falling through to a title comparison
+    // would put them in alphabetical order and call it a schedule.
+    const aRunning = isRunning(a, nowMs);
+    if (aRunning !== isRunning(b, nowMs)) return aRunning ? -1 : 1;
+    // Then a timed row before an untimed one — it is the one with a commitment
+    // attached — then events before tasks, then by title so the order is stable
+    // across refreshes rather than incidental.
     if (a.untimed !== b.untimed) return a.untimed ? 1 : -1;
     if (a.kind !== b.kind) return a.kind === 'event' ? -1 : 1;
     return a.title.localeCompare(b.title);

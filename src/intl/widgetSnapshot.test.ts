@@ -408,6 +408,85 @@ describe('buildWidgetSnapshot — an ongoing all-day event is not "next"', () =>
   });
 });
 
+describe('buildWidgetSnapshot — a running event does not hide what is inside it', () => {
+  /** "Arbeitszeit, 10 to 16", blocked out in one calendar every weekday. */
+  const block: TestEvent = {
+    ...baseEvent,
+    id: 'arbeitszeit',
+    calendar_id: 'block-cal',
+    title: 'Arbeitszeit',
+    start: localAt(2026, 8, 3, 10, 0).toISOString(),
+    end: localAt(2026, 8, 3, 16, 0).toISOString(),
+  };
+
+  it('puts the innermost running event first', () => {
+    // Reported from the device: while the block ran, the single-row widget
+    // showed the block and never the meeting actually happening inside it — for
+    // six hours a day. By START the block wins from 10:00 on, and keeps winning
+    // the longer it runs.
+    const meeting: TestEvent = {
+      ...baseEvent,
+      id: 'meeting',
+      start: localAt(2026, 8, 3, 13, 0).toISOString(),
+      end: localAt(2026, 8, 3, 14, 0).toISOString(),
+    };
+    const snap = build({ events: [block, meeting], now: localAt(2026, 8, 3, 13, 30) });
+    expect(snap.items.map((i) => i.id)).toEqual(['meeting', 'arbeitszeit']);
+  });
+
+  it('hands the block back once the meeting inside it is over', () => {
+    const meeting: TestEvent = {
+      ...baseEvent,
+      id: 'meeting',
+      start: localAt(2026, 8, 3, 13, 0).toISOString(),
+      end: localAt(2026, 8, 3, 14, 0).toISOString(),
+    };
+    // 14:01 — the meeting has ended and is gone; the block is still true.
+    const snap = build({ events: [block, meeting], now: localAt(2026, 8, 3, 14, 1) });
+    expect(snap.items.map((i) => i.id)).toEqual(['arbeitszeit']);
+  });
+
+  it('lets a not-yet-started appointment overtake the block that surrounds it', () => {
+    const later: TestEvent = {
+      ...baseEvent,
+      id: 'spaeter',
+      start: localAt(2026, 8, 3, 15, 0).toISOString(),
+      end: localAt(2026, 8, 3, 15, 30).toISOString(),
+    };
+    const snap = build({ events: [block, later], now: localAt(2026, 8, 3, 11, 0) });
+    // "In vier Stunden: Spätertermin" beats "läuft bis 16 Uhr" — the block is
+    // the backdrop, not the appointment.
+    expect(snap.items.map((i) => i.id)).toEqual(['spaeter', 'arbeitszeit']);
+  });
+
+  it('keeps a running meeting ahead of the one starting as it ends', () => {
+    // Back to back: both sort to 14:00, so the instant alone cannot separate
+    // them and the tie-break has to. Without it they would come out in
+    // alphabetical order.
+    const running: TestEvent = {
+      ...baseEvent,
+      id: 'zuerst',
+      title: 'Zuerst',
+      start: localAt(2026, 8, 3, 13, 0).toISOString(),
+      end: localAt(2026, 8, 3, 14, 0).toISOString(),
+    };
+    const next: TestEvent = {
+      ...baseEvent,
+      id: 'danach',
+      title: 'Danach',
+      start: localAt(2026, 8, 3, 14, 0).toISOString(),
+      end: localAt(2026, 8, 3, 15, 0).toISOString(),
+    };
+    const snap = build({ events: [running, next], now: localAt(2026, 8, 3, 13, 45) });
+    expect(snap.items.map((i) => i.id)).toEqual(['zuerst', 'danach']);
+  });
+
+  it('still shows a running event when nothing else is on', () => {
+    const snap = build({ events: [block], now: localAt(2026, 8, 3, 13, 30) });
+    expect(snap.items.map((i) => i.id)).toEqual(['arbeitszeit']);
+  });
+});
+
 describe('buildWidgetSnapshot — task state', () => {
   it('carries open and in-progress so the widget can tell them apart', () => {
     const open: Task = { ...baseTask, id: 'offen', scheduled_date: '2026-08-04' };

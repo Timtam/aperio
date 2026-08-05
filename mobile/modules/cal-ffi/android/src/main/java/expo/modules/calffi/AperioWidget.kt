@@ -204,9 +204,16 @@ private fun visibleItems(snapshot: JSONObject, ticked: Set<String>, now: Date): 
     if (!expiry.after(now)) continue
     if (ticked.contains(item.optString("id"))) continue
     out.add(item)
-    if (out.size == MAX_ROWS) break
   }
-  return out
+  // Ordered HERE and not taken from the file, because the key depends on the
+  // clock: a running event orders by when it ends, and the app wrote its answer
+  // for a `now` that has since moved on.
+  //
+  // Sorting comes BEFORE the cap, which is why the loop above no longer stops
+  // early. Cutting first and sorting after would drop rows that belong on the
+  // widget in favour of ones that do not.
+  out.sortWith(WidgetStore.displayOrder(now))
+  return out.take(MAX_ROWS)
 }
 
 private fun isExhausted(snapshot: JSONObject, now: Date): Boolean {

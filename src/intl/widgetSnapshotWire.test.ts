@@ -141,6 +141,35 @@ describe('the widget snapshot decodes on the Swift side', () => {
     }
   });
 
+  it('orders at RENDER time on both platforms, not from the file', () => {
+    // The one invariant a reader is most likely to undo, because the array
+    // arrives sorted and re-sorting it looks redundant.
+    //
+    // It is not. `sortInstant` depends on the clock — a running event orders by
+    // when it ENDS, so the innermost of several overlapping ones comes first —
+    // and the app froze its answer hours before the widget draws. Trusting the
+    // file's order is how a "working hours 10 to 16" block came to sit in front
+    // of every meeting inside it, all day, on the one widget that shows a single
+    // row.
+    const swiftSource = swift('Snapshot.swift');
+    expect(swiftSource, 'Snapshot.swift no longer derives a sort key').toContain(
+      'func sortInstant(at date: Date)',
+    );
+    expect(swiftSource, 'items(after:) no longer sorts').toMatch(/\.sorted\s*\{/);
+
+    const kotlin = (relative: string) =>
+      readFileSync(
+        resolve(process.cwd(), 'mobile/modules/cal-ffi/android/src/main/java/expo/modules/calffi', relative),
+        'utf8',
+      );
+    expect(kotlin('WidgetStore.kt'), 'WidgetStore.kt no longer derives a sort key').toContain(
+      'fun sortInstant(',
+    );
+    expect(kotlin('AperioWidget.kt'), 'visibleItems no longer sorts').toContain(
+      'sortWith(WidgetStore.displayOrder(',
+    );
+  });
+
   it('gives the no-data fallback a value for every string', () => {
     // A missing one here is not a decode failure but a compile failure: Swift's
     // memberwise initialiser takes every property, so `fallbackStrings` has to

@@ -121,22 +121,71 @@ extension WidgetItem {
         guard untimed else { return at }
         return Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: at))
     }
+
+    /// A timed event that has begun. The twin of `isRunning` in
+    /// `shared/widgetSnapshot.ts`; it does not re-check the end because callers
+    /// have already dropped everything expired.
+    func isRunning(at date: Date) -> Bool {
+        guard !untimed, end != nil, let start = parseInstant(self.at) else { return false }
+        return start <= date
+    }
+
+    /// The instant this row orders by — the twin of `sortInstant` in
+    /// `shared/widgetSnapshot.ts`, which carries the full reasoning.
+    ///
+    /// It has to be recomputed HERE rather than trusted from the file's order,
+    /// and that is the whole reason this exists. The key depends on when you
+    /// ask: a running event orders by its END, so the innermost of several
+    /// overlapping ones comes first. The app froze one answer into the array
+    /// hours ago, for a `now` that has since moved on — so a "working hours"
+    /// block written before it started would still be sitting in front of every
+    /// meeting inside it.
+    ///
+    /// Cheap enough to do per render: both timelines already build one entry per
+    /// start and per expiry, which are exactly the moments this can change.
+    ///
+    /// The two cases collapse into one sentence — anything already under way
+    /// orders by when it STOPS — and that instant is `expiresAt`, which the
+    /// widget already computes for filtering.
+    func sortInstant(at date: Date) -> Date {
+        if untimed || isRunning(at: date) { return expiresAt ?? .distantFuture }
+        return parseInstant(self.at) ?? .distantFuture
+    }
 }
 
 extension WidgetSnapshot {
     /// Items that have not passed `date`, soonest first.
     ///
-    /// The widget renders long after the app wrote this, so filtering by the
-    /// RENDER time — not the write time — is what makes one snapshot serve a
-    /// whole day of timeline entries.
+    /// Both the filtering AND the order are computed against the RENDER time
+    /// rather than taken from the file, which is what makes one snapshot serve a
+    /// whole day of timeline entries. Sorting used to be left to the app, and
+    /// that was only safe while the sort key did not depend on the clock; it
+    /// does now, so a frozen order goes wrong the moment a long event starts.
     func items(after date: Date) -> [WidgetItem] {
         // A tap the app has not drained yet is still in the snapshot, and a row
         // that stays put after being ticked reads as a dead button.
         let ticked = ActionQueue.pendingTaps()
-        return items.filter { item in
-            guard let expiry = item.expiresAt, expiry > date else { return false }
-            return !ticked.contains(item.id)
-        }
+        return
+            items
+            .filter { item in
+                guard let expiry = item.expiresAt, expiry > date else { return false }
+                return !ticked.contains(item.id)
+            }
+            // The same order as `shared/widgetSnapshot.ts`, tie-breaks included:
+            // running before not-yet-started at the same instant (back-to-back
+            // meetings both land on the changeover), then timed before untimed,
+            // events before tasks, then title so a refresh cannot reshuffle
+            // equals.
+            .sorted { lhs, rhs in
+                let left = lhs.sortInstant(at: date)
+                let right = rhs.sortInstant(at: date)
+                if left != right { return left < right }
+                let leftRunning = lhs.isRunning(at: date)
+                if leftRunning != rhs.isRunning(at: date) { return leftRunning }
+                if lhs.untimed != rhs.untimed { return !lhs.untimed }
+                if lhs.kind != rhs.kind { return lhs.kind == "event" }
+                return lhs.title < rhs.title
+            }
     }
 
     /// Items with a clock time only, soonest first.

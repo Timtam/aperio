@@ -134,6 +134,18 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       Die Texte reisen MIT dem Snapshot: die Sprache ist die in der App
       gewählte, und die kann eine Extension nicht lesen.
 
+      NACHTRAG (Gerätebefund): ein laufender Termin verdeckte alles, was IN ihm
+      lag. Ein Blocktermin „Arbeitszeit 10–16" gewann ab 10:00 gegen jede
+      Besprechung darin, und je länger er lief, desto sicherer — die Sortierung
+      nahm den START. Jetzt ordnet ein LAUFENDER Termin nach seinem ENDE, womit
+      der innerste zuerst kommt; dieselbe Begründung wie bei ganztägigen, nur
+      eine Stufe früher.
+      Das musste an DREI Stellen: der Schlüssel hängt jetzt an der Uhr, und die
+      App friert ihre Antwort Stunden vor dem Zeichnen ein. Also sortieren
+      `Snapshot.swift` und `WidgetStore.kt` zur RENDERZEIT neu — beide Zeitachsen
+      legen ohnehin je einen Eintrag auf jeden Start und jedes Ende, also genau
+      auf die Momente, an denen sich die Reihenfolge ändern kann.
+      `widgetSnapshotWire.test.ts` bewacht, dass beide es weiter tun.
       ⚠️ Noch ungeprüft auf dem Gerät. Offen bleibt außerdem: die Galerie-Namen
       („Als Nächstes" / „Up Next") können nicht aus dem Snapshot kommen — sie
       werden gelesen, bevor Daten existieren — und hängen deshalb an

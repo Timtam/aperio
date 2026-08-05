@@ -205,4 +205,64 @@ object WidgetStore {
     cal.add(Calendar.DAY_OF_YEAR, 1)
     return cal.time
   }
+
+  /**
+   * A timed event that has begun — the twin of `isRunning` in
+   * `shared/widgetSnapshot.ts`. It does not re-check the end, because callers
+   * have already dropped everything expired.
+   */
+  fun isRunning(item: JSONObject, now: Date): Boolean {
+    if (item.optBoolean("untimed", false)) return false
+    if (item.optString("end", null) == null) return false
+    val start = parseInstant(item.optString("at", null)) ?: return false
+    return !start.after(now)
+  }
+
+  /**
+   * The instant a row orders by — the twin of `sortInstant` in
+   * `shared/widgetSnapshot.ts`, which carries the full reasoning.
+   *
+   * Recomputed here rather than trusted from the file's order, and that is the
+   * point of it existing: the key depends on when you ask. A running event
+   * orders by its END, so the innermost of several overlapping ones comes
+   * first. The app froze one answer into the array, for a `now` that has since
+   * moved on — so an all-day "working hours" block written before it started
+   * would still sit in front of every meeting inside it.
+   *
+   * Both cases are one sentence: anything already under way orders by when it
+   * STOPS, which is the instant [expiresAt] already computes.
+   */
+  fun sortInstant(item: JSONObject, now: Date): Date? =
+    if (item.optBoolean("untimed", false) || isRunning(item, now)) {
+      expiresAt(item)
+    } else {
+      parseInstant(item.optString("at", null))
+    }
+
+  /**
+   * The row order the app's own lists use, resolved for [now].
+   *
+   * Tie-breaks in the same order as the shared builder: running before
+   * not-yet-started at the same instant (back-to-back meetings both land on the
+   * changeover), then timed before untimed, events before tasks, then title so
+   * a redraw cannot reshuffle equals.
+   */
+  fun displayOrder(now: Date): Comparator<JSONObject> =
+    Comparator<JSONObject> { a, b ->
+      // Compared as millis rather than as `Date?`: an unparseable row then
+      // sorts last by falling to the far end, instead of needing a null branch
+      // that could just as easily let it win.
+      val left = sortInstant(a, now)?.time ?: Long.MAX_VALUE
+      val right = sortInstant(b, now)?.time ?: Long.MAX_VALUE
+      val leftRunning = isRunning(a, now)
+      val leftUntimed = a.optBoolean("untimed", false)
+      when {
+        left != right -> left.compareTo(right)
+        leftRunning != isRunning(b, now) -> if (leftRunning) -1 else 1
+        leftUntimed != b.optBoolean("untimed", false) -> if (leftUntimed) 1 else -1
+        a.optString("kind") != b.optString("kind") ->
+          if (a.optString("kind") == "event") -1 else 1
+        else -> a.optString("title").compareTo(b.optString("title"))
+      }
+    }
 }
