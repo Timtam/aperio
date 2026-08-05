@@ -378,3 +378,56 @@ describe('mergeDayItems', () => {
     expect(untimed.map((t) => t.id)).toEqual(['sched', 'by-other-day']);
   });
 });
+
+describe('filterTasksOnDay — a finished task sits on the day it was finished', () => {
+  const shown = () => true;
+
+  it('moves a completed task off its deadline and onto its completion day', () => {
+    // Reported from Vikunja: a deadline on the 6th, never scheduled, ticked off
+    // on the 5th. It showed as done in the task list and then appeared in the
+    // calendar on the 6th — a tick on a day for work that was already over,
+    // while the 5th looked like nothing had happened.
+    const done: Task = {
+      ...baseTask,
+      id: 'abgehakt',
+      deadline_date: '2026-08-06',
+      status: 'completed',
+      completed_at: new Date(2026, 7, 5, 18, 0).toISOString(),
+    };
+    expect(filterTasksOnDay([done], '2026-08-05', shown).map((t) => t.id)).toEqual([
+      'abgehakt',
+    ]);
+    expect(filterTasksOnDay([done], '2026-08-06', shown)).toEqual([]);
+  });
+
+  it('reads the completion instant in LOCAL time', () => {
+    // Late in the evening at a positive offset, the UTC date is already
+    // tomorrow. Taking the date off the raw string would file the task a day
+    // late — the same trap that once cost the recurrence resurface a day.
+    const lateEvening = new Date(2026, 7, 5, 23, 30);
+    const done: Task = {
+      ...baseTask,
+      id: 'spaet',
+      scheduled_date: '2026-08-01',
+      status: 'completed',
+      completed_at: lateEvening.toISOString(),
+    };
+    expect(filterTasksOnDay([done], '2026-08-05', shown).map((t) => t.id)).toEqual([
+      'spaet',
+    ]);
+  });
+
+  it('falls back to the planned day when no completion instant was recorded', () => {
+    // An adapter that keeps no timestamp must not lose the task altogether.
+    const done: Task = {
+      ...baseTask,
+      id: 'ohne-zeitstempel',
+      scheduled_date: '2026-08-04',
+      status: 'completed',
+      completed_at: null,
+    };
+    expect(filterTasksOnDay([done], '2026-08-04', shown).map((t) => t.id)).toEqual([
+      'ohne-zeitstempel',
+    ]);
+  });
+});

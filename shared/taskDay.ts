@@ -1,3 +1,4 @@
+import { localDateKey } from './dateKey';
 import { isMineOrUnassigned } from './taskAssignment';
 import { taskOrder } from './taskGrouping';
 import type { Task, TaskUser } from './types';
@@ -64,6 +65,18 @@ export function todayIsoKey(): string {
  * everything; omitting `meFor` keeps the historical "show all". Mirrors the
  * day-start review's ownership filter (DESIGN §9.7).
  */
+/** The LOCAL day a task was completed on, or null when it carries no instant.
+ *
+ *  Local, not UTC, and that is the whole subtlety: `completed_at` is a UTC
+ *  instant, so a task finished at 23:30 in a positive offset reads as the NEXT
+ *  day if the date is taken off the raw string. The same trap already cost the
+ *  recurrence resurface a day. */
+function completionDayKey(task: Task): string | null {
+  if (!task.completed_at) return null;
+  const at = new Date(task.completed_at);
+  return Number.isNaN(at.getTime()) ? null : localDateKey(at);
+}
+
 export function filterTasksOnDay(
   tasks: Task[],
   dayIsoKey: string,
@@ -85,6 +98,19 @@ export function filterTasksOnDay(
     }
     if (meFor && !isMineOrUnassigned(task.assignees, meFor(task.list_id))) {
       return false;
+    }
+    // A FINISHED task belongs to the day it was finished, not to the day it was
+    // once due. Anything else makes the calendar disagree with what happened: a
+    // task due Thursday and done on Wednesday left Wednesday looking empty and
+    // put a tick on Thursday for work that was already over — and read, on the
+    // day itself, as something still to do.
+    //
+    // Falls through when the completion instant is missing (an adapter that
+    // does not record one), because the planned day is a worse answer than the
+    // right one but a much better answer than none.
+    if (task.status === 'completed') {
+      const finished = completionDayKey(task);
+      if (finished != null) return finished === dayIsoKey;
     }
     if (task.scheduled_date === dayIsoKey) return true;
     // A deadline surfaces as its own day marker ONLY for a task with no
