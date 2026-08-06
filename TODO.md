@@ -296,6 +296,19 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       Termin, in dem man gerade sitzt, ist das Unmittelbarste, was es gibt.
       ⚠️ Ungeprüft auf dem Gerät.
 
+### A9 · Termingruppen `[ ]` — Entwurf liegt vor
+Derselbe Termin liegt heute mehrfach in Aperio (Outlook für die Kollegen, Kopie
+im Privatkalender für Alexas Erinnerungen, dazu die Kalender der Kollegen), und
+Aperio weiß nichts davon: mehrfache Zeilen, mehrfaches Nachziehen bei jeder
+Verschiebung, und ein Meeting-Link an einem zufällig gewählten davon.
+Eine Gruppe ist eine Aussage von Aperio über fremde Daten — „diese Termine meinen
+dieselbe Verabredung" —, lebt im eigenen Datensatz und erreicht keinen Anbieter.
+Sie ersetzt die heutige Ja/Nein-Rückfrage beim Meeting-Verknüpfen ersatzlos.
+Vollständiger Entwurf samt der schwierigen Teile (woher die Mitgliedschaft kommt,
+wie eine Gruppe anbieterseitige Kennungswechsel überlebt, was bei fehlenden
+Schreibrechten passiert) und einem Stufenplan: `DESIGN-event-groups.md`.
+Größenordnung wie die Widgets. NICHT begonnen.
+
 ### A8 · Sprachbefehle (Siri / Kurzbefehle, iOS zuerst) `[~]`
 Termine und Aufgaben per Sprache anlegen, mit Kalender- bzw. Listenwahl.
 
