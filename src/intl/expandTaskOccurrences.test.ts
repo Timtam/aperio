@@ -6,6 +6,7 @@ import {
   isRecurringProjection,
   makeOccurrenceId,
   nextTaskOccurrence,
+  occurrenceMoveTarget,
   recurringSeriesTaskId,
   toBackend,
   type TaskRecurrenceValue,
@@ -375,5 +376,46 @@ describe('nextTaskOccurrence', () => {
         val({ freq: 'DAILY', endMode: 'UNTIL', until: '2026-06-25' }),
       ),
     ).toBeNull();
+  });
+});
+
+describe('occurrenceMoveTarget', () => {
+  const repeating = {
+    id: 'gehoertraining',
+    list_id: 'device',
+    scheduled_date: '2026-08-01',
+    recurrence: rule({ freq: 'DAILY' }),
+  } as unknown as Task;
+
+  it('passes the requested day through where the source can store it', () => {
+    expect(occurrenceMoveTarget(repeating, '2026-08-05', true)).toEqual({
+      date: '2026-08-05',
+      advanced: false,
+    });
+  });
+
+  it('advances the series where the source owns the date', () => {
+    // iOS Reminders: the due date is the series anchor, so an arbitrary day
+    // does not survive the round trip. One step forward is what it CAN do —
+    // and the caller is told, because that is not the day that was tapped.
+    expect(occurrenceMoveTarget(repeating, '2026-08-05', false)).toEqual({
+      date: '2026-08-02',
+      advanced: true,
+    });
+  });
+
+  it('leaves a non-repeating task alone even on such a source', () => {
+    const once = { ...repeating, recurrence: null } as unknown as Task;
+    expect(occurrenceMoveTarget(once, '2026-08-05', false)).toEqual({
+      date: '2026-08-05',
+      advanced: false,
+    });
+  });
+
+  it('does not invent a day when clearing the date', () => {
+    expect(occurrenceMoveTarget(repeating, null, false)).toEqual({
+      date: null,
+      advanced: false,
+    });
   });
 });

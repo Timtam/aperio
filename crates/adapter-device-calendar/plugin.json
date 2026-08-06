@@ -16,6 +16,7 @@
     "manageable_sections": false,
     "subtasks": false,
     "move_between_projects": false,
+    "reschedule_single_occurrence": false,
     "create_lists": false,
     "delete_lists": false
   },

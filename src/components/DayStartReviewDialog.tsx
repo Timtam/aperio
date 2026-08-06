@@ -9,7 +9,11 @@ import {
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
-import { buildReminderGroups, daysUntilDeadline } from '@aperio/shared';
+import {
+  buildReminderGroups,
+  daysUntilDeadline,
+  occurrenceMoveTarget,
+} from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import type { Task } from '../api/types';
@@ -77,7 +81,7 @@ export function DayStartReviewDialog({
 }: DayStartReviewDialogProps) {
   const { t, i18n } = useTranslation();
   const announce = useAnnouncer();
-  const { tasks, loading: tasksLoading } = useTasks();
+  const { tasks, taskListById, loading: tasksLoading } = useTasks();
   const { invalidateData, openTaskDialog } = useDialogState();
   // Per-list cascade resolution: each row obeys its OWN list's
   // status-coupling preference. The filter below treats a slipped
@@ -455,11 +459,25 @@ export function DayStartReviewDialog({
         // Sequential so a first-row failure surfaces cleanly without
         // leaving a half-applied family. Typical depth is one or two
         // so this stays well under the SQLite write budget.
+        // What the SOURCE can actually do with "move this one to that day".
+        // iOS Reminders keeps the due date as the series anchor, so an
+        // arbitrary day written to a repeating reminder does not stick — and it
+        // used to not stick SILENTLY, this dialog announcing a move that never
+        // happened. Where the source cannot move one occurrence, the series
+        // advances by a step instead and the announcement says so.
+        let advanced = false;
         for (const target of targets) {
+          const move = occurrenceMoveTarget(
+            target,
+            newDate,
+            taskListById.get(target.list_id)?.task_capabilities
+              ?.reschedule_single_occurrence ?? true,
+          );
+          if (move.advanced) advanced = true;
           await invoke<Task>('update_task', {
             task: {
               ...target,
-              scheduled_date: newDate,
+              scheduled_date: move.date,
               updated_at: now,
             },
           });
@@ -469,7 +487,10 @@ export function DayStartReviewDialog({
           targets.forEach((task) => next.add(task.id));
           return next;
         });
-        const base = t(announcementKey, { title: root.title });
+        // Says what HAPPENED, not what was asked for.
+        const base = advanced
+          ? t('dialogs.dayStartReview.carryOver.announceAdvancedSeries')
+          : t(announcementKey, { title: root.title });
         // The cascadeSuffix translation key lives under `views.tasks`
         // because useTaskStatusToggle owns the canonical announcement
         // ("Aufgabe X erledigt. N weitere Aufgaben wurden mit
@@ -490,7 +511,7 @@ export function DayStartReviewDialog({
         setBusy(false);
       }
     },
-    [tasks, effectiveForList, t, announce, invalidateData],
+    [tasks, taskListById, effectiveForList, t, announce, invalidateData],
   );
 
   const carryToToday = useCallback(

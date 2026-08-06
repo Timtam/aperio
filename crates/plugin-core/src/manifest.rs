@@ -206,6 +206,26 @@ pub struct TaskCapabilities {
     /// cross-project moves, so it sets this `false`.
     #[serde(default = "yes")]
     pub move_between_projects: bool,
+    /// ONE occurrence of a repeating task can be moved to an arbitrary day
+    /// and stay there.
+    ///
+    /// False where the source treats the due date as the SERIES anchor rather
+    /// than a property of the occurrence — iOS Reminders does, so writing an
+    /// arbitrary date to a repeating reminder is not a supported edit and the
+    /// value simply does not survive the round trip. It failed silently: the
+    /// day-start carry-over reported success, the reminder kept its old date,
+    /// and the day it had been carried to went on showing a read-only preview
+    /// with no checkbox.
+    ///
+    /// Where this is false, a caller that wants to move a single occurrence
+    /// advances the series by one step instead (`nextTaskOccurrence`) — which
+    /// is what the source can actually do, and what "skip this one" already
+    /// does for the same adapters.
+    ///
+    /// Defaults `true`: every cal-core-native backend stores the date per
+    /// task, so only the odd one out has to say so.
+    #[serde(default = "yes")]
+    pub reschedule_single_occurrence: bool,
     /// The adapter can create new task lists (projects) at the source.
     /// Defaults `false` — an adapter opts in once it implements
     /// `TasksFeature::create_task_list`; the UI gates its "new list in
@@ -252,6 +272,7 @@ impl Default for TaskCapabilities {
             task_recurrence: true,
             supports_in_progress: true,
             move_between_projects: true,
+            reschedule_single_occurrence: true,
             create_lists: false,
             delete_lists: false,
             manageable: false,

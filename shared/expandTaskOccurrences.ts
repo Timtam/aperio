@@ -281,3 +281,38 @@ function projectionOf<T extends Task>(task: T, dateKey: string): T {
     scheduled_time: task.scheduled_time,
   };
 }
+
+/**
+ * What "move this task to `dateKey`" can actually be, given what its source
+ * supports.
+ *
+ * Most backends store the due date on the task, so the answer is simply the day
+ * asked for. iOS Reminders does not: there the date is the SERIES anchor, and
+ * an arbitrary day written to a repeating reminder does not survive the round
+ * trip. It failed silently — the day-start carry-over reported success, the
+ * reminder kept its old date, and the day it had been carried to went on
+ * showing a read-only preview with no checkbox, which is the shape the bug
+ * arrived in.
+ *
+ * Where the source cannot do it, the honest equivalent is to advance the series
+ * by one step — the same move "skip this occurrence" already makes for the same
+ * adapters. `advanced` says which of the two happened, so the caller can tell
+ * the user rather than quietly doing something else than was asked.
+ *
+ * Returns the requested day unchanged when there is no later turn (a series
+ * that has ended): failing to move is better than moving somewhere invented.
+ */
+export function occurrenceMoveTarget(
+  task: Task,
+  dateKey: string | null,
+  canRescheduleOccurrence: boolean,
+): { date: string | null; advanced: boolean } {
+  if (dateKey == null || canRescheduleOccurrence) {
+    return { date: dateKey, advanced: false };
+  }
+  if (task.recurrence == null || task.scheduled_date == null) {
+    return { date: dateKey, advanced: false };
+  }
+  const next = nextTaskOccurrence(task.scheduled_date, fromBackend(task.recurrence));
+  return next == null ? { date: dateKey, advanced: false } : { date: next, advanced: true };
+}

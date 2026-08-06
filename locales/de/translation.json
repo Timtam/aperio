@@ -1149,7 +1149,8 @@
         "autoBacklogToast_one": "1 Aufgabe ins Backlog verschoben.",
         "autoBacklogToast_other": "{{count}} Aufgaben ins Backlog verschoben.",
         "undoAnnounce_one": "Übernahme für 1 Aufgabe rückgängig gemacht.",
-        "undoAnnounce_other": "Übernahme für {{count}} Aufgaben rückgängig gemacht."
+        "undoAnnounce_other": "Übernahme für {{count}} Aufgaben rückgängig gemacht.",
+        "announceAdvancedSeries": "Wiederkehrend: die Serie ist auf ihren nächsten Termin gerückt statt auf den gewählten Tag — der Anbieter kann ein einzelnes Vorkommen nicht verschieben."
       },
       "reminders": {
         "heading": "Erinnerungen",

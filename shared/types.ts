@@ -55,6 +55,15 @@ export interface TaskCapabilities {
    *  with only open/done set this false. Absent → true. */
   supports_in_progress: boolean;
   move_between_projects: boolean;
+  /** ONE occurrence of a repeating task can be moved to an arbitrary day and
+   *  stay there. Absent → true.
+   *
+   *  False where the source treats the due date as the SERIES anchor rather
+   *  than a property of the occurrence — iOS Reminders does, so an arbitrary
+   *  date written to a repeating reminder does not survive the round trip.
+   *  Callers that want to move a single occurrence advance the series by one
+   *  step instead, which is what the source can actually do. */
+  reschedule_single_occurrence?: boolean;
   /** The adapter can create new task lists (projects) at the source. */
   create_lists: boolean;
   /** The adapter can delete task lists at the source. */

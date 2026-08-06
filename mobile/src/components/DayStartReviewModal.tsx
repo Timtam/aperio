@@ -20,6 +20,7 @@ import {
   daysUntilDeadline,
   filterCarriedOver,
   filterOverdue,
+  occurrenceMoveTarget,
   priorityMarker,
   prioritySuffix,
   reminderCount,
@@ -425,15 +426,34 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
       queueFocusAfter(ids);
       try {
         // Sequential so a first-row failure surfaces without a half-applied family.
+        let advanced = false;
         for (const target of targets) {
-          await updateTask({ ...target, scheduled_date: newDate });
+          // What the SOURCE can actually do with "move this one to that day".
+          // iOS Reminders keeps the due date as the series anchor, so writing an
+          // arbitrary day to a repeating reminder simply does not stick — and it
+          // used to not stick SILENTLY: this dialog said "moved to today", the
+          // reminder kept its old date, and today went on showing a read-only
+          // preview with no checkbox.
+          const move = occurrenceMoveTarget(
+            target,
+            newDate,
+            taskListById.get(target.list_id)?.task_capabilities
+              ?.reschedule_single_occurrence ?? true,
+          );
+          if (move.advanced) advanced = true;
+          await updateTask({ ...target, scheduled_date: move.date });
         }
         setResolvedIds((s) => {
           const next = new Set(s);
           ids.forEach((id) => next.add(id));
           return next;
         });
-        const base = t(announcementKey, { title: root.title });
+        // Says what HAPPENED, not what was asked for. Advancing a series is not
+        // the day that was tapped, and announcing the tap would be the same lie
+        // in a politer form.
+        const base = advanced
+          ? t('dialogs.dayStartReview.carryOver.announceAdvancedSeries')
+          : t(announcementKey, { title: root.title });
         announce(
           followers.length > 0
             ? `${base} ${t('views.tasks.cascadeSuffix', { count: followers.length })}`
@@ -444,7 +464,7 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
         setBusy(false);
       }
     },
-    [announce, cascadeFor, invalidateData, queueFocusAfter, t, tasks],
+    [announce, cascadeFor, invalidateData, queueFocusAfter, t, taskListById, tasks],
   );
 
   const carryToToday = useCallback(

@@ -1152,7 +1152,8 @@
         "autoBacklogToast_one": "1 task sent to backlog.",
         "autoBacklogToast_other": "{{count}} tasks sent to backlog.",
         "undoAnnounce_one": "Undid carry-over for 1 task.",
-        "undoAnnounce_other": "Undid carry-over for {{count}} tasks."
+        "undoAnnounce_other": "Undid carry-over for {{count}} tasks.",
+        "announceAdvancedSeries": "Repeating: the series moved to its next turn instead of the chosen day — the source cannot move a single occurrence."
       },
       "reminders": {
         "heading": "Reminders",
