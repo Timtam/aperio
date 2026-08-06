@@ -980,7 +980,7 @@ export function DayView() {
                     }) +
                     subtaskParentSuffix(t, task, tasks) +
                     effortSuffix(t, task.effort) +
-                    (projection ? t('views.tasks.recurringOccurrence') : '')
+                    (task.recurrence ? t('views.tasks.recurringOccurrence') : '')
                   }
                   className={
                     'day-list__item day-list__item--task' +
@@ -1482,7 +1482,7 @@ function DayUntimedTasks({
                   }) +
                   subtaskParentSuffix(t, task, allTasks) +
                   effortSuffix(t, task.effort) +
-                  (projection ? t('views.tasks.recurringOccurrence') : '')
+                  (task.recurrence ? t('views.tasks.recurringOccurrence') : '')
                 }
               >
                 <span

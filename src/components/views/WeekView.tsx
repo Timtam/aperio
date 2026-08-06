@@ -1574,7 +1574,7 @@ export function WeekView() {
                               // either way.
                               aria-label={
                                 taskChipAriaLabel(t, task, time, tasks) +
-                                (projection
+                                (task.recurrence
                                   ? t('views.tasks.recurringOccurrence')
                                   : '')
                               }
@@ -2193,7 +2193,7 @@ function WeekDayTasks({
                 }) +
                 subtaskParentSuffix(t, task, allTasks) +
                 effortSuffix(t, task.effort) +
-                (projection ? t('views.tasks.recurringOccurrence') : '')
+                (task.recurrence ? t('views.tasks.recurringOccurrence') : '')
               }
             >
               <span className="week-task__body">

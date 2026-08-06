@@ -921,7 +921,7 @@ export function MonthView() {
                             ) +
                             subtaskParentSuffix(t, task, tasks) +
                             effortSuffix(t, task.effort) +
-                            (projection
+                            (task.recurrence
                               ? t('views.tasks.recurringOccurrence')
                               : '');
                           return (

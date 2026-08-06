@@ -1034,10 +1034,13 @@ export function CalendarDayList({
       if (colourName) {
         label += t('mobile.colorLabelSuffix', { name: colourName });
       }
-      if (isRecurringProjection(task)) {
-        // A read-only FUTURE occurrence of a recurring task — announce it so the
-        // SR user knows this row is a preview and that completion happens on the
-        // current instance, not here.
+      if (task.recurrence) {
+        // Announced for ANY recurring task, not only for a read-only future
+        // occurrence. Gating it on the projection meant the row you can
+        // actually act on — today's instance — was the one row that never said
+        // it repeats: a daily task read "open, planned" today and "recurring"
+        // on every other day. That a projection cannot be ticked off is carried
+        // by the row itself, which offers no checkbox and only "open the task".
         label += t('views.tasks.recurringOccurrence');
       }
       // Effort suffix appended unconditionally (regardless of the visual-sizing
