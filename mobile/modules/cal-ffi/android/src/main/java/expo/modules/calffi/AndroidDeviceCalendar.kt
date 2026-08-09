@@ -41,27 +41,57 @@ class AndroidDeviceCalendar(private val context: Context) : DeviceEventStoreBrid
 
   override fun listCalendars(): String {
     requireRead()
-    val out = JSONArray()
     val projection = arrayOf(
       CalendarContract.Calendars._ID,
       CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
       CalendarContract.Calendars.CALENDAR_COLOR,
       CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL,
+      // Which device account the calendar belongs to. Not shown unless it
+      // DISAMBIGUATES — see below.
+      CalendarContract.Calendars.ACCOUNT_NAME,
     )
+    // No selection, deliberately: every account the provider exposes, of every
+    // type. A phone with two Google accounts should yield both. Where it does
+    // not, the calendars are not being shared with this device at all — either
+    // the account's calendar sync is off, or Google Calendar's own
+    // "share Google Calendar data with other apps" toggle is. Neither is
+    // visible to us: an account withheld that way is indistinguishable from an
+    // account with no calendars, and there is no API to detect or request it.
+    val rows = mutableListOf<JSONObject>()
+    val accounts = mutableSetOf<String>()
     context.contentResolver.query(
       CalendarContract.Calendars.CONTENT_URI, projection, null, null, null,
     )?.use { cursor ->
       while (cursor.moveToNext()) {
+        val account = cursor.getString(4) ?: ""
+        if (account.isNotEmpty()) accounts.add(account)
         val obj = JSONObject()
         obj.put("id", cursor.getLong(0).toString())
         obj.put("name", cursor.getString(1) ?: "")
+        obj.put("account", account)
         obj.put(
           "read_only",
           cursor.getInt(3) < CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR,
         )
         if (!cursor.isNull(2)) obj.put("color_hex", hexColor(cursor.getInt(2)))
-        out.put(obj)
+        rows.add(obj)
       }
+    }
+    // The account is appended to the name ONLY when more than one is present.
+    // Two accounts routinely carry identically named calendars — "Events",
+    // "Birthdays" — and a list of duplicates is unusable, especially read
+    // aloud. With a single account the same suffix would be noise on every
+    // row, so it is left off: the name earns its length or it does not appear.
+    val out = JSONArray()
+    for (obj in rows) {
+      if (accounts.size > 1) {
+        val account = obj.optString("account", "")
+        if (account.isNotEmpty()) {
+          obj.put("name", "${obj.optString("name", "")} ($account)")
+        }
+      }
+      obj.remove("account")
+      out.put(obj)
     }
     return out.toString()
   }
