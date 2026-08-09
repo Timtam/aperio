@@ -37,6 +37,37 @@ use crate::calendars::split_recurrence;
 use crate::mapping::{encode_json, fmt_date, fmt_time, fmt_utc, write_sound};
 use crate::{map_sql_err, LocalAdapter};
 
+/// Remember that a group was dissolved, and when.
+///
+/// Kept monotonic: a later dissolve wins, an earlier one leaves the existing
+/// mark alone, so replaying the same log twice cannot move the line backwards.
+fn tombstone(
+    conn: &rusqlite::Connection,
+    group_id: &str,
+    dissolved_at: &str,
+) -> rusqlite::Result<()> {
+    let current: Option<String> = conn
+        .query_row(
+            "SELECT dissolved_at FROM event_group_tombstones WHERE group_id = ?",
+            params![group_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let keep = match &current {
+        Some(existing) => is_newer_claim((dissolved_at, group_id), (existing, group_id)),
+        None => true,
+    };
+    if keep {
+        conn.execute(
+            "INSERT INTO event_group_tombstones (group_id, dissolved_at)
+             VALUES (?, ?)
+             ON CONFLICT(group_id) DO UPDATE SET dissolved_at = excluded.dissolved_at",
+            params![group_id, dissolved_at],
+        )?;
+    }
+    Ok(())
+}
+
 /// Which of two claims about a group is the later one.
 ///
 /// The timestamp decides; the group id breaks a tie, so two devices that
@@ -425,7 +456,12 @@ impl LocalAdapter {
         let mut conn = self.db().lock().expect("db mutex poisoned");
         let tx = conn.transaction().map_err(map_sql_err)?;
 
-        // An older claim about a group we already hold changes nothing.
+        // An older claim about a group we already hold changes nothing — and
+        // neither does one older than the group's own DISSOLVE. Without the
+        // second half a dissolve is silently undone: the device that dissolved
+        // never re-applies its own event, so an update another device wrote
+        // before it heard the news arrives to an empty table and re-creates the
+        // group there, and only there.
         let local: Option<String> = tx
             .query_row(
                 "SELECT updated_at FROM event_groups WHERE id = ?",
@@ -434,8 +470,16 @@ impl LocalAdapter {
             )
             .optional()
             .map_err(map_sql_err)?;
-        if let Some(local) = local {
-            if !is_newer_claim((&group.updated_at, &group.id), (&local, &group.id)) {
+        let dissolved: Option<String> = tx
+            .query_row(
+                "SELECT dissolved_at FROM event_group_tombstones WHERE group_id = ?",
+                params![group.id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(map_sql_err)?;
+        for incumbent in [local, dissolved].into_iter().flatten() {
+            if !is_newer_claim((&group.updated_at, &group.id), (&incumbent, &group.id)) {
                 return Ok(());
             }
         }
@@ -477,6 +521,7 @@ impl LocalAdapter {
         if members.len() < 2 {
             tx.execute("DELETE FROM event_groups WHERE id = ?", params![group.id])
                 .map_err(map_sql_err)?;
+            tombstone(&tx, &group.id, &group.updated_at).map_err(map_sql_err)?;
             tx.commit().map_err(map_sql_err)?;
             return Ok(());
         }
@@ -519,22 +564,56 @@ impl LocalAdapter {
             .map_err(map_sql_err)?;
         }
         for id in robbed {
-            tx.execute(
-                "DELETE FROM event_groups
-                  WHERE id = ?1
-                    AND (SELECT COUNT(*) FROM event_group_members WHERE group_id = ?1) < 2",
-                params![id],
-            )
-            .map_err(map_sql_err)?;
+            let dropped = tx
+                .execute(
+                    "DELETE FROM event_groups
+                      WHERE id = ?1
+                        AND (SELECT COUNT(*) FROM event_group_members WHERE group_id = ?1) < 2",
+                    params![id],
+                )
+                .map_err(map_sql_err)?;
+            if dropped > 0 {
+                // Dissolved by this claim, so it is dissolved AS OF this claim:
+                // an older update naming it must not bring it back.
+                tombstone(&tx, &id, &group.updated_at).map_err(map_sql_err)?;
+            }
         }
         tx.commit().map_err(map_sql_err)?;
         Ok(())
     }
 
-    pub fn delete_event_group_from_sync(&self, group_id: &str) -> cal_core::Result<()> {
+    /// Record a dissolve mark that arrived in a snapshot.
+    ///
+    /// Separate from `delete_event_group_from_sync` because a snapshot's marks
+    /// are applied BEFORE its groups: deleting here would delete a group the
+    /// same snapshot is about to insert.
+    pub fn mark_event_group_dissolved_from_sync(
+        &self,
+        group_id: &str,
+        dissolved_at: &str,
+    ) -> cal_core::Result<()> {
         let conn = self.db().lock().expect("db mutex poisoned");
-        conn.execute("DELETE FROM event_groups WHERE id = ?", params![group_id])
+        tombstone(&conn, group_id, dissolved_at).map_err(map_sql_err)?;
+        Ok(())
+    }
+
+    /// Apply a dissolve, and leave a mark that outlives the row.
+    ///
+    /// `dissolved_at` is the arriving envelope's timestamp — WHEN the other
+    /// device decided, not when we heard about it. Stamping "now" here would
+    /// make the tombstone newer than a re-grouping the user did in between,
+    /// and swallow it.
+    pub fn delete_event_group_from_sync(
+        &self,
+        group_id: &str,
+        dissolved_at: &str,
+    ) -> cal_core::Result<()> {
+        let mut conn = self.db().lock().expect("db mutex poisoned");
+        let tx = conn.transaction().map_err(map_sql_err)?;
+        tx.execute("DELETE FROM event_groups WHERE id = ?", params![group_id])
             .map_err(map_sql_err)?;
+        tombstone(&tx, group_id, dissolved_at).map_err(map_sql_err)?;
+        tx.commit().map_err(map_sql_err)?;
         Ok(())
     }
 
@@ -889,6 +968,48 @@ mod tests {
     }
 
     #[test]
+    fn a_dissolved_group_is_not_brought_back_by_an_older_update() {
+        let a = adapter();
+        a.upsert_event_group_from_sync(&stamped(
+            "g1",
+            "2026-08-10T09:00:00Z",
+            vec![member("work", "ev-a"), member("private", "ev-b")],
+        ))
+        .unwrap();
+        a.delete_event_group_from_sync("g1", "2026-08-12T09:00:00Z")
+            .unwrap();
+        // An update written by a device that had not yet heard of the
+        // dissolve. With the row gone there is nothing left to compare it
+        // against, so without a tombstone it simply re-creates the group —
+        // here, and nowhere else.
+        a.upsert_event_group_from_sync(&stamped(
+            "g1",
+            "2026-08-11T09:00:00Z",
+            vec![member("work", "ev-a"), member("private", "ev-b")],
+        ))
+        .unwrap();
+
+        assert!(group_ids(&a).is_empty(), "a dissolved group came back");
+    }
+
+    #[test]
+    fn a_dissolve_does_not_bury_a_later_regrouping() {
+        let a = adapter();
+        a.delete_event_group_from_sync("g1", "2026-08-10T09:00:00Z")
+            .unwrap();
+        // The user grouped those events again afterwards. The tombstone is
+        // about a moment, not about the id forever.
+        a.upsert_event_group_from_sync(&stamped(
+            "g1",
+            "2026-08-12T09:00:00Z",
+            vec![member("work", "ev-a"), member("private", "ev-b")],
+        ))
+        .unwrap();
+
+        assert_eq!(members_of(&a, "g1"), vec!["ev-a", "ev-b"]);
+    }
+
+    #[test]
     fn dissolving_takes_the_members_with_it_and_leaves_the_events_alone() {
         let a = adapter();
         a.upsert_event_group_from_sync(&group(
@@ -896,7 +1017,8 @@ mod tests {
             vec![member("work", "ev-a"), member("private", "ev-b")],
         ))
         .unwrap();
-        a.delete_event_group_from_sync("g1").unwrap();
+        a.delete_event_group_from_sync("g1", "2026-08-12T09:00:00Z")
+            .unwrap();
 
         assert!(group_ids(&a).is_empty());
         assert!(
@@ -905,6 +1027,7 @@ mod tests {
         );
         // Dissolving is idempotent: a second device dissolving the same group
         // must not fail the round.
-        a.delete_event_group_from_sync("g1").unwrap();
+        a.delete_event_group_from_sync("g1", "2026-08-12T09:00:00Z")
+            .unwrap();
     }
 }

@@ -396,8 +396,11 @@ impl EventLogApplier {
                 Ok(true)
             }
             SyncEvent::EventGroupDissolved(payload) => {
+                // The envelope's timestamp, not ours: it says WHEN the other
+                // device decided, which is what an arriving update has to be
+                // compared against.
                 self.adapter
-                    .delete_event_group_from_sync(&payload.id)
+                    .delete_event_group_from_sync(&payload.id, &env.timestamp.to_rfc3339())
                     .map_err(core_to_sync)?;
                 Ok(true)
             }

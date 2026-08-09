@@ -2451,6 +2451,23 @@ unabhängige Termine vor sich zu haben. Für die Meeting-Id gilt das Gegenteil; 
 ist Buchhaltung über ein Anbieter-Objekt, das jedes Gerät über den Termin selbst
 erreicht.
 
+Beim Anwenden entscheidet nicht die Reihenfolge des Eintreffens, sondern der
+**Zeitstempel**. Das ist keine Feinheit: der Applier spielt die *eigenen*
+Umschläge eines Geräts nie erneut ab, also wenden zwei Geräte in
+entgegengesetzter Reihenfolge an — „nimm, was ankommt" hieße, dass jedes auf der
+Behauptung des anderen landet und dort bleibt. Ein älterer Anspruch auf eine
+Gruppe, die schon vorliegt, wird verworfen; ein umstrittenes Mitglied geht an den
+neueren Anspruch; die Gruppen-Id bricht den Gleichstand. Jedes Gerät rechnet
+dasselbe und kommt ohne weitere Runde auf dieselbe Antwort.
+
+Ein **aufgelöste**-Marke (Migration 0036, `event_group_tombstones`) überlebt die
+Zeile. Sonst wird eine Auflösung still rückgängig gemacht: das auflösende Gerät
+hört sein eigenes Ereignis nie wieder, während eine Aktualisierung, die ein
+anderes Gerät vor der Nachricht geschrieben hat, danach noch eintrifft — und ohne
+Zeile, gegen die man sie vergleichen könnte, legt sie die Gruppe wieder an, nur
+dort. Die Marke reist auch im Snapshot mit, aus demselben Grund wie die Gruppen
+selbst.
+
 `event_group.updated` trägt die **komplette** Mitgliederliste, nicht die Änderung
 daran. Eine Gruppe ist klein, nur als Ganzes sinnvoll — und zwei Geräte, die
 dieselben Termine unabhängig voneinander gruppieren, sollen **konvergieren** statt

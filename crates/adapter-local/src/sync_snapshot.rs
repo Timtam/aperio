@@ -98,6 +98,22 @@ pub struct SnapshotDump {
     /// table here, so it can go in last without ordering hazards.
     #[serde(default)]
     pub event_groups: Vec<EventGroup>,
+    /// Groups that were DISSOLVED, and when (migration 0036).
+    ///
+    /// A dissolve has to survive compaction for the same reason the groups
+    /// themselves do — but the other way round. A device that joins holding
+    /// only this snapshot has no row to compare an arriving update against, so
+    /// an update another device wrote before it heard about the dissolve would
+    /// re-create the group there and nowhere else. The mark is two strings.
+    #[serde(default)]
+    pub event_group_tombstones: Vec<EventGroupTombstone>,
+}
+
+/// A group that was dissolved, and the moment it was.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EventGroupTombstone {
+    pub group_id: String,
+    pub dissolved_at: String,
 }
 
 impl LocalAdapter {
@@ -116,6 +132,7 @@ impl LocalAdapter {
             tasks: self.dump_tasks_for_snapshot()?,
             color_labels: self.dump_color_labels_for_snapshot()?,
             event_groups: self.dump_event_groups_for_snapshot()?,
+            event_group_tombstones: self.dump_event_group_tombstones_for_snapshot()?,
         })
     }
 
@@ -347,6 +364,27 @@ impl LocalAdapter {
         Ok(out)
     }
 
+    /// Read every dissolve mark.
+    pub fn dump_event_group_tombstones_for_snapshot(
+        &self,
+    ) -> cal_core::Result<Vec<EventGroupTombstone>> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let mut stmt = conn
+            .prepare("SELECT group_id, dissolved_at FROM event_group_tombstones")
+            .map_err(map_sql_err)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(EventGroupTombstone {
+                    group_id: row.get(0)?,
+                    dissolved_at: row.get(1)?,
+                })
+            })
+            .map_err(map_sql_err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(map_sql_err)?;
+        Ok(rows)
+    }
+
     /// Apply a `SnapshotDump` onto local SQLite, upserting every row.
     ///
     /// Order matters: parent rows go in before children so the FK
@@ -442,8 +480,21 @@ impl LocalAdapter {
                 }
             }
         }
-        // Last: groups name foreign calendars and events, so nothing here is an
-        // FK target and nothing waits on them.
+        // Dissolve marks BEFORE the groups they are about: applying them the
+        // other way round would let a snapshot's own stale group survive its
+        // own tombstone for the length of one loop, and a reader in between
+        // would see a group the snapshot itself says is gone.
+        for stone in &dump.event_group_tombstones {
+            match self.mark_event_group_dissolved_from_sync(&stone.group_id, &stone.dissolved_at) {
+                Ok(()) => report.applied += 1,
+                Err(err) => {
+                    warn!(group_id = %stone.group_id, ?err, "snapshot apply: tombstone failed");
+                    report.failed += 1;
+                }
+            }
+        }
+        // Then the groups: they name foreign calendars and events, so nothing
+        // here is an FK target and nothing waits on them.
         for group in &dump.event_groups {
             match self.upsert_event_group_from_sync(group) {
                 Ok(()) => report.applied += 1,
@@ -788,6 +839,69 @@ mod tests {
         );
     }
 
+    /// A dissolve has to survive compaction too: a device joining with only
+    /// this snapshot has no row left to compare an arriving older update
+    /// against, and would re-create a group everyone else has dropped.
+    #[test]
+    fn a_dissolve_survives_the_snapshot() {
+        let src = make_adapter();
+        src.upsert_event_group_from_sync(&EventGroup {
+            id: "g1".into(),
+            created_at: "2026-08-09T12:00:00Z".into(),
+            updated_at: "2026-08-09T12:00:00Z".into(),
+            members: vec![
+                EventGroupMember {
+                    calendar_id: "work".into(),
+                    event_id: "ev-a".into(),
+                    title: "Wochenplanung".into(),
+                    starts_at: "2026-08-10T08:00:00Z".into(),
+                    added_at: "2026-08-09T12:00:00Z".into(),
+                },
+                EventGroupMember {
+                    calendar_id: "private".into(),
+                    event_id: "ev-b".into(),
+                    title: "Wochenplanung".into(),
+                    starts_at: "2026-08-10T08:00:00Z".into(),
+                    added_at: "2026-08-09T12:00:01Z".into(),
+                },
+            ],
+        })
+        .unwrap();
+        src.delete_event_group_from_sync("g1", "2026-08-12T09:00:00Z")
+            .unwrap();
+
+        let dump = src.dump_for_snapshot().unwrap();
+        assert!(dump.event_groups.is_empty());
+        assert_eq!(dump.event_group_tombstones.len(), 1);
+
+        let dst = make_adapter();
+        dst.apply_snapshot_dump(&dump).unwrap();
+        // The straggler's update, written before it heard about the dissolve.
+        dst.upsert_event_group_from_sync(&EventGroup {
+            id: "g1".into(),
+            created_at: "2026-08-09T12:00:00Z".into(),
+            updated_at: "2026-08-11T09:00:00Z".into(),
+            members: vec![
+                EventGroupMember {
+                    calendar_id: "work".into(),
+                    event_id: "ev-a".into(),
+                    title: "Wochenplanung".into(),
+                    starts_at: "2026-08-10T08:00:00Z".into(),
+                    added_at: "2026-08-09T12:00:00Z".into(),
+                },
+                EventGroupMember {
+                    calendar_id: "private".into(),
+                    event_id: "ev-b".into(),
+                    title: "Wochenplanung".into(),
+                    starts_at: "2026-08-10T08:00:00Z".into(),
+                    added_at: "2026-08-09T12:00:01Z".into(),
+                },
+            ],
+        })
+        .unwrap();
+        assert!(dst.dump_for_snapshot().unwrap().event_groups.is_empty());
+    }
+
     /// Same FK hazard, sibling table: `tasks.parent_id` is self-referential
     /// too, so a subtask dumped before its parent task must still survive.
     #[test]
@@ -892,6 +1006,7 @@ mod tests {
             tasks: vec![],
             color_labels: vec![],
             event_groups: vec![],
+            event_group_tombstones: vec![],
         };
         let dst = make_adapter();
         let first = dst.apply_snapshot_dump(&dump).unwrap();

@@ -67,6 +67,26 @@ pub enum EventGroupsError {
     Vanished,
 }
 
+/// Remember that this device dissolved a group, and when.
+///
+/// The mark has to outlive the row: another device may still be holding an
+/// UPDATE it wrote before it heard about the dissolve, and when that arrives
+/// to an empty table there is nothing left to compare it against — so it
+/// re-creates the group. See migration 0036.
+fn mark_dissolved(
+    conn: &rusqlite::Connection,
+    group_id: &str,
+    dissolved_at: &str,
+) -> Result<(), EventGroupsError> {
+    conn.execute(
+        "INSERT INTO event_group_tombstones (group_id, dissolved_at)
+         VALUES (?, ?)
+         ON CONFLICT(group_id) DO UPDATE SET dissolved_at = excluded.dissolved_at",
+        params![group_id, dissolved_at],
+    )?;
+    Ok(())
+}
+
 /// Read one group and its members.
 ///
 /// Takes a plain `&Connection` so a transaction can use it too: a caller that
@@ -168,6 +188,9 @@ impl<'a> EventGroupsRepo<'a> {
                 id.clone()
             }
             None => {
+                // A fresh id every time, so a group the user re-creates after
+                // dissolving one is a new group and its predecessor's
+                // tombstone (migration 0036) has nothing to say about it.
                 let id = uuid::Uuid::new_v4().to_string();
                 tx.execute(
                     "INSERT INTO event_groups (id, created_at, updated_at) VALUES (?, ?, ?)",
@@ -307,6 +330,7 @@ impl<'a> EventGroupsRepo<'a> {
         )?;
         if remaining < 2 {
             tx.execute("DELETE FROM event_groups WHERE id = ?", params![group_id])?;
+            mark_dissolved(&tx, &group_id, &now)?;
             tx.commit()?;
             return Ok(Some(Ungrouped::Dissolved { group_id }));
         }
@@ -321,8 +345,14 @@ impl<'a> EventGroupsRepo<'a> {
 
     /// Dissolve a whole group. The events themselves are untouched.
     pub fn dissolve(&self, group_id: &str) -> Result<bool, EventGroupsError> {
-        let conn = self.db.lock().expect("db mutex poisoned");
-        let removed = conn.execute("DELETE FROM event_groups WHERE id = ?", params![group_id])?;
+        let now = Utc::now().to_rfc3339();
+        let mut conn = self.db.lock().expect("db mutex poisoned");
+        let tx = conn.transaction()?;
+        let removed = tx.execute("DELETE FROM event_groups WHERE id = ?", params![group_id])?;
+        if removed > 0 {
+            mark_dissolved(&tx, group_id, &now)?;
+        }
+        tx.commit()?;
         Ok(removed > 0)
     }
 }
