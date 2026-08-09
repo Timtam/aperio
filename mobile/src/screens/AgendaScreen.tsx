@@ -9,12 +9,20 @@ import {
   View,
 } from 'react-native';
 
-import type { ColorLabel, DayOccurrence, MultiDayInfo } from '@aperio/shared';
-import { eventInstanceKey } from '@aperio/shared';
+import type {
+  CollapsedRow,
+  ColorLabel,
+  DayOccurrence,
+  EventGroup,
+  MultiDayInfo,
+} from '@aperio/shared';
 import {
+  collapseEventGroups,
+  eventInstanceKey,
   expandAll,
   expandToDayOccurrences,
   localDateKey,
+  seriesIdOf,
 } from '@aperio/shared';
 
 import {
@@ -24,6 +32,7 @@ import {
   listCalendars,
 } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
+import { eventGroupsForEvents } from '../api/eventGroups';
 import { ActionsMenu, type MenuAction } from '../components/ActionsMenu';
 import { CalendarActions } from '../components/CalendarActions';
 import { useNewEventOnDay } from '../components/useNewEventOnDay';
@@ -91,6 +100,7 @@ export default function AgendaScreen({
     const seed = route.params?.anchor ? new Date(route.params.anchor) : new Date();
     return localMidnight(Number.isNaN(seed.getTime()) ? new Date() : seed);
   });
+  const [eventGroups, setEventGroups] = useState<EventGroup[]>([]);
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [colorLabels, setColorLabels] = useState<ColorLabel[]>([]);
   const [occurrences, setOccurrences] = useState<DayOccurrence<CalendarEvent>[]>([]);
@@ -189,6 +199,22 @@ export default function AgendaScreen({
       // Drop events from calendars the user hid (the Calendars-screen toggles).
       const visible = expanded.filter((e) => !hidden.has(e.calendar_id));
       setOccurrences(expandToDayOccurrences(visible, range));
+      // Which of these Aperio has been told mean the same appointment. One
+      // query per window; whole groups come back, so a copy in a switched-off
+      // calendar still counts toward what a folded row says. A failure means
+      // no folding this round — what the app did before groups existed.
+      eventGroupsForEvents(
+        visible.map((ev) => ({
+          calendar_id: ev.calendar_id,
+          event_id: seriesIdOf(ev),
+        })),
+      )
+        .then((found) => {
+          if (reqToken.current === token) setEventGroups(found);
+        })
+        .catch(() => {
+          if (reqToken.current === token) setEventGroups([]);
+        });
       hasLoadedRef.current = true;
     } catch (err) {
       if (reqToken.current !== token) return;
@@ -214,14 +240,46 @@ export default function AgendaScreen({
   useCacheReload('calendar', load);
 
   // Per-day event counts for the accessible day-header labels.
+  /**
+   * One row per appointment instead of one per copy, folded PER DAY — the
+   * contract `collapseEventGroups` documents, because a recurring appointment
+   * renders a row per day and across a whole agenda its own days would look
+   * exactly like copies that disagree.
+   */
+  const { visibleOccurrences, groupRows } = useMemo(() => {
+    const byDay = new Map<string, DayOccurrence<CalendarEvent>[]>();
+    for (const occ of occurrences) {
+      const key = localDateKey(occ.day);
+      byDay.set(key, [...(byDay.get(key) ?? []), occ]);
+    }
+    const kept: DayOccurrence<CalendarEvent>[] = [];
+    const rows = new Map<string, CollapsedRow<CalendarEvent>>();
+    for (const [dayKey, dayOccurrences] of byDay) {
+      const folded = collapseEventGroups(
+        dayOccurrences.map((o) => o.ev),
+        eventGroups,
+        seriesIdOf,
+      );
+      const survivors = new Set(folded.map((row) => eventInstanceKey(row.event)));
+      for (const row of folded) {
+        if (row.group) rows.set(`${eventInstanceKey(row.event)}@${dayKey}`, row);
+      }
+      for (const occ of dayOccurrences) {
+        if (survivors.has(eventInstanceKey(occ.ev))) kept.push(occ);
+      }
+    }
+    return { visibleOccurrences: kept, groupRows: rows };
+  }, [occurrences, eventGroups]);
+
   const dayCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const occ of occurrences) {
+
+    for (const occ of visibleOccurrences) {
       const k = localDateKey(occ.day);
       counts.set(k, (counts.get(k) ?? 0) + 1);
     }
     return counts;
-  }, [occurrences]);
+  }, [visibleOccurrences]);
 
   const readOnlyIds = useMemo(
     () => new Set(calendars.filter((c) => c.read_only).map((c) => c.id)),
@@ -337,6 +395,20 @@ export default function AgendaScreen({
       if (span) {
         label += t('views.multiDaySuffix', { day: span.dayIndex, total: span.totalDays });
       }
+      // What this row stands for, if it stands for more than itself. The count
+      // comes from the group, so a copy in a switched-off calendar is counted
+      // too — that is what makes it match what the user knows they keep.
+      const groupRow = groupRows.get(`${eventInstanceKey(ev)}@${localDateKey(day)}`);
+      if (groupRow?.group) {
+        label += groupRow.diverged
+          ? t('views.eventGroupDivergedSuffix', { count: groupRow.otherMembers })
+          : t('views.eventGroupSuffix', {
+              count: groupRow.otherMembers,
+              calendars: groupRow.calendarIds
+                .map((id) => calendarsById.get(id)?.name ?? id)
+                .join(', '),
+            });
+      }
       if (ev.cancelled) {
         label += t('views.eventCancelledSuffix');
       }
@@ -346,7 +418,7 @@ export default function AgendaScreen({
       }
       return label;
     },
-    [calendarsById, fmtFullDate, labelsById, t, timeLabel],
+    [calendarsById, fmtFullDate, groupRows, labelsById, t, timeLabel],
   );
 
   return (
@@ -427,7 +499,7 @@ export default function AgendaScreen({
         <Text style={styles.muted} accessibilityLabel={t('views.loading')}>
           {t('views.loading')}
         </Text>
-      ) : occurrences.length === 0 ? (
+      ) : visibleOccurrences.length === 0 ? (
         <Text style={styles.muted}>{t('views.agenda.empty')}</Text>
       ) : (
         <ScrollView
@@ -442,7 +514,7 @@ export default function AgendaScreen({
           {(() => {
             let prevKey: string | null = null;
             const rows: ReactNode[] = [];
-            for (const occ of occurrences) {
+            for (const occ of visibleOccurrences) {
               const key = localDateKey(occ.day);
               if (key !== prevKey) {
                 prevKey = key;
