@@ -28,5 +28,6 @@ export * from './accountSchema';
 export * from './conferencing';
 export * from './meetingEvents';
 export * from './eventGroups';
+export * from './collapseEventGroups';
 export * from './deviceRegistry';
 export * from './widgetSnapshot';
