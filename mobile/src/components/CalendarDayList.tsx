@@ -28,6 +28,10 @@ import type {
 import {
   eventInstanceKey,
   withoutDuplicateMeetings,
+  collapseEventGroups,
+  seriesIdOf,
+  type CollapsedRow,
+  type EventGroup,
 } from '@aperio/shared';
 import {
   assigneeSuffix,
@@ -75,6 +79,7 @@ import { joinAction, openConference } from '../intl/conferencing';
 import { resolveEventColor } from '../intl/eventColor';
 import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
 import type { RootStackParamList } from '../navigation/types';
+import { eventGroupsForEvents } from '../api/eventGroups';
 import { ActionsMenu, type MenuAction } from './ActionsMenu';
 import { useCacheReload } from '../state/cacheObserver';
 import { hapticLoadBegin, hapticLoadEnd } from '../state/haptics';
@@ -764,6 +769,33 @@ export function CalendarDayList({
     () => events.filter((ev) => !hiddenCalendars.has(ev.calendar_id)),
     [events, hiddenCalendars],
   );
+  // Which of these Aperio has been told mean the same appointment. One query
+  // per window, not one per row; whole groups come back, so a copy in a
+  // switched-off calendar still counts toward what a folded row says.
+  const [eventGroups, setEventGroups] = useState<EventGroup[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const refs = visibleEvents.map((ev) => ({
+      calendar_id: ev.calendar_id,
+      event_id: seriesIdOf(ev),
+    }));
+    if (refs.length === 0) {
+      setEventGroups([]);
+      return;
+    }
+    eventGroupsForEvents(refs)
+      .then((found) => {
+        if (!cancelled) setEventGroups(found);
+      })
+      .catch(() => {
+        // No folding this round — which is what the app did before groups
+        // existed. Never an empty day.
+        if (!cancelled) setEventGroups([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visibleEvents]);
   // Expand recurring SCHEDULED tasks into one occurrence per planned day across
   // the visible window — so a task recurring every day/week shows on EVERY due
   // day here (like a recurring event), not only its single current
@@ -782,8 +814,12 @@ export function CalendarDayList({
     }
     return expandScheduledRecurringTasks(tasks, fromKey, toKey);
   }, [tasks, dayKeys]);
-  const buckets = useMemo<DayBucket[]>(() => {
-    return days.map((date, i) => {
+  // The day buckets AND what each folded row stands for, built together: the
+  // map describes exactly these rows, so computing it anywhere else would let
+  // a stale one outlive them.
+  const { buckets, groupRows } = useMemo(() => {
+    const rows = new Map<string, CollapsedRow<CalendarEvent>>();
+    const built: DayBucket[] = days.map((date, i) => {
       const key = dayKeys[i];
       const allDay = visibleEvents.filter(
         (ev) => ev.all_day && daysCoveredKeys(ev).includes(key),
@@ -795,8 +831,17 @@ export function CalendarDayList({
         (ev) => !ev.all_day && daysCoveredKeys(ev).includes(key),
       );
       const dayTasks = filterTasksOnDay(expandedTasks, key, showCompletedForList, meFor);
+      // One row per appointment instead of one per copy, decided PER DAY —
+      // the contract `collapseEventGroups` documents, because a recurring
+      // appointment renders a row per day and across a week its own days
+      // would look exactly like copies that disagree.
+      const foldedAllDay = collapseEventGroups(allDay, eventGroups, seriesIdOf);
+      const foldedTimed = collapseEventGroups(timedEvents, eventGroups, seriesIdOf);
+      for (const row of [...foldedAllDay, ...foldedTimed]) {
+        if (row.group) rows.set(`${eventInstanceKey(row.event)}@${key}`, row);
+      }
       const { timed, untimed } = mergeDayItems(
-        timedEvents,
+        foldedTimed.map((row) => row.event),
         dayTasks,
         key,
         (ev) => new Date(ev.start).getTime(),
@@ -804,13 +849,22 @@ export function CalendarDayList({
       return {
         key,
         date,
-        allDay,
+        allDay: foldedAllDay.map((row) => row.event),
         timed,
         untimed,
         count: allDay.length + timed.length + untimed.length,
       };
     });
-  }, [days, dayKeys, visibleEvents, expandedTasks, showCompletedForList, meFor]);
+    return { buckets: built, groupRows: rows };
+  }, [
+    days,
+    dayKeys,
+    visibleEvents,
+    expandedTasks,
+    eventGroups,
+    showCompletedForList,
+    meFor,
+  ]);
 
   const totalItems = useMemo(
     () => buckets.reduce((sum, b) => sum + b.count, 0),
@@ -996,6 +1050,20 @@ export function CalendarDayList({
       if (span) {
         label += t('views.multiDaySuffix', { day: span.dayIndex, total: span.totalDays });
       }
+      // What this row stands for, if it stands for more than itself. The count
+      // comes from the group, so a copy in a switched-off calendar is counted
+      // too — that is what makes it match what the user knows they keep.
+      const groupRow = groupRows.get(`${eventInstanceKey(ev)}@${localDateKey(day)}`);
+      if (groupRow?.group) {
+        label += groupRow.diverged
+          ? t('views.eventGroupDivergedSuffix', { count: groupRow.otherMembers })
+          : t('views.eventGroupSuffix', {
+              count: groupRow.otherMembers,
+              calendars: groupRow.calendarIds
+                .map((id) => calendarsById.get(id)?.name ?? id)
+                .join(', '),
+            });
+      }
       if (ev.cancelled) {
         label += t('views.eventCancelledSuffix');
       }
@@ -1005,7 +1073,7 @@ export function CalendarDayList({
       }
       return label;
     },
-    [calendarsById, eventTimeLabel, labelsById, t],
+    [calendarsById, eventTimeLabel, groupRows, labelsById, t],
   );
 
   const taskLabel = useCallback(

@@ -13,7 +13,11 @@ import {
   occurrenceIsoOf,
   seriesIdOf,
 } from '../../intl/recurrence';
-import { eventInstanceKey } from '@aperio/shared';
+import {
+  collapseEventGroups,
+  eventInstanceKey,
+  type CollapsedRow,
+} from '@aperio/shared';
 import {
   expandToDayOccurrences,
   type DayOccurrence,
@@ -22,6 +26,7 @@ import { useCalendarStore } from '../../state/calendarStoreContext';
 import { useChipContextMenu } from '../../state/useChipContextMenu';
 import { useDialogState } from '../../state/dialogStateContext';
 import { useEvents } from '../../state/useEvents';
+import { useEventGroups } from '../../state/useEventGroups';
 import { useViewState } from '../../state/viewStateContext';
 import { visibleRange } from '../../state/viewMath';
 import { duplicateEvent } from '../duplicateActions';
@@ -67,10 +72,41 @@ export function AgendaView() {
   // covered day. A 14-day vacation becomes 14 rows, each carrying
   // "Tag 3 von 14" position info; keyboard focus / Enter / Delete
   // operate on the underlying event via `occurrences[focusIndex].ev`.
-  const occurrences = useMemo(
+  const allOccurrences = useMemo(
     () => expandToDayOccurrences(events, range),
     [events, range],
   );
+  const groups = useEventGroups(events);
+  /**
+   * One row per appointment instead of one per copy — folded PER DAY, which
+   * is the contract `collapseEventGroups` documents: a recurring appointment
+   * renders a row per day, so judged across the whole agenda its own days
+   * would look exactly like copies that disagree.
+   */
+  const { occurrences, groupRows } = useMemo(() => {
+    const byDay = new Map<string, DayOccurrence[]>();
+    for (const occ of allOccurrences) {
+      const key = localDateKey(occ.day);
+      byDay.set(key, [...(byDay.get(key) ?? []), occ]);
+    }
+    const kept: DayOccurrence[] = [];
+    const rows = new Map<string, CollapsedRow<CalendarEvent>>();
+    for (const [dayKey, dayOccurrences] of byDay) {
+      const folded = collapseEventGroups(
+        dayOccurrences.map((o) => o.ev),
+        groups,
+        seriesIdOf,
+      );
+      const survivors = new Set(folded.map((row) => eventInstanceKey(row.event)));
+      for (const row of folded) {
+        rows.set(`${eventInstanceKey(row.event)}@${dayKey}`, row);
+      }
+      for (const occ of dayOccurrences) {
+        if (survivors.has(eventInstanceKey(occ.ev))) kept.push(occ);
+      }
+    }
+    return { occurrences: kept, groupRows: rows };
+  }, [allOccurrences, groups]);
 
   const [focusIndex, setFocusIndex] = useState(0);
 
@@ -284,6 +320,7 @@ export function AgendaView() {
           </li>
         ) : (
           renderOccurrences(occurrences, focusIndex, {
+            groupRows,
             calendarById,
             labelById,
             fmt,
@@ -333,6 +370,9 @@ export function AgendaView() {
 }
 
 interface RenderContext {
+  /** The folded rows, keyed `<eventInstanceKey>@<dayKey>` — what each row
+   *  stands for, when it stands for more than itself. */
+  groupRows: Map<string, CollapsedRow<CalendarEvent>>;
   calendarById: Parameters<typeof resolveEventColor>[1];
   labelById: Parameters<typeof resolveEventColor>[2];
   fmt: ReturnType<typeof useDateFormat>;
@@ -382,6 +422,22 @@ function renderOccurrences(
       time: timeLabel,
       calendar: cal?.name ?? '—',
     });
+    // What this row stands for, if it stands for more than itself. The count
+    // comes from the group, so a copy in a switched-off calendar is counted
+    // too — that is what makes it match what the user knows they keep.
+    const groupRow = ctx.groupRows.get(`${eventInstanceKey(ev)}@${dayKey}`);
+    const groupSuffix = groupRow?.group
+      ? groupRow.diverged
+        ? ctx.t('views.eventGroupDivergedSuffix', {
+            count: groupRow.otherMembers,
+          })
+        : ctx.t('views.eventGroupSuffix', {
+            count: groupRow.otherMembers,
+            calendars: groupRow.calendarIds
+              .map((id) => ctx.calendarById.get(id)?.name ?? id)
+              .join(', '),
+          })
+      : '';
     const aria =
       (span
         ? ariaBase +
@@ -390,6 +446,7 @@ function renderOccurrences(
             total: span.totalDays,
           })
         : ariaBase) +
+      groupSuffix +
       (ev.cancelled ? ctx.t('views.eventCancelledSuffix') : '');
     const focused = i === focusIndex;
 
