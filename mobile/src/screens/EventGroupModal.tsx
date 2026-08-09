@@ -14,6 +14,7 @@ import {
   expandAll,
   memberFromEvent,
   seriesIdOf,
+  suggestGroupMate,
   withoutDuplicateMeetings,
   type EventGroup,
 } from '@aperio/shared';
@@ -210,6 +211,28 @@ export default function EventGroupModal({
     return out;
   }, [dayEvents, group, anchorKey]);
 
+  /**
+   * The candidate that looks like a copy of this event — same name, same
+   * start, another calendar (`suggestGroupMate`).
+   *
+   * Offered, never applied: it arrives preselected with a line saying why, so
+   * confirming is one tap and disagreeing is just choosing something else.
+   */
+  const suggested = useMemo(
+    () => suggestGroupMate({ ...event, id: anchorId }, candidates),
+    [event, anchorId, candidates],
+  );
+  // Applied ONCE. A ref rather than reading `picked` in the effect: the point
+  // is "did we already offer this", which is not the same question as "is
+  // something chosen right now" — a user who deliberately clears the choice
+  // must not have the suggestion pushed back at them.
+  const suggestionOffered = useRef(false);
+  useEffect(() => {
+    if (suggestionOffered.current || suggested == null) return;
+    suggestionOffered.current = true;
+    setPicked(eventGroupMemberKey(suggested.calendar_id, seriesIdOf(suggested)));
+  }, [suggested]);
+
   const options = useMemo(
     () =>
       candidates.map((ev) => ({
@@ -369,12 +392,19 @@ export default function EventGroupModal({
       ))}
 
       {options.length > 0 ? (
-        <RadioGroup<string>
-          label={t('dialogs.eventGroup.pickLabel')}
-          value={picked}
-          options={options}
-          onChange={setPicked}
-        />
+        <>
+          {suggested != null && (
+            <Text style={styles.hint} accessibilityRole="text">
+              {t('dialogs.eventGroup.suggestHint', { title: suggested.title })}
+            </Text>
+          )}
+          <RadioGroup<string>
+            label={t('dialogs.eventGroup.pickLabel')}
+            value={picked}
+            options={options}
+            onChange={setPicked}
+          />
+        </>
       ) : (
         <Text style={styles.hint} accessibilityRole="text">
           {t('dialogs.eventGroup.noCandidates')}

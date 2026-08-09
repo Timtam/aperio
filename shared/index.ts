@@ -30,5 +30,6 @@ export * from './meetingEvents';
 export * from './eventGroups';
 export * from './collapseEventGroups';
 export * from './groupCarry';
+export * from './suggestGroupMate';
 export * from './deviceRegistry';
 export * from './widgetSnapshot';

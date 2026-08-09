@@ -1208,6 +1208,7 @@
       "pickLabel": "Also means this appointment",
       "pickNone": "Choose an event…",
       "pickHint": "The other events of that day.",
+      "suggestHint": "\"{{title}}\" looks like the same appointment — same name, same time, another calendar. Confirm or choose another.",
       "noCandidates": "That day holds no other event.",
       "candidate": "{{title}}, {{time}}, {{calendar}}",
       "allDay": "all day",

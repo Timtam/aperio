@@ -1205,6 +1205,7 @@
       "pickLabel": "Meint diese Verabredung ebenfalls",
       "pickNone": "Termin auswählen…",
       "pickHint": "Die übrigen Termine dieses Tages.",
+      "suggestHint": "„{{title}}“ sieht nach derselben Verabredung aus — gleicher Name, gleiche Zeit, anderer Kalender. Bestätigen oder etwas anderes wählen.",
       "noCandidates": "An diesem Tag liegt kein weiterer Termin.",
       "candidate": "{{title}}, {{time}}, {{calendar}}",
       "allDay": "ganztägig",

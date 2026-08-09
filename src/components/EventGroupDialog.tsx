@@ -5,6 +5,7 @@ import {
   type EventGroup,
   memberFromEvent,
   eventGroupMemberKey,
+  suggestGroupMate,
   withoutDuplicateMeetings,
 } from '@aperio/shared';
 
@@ -225,6 +226,35 @@ export function EventGroupDialog({
     [events],
   );
 
+  /**
+   * The candidate that looks like a copy of this event — same name, same
+   * start, another calendar (`suggestGroupMate`).
+   *
+   * Offered, never applied: it arrives as the picker's preselection with a
+   * line saying why, so confirming is one keystroke and disagreeing is just
+   * picking something else. The design rejected grouping automatically for a
+   * concrete reason — an office full of "Team meeting" at 10:00 — and a
+   * preselection the user must still confirm keeps the recognition without
+   * the wrong answer.
+   */
+  const suggested = useMemo(
+    () => suggestGroupMate({ ...event, id: anchorId }, candidates),
+    [event, anchorId, candidates],
+  );
+  // Applied ONCE per open. A ref rather than reading `picked` in the effect:
+  // the point is "did we already offer this", which is not the same question
+  // as "is something chosen right now" — a user who deliberately clears the
+  // picker back to nothing must not have the suggestion pushed back at them.
+  const suggestionOffered = useRef(false);
+  useEffect(() => {
+    if (!isOpen) suggestionOffered.current = false;
+  }, [isOpen]);
+  useEffect(() => {
+    if (!isOpen || suggestionOffered.current || suggested == null) return;
+    suggestionOffered.current = true;
+    setPicked(eventGroupMemberKey(suggested.calendar_id, seriesIdOf(suggested)));
+  }, [isOpen, suggested]);
+
   const describeEvent = useCallback(
     (ev: { title: string; start: string; all_day: boolean; calendar_id: string }) =>
       t('dialogs.eventGroup.candidate', {
@@ -382,7 +412,9 @@ export function EventGroupDialog({
         <span className="form__hint">
           {candidates.length === 0
             ? t('dialogs.eventGroup.noCandidates')
-            : t('dialogs.eventGroup.pickHint')}
+            : suggested
+              ? t('dialogs.eventGroup.suggestHint', { title: suggested.title })
+              : t('dialogs.eventGroup.pickHint')}
         </span>
       </label>
 

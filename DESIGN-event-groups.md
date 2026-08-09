@@ -136,6 +136,15 @@ kann.
 **Stufe 3** — Erkennung und Vorschlag; das Meeting wandert an die Gruppe, die
 heutige Verknüpfungs-Rückfrage entfällt.
 
+Die **Erkennung** ist gebaut (`shared/suggestGroupMate.ts`): gleicher Name,
+gleicher Beginn (bei ganztägigen derselbe Tag), anderer Kalender — alle drei
+Bedingungen nötig. „Überlappend" hätte den Termin DAVOR angeboten, und ein
+Beinahe-Treffer beim Titel ist weit öfter etwas anderes als dieselbe Sache. Der
+Fund kommt als **Vorauswahl** in die Auswahlliste, mit einer Zeile, die sagt
+warum; angewendet wird nichts ohne Bestätigung. Das Vorschlagen von sich aus (ein
+Hinweis in der Ansicht, „einmal bestätigt, dauerhaft gemerkt") und das Wandern
+des Meetings an die Gruppe stehen noch aus.
+
 ## Größenordnung
 
 Vergleichbar mit den Widgets: ein eigenes Vorhaben über Kern, Synchronisation und

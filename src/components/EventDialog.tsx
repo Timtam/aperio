@@ -852,6 +852,7 @@ export function EventDialog({
       calendars,
       notifyAttendees,
       announce,
+      offerToCarry,
       onClose,
       t,
     ],
