@@ -20,7 +20,9 @@ import {
   expandScheduledRecurringTasks,
   isRecurringProjection,
 } from './expandTaskOccurrences';
-import { expandAll, type RecurringEventLike } from './recurrence';
+import { collapseEventGroups } from './collapseEventGroups';
+import type { EventGroup } from './eventGroups';
+import { expandAll, seriesIdOf, type RecurringEventLike } from './recurrence';
 import { filterTasksOnDay, taskTimeOnDay } from './taskDay';
 import type { Task, TaskUser } from './types';
 
@@ -149,6 +151,12 @@ export interface WidgetSnapshot {
 export interface WidgetSnapshotInput<E extends RecurringEventLike> {
   /** Events as the backend returns them: masters, unexpanded. */
   events: E[];
+  /** Which events mean the same appointment (DESIGN-event-groups.md).
+   *
+   *  Omitted, nothing folds — what the widget did before groups existed.
+   *  Given, an appointment that lives in four calendars takes ONE line of the
+   *  very little room a widget has, instead of all four. */
+  eventGroups?: readonly EventGroup[];
   tasks: Task[];
   now: Date;
   /** How far ahead to look. */
@@ -302,11 +310,43 @@ function dayKeysThrough(now: Date, horizonDays: number): string[] {
  *     drops cancelled, completed, and undated subtasks, and resolves the
  *     scheduled-vs-deadline question.
  */
+/** Collapse each group to one row, a day at a time. See the call site for why
+ *  the bucketing is not optional. */
+function foldPerDay<E extends RecurringEventLike>(
+  expanded: E[],
+  groups: readonly EventGroup[],
+  calendarIdOf: (event: E) => string,
+  allDayOf: (event: E) => boolean,
+): E[] {
+  const byDay = new Map<string, E[]>();
+  for (const ev of expanded) {
+    const key = localDateKey(new Date(ev.start));
+    byDay.set(key, [...(byDay.get(key) ?? []), ev]);
+  }
+  const kept: E[] = [];
+  for (const dayEvents of byDay.values()) {
+    const rows = collapseEventGroups(
+      dayEvents.map((ev) => ({
+        id: seriesIdOf(ev),
+        calendar_id: calendarIdOf(ev),
+        start: ev.start,
+        all_day: allDayOf(ev),
+        source: ev,
+      })),
+      groups,
+      (row) => row.id,
+    );
+    for (const row of rows) kept.push(row.event.source);
+  }
+  return kept;
+}
+
 export function buildWidgetSnapshot<E extends RecurringEventLike>(
   input: WidgetSnapshotInput<E>,
 ): WidgetSnapshot {
   const {
     events,
+    eventGroups,
     tasks,
     now,
     horizonDays,
@@ -343,7 +383,17 @@ export function buildWidgetSnapshot<E extends RecurringEventLike>(
   // master's duration, so anything still running began at most that long ago.
   const visibleEvents = events.filter((ev) => !hidden.has(calendarIdOf(ev)));
   const expandFrom = new Date(nowMs - runningLookbackMs(visibleEvents));
-  for (const ev of expandAll(visibleEvents, { start: expandFrom, end: horizonEnd })) {
+  // Folded PER DAY — the contract `collapseEventGroups` documents: across a
+  // multi-day horizon a recurring appointment's own days look exactly like
+  // copies that disagree, and then nothing folds at all. A widget has less
+  // room than any view in the app, so a copy it need not show is a line it can
+  // give to the next real thing.
+  const expanded = expandAll(visibleEvents, { start: expandFrom, end: horizonEnd });
+  const foldedEvents =
+    eventGroups && eventGroups.length > 0
+      ? foldPerDay(expanded, eventGroups, calendarIdOf, allDayOf)
+      : expanded;
+  for (const ev of foldedEvents) {
     // Over, not merely started. An all-day event needs no special case: its end
     // is the EXCLUSIVE next midnight, so this keeps it for the whole of its day
     // and drops it exactly when the day turns.

@@ -89,6 +89,29 @@ describe('collapsing groups into one row', () => {
     expect(rows.every((r) => r.diverged)).toBe(true);
   });
 
+  it('gives the widget one line for an appointment, not four', () => {
+    // The widget has less room than any view in the app, so a copy it need
+    // not show is a line it can give to the next real thing. Same rule, same
+    // helper — the shape is what differs.
+    const rows = collapseEventGroups(
+      [
+        row('ev-a', 'work', '2026-08-10T08:00:00Z'),
+        row('ev-b', 'private', '2026-08-10T08:00:00Z'),
+        row('ev-c', 'colleague', '2026-08-10T08:00:00Z'),
+        row('ev-next', 'work', '2026-08-10T09:00:00Z', 'Zahnarzt'),
+      ],
+      [
+        group('g1', [
+          ['work', 'ev-a'],
+          ['private', 'ev-b'],
+          ['colleague', 'ev-c'],
+        ]),
+      ],
+      seriesId,
+    );
+    expect(rows.map((r) => r.event.id)).toEqual(['ev-a', 'ev-next']);
+  });
+
   it('leaves an ungrouped day exactly as it was', () => {
     const events = [
       row('ev-a', 'work', '2026-08-10T08:00:00Z'),

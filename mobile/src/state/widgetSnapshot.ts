@@ -1,12 +1,17 @@
 import { useCallback, useEffect } from 'react';
 import { AppState, Platform } from 'react-native';
 
-import { buildWidgetSnapshot } from '@aperio/shared';
+import {
+  buildWidgetSnapshot,
+  seriesIdOf,
+  type EventGroup,
+} from '@aperio/shared';
 import type { ColorLabel, Task, TaskList, TaskUser } from '@aperio/shared';
 
 import CalFfi from '../../modules/cal-ffi';
 import i18n from '../../i18n';
 import { getEvents, listCalendars, type Calendar, type CalendarEvent } from '../api/calendar';
+import { eventGroupsForEvents } from '../api/eventGroups';
 import { getTasks, listTaskLists } from '../api/client';
 import { listColorLabels } from '../api/colorLabels';
 import { resolveEventColor } from '../intl/eventColor';
@@ -93,6 +98,15 @@ async function computeSnapshot(): Promise<SnapshotPass> {
   ]);
   const { tasks, lists } = collected;
   const meByList = await resolveMe(lists);
+  // Which of these mean the same appointment. Best-effort: a failed lookup
+  // means an unfolded widget, which is what it looked like before groups
+  // existed — never an empty one.
+  const eventGroups = await eventGroupsForEvents(
+    events.map((ev) => ({
+      calendar_id: ev.calendar_id,
+      event_id: seriesIdOf(ev),
+    })),
+  ).catch(() => [] as EventGroup[]);
 
   const calendarsById = new Map(calendars.map((c) => [c.id, c]));
   const labelsById = new Map(labels.map((l) => [l.id, l]));
@@ -114,6 +128,8 @@ async function computeSnapshot(): Promise<SnapshotPass> {
   const snapshot = JSON.stringify(
     buildWidgetSnapshot<CalendarEvent>({
       events,
+      // What the widget must not repeat: a group takes one line, not four.
+      eventGroups,
       tasks,
       now,
       horizonDays: HORIZON_DAYS,
