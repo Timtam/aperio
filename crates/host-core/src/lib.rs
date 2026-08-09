@@ -23,6 +23,7 @@ pub mod contact_sync;
 pub mod credential_sync;
 pub mod db;
 pub mod device_names;
+pub mod event_groups;
 pub mod event_log;
 pub mod logging;
 pub mod meetings;
