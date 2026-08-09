@@ -20,31 +20,9 @@ use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
 use std::collections::HashMap;
 
+use cal_core::{EventGroup, EventGroupMember};
+
 use crate::db::SharedConn;
-
-/// One event's membership in a group.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct EventGroupMember {
-    pub calendar_id: String,
-    /// Series master id.
-    pub event_id: String,
-    /// The title it had when it joined. Part of the SIGNATURE, never shown:
-    /// what a user reads always comes from the event itself, which may since
-    /// have been renamed.
-    pub title: String,
-    /// The start it had when it joined. The other half of the signature.
-    pub starts_at: String,
-    pub added_at: String,
-}
-
-/// A set of events that mean one appointment.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct EventGroup {
-    pub id: String,
-    pub created_at: String,
-    pub updated_at: String,
-    pub members: Vec<EventGroupMember>,
-}
 
 /// What a caller hands over to put an event in a group.
 #[derive(Debug, Clone, PartialEq, Eq)]

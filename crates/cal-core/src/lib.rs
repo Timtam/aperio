@@ -8,6 +8,7 @@ pub mod attendee;
 pub mod color;
 pub mod conferencing;
 pub mod error;
+pub mod event_group;
 pub mod extras;
 pub mod recurrence;
 pub mod reminder;
@@ -20,6 +21,7 @@ pub use adapter::{
 };
 pub use color::{ColorLabel, ColorLabelId, ColorSource, ContainerColor};
 pub use error::{Error, Result};
+pub use event_group::{EventGroup, EventGroupMember};
 pub use extras::{
     apply_task_extras, decode_payload, encode_payload, extras_for_task, recurrence_needs_extras,
     AperioExtras,

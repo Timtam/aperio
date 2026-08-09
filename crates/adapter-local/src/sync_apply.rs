@@ -364,6 +364,77 @@ impl LocalAdapter {
         Ok(())
     }
 
+    /// Replace a group's membership wholesale.
+    ///
+    /// Wholesale, not merged, because the event carries the whole set: the
+    /// arriving value IS the group, and reconciling it field by field would
+    /// invent a state neither device holds. Members are deleted and re-inserted
+    /// inside one transaction so no reader sees a half-membership.
+    ///
+    /// An arriving member may already sit in a DIFFERENT group locally — two
+    /// devices can group the same event independently. The unique index moves
+    /// it here, which is the intended outcome: the last writer's claim wins.
+    /// Its old group may be left with a single member, so groups that fall
+    /// below two are dropped, exactly as the local path does.
+    pub fn upsert_event_group_from_sync(
+        &self,
+        group: &cal_core::EventGroup,
+    ) -> cal_core::Result<()> {
+        let mut conn = self.db().lock().expect("db mutex poisoned");
+        let tx = conn.transaction().map_err(map_sql_err)?;
+        tx.execute(
+            "INSERT INTO event_groups (id, created_at, updated_at)
+             VALUES (?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at",
+            params![group.id, group.created_at, group.updated_at],
+        )
+        .map_err(map_sql_err)?;
+        tx.execute(
+            "DELETE FROM event_group_members WHERE group_id = ?",
+            params![group.id],
+        )
+        .map_err(map_sql_err)?;
+        for m in &group.members {
+            tx.execute(
+                "INSERT INTO event_group_members
+                     (group_id, calendar_id, event_id, title, starts_at, added_at)
+                 VALUES (?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(calendar_id, event_id) DO UPDATE SET
+                     group_id  = excluded.group_id,
+                     title     = excluded.title,
+                     starts_at = excluded.starts_at",
+                params![
+                    group.id,
+                    m.calendar_id,
+                    m.event_id,
+                    m.title,
+                    m.starts_at,
+                    m.added_at
+                ],
+            )
+            .map_err(map_sql_err)?;
+        }
+        // A group robbed of members by the arriving claim is no longer a group.
+        tx.execute(
+            "DELETE FROM event_groups WHERE id IN (
+                 SELECT g.id FROM event_groups g
+                  LEFT JOIN event_group_members m ON m.group_id = g.id
+                  GROUP BY g.id HAVING COUNT(m.event_id) < 2
+             )",
+            [],
+        )
+        .map_err(map_sql_err)?;
+        tx.commit().map_err(map_sql_err)?;
+        Ok(())
+    }
+
+    pub fn delete_event_group_from_sync(&self, group_id: &str) -> cal_core::Result<()> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        conn.execute("DELETE FROM event_groups WHERE id = ?", params![group_id])
+            .map_err(map_sql_err)?;
+        Ok(())
+    }
+
     pub fn delete_color_label_from_sync(&self, label_id: &str) -> cal_core::Result<()> {
         let conn = self.db().lock().expect("db mutex poisoned");
         conn.execute("DELETE FROM color_labels WHERE id = ?", params![label_id])
@@ -427,5 +498,148 @@ fn task_effort_to_text(e: cal_core::TaskEffort) -> &'static str {
         Small => "small",
         Medium => "medium",
         Large => "large",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::open_test_db;
+    use cal_core::{EventGroup, EventGroupMember};
+
+    fn adapter() -> LocalAdapter {
+        LocalAdapter::new(open_test_db())
+    }
+
+    fn member(calendar: &str, event: &str) -> EventGroupMember {
+        EventGroupMember {
+            calendar_id: calendar.into(),
+            event_id: event.into(),
+            title: "Wochenplanung".into(),
+            starts_at: "2026-08-10T08:00:00Z".into(),
+            added_at: "2026-08-09T12:00:00Z".into(),
+        }
+    }
+
+    fn group(id: &str, members: Vec<EventGroupMember>) -> EventGroup {
+        EventGroup {
+            id: id.into(),
+            created_at: "2026-08-09T12:00:00Z".into(),
+            updated_at: "2026-08-09T12:00:00Z".into(),
+            members,
+        }
+    }
+
+    fn members_of(a: &LocalAdapter, group_id: &str) -> Vec<String> {
+        let conn = a.db().lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT event_id FROM event_group_members WHERE group_id = ? ORDER BY event_id",
+            )
+            .unwrap();
+        let rows = stmt
+            .query_map(params![group_id], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        rows
+    }
+
+    fn group_ids(a: &LocalAdapter) -> Vec<String> {
+        let conn = a.db().lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT id FROM event_groups ORDER BY id")
+            .unwrap();
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        rows
+    }
+
+    #[test]
+    fn an_arriving_group_replaces_its_membership_rather_than_adding_to_it() {
+        let a = adapter();
+        a.upsert_event_group_from_sync(&group(
+            "g1",
+            vec![member("work", "ev-a"), member("private", "ev-b")],
+        ))
+        .unwrap();
+
+        // The other device took one out again. The event carries the whole
+        // membership, so the removal has to land as a removal — a merge would
+        // keep ev-b forever and the two devices would never agree.
+        a.upsert_event_group_from_sync(&group(
+            "g1",
+            vec![member("work", "ev-a"), member("colleague", "ev-c")],
+        ))
+        .unwrap();
+
+        assert_eq!(members_of(&a, "g1"), vec!["ev-a", "ev-c"]);
+    }
+
+    #[test]
+    fn a_member_claimed_by_an_arriving_group_leaves_the_one_it_was_in() {
+        let a = adapter();
+        // Two devices grouped overlapping sets without knowing of each other.
+        a.upsert_event_group_from_sync(&group(
+            "local",
+            vec![
+                member("work", "ev-a"),
+                member("private", "ev-b"),
+                member("colleague", "ev-c"),
+            ],
+        ))
+        .unwrap();
+        a.upsert_event_group_from_sync(&group(
+            "remote",
+            vec![member("work", "ev-a"), member("other", "ev-d")],
+        ))
+        .unwrap();
+
+        // The last writer wins the disputed event...
+        assert_eq!(members_of(&a, "remote"), vec!["ev-a", "ev-d"]);
+        // ...and the group it left keeps the members nobody claimed.
+        assert_eq!(members_of(&a, "local"), vec!["ev-b", "ev-c"]);
+    }
+
+    #[test]
+    fn a_group_robbed_down_to_one_member_is_dropped() {
+        let a = adapter();
+        a.upsert_event_group_from_sync(&group(
+            "local",
+            vec![member("work", "ev-a"), member("private", "ev-b")],
+        ))
+        .unwrap();
+        a.upsert_event_group_from_sync(&group(
+            "remote",
+            vec![member("work", "ev-a"), member("other", "ev-d")],
+        ))
+        .unwrap();
+
+        // "local" would be left with ev-b alone, claiming to be grouped with
+        // nothing — the same rule the local ungroup path applies.
+        assert_eq!(group_ids(&a), vec!["remote"]);
+    }
+
+    #[test]
+    fn dissolving_takes_the_members_with_it_and_leaves_the_events_alone() {
+        let a = adapter();
+        a.upsert_event_group_from_sync(&group(
+            "g1",
+            vec![member("work", "ev-a"), member("private", "ev-b")],
+        ))
+        .unwrap();
+        a.delete_event_group_from_sync("g1").unwrap();
+
+        assert!(group_ids(&a).is_empty());
+        assert!(
+            members_of(&a, "g1").is_empty(),
+            "cascade must clear members"
+        );
+        // Dissolving is idempotent: a second device dissolving the same group
+        // must not fail the round.
+        a.delete_event_group_from_sync("g1").unwrap();
     }
 }

@@ -49,7 +49,10 @@
 //!   pulls them in.
 //! - Account configs / credentials. §19.2.1 always-local.
 
-use cal_core::{Calendar, ColorLabel, ColorLabelId, Event, Section, Task, TaskList};
+use cal_core::{
+    Calendar, ColorLabel, ColorLabelId, Event, EventGroup, EventGroupMember, Section, Task,
+    TaskList,
+};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
@@ -83,6 +86,18 @@ pub struct SnapshotDump {
     pub tasks: Vec<Task>,
     #[serde(default)]
     pub color_labels: Vec<ColorLabel>,
+    /// Which events mean the same appointment (migration 0035).
+    ///
+    /// In the snapshot and not only in the log, because the log does not
+    /// survive: after a compaction the snapshot is the WHOLE state a joining
+    /// device receives, so anything missing here is simply gone for it. A
+    /// grouping exists nowhere but in Aperio, so there is no second route by
+    /// which it could arrive later.
+    ///
+    /// Membership names foreign calendars and events and has no FK into any
+    /// table here, so it can go in last without ordering hazards.
+    #[serde(default)]
+    pub event_groups: Vec<EventGroup>,
 }
 
 impl LocalAdapter {
@@ -100,6 +115,7 @@ impl LocalAdapter {
             sections: self.dump_sections_for_snapshot()?,
             tasks: self.dump_tasks_for_snapshot()?,
             color_labels: self.dump_color_labels_for_snapshot()?,
+            event_groups: self.dump_event_groups_for_snapshot()?,
         })
     }
 
@@ -279,6 +295,58 @@ impl LocalAdapter {
         Ok(out)
     }
 
+    /// Read every event group with its members.
+    ///
+    /// Two queries rather than one join: a group is small, groups are few, and
+    /// the join would have to be un-flattened again on this side anyway.
+    pub fn dump_event_groups_for_snapshot(&self) -> cal_core::Result<Vec<EventGroup>> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let mut stmt = conn
+            .prepare("SELECT id, created_at, updated_at FROM event_groups")
+            .map_err(map_sql_err)?;
+        let heads = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(map_sql_err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(map_sql_err)?;
+        let mut members = conn
+            .prepare(
+                "SELECT calendar_id, event_id, title, starts_at, added_at
+                   FROM event_group_members WHERE group_id = ?
+                  ORDER BY added_at, event_id",
+            )
+            .map_err(map_sql_err)?;
+        let mut out = Vec::new();
+        for (id, created_at, updated_at) in heads {
+            let rows = members
+                .query_map([&id], |row| {
+                    Ok(EventGroupMember {
+                        calendar_id: row.get(0)?,
+                        event_id: row.get(1)?,
+                        title: row.get(2)?,
+                        starts_at: row.get(3)?,
+                        added_at: row.get(4)?,
+                    })
+                })
+                .map_err(map_sql_err)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(map_sql_err)?;
+            out.push(EventGroup {
+                id,
+                created_at,
+                updated_at,
+                members: rows,
+            });
+        }
+        Ok(out)
+    }
+
     /// Apply a `SnapshotDump` onto local SQLite, upserting every row.
     ///
     /// Order matters: parent rows go in before children so the FK
@@ -370,6 +438,17 @@ impl LocalAdapter {
                         ?err,
                         "snapshot apply: task upsert failed",
                     );
+                    report.failed += 1;
+                }
+            }
+        }
+        // Last: groups name foreign calendars and events, so nothing here is an
+        // FK target and nothing waits on them.
+        for group in &dump.event_groups {
+            match self.upsert_event_group_from_sync(group) {
+                Ok(()) => report.applied += 1,
+                Err(err) => {
+                    warn!(group_id = %group.id, ?err, "snapshot apply: event group upsert failed");
                     report.failed += 1;
                 }
             }
@@ -667,6 +746,48 @@ mod tests {
         assert_eq!(lbl.hex, "#ff8800");
     }
 
+    /// A group has to be IN the snapshot, not only in the log: after a
+    /// compaction the snapshot is the whole state a joining device receives,
+    /// and a grouping exists nowhere else to arrive from.
+    #[test]
+    fn event_groups_round_trip_through_a_snapshot() {
+        let src = make_adapter();
+        src.upsert_event_group_from_sync(&EventGroup {
+            id: "g1".into(),
+            created_at: "2026-08-09T12:00:00Z".into(),
+            updated_at: "2026-08-09T12:00:00Z".into(),
+            members: vec![
+                EventGroupMember {
+                    calendar_id: "work".into(),
+                    event_id: "ev-a".into(),
+                    title: "Wochenplanung".into(),
+                    starts_at: "2026-08-10T08:00:00Z".into(),
+                    added_at: "2026-08-09T12:00:00Z".into(),
+                },
+                EventGroupMember {
+                    calendar_id: "private".into(),
+                    event_id: "ev-b".into(),
+                    title: "Wochenplanung".into(),
+                    starts_at: "2026-08-10T08:00:00Z".into(),
+                    added_at: "2026-08-09T12:00:01Z".into(),
+                },
+            ],
+        })
+        .unwrap();
+
+        let dump = src.dump_for_snapshot().unwrap();
+        assert_eq!(dump.event_groups.len(), 1);
+        assert_eq!(dump.event_groups[0].members.len(), 2);
+
+        let dst = make_adapter();
+        dst.apply_snapshot_dump(&dump).unwrap();
+        let landed = dst.dump_for_snapshot().unwrap().event_groups;
+        assert_eq!(
+            landed, dump.event_groups,
+            "membership and signatures survive"
+        );
+    }
+
     /// Same FK hazard, sibling table: `tasks.parent_id` is self-referential
     /// too, so a subtask dumped before its parent task must still survive.
     #[test]
@@ -770,6 +891,7 @@ mod tests {
             sections: vec![],
             tasks: vec![],
             color_labels: vec![],
+            event_groups: vec![],
         };
         let dst = make_adapter();
         let first = dst.apply_snapshot_dump(&dump).unwrap();

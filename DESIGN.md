@@ -2429,6 +2429,8 @@ Jedes Gerät hat eine eindeutige `device_id` (UUID, beim ersten Start generiert)
 | `color_label.created` | Neues Farb-Label angelegt |
 | `color_label.updated` | Farb-Label bearbeitet (Name, Farbe) |
 | `color_label.deleted` | Farb-Label gelöscht |
+| `event_group.updated` | Termingruppe angelegt/geändert — trägt **immer die vollständige Mitgliedschaft**, nie einen Diff (siehe unten) |
+| `event_group.dissolved` | Termingruppe aufgelöst; die Termine selbst bleiben unberührt |
 | `plugin.installed` | Community-Plugin auf einem Gerät installiert (nur Metadaten, keine Binary) |
 | `plugin.updated` | Community-Plugin aktualisiert |
 | `plugin.uninstalled` | Community-Plugin entfernt (andere Geräte erhalten Hinweis und entfernen die "Plugin fehlt"-Markierung) |
@@ -2438,6 +2440,29 @@ Jedes Gerät hat eine eindeutige `device_id` (UUID, beim ersten Start generiert)
 | `settings.updated` | App-Einstellungen geändert (nur synchronisierbare Einstellungen, siehe 19.2.1) |
 | `credential.set` | Account-Zugangsdaten gesetzt/geändert — **nur bei aktivem E2E** (§19.7); trägt das Secret und existiert daher ausschließlich im verschlüsselten Log |
 | `credential.cleared` | Ein Zugangsdaten-Slot eines Accounts entfernt (gleiche E2E-Kopplung wie `credential.set`) |
+
+#### 19.2.0 Termingruppen: warum die ganze Mitgliedschaft reist
+
+Eine Termingruppe (Migration 0035, `DESIGN-event-groups.md`) ist eine Aussage von
+Aperio über fremde Daten: **diese Termine meinen dieselbe Verabredung.** Sie wird
+synchronisiert — anders als die Meeting-Bindung daneben —, weil sie **nirgendwo
+sonst existiert**: ein Gerät, dem niemand davon erzählt hat, bleibt überzeugt, vier
+unabhängige Termine vor sich zu haben. Für die Meeting-Id gilt das Gegenteil; sie
+ist Buchhaltung über ein Anbieter-Objekt, das jedes Gerät über den Termin selbst
+erreicht.
+
+`event_group.updated` trägt die **komplette** Mitgliederliste, nicht die Änderung
+daran. Eine Gruppe ist klein, nur als Ganzes sinnvoll — und zwei Geräte, die
+dieselben Termine unabhängig voneinander gruppieren, sollen **konvergieren** statt
+ihre Zutritte und Austritte zu einer Menge zu verschränken, die keines von beiden
+gemeint hat. Es gewinnt der letzte Schreiber, und zwar auf einem Wert, den der
+Nutzer sieht und notfalls neu setzt.
+
+Beim Anwenden wird die Mitgliedschaft deshalb **ersetzt**, nicht zusammengeführt,
+und ein ankommendes Mitglied wird seiner bisherigen lokalen Gruppe entrissen (der
+eindeutige Index `event_group_members_event_uidx` erzwingt genau das). Bleibt jene
+mit weniger als zwei Mitgliedern zurück, wird sie in derselben Transaktion
+gelöscht — eine „Gruppe" aus einem Termin ist keine.
 
 #### 19.2.1 Einstellungs-Synchronisation: Granularität
 

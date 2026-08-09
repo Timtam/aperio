@@ -391,6 +391,16 @@ impl EventLogApplier {
                 self.apply_calendar_delete(payload)?;
                 Ok(true)
             }
+            SyncEvent::EventGroupUpdated(payload) => {
+                self.apply_event_group_upsert(payload)?;
+                Ok(true)
+            }
+            SyncEvent::EventGroupDissolved(payload) => {
+                self.adapter
+                    .delete_event_group_from_sync(&payload.id)
+                    .map_err(core_to_sync)?;
+                Ok(true)
+            }
             SyncEvent::ColorLabelCreated(payload) => {
                 self.apply_color_label_upsert(payload)?;
                 Ok(true)
@@ -540,6 +550,18 @@ impl EventLogApplier {
     fn apply_calendar_delete(&self, payload: &IdPayload) -> SyncResult<()> {
         self.adapter
             .delete_calendar_from_sync(&payload.id)
+            .map_err(core_to_sync)
+    }
+
+    fn apply_event_group_upsert(&self, payload: &EventPayload) -> SyncResult<()> {
+        let group: cal_core::EventGroup =
+            serde_json::from_value(payload.fields.clone()).map_err(|err| {
+                SyncError::protocol(format!(
+                    "event_group upsert payload not a valid EventGroup: {err}",
+                ))
+            })?;
+        self.adapter
+            .upsert_event_group_from_sync(&group)
             .map_err(core_to_sync)
     }
 

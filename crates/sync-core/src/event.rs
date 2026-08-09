@@ -146,6 +146,24 @@ pub enum SyncEvent {
     #[serde(rename = "event.deleted")]
     EventDeleted(IdPayload),
 
+    /// Which events Aperio has been told mean the same appointment
+    /// (DESIGN-event-groups.md). Carries the WHOLE membership, never a
+    /// diff: a group is small, only meaningful entire, and two devices
+    /// grouping the same events independently must converge rather than
+    /// interleave additions and removals into a set neither of them
+    /// asked for. Last writer wins, on a value a user can see and redo.
+    ///
+    /// Synced, unlike the meeting binding beside it, because the
+    /// grouping exists nowhere else: a device that has not been told
+    /// stays convinced it is looking at separate appointments.
+    #[serde(rename = "event_group.updated")]
+    EventGroupUpdated(EventPayload),
+
+    /// A group was dissolved. The events themselves are untouched —
+    /// this says only that Aperio no longer claims they are one.
+    #[serde(rename = "event_group.dissolved")]
+    EventGroupDissolved(IdPayload),
+
     /// Local task created.
     #[serde(rename = "task.created")]
     TaskCreated(EventPayload),
