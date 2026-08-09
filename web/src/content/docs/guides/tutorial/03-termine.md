@@ -141,9 +141,53 @@ ungrouping leaves both exactly as they were — the calendars keep their own
 copies, Aperio just knows they are one appointment. The grouping travels
 between your devices with everything else.
 
+If the second copy is the obvious one — same name, same time, another calendar
+— it is already picked when the dialog opens, with a line saying why. Confirming
+is one keystroke; disagreeing is choosing something else. Aperio never groups
+anything on its own: in an office full of "Team meeting" at 10:00 that would
+declare two different meetings one appointment, and a wrong group hides a real
+commitment behind a copy of something else.
+
 If both events already belong to *different* groups, Aperio refuses rather than
 guessing: merging two claims about what an appointment is would be a decision
 you never asked for. Take one of them out first.
+
+### What changes once events are grouped
+
+**One row instead of four.** Every view shows the appointment once, and the row
+says what it stands for: "one appointment with 2 others, in Work, Private". The
+count is of the group, so a copy in a calendar you have switched off is counted
+too — it matches what you know you keep.
+
+There is one exception, and it is deliberate: if the copies have drifted apart
+— one was moved and the others were not — they are NOT folded. Each stays
+visible and says so. The group has stopped being true, and that is the one
+thing you need to see.
+
+**One edit instead of four.** After saving a change to a grouped event, Aperio
+asks whether the other copies should follow, names each one it will write, and
+names each one it may not. A colleague's calendar is read-only, and skipping it
+quietly is how a group ends up meaning two different times.
+
+Only what the appointment IS travels: title, when, where, and the description.
+Reminders stay with each copy — the private copy usually exists precisely
+because it carries a reminder the work one does not. Colour, calendar and
+attendees stay per copy for the same reason.
+
+The question comes after the save, never before, so your own change is never at
+stake and cancelling costs nothing. Editing a single occurrence of a recurring
+event does not offer it yet.
+
+**The meeting belongs to the appointment.** A meeting link hangs on exactly one
+event, and which one is a coincidence of the moment it was attached. Inside a
+group, **Join** appears on whichever copy you happen to be looking at.
+
+**Copies are found again.** Event ids belong to the provider and change
+underneath Aperio — a re-sync remints them, moving an event between calendars
+remints it. A group remembers each member's name and start, so when an id stops
+resolving the copy is looked for and the group repairs itself silently. If
+nothing matching is there, nothing is changed: it may be a copy you deleted, and
+dropping it on suspicion is not Aperio's call.
 
 ## Summary
 

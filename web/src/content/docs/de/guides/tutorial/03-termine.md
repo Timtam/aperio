@@ -151,10 +151,58 @@ Termine, das Auflösen lässt beide genau so zurück, wie sie waren — die Kale
 behalten ihre Kopien, Aperio weiß nur, dass es eine Verabredung ist. Die
 Gruppierung reist wie alles andere zwischen Ihren Geräten.
 
+Ist die zweite Kopie die offensichtliche — gleicher Name, gleiche Zeit, anderer
+Kalender —, ist sie beim Öffnen des Dialogs bereits ausgewählt, mit einer Zeile,
+die sagt warum. Bestätigen ist ein Tastendruck, Widersprechen heißt, etwas
+anderes zu wählen. Von sich aus gruppiert Aperio nie: In einem Büro voller
+„Team-Meeting" um 10:00 würde das zwei verschiedene Besprechungen zu einer
+Verabredung erklären, und eine falsche Gruppe versteckt eine echte Verpflichtung
+hinter der Kopie von etwas anderem.
+
 Gehören beide Termine bereits zu *verschiedenen* Gruppen, verweigert Aperio die
 Zusammenführung, statt zu raten: Zwei Aussagen darüber, was ein Termin ist,
 zusammenzulegen wäre eine Entscheidung, um die Sie nie gebeten haben. Lösen Sie
 zuerst einen davon heraus.
+
+### Was sich mit einer Gruppe ändert
+
+**Eine Zeile statt vier.** Jede Ansicht zeigt die Verabredung einmal, und die
+Zeile sagt, wofür sie steht: „ein Termin mit 2 weiteren, in Arbeit, Privat". Die
+Zahl gehört der Gruppe — eine Kopie in einem abgeschalteten Kalender zählt mit
+und passt so zu dem, was Sie zu haben wissen.
+
+Eine Ausnahme, und die ist Absicht: Sind die Kopien **auseinandergelaufen** —
+eine wurde verschoben, die andere nicht —, wird NICHT gefaltet. Jede bleibt
+sichtbar und sagt es. Die Gruppe stimmt dann nicht mehr, und genau das ist das
+Einzige, was Sie sehen müssen.
+
+**Ein Bearbeiten statt vier.** Nach dem Speichern einer Änderung an einem
+gruppierten Termin fragt Aperio, ob die anderen Kopien nachziehen sollen — und
+nennt jede, die es schreiben wird, und jede, die es nicht darf. Ein
+Kollegenkalender ist nur lesbar, und ihn still zu überspringen ist der Weg, auf
+dem eine Gruppe am Ende zwei verschiedene Zeiten meint.
+
+Mitgezogen wird nur, was der Termin IST: Titel, wann, wo, Beschreibung.
+**Erinnerungen bleiben bei jeder Kopie** — die Privatkopie gibt es meist genau
+deshalb, weil sie eine Erinnerung trägt, die die Arbeitskopie nicht hat. Farbe,
+Kalender und Teilnehmer bleiben aus demselben Grund pro Kopie.
+
+Die Frage kommt nach dem Speichern, nie davor: Ihre eigene Änderung steht damit
+nie auf dem Spiel, und Abbrechen kostet nichts. Beim Bearbeiten eines einzelnen
+Vorkommens einer Serie wird das noch nicht angeboten.
+
+**Das Meeting gehört der Verabredung.** Ein Meeting-Link hängt an genau einem
+Termin, und an welchem, ist ein Zufall des Moments, in dem verknüpft wurde.
+Innerhalb einer Gruppe erscheint **Beitreten** an der Kopie, die Sie gerade vor
+sich haben.
+
+**Kopien werden wiedergefunden.** Termin-Kennungen gehören dem Anbieter und
+ändern sich unter Aperio — eine Neu-Synchronisierung vergibt sie neu, das
+Verschieben zwischen Kalendern ebenso. Eine Gruppe merkt sich Name und Beginn
+jedes Mitglieds; löst eine Kennung nichts mehr auf, wird die Kopie gesucht und
+die Gruppe repariert sich still. Wird nichts Passendes gefunden, bleibt alles,
+wie es ist: Es könnte eine Kopie sein, die Sie gelöscht haben, und das auf
+Verdacht zu entscheiden steht Aperio nicht zu.
 
 ## Zusammenfassung
 
