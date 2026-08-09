@@ -296,7 +296,7 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       Termin, in dem man gerade sitzt, ist das Unmittelbarste, was es gibt.
       ⚠️ Ungeprüft auf dem Gerät.
 
-### A9 · Termingruppen `[~]` — Stufe 0 steht
+### A9 · Termingruppen `[~]` — Stufe 0 + 1 stehen
 Derselbe Termin liegt heute mehrfach in Aperio (Outlook für die Kollegen, Kopie
 im Privatkalender für Alexas Erinnerungen, dazu die Kalender der Kollegen), und
 Aperio weiß nichts davon: mehrfache Zeilen, mehrfaches Nachziehen bei jeder
@@ -309,13 +309,14 @@ wie eine Gruppe anbieterseitige Kennungswechsel überlebt, was bei fehlenden
 Schreibrechten passiert) und einem Stufenplan: `DESIGN-event-groups.md`.
 Größenordnung wie die Widgets.
 
-**Stufe 0 ist gebaut** (Migration 0035, `EventGroupsRepo`, Sync über
-`event_group.updated`/`.dissolved` UND den Snapshot, Aktion „Gehört zusammen
-mit…" im Kontext- bzw. Rotor-Menü beider Oberflächen). Offen bleiben Stufe 1
-(Zusammenfalten in den Ansichten — der eigentliche Alltagsgewinn), Stufe 2
-(Bearbeitungsumfang über die Mitglieder, mit ehrlicher Meldung über das, was
-nicht ging) und Stufe 3 (Erkennung + Vorschlag; das Meeting wandert an die
-Gruppe).
+**Stufe 0 und 1 sind gebaut**: Migration 0035/0036, `EventGroupsRepo`, Sync über
+`event_group.updated`/`.dissolved` samt Snapshot und Auflösungs-Marken, die
+Aktion „Gehört zusammen mit…" in beiden Oberflächen, und das Zusammenfalten auf
+allen sechs Ansichten (Desktop Tag/Woche/Monat/Agenda, mobil Tagesliste und
+Agenda). Offen bleiben Stufe 2 (Bearbeitungsumfang über die Mitglieder, mit
+ehrlicher Meldung über das, was nicht ging), Stufe 3 (Erkennung + Vorschlag; das
+Meeting wandert an die Gruppe) und die Selbstheilung über die gespeicherte
+Signatur, wenn ein Anbieter eine Kennung neu vergibt.
 
 ### A8 · Sprachbefehle (Siri / Kurzbefehle, iOS zuerst) `[~]`
 Termine und Aufgaben per Sprache anlegen, mit Kalender- bzw. Listenwahl.

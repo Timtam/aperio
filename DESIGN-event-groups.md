@@ -112,7 +112,12 @@ lässt den zweiten aus den übrigen Terminen desselben Tages BENENNEN. Dort lieg
 eine Dublette per Definition.
 
 **Stufe 1** — Zusammenfalten in den Ansichten. Eine Zeile, die ihre Kalender
-nennt. Der Alltagsgewinn.
+nennt. Der Alltagsgewinn. **GEBAUT** auf allen sechs Oberflächen (Desktop Tag,
+Woche, Monat, Agenda; mobil Tagesliste und Agenda). Gefaltet wird **pro Tag** —
+ein wiederkehrender Termin rendert eine Zeile pro Tag, über eine Woche gelesen
+sähen die eigenen Tage der Serie aus wie widersprüchliche Kopien. Und eine
+Gruppe, deren Kopien auseinandergelaufen sind, wird NICHT gefaltet: dann stimmt
+die Behauptung nicht mehr, und genau das ist das Einzige, was man sehen muss.
 
 **Stufe 2** — Bearbeitungsumfang über die Mitglieder, mit ehrlicher Meldung über
 das, was nicht ging.

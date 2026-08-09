@@ -32,10 +32,11 @@ import {
   TASK_DND_TYPE,
   type MoveCopyScope,
 } from '../../state/moveActions';
-import { isSeriesOccurrence } from '../../intl/recurrence';
+import { isSeriesOccurrence, seriesIdOf } from '../../intl/recurrence';
 import { MoveEventScopeDialog } from '../MoveEventScopeDialog';
 import { useDialogState } from '../../state/dialogStateContext';
 import { useEvents } from '../../state/useEvents';
+import { useEventGroups } from '../../state/useEventGroups';
 import { useTaskListShowCompleted } from '../../state/useTaskListShowCompleted';
 import { useChipContextMenu } from '../../state/useChipContextMenu';
 import { useTaskStatusToggle } from '../../state/useTaskStatusToggle';
@@ -75,6 +76,7 @@ import {
 } from '../../api/client';
 import { deleteThisAndFuture } from '../../state/deleteSeriesFromOccurrence';
 import {
+  collapseEventGroups,
   dropMinuteInWindow,
   eventBlockFactor,
   eventSpanForDay,
@@ -82,6 +84,7 @@ import {
   layoutDayColumn,
   MINUTES_PER_DAY,
   minutesFromMidnight,
+  type CollapsedRow,
   type PositionedSpan,
   type TimedSpan,
 } from '@aperio/shared';
@@ -330,10 +333,34 @@ export function WeekView() {
     [weekStart],
   );
 
-  const eventsByDay = useMemo(
-    () => groupEventsByDay(events, days),
-    [events, days],
-  );
+  const groups = useEventGroups(events);
+  /**
+   * The week's events per day, with each group folded into ONE chip.
+   *
+   * Folding here rather than at render time is what makes the rest of the
+   * week fall into place for free: `mergeDayItems`, the Tab buckets and
+   * `layoutDayColumn` all read this map, so a folded-away copy stops taking
+   * a column in the hour grid as well as a line in the reading order.
+   *
+   * Per day, as `collapseEventGroups` documents — across the week a recurring
+   * appointment's own days would look exactly like copies that disagree.
+   */
+  const { eventsByDay, groupRows } = useMemo(() => {
+    const raw = groupEventsByDay(events, days);
+    const folded = new Map<string, CalendarEvent[]>();
+    const rows = new Map<string, CollapsedRow<CalendarEvent>>();
+    for (const [dayKey, dayEvents] of raw) {
+      const collapsed = collapseEventGroups(dayEvents, groups, seriesIdOf);
+      folded.set(
+        dayKey,
+        collapsed.map((row) => row.event),
+      );
+      for (const row of collapsed) {
+        if (row.group) rows.set(`${eventInstanceKey(row.event)}@${dayKey}`, row);
+      }
+    }
+    return { eventsByDay: folded, groupRows: rows };
+  }, [events, days, groups]);
 
   // Bucket tasks per visible day (§9.4). A task lands on a day when it
   // is scheduled for that day OR due (deadline) that day — the deadline
@@ -1718,6 +1745,24 @@ export function WeekView() {
                         time: timeAria,
                         calendar: cal?.name ?? '—',
                       });
+                      // What this chip stands for, if it stands for more than
+                      // itself. The count comes from the group, so a copy in a
+                      // switched-off calendar is counted too.
+                      const groupRow = groupRows.get(
+                        `${eventInstanceKey(ev)}@${dayKey}`,
+                      );
+                      const groupSuffix = groupRow?.group
+                        ? groupRow.diverged
+                          ? t('views.eventGroupDivergedSuffix', {
+                              count: groupRow.otherMembers,
+                            })
+                          : t('views.eventGroupSuffix', {
+                              count: groupRow.otherMembers,
+                              calendars: groupRow.calendarIds
+                                .map((id) => calendarById.get(id)?.name ?? id)
+                                .join(', '),
+                            })
+                        : '';
                       const aria =
                         (span
                           ? ariaBase +
@@ -1726,6 +1771,7 @@ export function WeekView() {
                               total: span.totalDays,
                             })
                           : ariaBase) +
+                        groupSuffix +
                         (ev.cancelled ? t('views.eventCancelledSuffix') : '');
                       // All-day events are visualised by the lane above in BOTH
                       // modes; their per-day chip stays in the listbox as the

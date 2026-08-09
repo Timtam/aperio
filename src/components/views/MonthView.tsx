@@ -27,7 +27,11 @@ import {
   occurrenceIsoOf,
   seriesIdOf,
 } from '../../intl/recurrence';
-import { eventInstanceKey } from '@aperio/shared';
+import {
+  collapseEventGroups,
+  eventInstanceKey,
+  type CollapsedRow,
+} from '@aperio/shared';
 import { useDateFormat } from '../../intl/dateFormat';
 import {
   labelsLookup,
@@ -64,6 +68,7 @@ import { useCalendarStore } from '../../state/calendarStoreContext';
 import { useChipContextMenu } from '../../state/useChipContextMenu';
 import { useDialogState } from '../../state/dialogStateContext';
 import { useEvents } from '../../state/useEvents';
+import { useEventGroups } from '../../state/useEventGroups';
 import { useTasks } from '../../state/useTasks';
 import { useTaskListShowCompleted } from '../../state/useTaskListShowCompleted';
 import { useTaskStatusToggle } from '../../state/useTaskStatusToggle';
@@ -159,7 +164,33 @@ export function MonthView() {
     }
   }, [listIdsWithTasks, sectionsByList, loadSections]);
 
-  const eventsByDay = useMemo(() => groupEventsByDay(events), [events]);
+  const groups = useEventGroups(events);
+  /**
+   * The month's events per day, with each group folded into ONE chip.
+   *
+   * Folded here rather than at render time, so a folded-away copy stops
+   * consuming a line in a cell that only shows the first few — the month is
+   * where four copies of one appointment most often push a real second
+   * appointment behind a "+3 more".
+   *
+   * Per day, as `collapseEventGroups` documents.
+   */
+  const { eventsByDay, groupRows } = useMemo(() => {
+    const raw = groupEventsByDay(events);
+    const folded = new Map<string, CalendarEvent[]>();
+    const rows = new Map<string, CollapsedRow<CalendarEvent>>();
+    for (const [dayKey, dayEvents] of raw) {
+      const collapsed = collapseEventGroups(dayEvents, groups, seriesIdOf);
+      folded.set(
+        dayKey,
+        collapsed.map((row) => row.event),
+      );
+      for (const row of collapsed) {
+        if (row.group) rows.set(`${eventInstanceKey(row.event)}@${dayKey}`, row);
+      }
+    }
+    return { eventsByDay: folded, groupRows: rows };
+  }, [events, groups]);
 
   // Expand recurring SCHEDULED tasks into one occurrence per planned day across
   // the visible month grid — so a task recurring every day/week shows on EVERY
@@ -1053,6 +1084,24 @@ export function MonthView() {
                           time,
                           calendar: cal?.name ?? '—',
                         });
+                        // What this chip stands for, if it stands for more
+                        // than itself. The count comes from the group, so a
+                        // copy in a switched-off calendar is counted too.
+                        const groupRow = groupRows.get(
+                          `${eventInstanceKey(ev)}@${keyOf(day)}`,
+                        );
+                        const groupSuffix = groupRow?.group
+                          ? groupRow.diverged
+                            ? t('views.eventGroupDivergedSuffix', {
+                                count: groupRow.otherMembers,
+                              })
+                            : t('views.eventGroupSuffix', {
+                                count: groupRow.otherMembers,
+                                calendars: groupRow.calendarIds
+                                  .map((id) => calendarById.get(id)?.name ?? id)
+                                  .join(', '),
+                              })
+                          : '';
                         const aria =
                           (span
                             ? ariaBase +
@@ -1061,6 +1110,7 @@ export function MonthView() {
                                 total: span.totalDays,
                               })
                             : ariaBase) +
+                          groupSuffix +
                           (ev.cancelled ? t('views.eventCancelledSuffix') : '');
                         return (
                           <span
