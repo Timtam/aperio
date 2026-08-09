@@ -936,3 +936,107 @@ fn account_events_round_trip_through_applier() {
         .unwrap();
     assert_eq!(count, 0);
 }
+
+/// The whole event-group chain over the real applier: one device groups, the
+/// other applies, and what the second device ends up holding is what the first
+/// one said.
+///
+/// Every layer of this has unit tests of its own; none of them proves the
+/// layers are wired to each other. This is the only test that goes through the
+/// real `EventLogApplier`, the real store and the real migrations, so a wire
+/// crossed between `SyncEvent`, the applier arm and the adapter's writer shows
+/// up here and nowhere else.
+///
+/// ## Two clocks, one scale
+///
+/// The group carries its own `updated_at`; the dissolve carries only an id, so
+/// its authority is the ENVELOPE's timestamp. Those are two different fields,
+/// and this test has to keep them on one scale — the first version did not,
+/// and "failed" purely because `fixture_envelope` counts seconds from 1970
+/// while the repository stamps `Utc::now()`.
+///
+/// In production they agree by construction: both are the emitting device's
+/// wall clock, taken at the same moment as the mutation, and an envelope is
+/// stamped no earlier than the change it carries. So a dissolve's tombstone is
+/// never older than the state it dissolves.
+#[test]
+fn a_group_travels_between_devices_and_a_dissolve_sticks() {
+    use crate::event_groups::EventGroupsRepo;
+    use cal_core::{EventGroup, EventGroupMember};
+
+    let (adapter, db) = fixture();
+    let other = DeviceId::from_string("dev-other".into());
+    let me = DeviceId::from_string("dev-me".into());
+    let applier = make_applier(&db, &adapter, me);
+
+    // The group as the other device wrote it, stamped on the envelope scale
+    // (see above). Built as the value that actually travels rather than
+    // through the repository, so the payload is the wire shape and the
+    // timestamps stay comparable with the envelopes below.
+    let at = |secs: i64| Utc.timestamp_opt(secs, 0).unwrap().to_rfc3339();
+    let member = |calendar: &str, event: &str| EventGroupMember {
+        calendar_id: calendar.into(),
+        event_id: event.into(),
+        title: "Wochenplanung".into(),
+        starts_at: "2026-08-10T08:00:00Z".into(),
+        added_at: at(1000),
+    };
+    let group = EventGroup {
+        id: "g-shared".into(),
+        created_at: at(1000),
+        updated_at: at(1000),
+        members: vec![member("work", "ev-a"), member("private", "ev-b")],
+    };
+
+    let env = fixture_envelope(
+        other.clone(),
+        SyncEvent::EventGroupUpdated(EventPayload {
+            id: group.id.clone(),
+            fields: serde_json::to_value(&group).unwrap(),
+        }),
+        1000,
+    );
+    let report = applier.apply_envelopes(vec![env.clone()]).unwrap();
+    assert_eq!(report.applied, 1, "the group event must be understood");
+    assert_eq!(report.failed, 0);
+
+    // This device now holds the same group, read back through the same
+    // repository the UI uses.
+    let here = EventGroupsRepo::new(&db).get(&group.id).unwrap().unwrap();
+    assert_eq!(here.members.len(), 2);
+    assert!(here.members.iter().any(|m| m.event_id == "ev-a"));
+
+    // Replaying the same envelope changes nothing — idempotency is what makes
+    // re-downloading a log file safe.
+    let again = applier.apply_envelopes(vec![env]).unwrap();
+    assert_eq!(again.applied, 0);
+    assert_eq!(again.skipped_already_applied, 1);
+
+    // The other device dissolves it.
+    let dissolve = fixture_envelope(
+        other.clone(),
+        SyncEvent::EventGroupDissolved(IdPayload {
+            id: group.id.clone(),
+        }),
+        2000,
+    );
+    applier.apply_envelopes(vec![dissolve]).unwrap();
+    assert_eq!(EventGroupsRepo::new(&db).get(&group.id).unwrap(), None);
+
+    // And an UPDATE written before that device heard about the dissolve — the
+    // straggler that used to bring the group back to life on this device only.
+    let stale = fixture_envelope(
+        other,
+        SyncEvent::EventGroupUpdated(EventPayload {
+            id: group.id.clone(),
+            fields: serde_json::to_value(&group).unwrap(),
+        }),
+        1500,
+    );
+    applier.apply_envelopes(vec![stale]).unwrap();
+    assert_eq!(
+        EventGroupsRepo::new(&db).get(&group.id).unwrap(),
+        None,
+        "a dissolved group must stay dissolved",
+    );
+}

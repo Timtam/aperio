@@ -643,11 +643,16 @@ mod tests {
             .expect("the group stands");
         assert!(healed.members.iter().any(|m| m.event_id == "new-a"));
         assert!(!healed.members.iter().any(|m| m.event_id == "old-a"));
-        assert_eq!(healed.members.len(), 2, "healing is not a membership change");
+        assert_eq!(
+            healed.members.len(),
+            2,
+            "healing is not a membership change"
+        );
 
         // Two views healing the same thing at once is not an error.
         assert_eq!(
-            repo.heal_member(&group.id, "work", "old-a", "new-a").unwrap(),
+            repo.heal_member(&group.id, "work", "old-a", "new-a")
+                .unwrap(),
             None,
         );
     }
