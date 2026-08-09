@@ -27,6 +27,7 @@ import {
 } from '../../state/moveActions';
 import { useDialogState } from '../../state/dialogStateContext';
 import { useEvents } from '../../state/useEvents';
+import { useEventGroups } from '../../state/useEventGroups';
 import { useTaskListShowCompleted } from '../../state/useTaskListShowCompleted';
 import { useChipContextMenu } from '../../state/useChipContextMenu';
 import { useTaskStatusToggle } from '../../state/useTaskStatusToggle';
@@ -76,6 +77,7 @@ import {
   eventBlockFactor,
   eventSpanForDay,
   layoutDayColumn,
+  collapseEventGroups,
   eventInstanceKey,
   MINUTES_PER_DAY,
   minutesFromMidnight,
@@ -290,10 +292,26 @@ export function DayView() {
 
   // Pick up multi-day all-day events on every day of their span — see
   // intl/multiDay for the rationale.
-  const dayEvents = useMemo(
+  const eventsToday = useMemo(
     () => events.filter((ev) => eventCoversDay(ev, anchor)),
     [events, anchor],
   );
+  // Which of them Aperio has been told mean the same appointment.
+  const groups = useEventGroups(eventsToday);
+  // One row per appointment instead of one per copy (DESIGN-event-groups.md,
+  // Stufe 1). The folded-away members keep their place in the group's own
+  // record; what disappears here is the repetition, not the data.
+  const collapsed = useMemo(
+    () => collapseEventGroups(eventsToday, groups, seriesIdOf),
+    [eventsToday, groups],
+  );
+  const dayEvents = useMemo(() => collapsed.map((row) => row.event), [collapsed]);
+  /** The group behind a rendered row, when it stands for one. */
+  const groupRowOf = useMemo(() => {
+    const byKey = new Map<string, (typeof collapsed)[number]>();
+    for (const row of collapsed) byKey.set(eventInstanceKey(row.event), row);
+    return byKey;
+  }, [collapsed]);
 
   // Expand recurring SCHEDULED tasks into per-day occurrences for this single
   // day — so a task recurring every day/week shows here on its due day even when
@@ -1112,6 +1130,23 @@ export function DayView() {
               end: endStr,
               calendar: cal?.name ?? '—',
             });
+            // What this row stands for, if it stands for more than itself.
+            // The count comes from the group, so a copy in a switched-off
+            // calendar is still counted — that is what makes it match the
+            // user's own memory of how many copies they keep.
+            const groupRow = groupRowOf.get(eventInstanceKey(ev));
+            const groupSuffix = groupRow?.group
+              ? groupRow.diverged
+                ? t('views.eventGroupDivergedSuffix', {
+                    count: groupRow.otherMembers,
+                  })
+                : t('views.eventGroupSuffix', {
+                    count: groupRow.otherMembers,
+                    calendars: groupRow.calendarIds
+                      .map((id) => calendarById.get(id)?.name ?? id)
+                      .join(', '),
+                  })
+              : '';
             const aria =
               (span
                 ? ariaBase +
@@ -1120,6 +1155,7 @@ export function DayView() {
                     total: span.totalDays,
                   })
                 : ariaBase) +
+              groupSuffix +
               (ev.cancelled ? t('views.eventCancelledSuffix') : '');
             // In LIST mode a timed event gets a STRICT duration-scaled height via
             // eventBlockFactor (so the height reads duration; a long title clips
