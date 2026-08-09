@@ -76,7 +76,9 @@ export function AgendaView() {
     () => expandToDayOccurrences(events, range),
     [events, range],
   );
-  const groups = useEventGroups(events);
+  // The range as well as the events: with both in hand the hook can also
+  // repair members whose provider id changed (DESIGN-event-groups.md).
+  const groups = useEventGroups(events, range);
   /**
    * One row per appointment instead of one per copy — folded PER DAY, which
    * is the contract `collapseEventGroups` documents: a recurring appointment

@@ -20,6 +20,7 @@ import {
   collapseEventGroups,
   eventInstanceKey,
   expandAll,
+  findHealableMembers,
   expandToDayOccurrences,
   localDateKey,
   seriesIdOf,
@@ -32,7 +33,10 @@ import {
   listCalendars,
 } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
-import { eventGroupsForEvents } from '../api/eventGroups';
+import {
+  eventGroupsForEvents,
+  healEventGroupMember,
+} from '../api/eventGroups';
 import { ActionsMenu, type MenuAction } from '../components/ActionsMenu';
 import { CalendarActions } from '../components/CalendarActions';
 import { useNewEventOnDay } from '../components/useNewEventOnDay';
@@ -209,8 +213,27 @@ export default function AgendaScreen({
           event_id: seriesIdOf(ev),
         })),
       )
-        .then((found) => {
-          if (reqToken.current === token) setEventGroups(found);
+        .then(async (found) => {
+          if (reqToken.current !== token) return;
+      // Repair members whose provider id changed, while the range that proves
+      // it is in hand: a member whose stored start falls inside it and whose
+      // id resolves to nothing here has been re-minted, and the signature says
+      // which event it is now. Silent — the same events mean the same
+      // appointment before and after (DESIGN-event-groups.md).
+        const healable = findHealableMembers(found, visible, range, seriesIdOf);
+          for (const member of healable) {
+            await healEventGroupMember(member).catch(() => undefined);
+          }
+          if (reqToken.current !== token) return;
+          const fresh = healable.length
+            ? await eventGroupsForEvents(
+                visible.map((ev) => ({
+                  calendar_id: ev.calendar_id,
+                  event_id: seriesIdOf(ev),
+                })),
+              ).catch(() => found)
+            : found;
+          if (reqToken.current === token) setEventGroups(fresh);
         })
         .catch(() => {
           if (reqToken.current === token) setEventGroups([]);

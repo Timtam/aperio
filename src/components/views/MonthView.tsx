@@ -164,7 +164,9 @@ export function MonthView() {
     }
   }, [listIdsWithTasks, sectionsByList, loadSections]);
 
-  const groups = useEventGroups(events);
+  // The range as well as the events: with both in hand the hook can also
+  // repair members whose provider id changed (DESIGN-event-groups.md).
+  const groups = useEventGroups(events, range);
   /**
    * The month's events per day, with each group folded into ONE chip.
    *

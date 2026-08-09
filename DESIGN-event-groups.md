@@ -102,7 +102,8 @@ unangetastet — es könnte eine Kopie sein, die der Nutzer gelöscht hat, und s
 auf Verdacht fallen zu lassen ändert etwas, worum niemand gebeten hat.
 
 Die Reparatur läuft **still**: dieselben Termine meinen davor wie danach
-dieselbe Verabredung, es gibt dem Nutzer nichts zu melden.
+dieselbe Verabredung, es gibt dem Nutzer nichts zu melden. Sie läuft auf allen
+sechs Oberflächen — jede hat den Bereich, der den Beweis liefert.
 
 Offen bleibt der Fall, dass ein Anbieter ein Mitglied verschiebt und die Kopien
 auseinanderlaufen. Dann ist die Gruppe eine Behauptung, die nicht mehr stimmt.

@@ -29,6 +29,7 @@ import {
   eventInstanceKey,
   withoutDuplicateMeetings,
   collapseEventGroups,
+  findHealableMembers,
   seriesIdOf,
   type CollapsedRow,
   type EventGroup,
@@ -79,7 +80,10 @@ import { joinAction, openConference } from '../intl/conferencing';
 import { resolveEventColor } from '../intl/eventColor';
 import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
 import type { RootStackParamList } from '../navigation/types';
-import { eventGroupsForEvents } from '../api/eventGroups';
+import {
+  eventGroupsForEvents,
+  healEventGroupMember,
+} from '../api/eventGroups';
 import { ActionsMenu, type MenuAction } from './ActionsMenu';
 import { useCacheReload } from '../state/cacheObserver';
 import { hapticLoadBegin, hapticLoadEnd } from '../state/haptics';
@@ -784,8 +788,24 @@ export function CalendarDayList({
       return;
     }
     eventGroupsForEvents(refs)
-      .then((found) => {
-        if (!cancelled) setEventGroups(found);
+      .then(async (found) => {
+        if (cancelled) return;
+      // Repair members whose provider id changed, while the range that proves
+      // it is in hand: a member whose stored start falls inside it and whose
+      // id resolves to nothing here has been re-minted, and the signature says
+      // which event it is now. Silent — the same events mean the same
+      // appointment before and after (DESIGN-event-groups.md).
+      const healable = findHealableMembers(found, visibleEvents, range, seriesIdOf);
+        for (const member of healable) {
+          await healEventGroupMember(member).catch(() => undefined);
+        }
+        if (cancelled) return;
+        // Read back rather than patch locally: the repair also travels to the
+        // other devices, and the stored group is the answer.
+        const fresh = healable.length
+          ? await eventGroupsForEvents(refs).catch(() => found)
+          : found;
+        if (!cancelled) setEventGroups(fresh);
       })
       .catch(() => {
         // No folding this round — which is what the app did before groups
@@ -795,7 +815,7 @@ export function CalendarDayList({
     return () => {
       cancelled = true;
     };
-  }, [visibleEvents]);
+  }, [visibleEvents, range]);
   // Expand recurring SCHEDULED tasks into one occurrence per planned day across
   // the visible window — so a task recurring every day/week shows on EVERY due
   // day here (like a recurring event), not only its single current
