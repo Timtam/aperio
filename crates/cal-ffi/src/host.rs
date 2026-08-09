@@ -2909,6 +2909,9 @@ impl Host {
     /// local-only `delete_calendar`.
     pub fn delete_calendar(&self, id: String) -> Result<(), StoreError> {
         self.adapter.delete_calendar(&id).map_err(map_store_err)?;
+        // The calendar's events went with it, so no group can go on counting
+        // them.
+        self.forget_calendar_groupings(&id);
         self.writer
             .append(SyncEvent::CalendarDeleted(IdPayload { id }));
         Ok(())
@@ -3229,10 +3232,15 @@ impl Host {
             // single SQL UPDATE — no resource-URL gymnastics, so there's nothing
             // to gain from the two-call dance.
             if source_local && target_local {
+                let moved_to = event.calendar_id.clone();
                 let updated = self
                     .runtime
                     .block_on(async { self.adapter.update_event(event).await })
                     .map_err(map_store_err)?;
+                // A move is not an unlinking: the copy still means the same
+                // appointment, it just lives elsewhere now. Membership is keyed
+                // by (calendar, event), so it has to be carried across.
+                self.relocate_event_grouping(&previous, &updated.id, &moved_to, &updated.id);
                 if let Ok(fields) = serde_json::to_value(&updated) {
                     self.writer.append(SyncEvent::EventUpdated(EventPayload {
                         id: updated.id.clone(),
@@ -3300,6 +3308,18 @@ impl Host {
                 }
                 Ok::<_, StoreError>(created)
             })?;
+
+            // Carry the grouping over to the copy at the target: a
+            // cross-adapter move re-creates the event, so it lives under a new
+            // id now. The source delete here goes straight to the adapter, so
+            // it does not run the membership cleanup `delete_event` does —
+            // this is what keeps the group whole across a move.
+            self.relocate_event_grouping(
+                &previous,
+                &source_event_id,
+                &target_calendar_id,
+                &created.id,
+            );
 
             // Each LOCAL side emits its own event-log entry; external sides stay
             // silent (the provider's own sync mesh propagates the change).
@@ -8345,6 +8365,42 @@ impl Host {
 /// no business crossing the FFI boundary — the client in particular holds a
 /// secret.
 impl Host {
+    /// Follow an event that moved to another calendar, and tell the other
+    /// devices. Best-effort, like the delete twin.
+    fn relocate_event_grouping(
+        &self,
+        old_calendar_id: &str,
+        old_event_id: &str,
+        new_calendar_id: &str,
+        new_event_id: &str,
+    ) {
+        let shared = self.db.shared();
+        match EventGroupsRepo::new(&shared).relocate(
+            old_calendar_id,
+            old_event_id,
+            new_calendar_id,
+            new_event_id,
+        ) {
+            Ok(Some(group)) => self.emit_event_group(&group),
+            Ok(None) => {}
+            Err(err) => tracing::warn!(?err, "could not follow the moved event's grouping"),
+        }
+    }
+
+    /// Take a deleted calendar's events out of their groups, and tell the
+    /// other devices.
+    fn forget_calendar_groupings(&self, calendar_id: &str) {
+        let shared = self.db.shared();
+        match EventGroupsRepo::new(&shared).forget_calendar(calendar_id) {
+            Ok(groups) => {
+                for group in &groups {
+                    self.emit_event_group(group);
+                }
+            }
+            Err(err) => tracing::warn!(?err, "could not clear the calendar's groupings"),
+        }
+    }
+
     /// Take a deleted event out of whatever group it was in, and tell the
     /// other devices.
     ///

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
   findNodeHandle,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -13,6 +14,7 @@ import {
   expandAll,
   memberFromEvent,
   seriesIdOf,
+  withoutDuplicateMeetings,
   type EventGroup,
 } from '@aperio/shared';
 
@@ -162,10 +164,18 @@ export default function EventGroupModal({
         // itself uses, so the picker offers exactly what the view showed.
         if (!cancelled) {
           setDayEvents(
-            expandAll(perCalendar.flat(), {
-              start: new Date(range.start),
-              end: new Date(range.end),
-            }),
+            // `withoutDuplicateMeetings` for the same reason every view runs
+            // it: a videoconference account contributes a read-only calendar
+            // of its own meetings, and the ones that already have a calendar
+            // entry are dropped there. Offering them here would invite the
+            // user to group an event with a row that is not shown anywhere —
+            // and the group would then name something they cannot see.
+            withoutDuplicateMeetings(
+              expandAll(perCalendar.flat(), {
+                start: new Date(range.start),
+                end: new Date(range.end),
+              }),
+            ),
           );
         }
       } catch (err) {
@@ -236,9 +246,16 @@ export default function EventGroupModal({
         (err as { code?: string })?.code === 'event_group_conflict'
           ? t('dialogs.eventGroup.conflict')
           : errorMessage(err);
-      // Set only. The live region below speaks it the moment it appears —
-      // announcing it as well made every failure arrive twice.
       setError(message);
+      // The live region below is ANDROID ONLY — `accessibilityLiveRegion` maps
+      // to the Android platform attribute and does nothing on iOS. Removing
+      // this announce to avoid a double utterance therefore left VoiceOver
+      // with no channel at all: the one refusal a user has to act on ("take
+      // one of them out first") was set into a Text near the top of the screen
+      // and never spoken, while the cursor sat on a button that sounded
+      // exactly as it had before the tap. So: announce where nothing else
+      // will, stay quiet where the live region already does.
+      if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(message);
     },
     [t],
   );

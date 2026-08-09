@@ -5,6 +5,7 @@ import {
   type EventGroup,
   memberFromEvent,
   eventGroupMemberKey,
+  withoutDuplicateMeetings,
 } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
@@ -116,7 +117,12 @@ export function EventGroupDialog({
         ),
       );
       if (cancelled) return;
-      setEvents(expandAll(perCalendar.flat(), range));
+      // `withoutDuplicateMeetings` for the same reason every view runs it: a
+      // videoconference account contributes a read-only calendar of its own
+      // meetings, and the ones that already have a calendar entry are dropped
+      // there. Offering them here would invite the user to group an event with
+      // a row that is not shown anywhere.
+      setEvents(withoutDuplicateMeetings(expandAll(perCalendar.flat(), range)));
     })();
     return () => {
       cancelled = true;

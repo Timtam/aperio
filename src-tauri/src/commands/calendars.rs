@@ -290,10 +290,13 @@ pub async fn create_calendar(
 pub async fn delete_calendar(
     adapter: State<'_, LocalAdapter>,
     event_log: State<'_, Arc<EventLogWriter>>,
+    db: State<'_, DbHandle>,
     id: String,
 ) -> CommandResult<()> {
     adapter.delete_calendar(&id)?;
     event_log.append(SyncEvent::CalendarDeleted(IdPayload { id: id.clone() }));
+    // The calendar's events went with it, so no group can go on counting them.
+    super::forget_calendar_groupings(&db, &event_log, &id);
     Ok(())
 }
 
@@ -579,7 +582,19 @@ pub async fn update_event(
         // single SQL UPDATE without resource-URL gymnastics, so
         // there's nothing to gain from a two-call dance here.
         if source_account == LOCAL_ID && target_account == LOCAL_ID {
+            let moved_to = event.calendar_id.clone();
             let updated = adapter.update_event(event).await?;
+            // A move is not an unlinking: the copy still means the same
+            // appointment, it just lives elsewhere now. Membership is keyed by
+            // (calendar, event), so it has to be carried across.
+            super::relocate_event_grouping(
+                &db,
+                &event_log,
+                &previous,
+                &updated.id,
+                &moved_to,
+                &updated.id,
+            );
             // Local↔Local move surfaces as a single UPDATE on the
             // calendar_id column — emit one EventUpdated event
             // carrying the full row.
@@ -643,6 +658,20 @@ pub async fn update_event(
             };
             ext.create_event(&event.calendar_id, new_payload).await?
         };
+
+        // Carry the grouping over to the copy at the target. A cross-adapter
+        // move re-creates the event, so the new id is the created one, not the
+        // old. Done before the source delete so the order is the same whether
+        // or not that delete ever routes through the command that clears a
+        // deleted event's membership.
+        super::relocate_event_grouping(
+            &db,
+            &event_log,
+            &previous,
+            &event.id,
+            &event.calendar_id,
+            &created.id,
+        );
 
         // Delete from source. We log on failure rather than
         // bubbling — the create already succeeded, the event

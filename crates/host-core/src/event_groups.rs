@@ -122,6 +122,17 @@ fn read_group(
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
+    // Fewer than two members is not a group, and is not shown.
+    //
+    // Not deleted, though — the sync applier keeps a group that lost members
+    // to a newer claim, precisely so it does not forget what it had won.
+    // Deleting it made the outcome depend on the order claims arrived in (see
+    // `upsert_event_group_from_sync`). So the rule lives on the READ side: the
+    // row stays as the record of a claim that lost, and nobody is told about a
+    // group of one.
+    if members.len() < 2 {
+        return Ok(None);
+    }
     Ok(Some(EventGroup {
         id: group_id.to_string(),
         created_at,
@@ -264,6 +275,22 @@ impl<'a> EventGroupsRepo<'a> {
                 out.insert((calendar_id.clone(), event_id.clone()), group_id);
             }
         }
+        drop(stmt);
+        // Same rule as `get`: a row may still name a group that lost its other
+        // members to a newer claim, and that is not a group anyone should be
+        // told about.
+        let mut sizes =
+            conn.prepare("SELECT COUNT(*) FROM event_group_members WHERE group_id = ?")?;
+        let mut lonely: Vec<(String, String)> = Vec::new();
+        for (key, group_id) in &out {
+            let count: i64 = sizes.query_row(params![group_id], |row| row.get(0))?;
+            if count < 2 {
+                lonely.push(key.clone());
+            }
+        }
+        for key in lonely {
+            out.remove(&key);
+        }
         Ok(out)
     }
 
@@ -290,6 +317,101 @@ impl<'a> EventGroupsRepo<'a> {
                 out.push(group);
             }
         }
+        Ok(out)
+    }
+
+    /// Follow an event that moved to another calendar (or was re-created
+    /// there under a new id).
+    ///
+    /// Moving a copy between calendars does not stop it meaning the same
+    /// appointment — that is the whole point of the group. But membership is
+    /// keyed by (calendar, event), and a cross-adapter move re-creates the
+    /// event with a new id, so without this the row is left pointing at
+    /// something that no longer exists and the group quietly shrinks.
+    ///
+    /// `None` when the event was not grouped. Returns the group afterwards so
+    /// the caller can tell the other devices.
+    pub fn relocate(
+        &self,
+        old_calendar_id: &str,
+        old_event_id: &str,
+        new_calendar_id: &str,
+        new_event_id: &str,
+    ) -> Result<Option<EventGroup>, EventGroupsError> {
+        let now = Utc::now().to_rfc3339();
+        let mut conn = self.db.lock().expect("db mutex poisoned");
+        let tx = conn.transaction()?;
+        let group_id: Option<String> = tx
+            .query_row(
+                "SELECT group_id FROM event_group_members
+                  WHERE calendar_id = ? AND event_id = ?",
+                params![old_calendar_id, old_event_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(group_id) = group_id else {
+            tx.commit()?;
+            return Ok(None);
+        };
+        // The target may already be in a group (the user moved an event onto
+        // one it was grouped with). Its own membership wins; ours goes.
+        tx.execute(
+            "DELETE FROM event_group_members WHERE calendar_id = ? AND event_id = ?",
+            params![old_calendar_id, old_event_id],
+        )?;
+        tx.execute(
+            "INSERT INTO event_group_members
+                 (group_id, calendar_id, event_id, title, starts_at, added_at)
+             SELECT ?, ?, ?, title, starts_at, added_at
+               FROM event_group_members WHERE group_id = ? LIMIT 1
+             ON CONFLICT(calendar_id, event_id) DO NOTHING",
+            params![group_id, new_calendar_id, new_event_id, group_id],
+        )?;
+        tx.execute(
+            "UPDATE event_groups SET updated_at = ? WHERE id = ?",
+            params![now, group_id],
+        )?;
+        let group = read_group(&tx, &group_id)?;
+        tx.commit()?;
+        Ok(group)
+    }
+
+    /// Take every event of a calendar out of its groups.
+    ///
+    /// A deleted calendar takes its events with it, and a membership row that
+    /// names one of them is a group counting a row that cannot be shown. The
+    /// groups left standing are returned so the caller can tell the other
+    /// devices; a group that falls under two members stops being shown by
+    /// itself (see `get`), so nothing has to be deleted here.
+    pub fn forget_calendar(&self, calendar_id: &str) -> Result<Vec<EventGroup>, EventGroupsError> {
+        let now = Utc::now().to_rfc3339();
+        let mut conn = self.db.lock().expect("db mutex poisoned");
+        let tx = conn.transaction()?;
+        let mut stmt =
+            tx.prepare("SELECT DISTINCT group_id FROM event_group_members WHERE calendar_id = ?")?;
+        let touched = stmt
+            .query_map(params![calendar_id], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(stmt);
+        if touched.is_empty() {
+            tx.commit()?;
+            return Ok(Vec::new());
+        }
+        tx.execute(
+            "DELETE FROM event_group_members WHERE calendar_id = ?",
+            params![calendar_id],
+        )?;
+        let mut out = Vec::new();
+        for id in touched {
+            tx.execute(
+                "UPDATE event_groups SET updated_at = ? WHERE id = ?",
+                params![now, id],
+            )?;
+            if let Some(group) = read_group(&tx, &id)? {
+                out.push(group);
+            }
+        }
+        tx.commit()?;
         Ok(out)
     }
 

@@ -136,6 +136,13 @@ class CalFfiModule : Module() {
    * Everything else falls through untouched — a `StoreException.NotFound` was
    * never the problem.
    */
+  private inline fun <T> coded(block: () -> T): T =
+    try {
+      block()
+    } catch (e: StoreException.Sync) {
+      throw CodedException(e.code, e.detail, e)
+    }
+
   /**
    * Re-throw the ONE refusal a grouping request can meet with a code.
    *
@@ -149,13 +156,6 @@ class CalFfiModule : Module() {
       block()
     } catch (e: StoreException.Conflict) {
       throw CodedException("event_group_conflict", e.detail, e)
-    }
-
-  private inline fun <T> coded(block: () -> T): T =
-    try {
-      block()
-    } catch (e: StoreException.Sync) {
-      throw CodedException(e.code, e.detail, e)
     }
 
   // Split across several `ModuleDefinitionBuilder` extensions rather than one

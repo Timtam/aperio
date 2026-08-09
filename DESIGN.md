@@ -2460,7 +2460,18 @@ Gruppe, die schon vorliegt, wird verworfen; ein umstrittenes Mitglied geht an de
 neueren Anspruch; die Gruppen-Id bricht den Gleichstand. Jedes Gerät rechnet
 dasselbe und kommt ohne weitere Runde auf dieselbe Antwort.
 
-Ein **aufgelöste**-Marke (Migration 0036, `event_group_tombstones`) überlebt die
+Eine Gruppe, die Mitglieder an einen neueren Anspruch verliert, wird **nicht
+gelöscht**, sondern behält, was ihr bleibt — und wird ab weniger als zwei
+Mitgliedern nur nicht mehr *angezeigt* (die Lesepfade in host-core überspringen
+sie). Das Löschen war das letzte Stück Reihenfolgen-Abhängigkeit: eine
+ausgehungerte Gruppe vergisst, was sie gewonnen hatte, und damit hing die Antwort
+davon ab, ob sie vor oder nach dem nächsten Anspruch starb. Bei drei
+überlappenden Ansprüchen (a+b Montag, b+c Dienstag, c+d Mittwoch) endete eine
+Reihenfolge mit intaktem a+b und eine andere mit losem a und b — beide dauerhaft.
+So bleibt jedes Ereignis bei der neuesten Gruppe, die es je beansprucht hat, und
+das ist ein laufendes Maximum, also überall dasselbe.
+
+Eine **aufgelöste**-Marke (Migration 0036, `event_group_tombstones`) überlebt die
 Zeile. Sonst wird eine Auflösung still rückgängig gemacht: das auflösende Gerät
 hört sein eigenes Ereignis nie wieder, während eine Aktualisierung, die ein
 anderes Gerät vor der Nachricht geschrieben hat, danach noch eintrifft — und ohne

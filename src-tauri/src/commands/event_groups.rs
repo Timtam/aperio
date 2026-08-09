@@ -173,6 +173,48 @@ pub(crate) fn forget_event_grouping(
     }
 }
 
+/// Follow a moved event, and tell the other devices.
+///
+/// Best-effort like `forget_event_grouping`: the move has already happened.
+pub(crate) fn relocate_event_grouping(
+    db: &DbHandle,
+    event_log: &EventLogWriter,
+    old_calendar_id: &str,
+    old_event_id: &str,
+    new_calendar_id: &str,
+    new_event_id: &str,
+) {
+    let shared = db.shared();
+    match EventGroupsRepo::new(&shared).relocate(
+        old_calendar_id,
+        old_event_id,
+        new_calendar_id,
+        new_event_id,
+    ) {
+        Ok(Some(group)) => emit_group(event_log, &group),
+        Ok(None) => {}
+        Err(err) => tracing::warn!(?err, "could not follow the moved event's grouping"),
+    }
+}
+
+/// Take a deleted calendar's events out of their groups, and tell the other
+/// devices.
+pub(crate) fn forget_calendar_groupings(
+    db: &DbHandle,
+    event_log: &EventLogWriter,
+    calendar_id: &str,
+) {
+    let shared = db.shared();
+    match EventGroupsRepo::new(&shared).forget_calendar(calendar_id) {
+        Ok(groups) => {
+            for group in &groups {
+                emit_group(event_log, group);
+            }
+        }
+        Err(err) => tracing::warn!(?err, "could not clear the calendar's groupings"),
+    }
+}
+
 /// A group change travels as the whole membership — see `SyncEvent`'s own note
 /// on why a diff would let two devices interleave into a set neither meant.
 fn emit_group(event_log: &EventLogWriter, group: &cal_core::EventGroup) {

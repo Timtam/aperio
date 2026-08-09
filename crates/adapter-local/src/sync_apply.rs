@@ -444,11 +444,16 @@ impl LocalAdapter {
     ///   arriving group is the newer claim; otherwise it stays where it is and
     ///   the arriving group goes without it. `updated_at` decides and the group
     ///   id breaks a tie — arbitrary, but identically arbitrary everywhere.
-    /// - A group left under two members is not a group and is dropped, and so
-    ///   is an ARRIVING one that could not gather two. The cleanup only touches
-    ///   the groups this call actually robbed; the global sweep this used to do
-    ///   reaped bystanders, and since the applier cannot emit, no other device
-    ///   would ever hear that it had.
+    /// - A group left under two members is KEPT, holding whatever it still
+    ///   has, and simply stops being shown (the read paths in host-core skip a
+    ///   group with fewer than two members). Deleting it was the last piece of
+    ///   order-dependence: a starved group forgets the members it had won, so
+    ///   the answer depended on whether it happened to die before or after the
+    ///   next claim arrived. With three overlapping claims — a+b Monday, b+c
+    ///   Tuesday, c+d Wednesday — one order ended with a+b intact and another
+    ///   with a and b loose, and both stuck. Nothing is deleted here now, so
+    ///   each member simply ends up with the newest group that ever claimed
+    ///   it, which is a running maximum and therefore the same everywhere.
     pub fn upsert_event_group_from_sync(
         &self,
         group: &cal_core::EventGroup,
@@ -487,7 +492,6 @@ impl LocalAdapter {
         // Who may join: everyone free, plus everyone whose current group is the
         // older claim.
         let mut members: Vec<&cal_core::EventGroupMember> = Vec::new();
-        let mut robbed: Vec<String> = Vec::new();
         for m in &group.members {
             let holder: Option<(String, String)> = tx
                 .query_row(
@@ -504,9 +508,6 @@ impl LocalAdapter {
                 Some((held_by, held_updated)) if held_by != group.id => {
                     if is_newer_claim((&group.updated_at, &group.id), (&held_updated, &held_by)) {
                         members.push(m);
-                        if !robbed.contains(&held_by) {
-                            robbed.push(held_by);
-                        }
                     }
                     // Else: the group holding it made the newer claim, so the
                     // arriving group simply does not get this member. The other
@@ -515,15 +516,6 @@ impl LocalAdapter {
                 }
                 _ => members.push(m),
             }
-        }
-
-        // One event cannot mean the same appointment as itself.
-        if members.len() < 2 {
-            tx.execute("DELETE FROM event_groups WHERE id = ?", params![group.id])
-                .map_err(map_sql_err)?;
-            tombstone(&tx, &group.id, &group.updated_at).map_err(map_sql_err)?;
-            tx.commit().map_err(map_sql_err)?;
-            return Ok(());
         }
 
         tx.execute(
@@ -562,21 +554,6 @@ impl LocalAdapter {
                 ],
             )
             .map_err(map_sql_err)?;
-        }
-        for id in robbed {
-            let dropped = tx
-                .execute(
-                    "DELETE FROM event_groups
-                      WHERE id = ?1
-                        AND (SELECT COUNT(*) FROM event_group_members WHERE group_id = ?1) < 2",
-                    params![id],
-                )
-                .map_err(map_sql_err)?;
-            if dropped > 0 {
-                // Dissolved by this claim, so it is dissolved AS OF this claim:
-                // an older update naming it must not bring it back.
-                tombstone(&tx, &id, &group.updated_at).map_err(map_sql_err)?;
-            }
         }
         tx.commit().map_err(map_sql_err)?;
         Ok(())
@@ -822,9 +799,86 @@ mod tests {
         ))
         .unwrap();
 
-        // "local" would be left with ev-b alone, claiming to be grouped with
-        // nothing — the same rule the local ungroup path applies.
-        assert_eq!(group_ids(&a), vec!["remote"]);
+        // "local" is left holding ev-b alone. The ROW stays — deleting it is
+        // what used to make the outcome depend on arrival order — but nobody
+        // is told about it: the host-core read paths skip a group of one.
+        assert_eq!(group_ids(&a), vec!["local", "remote"]);
+        assert_eq!(members_of(&a, "local"), vec!["ev-b"]);
+    }
+
+    /// Three claims chained by a shared event, in every order they can arrive.
+    ///
+    /// The case an adversarial review reproduced: a+b Monday, b+c Tuesday, c+d
+    /// Wednesday. Deleting a group starved below two members made two of the
+    /// six orders end with a+b intact and four with a and b loose — and both
+    /// stuck, because the applier never re-applies a device's own envelopes
+    /// and cannot emit. Devices really do reach different orders: one that was
+    /// offline delivers its old envelope in a later round, so the sort inside
+    /// a batch does not put them all in one line.
+    #[test]
+    fn three_chained_claims_land_the_same_way_in_every_order() {
+        let claims = [
+            (
+                "g1",
+                "2026-08-10T09:00:00Z",
+                ("work", "ev-a"),
+                ("private", "ev-b"),
+            ),
+            (
+                "g2",
+                "2026-08-11T09:00:00Z",
+                ("private", "ev-b"),
+                ("colleague", "ev-c"),
+            ),
+            (
+                "g3",
+                "2026-08-12T09:00:00Z",
+                ("colleague", "ev-c"),
+                ("other", "ev-d"),
+            ),
+        ];
+        let orders = [
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ];
+
+        let mut seen: Vec<Vec<(String, Vec<String>)>> = Vec::new();
+        for order in orders {
+            let a = adapter();
+            for i in order {
+                let (id, at, first, second) = claims[i];
+                a.upsert_event_group_from_sync(&stamped(
+                    id,
+                    at,
+                    vec![member(first.0, first.1), member(second.0, second.1)],
+                ))
+                .unwrap();
+            }
+            // What a user is actually shown: groups of one are records of a
+            // claim that lost, not groups.
+            let visible: Vec<(String, Vec<String>)> = state(&a)
+                .into_iter()
+                .filter(|(_, members)| members.len() >= 2)
+                .collect();
+            seen.push(visible);
+        }
+
+        for (i, outcome) in seen.iter().enumerate() {
+            assert_eq!(outcome, &seen[0], "order {i} disagrees with the first one",);
+        }
+        // And the answer is the one every device can justify: each event ended
+        // up with the newest group that ever claimed it.
+        assert_eq!(
+            seen[0],
+            vec![(
+                "g3".to_string(),
+                vec!["ev-c".to_string(), "ev-d".to_string()]
+            )],
+        );
     }
 
     #[test]
@@ -881,14 +935,19 @@ mod tests {
 
         assert_eq!(state(&a), state(&b), "both devices must land on one answer");
         // And that answer is the later claim: ev-a means the appointment the
-        // newer group says it does, and the older group is left with one
-        // member, which is not a group.
+        // newer group says it does. The older group keeps its row holding
+        // ev-b alone — the record of a claim that lost, kept so the outcome
+        // does not depend on arrival order — and the read paths never surface
+        // a group of one.
         assert_eq!(
             state(&a),
-            vec![(
-                "g-late".to_string(),
-                vec!["ev-a".to_string(), "ev-d".to_string()]
-            )]
+            vec![
+                ("g-early".to_string(), vec!["ev-b".to_string()]),
+                (
+                    "g-late".to_string(),
+                    vec!["ev-a".to_string(), "ev-d".to_string()]
+                ),
+            ],
         );
     }
 
@@ -924,7 +983,8 @@ mod tests {
         ))
         .unwrap();
         // An older claim over the same two events: it may take neither, so it
-        // is left with nothing and must not appear as a group of zero.
+        // is stored empty. The row is the record of a claim that lost; the
+        // read paths never surface it.
         a.upsert_event_group_from_sync(&stamped(
             "older",
             "2026-08-10T09:00:00Z",
@@ -932,8 +992,8 @@ mod tests {
         ))
         .unwrap();
 
-        assert_eq!(group_ids(&a), vec!["held"]);
         assert_eq!(members_of(&a, "held"), vec!["ev-a", "ev-b"]);
+        assert!(members_of(&a, "older").is_empty());
     }
 
     #[test]
