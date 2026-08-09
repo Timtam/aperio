@@ -834,6 +834,11 @@ export function CalendarDayList({
     [navigation],
   );
 
+  const groupEvent = useCallback(
+    (ev: CalendarEvent) => navigation.navigate('EventGroup', { event: ev }),
+    [navigation],
+  );
+
   const removeEvent = useCallback(
     (ev: CalendarEvent) =>
       confirmDeleteEvent(
@@ -1148,12 +1153,18 @@ export function CalendarDayList({
       ...(join ? [join.action] : []),
       { name: 'activate', label: t('mobile.editTaskLabel') },
       { name: 'moveCopy', label: t('mobile.moveCopy') },
+      // "Belongs together with…" — the entry point to event groups. It sits
+      // with the non-destructive verbs because it is a statement ABOUT the
+      // event, not something done to it: no provider hears of it, and taking
+      // it back leaves nothing changed.
+      { name: 'group', label: t('chipMenu.groupWith') },
       { name: 'delete', label: t('dialogs.event.delete'), destructive: true },
     ];
     const runAction = (name: string) => {
       if (name === 'join' && join) void openConference(join.conference, t);
       else if (name === 'delete') removeEvent(ev);
       else if (name === 'moveCopy') moveCopyEvent(ev);
+      else if (name === 'group') groupEvent(ev);
       else editEvent(ev);
     };
     return (

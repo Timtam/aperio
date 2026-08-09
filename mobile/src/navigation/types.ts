@@ -51,6 +51,10 @@ export type RootStackParamList = {
   MoveCopy:
     | { kind: 'task'; taskId: string; listId: string }
     | { kind: 'event'; event: CalendarEvent };
+  // "These events mean the same appointment" (DESIGN-event-groups.md). The
+  // anchor rides in whole: the screen needs its title and start as the
+  // signature it stores, and re-fetching would only risk a different answer.
+  EventGroup: { event: CalendarEvent };
   Lists: undefined;
   ListEditor: { listId: string };
   // Manage a shared list's membership (§9.7) — only reachable for lists whose

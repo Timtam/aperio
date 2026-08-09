@@ -413,6 +413,22 @@ class CalFfiModule : Module() {
       host.deleteColorLabel(id)
     }
 
+    AsyncFunction("groupEventsJson") { membersJson: String ->
+      host.groupEventsJson(membersJson)
+    }
+
+    AsyncFunction("ungroupEventJson") { calendarId: String, eventId: String ->
+      host.ungroupEventJson(calendarId, eventId)
+    }
+
+    AsyncFunction("dissolveEventGroup") { groupId: String ->
+      host.dissolveEventGroup(groupId)
+    }
+
+    AsyncFunction("eventGroupsForEventsJson") { eventsJson: String ->
+      host.eventGroupsForEventsJson(eventsJson)
+    }
+
     AsyncFunction("setContainerColorLabel") { containerId: String, kind: String, colorLabelId: String? ->
       host.setContainerColorLabel(containerId, kind, colorLabelId)
     }

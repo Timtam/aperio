@@ -5,6 +5,7 @@ import { DayStartReviewDialog } from './DayStartReviewDialog';
 import { EditEventScopeDialog } from './EditEventScopeDialog';
 import { EventDialog } from './EventDialog';
 import { FirstLaunchWizardDialog } from './FirstLaunchWizardDialog';
+import { EventGroupDialog } from './EventGroupDialog';
 import { MoveCopyDialog } from './MoveCopyDialog';
 import { PlanTaskDialog } from './PlanTaskDialog';
 import { QuickAddDialog } from './QuickAddDialog';
@@ -100,6 +101,15 @@ export function DialogHost() {
     case 'moveCopy':
       return (
         <MoveCopyDialog isOpen onClose={close} target={mode.target} />
+      );
+    case 'eventGroup':
+      return (
+        <EventGroupDialog
+          isOpen
+          onClose={close}
+          event={mode.event}
+          onChanged={invalidateData}
+        />
       );
     case 'planTask':
       return (

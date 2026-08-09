@@ -164,6 +164,7 @@
     "cancelSilent": "Ohne Benachrichtigung entfernen",
     "moveTo": "Verschieben nach …",
     "copyTo": "Kopieren nach …",
+    "groupWith": "Gehört zusammen mit…",
     "bringToBacklog": "Ins Backlog holen",
     "broughtToBacklog": "„{{title}}\" ins Backlog geholt.",
     "status": "Status",
@@ -1173,6 +1174,28 @@
     "deadlinePin": {
       "announce_one": "1 Aufgabe hat heute ihre Deadline und wurde auf heute eingeplant.",
       "announce_other": "{{count}} Aufgaben haben heute ihre Deadline und wurden auf heute eingeplant."
+    },
+    "eventGroup": {
+      "title": "Derselbe Termin",
+      "loading": "Wird geprüft…",
+      "notGrouped": "„{{title}}“ ist mit keinem anderen Termin gruppiert.",
+      "inGroup_one": "„{{title}}“ meint dieselbe Verabredung wie {{count}} weiterer Termin.",
+      "inGroup_other": "„{{title}}“ meint dieselbe Verabredung wie {{count}} weitere Termine.",
+      "member": "{{title}} in {{calendar}}",
+      "pickLabel": "Meint diese Verabredung ebenfalls",
+      "pickNone": "Termin auswählen…",
+      "pickHint": "Die übrigen Termine dieses Tages.",
+      "noCandidates": "An diesem Tag liegt kein weiterer Termin.",
+      "candidate": "{{title}}, {{time}}, {{calendar}}",
+      "allDay": "ganztägig",
+      "add": "Gruppieren",
+      "removeSelf": "Diesen Termin herauslösen",
+      "dissolve": "Gruppe auflösen",
+      "close": "Schließen",
+      "grouped": "„{{title}}“ und „{{other}}“ meinen jetzt dieselbe Verabredung.",
+      "ungrouped": "„{{title}}“ ist nicht mehr gruppiert.",
+      "dissolved": "Gruppe aufgelöst. Die Termine bleiben unverändert.",
+      "conflict": "Beide Termine gehören bereits zu verschiedenen Gruppen. Lösen Sie einen davon zuerst heraus — zwei Gruppen zusammenzuführen entscheidet Aperio nicht für Sie."
     },
     "deleteScope": {
       "title": "Serientermin löschen",

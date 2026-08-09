@@ -346,7 +346,14 @@ export interface CommandError {
     // host keys until this device has confirmed the server's fingerprint.
     // Its own code because the repair is its own gesture: the sync settings
     // offer the trust dialog rather than a message the user cannot act on.
-    | 'host_key_not_trusted';
+    | 'host_key_not_trusted'
+    // `group_events` refuses to merge two existing groups. Its own code
+    // because the answer is a sentence only the user can act on ("take one of
+    // them out first"), not a failure to report.
+    | 'event_group_conflict'
+    // A group needs at least two events. The UI never sends fewer, so this is
+    // a guard rather than a message anyone should meet.
+    | 'event_group_too_few';
   message: string;
 }
 

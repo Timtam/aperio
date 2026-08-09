@@ -112,6 +112,7 @@ export function useChipContextMenu(): ChipContextMenuActions {
     openEventDialog,
     openTaskDialog,
     openMoveCopy,
+    openEventGroup,
     invalidateData,
   } = useDialogState();
   const { set: setTaskStatus } = useTaskStatusActions();
@@ -199,6 +200,11 @@ export function useChipContextMenu(): ChipContextMenuActions {
         { id: 'edit', label: t('chipMenu.edit') },
         { id: 'move', label: t('chipMenu.moveTo') },
         { id: 'copy', label: t('chipMenu.copyTo') },
+        // "Belongs together with…" — the entry point to event groups. It sits
+        // with edit/move/copy rather than near delete because it is a
+        // statement about the event, not something done TO it: no provider
+        // hears of it, and taking it back leaves nothing changed.
+        { id: 'group', label: t('chipMenu.groupWith') },
         colorSubmenu,
         { kind: 'separator' },
         ...(offersChoice
@@ -224,6 +230,8 @@ export function useChipContextMenu(): ChipContextMenuActions {
         }
       } else if (selected === 'edit') {
         openEventDialog(event);
+      } else if (selected === 'group') {
+        openEventGroup(event);
       } else if (selected === 'move') {
         openMoveCopy({ kind: 'event', event, defaultMode: 'move' });
       } else if (selected === 'copy') {
@@ -299,6 +307,7 @@ export function useChipContextMenu(): ChipContextMenuActions {
       announce,
       openEventDialog,
       openMoveCopy,
+      openEventGroup,
       invalidateData,
       colorLabels,
       calById,

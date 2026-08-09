@@ -296,7 +296,7 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       Termin, in dem man gerade sitzt, ist das Unmittelbarste, was es gibt.
       ⚠️ Ungeprüft auf dem Gerät.
 
-### A9 · Termingruppen `[ ]` — Entwurf liegt vor
+### A9 · Termingruppen `[~]` — Stufe 0 steht
 Derselbe Termin liegt heute mehrfach in Aperio (Outlook für die Kollegen, Kopie
 im Privatkalender für Alexas Erinnerungen, dazu die Kalender der Kollegen), und
 Aperio weiß nichts davon: mehrfache Zeilen, mehrfaches Nachziehen bei jeder
@@ -307,7 +307,15 @@ Sie ersetzt die heutige Ja/Nein-Rückfrage beim Meeting-Verknüpfen ersatzlos.
 Vollständiger Entwurf samt der schwierigen Teile (woher die Mitgliedschaft kommt,
 wie eine Gruppe anbieterseitige Kennungswechsel überlebt, was bei fehlenden
 Schreibrechten passiert) und einem Stufenplan: `DESIGN-event-groups.md`.
-Größenordnung wie die Widgets. NICHT begonnen.
+Größenordnung wie die Widgets.
+
+**Stufe 0 ist gebaut** (Migration 0035, `EventGroupsRepo`, Sync über
+`event_group.updated`/`.dissolved` UND den Snapshot, Aktion „Gehört zusammen
+mit…" im Kontext- bzw. Rotor-Menü beider Oberflächen). Offen bleiben Stufe 1
+(Zusammenfalten in den Ansichten — der eigentliche Alltagsgewinn), Stufe 2
+(Bearbeitungsumfang über die Mitglieder, mit ehrlicher Meldung über das, was
+nicht ging) und Stufe 3 (Erkennung + Vorschlag; das Meeting wandert an die
+Gruppe).
 
 ### A8 · Sprachbefehle (Siri / Kurzbefehle, iOS zuerst) `[~]`
 Termine und Aufgaben per Sprache anlegen, mit Kalender- bzw. Listenwahl.

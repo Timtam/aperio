@@ -122,6 +122,29 @@ changed (on edit, a new series takes over from here) or removed (on delete).
 > `Esc` cancels without saving. In a view, events are announced with title,
 > time and calendar when selected.
 
+## The same appointment in several calendars
+
+One commitment often exists several times over: in the work calendar so
+colleagues see it, copied into a private calendar because that is the one a
+voice assistant reads out, and again in a colleague's calendar Aperio also
+reads. To every provider those are unrelated events — Aperio can be told
+otherwise.
+
+Open an event's context menu (right-click, `Shift+F10`, or long-press on the
+phone) and choose **Belongs together with…**. The dialog lists the other events
+of that day; pick the twin and confirm with **Group**. The same dialog takes an
+event back out (**Take this event out**) or drops the whole grouping
+(**Dissolve group**).
+
+Nothing reaches the provider. Grouping two events changes neither of them, and
+ungrouping leaves both exactly as they were — the calendars keep their own
+copies, Aperio just knows they are one appointment. The grouping travels
+between your devices with everything else.
+
+If both events already belong to *different* groups, Aperio refuses rather than
+guessing: merging two claims about what an appointment is would be a decision
+you never asked for. Take one of them out first.
+
 ## Summary
 
 You can create, edit, move, delete and repeat events. Next we'll handle

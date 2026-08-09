@@ -131,6 +131,31 @@ entfernt (beim Löschen).
 > durch; `Esc` bricht ab, ohne zu speichern. In der Ansicht werden Termine
 > beim Markieren mit Titel, Uhrzeit und Kalender angesagt.
 
+## Derselbe Termin in mehreren Kalendern
+
+Ein und dieselbe Verabredung liegt oft mehrfach vor: im Arbeitskalender, damit
+die Kollegen sie sehen, noch einmal im Privatkalender, weil dieser an einen
+Sprachassistenten hängt, und drittens im Kalender einer Kollegin, den Aperio
+ebenfalls liest. Für jeden Anbieter sind das unabhängige Termine — Aperio kann
+man es sagen.
+
+Öffnen Sie das Kontextmenü eines Termins (Rechtsklick, `Umschalt+F10`, am
+Telefon langer Druck) und wählen Sie **Gehört zusammen mit…**. Der Dialog
+listet die übrigen Termine dieses Tages; wählen Sie den Zwilling und bestätigen
+Sie mit **Gruppieren**. Derselbe Dialog löst einen Termin wieder heraus
+(**Diesen Termin herauslösen**) oder hebt die Gruppe ganz auf (**Gruppe
+auflösen**).
+
+Nichts davon erreicht den Anbieter. Das Gruppieren ändert keinen der beiden
+Termine, das Auflösen lässt beide genau so zurück, wie sie waren — die Kalender
+behalten ihre Kopien, Aperio weiß nur, dass es eine Verabredung ist. Die
+Gruppierung reist wie alles andere zwischen Ihren Geräten.
+
+Gehören beide Termine bereits zu *verschiedenen* Gruppen, verweigert Aperio die
+Zusammenführung, statt zu raten: Zwei Aussagen darüber, was ein Termin ist,
+zusammenzulegen wäre eine Entscheidung, um die Sie nie gebeten haben. Lösen Sie
+zuerst einen davon heraus.
+
 ## Zusammenfassung
 
 Du kannst Termine anlegen, bearbeiten, verschieben, löschen und wiederholen

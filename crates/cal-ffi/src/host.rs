@@ -61,6 +61,7 @@ use host_core::conflicts::{
 };
 use host_core::contact_sync::{ContactSyncCore, ContactSyncObserver, ContactsSyncedPayload};
 use host_core::db::SharedConn;
+use host_core::event_groups::{EventGroupsError, EventGroupsRepo, NewMember, Ungrouped};
 use host_core::event_log::OnboardingService;
 use host_core::meetings::{
     attendee_addresses, should_provider_announce_removal, should_provider_notify, MeetingsRepo,
@@ -1921,6 +1922,29 @@ fn restore_adapter_from_prefs(
             tracing::warn!(%err, "could not restore the configured sync target");
             None
         }
+    }
+}
+
+/// The two refusals a grouping request can meet are answers, not failures.
+///
+/// `TooFewMembers` cannot reach a user through the UI (the call sites always
+/// name two events), so it maps to invalid input. `ConflictingGroups` can and
+/// does: it means both events are already grouped, with different partners,
+/// and only the user can decide what that should become. `Conflict` is the
+/// only thing the grouping call raises, so the call site can phrase it
+/// exactly.
+fn map_group_err(err: EventGroupsError) -> StoreError {
+    match err {
+        EventGroupsError::TooFewMembers => StoreError::InvalidField {
+            field: "members".to_string(),
+            detail: err.to_string(),
+        },
+        EventGroupsError::ConflictingGroups => StoreError::Conflict {
+            detail: err.to_string(),
+        },
+        EventGroupsError::Sqlite(err) => StoreError::Storage {
+            detail: err.to_string(),
+        },
     }
 }
 
@@ -6691,6 +6715,107 @@ impl Host {
         Ok(())
     }
 
+    // ── Event groups (which events mean the same appointment) ────────────────
+    //
+    // A group is Aperio's statement ABOUT foreign data and reaches no provider,
+    // so — like colour labels — every mutation is local and always emits. See
+    // `DESIGN-event-groups.md` and the desktop `event_groups` commands.
+
+    /// Declare that these events mean the same appointment.
+    ///
+    /// Takes a JSON array of `{calendar_id, event_id, title, starts_at}` and
+    /// returns the resulting group as JSON. `title`/`starts_at` are the
+    /// SIGNATURE: what the event looked like when it joined, kept so a member
+    /// whose provider id changes can be found again.
+    pub fn group_events_json(&self, members_json: String) -> Result<String, StoreError> {
+        #[derive(serde::Deserialize)]
+        struct Incoming {
+            calendar_id: String,
+            event_id: String,
+            title: String,
+            starts_at: String,
+        }
+        let incoming: Vec<Incoming> = from_json("event group members", &members_json)?;
+        let members: Vec<NewMember> = incoming
+            .into_iter()
+            .map(|m| NewMember {
+                calendar_id: m.calendar_id,
+                event_id: m.event_id,
+                title: m.title,
+                starts_at: m.starts_at,
+            })
+            .collect();
+        let shared = self.db.shared();
+        let group = EventGroupsRepo::new(&shared)
+            .group(&members)
+            .map_err(map_group_err)?;
+        self.emit_event_group(&group);
+        to_json(&group)
+    }
+
+    /// Take one event out of its group. Returns the group as it stands
+    /// afterwards, or `None` when the removal dissolved it (fewer than two
+    /// members left) or the event was not grouped at all.
+    pub fn ungroup_event_json(
+        &self,
+        calendar_id: String,
+        event_id: String,
+    ) -> Result<Option<String>, StoreError> {
+        let shared = self.db.shared();
+        let outcome = EventGroupsRepo::new(&shared)
+            .ungroup(&calendar_id, &event_id)
+            .map_err(map_group_err)?;
+        match outcome {
+            Some(Ungrouped::Remains(group)) => {
+                self.emit_event_group(&group);
+                Ok(Some(to_json(&group)?))
+            }
+            Some(Ungrouped::Dissolved { group_id }) => {
+                self.writer
+                    .append(SyncEvent::EventGroupDissolved(IdPayload { id: group_id }));
+                Ok(None)
+            }
+            // Not grouped: nothing happened, so nothing is told.
+            None => Ok(None),
+        }
+    }
+
+    /// Dissolve a whole group. The events themselves are untouched.
+    pub fn dissolve_event_group(&self, group_id: String) -> Result<(), StoreError> {
+        let shared = self.db.shared();
+        if EventGroupsRepo::new(&shared)
+            .dissolve(&group_id)
+            .map_err(map_group_err)?
+        {
+            self.writer
+                .append(SyncEvent::EventGroupDissolved(IdPayload { id: group_id }));
+        }
+        Ok(())
+    }
+
+    /// Every group any of these events belongs to, as a JSON `EventGroup[]`.
+    ///
+    /// Takes a JSON array of `{calendar_id, event_id}`. Groups come back WHOLE,
+    /// including members outside the rendered range — a group only reads as a
+    /// whole ("this and three others").
+    pub fn event_groups_for_events_json(&self, events_json: String) -> Result<String, StoreError> {
+        #[derive(serde::Deserialize)]
+        struct Incoming {
+            calendar_id: String,
+            event_id: String,
+        }
+        let incoming: Vec<Incoming> = from_json("event refs", &events_json)?;
+        let refs: Vec<(String, String)> = incoming
+            .into_iter()
+            .map(|e| (e.calendar_id, e.event_id))
+            .collect();
+        let shared = self.db.shared();
+        let groups = EventGroupsRepo::new(&shared)
+            .groups_for_events(&refs)
+            .map_err(map_group_err)?;
+        to_json(&groups)
+    }
+
     /// Set or clear a container's bound colour label (DESIGN §8.2). Mirrors the
     /// desktop `set_container_color_label`: a LOCAL calendar / task list carries
     /// the binding on its own (synced) row (update + emit the matching sync
@@ -8216,6 +8341,19 @@ impl Host {
 /// no business crossing the FFI boundary — the client in particular holds a
 /// secret.
 impl Host {
+    /// A group change travels as the WHOLE membership — see `SyncEvent`'s own
+    /// note on why a diff would let two devices interleave into a set neither
+    /// of them meant.
+    fn emit_event_group(&self, group: &cal_core::EventGroup) {
+        if let Ok(fields) = serde_json::to_value(group) {
+            self.writer
+                .append(SyncEvent::EventGroupUpdated(EventPayload {
+                    id: group.id.clone(),
+                    fields,
+                }));
+        }
+    }
+
     /// Read an event by id for the meeting commands.
     ///
     /// The same routing `get_event_by_id_json` uses — local rows straight from

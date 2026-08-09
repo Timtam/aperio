@@ -164,6 +164,7 @@
     "cancelSilent": "Remove without notifying",
     "moveTo": "Move to …",
     "copyTo": "Copy to …",
+    "groupWith": "Belongs together with…",
     "bringToBacklog": "Bring to backlog",
     "broughtToBacklog": "\"{{title}}\" brought to the backlog.",
     "status": "Status",
@@ -1176,6 +1177,28 @@
     "deadlinePin": {
       "announce_one": "1 task reached its deadline today and was pinned to today.",
       "announce_other": "{{count}} tasks reached their deadline today and were pinned to today."
+    },
+    "eventGroup": {
+      "title": "Same appointment",
+      "loading": "Checking…",
+      "notGrouped": "\"{{title}}\" is not grouped with any other event.",
+      "inGroup_one": "\"{{title}}\" means the same appointment as {{count}} other event.",
+      "inGroup_other": "\"{{title}}\" means the same appointment as {{count}} other events.",
+      "member": "{{title}} in {{calendar}}",
+      "pickLabel": "Also means this appointment",
+      "pickNone": "Choose an event…",
+      "pickHint": "The other events of that day.",
+      "noCandidates": "That day holds no other event.",
+      "candidate": "{{title}}, {{time}}, {{calendar}}",
+      "allDay": "all day",
+      "add": "Group",
+      "removeSelf": "Take this event out",
+      "dissolve": "Dissolve group",
+      "close": "Close",
+      "grouped": "\"{{title}}\" and \"{{other}}\" now mean the same appointment.",
+      "ungrouped": "\"{{title}}\" is no longer grouped.",
+      "dissolved": "Group dissolved. The events are untouched.",
+      "conflict": "Both events already belong to different groups. Take one of them out first — merging two groups is a decision Aperio will not make for you."
     },
     "deleteScope": {
       "title": "Delete recurring event",

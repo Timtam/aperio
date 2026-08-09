@@ -33,6 +33,20 @@ pub struct NewMember {
     pub starts_at: String,
 }
 
+/// What taking an event out of its group did.
+///
+/// The caller needs to tell the two apart because they sync differently: a
+/// group that still stands travels as its new membership, a dissolved one as
+/// its id. Collapsing both into `Option<EventGroup>` loses exactly the id the
+/// dissolve event needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Ungrouped {
+    /// The group stands, with the members left in it.
+    Remains(EventGroup),
+    /// Fewer than two were left, so the group is gone.
+    Dissolved { group_id: String },
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum EventGroupsError {
     #[error("sqlite error: {0}")]
@@ -206,17 +220,43 @@ impl<'a> EventGroupsRepo<'a> {
         Ok(out)
     }
 
+    /// Every group any of these events belongs to, each once.
+    ///
+    /// What a calendar view asks for: it holds a rendered range of events and
+    /// needs the groups behind them, including the members that fall outside
+    /// the range — a group is only readable as a whole ("this and three
+    /// others"), so returning the touched groups entire is the answer, not the
+    /// membership rows that happen to be on screen.
+    pub fn groups_for_events(
+        &self,
+        events: &[(String, String)],
+    ) -> Result<Vec<EventGroup>, EventGroupsError> {
+        let mut ids: Vec<String> = Vec::new();
+        for group_id in self.for_events(events)?.into_values() {
+            if !ids.contains(&group_id) {
+                ids.push(group_id);
+            }
+        }
+        let mut out = Vec::new();
+        for id in ids {
+            if let Some(group) = self.get(&id)? {
+                out.push(group);
+            }
+        }
+        Ok(out)
+    }
+
     /// Take one event out of its group.
     ///
     /// A group of one is not a group, so removing the second-to-last member
     /// dissolves it rather than leaving a single event claiming to be grouped
-    /// with nothing. Returns the group as it stands afterwards, or `None` when
-    /// it was dissolved or the event was not grouped at all.
+    /// with nothing. `None` means the event was not grouped in the first place
+    /// — nothing happened, and nothing needs to be told to the other devices.
     pub fn ungroup(
         &self,
         calendar_id: &str,
         event_id: &str,
-    ) -> Result<Option<EventGroup>, EventGroupsError> {
+    ) -> Result<Option<Ungrouped>, EventGroupsError> {
         let now = Utc::now().to_rfc3339();
         let mut conn = self.db.lock().expect("db mutex poisoned");
         let tx = conn.transaction()?;
@@ -244,7 +284,7 @@ impl<'a> EventGroupsRepo<'a> {
         if remaining < 2 {
             tx.execute("DELETE FROM event_groups WHERE id = ?", params![group_id])?;
             tx.commit()?;
-            return Ok(None);
+            return Ok(Some(Ungrouped::Dissolved { group_id }));
         }
         tx.execute(
             "UPDATE event_groups SET updated_at = ? WHERE id = ?",
@@ -252,7 +292,7 @@ impl<'a> EventGroupsRepo<'a> {
         )?;
         tx.commit()?;
         drop(conn);
-        self.get(&group_id)
+        Ok(self.get(&group_id)?.map(Ungrouped::Remains))
     }
 
     /// Dissolve a whole group. The events themselves are untouched.
@@ -323,6 +363,36 @@ mod tests {
     }
 
     #[test]
+    fn a_view_gets_whole_groups_including_members_it_cannot_see() {
+        let (_tmp, db) = fresh();
+        let shared = db.shared();
+        let repo = EventGroupsRepo::new(&shared);
+        repo.group(&[
+            member("work", "ev-a"),
+            member("private", "ev-b"),
+            member("colleague", "ev-c"),
+        ])
+        .unwrap();
+        repo.group(&[member("work", "ev-x"), member("private", "ev-y")])
+            .unwrap();
+
+        // The view holds one event of each group and nothing else.
+        let groups = repo
+            .groups_for_events(&[
+                ("work".into(), "ev-a".into()),
+                ("private".into(), "ev-y".into()),
+                ("work".into(), "ungrouped".into()),
+            ])
+            .unwrap();
+        assert_eq!(groups.len(), 2, "each group once, the loner not at all");
+        let three = groups.iter().find(|g| g.members.len() == 3).unwrap();
+        assert!(
+            three.members.iter().any(|m| m.event_id == "ev-c"),
+            "a member outside the range still belongs to the group",
+        );
+    }
+
+    #[test]
     fn merging_two_existing_groups_is_refused_rather_than_guessed() {
         let (_tmp, db) = fresh();
         let shared = db.shared();
@@ -349,7 +419,12 @@ mod tests {
 
         // Removing one of two leaves a single event that would otherwise claim
         // to be grouped with nothing.
-        assert_eq!(repo.ungroup("work", "ev-a").unwrap(), None);
+        assert_eq!(
+            repo.ungroup("work", "ev-a").unwrap(),
+            Some(Ungrouped::Dissolved {
+                group_id: group.id.clone()
+            }),
+        );
         assert_eq!(repo.get(&group.id).unwrap(), None);
         assert!(repo
             .for_events(&[("private".into(), "ev-b".into())])
@@ -369,10 +444,9 @@ mod tests {
         ])
         .unwrap();
 
-        let left = repo
-            .ungroup("colleague", "ev-c")
-            .unwrap()
-            .expect("still a group");
+        let Some(Ungrouped::Remains(left)) = repo.ungroup("colleague", "ev-c").unwrap() else {
+            panic!("two members left, so the group stands");
+        };
         assert_eq!(left.members.len(), 2);
     }
 

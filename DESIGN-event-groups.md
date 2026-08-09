@@ -1,7 +1,8 @@
 # Termingruppen — Entwurf
 
-Status: ENTWURF, nichts davon gebaut. Zweck dieses Dokuments ist zu entscheiden,
-ob und in welcher Form das gebaut wird — nicht, wie man es baut.
+Status: **Stufe 0 gebaut**, der Rest weiterhin Entwurf. Dieses Dokument hat
+entschieden, ob und in welcher Form gebaut wird; die Stufenliste am Ende sagt,
+was davon steht.
 
 ## Der Anlass
 
@@ -104,7 +105,11 @@ sonst entsteht wieder genau der Widerspruch, den die Gruppe verhindern sollte.
 Jede Stufe ist für sich nützlich und einzeln testbar.
 
 **Stufe 0** — Modell, Speicherung, Synchronisation. Eine Aktion „gehören
-zusammen" auf zwei ausgewählten Terminen. Keine weitere Oberfläche.
+zusammen" auf zwei ausgewählten Terminen. Keine weitere Oberfläche. **GEBAUT.**
+Statt einer Mehrfachauswahl — einer Zeigegeste ohne brauchbares
+Tastatur-Äquivalent — trägt der Dialog den Termin, aus dessen Menü er kam, und
+lässt den zweiten aus den übrigen Terminen desselben Tages BENENNEN. Dort liegt
+eine Dublette per Definition.
 
 **Stufe 1** — Zusammenfalten in den Ansichten. Eine Zeile, die ihre Kalender
 nennt. Der Alltagsgewinn.

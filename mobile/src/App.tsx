@@ -59,6 +59,7 @@ import ListEditorModal from './screens/ListEditorModal';
 import ListsScreen from './screens/ListsScreen';
 import LogsScreen from './screens/LogsScreen';
 import MonthScreen from './screens/MonthScreen';
+import EventGroupModal from './screens/EventGroupModal';
 import MoveCopyModal from './screens/MoveCopyModal';
 import PlanTaskModal from './screens/PlanTaskModal';
 import QuickAddEventModal from './screens/QuickAddEventModal';
@@ -304,6 +305,13 @@ function CalendarStackNav() {
         name="MoveCopy"
         component={MoveCopyModal}
         options={{ presentation: 'modal', title: t('mobile.moveCopy') }}
+      />
+      {/* Event groups are reached from an event row, which only the calendar
+          stack has — the tasks stack never shows one. */}
+      <CalendarStack.Screen
+        name="EventGroup"
+        component={EventGroupModal}
+        options={{ presentation: 'modal', title: t('dialogs.eventGroup.title') }}
       />
       <CalendarStack.Screen
         name="Search"

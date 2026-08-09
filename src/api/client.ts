@@ -632,7 +632,7 @@ export type {
   AccountFormOauth,
   AccountFormSpec,
 } from '@aperio/shared';
-import type { AccountFormSpec } from '@aperio/shared';
+import type { AccountFormSpec, EventGroup } from '@aperio/shared';
 
 /** One adapter this build can connect an account for. */
 export interface AdapterKindInfo {
@@ -757,6 +757,49 @@ export const detachMeeting = (request: {
 /** The meeting Aperio created for this event, if any. */
 export const eventMeeting = (event_id: string) =>
   invoke<EventMeetingBinding | null>('event_meeting', { eventId: event_id });
+
+// ── Event groups (which events mean the same appointment) ──
+//
+// Nothing here reaches a provider: grouping two events changes neither of
+// them, and ungrouping leaves both exactly as they were.
+
+/** A member on the way in: the reference plus its signature at this moment. */
+export interface NewGroupMember {
+  calendar_id: string;
+  /** Series master id. */
+  event_id: string;
+  title: string;
+  starts_at: string;
+}
+
+/** Declare that these events mean the same appointment.
+ *
+ *  Joins an existing group when exactly one of them is already in one — the
+ *  natural "and this one too". Rejects with `event_group_conflict` when two of
+ *  them are in DIFFERENT groups, because merging two claims about what an
+ *  appointment is cannot be inferred from a request that did not ask for it. */
+export const groupEvents = (members: NewGroupMember[]) =>
+  invoke<EventGroup>('group_events', { members });
+
+/** Take one event out of its group.
+ *
+ *  `null` when that dissolved the group (fewer than two members left) or the
+ *  event was not grouped at all. */
+export const ungroupEvent = (calendar_id: string, event_id: string) =>
+  invoke<EventGroup | null>('ungroup_event', {
+    calendarId: calendar_id,
+    eventId: event_id,
+  });
+
+/** Dissolve a whole group. The events themselves are untouched. */
+export const dissolveEventGroup = (group_id: string) =>
+  invoke<void>('dissolve_event_group', { groupId: group_id });
+
+/** Every group any of these events belongs to — whole, including members
+ *  outside the range asked about. */
+export const eventGroupsForEvents = (
+  events: { calendar_id: string; event_id: string }[],
+) => invoke<EventGroup[]>('event_groups_for_events', { events });
 
 /** One person the provider lists on a meeting. */
 export interface MeetingInvitee {

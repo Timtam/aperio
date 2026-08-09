@@ -321,6 +321,28 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   updateColorLabelJson(labelJson: string): Promise<string>;
   /** Delete a colour label by id. */
   deleteColorLabel(id: string): Promise<void>;
+
+  // ── Event groups (which events mean the same appointment) ──
+  /**
+   * Declare that these events mean the same appointment. Takes a JSON array of
+   * `{calendar_id, event_id, title, starts_at}` and returns the resulting
+   * `EventGroup` JSON. The title/start are the SIGNATURE at the time of
+   * grouping — kept so a member survives the provider re-minting its id.
+   */
+  groupEventsJson(membersJson: string): Promise<string>;
+  /**
+   * Take one event out of its group. Returns the remaining group as JSON, or
+   * `null` when that dissolved it or the event was not grouped at all.
+   */
+  ungroupEventJson(calendarId: string, eventId: string): Promise<string | null>;
+  /** Dissolve a whole group; the events themselves are untouched. */
+  dissolveEventGroup(groupId: string): Promise<void>;
+  /**
+   * Every group any of these events belongs to, as a JSON `EventGroup[]`.
+   * Takes a JSON array of `{calendar_id, event_id}`; groups come back whole,
+   * including members outside the range asked about.
+   */
+  eventGroupsForEventsJson(eventsJson: string): Promise<string>;
   /**
    * Set (or clear, with `null`) a LOCAL container's bound colour label. `kind`
    * is `'calendar' | 'task_list' | 'contact_list'`. Only local calendars / task

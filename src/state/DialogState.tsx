@@ -89,6 +89,12 @@ export type DialogMode =
   | { kind: 'search' }
   | { kind: 'reminders' }
   | { kind: 'moveCopy'; target: MoveCopyTarget }
+  | {
+      // "These events mean the same appointment" — the grouping dialog for one
+      // event (DESIGN-event-groups.md).
+      kind: 'eventGroup';
+      event: CalendarEvent;
+    }
   | { kind: 'planTask'; task: Task }
   | { kind: 'sectionEdit'; listId: string; section: Section | null }
   | {
@@ -209,6 +215,8 @@ export interface DialogStateValue {
   openSearch: () => void;
   openReminders: () => void;
   openMoveCopy: (target: MoveCopyTarget) => void;
+  /** Open the event-group dialog for one event. */
+  openEventGroup: (event: CalendarEvent) => void;
   openPlanTask: (task: Task) => void;
   /** Open the create/rename section dialog. Pass `section=null` (or omit)
    *  to create a new section in `listId`; pass an existing Section to
@@ -463,6 +471,10 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     (target: MoveCopyTarget) => push({ kind: 'moveCopy', target }),
     [push],
   );
+  const openEventGroup = useCallback(
+    (event: CalendarEvent) => push({ kind: 'eventGroup', event }),
+    [push],
+  );
   const openPlanTask = useCallback(
     (task: Task) => push({ kind: 'planTask', task }),
     [push],
@@ -574,6 +586,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openSearch,
       openReminders,
       openMoveCopy,
+      openEventGroup,
       openPlanTask,
       openSectionDialog,
       openTaskMembers,
@@ -603,6 +616,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openSearch,
       openReminders,
       openMoveCopy,
+      openEventGroup,
       openPlanTask,
       openSectionDialog,
       openTaskMembers,
