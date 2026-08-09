@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { eventGroupMemberKey, type EventGroup } from '@aperio/shared';
+import {
+  eventGroupMemberKey,
+  findHealableMembers,
+  type EventGroup,
+} from '@aperio/shared';
 
-import { eventGroupsForEvents } from '../api/client';
+import { eventGroupsForEvents, healEventGroupMember } from '../api/client';
 import type { CalendarEvent } from '../api/types';
 import { seriesIdOf } from '../intl/recurrence';
 import { useDialogState } from './dialogStateContext';
@@ -21,7 +25,12 @@ import { useDialogState } from './dialogStateContext';
  * are already known does not re-ask. Re-runs on `dataVersion`, like everything
  * else that has to notice a mutation.
  */
-export function useEventGroups(events: readonly CalendarEvent[]): EventGroup[] {
+export function useEventGroups(
+  events: readonly CalendarEvent[],
+  /** The range `events` covers. Given, the hook also REPAIRS members whose
+   *  provider id changed — see below. Omitted, it only reads. */
+  range?: { start: Date; end: Date },
+): EventGroup[] {
   const { dataVersion } = useDialogState();
   const [groups, setGroups] = useState<EventGroup[]>([]);
 
@@ -62,6 +71,46 @@ export function useEventGroups(events: readonly CalendarEvent[]): EventGroup[] {
       cancelled = true;
     };
   }, [refsKey, dataVersion]);
+
+  /**
+   * Point members at the ids their events carry now.
+   *
+   * Ids belong to the provider and change underneath us. A view that has a
+   * range in hand can tell the difference between "that member is elsewhere"
+   * and "that id resolves to nothing here", and the stored signature says
+   * which event it was — so the repair happens where the evidence is.
+   *
+   * Silent, and deliberately so: the same events mean the same appointment
+   * before and after, so there is nothing to tell the user. The refreshed
+   * groups are read back rather than patched locally, because the write also
+   * travels to the other devices.
+   */
+  useEffect(() => {
+    if (range == null || groups.length === 0) return;
+    const healable = findHealableMembers(groups, events, range, seriesIdOf);
+    if (healable.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      for (const member of healable) {
+        try {
+          await healEventGroupMember(member);
+        } catch {
+          // A repair that fails is a repair not made; the group keeps the id
+          // it had and the next render will try again.
+        }
+      }
+      if (cancelled || refsKey === '') return;
+      const refs = refsKey.split('\n').map((entry) => {
+        const [calendar_id, event_id] = JSON.parse(entry) as [string, string];
+        return { calendar_id, event_id };
+      });
+      const refreshed = await eventGroupsForEvents(refs).catch(() => null);
+      if (!cancelled && refreshed != null) setGroups(refreshed);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [groups, events, range, refsKey]);
 
   return groups;
 }

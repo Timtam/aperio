@@ -526,6 +526,15 @@ public class CalFfiModule: Module {
       try self.host.eventGroupsForEventsJson(eventsJson: eventsJson)
     }
 
+    AsyncFunction("healEventGroupMember") {
+      (groupId: String, calendarId: String, oldEventId: String, newEventId: String) in
+      try self.host.healEventGroupMember(
+        groupId: groupId,
+        calendarId: calendarId,
+        oldEventId: oldEventId,
+        newEventId: newEventId)
+    }
+
     AsyncFunction("setContainerColorLabel") { (containerId: String, kind: String, colorLabelId: String?) in
       try self.host.setContainerColorLabel(containerId: containerId, kind: kind, colorLabelId: colorLabelId)
     }

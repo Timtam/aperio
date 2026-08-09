@@ -343,6 +343,14 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    * including members outside the range asked about.
    */
   eventGroupsForEventsJson(eventsJson: string): Promise<string>;
+  /** Point one member at the id its event carries now — a silent repair of
+   *  Aperio's own bookkeeping, not a change to the group. */
+  healEventGroupMember(
+    groupId: string,
+    calendarId: string,
+    oldEventId: string,
+    newEventId: string,
+  ): Promise<void>;
   /**
    * Set (or clear, with `null`) a LOCAL container's bound colour label. `kind`
    * is `'calendar' | 'task_list' | 'contact_list'`. Only local calendars / task

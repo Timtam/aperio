@@ -415,6 +415,50 @@ impl<'a> EventGroupsRepo<'a> {
         Ok(out)
     }
 
+    /// Point a member at the id its event carries now.
+    ///
+    /// Ids belong to the provider and change underneath us — a re-bootstrap
+    /// remints them, moving an event between calendars remints it, Exchange
+    /// does it unprompted. The SIGNATURE stored with each member exists so the
+    /// event can be found again; this writes down what was found.
+    ///
+    /// A repair of Aperio's own bookkeeping, not a change to the group: the
+    /// same events mean the same appointment before and after. `updated_at`
+    /// still moves, because the other devices have to be told which id to use
+    /// — they will each have discovered the same thing, and the newest write
+    /// simply wins, as everywhere else.
+    ///
+    /// Returns the group afterwards, or `None` when the old member was already
+    /// gone (two views healing the same thing at once is not an error).
+    pub fn heal_member(
+        &self,
+        group_id: &str,
+        calendar_id: &str,
+        old_event_id: &str,
+        new_event_id: &str,
+    ) -> Result<Option<EventGroup>, EventGroupsError> {
+        let now = Utc::now().to_rfc3339();
+        let mut conn = self.db.lock().expect("db mutex poisoned");
+        let tx = conn.transaction()?;
+        let changed = tx.execute(
+            "UPDATE event_group_members
+                SET event_id = ?
+              WHERE group_id = ? AND calendar_id = ? AND event_id = ?",
+            params![new_event_id, group_id, calendar_id, old_event_id],
+        )?;
+        if changed == 0 {
+            tx.commit()?;
+            return Ok(None);
+        }
+        tx.execute(
+            "UPDATE event_groups SET updated_at = ? WHERE id = ?",
+            params![now, group_id],
+        )?;
+        let group = read_group(&tx, group_id)?;
+        tx.commit()?;
+        Ok(group)
+    }
+
     /// Take one event out of its group.
     ///
     /// A group of one is not a group, so removing the second-to-last member
@@ -582,6 +626,30 @@ mod tests {
             .group(&[member("work", "ev-a"), member("colleague", "ev-c")])
             .unwrap_err();
         assert!(matches!(err, EventGroupsError::ConflictingGroups));
+    }
+
+    #[test]
+    fn a_member_can_be_pointed_at_the_id_its_event_carries_now() {
+        let (_tmp, db) = fresh();
+        let shared = db.shared();
+        let repo = EventGroupsRepo::new(&shared);
+        let group = repo
+            .group(&[member("work", "old-a"), member("private", "ev-b")])
+            .unwrap();
+
+        let healed = repo
+            .heal_member(&group.id, "work", "old-a", "new-a")
+            .unwrap()
+            .expect("the group stands");
+        assert!(healed.members.iter().any(|m| m.event_id == "new-a"));
+        assert!(!healed.members.iter().any(|m| m.event_id == "old-a"));
+        assert_eq!(healed.members.len(), 2, "healing is not a membership change");
+
+        // Two views healing the same thing at once is not an error.
+        assert_eq!(
+            repo.heal_member(&group.id, "work", "old-a", "new-a").unwrap(),
+            None,
+        );
     }
 
     #[test]

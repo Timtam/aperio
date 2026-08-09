@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { isSameDay } from 'date-fns';
+import { endOfDay, isSameDay, startOfDay } from 'date-fns';
 
 import { useAnnouncer } from '../../a11y/announcerContext';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
@@ -297,7 +297,14 @@ export function DayView() {
     [events, anchor],
   );
   // Which of them Aperio has been told mean the same appointment.
-  const groups = useEventGroups(eventsToday);
+  // With the day's range the hook also repairs members whose provider id
+  // changed — the evidence is exactly here: a member whose stored start is
+  // today, whose id resolves to nothing, and whose signature matches one row.
+  const healRange = useMemo(
+    () => ({ start: startOfDay(anchor), end: endOfDay(anchor) }),
+    [anchor],
+  );
+  const groups = useEventGroups(eventsToday, healRange);
   // One row per appointment instead of one per copy (DESIGN-event-groups.md,
   // Stufe 1). The folded-away members keep their place in the group's own
   // record; what disappears here is the repetition, not the data.

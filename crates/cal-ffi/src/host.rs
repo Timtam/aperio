@@ -6817,6 +6817,28 @@ impl Host {
         Ok(())
     }
 
+    /// One member, found again under the id its event carries now.
+    ///
+    /// Silent on purpose: it repairs Aperio's own bookkeeping and changes
+    /// nothing about which events mean the same appointment. See
+    /// `EventGroupsRepo::heal_member`.
+    pub fn heal_event_group_member(
+        &self,
+        group_id: String,
+        calendar_id: String,
+        old_event_id: String,
+        new_event_id: String,
+    ) -> Result<(), StoreError> {
+        let shared = self.db.shared();
+        let healed = EventGroupsRepo::new(&shared)
+            .heal_member(&group_id, &calendar_id, &old_event_id, &new_event_id)
+            .map_err(map_group_err)?;
+        if let Some(group) = healed {
+            self.emit_event_group(&group);
+        }
+        Ok(())
+    }
+
     /// Every group any of these events belongs to, as a JSON `EventGroup[]`.
     ///
     /// Takes a JSON array of `{calendar_id, event_id}`. Groups come back WHOLE,

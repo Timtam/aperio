@@ -801,6 +801,24 @@ export const ungroupEvent = (calendar_id: string, event_id: string) =>
 export const dissolveEventGroup = (group_id: string) =>
   invoke<void>('dissolve_event_group', { groupId: group_id });
 
+/** Point one member at the id its event carries now.
+ *
+ *  A repair of Aperio's own bookkeeping — the same events mean the same
+ *  appointment before and after — so it is applied silently by whichever view
+ *  noticed, never announced as a change the user made. */
+export const healEventGroupMember = (payload: {
+  group_id: string;
+  calendar_id: string;
+  old_event_id: string;
+  new_event_id: string;
+}) =>
+  invoke<void>('heal_event_group_member', {
+    groupId: payload.group_id,
+    calendarId: payload.calendar_id,
+    oldEventId: payload.old_event_id,
+    newEventId: payload.new_event_id,
+  });
+
 /** Every group any of these events belongs to — whole, including members
  *  outside the range asked about. */
 export const eventGroupsForEvents = (

@@ -144,6 +144,32 @@ pub async fn event_groups_for_events(
         .map_err(map_group_err)
 }
 
+/// One member, found again under the id its event carries now.
+///
+/// The frontend spots this while folding a range it has in hand: a member
+/// whose stored start falls inside the range, whose id resolves to nothing,
+/// and whose signature matches exactly one event there. Silent on purpose —
+/// it repairs Aperio's own bookkeeping and changes nothing about which events
+/// mean the same appointment.
+#[tauri::command]
+pub async fn heal_event_group_member(
+    db: State<'_, DbHandle>,
+    event_log: State<'_, Arc<EventLogWriter>>,
+    group_id: String,
+    calendar_id: String,
+    old_event_id: String,
+    new_event_id: String,
+) -> CommandResult<()> {
+    let shared = db.shared();
+    let healed = EventGroupsRepo::new(&shared)
+        .heal_member(&group_id, &calendar_id, &old_event_id, &new_event_id)
+        .map_err(map_group_err)?;
+    if let Some(group) = healed {
+        emit_group(&event_log, &group);
+    }
+    Ok(())
+}
+
 /// Take a deleted event out of whatever group it was in, and tell the other
 /// devices.
 ///

@@ -444,6 +444,11 @@ class CalFfiModule : Module() {
       host.eventGroupsForEventsJson(eventsJson)
     }
 
+    AsyncFunction("healEventGroupMember") {
+      groupId: String, calendarId: String, oldEventId: String, newEventId: String ->
+      host.healEventGroupMember(groupId, calendarId, oldEventId, newEventId)
+    }
+
     AsyncFunction("setContainerColorLabel") { containerId: String, kind: String, colorLabelId: String? ->
       host.setContainerColorLabel(containerId, kind, colorLabelId)
     }

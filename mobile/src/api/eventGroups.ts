@@ -52,3 +52,21 @@ export const eventGroupsForEvents = async (
   JSON.parse(
     await CalFfi.eventGroupsForEventsJson(JSON.stringify(events)),
   ) as EventGroup[];
+
+/** Point one member at the id its event carries now.
+ *
+ *  A repair of Aperio's own bookkeeping — the same events mean the same
+ *  appointment before and after — so it is applied silently by whichever view
+ *  noticed, never announced as a change the user made. */
+export const healEventGroupMember = (payload: {
+  group_id: string;
+  calendar_id: string;
+  old_event_id: string;
+  new_event_id: string;
+}): Promise<void> =>
+  CalFfi.healEventGroupMember(
+    payload.group_id,
+    payload.calendar_id,
+    payload.old_event_id,
+    payload.new_event_id,
+  );
