@@ -1,0 +1,129 @@
+// Carrying a change to the other copies (DESIGN-event-groups.md, Stufe 2).
+//
+// A group says several events mean the same appointment. When the appointment
+// moves, all of them have to move — that is the second thing groups are for,
+// after not being read out four times. Doing it by hand is what the feature
+// exists to end: whoever forgets a copy has calendars that contradict each
+// other and finds out when somebody turns up at the wrong time.
+//
+// Two things are deliberately narrow here.
+//
+// WHICH FIELDS travel: what the appointment IS (title, when, where, what it
+// says), and nothing that is a property of the copy. Reminders above all — the
+// private copy usually exists precisely because it has a reminder the work one
+// does not, and carrying those across would delete the reason for the copy.
+// Colour, calendar and attendees are per-copy for the same kind of reason.
+//
+// WHICH MEMBERS travel: only those Aperio may write. A colleague's calendar is
+// read-only, and the design is explicit that "carry to all" must SAY which
+// members it could not do rather than skip them quietly — otherwise it
+// produces exactly the contradiction it set out to prevent.
+
+import type { EventGroup } from './eventGroups';
+import { eventGroupMemberKey } from './eventGroups';
+
+/** The fields a change is carried in. */
+export interface CarryableFields {
+  title: string;
+  start: string;
+  end: string;
+  all_day: boolean;
+  location: string | null;
+  description: string | null;
+}
+
+/** One member of the group, as the caller knows it. */
+export interface CarryTarget {
+  calendar_id: string;
+  event_id: string;
+  /** The name to show when reporting what happened to it. */
+  title: string;
+  /** Whether Aperio may write to the calendar it lives in. */
+  writable: boolean;
+}
+
+/** What carrying would do, decided before anything is written. */
+export interface CarryPlan {
+  /** The fields that actually differ from the saved event. */
+  changed: (keyof CarryableFields)[];
+  /** Members Aperio can and will write. */
+  targets: CarryTarget[];
+  /** Members it must leave alone, and the user has to be told about. */
+  skipped: CarryTarget[];
+}
+
+const CARRIED: (keyof CarryableFields)[] = [
+  'title',
+  'start',
+  'end',
+  'all_day',
+  'location',
+  'description',
+];
+
+/** Treat empty and absent as the same thing — providers disagree about which
+ *  they return for a field the user never filled in, and a change from `null`
+ *  to `""` is not a change anybody made. */
+function same(a: unknown, b: unknown): boolean {
+  const norm = (v: unknown) => (v == null || v === '' ? null : v);
+  return norm(a) === norm(b);
+}
+
+/**
+ * What carrying this edit to the group's other copies would do.
+ *
+ * Decided from the data, before the question is even asked: with nothing
+ * changed there is nothing to carry and no reason to ask, and with every other
+ * member read-only the honest answer is "this cannot be carried" rather than a
+ * dialog that does nothing.
+ *
+ * `anchor` is the copy that was edited — it is excluded, having been saved
+ * already.
+ */
+export function planCarry(
+  group: EventGroup,
+  anchor: { calendar_id: string; event_id: string },
+  before: CarryableFields,
+  after: CarryableFields,
+  isWritable: (calendarId: string) => boolean,
+  titleOf: (calendarId: string, eventId: string) => string,
+): CarryPlan {
+  const changed = CARRIED.filter((field) => !same(before[field], after[field]));
+  const anchorKey = eventGroupMemberKey(anchor.calendar_id, anchor.event_id);
+  const targets: CarryTarget[] = [];
+  const skipped: CarryTarget[] = [];
+  for (const member of group.members) {
+    if (eventGroupMemberKey(member.calendar_id, member.event_id) === anchorKey) {
+      continue;
+    }
+    const target: CarryTarget = {
+      calendar_id: member.calendar_id,
+      event_id: member.event_id,
+      title: titleOf(member.calendar_id, member.event_id),
+      writable: isWritable(member.calendar_id),
+    };
+    (target.writable ? targets : skipped).push(target);
+  }
+  return { changed, targets, skipped };
+}
+
+/** Whether the plan is worth asking the user about at all. */
+export function worthCarrying(plan: CarryPlan): boolean {
+  return plan.changed.length > 0 && plan.targets.length > 0;
+}
+
+/** Apply the carried fields onto one member's own current values.
+ *
+ *  A member keeps everything else it has — its calendar, its colour, and above
+ *  all its reminders. Only what the appointment IS travels. */
+export function carryOnto<T extends CarryableFields>(
+  member: T,
+  after: CarryableFields,
+  changed: readonly (keyof CarryableFields)[],
+): T {
+  const next = { ...member };
+  for (const field of changed) {
+    (next as CarryableFields)[field] = after[field] as never;
+  }
+  return next;
+}

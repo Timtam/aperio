@@ -29,5 +29,6 @@ export * from './conferencing';
 export * from './meetingEvents';
 export * from './eventGroups';
 export * from './collapseEventGroups';
+export * from './groupCarry';
 export * from './deviceRegistry';
 export * from './widgetSnapshot';
