@@ -5,6 +5,7 @@ import { DayStartReviewDialog } from './DayStartReviewDialog';
 import { EditEventScopeDialog } from './EditEventScopeDialog';
 import { EventDialog } from './EventDialog';
 import { FirstLaunchWizardDialog } from './FirstLaunchWizardDialog';
+import { EventGroupCarryDialog } from './EventGroupCarryDialog';
 import { EventGroupDialog } from './EventGroupDialog';
 import { MoveCopyDialog } from './MoveCopyDialog';
 import { PlanTaskDialog } from './PlanTaskDialog';
@@ -108,6 +109,18 @@ export function DialogHost() {
           isOpen
           onClose={close}
           event={mode.event}
+          onChanged={invalidateData}
+        />
+      );
+    case 'eventGroupCarry':
+      return (
+        <EventGroupCarryDialog
+          isOpen
+          onClose={close}
+          group={mode.group}
+          anchor={mode.anchor}
+          before={mode.before}
+          after={mode.after}
           onChanged={invalidateData}
         />
       );

@@ -1,5 +1,6 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
+import type { CarryableFields, EventGroup } from '@aperio/shared';
 import type { CalendarEvent } from '../api/calendar';
 
 /**
@@ -55,6 +56,16 @@ export type RootStackParamList = {
   // anchor rides in whole: the screen needs its title and start as the
   // signature it stores, and re-fetching would only risk a different answer.
   EventGroup: { event: CalendarEvent };
+  // "Carry this change to the other copies?" — asked AFTER an edit to a
+  // grouped event was saved (DESIGN-event-groups.md, Stufe 2). Everything it
+  // needs rides in: re-reading would risk a different answer than the one the
+  // question was asked about.
+  EventGroupCarry: {
+    group: EventGroup;
+    anchor: { calendar_id: string; event_id: string };
+    before: CarryableFields;
+    after: CarryableFields;
+  };
   Lists: undefined;
   ListEditor: { listId: string };
   // Manage a shared list's membership (§9.7) — only reachable for lists whose

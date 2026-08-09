@@ -1178,6 +1178,26 @@
       "announce_one": "1 task reached its deadline today and was pinned to today.",
       "announce_other": "{{count}} tasks reached their deadline today and were pinned to today."
     },
+    "eventGroupCarry": {
+      "title": "The other copies",
+      "message_one": "This appointment exists once more. Carry the change ({{fields}}) to it?",
+      "message_other": "This appointment exists {{count}} more times. Carry the change ({{fields}}) to them?",
+      "target": "{{title}} in {{calendar}}",
+      "skipped": "{{title}} in {{calendar}} cannot be changed — that calendar is read-only.",
+      "field": {
+        "title": "title",
+        "start": "start",
+        "end": "end",
+        "all_day": "all-day",
+        "location": "location",
+        "description": "description"
+      },
+      "carry": "Carry over",
+      "keep": "Leave the others",
+      "done_one": "One copy updated.",
+      "done_other": "{{count}} copies updated.",
+      "partly": "{{done}} updated. Not changed: {{failed}}."
+    },
     "eventGroup": {
       "title": "Same appointment",
       "loading": "Checking…",

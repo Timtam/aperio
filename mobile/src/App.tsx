@@ -59,6 +59,7 @@ import ListEditorModal from './screens/ListEditorModal';
 import ListsScreen from './screens/ListsScreen';
 import LogsScreen from './screens/LogsScreen';
 import MonthScreen from './screens/MonthScreen';
+import EventGroupCarryModal from './screens/EventGroupCarryModal';
 import EventGroupModal from './screens/EventGroupModal';
 import MoveCopyModal from './screens/MoveCopyModal';
 import PlanTaskModal from './screens/PlanTaskModal';
@@ -312,6 +313,14 @@ function CalendarStackNav() {
         name="EventGroup"
         component={EventGroupModal}
         options={{ presentation: 'modal', title: t('dialogs.eventGroup.title') }}
+      />
+      <CalendarStack.Screen
+        name="EventGroupCarry"
+        component={EventGroupCarryModal}
+        options={{
+          presentation: 'modal',
+          title: t('dialogs.eventGroupCarry.title'),
+        }}
       />
       <CalendarStack.Screen
         name="Search"

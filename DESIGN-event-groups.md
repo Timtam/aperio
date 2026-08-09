@@ -120,7 +120,18 @@ Gruppe, deren Kopien auseinandergelaufen sind, wird NICHT gefaltet: dann stimmt
 die Behauptung nicht mehr, und genau das ist das Einzige, was man sehen muss.
 
 **Stufe 2** — Bearbeitungsumfang über die Mitglieder, mit ehrlicher Meldung über
-das, was nicht ging.
+das, was nicht ging. **GEBAUT**, mit einer Abweichung vom Entwurf: gefragt wird
+NACH dem Speichern, nicht davor. Die eigene Änderung des Nutzers steht damit nie
+auf dem Spiel, die Frage kann nur Arbeit hinzufügen, und Abbrechen kostet nichts
+— anders als ein Umfang, der in „Speichern" eingebaut ist. Mitgezogen wird nur,
+was der Termin IST (Titel, wann, wo, Beschreibung); Erinnerungen, Farbe, Kalender
+und Teilnehmer gehören der Kopie. Nur-lese-Kalender werden VOR der Entscheidung
+genannt, nicht still übersprungen.
+
+Offen an Stufe 2: eine Bearbeitung mit Serien-Umfang („nur dieses Vorkommen",
+„dieses und alle folgenden") bietet das Mitziehen noch nicht an — „welche Kopie
+welchen Vorkommens" ist eine Frage, die der jetzige Stand nicht beantworten
+kann.
 
 **Stufe 3** — Erkennung und Vorschlag; das Meeting wandert an die Gruppe, die
 heutige Verknüpfungs-Rückfrage entfällt.

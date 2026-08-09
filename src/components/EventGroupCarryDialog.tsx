@@ -1,0 +1,196 @@
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+
+import {
+  carryOnto,
+  planCarry,
+  type CarryableFields,
+  type EventGroup,
+} from '@aperio/shared';
+
+import { useAnnouncer } from '../a11y/announcerContext';
+import { FocusableNote } from '../a11y/FocusableNote';
+import { getEventById, isCommandError, updateEvent } from '../api/client';
+import type { CalendarEvent } from '../api/types';
+import { useCalendarStore } from '../state/calendarStoreContext';
+import { Modal } from './Modal';
+
+/**
+ * "Carry this change to the other copies?" (`DESIGN-event-groups.md`, Stufe 2).
+ *
+ * Asked AFTER the edit is saved, never before. The user's change is safe
+ * whatever they answer here, and a dialog that can only add work is a dialog
+ * they may cancel without losing anything — which is also why it is a plain
+ * question rather than a scope built into Save.
+ *
+ * It says what it will do before doing it, and what it did afterwards,
+ * including the copies it could not touch. A colleague's calendar is read-only,
+ * and skipping it quietly is how a group ends up meaning two different times.
+ */
+export interface EventGroupCarryDialogProps {
+  isOpen: boolean;
+  onClose: () => void;
+  group: EventGroup;
+  /** The copy that was edited — already saved, and left alone here. */
+  anchor: { calendar_id: string; event_id: string };
+  before: CarryableFields;
+  after: CarryableFields;
+  onChanged?: () => void;
+}
+
+export function EventGroupCarryDialog({
+  isOpen,
+  onClose,
+  group,
+  anchor,
+  before,
+  after,
+  onChanged,
+}: EventGroupCarryDialogProps) {
+  const { t } = useTranslation();
+  const announce = useAnnouncer();
+  const { calendars } = useCalendarStore();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const messageId = useId();
+
+  const calendarName = useCallback(
+    (id: string) => calendars.find((c) => c.id === id)?.name ?? id,
+    [calendars],
+  );
+
+  const plan = useMemo(
+    () =>
+      planCarry(
+        group,
+        anchor,
+        before,
+        after,
+        (id) => {
+          const cal = calendars.find((c) => c.id === id);
+          // Unknown means a calendar this device no longer holds — treat it as
+          // unwritable rather than trying and failing halfway through.
+          return cal != null && !cal.read_only;
+        },
+        (calendarId, eventId) =>
+          group.members.find(
+            (m) => m.calendar_id === calendarId && m.event_id === eventId,
+          )?.title ?? eventId,
+      ),
+    [group, anchor, before, after, calendars],
+  );
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setError(null);
+    queueMicrotask(() => closeRef.current?.focus());
+  }, [isOpen]);
+
+  const carry = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    const failed: string[] = [];
+    let done = 0;
+    for (const target of plan.targets) {
+      try {
+        const current = await getEventById(target.event_id, target.calendar_id);
+        if (current == null) {
+          // The copy is gone from under us. Reported, not silently counted.
+          failed.push(target.title);
+          continue;
+        }
+        const next = carryOnto(current as CalendarEvent & CarryableFields, after, plan.changed);
+        await updateEvent(next, target.calendar_id);
+        done += 1;
+      } catch (err) {
+        failed.push(target.title);
+        if (isCommandError(err)) setError(err.message);
+      }
+    }
+    setBusy(false);
+    onChanged?.();
+    // The whole point of the dialog: say what actually happened, including
+    // what did not.
+    announce(
+      failed.length > 0
+        ? t('dialogs.eventGroupCarry.partly', {
+            done,
+            failed: failed.join(', '),
+          })
+        : t('dialogs.eventGroupCarry.done', { count: done }),
+    );
+    onClose();
+  };
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={t('dialogs.eventGroupCarry.title')}
+      describedById={messageId}
+    >
+      <FocusableNote id={messageId} className="form__message">
+        {t('dialogs.eventGroupCarry.message', {
+          count: plan.targets.length,
+          fields: plan.changed
+            .map((field) => t(`dialogs.eventGroupCarry.field.${field}`))
+            .join(', '),
+        })}
+      </FocusableNote>
+
+      {plan.targets.map((target) => (
+        <FocusableNote
+          key={`${target.calendar_id} ${target.event_id}`}
+          className="form__message"
+        >
+          {t('dialogs.eventGroupCarry.target', {
+            title: target.title,
+            calendar: calendarName(target.calendar_id),
+          })}
+        </FocusableNote>
+      ))}
+
+      {/* The copies it may not write. Said BEFORE the user decides, because
+          "carry to all" that silently means "to some" is the contradiction
+          this feature exists to prevent. */}
+      {plan.skipped.map((target) => (
+        <FocusableNote
+          key={`skip ${target.calendar_id} ${target.event_id}`}
+          className="form__hint form__hint--warning"
+        >
+          {t('dialogs.eventGroupCarry.skipped', {
+            title: target.title,
+            calendar: calendarName(target.calendar_id),
+          })}
+        </FocusableNote>
+      ))}
+
+      {error && (
+        <p className="form__error" role="alert">
+          {error}
+        </p>
+      )}
+
+      <div className="form__actions">
+        <button
+          ref={closeRef}
+          type="button"
+          onClick={onClose}
+          className="form__action"
+        >
+          {t('dialogs.eventGroupCarry.keep')}
+        </button>
+        <button
+          type="button"
+          onClick={() => void carry()}
+          className="form__action form__action--primary"
+          aria-disabled={busy || undefined}
+        >
+          {t('dialogs.eventGroupCarry.carry')}
+        </button>
+      </div>
+    </Modal>
+  );
+}

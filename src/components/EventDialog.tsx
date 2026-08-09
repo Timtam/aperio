@@ -16,6 +16,7 @@ import {
   addEventExdate,
   createEvent as apiCreateEvent,
   deleteEventById,
+  eventGroupsForEvents,
   getEventById,
   isCommandError,
   queryFreeBusy,
@@ -31,7 +32,13 @@ import {
   seriesIdOf,
   splitRRuleForEdit,
 } from '../intl/recurrence';
+import {
+  planCarry,
+  worthCarrying,
+  type CarryableFields,
+} from '@aperio/shared';
 import { useCalendarStore } from '../state/calendarStoreContext';
+import { useDialogState } from '../state/dialogStateContext';
 import { deleteThisAndFuture } from '../state/deleteSeriesFromOccurrence';
 import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
 import { useCancellationChoice } from '../state/useCancellationChoice';
@@ -171,6 +178,7 @@ export function EventDialog({
 }: EventDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
+  const { openEventGroupCarry } = useDialogState();
   const { calendars, colorLabels, selectedCalendarIds } = useCalendarStore();
   const { showHiddenCalendarTargets } = useViewState();
 
@@ -235,6 +243,59 @@ export function EventDialog({
     remindersWereFromDefault,
     getDefaultsFor,
   ]);
+
+  /**
+   * Offer to carry a saved edit to the group's other copies.
+   *
+   * Silent when the event is in no group, when nothing that travels changed,
+   * or when every other copy is read-only — a dialog that can only say "there
+   * is nothing to do" is worse than no dialog. The editor closes first: the
+   * question is about what happens NEXT, and stacking it over the editor it
+   * came from is how focus ends up somewhere nobody asked for.
+   */
+  const offerToCarry = useCallback(
+    async (saved: CalendarEvent, next: CalendarEvent) => {
+      const fieldsOf = (ev: CalendarEvent): CarryableFields => ({
+        title: ev.title,
+        start: ev.start,
+        end: ev.end,
+        all_day: ev.all_day,
+        location: ev.location,
+        description: ev.description,
+      });
+      try {
+        const groups = await eventGroupsForEvents([
+          { calendar_id: saved.calendar_id, event_id: seriesIdOf(saved) },
+        ]);
+        const group = groups[0];
+        if (!group) return;
+        const anchor = {
+          calendar_id: saved.calendar_id,
+          event_id: seriesIdOf(saved),
+        };
+        const before = fieldsOf(saved);
+        const after = fieldsOf(next);
+        const plan = planCarry(
+          group,
+          anchor,
+          before,
+          after,
+          (id) => {
+            const cal = calendars.find((c) => c.id === id);
+            return cal != null && !cal.read_only;
+          },
+          (_cal, ev) => ev,
+        );
+        if (!worthCarrying(plan)) return;
+        openEventGroupCarry({ group, anchor, before, after });
+      } catch {
+        // The grouping lookup is bookkeeping beside a save that already
+        // succeeded; failing it must not report the save as failed.
+      }
+    },
+    [calendars, openEventGroupCarry],
+  );
+
 
   const [form, setForm] = useState<FormState>(initialState);
   const [error, setError] = useState<string | null>(null);
@@ -732,6 +793,13 @@ export function EventDialog({
             );
           }
           announce(t('dialogs.event.updated', { title: trimmedTitle }));
+          // The appointment may exist several times over. Ask — after the
+          // save, so the user's own change is never at stake — whether the
+          // other copies should follow (DESIGN-event-groups.md, Stufe 2).
+          // Only for a whole-event edit: an occurrence override and a
+          // series truncation each return above, because "which copy of
+          // which occurrence" is a question this cannot answer yet.
+          await offerToCarry(event, updated);
         } else {
           const created = await apiCreateEvent({
             calendar_id: form.calendarId,

@@ -56,6 +56,13 @@ import {
 } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
 import { setEventColor } from '../api/containerColor';
+import {
+  planCarry,
+  seriesIdOf,
+  worthCarrying,
+  type CarryableFields,
+} from '@aperio/shared';
+import { eventGroupsForEvents } from '../api/eventGroups';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useShowHiddenCalendarTargets } from '../settings/hiddenTargets';
 import { useCalendarVisibility } from '../state/calendarVisibility';
@@ -308,6 +315,63 @@ export default function EventEditorModal({
     t,
   ]);
 
+  /**
+   * Offer to carry a saved edit to the group's other copies.
+   *
+   * Returns whether it navigated: silent (and `false`) when the event is in no
+   * group, when nothing that travels changed, or when every other copy is
+   * read-only — a screen that can only say "there is nothing to do" is worse
+   * than no screen. When it does navigate it REPLACES the editor's own
+   * goBack, so the user lands on one question instead of watching the editor
+   * close and something else appear.
+   */
+  const offerToCarry = useCallback(
+    async (saved: CalendarEvent, next: CalendarEvent): Promise<boolean> => {
+      const fieldsOf = (ev: CalendarEvent): CarryableFields => ({
+        title: ev.title,
+        start: ev.start,
+        end: ev.end,
+        all_day: ev.all_day,
+        location: ev.location,
+        description: ev.description,
+      });
+      try {
+        const groups = await eventGroupsForEvents([
+          { calendar_id: saved.calendar_id, event_id: seriesIdOf(saved) },
+        ]);
+        const group = groups[0];
+        if (!group) return false;
+        const cals = await listCalendars();
+        const anchor = {
+          calendar_id: saved.calendar_id,
+          event_id: seriesIdOf(saved),
+        };
+        const before = fieldsOf(saved);
+        const after = fieldsOf(next);
+        const plan = planCarry(
+          group,
+          anchor,
+          before,
+          after,
+          (id) => {
+            const cal = cals.find((c) => c.id === id);
+            return cal != null && !cal.read_only;
+          },
+          (_cal, ev) => ev,
+        );
+        if (!worthCarrying(plan)) return false;
+        navigation.replace('EventGroupCarry', { group, anchor, before, after });
+        return true;
+      } catch {
+        // Bookkeeping beside a save that already succeeded; failing it must
+        // not report the save as failed.
+        return false;
+      }
+    },
+    [navigation],
+  );
+
+
   const save = useCallback(async () => {
     const trimmedTitle = title.trim();
     if (trimmedTitle.length === 0) {
@@ -539,6 +603,13 @@ export default function EventEditorModal({
         AccessibilityInfo.announceForAccessibility(
           t('dialogs.event.updated', { title: updated.title }),
         );
+        // The appointment may exist several times over. Ask — after the save,
+        // so the user's own change is never at stake — whether the other
+        // copies should follow (DESIGN-event-groups.md, Stufe 2). Only for a
+        // whole-event edit: the occurrence and this-and-following branches
+        // return above, because "which copy of which occurrence" is a question
+        // this cannot answer yet.
+        if (await offerToCarry(original, updated)) return;
       } else {
         const created = await createEvent({
           calendar_id: calId,
@@ -591,6 +662,7 @@ export default function EventEditorModal({
     navigation,
     notifyAttendees,
     occurrence,
+    offerToCarry,
     original,
     recurrence,
     reminders,

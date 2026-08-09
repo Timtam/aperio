@@ -7,6 +7,7 @@ import {
 } from 'react';
 
 import { isSeriesOccurrence } from '@aperio/shared';
+import type { CarryableFields, EventGroup } from '@aperio/shared';
 
 import type {
   Account,
@@ -94,6 +95,15 @@ export type DialogMode =
       // event (DESIGN-event-groups.md).
       kind: 'eventGroup';
       event: CalendarEvent;
+    }
+  | {
+      // "Carry this change to the other copies?" — asked AFTER an edit to a
+      // grouped event was saved (DESIGN-event-groups.md, Stufe 2).
+      kind: 'eventGroupCarry';
+      group: EventGroup;
+      anchor: { calendar_id: string; event_id: string };
+      before: CarryableFields;
+      after: CarryableFields;
     }
   | { kind: 'planTask'; task: Task }
   | { kind: 'sectionEdit'; listId: string; section: Section | null }
@@ -217,6 +227,13 @@ export interface DialogStateValue {
   openMoveCopy: (target: MoveCopyTarget) => void;
   /** Open the event-group dialog for one event. */
   openEventGroup: (event: CalendarEvent) => void;
+  /** Ask whether a just-saved edit should travel to the group's other copies. */
+  openEventGroupCarry: (payload: {
+    group: EventGroup;
+    anchor: { calendar_id: string; event_id: string };
+    before: CarryableFields;
+    after: CarryableFields;
+  }) => void;
   openPlanTask: (task: Task) => void;
   /** Open the create/rename section dialog. Pass `section=null` (or omit)
    *  to create a new section in `listId`; pass an existing Section to
@@ -475,6 +492,15 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     (event: CalendarEvent) => push({ kind: 'eventGroup', event }),
     [push],
   );
+  const openEventGroupCarry = useCallback(
+    (payload: {
+      group: EventGroup;
+      anchor: { calendar_id: string; event_id: string };
+      before: CarryableFields;
+      after: CarryableFields;
+    }) => push({ kind: 'eventGroupCarry', ...payload }),
+    [push],
+  );
   const openPlanTask = useCallback(
     (task: Task) => push({ kind: 'planTask', task }),
     [push],
@@ -587,6 +613,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openReminders,
       openMoveCopy,
       openEventGroup,
+      openEventGroupCarry,
       openPlanTask,
       openSectionDialog,
       openTaskMembers,
@@ -617,6 +644,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openReminders,
       openMoveCopy,
       openEventGroup,
+      openEventGroupCarry,
       openPlanTask,
       openSectionDialog,
       openTaskMembers,

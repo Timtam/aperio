@@ -1175,6 +1175,26 @@
       "announce_one": "1 Aufgabe hat heute ihre Deadline und wurde auf heute eingeplant.",
       "announce_other": "{{count}} Aufgaben haben heute ihre Deadline und wurden auf heute eingeplant."
     },
+    "eventGroupCarry": {
+      "title": "Die anderen Kopien",
+      "message_one": "Diese Verabredung liegt noch ein weiteres Mal vor. Die Änderung ({{fields}}) mitziehen?",
+      "message_other": "Diese Verabredung liegt noch {{count}} weitere Male vor. Die Änderung ({{fields}}) mitziehen?",
+      "target": "{{title}} in {{calendar}}",
+      "skipped": "{{title}} in {{calendar}} kann nicht geändert werden — dieser Kalender ist nur lesbar.",
+      "field": {
+        "title": "Titel",
+        "start": "Beginn",
+        "end": "Ende",
+        "all_day": "ganztägig",
+        "location": "Ort",
+        "description": "Beschreibung"
+      },
+      "carry": "Mitziehen",
+      "keep": "Andere unverändert lassen",
+      "done_one": "Eine Kopie aktualisiert.",
+      "done_other": "{{count}} Kopien aktualisiert.",
+      "partly": "{{done}} aktualisiert. Nicht geändert: {{failed}}."
+    },
     "eventGroup": {
       "title": "Derselbe Termin",
       "loading": "Wird geprüft…",
