@@ -1,9 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AccessibilityInfo, Pressable, StyleSheet, Text } from 'react-native';
+import {
+  AccessibilityInfo,
+  findNodeHandle,
+  Pressable,
+  StyleSheet,
+  Text,
+} from 'react-native';
 
 import {
   eventGroupMemberKey,
+  expandAll,
   memberFromEvent,
   seriesIdOf,
   type EventGroup,
@@ -20,6 +27,7 @@ import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
 import { useCancelHeader } from '../components/useCancelHeader';
 import type { RootStackScreenProps } from '../navigation/types';
+import { useCalendarVisibility } from '../state/calendarVisibility';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 // "These events mean the same appointment" (DESIGN-event-groups.md) — the RN
@@ -52,8 +60,9 @@ export default function EventGroupModal({
   navigation,
 }: RootStackScreenProps<'EventGroup'>) {
   const { event } = route.params;
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
+  const { hidden: hiddenCalendars } = useCalendarVisibility();
   useCancelHeader(navigation);
 
   const anchorId = seriesIdOf(event);
@@ -69,9 +78,47 @@ export default function EventGroupModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * Land focus back on the heading after an action removes the control the
+   * user is standing on.
+   *
+   * Taking the last-but-one member out dissolves the group, so "Take this
+   * event out" and "Dissolve group" both UNMOUNT the moment they succeed —
+   * with VoiceOver's cursor on them. Without a repark the cursor lands
+   * wherever the platform decides, which on a screen the user is still in is
+   * indistinguishable from having been thrown out of it. The heading is the
+   * one node that is always there, and hearing it again says plainly which
+   * screen this still is.
+   */
+  const headingRef = useRef<Text>(null);
+  const reparkFocus = useCallback(() => {
+    const tag = findNodeHandle(headingRef.current);
+    if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+  }, []);
+
   const calendarName = useCallback(
     (id: string) => calendars.find((c) => c.id === id)?.name ?? id,
     [calendars],
+  );
+
+  /**
+   * What to call a member.
+   *
+   * The stored `title` is the SIGNATURE — what the event was called when it
+   * joined, kept so a member whose provider id changed can be found again. It
+   * is explicitly not for display: after a rename it is simply wrong. So the
+   * day's loaded events answer first, and the signature is the fallback for a
+   * member outside that range, where a stale name still beats no name.
+   */
+  const memberTitle = useCallback(
+    (m: { calendar_id: string; event_id: string; title: string }) => {
+      const key = eventGroupMemberKey(m.calendar_id, m.event_id);
+      const live = dayEvents.find(
+        (ev) => eventGroupMemberKey(ev.calendar_id, seriesIdOf(ev)) === key,
+      );
+      return live?.title ?? m.title;
+    },
+    [dayEvents],
   );
 
   const loadGroup = useCallback(async () => {
@@ -96,12 +143,31 @@ export default function EventGroupModal({
         const cals = await listCalendars();
         if (cancelled) return;
         setCalendars(cals);
+        // Only the calendars the user has switched ON, matching the desktop
+        // dialog (which reads the selected set) and the move/copy pickers on
+        // both platforms: a picker offers what the user has chosen to see.
+        // The anchor's own calendar is always asked, even when hidden — it is
+        // where the user just came from.
         const perCalendar = await Promise.all(
-          cals.map((c) =>
-            getEvents({ calendar_id: c.id, ...range }).catch(() => [] as CalendarEvent[]),
-          ),
+          cals
+            .filter((c) => c.id === event.calendar_id || !hiddenCalendars.has(c.id))
+            .map((c) =>
+              getEvents({ calendar_id: c.id, ...range }).catch(() => [] as CalendarEvent[]),
+            ),
         );
-        if (!cancelled) setDayEvents(perCalendar.flat());
+        // Expanded, like every other calendar surface: the adapters hand back
+        // a recurring SERIES as its master row, so an unexpanded list offers
+        // series that have no occurrence on this day and hides the ones whose
+        // master lies outside it. `expandAll` is the same helper the day list
+        // itself uses, so the picker offers exactly what the view showed.
+        if (!cancelled) {
+          setDayEvents(
+            expandAll(perCalendar.flat(), {
+              start: new Date(range.start),
+              end: new Date(range.end),
+            }),
+          );
+        }
       } catch (err) {
         if (!cancelled) setError(errorMessage(err));
       }
@@ -109,7 +175,7 @@ export default function EventGroupModal({
     return () => {
       cancelled = true;
     };
-  }, [event, loadGroup]);
+  }, [event, loadGroup, hiddenCalendars]);
 
   /**
    * The events that can be named as "the same appointment".
@@ -140,29 +206,39 @@ export default function EventGroupModal({
         value: eventGroupMemberKey(ev.calendar_id, seriesIdOf(ev)),
         label: t('dialogs.eventGroup.candidate', {
           title: ev.title,
+          // `i18n.language`, not the device locale: Aperio's language is a
+          // setting of its own, and a German app that reads out 8:00 AM in an
+          // otherwise German sentence is jarring — the rest of the app already
+          // formats this way.
           time: ev.all_day
             ? t('dialogs.eventGroup.allDay')
-            : new Date(ev.start).toLocaleTimeString(undefined, {
+            : new Date(ev.start).toLocaleTimeString(i18n.language, {
                 hour: '2-digit',
                 minute: '2-digit',
               }),
           calendar: calendarName(ev.calendar_id),
         }),
       })),
-    [candidates, calendarName, t],
+    [candidates, calendarName, t, i18n.language],
   );
 
   const fail = useCallback(
     (err: unknown) => {
       // The one refusal a user can actually meet: both events are already
       // grouped, with different partners. Only they can decide what that
-      // should become, so it is said plainly. A conflict is the ONLY conflict
-      // this call raises, which is what lets the message be this specific.
-      const message = /conflict|Gruppe/i.test(errorMessage(err))
-        ? t('dialogs.eventGroup.conflict')
-        : errorMessage(err);
+      // should become, so it is said plainly.
+      //
+      // Recognised by the CODE the native module attaches, not by words in the
+      // message — the message is the Rust `Display` text, in English, and a
+      // string match on it would silently stop working the day that sentence
+      // is reworded (it never matched to begin with).
+      const message =
+        (err as { code?: string })?.code === 'event_group_conflict'
+          ? t('dialogs.eventGroup.conflict')
+          : errorMessage(err);
+      // Set only. The live region below speaks it the moment it appears —
+      // announcing it as well made every failure arrive twice.
       setError(message);
-      AccessibilityInfo.announceForAccessibility(message);
     },
     [t],
   );
@@ -197,17 +273,24 @@ export default function EventGroupModal({
     setBusy(true);
     setError(null);
     try {
-      const next = await ungroupEvent(event.calendar_id, anchorId);
-      setGroup(next);
+      await ungroupEvent(event.calendar_id, anchorId);
+      // `null`, not the group that came back: the call returns what is LEFT of
+      // the group, which — with three or more members — still exists without
+      // this event in it. Storing that made the dialog go on claiming this
+      // event was grouped, and go on offering to dissolve a group it had just
+      // left. What this screen states is always about THIS event.
+      setGroup(null);
       AccessibilityInfo.announceForAccessibility(
         t('dialogs.eventGroup.ungrouped', { title: event.title }),
       );
+      // Both buttons unmount with the membership the user was standing on.
+      reparkFocus();
     } catch (err) {
       fail(err);
     } finally {
       setBusy(false);
     }
-  }, [busy, event, anchorId, t, fail]);
+  }, [busy, event, anchorId, t, fail, reparkFocus]);
 
   const dissolve = useCallback(async () => {
     if (busy || !group) return;
@@ -217,14 +300,16 @@ export default function EventGroupModal({
       await dissolveEventGroup(group.id);
       setGroup(null);
       AccessibilityInfo.announceForAccessibility(t('dialogs.eventGroup.dissolved'));
+      reparkFocus();
     } catch (err) {
       fail(err);
     } finally {
       setBusy(false);
     }
-  }, [busy, group, t, fail]);
+  }, [busy, group, t, fail, reparkFocus]);
 
   const members = group?.members ?? [];
+  const addBlocked = busy || picked === '';
 
   return (
     <FormScrollView
@@ -232,7 +317,7 @@ export default function EventGroupModal({
       contentContainerStyle={styles.content}
       accessibilityViewIsModal
     >
-      <Text style={styles.heading} accessibilityRole="header">
+      <Text ref={headingRef} style={styles.heading} accessibilityRole="header">
         {t('dialogs.eventGroup.title')}
       </Text>
 
@@ -260,7 +345,7 @@ export default function EventGroupModal({
           accessibilityRole="text"
         >
           {t('dialogs.eventGroup.member', {
-            title: m.title,
+            title: memberTitle(m),
             calendar: calendarName(m.calendar_id),
           })}
         </Text>
@@ -284,11 +369,15 @@ export default function EventGroupModal({
         accessibilityLabel={t('dialogs.eventGroup.add')}
         // `accessibilityState.disabled` rather than skipping the control: a
         // button that vanishes when unusable never tells anyone it exists.
-        accessibilityState={{ disabled: busy || picked === '' }}
+        // The dimmed text says the same thing to everyone else — without it a
+        // sighted user just taps a button that does nothing.
+        accessibilityState={{ disabled: addBlocked }}
         onPress={() => void addPicked()}
         style={styles.action}
       >
-        <Text style={styles.actionText}>{t('dialogs.eventGroup.add')}</Text>
+        <Text style={[styles.actionText, addBlocked && styles.disabled]}>
+          {t('dialogs.eventGroup.add')}
+        </Text>
       </Pressable>
 
       {members.length > 0 && (
@@ -300,7 +389,9 @@ export default function EventGroupModal({
             onPress={() => void removeSelf()}
             style={styles.action}
           >
-            <Text style={styles.actionText}>{t('dialogs.eventGroup.removeSelf')}</Text>
+            <Text style={[styles.actionText, busy && styles.disabled]}>
+              {t('dialogs.eventGroup.removeSelf')}
+            </Text>
           </Pressable>
           <Pressable
             accessibilityRole="button"
@@ -309,7 +400,7 @@ export default function EventGroupModal({
             onPress={() => void dissolve()}
             style={styles.action}
           >
-            <Text style={[styles.actionText, styles.destructive]}>
+            <Text style={[styles.actionText, busy ? styles.disabled : styles.destructive]}>
               {t('dialogs.eventGroup.dissolve')}
             </Text>
           </Pressable>
@@ -337,5 +428,6 @@ function makeStyles(c: ThemeColors) {
     },
     actionText: { fontSize: 16, color: c.textPrimary },
     destructive: { color: c.danger },
+    disabled: { color: c.textSecondary },
   });
 }

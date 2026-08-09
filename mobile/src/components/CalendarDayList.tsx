@@ -1092,7 +1092,19 @@ export function CalendarDayList({
     // Everything else about the row stays read-only.
     const readOnlyJoin = readOnlyIds.has(ev.calendar_id) ? joinAction(ev, t) : null;
     if (readOnlyIds.has(ev.calendar_id)) {
-      const readOnlyActions: MenuAction[] = readOnlyJoin ? [readOnlyJoin.action] : [];
+      // Grouping belongs here too, and read-only is exactly why: a colleague's
+      // calendar is the one Aperio can never write to, and its copy of the
+      // meeting is the copy that shows up twice. The group is Aperio's own
+      // statement ABOUT the event — it changes nothing on the provider, so
+      // there is nothing here that read-only should forbid.
+      const readOnlyActions: MenuAction[] = [
+        ...(readOnlyJoin ? [readOnlyJoin.action] : []),
+        { name: 'group', label: t('chipMenu.groupWith') },
+      ];
+      const runReadOnlyAction = (name: string) => {
+        if (name === 'group') groupEvent(ev);
+        else if (readOnlyJoin) void openConference(readOnlyJoin.conference, t);
+      };
       return (
         <View
           key={rowKey}
@@ -1100,9 +1112,7 @@ export function CalendarDayList({
           accessibilityRole="text"
           accessibilityLabel={eventLabel(ev, day, span)}
           accessibilityActions={readOnlyActions}
-          onAccessibilityAction={() => {
-            if (readOnlyJoin) void openConference(readOnlyJoin.conference, t);
-          }}
+          onAccessibilityAction={(e) => runReadOnlyAction(e.nativeEvent.actionName)}
           style={
             grid
               ? [styles.gridChip, slotStyle(slot, canvasPx), tint]
@@ -1111,15 +1121,12 @@ export function CalendarDayList({
         >
           <Pressable
             accessible={false}
-            onLongPress={
-              readOnlyJoin
-                ? () =>
-                    setMenu({
-                      title: ev.title,
-                      actions: readOnlyActions,
-                      onAction: () => void openConference(readOnlyJoin.conference, t),
-                    })
-                : undefined
+            onLongPress={() =>
+              setMenu({
+                title: ev.title,
+                actions: readOnlyActions,
+                onAction: runReadOnlyAction,
+              })
             }
             style={styles.rowText}
           >

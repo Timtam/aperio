@@ -1945,6 +1945,9 @@ fn map_group_err(err: EventGroupsError) -> StoreError {
         EventGroupsError::Sqlite(err) => StoreError::Storage {
             detail: err.to_string(),
         },
+        EventGroupsError::Vanished => StoreError::Storage {
+            detail: err.to_string(),
+        },
     }
 }
 
@@ -3375,9 +3378,10 @@ impl Host {
         })?;
         if is_local {
             self.writer
-                .append(SyncEvent::EventDeleted(IdPayload { id }));
+                .append(SyncEvent::EventDeleted(IdPayload { id: id.clone() }));
         }
         if let Some(cid) = calendar_id.as_deref() {
+            self.forget_event_grouping(cid, &id);
             self.invalidate_events_cache(cid);
         }
         Ok(())
@@ -8341,6 +8345,33 @@ impl Host {
 /// no business crossing the FFI boundary — the client in particular holds a
 /// secret.
 impl Host {
+    /// Take a deleted event out of whatever group it was in, and tell the
+    /// other devices.
+    ///
+    /// A deleted event cannot go on meaning the same appointment as anything,
+    /// and a membership row pointing at nothing is worse than none: the group
+    /// still counts it and still names it. Passing the id through as-is is
+    /// deliberate — memberships store the SERIES master id, so deleting a
+    /// single occurrence finds no row and correctly changes nothing.
+    ///
+    /// Best-effort by design: the event IS deleted by the time this runs, and
+    /// failing the whole call over the bookkeeping beside it would report a
+    /// delete that actually happened as a failure.
+    fn forget_event_grouping(&self, calendar_id: &str, event_id: &str) {
+        let shared = self.db.shared();
+        match EventGroupsRepo::new(&shared).ungroup(calendar_id, event_id) {
+            Ok(Some(Ungrouped::Remains(group))) => self.emit_event_group(&group),
+            Ok(Some(Ungrouped::Dissolved { group_id })) => {
+                self.writer
+                    .append(SyncEvent::EventGroupDissolved(IdPayload { id: group_id }));
+            }
+            Ok(None) => {}
+            Err(err) => {
+                tracing::warn!(?err, "could not clear the deleted event's grouping")
+            }
+        }
+    }
+
     /// A group change travels as the WHOLE membership — see `SyncEvent`'s own
     /// note on why a diff would let two devices interleave into a set neither
     /// of them meant.

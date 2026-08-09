@@ -48,6 +48,7 @@ fn map_group_err(err: host_core::event_groups::EventGroupsError) -> CommandError
         E::TooFewMembers => ("event_group_too_few", err.to_string()),
         E::ConflictingGroups => ("event_group_conflict", err.to_string()),
         E::Sqlite(err) => ("internal", err.to_string()),
+        E::Vanished => ("internal", err.to_string()),
     };
     CommandError {
         code,
@@ -141,6 +142,35 @@ pub async fn event_groups_for_events(
     EventGroupsRepo::new(&shared)
         .groups_for_events(&refs)
         .map_err(map_group_err)
+}
+
+/// Take a deleted event out of whatever group it was in, and tell the other
+/// devices.
+///
+/// A deleted event cannot go on meaning the same appointment as anything, and
+/// a membership row pointing at nothing is worse than none: the group still
+/// counts it and still names it. Passing the id through as-is is deliberate —
+/// memberships store the SERIES master id, so deleting a single occurrence
+/// finds no row and correctly changes nothing.
+///
+/// Best-effort by design: the event IS deleted by the time this runs, and
+/// failing the whole command over the bookkeeping beside it would report a
+/// delete that actually happened as a failure.
+pub(crate) fn forget_event_grouping(
+    db: &DbHandle,
+    event_log: &EventLogWriter,
+    calendar_id: &str,
+    event_id: &str,
+) {
+    let shared = db.shared();
+    match EventGroupsRepo::new(&shared).ungroup(calendar_id, event_id) {
+        Ok(Some(Ungrouped::Remains(group))) => emit_group(event_log, &group),
+        Ok(Some(Ungrouped::Dissolved { group_id })) => {
+            event_log.append(SyncEvent::EventGroupDissolved(IdPayload { id: group_id }));
+        }
+        Ok(None) => {}
+        Err(err) => tracing::warn!(?err, "could not clear the deleted event's grouping"),
+    }
 }
 
 /// A group change travels as the whole membership — see `SyncEvent`'s own note

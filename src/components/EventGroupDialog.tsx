@@ -8,9 +8,11 @@ import {
 } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
+import { FocusableNote } from '../a11y/FocusableNote';
 import {
   dissolveEventGroup,
   eventGroupsForEvents,
+  getEvents,
   groupEvents,
   isCommandError,
   ungroupEvent,
@@ -18,8 +20,8 @@ import {
 import type { CalendarEvent } from '../api/types';
 import { useDateFormat } from '../intl/dateFormat';
 import { seriesIdOf } from '../intl/recurrence';
+import { expandAll } from '../intl/recurrence';
 import { useCalendarStore } from '../state/calendarStoreContext';
-import { useEvents } from '../state/useEvents';
 import { Modal } from './Modal';
 
 /**
@@ -73,7 +75,7 @@ export function EventGroupDialog({
   const { t } = useTranslation();
   const fmt = useDateFormat();
   const announce = useAnnouncer();
-  const { calendars } = useCalendarStore();
+  const { calendars, selectedCalendarIds } = useCalendarStore();
   const calendarName = useCallback(
     (id: string) => calendars.find((c) => c.id === id)?.name ?? id,
     [calendars],
@@ -82,7 +84,44 @@ export function EventGroupDialog({
   const anchorId = seriesIdOf(event);
   const anchorKey = eventGroupMemberKey(event.calendar_id, anchorId);
   const range = useMemo(() => dayRangeOf(event), [event]);
-  const { events } = useEvents(range);
+
+  /**
+   * The day's events, fetched here rather than through `useEvents`.
+   *
+   * `useEvents` honours FOCUS MODE, which collapses the whole app to one
+   * calendar — and a picker that can only offer events from the calendar the
+   * anchor is already in is a picker for the one thing grouping is not for.
+   * The copy this dialog exists to name lives in a DIFFERENT calendar by
+   * definition.
+   *
+   * Selected calendars, then, and the anchor's own even when it is not (the
+   * user just came from it). Expanded like every calendar surface: the
+   * adapters hand back a recurring series as its master row, so unexpanded it
+   * would offer series that do not occur on this day and hide the ones whose
+   * master lies outside it.
+   */
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    const ids = new Set([...selectedCalendarIds, event.calendar_id]);
+    void (async () => {
+      const perCalendar = await Promise.all(
+        [...ids].map((id) =>
+          getEvents({
+            calendar_id: id,
+            start: range.start.toISOString(),
+            end: range.end.toISOString(),
+          }).catch(() => [] as CalendarEvent[]),
+        ),
+      );
+      if (cancelled) return;
+      setEvents(expandAll(perCalendar.flat(), range));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, range, selectedCalendarIds, event.calendar_id]);
 
   // `undefined` while the lookup is in flight — distinct from `null`, which is
   // the answer "not grouped". Without the distinction the dialog would claim
@@ -122,6 +161,21 @@ export function EventGroupDialog({
   }, [isOpen]);
 
   /**
+   * Land focus back on Close after an action removes the control the user is
+   * standing on.
+   *
+   * Taking the last-but-one member out dissolves the group, so "Take this
+   * event out" and "Dissolve group" both UNMOUNT the moment they succeed —
+   * with focus on them. Focus then falls to `<body>`, NVDA leaves application
+   * mode, and Escape and Tab go dead inside a dialog that is still open. The
+   * rAF runs after the removal commits and before the Modal's last-resort
+   * recovery frame, so this informed repark wins.
+   */
+  const reparkFocus = useCallback(() => {
+    requestAnimationFrame(() => closeRef.current?.focus({ preventScroll: true }));
+  }, []);
+
+  /**
    * The events that can be named as "the same appointment".
    *
    * By SERIES, not by occurrence: a recurring event shows up once per day in
@@ -143,6 +197,27 @@ export function EventGroupDialog({
     }
     return out;
   }, [events, group, anchorKey]);
+
+  /**
+   * What to call a member.
+   *
+   * The stored `title` is the SIGNATURE — what the event was called when it
+   * joined, kept so a member whose provider id changed can be found again. It
+   * is explicitly not for display: after a rename it is simply wrong. So the
+   * day's loaded events answer first, and the signature is the fallback for a
+   * member that is not in the loaded range (where a stale name still beats no
+   * name at all).
+   */
+  const memberTitle = useCallback(
+    (m: { calendar_id: string; event_id: string; title: string }) => {
+      const key = eventGroupMemberKey(m.calendar_id, m.event_id);
+      const live = events.find(
+        (ev) => eventGroupMemberKey(ev.calendar_id, seriesIdOf(ev)) === key,
+      );
+      return live?.title ?? m.title;
+    },
+    [events],
+  );
 
   const describeEvent = useCallback(
     (ev: { title: string; start: string; all_day: boolean; calendar_id: string }) =>
@@ -167,10 +242,11 @@ export function EventGroupDialog({
           : isCommandError(err)
             ? err.message
             : String(err);
+      // Set only. The <p role="alert"> below speaks it the moment it appears —
+      // announcing it as well made every failure arrive twice.
       setError(message);
-      announce(message);
     },
-    [t, announce],
+    [t],
   );
 
   const addPicked = async () => {
@@ -207,9 +283,16 @@ export function EventGroupDialog({
     setBusy(true);
     setError(null);
     try {
-      const next = await ungroupEvent(event.calendar_id, anchorId);
-      setGroup(next);
+      await ungroupEvent(event.calendar_id, anchorId);
+      // `null`, not the group that came back: the call returns what is LEFT of
+      // the group, which — with three or more members — still exists without
+      // this event in it. Storing that made the dialog go on claiming this
+      // event was grouped, and go on offering to dissolve a group it had just
+      // left. What this screen states is always about THIS event.
+      setGroup(null);
       announce(t('dialogs.eventGroup.ungrouped', { title: event.title }));
+      // Both buttons unmount with the membership the user was standing on.
+      reparkFocus();
       onChanged?.();
     } catch (err) {
       fail(err);
@@ -226,6 +309,7 @@ export function EventGroupDialog({
       await dissolveEventGroup(group.id);
       setGroup(null);
       announce(t('dialogs.eventGroup.dissolved'));
+      reparkFocus();
       onChanged?.();
     } catch (err) {
       fail(err);
@@ -243,7 +327,13 @@ export function EventGroupDialog({
       title={t('dialogs.eventGroup.title')}
       describedById={messageId}
     >
-      <p id={messageId} className="form__message">
+      {/* The dialog's whole answer — grouped or not, and with what — is prose,
+          and prose is invisible to NVDA inside the Modal's role="application"
+          body. `describedById` alone speaks it once at open and never again,
+          so a state that CHANGES under the user (they just grouped something)
+          would be stated only in the announcement. FocusableNote makes each
+          line something the reading cursor can stop on, at any time. */}
+      <FocusableNote id={messageId} className="form__message">
         {group === undefined
           ? t('dialogs.eventGroup.loading')
           : members.length > 0
@@ -252,28 +342,27 @@ export function EventGroupDialog({
                 count: members.length - 1,
               })
             : t('dialogs.eventGroup.notGrouped', { title: event.title })}
-      </p>
+      </FocusableNote>
 
-      {members.length > 0 && (
-        <ul className="form__message">
-          {members.map((m) => (
-            <li key={eventGroupMemberKey(m.calendar_id, m.event_id)}>
-              {t('dialogs.eventGroup.member', {
-                title: m.title,
-                calendar: calendarName(m.calendar_id),
-              })}
-            </li>
-          ))}
-        </ul>
-      )}
+      {members.map((m) => (
+        <FocusableNote
+          key={eventGroupMemberKey(m.calendar_id, m.event_id)}
+          className="form__message"
+        >
+          {t('dialogs.eventGroup.member', {
+            title: memberTitle(m),
+            calendar: calendarName(m.calendar_id),
+          })}
+        </FocusableNote>
+      ))}
 
       <label className="form__field">
         <span className="form__label">{t('dialogs.eventGroup.pickLabel')}</span>
-        <select
-          value={picked}
-          onChange={(e) => setPicked(e.target.value)}
-          disabled={candidates.length === 0}
-        >
+        {/* Never `disabled`: a disabled control leaves the tab order, taking
+            the hint below it out of reach — and "there is no other event that
+            day" is exactly what a user standing here needs to hear. With no
+            candidates it holds its placeholder alone and Group refuses. */}
+        <select value={picked} onChange={(e) => setPicked(e.target.value)}>
           <option value="">{t('dialogs.eventGroup.pickNone')}</option>
           {candidates.map((ev) => (
             <option

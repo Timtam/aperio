@@ -31,11 +31,33 @@
 
 use cal_core::{Calendar, ColorLabel, Event, Section, Task, TaskList};
 use chrono::Utc;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::calendars::split_recurrence;
 use crate::mapping::{encode_json, fmt_date, fmt_time, fmt_utc, write_sound};
 use crate::{map_sql_err, LocalAdapter};
+
+/// Which of two claims about a group is the later one.
+///
+/// The timestamp decides; the group id breaks a tie, so two devices that
+/// stamped the same second still reach the same answer. A timestamp that will
+/// not parse loses to one that will — a claim we cannot date cannot be shown
+/// to be the newer one — and when neither parses the strings decide, which is
+/// at least the same decision everywhere.
+fn is_newer_claim(candidate: (&str, &str), incumbent: (&str, &str)) -> bool {
+    let parsed = |s: &str| {
+        chrono::DateTime::parse_from_rfc3339(s)
+            .ok()
+            .map(|d| d.with_timezone(&chrono::Utc))
+    };
+    match (parsed(candidate.0), parsed(incumbent.0)) {
+        (Some(a), Some(b)) if a != b => a > b,
+        (Some(_), None) => true,
+        (None, Some(_)) => false,
+        (Some(_), Some(_)) => candidate.1 > incumbent.1,
+        (None, None) => (candidate.0, candidate.1) > (incumbent.0, incumbent.1),
+    }
+}
 
 impl LocalAdapter {
     /// Insert or update an event row exactly as another device
@@ -364,24 +386,101 @@ impl LocalAdapter {
         Ok(())
     }
 
-    /// Replace a group's membership wholesale.
+    /// Apply an arriving group, deciding every contested member the same way on
+    /// every device.
     ///
     /// Wholesale, not merged, because the event carries the whole set: the
     /// arriving value IS the group, and reconciling it field by field would
     /// invent a state neither device holds. Members are deleted and re-inserted
-    /// inside one transaction so no reader sees a half-membership.
+    /// inside one transaction so no reader ever sees a half-membership.
     ///
-    /// An arriving member may already sit in a DIFFERENT group locally — two
-    /// devices can group the same event independently. The unique index moves
-    /// it here, which is the intended outcome: the last writer's claim wins.
-    /// Its old group may be left with a single member, so groups that fall
-    /// below two are dropped, exactly as the local path does.
+    /// ## Why this is not a plain upsert
+    ///
+    /// The applier never re-applies a device's OWN envelopes, so "store
+    /// whatever arrives" is last-APPLIED-wins, not last-writer-wins — and two
+    /// devices apply in opposite orders. A groups a+b on Wednesday while B,
+    /// offline since Monday, groups a+c: A would end on B's Monday claim and B
+    /// on A's Wednesday one, each holding the other's, permanently, with
+    /// nothing left in the log to reconcile them.
+    ///
+    /// So the decision is taken from the DATA rather than from arrival order,
+    /// and every device therefore reaches the same answer without another
+    /// round:
+    ///
+    /// - An arrival that is not newer than the group we already hold under that
+    ///   id is dropped. Replay in any order lands on the same membership.
+    /// - A member currently held by a DIFFERENT group is taken only when the
+    ///   arriving group is the newer claim; otherwise it stays where it is and
+    ///   the arriving group goes without it. `updated_at` decides and the group
+    ///   id breaks a tie — arbitrary, but identically arbitrary everywhere.
+    /// - A group left under two members is not a group and is dropped, and so
+    ///   is an ARRIVING one that could not gather two. The cleanup only touches
+    ///   the groups this call actually robbed; the global sweep this used to do
+    ///   reaped bystanders, and since the applier cannot emit, no other device
+    ///   would ever hear that it had.
     pub fn upsert_event_group_from_sync(
         &self,
         group: &cal_core::EventGroup,
     ) -> cal_core::Result<()> {
         let mut conn = self.db().lock().expect("db mutex poisoned");
         let tx = conn.transaction().map_err(map_sql_err)?;
+
+        // An older claim about a group we already hold changes nothing.
+        let local: Option<String> = tx
+            .query_row(
+                "SELECT updated_at FROM event_groups WHERE id = ?",
+                params![group.id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(map_sql_err)?;
+        if let Some(local) = local {
+            if !is_newer_claim((&group.updated_at, &group.id), (&local, &group.id)) {
+                return Ok(());
+            }
+        }
+
+        // Who may join: everyone free, plus everyone whose current group is the
+        // older claim.
+        let mut members: Vec<&cal_core::EventGroupMember> = Vec::new();
+        let mut robbed: Vec<String> = Vec::new();
+        for m in &group.members {
+            let holder: Option<(String, String)> = tx
+                .query_row(
+                    "SELECT g.id, g.updated_at
+                       FROM event_group_members m
+                       JOIN event_groups g ON g.id = m.group_id
+                      WHERE m.calendar_id = ? AND m.event_id = ?",
+                    params![m.calendar_id, m.event_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .map_err(map_sql_err)?;
+            match holder {
+                Some((held_by, held_updated)) if held_by != group.id => {
+                    if is_newer_claim((&group.updated_at, &group.id), (&held_updated, &held_by)) {
+                        members.push(m);
+                        if !robbed.contains(&held_by) {
+                            robbed.push(held_by);
+                        }
+                    }
+                    // Else: the group holding it made the newer claim, so the
+                    // arriving group simply does not get this member. The other
+                    // device runs the same comparison and keeps it there, which
+                    // is how both end up agreeing.
+                }
+                _ => members.push(m),
+            }
+        }
+
+        // One event cannot mean the same appointment as itself.
+        if members.len() < 2 {
+            tx.execute("DELETE FROM event_groups WHERE id = ?", params![group.id])
+                .map_err(map_sql_err)?;
+            tx.commit().map_err(map_sql_err)?;
+            return Ok(());
+        }
+
         tx.execute(
             "INSERT INTO event_groups (id, created_at, updated_at)
              VALUES (?, ?, ?)
@@ -394,7 +493,7 @@ impl LocalAdapter {
             params![group.id],
         )
         .map_err(map_sql_err)?;
-        for m in &group.members {
+        for m in members {
             tx.execute(
                 "INSERT INTO event_group_members
                      (group_id, calendar_id, event_id, title, starts_at, added_at)
@@ -402,28 +501,32 @@ impl LocalAdapter {
                  ON CONFLICT(calendar_id, event_id) DO UPDATE SET
                      group_id  = excluded.group_id,
                      title     = excluded.title,
-                     starts_at = excluded.starts_at",
+                     starts_at = excluded.starts_at,
+                     added_at  = excluded.added_at",
                 params![
                     group.id,
                     m.calendar_id,
                     m.event_id,
                     m.title,
                     m.starts_at,
+                    // Carried, not kept: `added_at` orders the membership when
+                    // it is read back, so leaving the old group's timestamp in
+                    // place would list one group in a different order per
+                    // device.
                     m.added_at
                 ],
             )
             .map_err(map_sql_err)?;
         }
-        // A group robbed of members by the arriving claim is no longer a group.
-        tx.execute(
-            "DELETE FROM event_groups WHERE id IN (
-                 SELECT g.id FROM event_groups g
-                  LEFT JOIN event_group_members m ON m.group_id = g.id
-                  GROUP BY g.id HAVING COUNT(m.event_id) < 2
-             )",
-            [],
-        )
-        .map_err(map_sql_err)?;
+        for id in robbed {
+            tx.execute(
+                "DELETE FROM event_groups
+                  WHERE id = ?1
+                    AND (SELECT COUNT(*) FROM event_group_members WHERE group_id = ?1) < 2",
+                params![id],
+            )
+            .map_err(map_sql_err)?;
+        }
         tx.commit().map_err(map_sql_err)?;
         Ok(())
     }
@@ -522,12 +625,29 @@ mod tests {
     }
 
     fn group(id: &str, members: Vec<EventGroupMember>) -> EventGroup {
+        stamped(id, "2026-08-09T12:00:00Z", members)
+    }
+
+    /// A group as a device would have written it at a particular moment.
+    fn stamped(id: &str, updated_at: &str, members: Vec<EventGroupMember>) -> EventGroup {
         EventGroup {
             id: id.into(),
             created_at: "2026-08-09T12:00:00Z".into(),
-            updated_at: "2026-08-09T12:00:00Z".into(),
+            updated_at: updated_at.into(),
             members,
         }
+    }
+
+    /// What a device holds afterwards, as (group, its members) pairs — the
+    /// shape a convergence test compares between two devices.
+    fn state(a: &LocalAdapter) -> Vec<(String, Vec<String>)> {
+        group_ids(a)
+            .into_iter()
+            .map(|id| {
+                let members = members_of(a, &id);
+                (id, members)
+            })
+            .collect()
     }
 
     fn members_of(a: &LocalAdapter, group_id: &str) -> Vec<String> {
@@ -567,11 +687,14 @@ mod tests {
         ))
         .unwrap();
 
-        // The other device took one out again. The event carries the whole
-        // membership, so the removal has to land as a removal — a merge would
-        // keep ev-b forever and the two devices would never agree.
-        a.upsert_event_group_from_sync(&group(
+        // The other device took one out again and put another in. The event
+        // carries the whole membership, so the removal has to land as a
+        // removal — a merge would keep ev-b forever and the two devices would
+        // never agree. Stamped later, as a real edit would be: an arrival that
+        // is not newer than what we hold is deliberately ignored.
+        a.upsert_event_group_from_sync(&stamped(
             "g1",
+            "2026-08-12T09:00:00Z",
             vec![member("work", "ev-a"), member("colleague", "ev-c")],
         ))
         .unwrap();
@@ -592,13 +715,14 @@ mod tests {
             ],
         ))
         .unwrap();
-        a.upsert_event_group_from_sync(&group(
+        a.upsert_event_group_from_sync(&stamped(
             "remote",
+            "2026-08-12T09:00:00Z",
             vec![member("work", "ev-a"), member("other", "ev-d")],
         ))
         .unwrap();
 
-        // The last writer wins the disputed event...
+        // The NEWER claim wins the disputed event...
         assert_eq!(members_of(&a, "remote"), vec!["ev-a", "ev-d"]);
         // ...and the group it left keeps the members nobody claimed.
         assert_eq!(members_of(&a, "local"), vec!["ev-b", "ev-c"]);
@@ -612,8 +736,9 @@ mod tests {
             vec![member("work", "ev-a"), member("private", "ev-b")],
         ))
         .unwrap();
-        a.upsert_event_group_from_sync(&group(
+        a.upsert_event_group_from_sync(&stamped(
             "remote",
+            "2026-08-12T09:00:00Z",
             vec![member("work", "ev-a"), member("other", "ev-d")],
         ))
         .unwrap();
@@ -621,6 +746,146 @@ mod tests {
         // "local" would be left with ev-b alone, claiming to be grouped with
         // nothing — the same rule the local ungroup path applies.
         assert_eq!(group_ids(&a), vec!["remote"]);
+    }
+
+    #[test]
+    fn an_older_claim_does_not_undo_a_newer_one() {
+        let a = adapter();
+        // Wednesday: this device added ev-d.
+        a.upsert_event_group_from_sync(&stamped(
+            "g1",
+            "2026-08-12T09:00:00Z",
+            vec![member("work", "ev-a"), member("other", "ev-d")],
+        ))
+        .unwrap();
+        // Monday, from a device that was offline until now.
+        a.upsert_event_group_from_sync(&stamped(
+            "g1",
+            "2026-08-10T09:00:00Z",
+            vec![member("work", "ev-a"), member("colleague", "ev-c")],
+        ))
+        .unwrap();
+
+        assert_eq!(
+            members_of(&a, "g1"),
+            vec!["ev-a", "ev-d"],
+            "arrival order must not decide; the later claim stands",
+        );
+    }
+
+    #[test]
+    fn two_devices_that_grouped_the_same_event_end_up_agreeing() {
+        // The case that used to split permanently: each device holds its own
+        // claim and applies the other's, in opposite orders.
+        let earlier = || {
+            stamped(
+                "g-early",
+                "2026-08-10T09:00:00Z",
+                vec![member("work", "ev-a"), member("private", "ev-b")],
+            )
+        };
+        let later = || {
+            stamped(
+                "g-late",
+                "2026-08-12T09:00:00Z",
+                vec![member("work", "ev-a"), member("other", "ev-d")],
+            )
+        };
+
+        let a = adapter();
+        a.upsert_event_group_from_sync(&earlier()).unwrap();
+        a.upsert_event_group_from_sync(&later()).unwrap();
+
+        let b = adapter();
+        b.upsert_event_group_from_sync(&later()).unwrap();
+        b.upsert_event_group_from_sync(&earlier()).unwrap();
+
+        assert_eq!(state(&a), state(&b), "both devices must land on one answer");
+        // And that answer is the later claim: ev-a means the appointment the
+        // newer group says it does, and the older group is left with one
+        // member, which is not a group.
+        assert_eq!(
+            state(&a),
+            vec![(
+                "g-late".to_string(),
+                vec!["ev-a".to_string(), "ev-d".to_string()]
+            )]
+        );
+    }
+
+    #[test]
+    fn a_bystander_group_survives_a_claim_that_never_named_it() {
+        let a = adapter();
+        // Two unrelated groups, neither touching the other.
+        a.upsert_event_group_from_sync(&group(
+            "bystander",
+            vec![member("work", "ev-a"), member("private", "ev-b")],
+        ))
+        .unwrap();
+        a.upsert_event_group_from_sync(&stamped(
+            "arriving",
+            "2026-08-12T09:00:00Z",
+            vec![member("colleague", "ev-c"), member("other", "ev-d")],
+        ))
+        .unwrap();
+
+        // The sweep used to be global: any group under two members went, and
+        // since the applier cannot emit, no other device would ever hear that
+        // this one had decided to dissolve it.
+        assert_eq!(members_of(&a, "bystander"), vec!["ev-a", "ev-b"]);
+    }
+
+    #[test]
+    fn an_arriving_group_that_cannot_gather_two_members_is_not_stored() {
+        let a = adapter();
+        a.upsert_event_group_from_sync(&stamped(
+            "held",
+            "2026-08-12T09:00:00Z",
+            vec![member("work", "ev-a"), member("private", "ev-b")],
+        ))
+        .unwrap();
+        // An older claim over the same two events: it may take neither, so it
+        // is left with nothing and must not appear as a group of zero.
+        a.upsert_event_group_from_sync(&stamped(
+            "older",
+            "2026-08-10T09:00:00Z",
+            vec![member("work", "ev-a"), member("private", "ev-b")],
+        ))
+        .unwrap();
+
+        assert_eq!(group_ids(&a), vec!["held"]);
+        assert_eq!(members_of(&a, "held"), vec!["ev-a", "ev-b"]);
+    }
+
+    #[test]
+    fn a_stolen_member_carries_its_new_joining_time() {
+        let a = adapter();
+        a.upsert_event_group_from_sync(&group(
+            "first",
+            vec![member("work", "ev-a"), member("private", "ev-b")],
+        ))
+        .unwrap();
+        let mut taken = member("work", "ev-a");
+        taken.added_at = "2026-08-12T09:00:00Z".into();
+        a.upsert_event_group_from_sync(&stamped(
+            "second",
+            "2026-08-12T09:00:00Z",
+            vec![taken, member("other", "ev-d")],
+        ))
+        .unwrap();
+
+        let conn = a.db().lock().unwrap();
+        let added: String = conn
+            .query_row(
+                "SELECT added_at FROM event_group_members
+                  WHERE calendar_id = 'work' AND event_id = 'ev-a'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        // The membership is read back ORDER BY added_at, so keeping the old
+        // group's timestamp would order one group differently per device.
+        assert_eq!(added, "2026-08-12T09:00:00Z");
     }
 
     #[test]

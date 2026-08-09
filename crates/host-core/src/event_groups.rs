@@ -59,6 +59,55 @@ pub enum EventGroupsError {
     /// something to infer from an ambiguous request.
     #[error("those events are already in different groups")]
     ConflictingGroups,
+    /// A group that was written moments ago in the same transaction could not
+    /// be read back. Not reachable as far as anyone knows — it exists so the
+    /// code can say so instead of panicking, which would poison the database
+    /// mutex and take the whole process's storage with it.
+    #[error("the group vanished while it was being written")]
+    Vanished,
+}
+
+/// Read one group and its members.
+///
+/// Takes a plain `&Connection` so a transaction can use it too: a caller that
+/// has just written the group reads it back before letting go of the lock,
+/// rather than committing and hoping it is still there.
+fn read_group(
+    conn: &rusqlite::Connection,
+    group_id: &str,
+) -> Result<Option<EventGroup>, EventGroupsError> {
+    let head: Option<(String, String)> = conn
+        .query_row(
+            "SELECT created_at, updated_at FROM event_groups WHERE id = ?",
+            params![group_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let Some((created_at, updated_at)) = head else {
+        return Ok(None);
+    };
+    let mut stmt = conn.prepare(
+        "SELECT calendar_id, event_id, title, starts_at, added_at
+           FROM event_group_members WHERE group_id = ?
+          ORDER BY added_at, event_id",
+    )?;
+    let members = stmt
+        .query_map(params![group_id], |row| {
+            Ok(EventGroupMember {
+                calendar_id: row.get(0)?,
+                event_id: row.get(1)?,
+                title: row.get(2)?,
+                starts_at: row.get(3)?,
+                added_at: row.get(4)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(EventGroup {
+        id: group_id.to_string(),
+        created_at,
+        updated_at,
+        members,
+    }))
 }
 
 /// Read/write access to event groups.
@@ -150,46 +199,21 @@ impl<'a> EventGroupsRepo<'a> {
                 ],
             )?;
         }
+        // Read the answer back INSIDE the transaction. Committing first and
+        // re-reading afterwards means letting go of the write lock in between,
+        // where another thread's dissolve can land — and the `expect` that
+        // followed would then panic, poisoning the mutex and taking every
+        // later database call in the process down with it. A row we just wrote
+        // and have not yet released cannot be missing.
+        let group = read_group(&tx, &group_id)?.ok_or(EventGroupsError::Vanished)?;
         tx.commit()?;
-        drop(conn);
-        Ok(self.get(&group_id)?.expect("just written"))
+        Ok(group)
     }
 
     /// One group with its members, or `None` when the id is unknown.
     pub fn get(&self, group_id: &str) -> Result<Option<EventGroup>, EventGroupsError> {
         let conn = self.db.lock().expect("db mutex poisoned");
-        let head: Option<(String, String)> = conn
-            .query_row(
-                "SELECT created_at, updated_at FROM event_groups WHERE id = ?",
-                params![group_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
-        let Some((created_at, updated_at)) = head else {
-            return Ok(None);
-        };
-        let mut stmt = conn.prepare(
-            "SELECT calendar_id, event_id, title, starts_at, added_at
-               FROM event_group_members WHERE group_id = ?
-              ORDER BY added_at, event_id",
-        )?;
-        let members = stmt
-            .query_map(params![group_id], |row| {
-                Ok(EventGroupMember {
-                    calendar_id: row.get(0)?,
-                    event_id: row.get(1)?,
-                    title: row.get(2)?,
-                    starts_at: row.get(3)?,
-                    added_at: row.get(4)?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Some(EventGroup {
-            id: group_id.to_string(),
-            created_at,
-            updated_at,
-            members,
-        }))
+        read_group(&conn, group_id)
     }
 
     /// The group each of these events belongs to, keyed by `(calendar_id,
@@ -290,9 +314,9 @@ impl<'a> EventGroupsRepo<'a> {
             "UPDATE event_groups SET updated_at = ? WHERE id = ?",
             params![now, group_id],
         )?;
+        let group = read_group(&tx, &group_id)?.ok_or(EventGroupsError::Vanished)?;
         tx.commit()?;
-        drop(conn);
-        Ok(self.get(&group_id)?.map(Ungrouped::Remains))
+        Ok(Some(Ungrouped::Remains(group)))
     }
 
     /// Dissolve a whole group. The events themselves are untouched.

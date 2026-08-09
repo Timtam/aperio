@@ -297,6 +297,11 @@ export default function AgendaScreen({
     [navigation],
   );
 
+  const groupEvent = useCallback(
+    (ev: CalendarEvent) => navigation.navigate('EventGroup', { event: ev }),
+    [navigation],
+  );
+
   // Delete with recurrence scope: an occurrence offers "this occurrence" (exdate)
   // vs "whole series"; a single event a plain delete (shared helper).
   const removeEvent = useCallback(
@@ -527,7 +532,14 @@ export default function AgendaScreen({
     // Everything else about the row stays read-only.
     const readOnlyJoin = readOnlyIds.has(ev.calendar_id) ? joinAction(ev, t) : null;
     if (readOnlyIds.has(ev.calendar_id)) {
-      const readOnlyActions: MenuAction[] = readOnlyJoin ? [readOnlyJoin.action] : [];
+      const readOnlyActions: MenuAction[] = [
+        ...(readOnlyJoin ? [readOnlyJoin.action] : []),
+        { name: 'group', label: t('chipMenu.groupWith') },
+      ];
+      const runReadOnlyAction = (name: string) => {
+        if (name === 'group') groupEvent(ev);
+        else if (readOnlyJoin) void openConference(readOnlyJoin.conference, t);
+      };
       return (
         <View
           key={rowKey}
@@ -535,22 +547,17 @@ export default function AgendaScreen({
           accessibilityRole="text"
           accessibilityLabel={rowLabel(ev, occ.day, occ.span)}
           accessibilityActions={readOnlyActions}
-          onAccessibilityAction={() => {
-            if (readOnlyJoin) void openConference(readOnlyJoin.conference, t);
-          }}
+          onAccessibilityAction={(e) => runReadOnlyAction(e.nativeEvent.actionName)}
           style={[styles.row, tint, cancelledTile]}
         >
           <Pressable
             accessible={false}
-            onLongPress={
-              readOnlyJoin
-                ? () =>
-                    setMenu({
-                      title: ev.title,
-                      actions: readOnlyActions,
-                      onAction: () => void openConference(readOnlyJoin.conference, t),
-                    })
-                : undefined
+            onLongPress={() =>
+              setMenu({
+                title: ev.title,
+                actions: readOnlyActions,
+                onAction: runReadOnlyAction,
+              })
             }
             style={styles.rowText}
           >
@@ -578,12 +585,18 @@ export default function AgendaScreen({
       ...(join ? [join.action] : []),
       { name: 'activate', label: t('mobile.editTaskLabel') },
       { name: 'moveCopy', label: t('mobile.moveCopy') },
+      // "Belongs together with…" — the agenda is the screen where the same
+      // appointment showing up four times is most obvious, so leaving the
+      // entry point out of it would be leaving it out of the view that needs
+      // it most.
+      { name: 'group', label: t('chipMenu.groupWith') },
       { name: 'delete', label: t('dialogs.event.delete'), destructive: true },
     ];
     const runAction = (name: string) => {
       if (name === 'join' && join) void openConference(join.conference, t);
       else if (name === 'delete') removeEvent(ev);
       else if (name === 'moveCopy') moveCopyEvent(ev);
+      else if (name === 'group') groupEvent(ev);
       else editEvent(ev);
     };
     return (

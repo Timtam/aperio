@@ -115,6 +115,21 @@ public class CalFfiModule: Module {
     override var reason: String { syncDetail }
   }
 
+  /// Re-throw the ONE refusal a grouping request can meet with a code.
+  ///
+  /// `Conflict` is generic across the store, but at THIS call site it can only
+  /// be one thing: both named events are already in different groups. The
+  /// frontend has to say that sentence — "take one of them out first" — and it
+  /// cannot, if all that arrives is a Swift error description. Same mechanism
+  /// as `coded` below, narrowed to the one call that needs it.
+  private func groupCoded<T>(_ block: () throws -> T) throws -> T {
+    do {
+      return try block()
+    } catch let StoreError.Conflict(detail) {
+      throw SyncCodedError(code: "event_group_conflict", detail: detail)
+    }
+  }
+
   /// Re-throw a sync failure with its code intact. Everything else falls
   /// through untouched — a `StoreError.NotFound` was never the problem.
   private func coded<T>(_ block: () throws -> T) throws -> T {
@@ -496,7 +511,7 @@ public class CalFfiModule: Module {
     }
 
     AsyncFunction("groupEventsJson") { (membersJson: String) -> String in
-      try self.host.groupEventsJson(membersJson: membersJson)
+      try self.groupCoded { try self.host.groupEventsJson(membersJson: membersJson) }
     }
 
     AsyncFunction("ungroupEventJson") { (calendarId: String, eventId: String) -> String? in

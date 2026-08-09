@@ -136,6 +136,21 @@ class CalFfiModule : Module() {
    * Everything else falls through untouched — a `StoreException.NotFound` was
    * never the problem.
    */
+  /**
+   * Re-throw the ONE refusal a grouping request can meet with a code.
+   *
+   * `Conflict` is generic across the store, but at THIS call site it can only
+   * be one thing: both named events are already in different groups. The
+   * frontend has to say that sentence — "take one of them out first" — and it
+   * cannot, if all that arrives is an exception's `toString()`.
+   */
+  private inline fun <T> groupCoded(block: () -> T): T =
+    try {
+      block()
+    } catch (e: StoreException.Conflict) {
+      throw CodedException("event_group_conflict", e.detail, e)
+    }
+
   private inline fun <T> coded(block: () -> T): T =
     try {
       block()
@@ -414,7 +429,7 @@ class CalFfiModule : Module() {
     }
 
     AsyncFunction("groupEventsJson") { membersJson: String ->
-      host.groupEventsJson(membersJson)
+      groupCoded { host.groupEventsJson(membersJson) }
     }
 
     AsyncFunction("ungroupEventJson") { calendarId: String, eventId: String ->

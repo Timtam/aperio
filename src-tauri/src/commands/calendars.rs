@@ -764,6 +764,7 @@ pub async fn delete_event(
     cache: State<'_, Arc<CacheStore>>,
     scheduler: State<'_, SchedulerHandle>,
     event_log: State<'_, Arc<EventLogWriter>>,
+    db: State<'_, DbHandle>,
     id: String,
     calendar_id: Option<String>,
     send_cancellations: Option<bool>,
@@ -797,6 +798,14 @@ pub async fn delete_event(
     }
     if is_local {
         event_log.append(SyncEvent::EventDeleted(IdPayload { id: id.clone() }));
+    }
+    // The event is gone, so it cannot go on meaning the same appointment as
+    // anything. A membership row pointing at nothing is worse than none: the
+    // group still counts it and still names it. Passing the id through as-is
+    // is deliberate — memberships store the SERIES master id, so deleting a
+    // single occurrence finds no row and correctly changes nothing.
+    if let Some(cid) = &calendar_id {
+        super::forget_event_grouping(&db, &event_log, cid, &id);
     }
     scheduler.invalidate();
     Ok(())
