@@ -141,9 +141,20 @@ gleicher Beginn (bei ganztägigen derselbe Tag), anderer Kalender — alle drei
 Bedingungen nötig. „Überlappend" hätte den Termin DAVOR angeboten, und ein
 Beinahe-Treffer beim Titel ist weit öfter etwas anderes als dieselbe Sache. Der
 Fund kommt als **Vorauswahl** in die Auswahlliste, mit einer Zeile, die sagt
-warum; angewendet wird nichts ohne Bestätigung. Das Vorschlagen von sich aus (ein
-Hinweis in der Ansicht, „einmal bestätigt, dauerhaft gemerkt") und das Wandern
-des Meetings an die Gruppe stehen noch aus.
+warum; angewendet wird nichts ohne Bestätigung.
+
+Das **Meeting an der Gruppe** ist gebaut, als Lesen statt als Umzug
+(`MeetingsRepo::get_including_copies`): die Bindung liegt weiter an genau einem
+Termin, aber gesucht wird über alle Kopien. Damit hört es auf, ein Zufall des
+Moments zu sein, an welcher Kopie verknüpft wurde — „Beitreten" erscheint an
+jeder. Eine eigene Zeile an der Gruppe hätte eine weitere Tabelle und eine
+Migration gekostet, für etwas, das die Abfrage beantwortet, und hätte entscheiden
+müssen, was beim Auflösen der Gruppe mit dem Meeting geschieht — danach hat
+niemand gefragt.
+
+Offen bleibt das Vorschlagen von sich aus (ein Hinweis in der Ansicht, „einmal
+bestätigt, dauerhaft gemerkt") — das braucht eine Ablage für abgelehnte
+Vorschläge, also eine weitere Migration.
 
 ## Größenordnung
 

@@ -221,6 +221,49 @@ impl<'a> MeetingsRepo<'a> {
     /// Forget the binding. Returns what was there, so a caller that is about to
     /// delete the event can take the meeting down with it in one step and know
     /// exactly which meeting it removed.
+    /// The meeting bound to this event — or to any COPY of it.
+    ///
+    /// A meeting hangs on exactly one event, and which one is a coincidence of
+    /// the moment it was attached. Before groups that was simply how it was:
+    /// open the private copy and the Join button was missing, because the link
+    /// had been made from the work copy. A group says those are one
+    /// appointment, so its meeting is the appointment's, and it is reachable
+    /// from whichever copy the user happens to be looking at.
+    ///
+    /// The binding still LIVES on one event. Moving the row to the group would
+    /// mean a second table and a migration for something the lookup can answer
+    /// — and it would have to decide what happens to the meeting when the
+    /// group is dissolved, which nobody has asked for yet.
+    ///
+    /// Members are tried in the group's own order, so the answer is the same
+    /// on every device. A group lookup that fails is treated as "not grouped":
+    /// this is a read on the way to a Join button, and degrading to the plain
+    /// binding is exactly what the app did before.
+    pub fn get_including_copies(
+        &self,
+        calendar_id: &str,
+        event_id: &str,
+    ) -> Result<Option<EventMeeting>, MeetingsError> {
+        if let Some(own) = self.get(event_id)? {
+            return Ok(Some(own));
+        }
+        let groups = crate::event_groups::EventGroupsRepo::new(self.db);
+        let found = groups
+            .groups_for_events(&[(calendar_id.to_string(), event_id.to_string())])
+            .unwrap_or_default();
+        for group in found {
+            for member in &group.members {
+                if member.event_id == event_id {
+                    continue;
+                }
+                if let Some(meeting) = self.get(&member.event_id)? {
+                    return Ok(Some(meeting));
+                }
+            }
+        }
+        Ok(None)
+    }
+
     pub fn unbind(&self, event_id: &str) -> Result<Option<EventMeeting>, MeetingsError> {
         let existing = self.get(event_id)?;
         if existing.is_some() {

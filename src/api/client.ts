@@ -754,9 +754,15 @@ export const detachMeeting = (request: {
   calendar_id: string;
 }) => invoke<CalendarEvent | null>('detach_meeting', { request });
 
-/** The meeting Aperio created for this event, if any. */
-export const eventMeeting = (event_id: string) =>
-  invoke<EventMeetingBinding | null>('event_meeting', { eventId: event_id });
+/** The meeting Aperio created for this event — or for any copy of it.
+ *
+ *  Pass the calendar so a group can answer: a meeting hangs on exactly one
+ *  event, and which one is a coincidence of the moment it was attached. */
+export const eventMeeting = (event_id: string, calendar_id?: string) =>
+  invoke<EventMeetingBinding | null>('event_meeting', {
+    eventId: event_id,
+    calendarId: calendar_id,
+  });
 
 // ── Event groups (which events mean the same appointment) ──
 //

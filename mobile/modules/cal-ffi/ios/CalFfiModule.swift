@@ -661,8 +661,8 @@ public class CalFfiModule: Module {
       try self.host.adoptMeetingJson(requestJson: requestJson)
     }
 
-    AsyncFunction("eventMeetingJson") { (eventId: String) -> String in
-      try self.host.eventMeetingJson(eventId: eventId)
+    AsyncFunction("eventMeetingJson") { (eventId: String, calendarId: String?) -> String in
+      try self.host.eventMeetingJson(eventId: eventId, calendarId: calendarId)
     }
 
     AsyncFunction("listAdapterKindsJson") { () -> String in

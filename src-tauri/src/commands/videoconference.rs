@@ -280,8 +280,9 @@ pub async fn inspect_event_meeting(
     request: InspectEventMeetingRequest,
 ) -> CommandResult<EventMeetingInspection> {
     let shared = db.shared();
+    // Any copy's meeting is this appointment's meeting.
     let binding = MeetingsRepo::new(&shared)
-        .get(&request.event_id)
+        .get_including_copies(&request.calendar_id, &request.event_id)
         .map_err(meetings_error)?;
 
     // Ours: ask the account that made it, by id. Exact and one request.
@@ -490,11 +491,18 @@ pub async fn detach_meeting(
 pub fn event_meeting(
     db: State<'_, DbHandle>,
     event_id: String,
+    calendar_id: Option<String>,
 ) -> CommandResult<Option<EventMeeting>> {
     let shared = db.shared();
-    MeetingsRepo::new(&shared)
-        .get(&event_id)
-        .map_err(meetings_error)
+    let repo = MeetingsRepo::new(&shared);
+    // With the calendar known, a meeting attached to ANY copy of this
+    // appointment answers — which is the point of a group. Without it (an
+    // older caller) the plain binding is all there is.
+    match calendar_id {
+        Some(cid) => repo.get_including_copies(&cid, &event_id),
+        None => repo.get(&event_id),
+    }
+    .map_err(meetings_error)
 }
 
 fn meetings_error(err: host_core::meetings::MeetingsError) -> CommandError {

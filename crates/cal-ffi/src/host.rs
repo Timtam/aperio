@@ -7891,8 +7891,11 @@ impl Host {
     pub fn inspect_event_meeting_json(&self, request_json: String) -> Result<String, StoreError> {
         let req: AttachMeetingRequest = from_json("inspect meeting", &request_json)?;
         let shared = self.db.shared();
+        // Any copy's meeting is this appointment's meeting: a group says these
+        // events are one thing, so which copy the link was made from stops
+        // being the coincidence that decides whether Join appears.
         let binding = MeetingsRepo::new(&shared)
-            .get(&req.event_id)
+            .get_including_copies(&req.calendar_id, &req.event_id)
             .map_err(meetings_err)?;
 
         if let Some(binding) = &binding {
@@ -7962,11 +7965,20 @@ impl Host {
     }
 
     /// The meeting Aperio created for this event, if any, as JSON.
-    pub fn event_meeting_json(&self, event_id: String) -> Result<String, StoreError> {
+    pub fn event_meeting_json(
+        &self,
+        event_id: String,
+        calendar_id: Option<String>,
+    ) -> Result<String, StoreError> {
         let shared = self.db.shared();
-        let found = MeetingsRepo::new(&shared)
-            .get(&event_id)
-            .map_err(meetings_err)?;
+        let repo = MeetingsRepo::new(&shared);
+        // With the calendar known, a meeting attached to ANY copy answers.
+        // Without it the plain binding is all there is.
+        let found = match calendar_id {
+            Some(cid) => repo.get_including_copies(&cid, &event_id),
+            None => repo.get(&event_id),
+        }
+        .map_err(meetings_err)?;
         to_json(&found)
     }
 

@@ -843,8 +843,8 @@ class CalFfiModule : Module() {
       host.adoptMeetingJson(requestJson)
     }
 
-    AsyncFunction("eventMeetingJson") { eventId: String ->
-      host.eventMeetingJson(eventId)
+    AsyncFunction("eventMeetingJson") { eventId: String, calendarId: String? ->
+      host.eventMeetingJson(eventId, calendarId)
     }
 
     AsyncFunction("listAdapterKindsJson") {

@@ -64,9 +64,12 @@ export const detachMeeting = async (request: {
 /** The meeting Aperio created for this event, if any. */
 export const eventMeeting = async (
   eventId: string,
+  calendarId?: string,
 ): Promise<EventMeetingBinding | null> =>
   JSON.parse(
-    await CalFfi.eventMeetingJson(eventId),
+    // The calendar lets a group answer: a meeting hangs on exactly one event,
+    // and which one is a coincidence of the moment it was attached.
+    await CalFfi.eventMeetingJson(eventId, calendarId ?? null),
   ) as EventMeetingBinding | null;
 
 /** One person the provider lists on a meeting. */

@@ -489,7 +489,7 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    *  carries `{event_id, account_id, meeting_id, join_url}`. */
   adoptMeetingJson(requestJson: string): Promise<string>;
   /** The meeting Aperio created for this event, if any, as JSON. */
-  eventMeetingJson(eventId: string): Promise<string>;
+  eventMeetingJson(eventId: string, calendarId: string | null): Promise<string>;
 
   listAdapterKindsJson(): Promise<string>;
   accountFormSpecJson(adapterKind: string, lang: string | null): Promise<string>;
