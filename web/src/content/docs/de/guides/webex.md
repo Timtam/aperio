@@ -146,10 +146,20 @@ Kalender mit dem Namen dieses Kontos** an, in dem genau diese Meetings stehen.
 Er verhält sich wie jeder andere Kalender: in der Seitenleiste ein- und
 ausschalten, in Tages- und Wochenansicht sehen, aus dem Kontextmenü beitreten.
 
-Es erscheinen nur Meetings **ohne** Kalendereintrag. Eines, das schon einen hat
-— weil Aperio es angelegt hat oder eine Einladung es mitgebracht hat — steht
-nicht doppelt da. Die beiden werden über den Beitrittslink zusammengeführt, und
-der ist eindeutig.
+Ein Meeting, das schon einen Kalendereintrag hat — weil Aperio es angelegt hat
+oder eine Einladung es mitgebracht hat —, steht nicht doppelt da. Aperio führt
+die beiden über den Beitrittslink zusammen, der eindeutig ist, und
+**gruppiert** sie: Der Tag zeigt eine Zeile mit der Marke „2×", und wer die
+Gruppe öffnet, sieht beide Kopien benannt und kommt zu jeder von ihnen.
+
+Das ist der Erwähnung wert, weil hier das frühere Verhalten still danebenlag:
+Wird der Termin verschoben und das Meeting nicht, passt der Beitrittslink
+weiterhin — das Meeting einfach zu verstecken würde es also genau dann
+verstecken, wenn die beiden aufgehört haben, sich einig zu sein. Eine Gruppe tut
+das nicht: Sie faltet dann nicht mehr und zeigt beide Zeilen, markiert mit „≠".
+
+Nimmst du die beiden auseinander, bleiben sie auseinander — auf allen Geräten,
+nicht nur auf diesem.
 
 Der Kalender lässt sich nicht bearbeiten. Er zeigt, was bei Webex existiert; um
 ein Meeting anzulegen, trägst du einen Termin in einen deiner eigenen Kalender

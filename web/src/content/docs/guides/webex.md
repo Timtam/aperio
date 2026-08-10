@@ -140,9 +140,19 @@ after that account**, holding exactly those meetings. It behaves like any other
 calendar: toggle it in the sidebar, see the meetings in the day and week views,
 join them from the context menu.
 
-It shows only meetings with **no** calendar entry. A meeting that already has
-one — because Aperio created it, or because an invitation brought it in — is not
-listed twice. The two are matched by their join link, which is exact.
+A meeting that already has a calendar entry — because Aperio created it, or
+because an invitation brought it in — is not listed twice. Aperio matches the
+two by their join link, which is exact, and **groups them**: the day shows one
+row marked "2×", and opening the group names both copies and takes you to
+either one.
+
+That is worth a word, because it is the case where the old behaviour was quietly
+wrong. If the appointment is moved and the meeting is not, the join link still
+matches — so simply hiding the meeting would hide it at the very moment the two
+have stopped agreeing. A group does not: it stops folding and shows both rows,
+marked "≠".
+
+If you take the two apart, they stay apart — on every device, not just this one.
 
 The calendar cannot be edited. It shows what exists at Webex; to create a
 meeting, add an event to one of your own calendars and use **Create a meeting**

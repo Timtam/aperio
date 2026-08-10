@@ -1,10 +1,8 @@
 # Termingruppen — Entwurf
 
-Status: **Stufen 0 bis 3 gebaut**, auf beiden Plattformen und im Widget;
-**Stufe 4** (Meeting-Kalender als echte Kalender, automatisch gruppiert) ist
-Entwurf. Dieses Dokument hat entschieden, ob und in welcher Form gebaut wird;
-die Stufenliste am Ende sagt, was davon steht. Nichts davon lief bisher auf
-einem Gerät.
+Status: **Stufen 0 bis 4 gebaut**, auf beiden Plattformen und im Widget. Dieses
+Dokument hat entschieden, ob und in welcher Form gebaut wird; die Stufenliste am
+Ende sagt, was davon steht. Nichts davon lief bisher auf einem Gerät.
 
 ## Der Anlass
 
@@ -217,27 +215,33 @@ anzubieten ist der eine Fehler, den diese Funktion nicht machen darf.
 Angeboten wird nur auf den EINTÄGIGEN Oberflächen. In Woche und Monat würde die
 Frage einen Tag betreffen, den der Nutzer gerade nicht liest.
 
-**Stufe 4** — Die Meeting-Kalender sichtbar machen und ihre Zeilen automatisch
-mit dem Termin gruppieren, zu dem sie gehören. **ENTWURF**, noch nicht gebaut.
+**Stufe 4** — Die Meeting-Zeilen automatisch mit dem Termin gruppieren, zu dem
+sie gehören. **GEBAUT**, auf beiden Plattformen.
 
-### Das Problem, das heute versteckt wird
+### Das Problem, das vorher versteckt wurde
 
 Ein Videokonferenz-Konto liefert einen eigenen, nur lesbaren Kalender seiner
 Meetings. Die meisten dieser Meetings haben auch einen Kalendereintrag — Aperios
 eigenen oder die Einladung, die Outlook geschrieben hat —, also erschienen sie
-doppelt. `withoutDuplicateMeetings` wirft darum in der Ansicht die
-Meeting-Zeile weg, sobald ein echter Termin dieselbe **Beitritts-URL** trägt.
+doppelt. `withoutDuplicateMeetings` warf darum in der Ansicht die Meeting-Zeile
+weg, sobald ein echter Termin dieselbe **Beitritts-URL** trug.
 
 Das Ergebnis stimmt meistens, aber der Weg dahin ist derselbe, den dieses ganze
 Dokument sonst ablehnt: **Aperio wirft Daten weg, um eine Doppelung zu
 verbergen.** Greift die Regel daneben, verschwindet ein Meeting, das es wirklich
-gibt, und nichts sagt es. Und der Meeting-Kalender ist überhaupt nicht
-anwählbar, es gibt also keinen Ort, an dem man nachsehen könnte.
+gibt, und nichts sagt es.
+
+Der schlimmere Fall ist aber nicht das Danebengreifen, sondern der Treffer:
+Wird ein Termin verschoben und sein Meeting nicht, **passt die Beitritts-URL
+weiterhin** — der Filter versteckt das Meeting also genau dann, wenn die beiden
+aufgehört haben, sich einig zu sein. Das ist die eine Information, die man
+wirklich braucht, und sie war die einzige, die garantiert verschwand.
 
 Eine Gruppe erzeugt dasselbe Ergebnis auf ehrliche Weise: **beide Zeilen
 bleiben**, gefaltet wird eine, die Marke sagt „2×", „Beitreten" liest ohnehin
 schon über alle Kopien (`MeetingsRepo::get_including_copies`), und laufen die
-beiden auseinander, wird das sichtbar statt weggeworfen.
+beiden auseinander, faltet die Gruppe nicht mehr — beide Zeilen erscheinen, mit
+„≠" markiert.
 
 ### Warum hier automatisch gruppiert werden DARF
 
@@ -259,20 +263,32 @@ Automatisch gruppieren auf einer **Identität** ist damit etwas grundsätzlich
 anderes als automatisch gruppieren auf einer **Ähnlichkeit**. Das erste ist
 vertretbar, das zweite bleibt es nicht.
 
-### Was zu entscheiden ist, bevor das gebaut wird
+### Wie es gebaut ist
 
-**Woher die Gruppe kommt, muss man ihr ansehen.** Eine automatisch entstandene
-Gruppe darf nicht aussehen wie eine, die der Nutzer angelegt hat: Er muss sie
-auflösen können, ohne dass sie beim nächsten Abgleich wiederkommt, und die
-Auflösung darf nicht so wirken, als hätte er seine eigene Aussage verloren. Das
-heißt eine Herkunft an der Gruppe (etwa `origin: 'meeting-link'`), die
-synchronisiert wie alles andere.
+**Aufgelöst heißt aufgelöst.** Der Mechanismus dafür existierte schon: die
+Ablehnungs-Marken aus Migration 0037, die ein Paar dauerhaft und
+geräteübergreifend von Vorschlägen ausnehmen. Wer ein Mitglied aus einer Gruppe
+nimmt oder eine Gruppe auflöst, schreibt jetzt genau diese Marke — für jedes
+betroffene Paar, und sie **wandert über den Log mit** (`emit_declines`). Ohne
+das Mitwandern hätte das andere Gerät nur „die Gruppe ist weg" gehört und sie
+aus derselben Beitritts-URL sofort neu gebildet: die Gruppe käme jeden Tag
+zurück, und die Funktion wäre eine Zumutung statt einer Hilfe.
 
-**Aufgelöst heißt aufgelöst.** Der Mechanismus dafür existiert schon: die
-Ablehnungs-Marken aus Migration 0037, die ein Paar dauerhaft und geräteübergreifend
-von Vorschlägen ausnehmen. Eine automatische Gruppe, die der Nutzer auflöst,
-schreibt dieselbe Marke — und wird nicht neu gebildet. Ohne das ist die Funktion
-eine tägliche Zumutung statt einer Hilfe.
+Das bindet die Vorschlagszeile mit, und das ist richtig statt Nebenwirkung:
+„Ich habe das herausgenommen" ist dieselbe Aussage wie „nein, nicht dasselbe".
+Ausdrückliches Gruppieren fragt die Marken nie.
+
+**Ein gelöschter Termin hat nichts gesagt.** `ungroup` nimmt deshalb einen
+Grund entgegen (`Removal::ByUser` / `Removal::EventGone`). Nur das Herausnehmen
+durch den Nutzer schreibt eine Marke; das Aufräumen der Mitgliedschaft eines
+gelöschten Termins schreibt keine, die sonst den Termin überlebte und eine ID
+bände, die der Anbieter neu vergeben kann.
+
+**Woher die Gruppe kommt, steht nicht an der Gruppe.** Der Entwurf wollte eine
+Herkunft (`origin: 'meeting-link'`) — das wäre falsch: `group_events` tritt
+einer bestehenden Gruppe bei, eine Gruppe kann also halb vom Nutzer und halb
+automatisch sein. Die richtige Körnung ist das **Paar**, und genau die haben
+die Ablehnungs-Marken.
 
 **Nicht eindeutig heißt nicht gruppieren.** Eine Beitritts-URL kann auf mehrere
 Termine passen — ein Dauer-Meetingraum, der in einer Serie wiederverwendet wird,
@@ -281,34 +297,37 @@ einen Termin, wird **nichts** gruppiert: dieselbe Eindeutigkeits-Regel, die die
 Selbstheilung schon anwendet, aus demselben Grund — eine falsche Gruppe ist
 schlimmer als keine, weil sie authoritativ aussieht.
 
-**Der Kalender wird sichtbar, aber nicht laut.** Er wird ein normaler Kalender
-in der Seitenleiste, nur lesbar wie bisher. Offene Frage: an- oder abgeschaltet
-beim ersten Erscheinen. Für „abgeschaltet" spricht, dass die Faltung ihn ohnehin
-unsichtbar macht, sobald die Gruppen stehen; für „angeschaltet", dass ein Meeting
-ohne Kalendereintrag — der eigentliche Grund, warum es diesen Kalender gibt —
-sonst verschwindet. Ich empfehle **angeschaltet**: Das ist der Zustand, in dem
-nichts fehlt, und die Faltung räumt die Doppelungen weg.
+**Der Kalender war immer schon ein Kalender.** Der Entwurf behauptete, der
+Meeting-Kalender sei nicht anwählbar; das stimmte nicht. `VcCalendar` liefert
+ihn seit jeher aus `list_calendars` — nur lesbar, benannt nach dem Konto —, er
+steht also in der Seitenleiste und auf dem Kalender-Bildschirm und lässt sich
+an- und abschalten wie jeder andere. Es war nichts zu bauen; die halbe Stufe
+existierte bereits.
 
-**Die Reihenfolge der Umstellung ist heikel.** `withoutDuplicateMeetings` darf
-erst weg, wenn die Gruppen tatsächlich existieren — sonst erscheint jedes
-Meeting zwei Mal, und zwar bei jedem, der aktualisiert, bevor der erste Abgleich
-gelaufen ist. Also: erst gruppieren, dann filtern lassen, und den Filter erst
-danach ausbauen. Solange beides läuft, muss der Filter Zeilen in Ruhe lassen,
-die bereits Mitglied einer Gruppe sind — sonst faltet die Gruppe eine Zeile weg,
-die der Filter schon entfernt hat, und die Zählung stimmt nicht mehr.
+**Der Filter bleibt, mit einer Ausnahme.** `withoutDuplicateMeetings` kommt
+nicht weg: Für ein Paar, das nicht eindeutig ist, ist er die einzige
+Doppelungs-Bremse, und beim allerersten Laden greift er, bevor die erste Gruppe
+geschrieben ist. Er lässt jetzt Zeilen in Ruhe, die **Mitglied einer Gruppe**
+sind — dann faltet die Gruppe, und die Faltung zeigt eben beide Zeilen, sobald
+sie sich uneins sind. Genau deshalb ist die Ausnahme keine Kosmetik.
+
+Damit wanderte auch das Filtern: `useEvents` (Desktop) und `load()` (mobil)
+liefern jetzt **alles**, und gefiltert wird dort, wo die Gruppen bekannt sind —
+`useEventGroups` bzw. die Ansichten selbst. Das Paaren braucht beide Zeilen, und
+die gab es vorher nach dem Filter nicht mehr.
 
 **Schreibrechte klären sich von selbst.** Der Meeting-Kalender ist nur lesbar,
-und das ist bereits überall richtig behandelt: Gruppieren geht auf nur lesbaren
-Zeilen (die Gruppe ist Aperios Aussage, kein Schreibvorgang), und das Mitziehen
-nennt sie als das, was es nicht schreiben kann, statt sie still zu überspringen.
+und das ist überall richtig behandelt: Gruppieren geht auf nur lesbaren Zeilen
+(die Gruppe ist Aperios Aussage, kein Schreibvorgang), und das Mitziehen nennt
+sie als das, was es nicht schreiben kann, statt sie still zu überspringen.
 
 ### Was es wert ist
 
-Der sichtbare Gewinn ist klein — die Doppelung verschwindet heute auch schon.
+Der sichtbare Gewinn ist klein — die Doppelung verschwand vorher auch schon.
 Der Gewinn liegt darin, dass sie **richtig** verschwindet: nachvollziehbar, mit
-beiden Zeilen erhalten, mit einer Zahl, die sagt was es gibt, und mit einer
-Stelle, an der man nachsehen kann. Dazu fällt eine Heuristik weg, die still
-Daten unterdrückt — die einzige, die dieses Projekt noch hat.
+beiden Zeilen erhalten, mit einer Zahl, die sagt was es gibt, mit einer Stelle,
+an der man nachsehen kann — und mit dem einen Fall, der vorher garantiert
+unsichtbar war: Termin verschoben, Meeting nicht.
 
 ## Größenordnung
 
