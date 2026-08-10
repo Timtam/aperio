@@ -144,6 +144,23 @@ pub async fn event_groups_for_events(
         .map_err(map_group_err)
 }
 
+/// Write down what a member's event looks like now, so it can still be found
+/// after the provider remints its id. Local and silent — see
+/// `EventGroupsRepo::refresh_signature`.
+#[tauri::command]
+pub async fn refresh_event_group_signature(
+    db: State<'_, DbHandle>,
+    calendar_id: String,
+    event_id: String,
+    title: String,
+    starts_at: String,
+) -> CommandResult<()> {
+    let shared = db.shared();
+    EventGroupsRepo::new(&shared)
+        .refresh_signature(&calendar_id, &event_id, &title, &starts_at)
+        .map_err(map_group_err)
+}
+
 /// Record that two events are NOT the same appointment, so Aperio stops
 /// offering to group them.
 #[tauri::command]

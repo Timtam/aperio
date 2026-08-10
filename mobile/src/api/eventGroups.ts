@@ -84,3 +84,18 @@ export const declineGroupSuggestion = (
 /** Every pair the user has said is not one appointment. */
 export const groupSuggestionDeclines = async (): Promise<SuggestionDecline[]> =>
   JSON.parse(await CalFfi.groupSuggestionDeclinesJson()) as SuggestionDecline[];
+
+/** Write down what a member's event looks like now, so the group can still
+ *  find it after the provider remints its id. Local and silent. */
+export const refreshEventGroupSignature = (payload: {
+  calendar_id: string;
+  event_id: string;
+  title: string;
+  starts_at: string;
+}): Promise<void> =>
+  CalFfi.refreshEventGroupSignature(
+    payload.calendar_id,
+    payload.event_id,
+    payload.title,
+    payload.starts_at,
+  );

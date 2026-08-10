@@ -29,7 +29,9 @@ import {
   eventInstanceKey,
   withoutDuplicateMeetings,
   collapseEventGroups,
+  groupBadge,
   findHealableMembers,
+  findStaleSignatures,
   seriesIdOf,
   type CollapsedRow,
   type EventGroup,
@@ -83,6 +85,7 @@ import type { RootStackParamList } from '../navigation/types';
 import {
   eventGroupsForEvents,
   healEventGroupMember,
+  refreshEventGroupSignature,
 } from '../api/eventGroups';
 import { ActionsMenu, type MenuAction } from './ActionsMenu';
 import { GroupSuggestionNotice } from './GroupSuggestionNotice';
@@ -791,18 +794,24 @@ export function CalendarDayList({
     eventGroupsForEvents(refs)
       .then(async (found) => {
         if (cancelled) return;
-      // Repair members whose provider id changed, while the range that proves
-      // it is in hand: a member whose stored start falls inside it and whose
-      // id resolves to nothing here has been re-minted, and the signature says
-      // which event it is now. Silent — the same events mean the same
-      // appointment before and after (DESIGN-event-groups.md).
-      const healable = findHealableMembers(found, visibleEvents, range, seriesIdOf);
+        // Keep the signatures describing the events as they ARE. Written once
+        // at joining, they went stale the moment the appointment moved — and
+        // the repair below searches by exactly them.
+        for (const stale of findStaleSignatures(found, visibleEvents, seriesIdOf)) {
+          await refreshEventGroupSignature(stale).catch(() => undefined);
+        }
+        if (cancelled) return;
+        // Repair members whose provider id changed, while the range that proves
+        // it is in hand: a member whose stored start falls inside it and whose
+        // id resolves to nothing here has been re-minted, and the signature
+        // says which event it is now. Silent — the same events mean the same
+        // appointment before and after (DESIGN-event-groups.md).
+        const healable = findHealableMembers(found, visibleEvents, range, seriesIdOf);
         for (const member of healable) {
           await healEventGroupMember(member).catch(() => undefined);
         }
         if (cancelled) return;
-        // Read back rather than patch locally: the repair also travels to the
-        // other devices, and the stored group is the answer.
+        // Read back rather than patch locally: the stored group is the answer.
         const fresh = healable.length
           ? await eventGroupsForEvents(refs).catch(() => found)
           : found;
@@ -1189,6 +1198,12 @@ export function CalendarDayList({
     const badge = span
       ? ` ${t('views.multiDayCompact', { day: span.dayIndex, total: span.totalDays })}`
       : '';
+    // What this row stands for, for the EYE. The label already says it in
+    // words, so the mark below is hidden from the reader — without it, folding
+    // was audible and invisible, and a group that had drifted apart looked
+    // like two unrelated rows.
+    const groupRow = groupRows.get(`${eventInstanceKey(ev)}@${localDateKey(day)}`);
+    const group = groupRow ? groupBadge(groupRow) : null;
     // Read-only calendars still get the join affordance when the event carries
     // a meeting: these rows have no editor to open, so without it a meeting on
     // a subscribed or shared calendar would be un-joinable from the app at all.
@@ -1240,6 +1255,16 @@ export function CalendarDayList({
             >
               {ev.title}
               {badge}
+              {group != null && (
+                <Text
+                  style={
+                    groupRow?.diverged ? styles.groupBadgeDiverged : styles.groupBadge
+                  }
+                  importantForAccessibility="no"
+                >
+                  {` ${group}`}
+                </Text>
+              )}
             </Text>
             {!grid && (
               <Text style={styles.itemMeta} importantForAccessibility="no">
@@ -1305,6 +1330,16 @@ export function CalendarDayList({
           >
             {ev.title}
             {badge}
+            {group != null && (
+              <Text
+                style={
+                  groupRow?.diverged ? styles.groupBadgeDiverged : styles.groupBadge
+                }
+                importantForAccessibility="no"
+              >
+                {` ${group}`}
+              </Text>
+            )}
           </Text>
           {!grid && (
             <Text style={styles.itemMeta} importantForAccessibility="no">
@@ -1906,6 +1941,12 @@ const makeStyles = (c: ThemeColors) =>
     cancelledTitle: { textDecorationLine: 'line-through' as const },
     itemTitleDone: { textDecorationLine: 'line-through', color: c.textSecondary },
     itemMeta: { fontSize: 14, color: c.textSecondary },
+    // The mark on a row standing for several copies of one appointment ("3×").
+    // Hidden from the reader — the row's label says it in words.
+    groupBadge: { fontSize: 13, color: c.textSecondary },
+    // Copies that no longer agree about the time. Coloured, because that is a
+    // state to act on rather than a fact about the row.
+    groupBadgeDiverged: { fontSize: 13, color: c.warning, fontWeight: '600' as const },
     // ── Single-day untimed-task band (dayLayout='grid') ──────────────────────
     // A compact band of the day's untimed tasks, sitting ABOVE the 24h canvas
     // (between the all-day rows and the hour-grid). A little tighter than the

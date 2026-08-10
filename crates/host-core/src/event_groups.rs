@@ -474,6 +474,34 @@ impl<'a> EventGroupsRepo<'a> {
         Ok(out)
     }
 
+    /// Write down what a member's event looks like NOW.
+    ///
+    /// The signature is how a member is found again once the provider remints
+    /// its id — so it has to describe the event as it currently is. Written
+    /// once at joining, it went stale the first time the appointment moved,
+    /// and the healing that depends on it could never match again. Carrying an
+    /// edit to the copies makes that the ordinary case rather than the rare
+    /// one: moving the appointment is what the carry is for.
+    ///
+    /// Local only and silent, for the same reason as `heal_member`: every
+    /// device sees the same events and refreshes its own copy.
+    pub fn refresh_signature(
+        &self,
+        calendar_id: &str,
+        event_id: &str,
+        title: &str,
+        starts_at: &str,
+    ) -> Result<(), EventGroupsError> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        conn.execute(
+            "UPDATE event_group_members
+                SET title = ?, starts_at = ?
+              WHERE calendar_id = ? AND event_id = ?",
+            params![title, starts_at, calendar_id, event_id],
+        )?;
+        Ok(())
+    }
+
     /// Point a member at the id its event carries now.
     ///
     /// Ids belong to the provider and change underneath us — a re-bootstrap

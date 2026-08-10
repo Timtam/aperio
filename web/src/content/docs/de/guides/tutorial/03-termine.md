@@ -171,16 +171,25 @@ Zeile sagt, wofür sie steht: „ein Termin mit 2 weiteren, in Arbeit, Privat". 
 Zahl gehört der Gruppe — eine Kopie in einem abgeschalteten Kalender zählt mit
 und passt so zu dem, was Sie zu haben wissen.
 
+Sichtbar ist es auch: Eine gefaltete Zeile trägt eine kleine Marke — „3×" für
+die Verabredung und ihre zwei weiteren Kopien.
+
 Eine Ausnahme, und die ist Absicht: Sind die Kopien **auseinandergelaufen** —
 eine wurde verschoben, die andere nicht —, wird NICHT gefaltet. Jede bleibt
-sichtbar und sagt es. Die Gruppe stimmt dann nicht mehr, und genau das ist das
-Einzige, was Sie sehen müssen.
+sichtbar und sagt es, mit einer hervorgehobenen Marke („3× ≠"). Die Gruppe
+stimmt dann nicht mehr, und genau das ist das Einzige, was Sie sehen müssen.
 
 **Ein Bearbeiten statt vier.** Nach dem Speichern einer Änderung an einem
 gruppierten Termin fragt Aperio, ob die anderen Kopien nachziehen sollen — und
 nennt jede, die es schreiben wird, und jede, die es nicht darf. Ein
 Kollegenkalender ist nur lesbar, und ihn still zu überspringen ist der Weg, auf
-dem eine Gruppe am Ende zwei verschiedene Zeiten meint.
+dem eine Gruppe am Ende zwei verschiedene Zeiten meint. Die Kopien werden nach
+ihrem **Kalender** benannt: Der Titel ist auf allen derselbe — das macht sie ja
+zur Gruppe.
+
+Geht dabei etwas schief, bleibt der Dialog offen und sagt, welche Kalender
+nicht geschrieben werden konnten; **Rest erneut versuchen** nimmt genau die noch
+einmal vor. Halb mitgezogen ist der eine Zustand, den Sie sehen müssen.
 
 Mitgezogen wird nur, was der Termin IST: Titel, wann, wo, Beschreibung.
 **Erinnerungen bleiben bei jeder Kopie** — die Privatkopie gibt es meist genau

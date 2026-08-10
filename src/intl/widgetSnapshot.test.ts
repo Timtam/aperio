@@ -6,6 +6,7 @@ import {
   buildWidgetSnapshot,
   isRecurringProjection,
   toBackend,
+  type EventGroup,
   type RecurringEventLike,
 } from '@aperio/shared';
 
@@ -74,9 +75,11 @@ function build(
     hiddenContainers?: ReadonlySet<string>;
     meFor?: (listId: string) => TaskUser | null;
     eventColorOf?: (event: TestEvent) => string | null;
+    eventGroups?: EventGroup[];
   } = {},
 ) {
   return buildWidgetSnapshot<TestEvent>({
+    eventGroups: patch.eventGroups,
     events: patch.events ?? [],
     tasks: patch.tasks ?? [],
     now: patch.now ?? localAt(2026, 8, 3, 7, 0),
@@ -115,6 +118,76 @@ describe('buildWidgetSnapshot — envelope', () => {
     // The horizon is what tells the widget "no more data" apart from "nothing
     // planned" — an empty list alone cannot distinguish those.
     expect(new Date(snap.horizonEnd).getTime() - now.getTime()).toBe(7 * 86_400_000);
+  });
+});
+
+describe('buildWidgetSnapshot — grouped copies', () => {
+  /** The same appointment in two calendars, told to Aperio that they are. */
+  const group = (starts: string): EventGroup => ({
+    id: 'g1',
+    created_at: '2026-08-01T00:00:00Z',
+    updated_at: '2026-08-01T00:00:00Z',
+    members: [
+      {
+        calendar_id: 'work',
+        event_id: 'ev-work',
+        title: 'Wochenplanung',
+        starts_at: starts,
+        added_at: '2026-08-01T00:00:00Z',
+      },
+      {
+        calendar_id: 'private',
+        event_id: 'ev-private',
+        title: 'Wochenplanung',
+        starts_at: starts,
+        added_at: '2026-08-01T00:00:00Z',
+      },
+    ],
+  });
+
+  it('shows a grouped appointment once', () => {
+    const start = localAt(2026, 8, 3, 10, 0).toISOString();
+    const end = localAt(2026, 8, 3, 11, 0).toISOString();
+    const snap = build({
+      now: localAt(2026, 8, 3, 7, 0),
+      eventGroups: [group(start)],
+      events: [
+        { ...baseEvent, id: 'ev-work', calendar_id: 'work', start, end },
+        { ...baseEvent, id: 'ev-private', calendar_id: 'private', start, end },
+      ],
+    });
+    expect(snap.items.filter((i) => i.kind === 'event')).toHaveLength(1);
+  });
+
+  it('keeps a running appointment whose other copy has already ended', () => {
+    // The copies disagree about the end — one was booked for half an hour, the
+    // other for two. Folding before the has-it-ended filter let the finished
+    // copy stand for the group, and the group vanished from the widget while
+    // the appointment was still going: the one row the user opens it to see.
+    const start = localAt(2026, 8, 3, 9, 0).toISOString();
+    const snap = build({
+      now: localAt(2026, 8, 3, 10, 15),
+      eventGroups: [group(start)],
+      events: [
+        {
+          ...baseEvent,
+          id: 'ev-work',
+          calendar_id: 'work',
+          start,
+          end: localAt(2026, 8, 3, 9, 30).toISOString(),
+        },
+        {
+          ...baseEvent,
+          id: 'ev-private',
+          calendar_id: 'private',
+          start,
+          end: localAt(2026, 8, 3, 11, 0).toISOString(),
+        },
+      ],
+    });
+    const events = snap.items.filter((i) => i.kind === 'event');
+    expect(events).toHaveLength(1);
+    expect(events[0]?.id).toBe('ev-private');
   });
 });
 

@@ -18,9 +18,11 @@ import type {
 } from '@aperio/shared';
 import {
   collapseEventGroups,
+  groupBadge,
   eventInstanceKey,
   expandAll,
   findHealableMembers,
+  findStaleSignatures,
   expandToDayOccurrences,
   localDateKey,
   seriesIdOf,
@@ -36,6 +38,7 @@ import { listColorLabels } from '../api/colorLabels';
 import {
   eventGroupsForEvents,
   healEventGroupMember,
+  refreshEventGroupSignature,
 } from '../api/eventGroups';
 import { ActionsMenu, type MenuAction } from '../components/ActionsMenu';
 import { CalendarActions } from '../components/CalendarActions';
@@ -215,12 +218,19 @@ export default function AgendaScreen({
       )
         .then(async (found) => {
           if (reqToken.current !== token) return;
-      // Repair members whose provider id changed, while the range that proves
-      // it is in hand: a member whose stored start falls inside it and whose
-      // id resolves to nothing here has been re-minted, and the signature says
-      // which event it is now. Silent — the same events mean the same
-      // appointment before and after (DESIGN-event-groups.md).
-        const healable = findHealableMembers(found, visible, range, seriesIdOf);
+          // Keep the signatures describing the events as they ARE. Written
+          // once at joining, they went stale the moment the appointment moved
+          // — and the repair below searches by exactly them.
+          for (const stale of findStaleSignatures(found, visible, seriesIdOf)) {
+            await refreshEventGroupSignature(stale).catch(() => undefined);
+          }
+          if (reqToken.current !== token) return;
+          // Repair members whose provider id changed, while the range that
+          // proves it is in hand: a member whose stored start falls inside it
+          // and whose id resolves to nothing here has been re-minted, and the
+          // signature says which event it is now. Silent — the same events
+          // mean the same appointment before and after.
+          const healable = findHealableMembers(found, visible, range, seriesIdOf);
           for (const member of healable) {
             await healEventGroupMember(member).catch(() => undefined);
           }
@@ -621,6 +631,12 @@ export default function AgendaScreen({
     const badge = occ.span
       ? ` ${t('views.multiDayCompact', { day: occ.span.dayIndex, total: occ.span.totalDays })}`
       : '';
+    // What this row stands for, for the EYE. The label already says it in
+    // words, so the mark below is hidden from the reader — without it, folding
+    // was audible and invisible, and a group that had drifted apart looked
+    // like two unrelated rows.
+    const groupRow = groupRows.get(`${eventInstanceKey(ev)}@${localDateKey(occ.day)}`);
+    const group = groupRow ? groupBadge(groupRow) : null;
     // Read-only calendars still get the join affordance when the event carries
     // a meeting: these rows have no editor to open, so without it a meeting on
     // a subscribed or shared calendar would be un-joinable from the app at all.
@@ -659,6 +675,16 @@ export default function AgendaScreen({
             <Text style={titleStyle} importantForAccessibility="no">
               {ev.title}
               {badge}
+              {group != null && (
+                <Text
+                  style={
+                    groupRow?.diverged ? styles.groupBadgeDiverged : styles.groupBadge
+                  }
+                  importantForAccessibility="no"
+                >
+                  {` ${group}`}
+                </Text>
+              )}
             </Text>
             <Text style={styles.eventTime} importantForAccessibility="no">
               {timeLabel(ev)}
@@ -714,6 +740,16 @@ export default function AgendaScreen({
           <Text style={titleStyle} importantForAccessibility="no">
             {ev.title}
             {badge}
+            {group != null && (
+              <Text
+                style={
+                  groupRow?.diverged ? styles.groupBadgeDiverged : styles.groupBadge
+                }
+                importantForAccessibility="no"
+              >
+                {` ${group}`}
+              </Text>
+            )}
           </Text>
           <Text style={styles.eventTime} importantForAccessibility="no">
             {timeLabel(ev)}
@@ -727,6 +763,12 @@ export default function AgendaScreen({
 const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
     screen: { flex: 1, backgroundColor: c.background },
+    // The mark on a row standing for several copies of one appointment ("3×").
+    // Hidden from the reader — the row's label says it in words.
+    groupBadge: { fontSize: 13, color: c.textSecondary },
+    // Copies that no longer agree about the time. Coloured, because that is a
+    // state to act on rather than a fact about the row.
+    groupBadgeDiverged: { fontSize: 13, color: c.warning, fontWeight: '600' as const },
     navBar: {
       flexDirection: 'row',
       alignItems: 'center',

@@ -15,6 +15,7 @@ import {
 } from '../../intl/recurrence';
 import {
   collapseEventGroups,
+  groupBadge,
   eventInstanceKey,
   type CollapsedRow,
 } from '@aperio/shared';
@@ -440,6 +441,7 @@ function renderOccurrences(
               .join(', '),
           })
       : '';
+    const badge = groupRow ? groupBadge(groupRow) : null;
     const aria =
       (span
         ? ariaBase +
@@ -495,6 +497,20 @@ function renderOccurrences(
                 day: span.dayIndex,
                 total: span.totalDays,
               })}
+            </span>
+          )}
+          {/* Folding was audible and invisible. `aria-hidden` — the option's
+              label says it in words. */}
+          {badge && (
+            <span
+              className={
+                'agenda-list__group' +
+                (groupRow?.diverged ? ' agenda-list__group--diverged' : '')
+              }
+              aria-hidden="true"
+            >
+              {' '}
+              {badge}
             </span>
           )}
         </span>

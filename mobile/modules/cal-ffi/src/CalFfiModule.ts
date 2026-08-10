@@ -343,6 +343,13 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    * including members outside the range asked about.
    */
   eventGroupsForEventsJson(eventsJson: string): Promise<string>;
+  /** Write down what a member's event looks like now. */
+  refreshEventGroupSignature(
+    calendarId: string,
+    eventId: string,
+    title: string,
+    startsAt: string,
+  ): Promise<void>;
   /** Record that two events are NOT the same appointment. Both refs are JSON
    *  `{calendar_id, event_id}` objects. */
   declineGroupSuggestionJson(firstJson: string, secondJson: string): Promise<void>;

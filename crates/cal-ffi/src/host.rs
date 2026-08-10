@@ -6817,6 +6817,22 @@ impl Host {
         Ok(())
     }
 
+    /// Write down what a member's event looks like now, so it can still be
+    /// found after the provider remints its id. Local and silent — see
+    /// `EventGroupsRepo::refresh_signature`.
+    pub fn refresh_event_group_signature(
+        &self,
+        calendar_id: String,
+        event_id: String,
+        title: String,
+        starts_at: String,
+    ) -> Result<(), StoreError> {
+        let shared = self.db.shared();
+        EventGroupsRepo::new(&shared)
+            .refresh_signature(&calendar_id, &event_id, &title, &starts_at)
+            .map_err(map_group_err)
+    }
+
     /// Record that two events are NOT the same appointment, so Aperio stops
     /// offering to group them. Takes the two refs as JSON `{calendar_id,
     /// event_id}` objects.

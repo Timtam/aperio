@@ -805,6 +805,21 @@ export const ungroupEvent = (calendar_id: string, event_id: string) =>
 export const dissolveEventGroup = (group_id: string) =>
   invoke<void>('dissolve_event_group', { groupId: group_id });
 
+/** Write down what a member's event looks like now, so the group can still
+ *  find it after the provider remints its id. Local and silent. */
+export const refreshEventGroupSignature = (payload: {
+  calendar_id: string;
+  event_id: string;
+  title: string;
+  starts_at: string;
+}) =>
+  invoke<void>('refresh_event_group_signature', {
+    calendarId: payload.calendar_id,
+    eventId: payload.event_id,
+    title: payload.title,
+    startsAt: payload.starts_at,
+  });
+
 /** Record that two events are NOT the same appointment.
  *
  *  Silences the OFFER only — grouping them by hand still works and never

@@ -1182,8 +1182,8 @@
       "title": "The other copies",
       "message_one": "This appointment exists once more. Carry the change ({{fields}}) to it?",
       "message_other": "This appointment exists {{count}} more times. Carry the change ({{fields}}) to them?",
-      "target": "{{title}} in {{calendar}}",
-      "skipped": "{{title}} in {{calendar}} cannot be changed — that calendar is read-only.",
+      "target": "The copy in {{calendar}}",
+      "skipped": "The copy in {{calendar}} cannot be changed — that calendar is read-only.",
       "field": {
         "title": "title",
         "start": "start",
@@ -1196,7 +1196,9 @@
       "keep": "Leave the others",
       "done_one": "One copy updated.",
       "done_other": "{{count}} copies updated.",
-      "partly": "{{done}} updated. Not changed: {{failed}}."
+      "partly": "{{done}} updated. Not changed: {{failed}}.",
+      "retry": "Try the rest again",
+      "dismiss": "Close"
     },
     "eventGroup": {
       "title": "Same appointment",

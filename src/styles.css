@@ -3414,6 +3414,36 @@ button[aria-disabled='true'] {
 }
 
 /*
+ * The mark on a row that stands for several copies of one appointment
+ * ("3×", and "3× ≠" when the copies no longer agree about the time).
+ *
+ * Folding used to be audible only: a screen reader heard "an appointment with
+ * 2 others, in Work and Private" while the screen showed an ordinary row — so
+ * a sighted user could not tell a folded row from a plain one, and a group
+ * that had drifted apart looked like two unrelated entries. Each mark is
+ * `aria-hidden`; the option's own label already says all of it in words.
+ */
+.week-event__group,
+.month-event__group,
+.day-list__group,
+.agenda-list__group {
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85em;
+}
+
+/* Disagreement is the one thing here worth a colour: it is a state the user
+   has to act on, not a fact about the row. */
+.week-event__group--diverged,
+.month-event__group--diverged,
+.day-list__group--diverged,
+.agenda-list__group--diverged {
+  opacity: 1;
+  color: var(--color-warning);
+  font-weight: 600;
+}
+
+/*
  * `--in-lane` chips: the visible representation lives in the all-day
  * lane above, but the per-day option stays in the listbox so screen
  * readers can navigate to the event on every day it covers and the

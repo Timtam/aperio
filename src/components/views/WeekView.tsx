@@ -77,6 +77,7 @@ import {
 import { deleteThisAndFuture } from '../../state/deleteSeriesFromOccurrence';
 import {
   collapseEventGroups,
+  groupBadge,
   dropMinuteInWindow,
   eventBlockFactor,
   eventSpanForDay,
@@ -1786,6 +1787,7 @@ export function WeekView() {
                                 .join(', '),
                             })
                         : '';
+                      const badge = groupRow ? groupBadge(groupRow) : null;
                       const aria =
                         (span
                           ? ariaBase +
@@ -1921,6 +1923,21 @@ export function WeekView() {
                                   day: span.dayIndex,
                                   total: span.totalDays,
                                 })}
+                              </span>
+                            )}
+                            {/* Folding was audible and invisible. `aria-hidden`
+                                — the option's label says it in words. */}
+                            {badge && (
+                              <span
+                                className={
+                                  'week-event__group' +
+                                  (groupRow?.diverged
+                                    ? ' week-event__group--diverged'
+                                    : '')
+                                }
+                                aria-hidden="true"
+                              >
+                                {badge}
                               </span>
                             )}
                           </span>

@@ -79,6 +79,7 @@ import {
   eventSpanForDay,
   layoutDayColumn,
   collapseEventGroups,
+  groupBadge,
   eventInstanceKey,
   MINUTES_PER_DAY,
   minutesFromMidnight,
@@ -1158,6 +1159,7 @@ export function DayView() {
                       .join(', '),
                   })
               : '';
+            const badge = groupRow ? groupBadge(groupRow) : null;
             const aria =
               (span
                 ? ariaBase +
@@ -1263,6 +1265,22 @@ export function DayView() {
                         day: span.dayIndex,
                         total: span.totalDays,
                       })}
+                    </span>
+                  )}
+                  {/* Folding was audible and invisible: the label said "an
+                      appointment with 2 others", the screen showed an ordinary
+                      row. `aria-hidden`, because the label already says it in
+                      words. */}
+                  {badge && (
+                    <span
+                      className={
+                        'day-list__group' +
+                        (groupRow?.diverged ? ' day-list__group--diverged' : '')
+                      }
+                      aria-hidden="true"
+                    >
+                      {' '}
+                      {badge}
                     </span>
                   )}
                 </span>

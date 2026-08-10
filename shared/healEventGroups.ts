@@ -28,6 +28,15 @@ export interface HealableEvent {
   all_day?: boolean;
 }
 
+/** A member whose stored signature no longer describes its event. */
+export interface StaleSignature {
+  group_id: string;
+  calendar_id: string;
+  event_id: string;
+  title: string;
+  starts_at: string;
+}
+
 /** A member that was found again under a new id. */
 export interface HealedMember {
   group_id: string;
@@ -124,4 +133,58 @@ export function findHealableMembers<E extends HealableEvent>(
     }
   }
   return healed;
+}
+
+/**
+ * Members whose signature no longer matches the event it describes.
+ *
+ * The signature is written when a member joins and was never touched again —
+ * so the first time the appointment MOVED, every member's stored start became
+ * wrong, and healing (which searches by exactly that) could never find any of
+ * them afterwards. The carry makes this the common case rather than the rare
+ * one: moving the appointment is precisely what it exists for.
+ *
+ * Refreshed from the live event whenever a view has it in hand, which is the
+ * same evidence-where-it-is rule the healing follows. Only members that ARE
+ * resolvable are considered: a member whose id no longer resolves is the
+ * healing's business, and rewriting its signature would destroy the only
+ * means of finding it.
+ *
+ * EXPANDED OCCURRENCES ARE IGNORED. They all carry the same series id, so a
+ * recurring member would be handed whichever day happened to be rendered last
+ * — and the next range would disagree, so the two views would rewrite the
+ * signature past each other for as long as the app stayed open. A recurring
+ * member therefore keeps the signature it joined with, which is no worse than
+ * before this existed.
+ */
+export function findStaleSignatures<E extends HealableEvent>(
+  groups: readonly EventGroup[],
+  eventsInRange: readonly E[],
+  seriesId: (event: E) => string,
+): StaleSignature[] {
+  if (groups.length === 0) return [];
+  const live = new Map<string, E>();
+  for (const ev of eventsInRange) {
+    if (seriesId(ev) !== ev.id) continue;
+    live.set(eventGroupMemberKey(ev.calendar_id, ev.id), ev);
+  }
+  const stale: StaleSignature[] = [];
+  for (const group of groups) {
+    for (const member of group.members) {
+      const ev = live.get(eventGroupMemberKey(member.calendar_id, member.event_id));
+      if (!ev) continue;
+      const sameTitle = normalizeTitle(ev.title) === normalizeTitle(member.title);
+      const sameStart =
+        new Date(ev.start).getTime() === new Date(member.starts_at).getTime();
+      if (sameTitle && sameStart) continue;
+      stale.push({
+        group_id: group.id,
+        calendar_id: member.calendar_id,
+        event_id: member.event_id,
+        title: ev.title,
+        starts_at: ev.start,
+      });
+    }
+  }
+  return stale;
 }

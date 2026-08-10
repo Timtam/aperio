@@ -1179,8 +1179,8 @@
       "title": "Die anderen Kopien",
       "message_one": "Diese Verabredung liegt noch ein weiteres Mal vor. Die Änderung ({{fields}}) mitziehen?",
       "message_other": "Diese Verabredung liegt noch {{count}} weitere Male vor. Die Änderung ({{fields}}) mitziehen?",
-      "target": "{{title}} in {{calendar}}",
-      "skipped": "{{title}} in {{calendar}} kann nicht geändert werden — dieser Kalender ist nur lesbar.",
+      "target": "Die Kopie in {{calendar}}",
+      "skipped": "Die Kopie in {{calendar}} kann nicht geändert werden — dieser Kalender ist nur lesbar.",
       "field": {
         "title": "Titel",
         "start": "Beginn",
@@ -1193,7 +1193,9 @@
       "keep": "Andere unverändert lassen",
       "done_one": "Eine Kopie aktualisiert.",
       "done_other": "{{count}} Kopien aktualisiert.",
-      "partly": "{{done}} aktualisiert. Nicht geändert: {{failed}}."
+      "partly": "{{done}} aktualisiert. Nicht geändert: {{failed}}.",
+      "retry": "Rest erneut versuchen",
+      "dismiss": "Schließen"
     },
     "eventGroup": {
       "title": "Derselbe Termin",

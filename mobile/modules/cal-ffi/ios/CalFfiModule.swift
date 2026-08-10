@@ -526,6 +526,12 @@ public class CalFfiModule: Module {
       try self.host.eventGroupsForEventsJson(eventsJson: eventsJson)
     }
 
+    AsyncFunction("refreshEventGroupSignature") {
+      (calendarId: String, eventId: String, title: String, startsAt: String) in
+      try self.host.refreshEventGroupSignature(
+        calendarId: calendarId, eventId: eventId, title: title, startsAt: startsAt)
+    }
+
     AsyncFunction("declineGroupSuggestionJson") { (firstJson: String, secondJson: String) in
       try self.host.declineGroupSuggestionJson(firstJson: firstJson, secondJson: secondJson)
     }

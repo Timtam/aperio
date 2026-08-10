@@ -159,15 +159,24 @@ says what it stands for: "one appointment with 2 others, in Work, Private". The
 count is of the group, so a copy in a calendar you have switched off is counted
 too — it matches what you know you keep.
 
+You can see it too: a folded row carries a small mark — "3×" for the
+appointment and its two other copies.
+
 There is one exception, and it is deliberate: if the copies have drifted apart
 — one was moved and the others were not — they are NOT folded. Each stays
-visible and says so. The group has stopped being true, and that is the one
-thing you need to see.
+visible and says so, with a highlighted mark ("3× ≠"). The group has stopped
+being true, and that is the one thing you need to see.
 
 **One edit instead of four.** After saving a change to a grouped event, Aperio
 asks whether the other copies should follow, names each one it will write, and
 names each one it may not. A colleague's calendar is read-only, and skipping it
-quietly is how a group ends up meaning two different times.
+quietly is how a group ends up meaning two different times. The copies are
+named by their **calendar**: the title is the same on all of them — that is
+what makes them a group.
+
+If something goes wrong along the way, the dialog stays open and says which
+calendars could not be written; **Try the rest again** retries exactly those.
+Half-carried is the one state you have to see.
 
 Only what the appointment IS travels: title, when, where, and the description.
 Reminders stay with each copy — the private copy usually exists precisely

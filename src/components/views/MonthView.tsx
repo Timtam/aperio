@@ -29,6 +29,7 @@ import {
 } from '../../intl/recurrence';
 import {
   collapseEventGroups,
+  groupBadge,
   eventInstanceKey,
   type CollapsedRow,
 } from '@aperio/shared';
@@ -1125,6 +1126,7 @@ export function MonthView() {
                                   .join(', '),
                               })
                           : '';
+                        const badge = groupRow ? groupBadge(groupRow) : null;
                         const aria =
                           (span
                             ? ariaBase +
@@ -1191,6 +1193,22 @@ export function MonthView() {
                                   day: span.dayIndex,
                                   total: span.totalDays,
                                 })}
+                              </span>
+                            )}
+                            {/* Folding was audible and invisible. `aria-hidden`
+                                — the option's label says it in words. */}
+                            {badge && (
+                              <span
+                                className={
+                                  'month-event__group' +
+                                  (groupRow?.diverged
+                                    ? ' month-event__group--diverged'
+                                    : '')
+                                }
+                                aria-hidden="true"
+                              >
+                                {' '}
+                                {badge}
                               </span>
                             )}
                           </span>

@@ -297,19 +297,6 @@ function dayKeysThrough(now: Date, horizonDays: number): string[] {
   return keys;
 }
 
-/**
- * Build the snapshot the widget will render from.
- *
- * Selection rules, chosen to match what the app's own day view shows so the
- * widget never disagrees with the screen behind it:
- *   - an event is in if it has not ENDED yet (a meeting running right now is
- *     the most relevant row there is, and dropping it at its start time would
- *     be the one moment the user looks);
- *   - an all-day event is in for its whole day;
- *   - a task is in on the day `filterTasksOnDay` places it — which already
- *     drops cancelled, completed, and undated subtasks, and resolves the
- *     scheduled-vs-deadline question.
- */
 /** Collapse each group to one row, a day at a time. See the call site for why
  *  the bucketing is not optional. */
 function foldPerDay<E extends RecurringEventLike>(
@@ -341,6 +328,19 @@ function foldPerDay<E extends RecurringEventLike>(
   return kept;
 }
 
+/**
+ * Build the snapshot the widget will render from.
+ *
+ * Selection rules, chosen to match what the app's own day view shows so the
+ * widget never disagrees with the screen behind it:
+ *   - an event is in if it has not ENDED yet (a meeting running right now is
+ *     the most relevant row there is, and dropping it at its start time would
+ *     be the one moment the user looks);
+ *   - an all-day event is in for its whole day;
+ *   - a task is in on the day `filterTasksOnDay` places it — which already
+ *     drops cancelled, completed, and undated subtasks, and resolves the
+ *     scheduled-vs-deadline question.
+ */
 export function buildWidgetSnapshot<E extends RecurringEventLike>(
   input: WidgetSnapshotInput<E>,
 ): WidgetSnapshot {
@@ -389,15 +389,22 @@ export function buildWidgetSnapshot<E extends RecurringEventLike>(
   // room than any view in the app, so a copy it need not show is a line it can
   // give to the next real thing.
   const expanded = expandAll(visibleEvents, { start: expandFrom, end: horizonEnd });
+  // Over, not merely started. An all-day event needs no special case: its end
+  // is the EXCLUSIVE next midnight, so this keeps it for the whole of its day
+  // and drops it exactly when the day turns.
+  //
+  // BEFORE the fold, not after. Folding picks one copy to stand for the group,
+  // and the copies need not agree about the end — so a group whose chosen
+  // representative had already finished disappeared from the widget entirely
+  // while the appointment was still running, which is precisely the row the
+  // user opens the widget to see. Filtering first can only leave copies that
+  // are still to come, so whichever one stands for the group is one of them.
+  const live = expanded.filter((ev) => new Date(ev.end).getTime() > nowMs);
   const foldedEvents =
     eventGroups && eventGroups.length > 0
-      ? foldPerDay(expanded, eventGroups, calendarIdOf, allDayOf)
-      : expanded;
+      ? foldPerDay(live, eventGroups, calendarIdOf, allDayOf)
+      : live;
   for (const ev of foldedEvents) {
-    // Over, not merely started. An all-day event needs no special case: its end
-    // is the EXCLUSIVE next midnight, so this keeps it for the whole of its day
-    // and drops it exactly when the day turns.
-    if (new Date(ev.end).getTime() <= nowMs) continue;
     const containerId = calendarIdOf(ev);
     const color = eventColorOf?.(ev) ?? undefined;
     items.push({

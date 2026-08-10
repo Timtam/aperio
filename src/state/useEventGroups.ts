@@ -3,10 +3,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   eventGroupMemberKey,
   findHealableMembers,
+  findStaleSignatures,
   type EventGroup,
 } from '@aperio/shared';
 
-import { eventGroupsForEvents, healEventGroupMember } from '../api/client';
+import {
+  eventGroupsForEvents,
+  healEventGroupMember,
+  refreshEventGroupSignature,
+} from '../api/client';
 import type { CalendarEvent } from '../api/types';
 import { seriesIdOf } from '../intl/recurrence';
 import { useDialogState } from './dialogStateContext';
@@ -81,9 +86,11 @@ export function useEventGroups(
    * which event it was — so the repair happens where the evidence is.
    *
    * Silent, and deliberately so: the same events mean the same appointment
-   * before and after, so there is nothing to tell the user. The refreshed
-   * groups are read back rather than patched locally, because the write also
-   * travels to the other devices.
+   * before and after, so there is nothing to tell the user. It stays on this
+   * device too — every device has the same evidence and repairs itself, and
+   * broadcasting a repair stamped "now" would outrank a dissolve someone else
+   * had just made. The refreshed groups are read back rather than patched
+   * locally, because the stored group is the answer.
    */
   // Every repair this hook has already attempted. Without it the effect feeds
   // itself: it heals, reads the groups back, `groups` changes, the effect runs
@@ -92,6 +99,16 @@ export function useEventGroups(
   const attempted = useRef(new Set<string>());
   useEffect(() => {
     if (range == null || groups.length === 0) return;
+    // Keep the signatures describing the events as they ARE. Written once at
+    // joining they went stale the first time the appointment moved — and then
+    // the healing below, which searches by exactly them, could never match
+    // again. Silent and local, like the heal.
+    for (const stale of findStaleSignatures(groups, events, seriesIdOf)) {
+      const key = `sig\n${stale.calendar_id}\n${stale.event_id}\n${stale.title}\n${stale.starts_at}`;
+      if (attempted.current.has(key)) continue;
+      attempted.current.add(key);
+      void refreshEventGroupSignature(stale).catch(() => undefined);
+    }
     const healable = findHealableMembers(groups, events, range, seriesIdOf).filter(
       (member) =>
         !attempted.current.has(

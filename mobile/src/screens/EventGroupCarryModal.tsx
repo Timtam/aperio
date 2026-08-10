@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AccessibilityInfo, Platform, Pressable, StyleSheet, Text } from 'react-native';
 
@@ -37,6 +37,9 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** One copy the carry may write, as `planCarry` describes it. */
+type CarryTarget = ReturnType<typeof planCarry>['targets'][number];
+
 export default function EventGroupCarryModal({
   route,
   navigation,
@@ -51,6 +54,34 @@ export default function EventGroupCarryModal({
   const [calendars, setCalendars] = useState<Calendar[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * What the last attempt achieved, once some of it failed.
+   *
+   * A partial carry is the one outcome the user must act on — the group now
+   * means two different things — and it used to be spoken once into a screen
+   * that was already dismissing itself. It stays instead, and the button
+   * retries exactly what is left.
+   */
+  const [outcome, setOutcome] = useState<{ done: number; failed: CarryTarget[] } | null>(
+    null,
+  );
+  const [pending, setPending] = useState<CarryTarget[] | null>(null);
+  /**
+   * Whether this screen is still here.
+   *
+   * The carry is a loop of provider round trips, and the header's Cancel (or
+   * a back swipe) does not interrupt it: the loop went on writing copy after
+   * copy into a screen the user had left, then called `goBack()` from an
+   * unmounted screen and popped whatever they had opened since. The writes
+   * already issued cannot be recalled, but the remaining ones stop.
+   */
+  const alive = useRef(true);
+  useEffect(
+    () => () => {
+      alive.current = false;
+    },
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -95,18 +126,23 @@ export default function EventGroupCarryModal({
     [group, anchor, before, after, calendars],
   );
 
+  // After a partial carry, only what is still outstanding.
+  const targets = pending ?? plan.targets;
+
   const carry = useCallback(async () => {
     if (busy) return;
     setBusy(true);
     setError(null);
-    const failed: string[] = [];
-    let done = 0;
-    for (const target of plan.targets) {
+    const failed: CarryTarget[] = [];
+    let done = outcome?.done ?? 0;
+    for (const target of targets) {
+      // The user left. Stop writing copies into a screen that is gone.
+      if (!alive.current) return;
       try {
         const current = await getEventById(target.event_id, target.calendar_id);
         if (current == null) {
           // The copy is gone from under us. Reported, not silently counted.
-          failed.push(target.title);
+          failed.push(target);
           continue;
         }
         if (scope === 'occurrence' && occurrence) {
@@ -147,24 +183,38 @@ export default function EventGroupCarryModal({
         }
         done += 1;
       } catch (err) {
-        failed.push(target.title);
+        failed.push(target);
         const message = errorMessage(err);
+        if (!alive.current) return;
         setError(message);
         // `accessibilityLiveRegion` below is ANDROID ONLY, so on iOS this
         // announce is the only channel VoiceOver has.
         if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(message);
       }
     }
+    if (!alive.current) return;
     setBusy(false);
     // The whole point of the screen: say what actually happened, including
     // what did not.
+    if (failed.length > 0) {
+      // Named by CALENDAR, not by title: every copy of an appointment carries
+      // the same title — that is what made them a group — so a list of titles
+      // said nothing about which copy is now out of step.
+      const names = failed.map((target) => calendarName(target.calendar_id));
+      setOutcome({ done, failed });
+      setPending(failed);
+      AccessibilityInfo.announceForAccessibility(
+        t('dialogs.eventGroupCarry.partly', { done, failed: names.join(', ') }),
+      );
+      // Stays open: a half-carried group is the state this feature exists to
+      // prevent, so it has to be seen, and the rest can be retried.
+      return;
+    }
     AccessibilityInfo.announceForAccessibility(
-      failed.length > 0
-        ? t('dialogs.eventGroupCarry.partly', { done, failed: failed.join(', ') })
-        : t('dialogs.eventGroupCarry.done', { count: done }),
+      t('dialogs.eventGroupCarry.done', { count: done }),
     );
     navigation.goBack();
-  }, [busy, plan, after, scope, occurrence, t, navigation]);
+  }, [busy, targets, outcome, plan.changed, after, scope, occurrence, calendarName, t, navigation]);
 
   return (
     <FormScrollView
@@ -176,30 +226,43 @@ export default function EventGroupCarryModal({
         {t('dialogs.eventGroupCarry.title')}
       </Text>
 
-      <Text style={styles.intro} accessibilityRole="text">
-        {calendars == null
-          ? t('dialogs.eventGroup.loading')
-          : t('dialogs.eventGroupCarry.message', {
-          count: plan.targets.length,
-          fields: plan.changed
-            .map((field) => t(`dialogs.eventGroupCarry.field.${field}`))
-            .join(', '),
-            })}
+      <Text
+        style={outcome ? styles.warning : styles.intro}
+        accessibilityRole="text"
+        accessibilityLiveRegion={outcome ? 'assertive' : 'none'}
+      >
+        {outcome
+          ? t('dialogs.eventGroupCarry.partly', {
+              done: outcome.done,
+              failed: outcome.failed
+                .map((target) => calendarName(target.calendar_id))
+                .join(', '),
+            })
+          : calendars == null
+            ? t('dialogs.eventGroup.loading')
+            : t('dialogs.eventGroupCarry.message', {
+                count: plan.targets.length,
+                fields: plan.changed
+                  .map((field) => t(`dialogs.eventGroupCarry.field.${field}`))
+                  .join(', '),
+              })}
       </Text>
 
+      {/* Named by their calendar. The title is the same on every copy — that
+          is what made them a group — and the stored one is the title the copy
+          had when it JOINED, which an edit since then has already outdated. */}
       {calendars != null &&
-        plan.targets.map((target) => (
-        <Text
-          key={`${target.calendar_id} ${target.event_id}`}
-          style={styles.member}
-          accessibilityRole="text"
-        >
-          {t('dialogs.eventGroupCarry.target', {
-            title: target.title,
-            calendar: calendarName(target.calendar_id),
-          })}
-        </Text>
-      ))}
+        targets.map((target) => (
+          <Text
+            key={`${target.calendar_id} ${target.event_id}`}
+            style={styles.member}
+            accessibilityRole="text"
+          >
+            {t('dialogs.eventGroupCarry.target', {
+              calendar: calendarName(target.calendar_id),
+            })}
+          </Text>
+        ))}
 
       {/* The copies it may not write — said BEFORE the user decides, because
           "carry to all" that silently means "to some" is the contradiction
@@ -211,7 +274,6 @@ export default function EventGroupCarryModal({
           accessibilityRole="text"
         >
           {t('dialogs.eventGroupCarry.skipped', {
-            title: target.title,
             calendar: calendarName(target.calendar_id),
           })}
         </Text>
@@ -229,28 +291,35 @@ export default function EventGroupCarryModal({
 
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={t('dialogs.eventGroupCarry.carry')}
-        accessibilityState={{ disabled: busy || plan.targets.length === 0 }}
+        accessibilityLabel={t(
+          outcome ? 'dialogs.eventGroupCarry.retry' : 'dialogs.eventGroupCarry.carry',
+        )}
+        accessibilityState={{ disabled: busy || targets.length === 0 }}
         onPress={() => void carry()}
         style={styles.action}
       >
         <Text
-          style={[
-            styles.actionText,
-            (busy || plan.targets.length === 0) && styles.disabled,
-          ]}
+          style={[styles.actionText, (busy || targets.length === 0) && styles.disabled]}
         >
-          {t('dialogs.eventGroupCarry.carry')}
+          {t(
+            outcome ? 'dialogs.eventGroupCarry.retry' : 'dialogs.eventGroupCarry.carry',
+          )}
         </Text>
       </Pressable>
 
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={t('dialogs.eventGroupCarry.keep')}
+        accessibilityLabel={t(
+          outcome ? 'dialogs.eventGroupCarry.dismiss' : 'dialogs.eventGroupCarry.keep',
+        )}
         onPress={() => navigation.goBack()}
         style={styles.action}
       >
-        <Text style={styles.actionText}>{t('dialogs.eventGroupCarry.keep')}</Text>
+        <Text style={styles.actionText}>
+          {t(
+            outcome ? 'dialogs.eventGroupCarry.dismiss' : 'dialogs.eventGroupCarry.keep',
+          )}
+        </Text>
       </Pressable>
     </FormScrollView>
   );

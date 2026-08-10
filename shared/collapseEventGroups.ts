@@ -136,3 +136,25 @@ export function collapseEventGroups<E extends CollapsibleEvent>(
   }
   return out;
 }
+
+/**
+ * The mark a SIGHTED user sees on a row that stands for more than itself.
+ *
+ * Folding was audible and invisible: a screen reader heard "an appointment
+ * with 2 others, in Work and Private", and the screen showed an ordinary row
+ * — so a sighted user could not tell a folded row from a plain one, and had
+ * no way of knowing that a group had drifted apart either. The count reads
+ * "3×" (this copy and its two others), and a group whose copies no longer
+ * agree about the time adds "≠", the one glyph that says disagreement without
+ * a word of any language.
+ *
+ * Returns `null` for a row that stands only for itself, so a caller can drop
+ * the element entirely rather than draw an empty one. The string is decoration
+ * for the eye alone — every caller marks it `aria-hidden`, because the row's
+ * label already says all of this in words.
+ */
+export function groupBadge<E>(row: Pick<CollapsedRow<E>, 'group' | 'otherMembers' | 'diverged'>): string | null {
+  if (!row.group) return null;
+  const copies = row.otherMembers + 1;
+  return row.diverged ? `${copies}× ≠` : `${copies}×`;
+}
