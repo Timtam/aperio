@@ -1112,12 +1112,14 @@
         "dateLabel": "Deadline war am {{date}}",
         "actions": {
           "done": "Erledigt",
+          "today": "Frist auf heute",
           "backlog": "Zurück in Backlog"
         },
         "bulk": {
           "allDone": "Alle erledigt"
         },
         "announceBackToBacklog": "„{{title}}\" zurück in Backlog.",
+        "announceDeadlineToday": "„{{title}}\" ist jetzt heute fällig.",
         "announceAllCompleted_one": "1 Aufgabe als erledigt markiert.",
         "announceAllCompleted_other": "{{count}} Aufgaben als erledigt markiert."
       },

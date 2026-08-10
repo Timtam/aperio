@@ -27,6 +27,7 @@ import { useTasks } from '../state/useTasks';
 import {
   actionableDescendants,
   filterCarriedOver,
+  deadlineMovedToToday,
   filterOverdue,
   snoozeDayStartReview,
 } from './dayStartReview';
@@ -361,6 +362,48 @@ export function DayStartReviewDialog({
       return parts.join(', ');
     },
     [t],
+  );
+
+  /**
+   * Move a lapsed deadline to today, keeping the time of day.
+   *
+   * The section's only other way out of an overdue deadline was Backlog, which
+   * clears the deadline AND the scheduling — everything, when the answer is
+   * usually "it is still due, just not yesterday".
+   *
+   * The TIME is kept on purpose: a deadline of 14:00 that slipped is still a
+   * 14:00 deadline, and dropping it to "sometime today" would quietly discard
+   * what the user wrote. The SCHEDULING is left alone for the same reason —
+   * what lapsed is the deadline, not the plan.
+   *
+   * One task, no cascade over subtasks, matching `backToBacklog` right beside
+   * it. Two buttons in one row where one drags the children along and the
+   * other does not would be worse than either rule on its own.
+   */
+  const deadlineToToday = useCallback(
+    async (task: Task): Promise<void> => {
+      setBusy(true);
+      try {
+        const updated: Task = {
+          ...deadlineMovedToToday(task),
+          updated_at: new Date().toISOString(),
+        };
+        await invoke<Task>('update_task', { task: updated });
+        setResolvedIds((s) => new Set(s).add(task.id));
+        announce(
+          t('dialogs.dayStartReview.deadlines.announceDeadlineToday', {
+            title: task.title,
+          }),
+        );
+        invalidateData();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('update_task failed', err);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [t, announce, invalidateData],
   );
 
   const backToBacklog = useCallback(
@@ -751,6 +794,14 @@ export function DayStartReviewDialog({
                       aria-disabled={busy || undefined}
                     >
                       {t('dialogs.dayStartReview.deadlines.actions.done')}
+                    </button>
+                    <button
+                      type="button"
+                      className="form__action"
+                      onClick={() => void deadlineToToday(task)}
+                      aria-disabled={busy || undefined}
+                    >
+                      {t('dialogs.dayStartReview.deadlines.actions.today')}
                     </button>
                     <button
                       type="button"

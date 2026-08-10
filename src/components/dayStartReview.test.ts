@@ -3,6 +3,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import type { Task, TaskUser } from '../api/types';
 import {
   actionableDescendants,
+  deadlineMovedToToday,
   filterCarriedOver,
   filterOverdue,
   isDayStartReviewSnoozed,
@@ -17,6 +18,7 @@ import {
   filterUntimedToday,
   hasActionableDescendants,
   reminderCount,
+  todayIsoKey,
 } from '@aperio/shared';
 
 const allRemindersOn = {
@@ -108,6 +110,36 @@ describe('filterOverdue', () => {
     ];
     // in_progress is NOT terminal — still a missed commitment.
     expect(filterOverdue(tasks).map((t) => t.id)).toEqual(['inprogress']);
+  });
+});
+
+describe('deadlineMovedToToday', () => {
+  it('moves the day and keeps the time', () => {
+    // A deadline of 14:00 that slipped is still a 14:00 deadline. Clearing the
+    // time would turn a commitment into "sometime today" without being asked.
+    const moved = deadlineMovedToToday({
+      ...baseTask,
+      deadline_date: '2020-01-02',
+      deadline_time: '14:00',
+    });
+    expect(moved.deadline_date).toBe(todayIsoKey());
+    expect(moved.deadline_time).toBe('14:00');
+  });
+
+  it('leaves the scheduling alone', () => {
+    // What lapsed is the deadline, not the plan — the carry-over section is
+    // where a slipped PLAN is moved. Backlog is the button that clears both,
+    // and it stays the only one that does.
+    const moved = deadlineMovedToToday({
+      ...baseTask,
+      deadline_date: '2020-01-02',
+      scheduled_date: '2020-01-05',
+      scheduled_time: '09:00',
+      status: 'in_progress' as const,
+    });
+    expect(moved.scheduled_date).toBe('2020-01-05');
+    expect(moved.scheduled_time).toBe('09:00');
+    expect(moved.status).toBe('in_progress');
   });
 });
 

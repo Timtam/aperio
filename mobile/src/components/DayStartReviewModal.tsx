@@ -24,6 +24,7 @@ import {
   priorityMarker,
   prioritySuffix,
   reminderCount,
+  deadlineMovedToToday,
   todayIsoKey,
 } from '@aperio/shared';
 import type { Task } from '@aperio/shared';
@@ -353,6 +354,41 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
       }
     },
     [announce, invalidateData, queueFocusAfter, t, tasks, taskListById],
+  );
+
+  /**
+   * Move a lapsed deadline to today, keeping the time of day.
+   *
+   * The section's only other way out of an overdue deadline was Backlog, which
+   * clears the deadline AND the scheduling — everything, when the answer is
+   * usually "it is still due, just not yesterday".
+   *
+   * The TIME is kept on purpose: a deadline of 14:00 that slipped is still a
+   * 14:00 deadline, and dropping it to "sometime today" would quietly discard
+   * what the user wrote. The SCHEDULING is left alone for the same reason —
+   * what lapsed is the deadline, not the plan.
+   *
+   * One task, no cascade over subtasks, matching `backToBacklog` right beside
+   * it. Twin of the desktop dialog's action of the same name.
+   */
+  const deadlineToToday = useCallback(
+    async (task: Task): Promise<void> => {
+      setBusy(true);
+      queueFocusAfter([task.id]);
+      try {
+        await updateTask(deadlineMovedToToday(task));
+        setResolvedIds((s) => new Set(s).add(task.id));
+        announce(
+          t('dialogs.dayStartReview.deadlines.announceDeadlineToday', {
+            title: task.title,
+          }),
+        );
+        invalidateData();
+      } finally {
+        setBusy(false);
+      }
+    },
+    [announce, invalidateData, queueFocusAfter, t],
   );
 
   const backToBacklog = useCallback(
@@ -751,6 +787,10 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
                       label: t('dialogs.dayStartReview.deadlines.actions.done'),
                       primary: true,
                       onPress: () => void markCompleted(task),
+                    },
+                    {
+                      label: t('dialogs.dayStartReview.deadlines.actions.today'),
+                      onPress: () => void deadlineToToday(task),
                     },
                     {
                       label: t('dialogs.dayStartReview.deadlines.actions.backlog'),

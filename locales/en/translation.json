@@ -1115,12 +1115,14 @@
         "dateLabel": "Deadline was {{date}}",
         "actions": {
           "done": "Mark done",
+          "today": "Deadline today",
           "backlog": "Back to backlog"
         },
         "bulk": {
           "allDone": "Mark all done"
         },
         "announceBackToBacklog": "\"{{title}}\" sent back to backlog.",
+        "announceDeadlineToday": "\"{{title}}\" is now due today.",
         "announceAllCompleted_one": "Marked 1 task as done.",
         "announceAllCompleted_other": "Marked {{count}} tasks as done."
       },

@@ -82,6 +82,31 @@ export function filterCarriedOver(
  * (`open` / `in_progress`) — for a parent-row verdict that should drag its open
  * children along while leaving settled (completed/cancelled) ones untouched.
  */
+/**
+ * The task as it stands after "move the lapsed deadline to today".
+ *
+ * Shared because the rule is the interesting part and both platforms have to
+ * obey the same one — the desktop dialog and the mobile modal each own their
+ * own write, and a rule that lives in two places is a rule that ends up
+ * applied in one.
+ *
+ * Two things it does NOT touch, and both are deliberate:
+ *
+ * The TIME stays. A deadline of 14:00 that slipped is still a 14:00 deadline;
+ * clearing it would silently turn a commitment into "sometime today", which is
+ * not what the user wrote and not what they asked for.
+ *
+ * The SCHEDULING stays. What lapsed is the deadline, not the plan. The day
+ * this is due and the day it was meant to be worked on are separate answers,
+ * and the review offers them separately — the carry-over section is where a
+ * slipped PLAN is moved.
+ */
+export function deadlineMovedToToday<T extends { deadline_date?: string | null }>(
+  task: T,
+): T {
+  return { ...task, deadline_date: todayIsoKey() };
+}
+
 export function actionableDescendants(rootId: string, tasks: Task[]): Task[] {
   const out: Task[] = [];
   const stack: string[] = [rootId];
