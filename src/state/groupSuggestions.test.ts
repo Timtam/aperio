@@ -35,6 +35,20 @@ const day = [
 ];
 
 describe('offering a group nobody asked for', () => {
+  it('never offers a videoconference meeting on a resemblance', () => {
+    // A meeting carries the join URL its provider issued — an identity — and
+    // `findMeetingLinkPairs` pairs it on that. Offering it here asks the user
+    // the wrong question, and their answer is kept forever: the refusal names
+    // the meeting, and the office full of "Team meeting" at 10:00 that this
+    // module warns about is exactly where a meeting meets a stranger.
+    const withMeeting = [
+      ev('vc::m1', 'acc::meetings', 'Team meeting', '2026-08-10T10:00:00Z'),
+      ev('ev-strange', 'shared-team', 'Team meeting', '2026-08-10T10:00:00Z'),
+    ];
+    expect(findGroupSuggestions(withMeeting, [], [], seriesId)).toEqual([]);
+  });
+
+
   it('spots the copy in another calendar', () => {
     const found = findGroupSuggestions(day, [], [], seriesId);
     expect(found).toHaveLength(1);

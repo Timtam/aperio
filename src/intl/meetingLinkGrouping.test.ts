@@ -153,19 +153,20 @@ describe('grouping a meeting with its appointment', () => {
     expect(pairs).toEqual([]);
   });
 
-  it('a refusal outlives the appointment id it named', () => {
-    // The reason the refusal is read by its meeting side alone. Providers
-    // re-mint event ids — a bootstrap, a move, Exchange unasked — and a mark
-    // for an ungrouped pair has no healing to follow them. Read as an exact
-    // pair, the mark would silently expire with the first id change, and the
-    // group the user dissolved would be back.
+  it('a refusal about a DIFFERENT partner leaves this meeting pairable', () => {
+    // The reason the one-sided read was reverted. `ungroup` writes a mark
+    // between the departing event and every member it left, so a meeting that
+    // merely sat in that group gets named by a statement about somebody else.
+    // Reading a mark by its meeting half alone turned that into a permanent,
+    // global refusal to pair the meeting with anything — over a refusal the
+    // user never made about it.
     const pairs = findMeetingLinkPairs(
-      [row('m1', 'acc::meetings', LINK), row('e-reminted', 'work', LINK)],
+      [row('m1', 'acc::meetings', LINK), row('e1', 'work', LINK)],
       [],
-      [decline(['acc::meetings', 'm1'], ['work', 'e-old'])],
+      [decline(['acc::meetings', 'm1'], ['private', 'someone-else'])],
       seriesId,
     );
-    expect(pairs).toEqual([]);
+    expect(pairs).toHaveLength(1);
   });
 
   it('a refusal about a different meeting blocks nothing here', () => {

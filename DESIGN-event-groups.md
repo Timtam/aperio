@@ -325,21 +325,28 @@ nicht selbst herleiten.
 Für Marken über **nicht gruppierte** Paare — dem Hauptzweck einer Marke — gibt
 es keine Heilung, und kann es keine geben: Eine nackte Marke hat weder
 Mitgliedszeile noch Signatur, über die sich der Termin wiederfinden ließe.
-Deshalb liest die automatische Verknüpfung eine Marke **einseitig, über ihre
-Meeting-Hälfte**: `vc::<Meeting-ID>` ist die stabile Seite (der Anbieter prägt
-sie, und wiederkehrende Meetings werden ohnehin nicht gepaart), die
-Termin-Seite ist die, die stirbt. Ein Meeting, das irgendeine gültige Marke
-nennt, wird mit nichts mehr automatisch verknüpft — von Hand gruppieren geht
-immer und nimmt die Marke zurück. Der Fehler liegt damit auf der richtigen
-Seite: Die Kosten sind eine Verknüpfung, die unterbleibt, nicht eine Gruppe,
-die wiederkommt.
+Vergibt der Anbieter die Termin-ID neu, passt die Marke nicht mehr, das Paar
+wird einmal erneut zur Verknüpfung angeboten, und der Nutzer lehnt einmal mehr
+ab — die neue Marke nennt dann die neue ID. Das ist der Preis, und er ist
+bewusst gewählt.
 
-Zwei Fälle überlebt auch das nicht, akzeptiert und aufgeschrieben: ein Meeting,
-das beim Anbieter gelöscht und neu angelegt wird (neue Meeting-ID — die
-Verknüpfung passiert einmal erneut, einmal ablehnen genügt), und die
-**Namens-Vorschläge**, deren Marken zwei gewöhnliche Termine verbinden und mit
-jeder der beiden IDs verfallen — dort ist der Preis ein wiederholtes Angebot,
-das man einmal mehr ablehnt.
+Der Versuch, ihn zu vermeiden, ist gescheitert und zurückgenommen: die Marke
+**einseitig** über ihre stabile Meeting-Hälfte zu lesen. Das Argument dafür —
+jede Marke, die über eine Verknüpfung spricht, nennt das Meeting — ist wahr und
+nutzlos, denn die Regel braucht die Umkehrung: dass jede Marke, die das Meeting
+*nennt*, über seine Verknüpfbarkeit spricht. Die ist falsch. `ungroup` schreibt
+eine Marke zwischen dem gehenden Termin und **jedem** verbliebenen Mitglied, ein
+Meeting wird also von einer Aussage über jemand anderen mitbenannt; und eine
+Namens-Ablehnung konnte ebenfalls ein Meeting nennen. Beides hätte das Meeting
+dauerhaft und global vom Verknüpfen ausgeschlossen — wegen einer Ablehnung, die
+der Nutzer über es nie ausgesprochen hat. Ein wiederholtes Angebot nach einem
+ID-Wechsel ist das billigere Übel.
+
+**Ein Meeting wird nie auf Ähnlichkeit angeboten.** Die Namens-Vorschläge
+schlossen Meeting-Zeilen nicht aus — ein Fehler, der älter ist als Stufe 4 und
+den erst der einseitige Versuch sichtbar gemacht hat. Ein Meeting trägt eine
+Identität; danach zu raten war nie die Absicht, und die Antwort auf die falsche
+Frage wurde als Marke aufbewahrt. `findGroupSuggestions` überspringt sie jetzt.
 
 Ein Altbestand, der `cleared_at` nicht kennt, liest eine zurückgenommene Marke
 als gültige Ablehnung — belanglos, solange nichts ausgeliefert ist, notiert für

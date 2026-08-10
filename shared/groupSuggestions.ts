@@ -18,6 +18,7 @@
 
 import type { EventGroup } from './eventGroups';
 import { eventGroupMemberKey, indexEventGroups } from './eventGroups';
+import { isMeetingCalendarEvent } from './meetingEvents';
 import type { SuggestionDecline } from './types';
 
 /** The minimum a row needs to take part. */
@@ -97,11 +98,27 @@ export function findGroupSuggestions<E extends SuggestibleEvent>(
 
   const out: GroupSuggestion<E>[] = [];
   const spokenFor = new Set<string>();
+  // A meeting row is never OFFERED on a resemblance.
+  //
+  // This whole function guesses from a name and a time, which is why its answer
+  // is an offer rather than a group. A videoconference meeting is the one row
+  // that does not need guessing: it carries the join URL its provider issued,
+  // and `findMeetingLinkPairs` pairs it on that identity. Offering it here put
+  // the two mechanisms in each other's way — Aperio writes the event's own
+  // title into the meeting it creates, so "same name, same time" is nearly
+  // guaranteed for the wrong reasons, and the office full of "Team meeting" at
+  // 10:00 that this module's own comment warns about is exactly where a meeting
+  // would be offered against a stranger.
+  //
+  // Answering that offer wrote a refusal NAMING the meeting, and a refusal is
+  // forever. The user was asked the wrong question and their answer was kept.
+  const offerable = (event: E) => !isMeetingCalendarEvent(event);
   for (let i = 0; i < events.length; i += 1) {
     const first = events[i];
     const firstId = seriesId(first);
     const firstKey = eventGroupMemberKey(first.calendar_id, firstId);
     if (spokenFor.has(firstKey) || grouped.has(firstKey)) continue;
+    if (!offerable(first)) continue;
     const title = normalizeTitle(first.title);
     if (title === '') continue;
     const when = whenKey(first);
@@ -111,6 +128,7 @@ export function findGroupSuggestions<E extends SuggestibleEvent>(
       const secondId = seriesId(second);
       const secondKey = eventGroupMemberKey(second.calendar_id, secondId);
       if (spokenFor.has(secondKey) || grouped.has(secondKey)) continue;
+      if (!offerable(second)) continue;
       if (second.calendar_id === first.calendar_id) continue;
       if (normalizeTitle(second.title) !== title) continue;
       if (whenKey(second) !== when) continue;
