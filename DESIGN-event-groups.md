@@ -1,8 +1,9 @@
 # Termingruppen — Entwurf
 
-Status: **Stufe 0 gebaut**, der Rest weiterhin Entwurf. Dieses Dokument hat
-entschieden, ob und in welcher Form gebaut wird; die Stufenliste am Ende sagt,
-was davon steht.
+Status: **Stufen 0 bis 3 gebaut**, auf beiden Plattformen und im Widget; offen
+ist allein „dieses und alle folgenden" beim Mitziehen (siehe Stufe 2). Dieses
+Dokument hat entschieden, ob und in welcher Form gebaut wird; die Stufenliste am
+Ende sagt, was davon steht. Nichts davon lief bisher auf einem Gerät.
 
 ## Der Anlass
 
@@ -133,6 +134,11 @@ ein wiederkehrender Termin rendert eine Zeile pro Tag, über eine Woche gelesen
 sähen die eigenen Tage der Serie aus wie widersprüchliche Kopien. Und eine
 Gruppe, deren Kopien auseinandergelaufen sind, wird NICHT gefaltet: dann stimmt
 die Behauptung nicht mehr, und genau das ist das Einzige, was man sehen muss.
+
+Gefaltet wird auch SICHTBAR: Die Zeile trägt eine Marke („3×", bei
+auseinandergelaufenen Kopien „3× ≠" in der Warnfarbe, `groupBadge`). Ohne sie
+war das Falten nur hörbar — die Sprachausgabe sagte „ein Termin mit 2
+weiteren", der Bildschirm zeigte eine gewöhnliche Zeile.
 
 **Stufe 2** — Bearbeitungsumfang über die Mitglieder, mit ehrlicher Meldung über
 das, was nicht ging. **GEBAUT**, mit einer Abweichung vom Entwurf: gefragt wird
