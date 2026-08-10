@@ -1223,7 +1223,8 @@
       "grouped": "„{{title}}“ und „{{other}}“ meinen jetzt dieselbe Verabredung.",
       "ungrouped": "„{{title}}“ ist nicht mehr gruppiert.",
       "dissolved": "Gruppe aufgelöst. Die Termine bleiben unverändert.",
-      "conflict": "Beide Termine gehören bereits zu verschiedenen Gruppen. Lösen Sie einen davon zuerst heraus — zwei Gruppen zusammenzuführen entscheidet Aperio nicht für Sie."
+      "conflict": "Beide Termine gehören bereits zu verschiedenen Gruppen. Lösen Sie einen davon zuerst heraus — zwei Gruppen zusammenzuführen entscheidet Aperio nicht für Sie.",
+      "candidateHiddenSuffix": " (Kalender ausgeblendet)"
     },
     "deleteScope": {
       "title": "Serientermin löschen",

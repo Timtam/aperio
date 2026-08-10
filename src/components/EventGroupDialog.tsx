@@ -96,20 +96,39 @@ export function EventGroupDialog({
    * The copy this dialog exists to name lives in a DIFFERENT calendar by
    * definition.
    *
-   * Selected calendars, then, and the anchor's own even when it is not (the
-   * user just came from it). Expanded like every calendar surface: the
-   * adapters hand back a recurring series as its master row, so unexpanded it
-   * would offer series that do not occur on this day and hide the ones whose
-   * master lies outside it.
+   * EVERY calendar, then, switched off ones included. A calendar is switched
+   * off because its rows are noise on the day — and the colleague's calendar,
+   * which is exactly the one people keep off, is exactly where the third copy
+   * of the meeting sits. Refusing to offer it left the gap this feature exists
+   * to close open in the one case that hurts most; the ones from a hidden
+   * calendar say so in their label instead.
+   *
+   * Read-only calendars belong here too, which is why this does NOT use
+   * `selectableEventCalendars`: that decides where an event may be WRITTEN,
+   * and a group is written nowhere — it is Aperio's own statement about rows
+   * it can only read.
+   *
+   * Expanded like every calendar surface: the adapters hand back a recurring
+   * series as its master row, so unexpanded it would offer series that do not
+   * occur on this day and hide the ones whose master lies outside it.
    */
   const [events, setEvents] = useState<CalendarEvent[]>([]);
+  // Keyed by the ids alone: switching a calendar on or off changes how a
+  // candidate is LABELLED, not which ones exist, and must not refetch the day.
+  const calendarIdsKey = useMemo(
+    () =>
+      [...new Set([...calendars.map((c) => c.id), event.calendar_id])]
+        .sort()
+        .join('\n'),
+    [calendars, event.calendar_id],
+  );
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
-    const ids = new Set([...selectedCalendarIds, event.calendar_id]);
+    const ids = calendarIdsKey.split('\n').filter(Boolean);
     void (async () => {
       const perCalendar = await Promise.all(
-        [...ids].map((id) =>
+        ids.map((id) =>
           getEvents({
             calendar_id: id,
             start: range.start.toISOString(),
@@ -128,7 +147,7 @@ export function EventGroupDialog({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, range, selectedCalendarIds, event.calendar_id]);
+  }, [isOpen, range, calendarIdsKey]);
 
   // `undefined` while the lookup is in flight — distinct from `null`, which is
   // the answer "not grouped". Without the distinction the dialog would claim
@@ -263,8 +282,14 @@ export function EventGroupDialog({
           ? t('dialogs.eventGroup.allDay')
           : fmt.format(new Date(ev.start), 'p'),
         calendar: calendarName(ev.calendar_id),
-      }),
-    [t, fmt, calendarName],
+      }) +
+      // Said, not hidden: the picker reaches into calendars the day itself
+      // does not show, and a candidate the user cannot see anywhere else would
+      // otherwise look like an event that has appeared from nowhere.
+      (selectedCalendarIds.has(ev.calendar_id)
+        ? ''
+        : t('dialogs.eventGroup.candidateHiddenSuffix')),
+    [t, fmt, calendarName, selectedCalendarIds],
   );
 
   const fail = useCallback(

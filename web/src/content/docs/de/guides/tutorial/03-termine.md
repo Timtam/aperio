@@ -142,7 +142,10 @@ man es sagen.
 Öffnen Sie das Kontextmenü eines Termins (Rechtsklick, `Umschalt+F10`, am
 Telefon langer Druck) und wählen Sie **Gehört zusammen mit…**. Der Dialog
 listet die übrigen Termine dieses Tages; wählen Sie den Zwilling und bestätigen
-Sie mit **Gruppieren**. Derselbe Dialog löst einen Termin wieder heraus
+Sie mit **Gruppieren**. Die Liste reicht dabei auch in **ausgeblendete
+Kalender** — der Kollegenkalender ist oft genau deshalb aus, weil er laut ist,
+und liegt dort doch die dritte Kopie. Solche Vorschläge tragen den Zusatz
+„(Kalender ausgeblendet)", damit kein Termin aus dem Nichts auftaucht. Derselbe Dialog löst einen Termin wieder heraus
 (**Diesen Termin herauslösen**) oder hebt die Gruppe ganz auf (**Gruppe
 auflösen**).
 

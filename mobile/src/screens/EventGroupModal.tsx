@@ -146,17 +146,17 @@ export default function EventGroupModal({
         const cals = await listCalendars();
         if (cancelled) return;
         setCalendars(cals);
-        // Only the calendars the user has switched ON, matching the desktop
-        // dialog (which reads the selected set) and the move/copy pickers on
-        // both platforms: a picker offers what the user has chosen to see.
-        // The anchor's own calendar is always asked, even when hidden — it is
-        // where the user just came from.
+        // EVERY calendar, switched off ones included — the same reach as the
+        // desktop dialog. A calendar is switched off because its rows are
+        // noise on the day, and the colleague's calendar, which is exactly the
+        // one people keep off, is exactly where the third copy of the meeting
+        // sits. Refusing to offer it left the gap this feature exists to close
+        // open in the one case that hurts most; candidates from a hidden
+        // calendar say so in their label instead.
         const perCalendar = await Promise.all(
-          cals
-            .filter((c) => c.id === event.calendar_id || !hiddenCalendars.has(c.id))
-            .map((c) =>
-              getEvents({ calendar_id: c.id, ...range }).catch(() => [] as CalendarEvent[]),
-            ),
+          cals.map((c) =>
+            getEvents({ calendar_id: c.id, ...range }).catch(() => [] as CalendarEvent[]),
+          ),
         );
         // Expanded, like every other calendar surface: the adapters hand back
         // a recurring SERIES as its master row, so an unexpanded list offers
@@ -186,7 +186,7 @@ export default function EventGroupModal({
     return () => {
       cancelled = true;
     };
-  }, [event, loadGroup, hiddenCalendars]);
+  }, [event, loadGroup]);
 
   /**
    * The events that can be named as "the same appointment".
@@ -250,9 +250,15 @@ export default function EventGroupModal({
                 minute: '2-digit',
               }),
           calendar: calendarName(ev.calendar_id),
-        }),
+        }) +
+          // Said, not hidden: the picker reaches into calendars the day itself
+          // does not show, and a candidate the user cannot see anywhere else
+          // would otherwise look like an event out of nowhere.
+          (hiddenCalendars.has(ev.calendar_id)
+            ? t('dialogs.eventGroup.candidateHiddenSuffix')
+            : ''),
       })),
-    [candidates, calendarName, t, i18n.language],
+    [candidates, calendarName, hiddenCalendars, t, i18n.language],
   );
 
   const fail = useCallback(

@@ -132,7 +132,11 @@ otherwise.
 
 Open an event's context menu (right-click, `Shift+F10`, or long-press on the
 phone) and choose **Belongs together with…**. The dialog lists the other events
-of that day; pick the twin and confirm with **Group**. The same dialog takes an
+of that day; pick the twin and confirm with **Group**. The list reaches into
+**switched-off calendars** as well — a colleague's calendar is often off
+precisely because it is noisy, and that is where the third copy sits. Those
+entries carry a "(calendar switched off)" note, so no event turns up out of
+nowhere. The same dialog takes an
 event back out (**Take this event out**) or drops the whole grouping
 (**Dissolve group**).
 
