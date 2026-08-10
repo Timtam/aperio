@@ -1029,12 +1029,83 @@ impl AdapterRegistry {
     /// things a plugin cannot do for itself — reaching the platform keychain,
     /// and minting the capability token that lets an instance report a rotated
     /// credential back and be believed about which account it speaks for.
+    /// Move a credential an older build left in the account row into the
+    /// keychain, where this build looks for it.
+    ///
+    /// Before the schema-driven connect path, a secret typed into a connect
+    /// form was written into `config_json` — the Google flow put `client_id`
+    /// and `client_secret` in the row side by side. The schema path moved
+    /// secrets to the keychain and nothing migrated the values already
+    /// written, so the first launch of a newer build finds an empty slot for
+    /// an account that has worked for months, and drops it: no calendars, no
+    /// tasks, and an error naming nothing the user can act on. It is not
+    /// recoverable by hand either — the secret belongs to an OAuth
+    /// registration the user may never have seen.
+    ///
+    /// Runs before every schema registration because that is the first moment
+    /// this build touches the account, and it is idempotent: a populated slot
+    /// is left exactly as it is, so this is a no-op from the second launch on.
+    ///
+    /// COPY, not move. The row keeps its value on purpose: another device may
+    /// still be running the older build, which reads the secret from there and
+    /// nowhere else, and `config_json` is the half that travels between
+    /// devices. Stripping it here would fix this device by breaking that one.
+    /// Clearing the column is a separate step, for when no old build is left —
+    /// and it is worth taking, because that column rides the sync log
+    /// unencrypted when end-to-end encryption is off.
+    ///
+    /// Best-effort: a keychain that refuses the write is logged and the
+    /// registration continues, because the read path falls back to the same
+    /// value in the row (`account_setup::legacy_config_secret`). The account
+    /// works either way; only the tidying is lost.
+    fn adopt_legacy_config_secrets(
+        &self,
+        account: &Account,
+        schema: &plugin_core::account_schema::AccountSchema,
+    ) {
+        let Ok(Value::Object(config)) = serde_json::from_str::<Value>(&account.config_json) else {
+            return;
+        };
+        for field in &schema.fields {
+            let Some(slot) = field.secret_slot else {
+                continue;
+            };
+            let Some(value) = crate::account_setup::legacy_config_secret(&config, &field.key)
+            else {
+                continue;
+            };
+            let slot = crate::account_setup::host_slot(slot);
+            // Only an ABSENT slot is filled. A keychain that will not answer
+            // is not an empty one, and overwriting a stored credential with a
+            // row's older copy is how a rotated secret gets undone.
+            if let Err(sync_engine::SecretError::NotFound) =
+                self.secret_store.retrieve(&account.id, slot)
+            {
+                match self.secret_store.store(&account.id, slot, &value) {
+                    Ok(()) => tracing::info!(
+                        account_id = %account.id,
+                        slot = ?slot,
+                        field = %field.key,
+                        "adopted a credential an older build left in the account row",
+                    ),
+                    Err(err) => tracing::warn!(
+                        account_id = %account.id,
+                        slot = ?slot,
+                        ?err,
+                        "could not adopt the credential from the account row",
+                    ),
+                }
+            }
+        }
+    }
+
     fn register_from_schema(
         &self,
         account: &Account,
         plugin_id: &str,
         schema: &plugin_core::account_schema::AccountSchema,
     ) -> Result<(), RegistryError> {
+        self.adopt_legacy_config_secrets(account, schema);
         let local = self.device_local_values(&account.id, schema);
         let mut plugin_config = crate::account_setup::init_config_with_local(
             schema,
@@ -1354,6 +1425,94 @@ mod tests {
         assert_eq!(cals.len(), 1, "one calendar, for this account's meetings");
         assert_eq!(cals[0].name, "Webex", "named after the account");
         assert!(cals[0].read_only, "it shows what exists at the provider");
+    }
+
+    /// The upgrade must not cost a working account.
+    ///
+    /// An account created by a build that wrote the client secret into
+    /// `config_json` has an empty keychain slot. Registration used to fail on
+    /// that — every calendar of that account gone, with an error naming
+    /// nothing the user could act on. The value is right there in the row, so
+    /// the registry takes it and puts it where this build looks.
+    #[test]
+    fn a_client_secret_left_in_the_row_is_adopted_into_the_keychain() {
+        let db = DbHandle::open_in_memory().expect("in-memory db");
+        let shared = db.shared();
+        let repo = AccountsRepo::new(&shared);
+        let (registry, secrets) = webex_registry();
+
+        let account = repo
+            .create(
+                AdapterKind::new("webex"),
+                "Webex",
+                // Exactly what the older connect path wrote: the secret beside
+                // the client id, in the row.
+                &serde_json::json!({
+                    "client_id": "cid",
+                    "client_secret": "FROM-THE-ROW",
+                    "site_url": Value::Null,
+                })
+                .to_string(),
+            )
+            .expect("create the account");
+        // The keychain has the token that travelled, and nothing else.
+        secrets
+            .store(&account.id, sync_engine::SecretSlot::RefreshToken, "RT")
+            .expect("store the refresh token");
+
+        registry
+            .register(&account)
+            .expect("an account whose secret is still in the row must register");
+
+        assert_eq!(
+            secrets
+                .retrieve(&account.id, sync_engine::SecretSlot::OauthClientSecret)
+                .expect("the slot is populated after registration"),
+            "FROM-THE-ROW",
+            "the credential moved to where this build reads it",
+        );
+    }
+
+    /// A stored credential is never overwritten by the row's older copy —
+    /// that is how a rotated secret would get undone.
+    #[test]
+    fn adoption_leaves_a_populated_slot_alone() {
+        let db = DbHandle::open_in_memory().expect("in-memory db");
+        let shared = db.shared();
+        let repo = AccountsRepo::new(&shared);
+        let (registry, secrets) = webex_registry();
+
+        let account = repo
+            .create(
+                AdapterKind::new("webex"),
+                "Webex",
+                &serde_json::json!({
+                    "client_id": "cid",
+                    "client_secret": "STALE",
+                    "site_url": Value::Null,
+                })
+                .to_string(),
+            )
+            .expect("create the account");
+        secrets
+            .store(
+                &account.id,
+                sync_engine::SecretSlot::OauthClientSecret,
+                "CURRENT",
+            )
+            .expect("store the current secret");
+        secrets
+            .store(&account.id, sync_engine::SecretSlot::RefreshToken, "RT")
+            .expect("store the refresh token");
+
+        registry.register(&account).expect("register the account");
+
+        assert_eq!(
+            secrets
+                .retrieve(&account.id, sync_engine::SecretSlot::OauthClientSecret)
+                .expect("still there"),
+            "CURRENT",
+        );
     }
 
     // ── host-key pins ──────────────────────────────────────────────────────

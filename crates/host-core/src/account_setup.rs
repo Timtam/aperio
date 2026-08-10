@@ -79,6 +79,29 @@ pub fn host_slot(slot: AccountSecretSlot) -> SecretSlot {
     }
 }
 
+/// A credential an older build left in the account row.
+///
+/// Until the schema-driven connect path, a secret typed into the connect form
+/// was written into `config_json` — the desktop's Google flow, for one, stored
+/// `client_id` and `client_secret` side by side in the row, with a comment
+/// citing Google's own "not treated as a secret" for installed apps. The
+/// schema path moved secrets into the keychain, and nothing moved the values
+/// already written. So the value is still there, in the column the host stopped
+/// reading, on every device the account ever reached (`config_json` travels
+/// between a user's devices; the keychain deliberately does not).
+///
+/// Returns the trimmed value, or `None` when the key is absent, not a string,
+/// or blank — a blank is not a credential, and treating one as found would
+/// swap "please sign in again" for a confusing failure at the provider.
+pub fn legacy_config_secret(config: &Map<String, Value>, key: &str) -> Option<String> {
+    config
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
 // ── 1. Which OAuth client ────────────────────────────────────────────────────
 
 /// The client id and secret to sign in with, once settled.
@@ -643,6 +666,16 @@ pub fn init_config_with_local(
             Ok(value) => {
                 obj.insert(field.key.clone(), Value::String(value));
             }
+            // Nothing in the keychain. Before failing, look where an OLDER
+            // BUILD would have left it: in the row itself. Until the
+            // schema-driven connect path, a secret field's value was written
+            // straight into `config_json`, and no migration moved the values
+            // that were already there — so an account made by such a build has
+            // its credential in the row and an empty slot. `obj` IS that row,
+            // so a value under this key is exactly that case, and keeping it
+            // is what makes the account survive the upgrade. See
+            // `legacy_config_secret`.
+            Err(SecretError::NotFound) if legacy_config_secret(obj, &field.key).is_some() => {}
             Err(SecretError::NotFound) if !field.required => {}
             Err(err) => {
                 return Err(AccountSetupError::Secret(format!(
@@ -757,7 +790,27 @@ fn resolve_oauth_client(
             let required = schema.field(key).is_none_or(|field| field.required);
             match read_secret(SecretSlot::OauthClientSecret) {
                 Ok(value) => Some(value),
-                Err(SecretError::NotFound) if !required => None,
+                // Nothing in the slot — but an account created before the
+                // schema-driven connect path carries its client secret in the
+                // row, because that is where that path put it, and no
+                // migration ever moved the ones already written. Without this,
+                // every such account loses its adapter the first time it meets
+                // a build that reads the slot: no calendars, no tasks, and a
+                // "could not be synchronised" that names nothing the user can
+                // act on.
+                Err(SecretError::NotFound) => {
+                    match cfg.as_object().and_then(|o| legacy_config_secret(o, key)) {
+                        Some(value) => Some(value),
+                        None if !required => None,
+                        None => {
+                            return Err(AccountSetupError::Secret(
+                                "missing OAuth client secret: no secret stored for this \
+                                 account/slot, and none left in the account by an older build"
+                                    .into(),
+                            ))
+                        }
+                    }
+                }
                 Err(err) => {
                     return Err(AccountSetupError::Secret(format!(
                         "missing OAuth client secret: {err}"
@@ -768,6 +821,126 @@ fn resolve_oauth_client(
         None => None,
     };
     Ok(OauthClient { id, secret })
+}
+
+#[cfg(test)]
+mod legacy_config_secret_tests {
+    use super::*;
+    use plugin_core::account_schema::AccountSchema;
+
+    /// The Google account shape as an OLDER build wrote it: client id and
+    /// client secret side by side in the row, nothing in the keychain.
+    fn google_schema() -> AccountSchema {
+        serde_json::from_value(serde_json::json!({
+            "fields": [
+                { "key": "client_id", "label": "Client ID", "kind": "text", "required": true },
+                {
+                    "key": "client_secret",
+                    "label": "Client secret",
+                    "kind": "secret",
+                    "required": true,
+                    "secret_slot": "oauth_client_secret"
+                }
+            ],
+            "oauth": {
+                "client_id_field": "client_id",
+                "client_secret_field": "client_secret",
+                "refresh_token_field": "refresh_token",
+                "access_token_field": "access_token"
+            }
+        }))
+        .expect("the fixture schema parses")
+    }
+
+    /// The outage this exists for. An account that worked for months stops
+    /// having an adapter the first time it meets a build that reads the slot,
+    /// and the user cannot type the value back — it belongs to an OAuth
+    /// registration they may never have seen.
+    #[test]
+    fn a_client_secret_left_in_the_row_by_an_older_build_still_opens_the_account() {
+        let schema = google_schema();
+        let config = serde_json::json!({
+            "client_id": "CID",
+            "client_secret": "LEGACY-SECRET",
+        })
+        .to_string();
+
+        let out = init_config(&schema, &config, |slot| match slot {
+            SecretSlot::RefreshToken => Ok("RT".into()),
+            // The keychain has never heard of this account's client secret.
+            _ => Err(SecretError::NotFound),
+        })
+        .expect("an account with its secret in the row still opens");
+
+        let parsed: Value = serde_json::from_str(&out).expect("valid JSON");
+        assert_eq!(
+            parsed.get("client_secret").and_then(Value::as_str),
+            Some("LEGACY-SECRET"),
+            "the value the older build stored is what the adapter receives",
+        );
+    }
+
+    /// The keychain still wins when it has an answer: a rotated secret must
+    /// not be undone by the stale copy sitting in the row.
+    #[test]
+    fn the_keychain_wins_over_the_row() {
+        let schema = google_schema();
+        let config = serde_json::json!({
+            "client_id": "CID",
+            "client_secret": "STALE",
+        })
+        .to_string();
+
+        let out = init_config(&schema, &config, |slot| match slot {
+            SecretSlot::OauthClientSecret => Ok("CURRENT".into()),
+            SecretSlot::RefreshToken => Ok("RT".into()),
+            _ => Err(SecretError::NotFound),
+        })
+        .expect("opens");
+
+        let parsed: Value = serde_json::from_str(&out).expect("valid JSON");
+        assert_eq!(
+            parsed.get("client_secret").and_then(Value::as_str),
+            Some("CURRENT"),
+        );
+    }
+
+    /// Nothing anywhere is still an error — and it must stay one, or an
+    /// account with no credential at all would reach the provider and fail
+    /// there, a long way from its cause.
+    #[test]
+    fn nothing_in_either_place_still_fails() {
+        let schema = google_schema();
+        let config = serde_json::json!({ "client_id": "CID" }).to_string();
+
+        let err = init_config(&schema, &config, |slot| match slot {
+            SecretSlot::RefreshToken => Ok("RT".into()),
+            _ => Err(SecretError::NotFound),
+        })
+        .expect_err("no credential anywhere is a failure");
+        assert!(
+            matches!(err, AccountSetupError::Secret(_)),
+            "reported as a missing secret, not as a config problem: {err:?}",
+        );
+    }
+
+    /// A blank is not a credential. Treating one as found would replace "sign
+    /// in again" with an `invalid_client` from the provider.
+    #[test]
+    fn a_blank_value_in_the_row_is_not_a_credential() {
+        let schema = google_schema();
+        let config = serde_json::json!({
+            "client_id": "CID",
+            "client_secret": "   ",
+        })
+        .to_string();
+
+        assert!(init_config(&schema, &config, |slot| match slot {
+            SecretSlot::RefreshToken => Ok("RT".into()),
+            _ => Err(SecretError::NotFound),
+        })
+        .is_err());
+    }
 }
 
 #[cfg(test)]
