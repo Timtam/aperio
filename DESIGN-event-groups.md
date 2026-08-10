@@ -276,7 +276,41 @@ zurück, und die Funktion wäre eine Zumutung statt einer Hilfe.
 
 Das bindet die Vorschlagszeile mit, und das ist richtig statt Nebenwirkung:
 „Ich habe das herausgenommen" ist dieselbe Aussage wie „nein, nicht dasselbe".
-Ausdrückliches Gruppieren fragt die Marken nie.
+
+**Eine Marke bricht die Gruppe, der sie widerspricht.** Das Gerät, das eine
+Gruppe auseinandernimmt, schreibt Entfernung und Marke in derselben
+Transaktion; jedes andere bekam nur die Marke und behielt die Gruppe — und weil
+die automatische Verknüpfung bereits gruppierte Paare überspringt, lag die
+Marke da und tat nichts. Beim Anwenden wird jetzt auch das Mitglied entfernt,
+und ein Zweier-Paar löst sich damit auf.
+
+Entschieden wird über die **Zeitstempel**, nicht über die Reihenfolge des
+Eintreffens: Eine Marke, die älter ist als die Gruppe, lässt sie stehen. Genau
+das schützt vor dem Gerät, das drei Wochen aus war und eine Marke von vor der
+Gruppenbildung nachreicht. Welches der beiden Mitglieder geht, ist die
+kanonisch zweite Hälfte des Paares — irgendeine Regel muss es sein, und sie muss
+auf jedem Gerät dieselbe sein, sonst laufen sie auseinander.
+
+**Und eine Marke lässt sich zurücknehmen.** Ausdrückliches Gruppieren ist die
+gegenteilige Aussage und löscht die Marken zwischen allen Mitgliedern
+(Migration 0038). Ohne das wäre die Regel oben eine Falle: Eine Marke von einem
+lange abgeschalteten Gerät zerrisse eine Gruppe, die man gestern absichtlich
+angelegt hat, und es gäbe keinen Weg, das zu verhindern — nirgends sonst in der
+Anwendung wird eine Marke je entfernt.
+
+Die Rücknahme **löscht die Zeile nicht**, sie stempelt sie. Löschen zerstörte
+die Vereinigungs-Regel, auf der die Synchronisation dieser Tabelle beruht: Das
+Löschen des einen Geräts und die überlebende Zeile des anderen verschmelzen
+zurück zu „abgelehnt". Zwei Zeitstempel, die sich nur vorwärts bewegen,
+verschmelzen dagegen zur selben Antwort, in welcher Reihenfolge sie auch
+ankommen — geprüft über alle sechs Reihenfolgen der drei beteiligten Datensätze.
+
+**Marken wandern mit, wenn eine Kennung neu vergeben wird.** Mitglieder werden
+repariert, wenn ein Anbieter eine ID neu vergibt, und ziehen mit, wenn ein
+Termin den Kalender wechselt — die Marken hingen an denselben IDs und wurden von
+beidem nicht angefasst. Ein ID-Wechsel nahm damit still zurück, was man Monate
+vorher gesagt hatte, und das Paar wurde erneut gruppiert, ohne dass irgendetwas
+erklärt hätte, warum.
 
 **Ein gelöschter Termin hat nichts gesagt.** `ungroup` nimmt deshalb einen
 Grund entgegen (`Removal::ByUser` / `Removal::EventGone`). Nur das Herausnehmen

@@ -401,7 +401,7 @@ impl LocalAdapter {
         let conn = self.db().lock().expect("db mutex poisoned");
         let mut stmt = conn
             .prepare(
-                "SELECT calendar_a, event_a, calendar_b, event_b, declined_at
+                "SELECT calendar_a, event_a, calendar_b, event_b, declined_at, cleared_at
                    FROM event_group_suggestion_declines",
             )
             .map_err(map_sql_err)?;
@@ -413,6 +413,9 @@ impl LocalAdapter {
                     calendar_b: row.get(2)?,
                     event_b: row.get(3)?,
                     declined_at: row.get(4)?,
+                    // A cleared row travels too: it is how the other devices
+                    // learn the refusal was taken back.
+                    cleared_at: row.get(5)?,
                 })
             })
             .map_err(map_sql_err)?

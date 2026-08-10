@@ -6770,11 +6770,15 @@ impl Host {
             })
             .collect();
         let shared = self.db.shared();
-        let group = EventGroupsRepo::new(&shared)
+        let grouped = EventGroupsRepo::new(&shared)
             .group(&members)
             .map_err(map_group_err)?;
-        self.emit_event_group(&group);
-        to_json(&group)
+        self.emit_event_group(&grouped.group);
+        // The refusals this took back have to travel too: a clearing that
+        // stays on this device is a mark the others still hold — and they
+        // would use it to break the very group just made.
+        self.emit_declines(&grouped.cleared);
+        to_json(&grouped.group)
     }
 
     /// Take one event out of its group. Returns the group as it stands

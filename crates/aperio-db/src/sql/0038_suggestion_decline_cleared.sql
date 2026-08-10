@@ -1,0 +1,30 @@
+-- Migration 0038: a refusal can be taken back.
+--
+-- Migration 0037 called this table "a set that only ever grows", and that was
+-- true of what it then held: an answer of NO to an offer. Stufe 4 gave the
+-- marks a second job — they are what stops automatic grouping re-forming a
+-- group the user pulled apart — and with that job, "only grows" became a trap.
+--
+-- Two things were wrong with it.
+--
+-- A mark could not be undone. Take a group apart by accident and that pair was
+-- silenced for good: never offered again, never grouped automatically again,
+-- with nothing in the interface to say so and no way back. Grouping by hand
+-- still worked, so it was not a dead end — but the silence was permanent, and
+-- permanence nobody asked for is not a feature.
+--
+-- And a mark could not lose. An arriving refusal is now allowed to break a
+-- group that contradicts it, so that a person's "these are not one
+-- appointment" outranks a machine's guess regardless of which clock ran later.
+-- That rule is only safe if the opposite statement can win too: grouping two
+-- events BY HAND has to clear the refusal, or a mark from a device that was
+-- offline for three weeks would tear apart a group made deliberately
+-- yesterday.
+--
+-- So a row now carries both timestamps and the pair is refused iff
+-- `declined_at` is the more recent one. Neither column ever moves backwards,
+-- so the union rule that made this table trivial to synchronise still holds:
+-- two devices merge by taking the later of each, and the answer does not
+-- depend on the order the rows arrive in. A row is never deleted — deletion is
+-- what would have broken convergence.
+ALTER TABLE event_group_suggestion_declines ADD COLUMN cleared_at TEXT;

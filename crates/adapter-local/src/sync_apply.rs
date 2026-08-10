@@ -559,30 +559,149 @@ impl LocalAdapter {
         Ok(())
     }
 
-    /// Remember a decline another device made.
+    /// Remember what another device said about a pair — refused, or taken back.
     ///
-    /// Insert-only, and that is the whole story: the declines are a set that
-    /// only grows, so applying the same one twice or in any order lands in the
-    /// same place.
+    /// A row carries two statements and each only ever moves forward, so this
+    /// merges by taking the later of each. That keeps the property migration
+    /// 0037 relies on: the answer does not depend on the order rows arrive in,
+    /// and there is no last-writer rule to get wrong.
+    ///
+    /// ## A refusal breaks the group that contradicts it
+    ///
+    /// Applying only the mark left the two halves of one action split: the
+    /// device that pulled a group apart wrote the removal AND the mark in one
+    /// transaction, while every other device got the mark and kept the group.
+    /// Automatic grouping skips pairs that are already grouped, so the mark sat
+    /// there doing nothing, and the group the user had taken apart stood on
+    /// every other device.
+    ///
+    /// It matters even more the other way round: groups converge by timestamp,
+    /// so a device that re-formed the group before hearing the refusal would
+    /// win on age and put it back everywhere. A person saying "these are not
+    /// one appointment" has to outrank a machine's guess whatever the clocks
+    /// say — which is exactly what this does, and why grouping by hand can
+    /// take a mark back (`EventGroupsRepo::group`).
+    ///
+    /// WHICH member leaves has to be decided the same way on every device or
+    /// they diverge, so it is the canonically-second one — the same ordering
+    /// the pair is stored in. For the two-member group this is about, either
+    /// choice dissolves it anyway.
     pub fn upsert_suggestion_decline_from_sync(
         &self,
         decline: &cal_core::SuggestionDecline,
     ) -> cal_core::Result<()> {
-        let conn = self.db().lock().expect("db mutex poisoned");
-        conn.execute(
+        let mut conn = self.db().lock().expect("db mutex poisoned");
+        let tx = conn.transaction().map_err(map_sql_err)?;
+        tx.execute(
             "INSERT INTO event_group_suggestion_declines
-                 (calendar_a, event_a, calendar_b, event_b, declined_at)
-             VALUES (?, ?, ?, ?, ?)
-             ON CONFLICT(calendar_a, event_a, calendar_b, event_b) DO NOTHING",
+                 (calendar_a, event_a, calendar_b, event_b, declined_at, cleared_at)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(calendar_a, event_a, calendar_b, event_b) DO UPDATE SET
+                 declined_at = MAX(declined_at, excluded.declined_at),
+                 cleared_at  = CASE
+                     WHEN excluded.cleared_at IS NULL THEN cleared_at
+                     WHEN cleared_at IS NULL THEN excluded.cleared_at
+                     ELSE MAX(cleared_at, excluded.cleared_at)
+                 END",
             params![
                 decline.calendar_a,
                 decline.event_a,
                 decline.calendar_b,
                 decline.event_b,
-                decline.declined_at
+                decline.declined_at,
+                decline.cleared_at,
             ],
         )
         .map_err(map_sql_err)?;
+
+        // What the row says AFTER the merge — not what arrived. A refusal that
+        // loses to a newer clearing must not break anything.
+        let merged: Option<(String, Option<String>)> = tx
+            .query_row(
+                "SELECT declined_at, cleared_at FROM event_group_suggestion_declines
+                  WHERE calendar_a = ? AND event_a = ? AND calendar_b = ? AND event_b = ?",
+                params![
+                    decline.calendar_a,
+                    decline.event_a,
+                    decline.calendar_b,
+                    decline.event_b
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(map_sql_err)?;
+        let merged = merged.map(|(declined_at, cleared_at)| {
+            let refused = match &cleared_at {
+                None => true,
+                Some(cleared) => declined_at >= *cleared,
+            };
+            (declined_at, refused)
+        });
+
+        if let Some((declined_at, true)) = merged {
+            // The group that says the opposite, and WHEN it last said it.
+            //
+            // Both timestamps or neither: reading only "is it refused" made the
+            // outcome depend on which of the two statements the sync round
+            // happened to deliver first — a refusal landing before the clearing
+            // that supersedes it broke a group that then had to wait for
+            // another group event to come back. Comparing the dates is
+            // order-independent, and it is the same rule the groups themselves
+            // converge by.
+            //
+            // A refusal OLDER than the group is the case this protects: a
+            // device offline for three weeks pushing a mark from before the
+            // group was made by hand must not tear it apart.
+            let same_group: Option<(String, String)> = tx
+                .query_row(
+                    "SELECT g.id, g.updated_at FROM event_groups g
+                       JOIN event_group_members a ON a.group_id = g.id
+                       JOIN event_group_members b ON b.group_id = g.id
+                      WHERE a.calendar_id = ? AND a.event_id = ?
+                        AND b.calendar_id = ? AND b.event_id = ?",
+                    params![
+                        decline.calendar_a,
+                        decline.event_a,
+                        decline.calendar_b,
+                        decline.event_b
+                    ],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .map_err(map_sql_err)?
+                .filter(|(_, updated_at)| *updated_at < declined_at);
+            if let Some((group_id, _)) = same_group {
+                tx.execute(
+                    "DELETE FROM event_group_members
+                      WHERE calendar_id = ? AND event_id = ?",
+                    params![decline.calendar_b, decline.event_b],
+                )
+                .map_err(map_sql_err)?;
+                let remaining: i64 = tx
+                    .query_row(
+                        "SELECT COUNT(*) FROM event_group_members WHERE group_id = ?",
+                        params![group_id],
+                        |row| row.get(0),
+                    )
+                    .map_err(map_sql_err)?;
+                // A group of one is not a group — the same rule `ungroup`
+                // applies, and the tombstone is what stops an in-flight update
+                // from another device re-creating it.
+                if remaining < 2 {
+                    tx.execute("DELETE FROM event_groups WHERE id = ?", params![group_id])
+                        .map_err(map_sql_err)?;
+                    tx.execute(
+                        "INSERT INTO event_group_tombstones (group_id, dissolved_at)
+                         VALUES (?, ?)
+                         ON CONFLICT(group_id) DO UPDATE SET
+                             dissolved_at = MAX(dissolved_at, excluded.dissolved_at)",
+                        params![group_id, declined_at],
+                    )
+                    .map_err(map_sql_err)?;
+                }
+            }
+        }
+        tx.commit().map_err(map_sql_err)?;
         Ok(())
     }
 
@@ -759,6 +878,135 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         rows
+    }
+
+    fn decline(a: (&str, &str), b: (&str, &str), at: &str) -> cal_core::SuggestionDecline {
+        cal_core::SuggestionDecline::new(a, b, at.to_string())
+    }
+
+    /// A person's "these are not one appointment" outranks a machine's guess,
+    /// whichever clock ran later.
+    ///
+    /// The device that pulled the group apart wrote the removal AND the mark in
+    /// one transaction. Every other device used to get only the mark, keep the
+    /// group — and because automatic grouping skips pairs that are already
+    /// grouped, the mark sat there doing nothing while the group the user had
+    /// taken apart stood everywhere else.
+    #[test]
+    fn an_arriving_refusal_breaks_the_group_that_contradicts_it() {
+        let a = adapter();
+        a.upsert_event_group_from_sync(&group(
+            "g1",
+            vec![member("work", "ev-a"), member("acc::meetings", "vc::1")],
+        ))
+        .unwrap();
+        assert_eq!(group_ids(&a).len(), 1);
+
+        a.upsert_suggestion_decline_from_sync(&decline(
+            ("work", "ev-a"),
+            ("acc::meetings", "vc::1"),
+            "2026-08-10T09:00:00Z",
+        ))
+        .unwrap();
+
+        // Two members, one leaves, and a group of one is not a group.
+        assert!(group_ids(&a).is_empty(), "the group is gone");
+        let conn = a.db().lock().unwrap();
+        let tombstoned: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM event_group_tombstones WHERE group_id = 'g1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(tombstoned, 1, "and it cannot be re-created behind our back");
+    }
+
+    /// A refusal OLDER than the group leaves it alone.
+    ///
+    /// The case that makes taking a refusal back safe at all: a device offline
+    /// for three weeks pushing a mark from before the group was made by hand
+    /// must not tear it apart.
+    #[test]
+    fn a_refusal_older_than_the_group_leaves_it_standing() {
+        let a = adapter();
+        a.upsert_event_group_from_sync(&stamped(
+            "g1",
+            "2026-08-10T10:00:00Z",
+            vec![member("work", "ev-a"), member("private", "ev-b")],
+        ))
+        .unwrap();
+
+        a.upsert_suggestion_decline_from_sync(&decline(
+            ("work", "ev-a"),
+            ("private", "ev-b"),
+            "2026-08-10T09:00:00Z",
+        ))
+        .unwrap();
+
+        assert_eq!(
+            members_of(&a, "g1"),
+            vec!["ev-a".to_string(), "ev-b".to_string()],
+        );
+    }
+
+    /// Grouping by hand beats an older refusal, however the records interleave.
+    ///
+    /// Three records travel for that one action: the older refusal from the
+    /// other device, and — always together, always stamped the same instant —
+    /// the group and the clearing that `EventGroupsRepo::group` writes. A sync
+    /// mesh gives no ordering guarantee across devices, so the end state has to
+    /// be the same for every arrival order. All six are checked rather than the
+    /// one that happens to be convenient: the first draft of this rule passed
+    /// three of them.
+    #[test]
+    fn grouping_by_hand_beats_an_older_refusal_in_every_arrival_order() {
+        #[derive(Clone, Copy, Debug)]
+        enum Rec {
+            Refusal,
+            Group,
+            Clearing,
+        }
+        let orders = [
+            [Rec::Refusal, Rec::Group, Rec::Clearing],
+            [Rec::Refusal, Rec::Clearing, Rec::Group],
+            [Rec::Group, Rec::Refusal, Rec::Clearing],
+            [Rec::Group, Rec::Clearing, Rec::Refusal],
+            [Rec::Clearing, Rec::Refusal, Rec::Group],
+            [Rec::Clearing, Rec::Group, Rec::Refusal],
+        ];
+        for order in orders {
+            let a = adapter();
+            let refusal = decline(
+                ("work", "ev-a"),
+                ("private", "ev-b"),
+                "2026-08-10T09:00:00Z",
+            );
+            let mut clearing = refusal.clone();
+            clearing.cleared_at = Some("2026-08-10T10:00:00Z".into());
+            for rec in order {
+                match rec {
+                    Rec::Refusal => {
+                        a.upsert_suggestion_decline_from_sync(&refusal).unwrap();
+                    }
+                    Rec::Clearing => {
+                        a.upsert_suggestion_decline_from_sync(&clearing).unwrap();
+                    }
+                    Rec::Group => a
+                        .upsert_event_group_from_sync(&stamped(
+                            "g1",
+                            "2026-08-10T10:00:00Z",
+                            vec![member("work", "ev-a"), member("private", "ev-b")],
+                        ))
+                        .unwrap(),
+                }
+            }
+            assert_eq!(
+                members_of(&a, "g1"),
+                vec!["ev-a".to_string(), "ev-b".to_string()],
+                "order = {order:?}",
+            );
+        }
     }
 
     #[test]

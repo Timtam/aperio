@@ -233,4 +233,9 @@ export interface SuggestionDecline {
   calendar_b: string;
   event_b: string;
   declined_at: string;
+  /** When the pair was last grouped BY HAND, if ever. Refused iff
+   *  `declined_at` is the later of the two — see migration 0038. The host
+   *  filters on it already; this is here so a row read from a snapshot keeps
+   *  its shape. */
+  cleared_at?: string | null;
 }

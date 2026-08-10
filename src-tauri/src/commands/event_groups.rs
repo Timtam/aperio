@@ -76,11 +76,15 @@ pub async fn group_events(
             starts_at: m.starts_at,
         })
         .collect();
-    let group = EventGroupsRepo::new(&shared)
+    let grouped = EventGroupsRepo::new(&shared)
         .group(&members)
         .map_err(map_group_err)?;
-    emit_group(&event_log, &group);
-    Ok(group)
+    emit_group(&event_log, &grouped.group);
+    // The refusals this took back have to travel too: a clearing that stays on
+    // this device is a mark the others still hold — and they would use it to
+    // break the very group just made.
+    emit_declines(&event_log, &grouped.cleared);
+    Ok(grouped.group)
 }
 
 /// Take one event out of its group, dissolving the group if that leaves fewer

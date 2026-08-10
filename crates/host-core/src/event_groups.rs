@@ -57,6 +57,17 @@ pub enum Ungrouped {
     },
 }
 
+/// A group as it stands, plus the refusals that grouping took back.
+///
+/// The caller has to pass BOTH on: a clearing that never leaves the device it
+/// happened on is a mark the other devices still hold, and they would use it
+/// to break this very group.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Grouped {
+    pub group: EventGroup,
+    pub cleared: Vec<SuggestionDecline>,
+}
+
 /// Why a member is leaving its group — and so whether it means anything.
 ///
 /// Only [`Removal::ByUser`] is a statement. Someone taking an event out is
@@ -128,9 +139,10 @@ fn write_decline(
 ) -> Result<(), EventGroupsError> {
     conn.execute(
         "INSERT INTO event_group_suggestion_declines
-             (calendar_a, event_a, calendar_b, event_b, declined_at)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(calendar_a, event_a, calendar_b, event_b) DO NOTHING",
+             (calendar_a, event_a, calendar_b, event_b, declined_at, cleared_at)
+         VALUES (?, ?, ?, ?, ?, NULL)
+         ON CONFLICT(calendar_a, event_a, calendar_b, event_b)
+         DO UPDATE SET declined_at = MAX(declined_at, excluded.declined_at)",
         params![
             decline.calendar_a,
             decline.event_a,
@@ -142,14 +154,79 @@ fn write_decline(
     Ok(())
 }
 
+/// Take a refusal back, because the user just said the opposite.
+///
+/// Grouping two events BY HAND is the statement that they ARE one appointment,
+/// and it has to be able to win — an arriving mark is now allowed to break a
+/// group that contradicts it, so without this a refusal from a device that was
+/// offline for three weeks would tear apart a group made deliberately
+/// yesterday.
+///
+/// It stamps rather than deletes. Deleting would break the union rule the
+/// whole table rests on: one device's delete and another's surviving row merge
+/// back to "refused" and the clearing is lost. Two timestamps that only move
+/// forward merge to the same answer whatever order they arrive in.
+///
+/// Writes nothing when there is no row: a pair nobody ever refused needs no
+/// record saying so.
+fn clear_decline(
+    conn: &rusqlite::Connection,
+    first: (&str, &str),
+    second: (&str, &str),
+    now: &str,
+) -> Result<Option<SuggestionDecline>, EventGroupsError> {
+    let key = SuggestionDecline::new(first, second, now.to_string());
+    let changed = conn.execute(
+        "UPDATE event_group_suggestion_declines
+            SET cleared_at = MAX(COALESCE(cleared_at, ''), ?)
+          WHERE calendar_a = ? AND event_a = ? AND calendar_b = ? AND event_b = ?",
+        params![
+            now,
+            key.calendar_a,
+            key.event_a,
+            key.calendar_b,
+            key.event_b
+        ],
+    )?;
+    if changed == 0 {
+        return Ok(None);
+    }
+    read_decline(conn, &key)
+}
+
+/// One pair's row, whatever it currently says.
+fn read_decline(
+    conn: &rusqlite::Connection,
+    key: &SuggestionDecline,
+) -> Result<Option<SuggestionDecline>, EventGroupsError> {
+    let row = conn
+        .query_row(
+            "SELECT declined_at, cleared_at FROM event_group_suggestion_declines
+              WHERE calendar_a = ? AND event_a = ? AND calendar_b = ? AND event_b = ?",
+            params![key.calendar_a, key.event_a, key.calendar_b, key.event_b],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+        )
+        .optional()?;
+    Ok(row.map(|(declined_at, cleared_at)| SuggestionDecline {
+        declined_at,
+        cleared_at,
+        ..key.clone()
+    }))
+}
+
 fn read_declines(conn: &rusqlite::Connection) -> Result<Vec<SuggestionDecline>, EventGroupsError> {
+    // Only the pairs currently refused. A row whose clearing is the newer of
+    // the two statements is a pair the user has since grouped by hand, and it
+    // stays on disk only so the clearing can travel and merge.
     let mut stmt = conn.prepare(
-        "SELECT calendar_a, event_a, calendar_b, event_b, declined_at
-           FROM event_group_suggestion_declines",
+        "SELECT calendar_a, event_a, calendar_b, event_b, declined_at, cleared_at
+           FROM event_group_suggestion_declines
+          WHERE cleared_at IS NULL OR declined_at >= cleared_at",
     )?;
     let rows = stmt
         .query_map([], |row| {
             Ok(SuggestionDecline {
+                cleared_at: row.get(5)?,
                 calendar_a: row.get(0)?,
                 event_a: row.get(1)?,
                 calendar_b: row.get(2)?,
@@ -215,6 +292,92 @@ fn read_group(
     }))
 }
 
+/// Point every refusal naming `old` at `new`.
+///
+/// Group members are repaired when a provider re-mints an id and followed when
+/// an event moves calendars, because the design accepts that ids change. The
+/// refusals were keyed by the same ids and were touched by neither — so months
+/// after saying no, an id change would silently un-say it and the pair would be
+/// grouped again with nothing to explain why.
+///
+/// The pair is stored in a canonical order, so a rewrite can change which side
+/// a row belongs on: the row is rebuilt through `SuggestionDecline::new` rather
+/// than updated in place, and merged into whatever is already there — the same
+/// later-of-each rule the sync path uses, for the same reason.
+///
+/// Local and silent, exactly like the repairs it follows: every device holds
+/// the same marks and sees the same id change, so each fixes its own.
+fn carry_declines(
+    conn: &rusqlite::Connection,
+    old: (&str, &str),
+    new: (&str, &str),
+) -> Result<(), EventGroupsError> {
+    if old == new {
+        return Ok(());
+    }
+    let affected: Vec<SuggestionDecline> = {
+        let mut stmt = conn.prepare(
+            "SELECT calendar_a, event_a, calendar_b, event_b, declined_at, cleared_at
+               FROM event_group_suggestion_declines
+              WHERE (calendar_a = ?1 AND event_a = ?2) OR (calendar_b = ?1 AND event_b = ?2)",
+        )?;
+        let rows = stmt.query_map(params![old.0, old.1], |row| {
+            Ok(SuggestionDecline {
+                calendar_a: row.get(0)?,
+                event_a: row.get(1)?,
+                calendar_b: row.get(2)?,
+                event_b: row.get(3)?,
+                declined_at: row.get(4)?,
+                cleared_at: row.get(5)?,
+            })
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()?
+    };
+    for row in affected {
+        let other = if (row.calendar_a.as_str(), row.event_a.as_str()) == old {
+            (row.calendar_b.clone(), row.event_b.clone())
+        } else {
+            (row.calendar_a.clone(), row.event_a.clone())
+        };
+        // A pair cannot refuse itself: an event moved onto the very id it was
+        // already refused against leaves nothing to say.
+        if (other.0.as_str(), other.1.as_str()) == new {
+            continue;
+        }
+        let mut moved = SuggestionDecline::new(
+            new,
+            (other.0.as_str(), other.1.as_str()),
+            row.declined_at.clone(),
+        );
+        moved.cleared_at = row.cleared_at.clone();
+        if let Some(existing) = read_decline(conn, &moved)? {
+            moved.merge(&existing);
+        }
+        conn.execute(
+            "INSERT INTO event_group_suggestion_declines
+                 (calendar_a, event_a, calendar_b, event_b, declined_at, cleared_at)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(calendar_a, event_a, calendar_b, event_b) DO UPDATE SET
+                 declined_at = excluded.declined_at,
+                 cleared_at  = excluded.cleared_at",
+            params![
+                moved.calendar_a,
+                moved.event_a,
+                moved.calendar_b,
+                moved.event_b,
+                moved.declined_at,
+                moved.cleared_at,
+            ],
+        )?;
+        conn.execute(
+            "DELETE FROM event_group_suggestion_declines
+              WHERE calendar_a = ? AND event_a = ? AND calendar_b = ? AND event_b = ?",
+            params![row.calendar_a, row.event_a, row.calendar_b, row.event_b],
+        )?;
+    }
+    Ok(())
+}
+
 /// Read/write access to event groups.
 pub struct EventGroupsRepo<'a> {
     db: &'a SharedConn,
@@ -235,7 +398,7 @@ impl<'a> EventGroupsRepo<'a> {
     ///
     /// Idempotent for members already in the group it lands on: grouping the
     /// same pair twice is not an error, it is a no-op with the same answer.
-    pub fn group(&self, members: &[NewMember]) -> Result<EventGroup, EventGroupsError> {
+    pub fn group(&self, members: &[NewMember]) -> Result<Grouped, EventGroupsError> {
         if members.len() < 2 {
             return Err(EventGroupsError::TooFewMembers);
         }
@@ -314,8 +477,34 @@ impl<'a> EventGroupsRepo<'a> {
         // later database call in the process down with it. A row we just wrote
         // and have not yet released cannot be missing.
         let group = read_group(&tx, &group_id)?.ok_or(EventGroupsError::Vanished)?;
+        // Saying "these ARE one appointment" takes back every refusal among
+        // them.
+        //
+        // Without this the two statements could not both be honoured: an
+        // arriving mark is allowed to break a group that contradicts it, so a
+        // refusal from a device that was offline for three weeks would tear
+        // apart a group made deliberately yesterday, and there would be no way
+        // to stop it — nothing else in the app can take a mark back.
+        //
+        // Across every PAIR in the group, not only the ones named in this
+        // call: the members are now one appointment, and a leftover mark
+        // between two of them is a contradiction waiting for the next sync
+        // round to act on.
+        let mut cleared = Vec::new();
+        for (i, first) in group.members.iter().enumerate() {
+            for second in group.members.iter().skip(i + 1) {
+                if let Some(row) = clear_decline(
+                    &tx,
+                    (&first.calendar_id, &first.event_id),
+                    (&second.calendar_id, &second.event_id),
+                    &now,
+                )? {
+                    cleared.push(row);
+                }
+            }
+        }
         tx.commit()?;
-        Ok(group)
+        Ok(Grouped { group, cleared })
     }
 
     /// One group with its members, or `None` when the id is unknown.
@@ -462,6 +651,13 @@ impl<'a> EventGroupsRepo<'a> {
             "UPDATE event_groups SET updated_at = ? WHERE id = ?",
             params![now, group_id],
         )?;
+        // The refusals name the id the membership just left — see
+        // `carry_declines`.
+        carry_declines(
+            &tx,
+            (old_calendar_id, old_event_id),
+            (new_calendar_id, new_event_id),
+        )?;
         let group = read_group(&tx, &group_id)?;
         tx.commit()?;
         Ok(group)
@@ -574,6 +770,13 @@ impl<'a> EventGroupsRepo<'a> {
             tx.commit()?;
             return Ok(None);
         }
+        // The refusals name the same id the membership did — see
+        // `carry_declines`.
+        carry_declines(
+            &tx,
+            (calendar_id, old_event_id),
+            (calendar_id, new_event_id),
+        )?;
         let group = read_group(&tx, group_id)?;
         tx.commit()?;
         Ok(group)
@@ -764,7 +967,8 @@ mod tests {
 
         let group = repo
             .group(&[member("work", "ev-a"), member("private", "ev-b")])
-            .unwrap();
+            .unwrap()
+            .group;
         assert_eq!(group.members.len(), 2);
 
         let found = repo
@@ -785,12 +989,14 @@ mod tests {
         let repo = EventGroupsRepo::new(&shared);
         let first = repo
             .group(&[member("work", "ev-a"), member("private", "ev-b")])
-            .unwrap();
+            .unwrap()
+            .group;
 
         // "and this one too" — named alongside a member already in the group.
         let joined = repo
             .group(&[member("work", "ev-a"), member("colleague", "ev-c")])
-            .unwrap();
+            .unwrap()
+            .group;
         assert_eq!(joined.id, first.id, "a second group would split the truth");
         assert_eq!(joined.members.len(), 3);
     }
@@ -848,7 +1054,8 @@ mod tests {
         let repo = EventGroupsRepo::new(&shared);
         let group = repo
             .group(&[member("work", "old-a"), member("private", "ev-b")])
-            .unwrap();
+            .unwrap()
+            .group;
 
         let healed = repo
             .heal_member(&group.id, "work", "old-a", "new-a")
@@ -877,7 +1084,8 @@ mod tests {
         let repo = EventGroupsRepo::new(&shared);
         let group = repo
             .group(&[member("work", "ev-a"), member("private", "ev-b")])
-            .unwrap();
+            .unwrap()
+            .group;
 
         // Removing one of two leaves a single event that would otherwise claim
         // to be grouped with nothing.
@@ -930,7 +1138,8 @@ mod tests {
                 member("private", "ev-b"),
                 member("colleague", "ev-c"),
             ])
-            .unwrap();
+            .unwrap()
+            .group;
 
         let declines = repo.dissolve(&group.id).unwrap().expect("it was there");
         // Every pair, not just the ones somebody looked at: after this the
@@ -1000,6 +1209,63 @@ mod tests {
     }
 
     #[test]
+    fn grouping_by_hand_takes_the_refusal_back() {
+        let (_tmp, db) = fresh();
+        let shared = db.shared();
+        let repo = EventGroupsRepo::new(&shared);
+        repo.decline_suggestion(("work", "ev-a"), ("private", "ev-b"))
+            .unwrap();
+        assert_eq!(repo.declined_suggestions().unwrap().len(), 1);
+
+        // The opposite statement, and the newer one.
+        let grouped = repo
+            .group(&[member("work", "ev-a"), member("private", "ev-b")])
+            .unwrap();
+        assert_eq!(grouped.cleared.len(), 1, "the caller has to pass it on");
+        assert!(
+            repo.declined_suggestions().unwrap().is_empty(),
+            "a pair that is grouped is not a pair that is refused",
+        );
+
+        // And refusing again wins again — the later statement, either way.
+        repo.ungroup("private", "ev-b", Removal::ByUser).unwrap();
+        assert_eq!(repo.declined_suggestions().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_refusal_follows_an_id_the_provider_reminted() {
+        let (_tmp, db) = fresh();
+        let shared = db.shared();
+        let repo = EventGroupsRepo::new(&shared);
+        // The pair is refused, and SEPARATELY there is a group holding the
+        // event under its old id — which is what gives `heal_member` something
+        // to repair.
+        repo.decline_suggestion(("private", "old-b"), ("acc::meetings", "vc::1"))
+            .unwrap();
+        let group = repo
+            .group(&[member("private", "old-b"), member("work", "ev-a")])
+            .unwrap()
+            .group;
+
+        repo.heal_member(&group.id, "private", "old-b", "new-b")
+            .unwrap()
+            .expect("healed");
+
+        let declines = repo.declined_suggestions().unwrap();
+        assert_eq!(declines.len(), 1, "still exactly one refusal");
+        let d = &declines[0];
+        let names = [
+            (d.calendar_a.as_str(), d.event_a.as_str()),
+            (d.calendar_b.as_str(), d.event_b.as_str()),
+        ];
+        assert!(
+            names.contains(&("private", "new-b")),
+            "the refusal moved with the event: {names:?}",
+        );
+        assert!(names.contains(&("acc::meetings", "vc::1")));
+    }
+
+    #[test]
     fn one_event_is_not_a_group() {
         let (_tmp, db) = fresh();
         let shared = db.shared();
@@ -1015,10 +1281,12 @@ mod tests {
         let repo = EventGroupsRepo::new(&shared);
         let first = repo
             .group(&[member("work", "ev-a"), member("private", "ev-b")])
-            .unwrap();
+            .unwrap()
+            .group;
         let again = repo
             .group(&[member("work", "ev-a"), member("private", "ev-b")])
-            .unwrap();
+            .unwrap()
+            .group;
         assert_eq!(again.id, first.id);
         assert_eq!(again.members.len(), 2);
     }
