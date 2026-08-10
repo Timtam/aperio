@@ -296,7 +296,7 @@ EAS-Durchlauf und ist blind, also kommen die Fragen zuerst, deren Antwort alles
       Termin, in dem man gerade sitzt, ist das Unmittelbarste, was es gibt.
       ⚠️ Ungeprüft auf dem Gerät.
 
-### A9 · Termingruppen `[~]` — Stufe 0 + 1 stehen
+### A9 · Termingruppen `[x]` — Stufen 0 bis 3 stehen
 Derselbe Termin liegt heute mehrfach in Aperio (Outlook für die Kollegen, Kopie
 im Privatkalender für Alexas Erinnerungen, dazu die Kalender der Kollegen), und
 Aperio weiß nichts davon: mehrfache Zeilen, mehrfaches Nachziehen bei jeder
@@ -307,7 +307,12 @@ Sie ersetzt die heutige Ja/Nein-Rückfrage beim Meeting-Verknüpfen ersatzlos.
 Vollständiger Entwurf samt der schwierigen Teile (woher die Mitgliedschaft kommt,
 wie eine Gruppe anbieterseitige Kennungswechsel überlebt, was bei fehlenden
 Schreibrechten passiert) und einem Stufenplan: `DESIGN-event-groups.md`.
-Größenordnung wie die Widgets.
+
+Gebaut sind alle vier Stufen: Modell und Synchronisation, das Falten in allen
+sechs Ansichten, das Mitziehen einer Bearbeitung in allen drei Umfängen (ganze
+Serie, nur dieses Vorkommen, dieses und alle folgenden), Erkennung samt
+Vorschlagszeile mit endgültigem „Nein", das Meeting an der Gruppe und die
+Selbstheilung nach Kennungswechseln. Nichts davon lief bisher auf einem Gerät.
 
 **Stufe 0 und 1 sind gebaut**: Migration 0035/0036, `EventGroupsRepo`, Sync über
 `event_group.updated`/`.dissolved` samt Snapshot und Auflösungs-Marken, die

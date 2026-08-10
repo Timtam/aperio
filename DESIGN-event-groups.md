@@ -105,9 +105,11 @@ Die Reparatur läuft **still**: dieselben Termine meinen davor wie danach
 dieselbe Verabredung, es gibt dem Nutzer nichts zu melden. Sie läuft auf allen
 sechs Oberflächen — jede hat den Bereich, der den Beweis liefert.
 
-Offen bleibt der Fall, dass ein Anbieter ein Mitglied verschiebt und die Kopien
-auseinanderlaufen. Dann ist die Gruppe eine Behauptung, die nicht mehr stimmt.
-Sie muss das anzeigen können statt es zu verschweigen.
+Läuft eine Gruppe auseinander — ein Anbieter verschiebt ein Mitglied, die
+anderen nicht —, ist sie eine Behauptung, die nicht mehr stimmt. Sie wird dann
+NICHT gefaltet: jede Kopie bleibt sichtbar, sagt es in ihrer Beschriftung und
+trägt die hervorgehobene Marke „3× ≠". Verschweigen wäre das Einzige, was hier
+nicht geht.
 
 ### Rechte
 
