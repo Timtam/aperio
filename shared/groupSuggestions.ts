@@ -43,6 +43,20 @@ function whenKey(event: SuggestibleEvent): string {
   return event.all_day ? event.start.slice(0, 10) : new Date(event.start).toISOString();
 }
 
+/**
+ * Whether a stored refusal is currently in force.
+ *
+ * The later statement wins, and a tie goes to the refusal — the same rule the
+ * host applies in `SuggestionDecline::is_declined` and in `read_declines`'
+ * WHERE clause, stated once on this side of the FFI. The host already filters
+ * before handing rows over, so for today's callers this is a defence: a future
+ * caller feeding raw snapshot rows must not resurrect a refusal the user took
+ * back.
+ */
+export function isDeclineInForce(d: SuggestionDecline): boolean {
+  return d.cleared_at == null || d.declined_at >= d.cleared_at;
+}
+
 /** The pair, in the canonical order the decline record uses, as one string. */
 export function suggestionPairKey(
   a: { calendar_id: string; event_id: string },
@@ -73,7 +87,7 @@ export function findGroupSuggestions<E extends SuggestibleEvent>(
 ): GroupSuggestion<E>[] {
   const grouped = indexEventGroups(groups);
   const declined = new Set(
-    declines.map((d) =>
+    declines.filter(isDeclineInForce).map((d) =>
       suggestionPairKey(
         { calendar_id: d.calendar_a, event_id: d.event_a },
         { calendar_id: d.calendar_b, event_id: d.event_b },

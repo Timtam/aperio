@@ -33,7 +33,7 @@
 
 import type { EventGroup } from './eventGroups';
 import { eventGroupMemberKey, indexEventGroups } from './eventGroups';
-import { suggestionPairKey } from './groupSuggestions';
+import { isDeclineInForce } from './groupSuggestions';
 import { isMeetingCalendarEvent, meetingJoinUrl } from './meetingEvents';
 import type { SuggestionDecline } from './types';
 
@@ -120,8 +120,30 @@ export function normalizeJoinUrl(url: string): string {
  * `declines` is what stops this being a daily nuisance. Taking a member out of
  * a group, or dissolving one, writes exactly those marks (`EventGroupsRepo`),
  * and they sync — so a pair the user has pulled apart on any device stays
- * apart on all of them. Checked against EVERY copy of the appointment, because
- * a refusal names the pair the user actually saw.
+ * apart on all of them.
+ *
+ * ## A refusal is read by its MEETING side, alone
+ *
+ * The mark stores both ids, and the appointment's half is the one that dies:
+ * providers re-mint event ids (a bootstrap, a move, Exchange unasked), and a
+ * mark for an UNGROUPED pair has no way to follow — healing needs a membership
+ * row and a signature, and a bare mark has neither. Read as an exact pair, the
+ * refusal would silently expire with the first id change, and the group the
+ * user dissolved would be back — the one failure this whole mechanism exists
+ * to prevent.
+ *
+ * The meeting's half is the stable one: `vc::<meeting-id>`, minted from the
+ * provider's own meeting id, and only non-recurring meetings are ever paired.
+ * So the rule is one-sided: a meeting named by any refusal in force is not
+ * paired automatically, with anything. That reads as a statement about the
+ * meeting — "this one was refused once" — and it errs the right way round: the
+ * cost is an auto-pair that does not happen, and grouping by hand is always
+ * there and takes the mark back.
+ *
+ * What this does NOT survive, accepted and documented: the meeting itself
+ * deleted and re-created at the provider (a new meeting id), and the
+ * name-and-time SUGGESTIONS, whose marks join two ordinary events and expire
+ * with either id — there the cost is one repeated offer, refused once more.
  */
 export function findMeetingLinkPairs<E extends LinkableEvent>(
   events: readonly E[],
@@ -130,14 +152,14 @@ export function findMeetingLinkPairs<E extends LinkableEvent>(
   seriesId: (event: E) => string,
 ): MeetingLinkPair<E>[] {
   const grouped = indexEventGroups(groups);
-  const declined = new Set(
-    declines.map((d) =>
-      suggestionPairKey(
-        { calendar_id: d.calendar_a, event_id: d.event_a },
-        { calendar_id: d.calendar_b, event_id: d.event_b },
-      ),
-    ),
-  );
+  // Every (calendar, event) a refusal in force names, on either side. Only the
+  // meeting's key is ever looked up in it — see the doc block above.
+  const namedInRefusal = new Set<string>();
+  for (const d of declines) {
+    if (!isDeclineInForce(d)) continue;
+    namedInRefusal.add(eventGroupMemberKey(d.calendar_a, d.event_a));
+    namedInRefusal.add(eventGroupMemberKey(d.calendar_b, d.event_b));
+  }
 
   /** What the row is, as far as membership is concerned. */
   const memberKey = (event: E) =>
@@ -213,24 +235,18 @@ export function findMeetingLinkPairs<E extends LinkableEvent>(
     ) {
       continue;
     }
-    // Already refused — against every copy of the appointment there IS, not
-    // merely the ones in view.
+    // A meeting any refusal in force names is not paired, with anything.
     //
-    // `ungroup` writes one mark per member the event left AT THAT MOMENT, so a
-    // copy added to the appointment afterwards carries no mark of its own. Ask
-    // the rows in view and the refusal is invisible whenever that younger copy
-    // is the one on screen — and the pair the user pulled apart comes back.
-    // The group knows all of them, so when there is one, it answers.
-    const against = appointmentGroup
-      ? appointmentGroup.members.map((m) => ({
-          calendar_id: m.calendar_id,
-          event_id: m.event_id,
-        }))
-      : entries.map((entry) => ({
-          calendar_id: entry.calendar_id,
-          event_id: seriesId(entry),
-        }));
-    if (against.some((ref) => declined.has(suggestionPairKey(a, ref)))) continue;
+    // One-sided by design — see the doc block above. Every mark that can speak
+    // about this pairing names the meeting (ungroup and dissolve write one per
+    // pair the meeting was in; declining the offer names the offered pair), so
+    // nothing legitimate is lost. What is GAINED is survival: the mark's
+    // appointment half dies with the provider's next id re-mint, and a bare
+    // mark cannot be healed — read as an exact pair it would silently expire,
+    // and the group the user dissolved would be back.
+    if (namedInRefusal.has(eventGroupMemberKey(a.calendar_id, a.event_id))) {
+      continue;
+    }
     out.push({ meeting, event, joinUrl });
   }
   return out;

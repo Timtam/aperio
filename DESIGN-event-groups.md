@@ -291,12 +291,16 @@ aus der einer ging, wurde gar keine Gruppe mehr. Dazu wanderte die gefilterte
 Mitgliederliste über den Log und **löschte** auf den anderen Geräten, was sie
 hier nur verbarg.
 
-Was damit offen bleibt, und zwar bewusst: Löst ein Gerät eine Gruppe auf und
-bildet ein anderes sie neu, bevor es die Marke gehört hat, gewinnt die jüngere
-Gruppe. Die Marke kommt an und sorgt dafür, dass die *automatische*
-Verknüpfung sie nicht noch einmal bildet — das nächste Auflösen hält also. Ein
-Fenster von einer Sync-Runde bleibt. Das ist der ehrliche Preis; die beiden
-Versuche, ihn zu schließen, haben mehr gekostet als er wert ist.
+Was damit offen bleibt, und zwar bewusst — und schmaler, als es zunächst
+klingt: Auflösung und Marken schreibt ein Gerät in **denselben** Log, das
+andere wendet beide in derselben Runde an, und die Ansichten lesen erst danach.
+Das Fenster, das wirklich bleibt, ist die **unabhängige Neubildung**: Ein
+Gerät, das die Gruppe nie hatte — frisch eingerichtet, oder der Tag gerade
+offen —, bildet sie aus derselben Beitritts-URL, bevor die Marken es erreicht
+haben. Dann steht die Gruppe wieder, einmal; die Marken kommen an, die
+automatische Verknüpfung schweigt ab da, und das zweite Auflösen hält.
+Schlimmster Fall: zweimal auflösen. Das ist der ehrliche Preis; die beiden
+Versuche, ihn zu schließen, haben drei Review-Runden und 34 Funde gekostet.
 
 **Und eine Marke lässt sich zurücknehmen.** Ausdrückliches Gruppieren ist die
 gegenteilige Aussage und löscht die Marken zwischen den Paaren, die es
@@ -311,12 +315,35 @@ zurück zu „abgelehnt". Zwei Zeitstempel, die sich nur vorwärts bewegen,
 verschmelzen dagegen zur selben Antwort, in welcher Reihenfolge sie auch
 ankommen. Die spätere Aussage gewinnt, Gleichstand geht an die Ablehnung.
 
-**Marken wandern mit, wenn eine Kennung neu vergeben wird.** Mitglieder werden
-repariert, wenn ein Anbieter eine ID neu vergibt, und ziehen mit, wenn ein
-Termin den Kalender wechselt — die Marken hingen an denselben IDs und wurden von
-beidem nicht angefasst. Ein ID-Wechsel nahm damit still zurück, was man Monate
-vorher gesagt hatte, und das Paar wurde erneut gruppiert, ohne dass irgendetwas
-erklärt hätte, warum.
+**Marken überleben einen ID-Wechsel — aber auf zwei verschiedene Arten, und
+das ehrlich benannt.** Für Marken, deren Termin **Gruppenmitglied** ist, greift
+dieselbe Reparatur wie für die Mitgliedschaft: `heal_member` und `relocate`
+schreiben die Marke in derselben Transaktion um (`carry_declines`), und beim
+Kalenderwechsel reist sie mit über den Log, weil die anderen Geräte einen Umzug
+nicht selbst herleiten.
+
+Für Marken über **nicht gruppierte** Paare — dem Hauptzweck einer Marke — gibt
+es keine Heilung, und kann es keine geben: Eine nackte Marke hat weder
+Mitgliedszeile noch Signatur, über die sich der Termin wiederfinden ließe.
+Deshalb liest die automatische Verknüpfung eine Marke **einseitig, über ihre
+Meeting-Hälfte**: `vc::<Meeting-ID>` ist die stabile Seite (der Anbieter prägt
+sie, und wiederkehrende Meetings werden ohnehin nicht gepaart), die
+Termin-Seite ist die, die stirbt. Ein Meeting, das irgendeine gültige Marke
+nennt, wird mit nichts mehr automatisch verknüpft — von Hand gruppieren geht
+immer und nimmt die Marke zurück. Der Fehler liegt damit auf der richtigen
+Seite: Die Kosten sind eine Verknüpfung, die unterbleibt, nicht eine Gruppe,
+die wiederkommt.
+
+Zwei Fälle überlebt auch das nicht, akzeptiert und aufgeschrieben: ein Meeting,
+das beim Anbieter gelöscht und neu angelegt wird (neue Meeting-ID — die
+Verknüpfung passiert einmal erneut, einmal ablehnen genügt), und die
+**Namens-Vorschläge**, deren Marken zwei gewöhnliche Termine verbinden und mit
+jeder der beiden IDs verfallen — dort ist der Preis ein wiederholtes Angebot,
+das man einmal mehr ablehnt.
+
+Ein Altbestand, der `cleared_at` nicht kennt, liest eine zurückgenommene Marke
+als gültige Ablehnung — belanglos, solange nichts ausgeliefert ist, notiert für
+den Tag, an dem gemischte Versionen ein Sync-Ziel teilen.
 
 **Ein gelöschter Termin hat nichts gesagt.** `ungroup` nimmt deshalb einen
 Grund entgegen (`Removal::ByUser` / `Removal::Bookkeeping`). Nur das Herausnehmen

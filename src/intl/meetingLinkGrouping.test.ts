@@ -153,6 +153,47 @@ describe('grouping a meeting with its appointment', () => {
     expect(pairs).toEqual([]);
   });
 
+  it('a refusal outlives the appointment id it named', () => {
+    // The reason the refusal is read by its meeting side alone. Providers
+    // re-mint event ids — a bootstrap, a move, Exchange unasked — and a mark
+    // for an ungrouped pair has no healing to follow them. Read as an exact
+    // pair, the mark would silently expire with the first id change, and the
+    // group the user dissolved would be back.
+    const pairs = findMeetingLinkPairs(
+      [row('m1', 'acc::meetings', LINK), row('e-reminted', 'work', LINK)],
+      [],
+      [decline(['acc::meetings', 'm1'], ['work', 'e-old'])],
+      seriesId,
+    );
+    expect(pairs).toEqual([]);
+  });
+
+  it('a refusal about a different meeting blocks nothing here', () => {
+    const pairs = findMeetingLinkPairs(
+      [row('m1', 'acc::meetings', LINK), row('e1', 'work', LINK)],
+      [],
+      [decline(['acc::meetings', 'm-other'], ['work', 'e1'])],
+      seriesId,
+    );
+    expect(pairs).toHaveLength(1);
+  });
+
+  it('a refusal the user took back blocks nothing', () => {
+    // The host filters cleared rows before handing them over; this guards a
+    // caller feeding raw snapshot rows. The later statement wins.
+    const takenBack = {
+      ...decline(['acc::meetings', 'm1'], ['work', 'e1']),
+      cleared_at: '2026-02-01T00:00:00Z',
+    };
+    const pairs = findMeetingLinkPairs(
+      [row('m1', 'acc::meetings', LINK), row('e1', 'work', LINK)],
+      [],
+      [takenBack],
+      seriesId,
+    );
+    expect(pairs).toHaveLength(1);
+  });
+
   it('adds one meeting per account, however often the provider remints its id', () => {
     // Webex lists a recurring meeting as one row per occurrence, each with its
     // own id, and its list response carries no series id to collapse them by.
