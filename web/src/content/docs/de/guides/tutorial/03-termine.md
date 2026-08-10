@@ -197,8 +197,21 @@ deshalb, weil sie eine Erinnerung trägt, die die Arbeitskopie nicht hat. Farbe,
 Kalender und Teilnehmer bleiben aus demselben Grund pro Kopie.
 
 Die Frage kommt nach dem Speichern, nie davor: Ihre eigene Änderung steht damit
-nie auf dem Spiel, und Abbrechen kostet nichts. Beim Bearbeiten eines einzelnen
-Vorkommens einer Serie wird das noch nicht angeboten.
+nie auf dem Spiel, und Abbrechen kostet nichts.
+
+**Auch bei Serien, und in jedem Umfang.** Ändern Sie **nur dieses Vorkommen**,
+wird bei jeder Kopie dasselbe getan, was mit Ihrem Termin geschah: das Vorkommen
+aus der Serie geschnitten und ein Einzeltermin an seine Stelle gesetzt. Bei
+**diesem und allen folgenden** wird die Serie jeder Kopie an derselben Stelle
+geteilt — die früheren Vorkommen bleiben unangetastet, die späteren tragen die
+Änderung. Läuft eine Kopie in einem anderen Takt (zweiwöchentlich gegen
+wöchentlich), wird sie an ihrem eigenen nächsten Vorkommen geteilt; hat sie ab
+dort keines mehr, wird sie genannt statt still übergangen.
+
+Der Dialog sagt jedes Mal dazu, welche Vorkommen betroffen sind. Und weil beide
+Umfänge NEUE Einträge erzeugen, werden die anschließend wieder miteinander
+verknüpft: Sonst wäre die Verabredung, die Sie gerade zu einer Zeile gemacht
+haben, ab dieser Stelle wieder vier.
 
 **Das Meeting gehört der Verabredung.** Ein Meeting-Link hängt an genau einem
 Termin, und an welchem, ist ein Zufall des Moments, in dem verknüpft wurde.

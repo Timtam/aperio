@@ -3,8 +3,11 @@ import { useTranslation } from 'react-i18next';
 
 import {
   carryOnto,
+  firstOccurrenceFrom,
   occurrenceCarryRow,
   planCarry,
+  planSeriesSplit,
+  writeSeriesSplit,
   type CarryableFields,
   type CarryScope,
   type EventGroup,
@@ -16,8 +19,10 @@ import {
   addEventExdate,
   createEvent,
   getEventById,
+  groupEvents,
   isCommandError,
   updateEvent,
+  type NewGroupMember,
 } from '../api/client';
 import type { CalendarEvent } from '../api/types';
 import { useCalendarStore } from '../state/calendarStoreContext';
@@ -38,6 +43,13 @@ import { Modal } from './Modal';
 /** One copy the carry may write, as `planCarry` describes it. */
 type CarryTarget = ReturnType<typeof planCarry>['targets'][number];
 
+/** How the last attempt ended, when it did not simply succeed. */
+type CarryOutcome =
+  /** Some copies could not be written. */
+  | { kind: 'partly'; done: number; failed: CarryTarget[] }
+  /** Every copy was written, but the new rows are not tied together yet. */
+  | { kind: 'regroup'; done: number };
+
 export interface EventGroupCarryDialogProps {
   isOpen: boolean;
   onClose: () => void;
@@ -55,6 +67,17 @@ export interface EventGroupCarryDialogProps {
   scope?: CarryScope;
   /** The occurrence's original instant, for `scope: 'occurrence'`. */
   occurrence?: string | null;
+  /**
+   * The row the anchor's edit left behind, when the edit made one.
+   *
+   * An occurrence edit carves a standalone event out of the series; a "this
+   * and all following" edit cuts the series in two. Either way the anchor's
+   * new row is OUTSIDE the group, and so is every copy this dialog creates —
+   * from that point on the appointment would be read out four times again,
+   * having just been made one. So the new rows are grouped with each other
+   * once the carry is done, and this is the anchor's half of that.
+   */
+  successor?: NewGroupMember | null;
   onChanged?: () => void;
 }
 
@@ -67,6 +90,7 @@ export function EventGroupCarryDialog({
   after,
   scope = 'series',
   occurrence,
+  successor,
   onChanged,
 }: EventGroupCarryDialogProps) {
   const { t } = useTranslation();
@@ -84,10 +108,11 @@ export function EventGroupCarryDialog({
    * nothing at all. So the dialog stays open and says it, and the button
    * turns into a retry over exactly what is left.
    */
-  const [outcome, setOutcome] = useState<{ done: number; failed: CarryTarget[] } | null>(
-    null,
-  );
+  const [outcome, setOutcome] = useState<CarryOutcome | null>(null);
   const [pending, setPending] = useState<CarryTarget[] | null>(null);
+  /** The rows written so far, kept across a retry so the regrouping at the end
+   *  ties ALL of them together and not just the last pass's. */
+  const [createdRows, setCreatedRows] = useState<NewGroupMember[]>([]);
   const closeRef = useRef<HTMLButtonElement>(null);
   const outcomeRef = useRef<HTMLParagraphElement>(null);
   const messageId = useId();
@@ -123,6 +148,7 @@ export function EventGroupCarryDialog({
     setError(null);
     setOutcome(null);
     setPending(null);
+    setCreatedRows([]);
     queueMicrotask(() => closeRef.current?.focus());
   }, [isOpen]);
 
@@ -134,6 +160,9 @@ export function EventGroupCarryDialog({
     setBusy(true);
     setError(null);
     const failed: CarryTarget[] = [];
+    // The rows created so far, to be joined into a group of their own — the
+    // earlier passes' included, so a retry ties the whole set together.
+    const created: NewGroupMember[] = [...createdRows];
     let done = outcome?.done ?? 0;
     for (const target of targets) {
       try {
@@ -156,7 +185,7 @@ export function EventGroupCarryDialog({
             plan.changed,
           );
           await addEventExdate(target.event_id, occurrence, target.calendar_id);
-          await createEvent({
+          const standalone = await createEvent({
             calendar_id: target.calendar_id,
             title: row.title,
             description: row.description,
@@ -172,6 +201,103 @@ export function EventGroupCarryDialog({
             attendees: current.attendees,
             send_invitations: false,
           });
+          created.push({
+            calendar_id: standalone.calendar_id,
+            event_id: standalone.id,
+            title: standalone.title,
+            starts_at: standalone.start,
+          });
+        } else if (scope === 'future' && occurrence) {
+          // What the edit did to the anchor: its series was cut in two at the
+          // occurrence, and a new one took over from there. Each copy has a
+          // series of its OWN, so the same cut is made in it — an update would
+          // move every occurrence of the copy because one of them was edited.
+          //
+          // The copy's own next occurrence at or after the cutoff is the point
+          // it is cut at. Usually that is the cutoff itself; a copy patterned
+          // differently (fortnightly against weekly) is cut at ITS next one,
+          // which is what "and all following" means over there.
+          const anchorIso = firstOccurrenceFrom(
+            current as CalendarEvent & CarryableFields,
+            occurrence,
+          );
+          if (anchorIso == null) {
+            // This copy has nothing left at or after the cutoff. Reported, not
+            // counted as done: a copy that silently kept its old shape is the
+            // contradiction the group exists to prevent.
+            failed.push(target);
+            continue;
+          }
+          const row = occurrenceCarryRow(
+            current as CalendarEvent & CarryableFields,
+            anchorIso,
+            after,
+            plan.changed,
+          );
+          const splitPlan = planSeriesSplit(
+            current as CalendarEvent & CarryableFields,
+            anchorIso,
+          );
+          const currentRecurrence = current.recurrence;
+          if (splitPlan == null || currentRecurrence == null) {
+            // The copy is a single event: it has one occurrence, and "this and
+            // all following" is that one. It keeps its id, so it also keeps
+            // its membership — nothing to regroup.
+            await updateEvent(row, target.calendar_id);
+          } else {
+            const tail = await writeSeriesSplit(
+              {
+                truncate: (headRule) =>
+                  updateEvent(
+                    {
+                      ...current,
+                      recurrence: { ...currentRecurrence, rrule: headRule },
+                      // The copies are the user's own bookkeeping — the invite
+                      // went out from the anchor, and telling every copy's
+                      // attendees again would mail them twice.
+                      send_invitations: false,
+                      truncate_tail_overrides: true,
+                    },
+                    target.calendar_id,
+                  ),
+                createTail: (recurrence) =>
+                  createEvent(
+                    {
+                      calendar_id: target.calendar_id,
+                      title: row.title,
+                      description: row.description,
+                      location: row.location,
+                      start: row.start,
+                      end: row.end,
+                      all_day: row.all_day,
+                      recurrence,
+                      // The copy keeps its own: what travels is what the
+                      // appointment IS.
+                      color_label: current.color_label,
+                      reminders: current.reminders,
+                      sound: null,
+                      attendees: current.attendees,
+                      send_invitations: false,
+                    },
+                    // A continuation of the copy's own series — its zone stays
+                    // verbatim so both halves expand alike.
+                    { preserveRecurrenceZone: true },
+                  ),
+                restore: () =>
+                  updateEvent(
+                    { ...current, send_invitations: false },
+                    target.calendar_id,
+                  ),
+              },
+              splitPlan,
+            );
+            created.push({
+              calendar_id: tail.calendar_id,
+              event_id: tail.id,
+              title: tail.title,
+              starts_at: tail.start,
+            });
+          }
         } else {
           const next = carryOnto(
             current as CalendarEvent & CarryableFields,
@@ -186,6 +312,23 @@ export function EventGroupCarryDialog({
         if (isCommandError(err)) setError(err.message);
       }
     }
+    // The rows this carry created are copies of each other exactly as the ones
+    // it came from were — so they are told so. Without this, an occurrence or
+    // "and all following" edit would quietly UNDO the grouping from that point
+    // on: the appointment the user had just made one row would be four again.
+    //
+    // A failure here leaves the writes done and correct, so it is not counted
+    // against any copy; it is said in its own words, because the group is what
+    // the user came for.
+    setCreatedRows(created);
+    let regroupFailed = false;
+    if (successor && created.length > 0) {
+      try {
+        await groupEvents([successor, ...created]);
+      } catch {
+        regroupFailed = true;
+      }
+    }
     setBusy(false);
     onChanged?.();
     // The whole point of the dialog: say what actually happened, including
@@ -195,13 +338,23 @@ export function EventGroupCarryDialog({
       // the same title — that is what made them a group — so a list of titles
       // told the user nothing about which copy is now out of step.
       const names = failed.map((target) => calendarName(target.calendar_id));
-      setOutcome({ done, failed });
+      setOutcome({ kind: 'partly', done, failed });
       setPending(failed);
       announce(
         t('dialogs.eventGroupCarry.partly', { done, failed: names.join(', ') }),
       );
       // Stays open. A half-carried group is exactly the state this feature
       // exists to prevent, so the user has to see it and can retry the rest.
+      queueMicrotask(() => outcomeRef.current?.focus());
+      return;
+    }
+    if (regroupFailed) {
+      // Every copy was written; only the new rows are not tied together yet.
+      // Said, and left on screen, because "the appointment is one row again" is
+      // what the user was promised.
+      setOutcome({ kind: 'regroup', done });
+      setPending([]);
+      announce(t('dialogs.eventGroupCarry.regroupFailed', { count: done }));
       queueMicrotask(() => outcomeRef.current?.focus());
       return;
     }
@@ -222,12 +375,14 @@ export function EventGroupCarryDialog({
           id={messageId}
           className="form__hint form__hint--warning"
         >
-          {t('dialogs.eventGroupCarry.partly', {
-            done: outcome.done,
-            failed: outcome.failed
-              .map((target) => calendarName(target.calendar_id))
-              .join(', '),
-          })}
+          {outcome.kind === 'regroup'
+            ? t('dialogs.eventGroupCarry.regroupFailed', { count: outcome.done })
+            : t('dialogs.eventGroupCarry.partly', {
+                done: outcome.done,
+                failed: outcome.failed
+                  .map((target) => calendarName(target.calendar_id))
+                  .join(', '),
+              })}
         </FocusableNote>
       ) : (
         <FocusableNote id={messageId} className="form__message">
@@ -237,6 +392,18 @@ export function EventGroupCarryDialog({
               .map((field) => t(`dialogs.eventGroupCarry.field.${field}`))
               .join(', '),
           })}
+        </FocusableNote>
+      )}
+
+      {/* Which occurrences this is about. Without it the question reads the
+          same whether it will touch one appointment or a hundred. */}
+      {!outcome && scope !== 'series' && (
+        <FocusableNote className="form__hint">
+          {t(
+            scope === 'future'
+              ? 'dialogs.eventGroupCarry.scopeFuture'
+              : 'dialogs.eventGroupCarry.scopeOccurrence',
+          )}
         </FocusableNote>
       )}
 

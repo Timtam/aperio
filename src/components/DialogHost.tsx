@@ -123,6 +123,7 @@ export function DialogHost() {
           after={mode.after}
           scope={mode.scope}
           occurrence={mode.occurrence}
+          successor={mode.successor}
           onChanged={invalidateData}
         />
       );

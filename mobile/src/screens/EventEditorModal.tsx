@@ -22,11 +22,11 @@ import {
   applyDateTimeChange,
   dateInput,
   defaultNewEventTimes,
-  expandEvent,
   isBirthdayEventId,
+  planSeriesSplit,
   recurrenceStartDate,
   selectableEventCalendars,
-  splitRRuleForEdit,
+  writeSeriesSplit,
   timeInput,
   toIso,
 } from '@aperio/shared';
@@ -382,6 +382,20 @@ export default function EventEditorModal({
           after,
           scope,
           occurrence: occurrenceIso,
+          // An occurrence edit and a "this and all following" edit both leave
+          // a NEW row behind, outside the group. The copies the carry makes
+          // are outside it too, so they are tied to this one afterwards —
+          // otherwise the appointment the user just made one row would be four
+          // again from that point on.
+          successor:
+            scope === 'series'
+              ? null
+              : {
+                  calendar_id: next.calendar_id,
+                  event_id: next.id,
+                  title: next.title,
+                  starts_at: next.start,
+                },
         });
         return true;
       } catch {
@@ -498,101 +512,74 @@ export default function EventEditorModal({
         editScope === 'this_and_future' &&
         original.recurrence?.rrule
       ) {
-        // "This and all following": split the series at this occurrence. Truncate
-        // the loaded master to end just before the cutoff (keeping its earlier
-        // occurrences and own fields), then create a NEW series from here carrying
-        // the edits, reusing the original PATTERN with the remaining COUNT. The
-        // loaded `original` IS the master (getEventById resolves the series), so
-        // its start anchors the occurrence count. Mirrors the desktop EventDialog.
-        const cutoff = new Date(occurrence);
-        // Count RRULE-generated occurrences STRICTLY before the cutoff. Two
-        // subtleties: (1) expandEvent's range is inclusive of the end instant and
-        // the cutoff IS an occurrence, so end at cutoff-1ms to exclude it; (2)
-        // RFC-5545 COUNT counts every rule slot INCLUDING exdated ones, so expand
-        // with exceptions cleared — otherwise an EXDATE before the cutoff
-        // undercounts, leaving the tail's remaining COUNT too large and appending
-        // a phantom occurrence past the series end.
-        const before = expandEvent(
-          {
-            ...original,
-            recurrence: { ...original.recurrence, exceptions: [] },
-          },
-          {
-            start: new Date(original.start),
-            end: new Date(cutoff.getTime() - 1),
-          },
-        ).length;
-        const { oldRule, newRule } = splitRRuleForEdit(
-          original.recurrence.rrule,
-          cutoff,
-          before,
-          { allDay: original.all_day },
-        );
-        // Carry forward the master's EXDATEs at/after the cutoff — they belong to
-        // the tail the new series owns. Dropping them would resurrect an
-        // explicitly-deleted future occurrence or double a moved instance.
-        const tailExceptions = (original.recurrence.exceptions ?? []).filter(
-          (x) => new Date(x).getTime() >= cutoff.getTime(),
-        );
-        // Notify on the truncate too (symmetric with delete-this-and-following):
-        // on notify-flag providers (EWS/Graph) attendees must learn the original
-        // series now ends before the cutoff, else they keep the old occurrences
-        // AND receive the new tail invite = duplicates.
-        await updateEvent(
-          {
-            ...original,
-            recurrence: { ...original.recurrence, rrule: oldRule },
-            send_invitations: sendInvitations,
-            // Drop provider-side overrides in the dropped tail (they'd otherwise
-            // ghost / duplicate against the new series).
-            truncate_tail_overrides: true,
-          },
-          original.calendar_id,
-        );
-        let created;
-        try {
-          created = await createEvent(
-            {
-              calendar_id: calId,
-              title: trimmedTitle,
-              description: description.trim() || null,
-              location: location.trim() || null,
-              start,
-              end,
-              all_day: allDay,
-              recurrence: {
-                rrule: newRule,
-                exceptions: tailExceptions,
-                tzid: original.recurrence.tzid ?? null,
-              },
-              color_label: colorToSend,
-              reminders: remindersForWire,
-              sound: null,
-              attendees,
-              send_invitations: sendInvitations,
-            },
-            // Continuation of the master — keep its zone verbatim (incl.
-            // floating) so head and tail expand identically.
-            { preserveRecurrenceZone: true },
-          );
-        } catch (createErr) {
-          // The master was already truncated; restore it so the tail isn't
-          // silently lost, then surface the original failure. Restore WITH the
-          // same notify flag as the truncate: if we told attendees the series
-          // ended early, we must tell them it's whole again, else their calendars
-          // stay diverged from the organizer's.
-          await updateEvent(
-            { ...original, send_invitations: sendInvitations },
-            original.calendar_id,
-          ).catch(() => {});
-          throw createErr;
+        // "This and all following": split the series at this occurrence. The
+        // arithmetic — the COUNT the tail keeps, the EXDATEs that travel with
+        // it, the zone it inherits — lives in `planSeriesSplit`; the order and
+        // the recovery in `writeSeriesSplit`. See shared/seriesSplit.ts for why
+        // each of those details decides whether the two halves line up.
+        // The loaded `original` IS the master (getEventById resolves the
+        // series), so its start anchors the occurrence count.
+        const plan = planSeriesSplit(original, occurrence);
+        if (plan == null) {
+          throw new Error(t('dialogs.event.thisAndFutureLoadFailed', { title }));
         }
+        const masterRecurrence = original.recurrence;
+        const created = await writeSeriesSplit(
+          {
+            // Notify on the truncate too (symmetric with
+            // delete-this-and-following): on notify-flag providers attendees
+            // must learn the original series now ends before the cutoff, else
+            // they keep the old occurrences AND receive the new tail invite.
+            truncate: (headRule) =>
+              updateEvent(
+                {
+                  ...original,
+                  recurrence: { ...masterRecurrence, rrule: headRule },
+                  send_invitations: sendInvitations,
+                  truncate_tail_overrides: true,
+                },
+                original.calendar_id,
+              ),
+            createTail: (recurrence) =>
+              createEvent(
+                {
+                  calendar_id: calId,
+                  title: trimmedTitle,
+                  description: description.trim() || null,
+                  location: location.trim() || null,
+                  start,
+                  end,
+                  all_day: allDay,
+                  recurrence,
+                  color_label: colorToSend,
+                  reminders: remindersForWire,
+                  sound: null,
+                  attendees,
+                  send_invitations: sendInvitations,
+                },
+                // Continuation of the master — keep its zone verbatim (incl.
+                // floating) so head and tail expand identically.
+                { preserveRecurrenceZone: true },
+              ),
+            restore: () =>
+              updateEvent(
+                { ...original, send_invitations: sendInvitations },
+                original.calendar_id,
+              ),
+          },
+          plan,
+        );
         if (!isLocalCal) {
           await setEventColor(created.id, calId, colorCapable ? null : colorToSend);
         }
         AccessibilityInfo.announceForAccessibility(
           t('dialogs.event.thisAndFutureUpdated', { title: trimmedTitle }),
         );
+        // The other copies have a series each, so carrying this means splitting
+        // theirs at the same point — not updating a row.
+        if (await offerToCarry(original, created, 'future', occurrence)) {
+          return;
+        }
         navigation.goBack();
         return;
       }

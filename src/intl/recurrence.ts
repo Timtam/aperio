@@ -15,6 +15,9 @@ export {
   occurrenceIsoOf,
   truncateRRuleBefore,
   splitRRuleForEdit,
+  planSeriesSplit,
+  writeSeriesSplit,
+  firstOccurrenceFrom,
   localTimeZone,
   withCreatedRecurrenceZone,
 } from '@aperio/shared';

@@ -184,8 +184,19 @@ because it carries a reminder the work one does not. Colour, calendar and
 attendees stay per copy for the same reason.
 
 The question comes after the save, never before, so your own change is never at
-stake and cancelling costs nothing. Editing a single occurrence of a recurring
-event does not offer it yet.
+stake and cancelling costs nothing.
+
+**Series too, at every scope.** Change **this occurrence only** and each copy
+gets what your event got: the occurrence cut out of its series and a standalone
+event put in its place. Choose **this and all following** and each copy's series
+is split at the same point — the earlier occurrences stay untouched, the later
+ones carry the change. A copy running to a different pattern (fortnightly
+against weekly) is split at its OWN next occurrence; a copy with none left from
+there on is named rather than quietly skipped.
+
+The dialog says which occurrences it is about. And because both scopes create
+NEW entries, those are tied together afterwards — otherwise the appointment you
+had just made one row would be four again from that point on.
 
 **The meeting belongs to the appointment.** A meeting link hangs on exactly one
 event, and which one is a coincidence of the moment it was attached. Inside a

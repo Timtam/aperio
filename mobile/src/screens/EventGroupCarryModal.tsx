@@ -4,8 +4,11 @@ import { AccessibilityInfo, Platform, Pressable, StyleSheet, Text } from 'react-
 
 import {
   carryOnto,
+  firstOccurrenceFrom,
   occurrenceCarryRow,
   planCarry,
+  planSeriesSplit,
+  writeSeriesSplit,
   type CarryableFields,
 } from '@aperio/shared';
 
@@ -18,6 +21,7 @@ import {
   type Calendar,
   type CalendarEvent,
 } from '../api/calendar';
+import { groupEvents, type NewGroupMember } from '../api/eventGroups';
 import { FormScrollView } from '../components/FormScrollView';
 import { useCancelHeader } from '../components/useCancelHeader';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -40,11 +44,26 @@ function errorMessage(err: unknown): string {
 /** One copy the carry may write, as `planCarry` describes it. */
 type CarryTarget = ReturnType<typeof planCarry>['targets'][number];
 
+/** How the last attempt ended, when it did not simply succeed. */
+type CarryOutcome =
+  /** Some copies could not be written. */
+  | { kind: 'partly'; done: number; failed: CarryTarget[] }
+  /** Every copy was written, but the new rows are not tied together yet. */
+  | { kind: 'regroup'; done: number };
+
 export default function EventGroupCarryModal({
   route,
   navigation,
 }: RootStackScreenProps<'EventGroupCarry'>) {
-  const { group, anchor, before, after, scope = 'series', occurrence } = route.params;
+  const {
+    group,
+    anchor,
+    before,
+    after,
+    scope = 'series',
+    occurrence,
+    successor,
+  } = route.params;
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   useCancelHeader(navigation);
@@ -62,10 +81,11 @@ export default function EventGroupCarryModal({
    * that was already dismissing itself. It stays instead, and the button
    * retries exactly what is left.
    */
-  const [outcome, setOutcome] = useState<{ done: number; failed: CarryTarget[] } | null>(
-    null,
-  );
+  const [outcome, setOutcome] = useState<CarryOutcome | null>(null);
   const [pending, setPending] = useState<CarryTarget[] | null>(null);
+  /** The rows written so far, kept across a retry so the regrouping at the end
+   *  ties ALL of them together and not just the last pass's. */
+  const [createdRows, setCreatedRows] = useState<NewGroupMember[]>([]);
   /**
    * Whether this screen is still here.
    *
@@ -134,6 +154,9 @@ export default function EventGroupCarryModal({
     setBusy(true);
     setError(null);
     const failed: CarryTarget[] = [];
+    // The rows created so far, to be joined into a group of their own — the
+    // earlier passes' included, so a retry ties the whole set together.
+    const created: NewGroupMember[] = [...createdRows];
     let done = outcome?.done ?? 0;
     for (const target of targets) {
       // The user left. Stop writing copies into a screen that is gone.
@@ -157,7 +180,7 @@ export default function EventGroupCarryModal({
             plan.changed,
           );
           await addEventExdate(target.event_id, occurrence, target.calendar_id);
-          await createEvent({
+          const standalone = await createEvent({
             calendar_id: target.calendar_id,
             title: row.title,
             description: row.description,
@@ -173,6 +196,102 @@ export default function EventGroupCarryModal({
             attendees: current.attendees,
             send_invitations: false,
           });
+          created.push({
+            calendar_id: standalone.calendar_id,
+            event_id: standalone.id,
+            title: standalone.title,
+            starts_at: standalone.start,
+          });
+        } else if (scope === 'future' && occurrence) {
+          // What the edit did to the anchor: its series was cut in two at the
+          // occurrence, and a new one took over from there. Each copy has a
+          // series of its OWN, so the same cut is made in it — an update would
+          // move every occurrence of the copy because one of them was edited.
+          //
+          // The copy's own next occurrence at or after the cutoff is the point
+          // it is cut at. Usually that is the cutoff itself; a copy patterned
+          // differently is cut at ITS next one, which is what "and all
+          // following" means over there.
+          const anchorIso = firstOccurrenceFrom(
+            current as CalendarEvent & CarryableFields,
+            occurrence,
+          );
+          if (anchorIso == null) {
+            // Nothing left in this copy at or after the cutoff. Reported, not
+            // counted as done.
+            failed.push(target);
+            continue;
+          }
+          const row = occurrenceCarryRow(
+            current as CalendarEvent & CarryableFields,
+            anchorIso,
+            after,
+            plan.changed,
+          );
+          const splitPlan = planSeriesSplit(
+            current as CalendarEvent & CarryableFields,
+            anchorIso,
+          );
+          const currentRecurrence = current.recurrence;
+          if (splitPlan == null || currentRecurrence == null) {
+            // The copy is a single event: it has one occurrence, and "this and
+            // all following" is that one. It keeps its id, so it also keeps its
+            // membership — nothing to regroup.
+            await updateEvent(row, target.calendar_id);
+          } else {
+            const tail = await writeSeriesSplit(
+              {
+                truncate: (headRule) =>
+                  updateEvent(
+                    {
+                      ...current,
+                      recurrence: { ...currentRecurrence, rrule: headRule },
+                      // The copies are the user's own bookkeeping — the invite
+                      // went out from the anchor, and telling every copy's
+                      // attendees again would mail them twice.
+                      send_invitations: false,
+                      truncate_tail_overrides: true,
+                    },
+                    target.calendar_id,
+                  ),
+                createTail: (recurrence) =>
+                  createEvent(
+                    {
+                      calendar_id: target.calendar_id,
+                      title: row.title,
+                      description: row.description,
+                      location: row.location,
+                      start: row.start,
+                      end: row.end,
+                      all_day: row.all_day,
+                      recurrence,
+                      // The copy keeps its own: what travels is what the
+                      // appointment IS.
+                      color_label: current.color_label,
+                      reminders: current.reminders,
+                      sound: null,
+                      attendees: current.attendees,
+                      send_invitations: false,
+                    },
+                    // A continuation of the copy's own series — its zone stays
+                    // verbatim so both halves expand alike.
+                    { preserveRecurrenceZone: true },
+                  ),
+                restore: () =>
+                  updateEvent(
+                    { ...current, send_invitations: false },
+                    target.calendar_id,
+                  ),
+              },
+              splitPlan,
+            );
+            created.push({
+              calendar_id: tail.calendar_id,
+              event_id: tail.id,
+              title: tail.title,
+              starts_at: tail.start,
+            });
+          }
         } else {
           const next = carryOnto(
             current as CalendarEvent & CarryableFields,
@@ -193,6 +312,20 @@ export default function EventGroupCarryModal({
       }
     }
     if (!alive.current) return;
+    setCreatedRows(created);
+    // The rows this carry created are copies of each other exactly as the ones
+    // it came from were — so they are told so. Without this, an occurrence or
+    // "and all following" edit would quietly UNDO the grouping from that point
+    // on: the appointment the user had just made one row would be four again.
+    let regroupFailed = false;
+    if (successor && created.length > 0) {
+      try {
+        await groupEvents([successor, ...created]);
+      } catch {
+        regroupFailed = true;
+      }
+    }
+    if (!alive.current) return;
     setBusy(false);
     // The whole point of the screen: say what actually happened, including
     // what did not.
@@ -201,7 +334,7 @@ export default function EventGroupCarryModal({
       // the same title — that is what made them a group — so a list of titles
       // said nothing about which copy is now out of step.
       const names = failed.map((target) => calendarName(target.calendar_id));
-      setOutcome({ done, failed });
+      setOutcome({ kind: 'partly', done, failed });
       setPending(failed);
       AccessibilityInfo.announceForAccessibility(
         t('dialogs.eventGroupCarry.partly', { done, failed: names.join(', ') }),
@@ -210,11 +343,35 @@ export default function EventGroupCarryModal({
       // prevent, so it has to be seen, and the rest can be retried.
       return;
     }
+    if (regroupFailed) {
+      // Every copy was written; only the new rows are not tied together yet.
+      // Said, and left on screen, because "the appointment is one row again" is
+      // what the user was promised.
+      setOutcome({ kind: 'regroup', done });
+      setPending([]);
+      AccessibilityInfo.announceForAccessibility(
+        t('dialogs.eventGroupCarry.regroupFailed', { count: done }),
+      );
+      return;
+    }
     AccessibilityInfo.announceForAccessibility(
       t('dialogs.eventGroupCarry.done', { count: done }),
     );
     navigation.goBack();
-  }, [busy, targets, outcome, plan.changed, after, scope, occurrence, calendarName, t, navigation]);
+  }, [
+    busy,
+    targets,
+    outcome,
+    createdRows,
+    successor,
+    plan.changed,
+    after,
+    scope,
+    occurrence,
+    calendarName,
+    t,
+    navigation,
+  ]);
 
   return (
     <FormScrollView
@@ -232,12 +389,14 @@ export default function EventGroupCarryModal({
         accessibilityLiveRegion={outcome ? 'assertive' : 'none'}
       >
         {outcome
-          ? t('dialogs.eventGroupCarry.partly', {
-              done: outcome.done,
-              failed: outcome.failed
-                .map((target) => calendarName(target.calendar_id))
-                .join(', '),
-            })
+          ? outcome.kind === 'regroup'
+            ? t('dialogs.eventGroupCarry.regroupFailed', { count: outcome.done })
+            : t('dialogs.eventGroupCarry.partly', {
+                done: outcome.done,
+                failed: outcome.failed
+                  .map((target) => calendarName(target.calendar_id))
+                  .join(', '),
+              })
           : calendars == null
             ? t('dialogs.eventGroup.loading')
             : t('dialogs.eventGroupCarry.message', {
@@ -247,6 +406,18 @@ export default function EventGroupCarryModal({
                   .join(', '),
               })}
       </Text>
+
+      {/* Which occurrences this is about. Without it the question reads the
+          same whether it will touch one appointment or a hundred. */}
+      {!outcome && scope !== 'series' && (
+        <Text style={styles.member} accessibilityRole="text">
+          {t(
+            scope === 'future'
+              ? 'dialogs.eventGroupCarry.scopeFuture'
+              : 'dialogs.eventGroupCarry.scopeOccurrence',
+          )}
+        </Text>
+      )}
 
       {/* Named by their calendar. The title is the same on every copy — that
           is what made them a group — and the stored one is the title the copy

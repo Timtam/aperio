@@ -1198,7 +1198,11 @@
       "done_other": "{{count}} copies updated.",
       "partly": "{{done}} updated. Not changed: {{failed}}.",
       "retry": "Try the rest again",
-      "dismiss": "Close"
+      "dismiss": "Close",
+      "scopeOccurrence": "This applies to this occurrence only.",
+      "scopeFuture": "This applies to this occurrence and all following ones. Each copy series is split at the same point.",
+      "regroupFailed_one": "The copy was updated, but the new entries could not be tied together as one appointment again.",
+      "regroupFailed_other": "The {{count}} copies were updated, but the new entries could not be tied together as one appointment again."
     },
     "eventGroup": {
       "title": "Same appointment",

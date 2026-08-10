@@ -2,6 +2,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import type { CarryableFields, CarryScope, EventGroup } from '@aperio/shared';
 import type { CalendarEvent } from '../api/calendar';
+import type { NewGroupMember } from '../api/eventGroups';
 
 /**
  * The root native-stack route table. Must be a `type` alias (React Navigation
@@ -65,10 +66,16 @@ export type RootStackParamList = {
     anchor: { calendar_id: string; event_id: string };
     before: CarryableFields;
     after: CarryableFields;
-    /** Which occurrences the carry is about — `occurrence` does to each copy
-     *  what the edit did to the anchor rather than moving its whole series. */
+    /** Which occurrences the carry is about — `occurrence` and `future` do to
+     *  each copy what the edit did to the anchor (carve one out / cut the
+     *  series in two) rather than moving its whole series. */
     scope?: CarryScope;
     occurrence?: string | null;
+    /** The row the anchor's edit left behind, when it made one. The copies the
+     *  carry creates are tied to it afterwards, so an occurrence or
+     *  "and all following" edit does not quietly undo the grouping from that
+     *  point on. */
+    successor?: NewGroupMember | null;
   };
   Lists: undefined;
   ListEditor: { listId: string };

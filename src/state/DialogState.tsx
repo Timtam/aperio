@@ -9,6 +9,7 @@ import {
 import { isSeriesOccurrence } from '@aperio/shared';
 import type { CarryableFields, CarryScope, EventGroup } from '@aperio/shared';
 
+import type { NewGroupMember } from '../api/client';
 import type {
   Account,
   CalendarEvent,
@@ -106,6 +107,17 @@ export type DialogMode =
       after: CarryableFields;
       scope?: CarryScope;
       occurrence?: string | null;
+      /**
+       * The row the anchor's edit LEFT BEHIND, when the edit made one.
+       *
+       * An occurrence edit carves a standalone event out of the series; a
+       * "this and all following" edit cuts the series in two and starts a new
+       * one. Either way the anchor's new row is outside the group, and so is
+       * every copy the carry creates — from that point on the appointment
+       * would be back to being read out four times. They are grouped with each
+       * other once the carry is done, and this is the anchor's half of it.
+       */
+      successor?: NewGroupMember | null;
     }
   | { kind: 'planTask'; task: Task }
   | { kind: 'sectionEdit'; listId: string; section: Section | null }
@@ -237,6 +249,8 @@ export interface DialogStateValue {
     after: CarryableFields;
     scope?: CarryScope;
     occurrence?: string | null;
+    /** The anchor's new row, when the edit made one — see the frame type. */
+    successor?: NewGroupMember | null;
   }) => void;
   openPlanTask: (task: Task) => void;
   /** Open the create/rename section dialog. Pass `section=null` (or omit)
@@ -504,6 +518,8 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       after: CarryableFields;
       scope?: CarryScope;
       occurrence?: string | null;
+      /** The anchor's new row, when the edit made one — see the frame type. */
+      successor?: NewGroupMember | null;
     }) => push({ kind: 'eventGroupCarry', ...payload }),
     [push],
   );

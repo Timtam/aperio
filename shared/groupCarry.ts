@@ -42,8 +42,17 @@ export interface CarryTarget {
   writable: boolean;
 }
 
-/** Which occurrences an edit — and therefore its carry — is about. */
-export type CarryScope = 'series' | 'occurrence';
+/**
+ * Which occurrences an edit — and therefore its carry — is about.
+ *
+ * `series` updates each copy's row. `occurrence` does to each copy what the
+ * edit did to the anchor: EXDATE the series at that instant and put a
+ * standalone event in its place. `future` splits each copy's own series at the
+ * same point, the way the anchor's was split — an update there would move
+ * EVERY occurrence of that copy because one of them was edited, which is the
+ * outcome the scope question exists to prevent.
+ */
+export type CarryScope = 'series' | 'occurrence' | 'future';
 
 /** What carrying would do, decided before anything is written. */
 export interface CarryPlan {

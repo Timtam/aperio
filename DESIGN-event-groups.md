@@ -1,7 +1,6 @@
 # Termingruppen — Entwurf
 
-Status: **Stufen 0 bis 3 gebaut**, auf beiden Plattformen und im Widget; offen
-ist allein „dieses und alle folgenden" beim Mitziehen (siehe Stufe 2). Dieses
+Status: **Stufen 0 bis 3 gebaut**, auf beiden Plattformen und im Widget. Dieses
 Dokument hat entschieden, ob und in welcher Form gebaut wird; die Stufenliste am
 Ende sagt, was davon steht. Nichts davon lief bisher auf einem Gerät.
 
@@ -159,11 +158,27 @@ Erinnerung, ihre Farbe, ihr Kalender —, nur mit den geänderten Feldern
 überschrieben; Beginn und Ende kommen aus dem eigenen Vorkommen der Kopie,
 außer die Bearbeitung hat den Termin verschoben.
 
-Offen bleibt „**dieses und alle folgenden**": das Aufteilen einer Serie
-(COUNT-Arithmetik, EXDATE-Übergabe an den Rest, Benachrichtigungen) steht heute
-zweimal inline in den beiden Editoren. Es je Mitglied zu wiederholen hieße,
-diese heikle Rechnung an vier Stellen zu haben — der ehrliche Weg ist, sie
-vorher in ein geteiltes Modul zu ziehen.
+„**Dieses und alle folgenden**" zieht ebenfalls mit. Zuerst wurde die heikle
+Rechnung — COUNT-Arithmetik, EXDATE-Übergabe an den Rest, die Zone des
+Fortsetzungs-Teils, Benachrichtigung auf BEIDEN Schreibvorgängen und das
+Zurücknehmen des Kopfes, wenn der Rest nicht angelegt werden konnte — aus den
+beiden Editoren in `shared/seriesSplit.ts` gezogen (`planSeriesSplit` rechnet,
+`writeSeriesSplit` schreibt in der richtigen Reihenfolge und heilt). Sie je
+Mitglied zu wiederholen hätte sie sonst an vier Stellen stehen lassen.
+
+Geteilt wird jede Kopie an IHREM eigenen nächsten Vorkommen ab dem Schnitt —
+meist ist das der Schnitt selbst; eine anders getaktete Kopie (zweiwöchentlich
+gegen wöchentlich) hat dort keines und wird an ihrem nächsten geteilt. Eine
+Kopie, die ab dem Schnitt gar keines mehr hat, wird GENANNT statt still
+übergangen.
+
+**Die neuen Zeilen werden wieder verknüpft.** Sowohl „nur dieses Vorkommen" als
+auch „dieses und alle folgenden" hinterlassen eine NEUE Zeile je Kalender —
+außerhalb der Gruppe. Ohne einen zweiten Schritt hätte das Mitziehen die
+Gruppierung ab dieser Stelle also aufgehoben: Was gerade eine Zeile geworden
+war, wäre wieder vier. Am Ende des Mitziehens werden die neuen Zeilen darum zu
+einer eigenen Gruppe zusammengefasst (die alte behält die Köpfe). Scheitert
+das, sagt der Dialog genau das — geschrieben ist trotzdem alles.
 
 **Stufe 3** — Erkennung und Vorschlag; das Meeting wandert an die Gruppe, die
 heutige Verknüpfungs-Rückfrage entfällt.
