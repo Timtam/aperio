@@ -229,6 +229,22 @@ impl ApiState {
     }
 }
 
+/// The one non-success answer that is not a failure: Google refusing a
+/// DIRECTORY listing to an account that has none.
+///
+/// Kept beside the logging it silences, and deliberately narrow — the status
+/// AND the precondition signature, so a genuine `400 INVALID_ARGUMENT` (a bad
+/// readMask, a request bug of ours) still shouts. `contacts::directory_unavailable`
+/// makes the same judgement for the error VALUE; this one exists because the
+/// logging happens a layer below, before any caller has judged anything.
+fn is_directory_precondition(status: u16, body: &str) -> bool {
+    if status != 400 {
+        return false;
+    }
+    let lower = body.to_ascii_lowercase();
+    lower.contains("failed_precondition") || lower.contains("g suite domain")
+}
+
 /// Decode the response body as JSON, surfacing HTTP errors as
 /// `GoogleError::Http`. `pub(crate)` for the tasks module — same
 /// rationale as `send_with_refresh` above.
@@ -241,7 +257,26 @@ pub(crate) async fn decode_json<T: DeserializeOwned>(
         let message: String = text.chars().take(300).collect();
         // Log the body — Google's error payload says WHY (e.g. "Invalid resource id
         // value") and is otherwise lost inside the propagated error.
-        warn!(status = status.as_u16(), body = %message, "google request failed");
+        //
+        // At WARN, except for the one answer that is not a failure. A personal
+        // account — and a Workspace one whose domain does not publish its
+        // directory — gets `400 FAILED_PRECONDITION "Must be a G Suite domain
+        // user."` for the directory listing, and the caller turns exactly that
+        // into an empty directory (`contacts::directory_unavailable`). This
+        // layer cannot see that decision, so it used to warn every refresh
+        // round, forever: one user's log carried 116 of them over two weeks and
+        // read as a broken Google account while nothing was wrong. A log that
+        // cries every half hour about an expected answer is a log nobody reads
+        // when something real happens.
+        if is_directory_precondition(status.as_u16(), &message) {
+            tracing::debug!(
+                status = status.as_u16(),
+                body = %message,
+                "google directory unavailable for this account (expected; empty directory)",
+            );
+        } else {
+            warn!(status = status.as_u16(), body = %message, "google request failed");
+        }
         return Err(GoogleError::Http {
             status: status.as_u16(),
             message,
@@ -1845,5 +1880,33 @@ mod tests {
         let state = fixture_state(&server.url());
         let err = list_calendars(&state).await.unwrap_err();
         assert!(matches!(err, GoogleError::Http { status: 500, .. }));
+    }
+}
+
+#[cfg(test)]
+mod directory_precondition_tests {
+    use super::is_directory_precondition;
+
+    /// The answer that costs nothing and used to shout every half hour.
+    #[test]
+    fn the_directory_precondition_is_recognised() {
+        let body = r#"{"error":{"code":400,"message":"Must be a G Suite domain user.","status":"FAILED_PRECONDITION"}}"#;
+        assert!(is_directory_precondition(400, body));
+    }
+
+    /// A request bug of ours must keep shouting: same status, different reason.
+    #[test]
+    fn a_real_bad_request_still_warns() {
+        let body =
+            r#"{"error":{"code":400,"message":"Invalid readMask","status":"INVALID_ARGUMENT"}}"#;
+        assert!(!is_directory_precondition(400, body));
+    }
+
+    /// And nothing else is silenced by accident.
+    #[test]
+    fn another_status_is_never_silenced() {
+        let body = r#"{"error":{"status":"FAILED_PRECONDITION"}}"#;
+        assert!(!is_directory_precondition(403, body));
+        assert!(!is_directory_precondition(500, body));
     }
 }

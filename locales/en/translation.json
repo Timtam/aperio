@@ -1910,6 +1910,7 @@
       "accountLabel": "{{name}} ({{kind}})",
       "refreshError": "Warning: updating this account is failing; shown data may be outdated.",
       "refreshErrorAuth": "Warning: updating this account is failing — re-enter the password under Settings, Accounts.",
+      "needsConnect": "Warning: this device is not signed in to this account — sign in again under Settings, Accounts. Nothing is being fetched until then.",
       "sectionLabel": "{{name}}",
       "empty": "No calendars or task lists yet — open this account in \"Manage accounts\" to check the connection.",
       "contextMenuHint": "Use arrow keys to navigate, Space to toggle visibility, Shift+F10 or the Menu key for actions."

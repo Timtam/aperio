@@ -64,6 +64,7 @@ import {
 import { useSidebarExpansion } from '../state/useSidebarExpansion';
 import { useTaskListShowCompleted } from '../state/useTaskListShowCompleted';
 import { useViewState } from '../state/viewStateContext';
+import { fetchAccountsNeedingConnect } from './accountsNeedingConnect';
 import { useRefreshErrors } from '../state/useRefreshErrors';
 import type { AccountRefreshErrors } from '../api/types';
 
@@ -158,6 +159,23 @@ export function Sidebar({
   } = useCalendarStore();
   const { openSettings, openTaskMembers, openSectionDialog } =
     useDialogState();
+  // Accounts this device holds no credentials for. A failing refresh is the
+  // SYMPTOM; a missing credential is the cause, and "updating is failing"
+  // sends the user to look at their network when the answer is one sign-in.
+  // Read from the same list the reconnect wizard uses, so the two can never
+  // disagree about which accounts are affected, and re-read whenever the
+  // account list itself changes (a sign-in is exactly such a change).
+  const [needsConnect, setNeedsConnect] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    void fetchAccountsNeedingConnect().then((pending) => {
+      if (cancelled) return;
+      setNeedsConnect(new Set((pending ?? []).map((a) => a.id)));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [accounts]);
   const expansion = useSidebarExpansion();
   const showCompleted = useTaskListShowCompleted();
   const { focusedCalendarId, enterFocus, exitFocus } = useViewState();
@@ -1360,6 +1378,7 @@ export function Sidebar({
             key={account.key}
             account={account}
             refreshError={errorsByAccount.get(account.accountId)}
+            needsConnect={needsConnect.has(account.accountId)}
             expansion={expansion}
             focusedKey={focusedKey}
             onFocusKey={setFocusedKey}
@@ -1644,11 +1663,15 @@ interface AccountSubtreeProps {
   /** Present when this account has failing container refreshes — drives
    *  the warning glyph + the appended screen-reader description. */
   refreshError?: AccountRefreshErrors;
+  /** This device holds no credentials for the account — it is not signed in
+   *  here, so nothing is even attempted against the provider. */
+  needsConnect?: boolean;
 }
 
 function AccountSubtree({
   account,
   refreshError,
+  needsConnect,
   expansion,
   focusedKey,
   onFocusKey,
@@ -1692,14 +1715,16 @@ function AccountSubtree({
             name: account.displayName,
             kind: t(`dialogs.accounts.kindName.${account.adapterKind}`),
           }) +
-          (refreshError
-            ? ' ' +
-              t(
-                refreshError.auth_suspected
-                  ? 'sidebar.tree.refreshErrorAuth'
-                  : 'sidebar.tree.refreshError',
-              )
-            : '')
+          (needsConnect
+            ? ' ' + t('sidebar.tree.needsConnect')
+            : refreshError
+              ? ' ' +
+                t(
+                  refreshError.auth_suspected
+                    ? 'sidebar.tree.refreshErrorAuth'
+                    : 'sidebar.tree.refreshError',
+                )
+              : '')
         }
         className="sidebar__row sidebar__row--account"
       >
@@ -1721,15 +1746,19 @@ function AccountSubtree({
               {account.children.length === 0 ? '·' : isOpen ? '▾' : '▸'}
             </span>
             <span className="sidebar__name">{account.displayName}</span>
-            {refreshError && (
+            {(needsConnect || refreshError) && (
               <span
                 className="sidebar__refresh-error"
                 aria-hidden="true"
-                title={t(
-                  refreshError.auth_suspected
-                    ? 'sidebar.tree.refreshErrorAuth'
-                    : 'sidebar.tree.refreshError',
-                )}
+                title={
+                  needsConnect
+                    ? t('sidebar.tree.needsConnect')
+                    : t(
+                        refreshError?.auth_suspected
+                          ? 'sidebar.tree.refreshErrorAuth'
+                          : 'sidebar.tree.refreshError',
+                      )
+                }
               >
                 ⚠️
               </span>
