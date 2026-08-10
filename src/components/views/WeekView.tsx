@@ -246,7 +246,7 @@ export function WeekView() {
     () => visibleRange('week', anchor, weekStartsOn),
     [anchor, weekStartsOn],
   );
-  const { events, calendarById, loading } = useEvents(range);
+  const { events: allEvents, calendarById, loading } = useEvents(range);
   const { tasks, taskListById } = useTasks();
   const { visualEffortSizing, dayViewMode, dayStartMin, dayEndMin } =
     useTaskCascadeEnabled();
@@ -335,8 +335,11 @@ export function WeekView() {
   );
 
   // The range as well as the events: with both in hand the hook can also
-  // repair members whose provider id changed (DESIGN-event-groups.md).
-  const groups = useEventGroups(events, range);
+  // repair members whose provider id changed, and group a videoconference
+  // meeting with the appointment it belongs to (DESIGN-event-groups.md). It
+  // hands back the rows to show — without the meetings whose appointment is
+  // in view and not grouped with them.
+  const { groups, events } = useEventGroups(allEvents, range);
   /**
    * The week's events per day, with each group folded into ONE chip.
    *

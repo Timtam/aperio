@@ -19,13 +19,18 @@ import type {
 import {
   collapseEventGroups,
   groupBadge,
+  eventGroupMemberKey,
   eventInstanceKey,
   expandAll,
   findHealableMembers,
+  findMeetingLinkPairs,
   findStaleSignatures,
   expandToDayOccurrences,
+  indexEventGroups,
   localDateKey,
+  memberFromEvent,
   seriesIdOf,
+  withoutDuplicateMeetings,
 } from '@aperio/shared';
 
 import {
@@ -37,6 +42,8 @@ import {
 import { listColorLabels } from '../api/colorLabels';
 import {
   eventGroupsForEvents,
+  groupEvents,
+  groupSuggestionDeclines,
   healEventGroupMember,
   refreshEventGroupSignature,
 } from '../api/eventGroups';
@@ -108,6 +115,8 @@ export default function AgendaScreen({
     return localMidnight(Number.isNaN(seed.getTime()) ? new Date() : seed);
   });
   const [eventGroups, setEventGroups] = useState<EventGroup[]>([]);
+  // Pairs this mount has already tried to group automatically — see `load`.
+  const linkAttempted = useRef(new Set<string>());
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [colorLabels, setColorLabels] = useState<ColorLabel[]>([]);
   const [occurrences, setOccurrences] = useState<DayOccurrence<CalendarEvent>[]>([]);
@@ -235,14 +244,50 @@ export default function AgendaScreen({
             await healEventGroupMember(member).catch(() => undefined);
           }
           if (reqToken.current !== token) return;
-          const fresh = healable.length
-            ? await eventGroupsForEvents(
-                visible.map((ev) => ({
-                  calendar_id: ev.calendar_id,
-                  event_id: seriesIdOf(ev),
-                })),
-              ).catch(() => found)
+          const refs = visible.map((ev) => ({
+            calendar_id: ev.calendar_id,
+            event_id: seriesIdOf(ev),
+          }));
+          let fresh = healable.length
+            ? await eventGroupsForEvents(refs).catch(() => found)
             : found;
+          // Group a videoconference meeting with the appointment it belongs
+          // to. Unlike the repairs above this WRITES a group, and it syncs —
+          // it is a statement about what an appointment is. It rests on the
+          // join URL, an identity the provider issued, which is why it may
+          // happen unasked while a name-and-time resemblance may not.
+          const declines = await groupSuggestionDeclines().catch(() => null);
+          if (reqToken.current !== token) return;
+          if (declines != null) {
+            const pairs = findMeetingLinkPairs(
+              visible,
+              fresh,
+              declines,
+              seriesIdOf,
+            ).filter((pair) => {
+              // Once per pair per mount: a pair that cannot be grouped must be
+              // tried once and then left alone.
+              const key = `${eventGroupMemberKey(pair.meeting.calendar_id, seriesIdOf(pair.meeting))}\n${eventGroupMemberKey(pair.event.calendar_id, seriesIdOf(pair.event))}`;
+              if (linkAttempted.current.has(key)) return false;
+              linkAttempted.current.add(key);
+              return true;
+            });
+            let grouped = false;
+            for (const pair of pairs) {
+              try {
+                await groupEvents([
+                  memberFromEvent({ ...pair.meeting, id: seriesIdOf(pair.meeting) }),
+                  memberFromEvent({ ...pair.event, id: seriesIdOf(pair.event) }),
+                ]);
+                grouped = true;
+              } catch {
+                // Refused or not written; the day looks as it did and this
+                // pair is not asked about again.
+              }
+            }
+            if (reqToken.current !== token) return;
+            if (grouped) fresh = await eventGroupsForEvents(refs).catch(() => fresh);
+          }
           if (reqToken.current === token) setEventGroups(fresh);
         })
         .catch(() => {
@@ -287,12 +332,18 @@ export default function AgendaScreen({
     }
     const kept: DayOccurrence<CalendarEvent>[] = [];
     const rows = new Map<string, CollapsedRow<CalendarEvent>>();
+    const byMember = indexEventGroups(eventGroups);
     for (const [dayKey, dayOccurrences] of byDay) {
-      const folded = collapseEventGroups(
+      // A videoconference meeting whose appointment is in view and NOT grouped
+      // with it is a duplicate and stays hidden. A grouped one is left here —
+      // folding hides it while counting it, and stops hiding it the moment the
+      // two disagree about when the appointment is (DESIGN-event-groups.md,
+      // Stufe 4).
+      const shown = withoutDuplicateMeetings(
         dayOccurrences.map((o) => o.ev),
-        eventGroups,
-        seriesIdOf,
+        (ev) => byMember.has(eventGroupMemberKey(ev.calendar_id, seriesIdOf(ev))),
       );
+      const folded = collapseEventGroups(shown, eventGroups, seriesIdOf);
       const survivors = new Set(folded.map((row) => eventInstanceKey(row.event)));
       for (const row of folded) {
         if (row.group) rows.set(`${eventInstanceKey(row.event)}@${dayKey}`, row);

@@ -29,8 +29,15 @@ export function isMeetingCalendarEvent(event: {
   return (event.calendar_id ?? '').endsWith('::meetings');
 }
 
-/** The join URL an event carries, or `null`. */
-function joinUrlOf(event: {
+/**
+ * The join URL an event carries, or `null`.
+ *
+ * Exported because the automatic grouping (`meetingLinkGrouping`) has to read
+ * the identity the SAME way this filter does. Two readers that disagree would
+ * mean a row this drops and the grouping never pairs — the duplicate would be
+ * gone with nothing to say where.
+ */
+export function meetingJoinUrl(event: {
   location?: string | null;
   description?: string | null;
 }): string | null {
@@ -56,20 +63,36 @@ export function withoutDuplicateMeetings<
     location?: string | null;
     description?: string | null;
   },
->(events: T[]): T[] {
+>(
+  events: T[],
+  /**
+   * Whether this row is already a member of a group (Stufe 4).
+   *
+   * A grouped meeting row must NOT be dropped here: the folding is what hides
+   * it then, and it hides it while COUNTING it — the row says "2×" and the
+   * group can be opened. Dropped first, the count would be a lie about a row
+   * that is not there.
+   *
+   * This is also the transition: as automatic grouping spreads, this filter
+   * quietly stops applying to the pairs it covers, and what is left is the
+   * case it was written for — a meeting whose partner is not in view.
+   */
+  isGrouped: (event: T) => boolean = () => false,
+): T[] {
   // Collect the links carried by REAL events first — a second synthesized
   // event for the same meeting (two accounts on one site, say) must not
   // suppress the first.
   const claimed = new Set<string>();
   for (const event of events) {
     if (isMeetingCalendarEvent(event)) continue;
-    const url = joinUrlOf(event);
+    const url = meetingJoinUrl(event);
     if (url) claimed.add(url);
   }
   if (claimed.size === 0) return events;
   return events.filter((event) => {
     if (!isMeetingCalendarEvent(event)) return true;
-    const url = joinUrlOf(event);
+    if (isGrouped(event)) return true;
+    const url = meetingJoinUrl(event);
     return url == null || !claimed.has(url);
   });
 }

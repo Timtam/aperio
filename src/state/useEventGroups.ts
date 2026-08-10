@@ -3,18 +3,43 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   eventGroupMemberKey,
   findHealableMembers,
+  findMeetingLinkPairs,
   findStaleSignatures,
+  indexEventGroups,
+  memberFromEvent,
+  withoutDuplicateMeetings,
   type EventGroup,
+  type SuggestionDecline,
 } from '@aperio/shared';
 
 import {
   eventGroupsForEvents,
+  groupEvents,
+  groupSuggestionDeclines,
   healEventGroupMember,
   refreshEventGroupSignature,
 } from '../api/client';
 import type { CalendarEvent } from '../api/types';
 import { seriesIdOf } from '../intl/recurrence';
 import { useDialogState } from './dialogStateContext';
+
+/** What a view renders, and what it knows about the groups behind it. */
+export interface GroupedEvents {
+  /** The groups any of the rows belong to, whole. */
+  groups: EventGroup[];
+  /**
+   * The rows to show.
+   *
+   * The same events, minus the videoconference meetings whose appointment is
+   * already in view and NOT grouped with them. A grouped one stays: folding is
+   * what hides it then, and folding hides it while still counting it — and
+   * stops hiding it the moment the two disagree about when the appointment is,
+   * which is the case the plain filter can never see (the join URL still
+   * matches, so it would go on hiding the meeting exactly when the mismatch
+   * matters). See `DESIGN-event-groups.md`, Stufe 4.
+   */
+  events: CalendarEvent[];
+}
 
 /**
  * The groups behind the events a view is about to render
@@ -29,13 +54,18 @@ import { useDialogState } from './dialogStateContext';
  * Keyed on the series masters in view, so paging back to a day whose events
  * are already known does not re-ask. Re-runs on `dataVersion`, like everything
  * else that has to notice a mutation.
+ *
+ * Given a range it also does the three things that need a whole window in
+ * hand: refreshing member signatures, healing members whose provider id
+ * changed, and grouping a videoconference meeting with the appointment it
+ * belongs to. All three are passes over evidence only a view has.
  */
 export function useEventGroups(
   events: readonly CalendarEvent[],
   /** The range `events` covers. Given, the hook also REPAIRS members whose
    *  provider id changed — see below. Omitted, it only reads. */
   range?: { start: Date; end: Date },
-): EventGroup[] {
+): GroupedEvents {
   const { dataVersion } = useDialogState();
   const [groups, setGroups] = useState<EventGroup[]>([]);
 
@@ -144,5 +174,83 @@ export function useEventGroups(
     };
   }, [groups, events, range, refsKey]);
 
-  return groups;
+  // The pairs the user has already pulled apart. `null` until they are known —
+  // NOT an empty list, because acting on "nothing is refused" before the
+  // refusals have arrived is exactly how a group the user dissolved would come
+  // back.
+  const [declines, setDeclines] = useState<SuggestionDecline[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    groupSuggestionDeclines()
+      .then((found) => {
+        if (!cancelled) setDeclines(found);
+      })
+      .catch(() => {
+        if (!cancelled) setDeclines(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dataVersion]);
+
+  /**
+   * Group a videoconference meeting with the appointment it belongs to.
+   *
+   * Unlike the two repairs above this WRITES a group, and the group syncs —
+   * because it is a statement about what an appointment is, not bookkeeping.
+   * Two devices doing it at once converge the way every other group does, by
+   * timestamp.
+   *
+   * Guarded by the same `attempted` ref: a pair that cannot be grouped (the
+   * two turn out to be in different groups, say) must be tried once and then
+   * left alone, or every render would ask again.
+   */
+  useEffect(() => {
+    if (range == null || declines == null) return;
+    const pairs = findMeetingLinkPairs(events, groups, declines, seriesIdOf).filter(
+      (pair) => {
+        const key = `link\n${eventGroupMemberKey(pair.meeting.calendar_id, seriesIdOf(pair.meeting))}\n${eventGroupMemberKey(pair.event.calendar_id, seriesIdOf(pair.event))}`;
+        if (attempted.current.has(key)) return false;
+        attempted.current.add(key);
+        return true;
+      },
+    );
+    if (pairs.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      let grouped = false;
+      for (const pair of pairs) {
+        try {
+          await groupEvents([
+            memberFromEvent({ ...pair.meeting, id: seriesIdOf(pair.meeting) }),
+            memberFromEvent({ ...pair.event, id: seriesIdOf(pair.event) }),
+          ]);
+          grouped = true;
+        } catch {
+          // Refused (two different groups) or failed to write. Either way the
+          // day looks exactly as it did before — the filter below still hides
+          // the duplicate — and the pair is not asked about again.
+        }
+      }
+      if (cancelled || !grouped || refsKey === '') return;
+      const refs = refsKey.split('\n').map((entry) => {
+        const [calendar_id, event_id] = JSON.parse(entry) as [string, string];
+        return { calendar_id, event_id };
+      });
+      const refreshed = await eventGroupsForEvents(refs).catch(() => null);
+      if (!cancelled && refreshed != null) setGroups(refreshed);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [groups, events, range, refsKey, declines]);
+
+  const visible = useMemo(() => {
+    const byMember = indexEventGroups(groups);
+    return withoutDuplicateMeetings([...events], (event) =>
+      byMember.has(eventGroupMemberKey(event.calendar_id, seriesIdOf(event))),
+    );
+  }, [events, groups]);
+
+  return { groups, events: visible };
 }

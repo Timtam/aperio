@@ -294,7 +294,7 @@ export function DayView() {
 
   // Pick up multi-day all-day events on every day of their span — see
   // intl/multiDay for the rationale.
-  const eventsToday = useMemo(
+  const eventsOnDay = useMemo(
     () => events.filter((ev) => eventCoversDay(ev, anchor)),
     [events, anchor],
   );
@@ -306,7 +306,10 @@ export function DayView() {
     () => ({ start: startOfDay(anchor), end: endOfDay(anchor) }),
     [anchor],
   );
-  const groups = useEventGroups(eventsToday, healRange);
+  // …and hands back the rows to show: a videoconference meeting whose
+  // appointment is in view and not grouped with it is a duplicate, and stays
+  // hidden (DESIGN-event-groups.md, Stufe 4).
+  const { groups, events: eventsToday } = useEventGroups(eventsOnDay, healRange);
   // One row per appointment instead of one per copy (DESIGN-event-groups.md,
   // Stufe 1). The folded-away members keep their place in the group's own
   // record; what disappears here is the repetition, not the data.

@@ -75,7 +75,30 @@ export default function EventGroupModal({
   // answer "not grouped". Without the distinction the screen would claim the
   // event is ungrouped for the first frame of every open.
   const [group, setGroup] = useState<EventGroup | null | undefined>(undefined);
-  const [dayEvents, setDayEvents] = useState<CalendarEvent[]>([]);
+  const [rawDayEvents, setRawDayEvents] = useState<CalendarEvent[]>([]);
+  /**
+   * The day's rows as this screen reads them.
+   *
+   * `withoutDuplicateMeetings` for the same reason every view runs it: a
+   * videoconference account contributes a read-only calendar of its own
+   * meetings, and the ones that already have a calendar entry are dropped
+   * there. Offering one here would invite the user to group an event with a
+   * row that is not shown anywhere.
+   *
+   * A meeting that is a member of THIS group stays. It is shown — folded into
+   * the row it belongs to — and this screen is where its own copy is named and
+   * opened (DESIGN-event-groups.md, Stufe 4).
+   */
+  const dayEvents = useMemo(() => {
+    const members = new Set(
+      (group?.members ?? []).map((m) =>
+        eventGroupMemberKey(m.calendar_id, m.event_id),
+      ),
+    );
+    return withoutDuplicateMeetings(rawDayEvents, (ev) =>
+      members.has(eventGroupMemberKey(ev.calendar_id, seriesIdOf(ev))),
+    );
+  }, [rawDayEvents, group]);
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [picked, setPicked] = useState('');
   const [busy, setBusy] = useState(false);
@@ -175,19 +198,11 @@ export default function EventGroupModal({
         // master lies outside it. `expandAll` is the same helper the day list
         // itself uses, so the picker offers exactly what the view showed.
         if (!cancelled) {
-          setDayEvents(
-            // `withoutDuplicateMeetings` for the same reason every view runs
-            // it: a videoconference account contributes a read-only calendar
-            // of its own meetings, and the ones that already have a calendar
-            // entry are dropped there. Offering them here would invite the
-            // user to group an event with a row that is not shown anywhere —
-            // and the group would then name something they cannot see.
-            withoutDuplicateMeetings(
-              expandAll(perCalendar.flat(), {
-                start: new Date(range.start),
-                end: new Date(range.end),
-              }),
-            ),
+          setRawDayEvents(
+            expandAll(perCalendar.flat(), {
+              start: new Date(range.start),
+              end: new Date(range.end),
+            }),
           );
         }
       } catch (err) {

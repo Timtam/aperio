@@ -64,10 +64,17 @@ export function AgendaView() {
   const { openEventDialog, openMoveCopy, invalidateData } = useDialogState();
 
   const range = useMemo(() => visibleRange('agenda', anchor), [anchor]);
-  const { events, calendarById, loading } = useEvents(range);
+  const { events: allEvents, calendarById, loading } = useEvents(range);
   const { openForEvent: openEventMenu } = useChipContextMenu();
   const { colorLabels } = useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
+
+  // The range as well as the events: with both in hand the hook can also
+  // repair members whose provider id changed, and group a videoconference
+  // meeting with the appointment it belongs to (DESIGN-event-groups.md). It
+  // hands back the rows to show — without the meetings whose appointment is
+  // in view and not grouped with them.
+  const { groups, events } = useEventGroups(allEvents, range);
 
   // Expand multi-day all-day events into one renderable row per
   // covered day. A 14-day vacation becomes 14 rows, each carrying
@@ -77,9 +84,6 @@ export function AgendaView() {
     () => expandToDayOccurrences(events, range),
     [events, range],
   );
-  // The range as well as the events: with both in hand the hook can also
-  // repair members whose provider id changed (DESIGN-event-groups.md).
-  const groups = useEventGroups(events, range);
   /**
    * One row per appointment instead of one per copy — folded PER DAY, which
    * is the contract `collapseEventGroups` documents: a recurring appointment

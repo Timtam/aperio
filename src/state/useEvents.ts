@@ -1,4 +1,3 @@
-import { withoutDuplicateMeetings } from '@aperio/shared';
 import { useEffect, useMemo, useState } from 'react';
 
 import { getEvents } from '../api/client';
@@ -193,17 +192,18 @@ export function useEvents(range: { start: Date; end: Date }) {
     // RRULE); rrule.js expands in the browser. Re-run on each arrival
     // over the accumulated set — cheap for the handful of calendars in
     // play.
-    // The meetings a videoconference account contributes are dropped here when
-    // a real event already shows the same meeting — matched on the join URL,
-    // which is exact. This is the only place all of the window's events are in
-    // hand; an adapter is asked for one calendar at a time and cannot know.
+    //
+    // Everything a calendar holds, INCLUDING the meetings a videoconference
+    // account contributes for appointments that already have a calendar entry.
+    // Hiding those duplicates is `useEventGroups`' job now, because the honest
+    // way to hide one is to group the two — and pairing them needs both rows,
+    // which only exist before any filtering. See `DESIGN-event-groups.md`,
+    // Stufe 4.
     const aggregate = (): CalendarEvent[] =>
-      withoutDuplicateMeetings(
-        expandAll(Array.from(perCalendar.values()).flat(), {
-          start: rangeStart,
-          end: rangeEnd,
-        }),
-      );
+      expandAll(Array.from(perCalendar.values()).flat(), {
+        start: rangeStart,
+        end: rangeEnd,
+      });
 
     ids.forEach((id) => {
       const ckey = perCalendarKey(id, startIso, endIso);

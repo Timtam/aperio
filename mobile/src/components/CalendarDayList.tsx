@@ -29,9 +29,13 @@ import {
   eventInstanceKey,
   withoutDuplicateMeetings,
   collapseEventGroups,
+  eventGroupMemberKey,
   groupBadge,
   findHealableMembers,
+  findMeetingLinkPairs,
   findStaleSignatures,
+  indexEventGroups,
+  memberFromEvent,
   seriesIdOf,
   type CollapsedRow,
   type EventGroup,
@@ -84,6 +88,8 @@ import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
 import type { RootStackParamList } from '../navigation/types';
 import {
   eventGroupsForEvents,
+  groupEvents,
+  groupSuggestionDeclines,
   healEventGroupMember,
   refreshEventGroupSignature,
 } from '../api/eventGroups';
@@ -684,14 +690,14 @@ export function CalendarDayList({
       setTaskLists(lists);
       // Expand recurring series across the whole window so an event recurring
       // mid-window isn't invisible after its first occurrence (rrule + EXDATE).
-      // Meetings a videoconference account contributes are dropped when a real
-      // event already shows the same meeting, matched on the join URL. Same
-      // shared rule the desktop runs, and the same reason it lives here: this
-      // is where the whole window's events are in hand.
+      //
+      // EVERYTHING, including the meetings a videoconference account
+      // contributes for appointments that already have a calendar entry.
+      // Hiding those duplicates happens further down, once the groups are
+      // known — because the honest way to hide one is to group the two, and
+      // pairing them needs both rows (DESIGN-event-groups.md, Stufe 4).
       setEvents(
-        withoutDuplicateMeetings(
-          expandAll(perCalendar.flat(), { start: range.start, end: range.end }),
-        ),
+        expandAll(perCalendar.flat(), { start: range.start, end: range.end }),
       );
       setTasks(perList.flat());
       setSections(perListSections.flat());
@@ -781,6 +787,8 @@ export function CalendarDayList({
   // per window, not one per row; whole groups come back, so a copy in a
   // switched-off calendar still counts toward what a folded row says.
   const [eventGroups, setEventGroups] = useState<EventGroup[]>([]);
+  // Pairs this mount has already tried to group automatically — see below.
+  const linkAttempted = useRef(new Set<string>());
   useEffect(() => {
     let cancelled = false;
     const refs = visibleEvents.map((ev) => ({
@@ -812,9 +820,50 @@ export function CalendarDayList({
         }
         if (cancelled) return;
         // Read back rather than patch locally: the stored group is the answer.
-        const fresh = healable.length
+        let fresh = healable.length
           ? await eventGroupsForEvents(refs).catch(() => found)
           : found;
+        // Group a videoconference meeting with the appointment it belongs to.
+        //
+        // Unlike the two repairs above this WRITES a group, and the group
+        // syncs — it is a statement about what an appointment is, not
+        // bookkeeping. It rests on the join URL, an identity the provider
+        // issued, which is why it may happen without being asked while
+        // name-and-time resemblance may not (DESIGN-event-groups.md, Stufe 4).
+        const declines = await groupSuggestionDeclines().catch(() => null);
+        if (cancelled) return;
+        if (declines != null) {
+          const pairs = findMeetingLinkPairs(
+            visibleEvents,
+            fresh,
+            declines,
+            seriesIdOf,
+          ).filter((pair) => {
+            // Once per pair per mount: a pair that cannot be grouped (the two
+            // turn out to be in different groups, say) must be tried once and
+            // then left alone, or every reload would ask again.
+            const key = `${eventGroupMemberKey(pair.meeting.calendar_id, seriesIdOf(pair.meeting))}\n${eventGroupMemberKey(pair.event.calendar_id, seriesIdOf(pair.event))}`;
+            if (linkAttempted.current.has(key)) return false;
+            linkAttempted.current.add(key);
+            return true;
+          });
+          let grouped = false;
+          for (const pair of pairs) {
+            try {
+              await groupEvents([
+                memberFromEvent({ ...pair.meeting, id: seriesIdOf(pair.meeting) }),
+                memberFromEvent({ ...pair.event, id: seriesIdOf(pair.event) }),
+              ]);
+              grouped = true;
+            } catch {
+              // Refused or not written. The day looks exactly as it did — the
+              // filter still hides the duplicate — and this pair is not asked
+              // about again.
+            }
+          }
+          if (cancelled) return;
+          if (grouped) fresh = await eventGroupsForEvents(refs).catch(() => fresh);
+        }
         if (!cancelled) setEventGroups(fresh);
       })
       .catch(() => {
@@ -826,6 +875,19 @@ export function CalendarDayList({
       cancelled = true;
     };
   }, [visibleEvents, range]);
+  // What the days actually draw: the same rows, minus a videoconference
+  // meeting whose appointment is in view and NOT grouped with it. A grouped
+  // one stays — folding hides it then, and folding hides it while counting it,
+  // and stops hiding it the moment the two disagree about when the appointment
+  // is. That last case is the one this filter can never see on its own: the
+  // join URL still matches after a move, so it would hide the meeting exactly
+  // when the mismatch matters (DESIGN-event-groups.md, Stufe 4).
+  const renderEvents = useMemo(() => {
+    const byMember = indexEventGroups(eventGroups);
+    return withoutDuplicateMeetings(visibleEvents, (ev) =>
+      byMember.has(eventGroupMemberKey(ev.calendar_id, seriesIdOf(ev))),
+    );
+  }, [visibleEvents, eventGroups]);
   // Expand recurring SCHEDULED tasks into one occurrence per planned day across
   // the visible window — so a task recurring every day/week shows on EVERY due
   // day here (like a recurring event), not only its single current
@@ -851,10 +913,10 @@ export function CalendarDayList({
     const rows = new Map<string, CollapsedRow<CalendarEvent>>();
     const built: DayBucket[] = days.map((date, i) => {
       const key = dayKeys[i];
-      const allDay = visibleEvents.filter(
+      const allDay = renderEvents.filter(
         (ev) => ev.all_day && daysCoveredKeys(ev).includes(key),
       );
-      const timedEvents = visibleEvents.filter(
+      const timedEvents = renderEvents.filter(
         // daysCoveredKeys spreads a timed event across midnight too, so a
         // 23:00→01:00 meeting buckets onto both days (mergeDayItems +
         // eventSpanForDay clamp each day's portion).
@@ -903,7 +965,7 @@ export function CalendarDayList({
   }, [
     days,
     dayKeys,
-    visibleEvents,
+    renderEvents,
     expandedTasks,
     eventGroups,
     showCompletedForList,
@@ -1809,7 +1871,7 @@ export function CalendarDayList({
               multi-day views would ask about a day the user is not reading. */}
           {dayLayout != null && buckets.length === 1 && (
             <GroupSuggestionNotice
-              events={visibleEvents}
+              events={renderEvents}
               groups={eventGroups}
               calendars={calendars}
               onChanged={() => void load()}

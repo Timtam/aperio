@@ -27,6 +27,7 @@ export * from './eventDateTime';
 export * from './accountSchema';
 export * from './conferencing';
 export * from './meetingEvents';
+export * from './meetingLinkGrouping';
 export * from './seriesSplit';
 export * from './titleSuggestions';
 export * from './eventGroups';

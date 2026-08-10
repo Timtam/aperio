@@ -114,7 +114,7 @@ export function EventGroupDialog({
    * series as its master row, so unexpanded it would offer series that do not
    * occur on this day and hide the ones whose master lies outside it.
    */
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [dayEvents, setDayEvents] = useState<CalendarEvent[]>([]);
   // Keyed by the ids alone: switching a calendar on or off changes how a
   // candidate is LABELLED, not which ones exist, and must not refetch the day.
   const calendarIdsKey = useMemo(
@@ -139,12 +139,7 @@ export function EventGroupDialog({
         ),
       );
       if (cancelled) return;
-      // `withoutDuplicateMeetings` for the same reason every view runs it: a
-      // videoconference account contributes a read-only calendar of its own
-      // meetings, and the ones that already have a calendar entry are dropped
-      // there. Offering them here would invite the user to group an event with
-      // a row that is not shown anywhere.
-      setEvents(withoutDuplicateMeetings(expandAll(perCalendar.flat(), range)));
+      setDayEvents(expandAll(perCalendar.flat(), range));
     })();
     return () => {
       cancelled = true;
@@ -202,6 +197,30 @@ export function EventGroupDialog({
   const reparkFocus = useCallback(() => {
     requestAnimationFrame(() => closeRef.current?.focus({ preventScroll: true }));
   }, []);
+
+  /**
+   * The day's rows as this dialog reads them.
+   *
+   * `withoutDuplicateMeetings` for the same reason every view runs it: a
+   * videoconference account contributes a read-only calendar of its own
+   * meetings, and the ones that already have a calendar entry are dropped
+   * there. Offering one here would invite the user to group an event with a
+   * row that is not shown anywhere.
+   *
+   * A meeting that is a member of THIS group stays. It is shown — folded into
+   * the row it belongs to — and this dialog is where its own copy is named and
+   * opened (DESIGN-event-groups.md, Stufe 4).
+   */
+  const events = useMemo(() => {
+    const members = new Set(
+      (group?.members ?? []).map((m) =>
+        eventGroupMemberKey(m.calendar_id, m.event_id),
+      ),
+    );
+    return withoutDuplicateMeetings(dayEvents, (ev) =>
+      members.has(eventGroupMemberKey(ev.calendar_id, seriesIdOf(ev))),
+    );
+  }, [dayEvents, group]);
 
   /**
    * The events that can be named as "the same appointment".
