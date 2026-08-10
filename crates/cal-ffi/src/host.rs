@@ -8483,7 +8483,11 @@ impl Host {
             new_calendar_id,
             new_event_id,
         ) {
-            Ok(Some(group)) => self.emit_event_group(&group),
+            Ok(Some(moved)) => {
+                self.emit_event_group(&moved.group);
+                // The marks moved with the member; they have to travel too.
+                self.emit_declines(&moved.carried);
+            }
             Ok(None) => {}
             Err(err) => tracing::warn!(?err, "could not follow the moved event's grouping"),
         }

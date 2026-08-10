@@ -112,10 +112,19 @@ export function useEventGroups(
       })
       .catch(() => {
         // A failed lookup means no folding this round — which is exactly what
-        // the app did before groups existed. Never an empty day. The key stays
-        // behind on purpose: an empty list from a FAILURE must not read as
-        // "there are no groups here" to anything that writes.
-        if (!cancelled) setGroups([]);
+        // the app did before groups existed. Never an empty day.
+        //
+        // And the key is CLEARED, not left alone. An empty list from a failure
+        // must not read as "there are no groups here" to anything that writes,
+        // and leaving the key behind only achieved that while the failure was
+        // the first fetch for this window: once it had succeeded once, a later
+        // failure downgraded the groups to [] while the key still said they
+        // described the window in hand — and the link pass would form groups
+        // that already exist, which is the whole reason the key exists.
+        if (!cancelled) {
+          setGroups([]);
+          setGroupsKey(null);
+        }
       });
     return () => {
       cancelled = true;

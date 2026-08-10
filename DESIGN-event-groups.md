@@ -313,9 +313,10 @@ vorher gesagt hatte, und das Paar wurde erneut gruppiert, ohne dass irgendetwas
 erklärt hätte, warum.
 
 **Ein gelöschter Termin hat nichts gesagt.** `ungroup` nimmt deshalb einen
-Grund entgegen (`Removal::ByUser` / `Removal::EventGone`). Nur das Herausnehmen
-durch den Nutzer schreibt eine Marke; das Aufräumen der Mitgliedschaft eines
-gelöschten Termins schreibt keine, die sonst den Termin überlebte und eine ID
+Grund entgegen (`Removal::ByUser` / `Removal::Bookkeeping`). Nur das Herausnehmen
+durch den Nutzer schreibt eine Marke; Aufräumen schreibt keine — weder bei der
+Mitgliedschaft eines gelöschten Termins noch bei einer Kopie, die der
+Serien-Übertrag gerade aus einer Gruppe in die nächste hebt, die sonst den Termin überlebte und eine ID
 bände, die der Anbieter neu vergeben kann.
 
 **Woher die Gruppe kommt, steht nicht an der Gruppe.** Der Entwurf wollte eine

@@ -54,15 +54,16 @@ impl SuggestionDecline {
 
     /// Whether this row currently refuses the pair.
     ///
-    /// The later statement wins, and a tie counts as refused: the two are
-    /// written by different code paths in the same transaction only when the
-    /// pair was declined and cleared at the identical instant, which cannot
-    /// happen in one device's history — a tie is two devices, and the safe
-    /// reading of "both at once" is the one that asks rather than assumes.
+    /// The later statement wins, and a TIE goes to the clearing. Grouping by
+    /// hand clamps its stamp to at least the refusal it is taking back, so a
+    /// clock running behind another device's cannot make the clearing dead on
+    /// arrival; that clamp is only worth anything if the equal case counts as
+    /// cleared. And the asymmetry is the right way round: a refusal that is
+    /// merely as old as the statement contradicting it has not outlived it.
     pub fn is_declined(&self) -> bool {
         match &self.cleared_at {
             None => true,
-            Some(cleared) => self.declined_at >= *cleared,
+            Some(cleared) => self.declined_at > *cleared,
         }
     }
 

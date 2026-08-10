@@ -82,6 +82,20 @@ export function filterCarriedOver(
  * (`open` / `in_progress`) — for a parent-row verdict that should drag its open
  * children along while leaving settled (completed/cancelled) ones untouched.
  */
+export function actionableDescendants(rootId: string, tasks: Task[]): Task[] {
+  const out: Task[] = [];
+  const stack: string[] = [rootId];
+  while (stack.length > 0) {
+    const id = stack.pop() as string;
+    for (const t of tasks) {
+      if (t.parent_id !== id) continue;
+      stack.push(t.id);
+      if (t.status === 'open' || t.status === 'in_progress') out.push(t);
+    }
+  }
+  return out;
+}
+
 /**
  * The task as it stands after "move the lapsed deadline to today".
  *
@@ -105,20 +119,6 @@ export function deadlineMovedToToday<T extends { deadline_date?: string | null }
   task: T,
 ): T {
   return { ...task, deadline_date: todayIsoKey() };
-}
-
-export function actionableDescendants(rootId: string, tasks: Task[]): Task[] {
-  const out: Task[] = [];
-  const stack: string[] = [rootId];
-  while (stack.length > 0) {
-    const id = stack.pop() as string;
-    for (const t of tasks) {
-      if (t.parent_id !== id) continue;
-      stack.push(t.id);
-      if (t.status === 'open' || t.status === 'in_progress') out.push(t);
-    }
-  }
-  return out;
 }
 
 /**

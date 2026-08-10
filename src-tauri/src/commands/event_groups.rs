@@ -285,7 +285,11 @@ pub(crate) fn relocate_event_grouping(
         new_calendar_id,
         new_event_id,
     ) {
-        Ok(Some(group)) => emit_group(event_log, &group),
+        Ok(Some(moved)) => {
+            emit_group(event_log, &moved.group);
+            // The marks moved with the member; they have to travel too.
+            emit_declines(event_log, &moved.carried);
+        }
         Ok(None) => {}
         Err(err) => tracing::warn!(?err, "could not follow the moved event's grouping"),
     }

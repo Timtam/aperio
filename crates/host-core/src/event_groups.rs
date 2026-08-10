@@ -18,7 +18,7 @@
 
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use cal_core::{EventGroup, EventGroupMember, SuggestionDecline};
 
@@ -66,6 +66,17 @@ pub enum Ungrouped {
 pub struct Grouped {
     pub group: EventGroup,
     pub cleared: Vec<SuggestionDecline>,
+}
+
+/// A group after one of its members moved, plus the refusals that moved with it.
+///
+/// The marks have to reach the other devices: they are TOLD the new member id
+/// rather than working it out, so nothing there would rewrite a mark of its
+/// own — see `carry_declines`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Relocated {
+    pub group: EventGroup,
+    pub carried: Vec<SuggestionDecline>,
 }
 
 /// Why a member is leaving its group — and so whether it means anything.
@@ -176,9 +187,17 @@ fn clear_decline(
     now: &str,
 ) -> Result<Option<SuggestionDecline>, EventGroupsError> {
     let key = SuggestionDecline::new(first, second, now.to_string());
+    // At least as late as the refusal it takes back, never merely "now".
+    //
+    // Clocks differ between devices, and the refusal may carry a stamp from one
+    // running ahead. Taking this device's wall clock would then write a
+    // clearing OLDER than what it contradicts — counted nowhere, yet reported
+    // as done and broadcast to everyone. The user's group would stand beside a
+    // mark saying it should not, which is exactly the contradiction this column
+    // exists to end.
     let changed = conn.execute(
         "UPDATE event_group_suggestion_declines
-            SET cleared_at = MAX(COALESCE(cleared_at, ''), ?)
+            SET cleared_at = MAX(COALESCE(cleared_at, ''), declined_at, ?)
           WHERE calendar_a = ? AND event_a = ? AND calendar_b = ? AND event_b = ?",
         params![
             now,
@@ -221,7 +240,7 @@ fn read_declines(conn: &rusqlite::Connection) -> Result<Vec<SuggestionDecline>, 
     let mut stmt = conn.prepare(
         "SELECT calendar_a, event_a, calendar_b, event_b, declined_at, cleared_at
            FROM event_group_suggestion_declines
-          WHERE cleared_at IS NULL OR declined_at >= cleared_at",
+          WHERE cleared_at IS NULL OR declined_at > cleared_at",
     )?;
     let rows = stmt
         .query_map([], |row| {
@@ -236,6 +255,70 @@ fn read_declines(conn: &rusqlite::Connection) -> Result<Vec<SuggestionDecline>, 
         })?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
+}
+
+/// Drop members until no refusal contradicts the ones that remain.
+///
+/// A group claims its members are one appointment. A mark says two of them are
+/// not — so the claim as a whole cannot stand, and one of the two has to go.
+///
+/// Which one, and in which order, has to be decided from the DATA alone or two
+/// devices holding identical rows would show different groups. So: of all the
+/// marks whose two sides are both still present, take the smallest in the
+/// canonical order the marks are already stored in and drop its second half.
+/// Repeat until nothing contradicts. A total order in gives a total order out —
+/// the storage order, the arrival order and the group's size are all
+/// irrelevant.
+///
+/// Doing this when a mark ARRIVES instead, by deleting the membership row, made
+/// the answer a function of what the database happened to hold at that instant:
+/// a mark landing before its group broke nothing and one landing after broke
+/// it, the snapshot path and the log path applied the two in opposite orders,
+/// and two marks sharing a member were not commutative because the first
+/// changed what the second could still find. Every one of those is arrival
+/// order deciding what the data means.
+///
+/// The membership itself is never touched. The rows stay as they are, and a
+/// clearing — grouping the pair by hand — simply makes the mark stop counting,
+/// which brings the member straight back.
+fn without_refused_pairs(
+    conn: &rusqlite::Connection,
+    members: Vec<EventGroupMember>,
+) -> Result<Vec<EventGroupMember>, EventGroupsError> {
+    if members.len() < 2 {
+        return Ok(members);
+    }
+    let present: HashSet<(String, String)> = members
+        .iter()
+        .map(|m| (m.calendar_id.clone(), m.event_id.clone()))
+        .collect();
+    // Only the marks that could speak about THESE members. The set is small —
+    // it grows only when someone says no — so one read beats a query per pair.
+    let mut refusals: Vec<(String, String, String, String)> = read_declines(conn)?
+        .into_iter()
+        .filter(|d| {
+            present.contains(&(d.calendar_a.clone(), d.event_a.clone()))
+                && present.contains(&(d.calendar_b.clone(), d.event_b.clone()))
+        })
+        .map(|d| (d.calendar_a, d.event_a, d.calendar_b, d.event_b))
+        .collect();
+    if refusals.is_empty() {
+        return Ok(members);
+    }
+    refusals.sort();
+
+    let mut dropped: HashSet<(String, String)> = HashSet::new();
+    while let Some((_, _, cb, eb)) = refusals.iter().find(|(ca, ea, cb, eb)| {
+        !dropped.contains(&(ca.clone(), ea.clone())) && !dropped.contains(&(cb.clone(), eb.clone()))
+    }) {
+        // The canonically-second half goes. Either choice breaks the pair; this
+        // one is a property of the mark, so every device makes it.
+        dropped.insert((cb.clone(), eb.clone()));
+    }
+    Ok(members
+        .into_iter()
+        .filter(|m| !dropped.contains(&(m.calendar_id.clone(), m.event_id.clone())))
+        .collect())
 }
 
 /// Read one group and its members.
@@ -273,6 +356,9 @@ fn read_group(
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
+    // A refusal contradicting two of these takes one of them out — the rule
+    // lives here, next to the one below and for the same reason.
+    let members = without_refused_pairs(conn, members)?;
     // Fewer than two members is not a group, and is not shown.
     //
     // Not deleted, though — the sync applier keeps a group that lost members
@@ -311,9 +397,9 @@ fn carry_declines(
     conn: &rusqlite::Connection,
     old: (&str, &str),
     new: (&str, &str),
-) -> Result<(), EventGroupsError> {
+) -> Result<Vec<SuggestionDecline>, EventGroupsError> {
     if old == new {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let affected: Vec<SuggestionDecline> = {
         let mut stmt = conn.prepare(
@@ -333,6 +419,7 @@ fn carry_declines(
         })?;
         rows.collect::<std::result::Result<Vec<_>, _>>()?
     };
+    let mut carried = Vec::new();
     for row in affected {
         let other = if (row.calendar_a.as_str(), row.event_a.as_str()) == old {
             (row.calendar_b.clone(), row.event_b.clone())
@@ -374,8 +461,9 @@ fn carry_declines(
               WHERE calendar_a = ? AND event_a = ? AND calendar_b = ? AND event_b = ?",
             params![row.calendar_a, row.event_a, row.calendar_b, row.event_b],
         )?;
+        carried.push(moved);
     }
-    Ok(())
+    Ok(carried)
 }
 
 /// Read/write access to event groups.
@@ -470,6 +558,41 @@ impl<'a> EventGroupsRepo<'a> {
                 ],
             )?;
         }
+        // Saying "these ARE one appointment" takes back every refusal among
+        // them — and this has to happen BEFORE the answer is read back.
+        //
+        // Reading first would ask `read_group`, which drops a member a refusal
+        // contradicts; the loop would then walk the SURVIVORS and never reach
+        // the pair whose mark is the reason one of them is missing. Grouping a
+        // refused pair by hand would have cleared nothing, quietly done
+        // nothing, and — for a pair — read back as a group of one, which is no
+        // group at all.
+        //
+        // Over the stored membership, and over every PAIR of it rather than
+        // only the ones this call named: they are all one appointment now, and
+        // a leftover mark between two of them is a contradiction the read side
+        // would act on.
+        let stored: Vec<(String, String)> = {
+            let mut stmt = tx.prepare(
+                "SELECT calendar_id, event_id FROM event_group_members
+                  WHERE group_id = ? ORDER BY calendar_id, event_id",
+            )?;
+            let rows = stmt.query_map(params![group_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let mut cleared = Vec::new();
+        for (i, first) in stored.iter().enumerate() {
+            for second in stored.iter().skip(i + 1) {
+                if let Some(row) = clear_decline(
+                    &tx,
+                    (first.0.as_str(), first.1.as_str()),
+                    (second.0.as_str(), second.1.as_str()),
+                    &now,
+                )? {
+                    cleared.push(row);
+                }
+            }
+        }
         // Read the answer back INSIDE the transaction. Committing first and
         // re-reading afterwards means letting go of the write lock in between,
         // where another thread's dissolve can land — and the `expect` that
@@ -477,32 +600,6 @@ impl<'a> EventGroupsRepo<'a> {
         // later database call in the process down with it. A row we just wrote
         // and have not yet released cannot be missing.
         let group = read_group(&tx, &group_id)?.ok_or(EventGroupsError::Vanished)?;
-        // Saying "these ARE one appointment" takes back every refusal among
-        // them.
-        //
-        // Without this the two statements could not both be honoured: an
-        // arriving mark is allowed to break a group that contradicts it, so a
-        // refusal from a device that was offline for three weeks would tear
-        // apart a group made deliberately yesterday, and there would be no way
-        // to stop it — nothing else in the app can take a mark back.
-        //
-        // Across every PAIR in the group, not only the ones named in this
-        // call: the members are now one appointment, and a leftover mark
-        // between two of them is a contradiction waiting for the next sync
-        // round to act on.
-        let mut cleared = Vec::new();
-        for (i, first) in group.members.iter().enumerate() {
-            for second in group.members.iter().skip(i + 1) {
-                if let Some(row) = clear_decline(
-                    &tx,
-                    (&first.calendar_id, &first.event_id),
-                    (&second.calendar_id, &second.event_id),
-                    &now,
-                )? {
-                    cleared.push(row);
-                }
-            }
-        }
         tx.commit()?;
         Ok(Grouped { group, cleared })
     }
@@ -600,7 +697,7 @@ impl<'a> EventGroupsRepo<'a> {
         old_event_id: &str,
         new_calendar_id: &str,
         new_event_id: &str,
-    ) -> Result<Option<EventGroup>, EventGroupsError> {
+    ) -> Result<Option<Relocated>, EventGroupsError> {
         let now = Utc::now().to_rfc3339();
         let mut conn = self.db.lock().expect("db mutex poisoned");
         let tx = conn.transaction()?;
@@ -652,15 +749,19 @@ impl<'a> EventGroupsRepo<'a> {
             params![now, group_id],
         )?;
         // The refusals name the id the membership just left — see
-        // `carry_declines`.
-        carry_declines(
+        // `carry_declines`. Unlike the healing, these have to TRAVEL: the other
+        // devices are told the new member id, they do not derive the move from
+        // evidence of their own, so nothing there would ever rewrite the marks.
+        // Left behind they would name an id that exists nowhere, and the pair
+        // would be groupable again as if nothing had been said.
+        let carried = carry_declines(
             &tx,
             (old_calendar_id, old_event_id),
             (new_calendar_id, new_event_id),
         )?;
         let group = read_group(&tx, &group_id)?;
         tx.commit()?;
-        Ok(group)
+        Ok(group.map(|group| Relocated { group, carried }))
     }
 
     /// Take every event of a calendar out of its groups.
@@ -1263,6 +1364,115 @@ mod tests {
             "the refusal moved with the event: {names:?}",
         );
         assert!(names.contains(&("acc::meetings", "vc::1")));
+    }
+
+    /// A refusal contradicting two members takes one of them out — wherever the
+    /// group is read, without touching a single stored row.
+    #[test]
+    fn a_refusal_takes_a_member_out_of_the_group_that_contradicts_it() {
+        let (_tmp, db) = fresh();
+        let shared = db.shared();
+        let repo = EventGroupsRepo::new(&shared);
+        let group = repo
+            .group(&[
+                member("work", "ev-a"),
+                member("private", "ev-b"),
+                member("colleague", "ev-c"),
+            ])
+            .unwrap()
+            .group;
+        assert_eq!(group.members.len(), 3);
+
+        repo.decline_suggestion(("work", "ev-a"), ("private", "ev-b"))
+            .unwrap();
+
+        let after = repo.get(&group.id).unwrap().expect("still a group");
+        assert_eq!(after.members.len(), 2, "one of the pair is gone");
+        // The canonically-second half — a property of the mark, so every device
+        // drops the same one.
+        assert!(after.members.iter().any(|m| m.event_id == "ev-c"));
+
+        // Nothing was deleted: taking the refusal back brings it straight back.
+        repo.group(&[member("work", "ev-a"), member("private", "ev-b")])
+            .unwrap();
+        assert_eq!(repo.get(&group.id).unwrap().unwrap().members.len(), 3);
+    }
+
+    /// Two refusals sharing a member are commutative — the old rule, which
+    /// deleted memberships as marks arrived, was not.
+    #[test]
+    fn two_refusals_sharing_a_member_give_one_answer() {
+        // The pairs are declined in both orders, in two fresh databases. If the
+        // rule read anything but the finished set, the two would disagree.
+        let mut answers = Vec::new();
+        for reversed in [false, true] {
+            let (_tmp, db) = fresh();
+            let shared = db.shared();
+            let repo = EventGroupsRepo::new(&shared);
+            let group = repo
+                .group(&[
+                    member("work", "ev-a"),
+                    member("private", "ev-b"),
+                    member("colleague", "ev-c"),
+                ])
+                .unwrap()
+                .group;
+            let pairs: [((&str, &str), (&str, &str)); 2] = [
+                (("work", "ev-a"), ("private", "ev-b")),
+                (("private", "ev-b"), ("colleague", "ev-c")),
+            ];
+            let order: Vec<_> = if reversed {
+                pairs.iter().rev().collect()
+            } else {
+                pairs.iter().collect()
+            };
+            for (first, second) in order {
+                repo.decline_suggestion(*first, *second).unwrap();
+            }
+            let after = repo.get(&group.id).unwrap();
+            answers.push(
+                after
+                    .map(|g| {
+                        let mut ids: Vec<_> = g.members.into_iter().map(|m| m.event_id).collect();
+                        ids.sort();
+                        ids
+                    })
+                    .unwrap_or_default(),
+            );
+        }
+        assert_eq!(answers[0], answers[1], "the order the marks were made in");
+    }
+
+    /// A clearing is never born already lost, however far the clocks differ.
+    #[test]
+    fn grouping_by_hand_wins_even_against_a_refusal_from_a_fast_clock() {
+        let (_tmp, db) = fresh();
+        let shared = db.shared();
+        let repo = EventGroupsRepo::new(&shared);
+        // A refusal stamped in the future, as a device with a fast clock would.
+        let ahead = (Utc::now() + chrono::Duration::hours(2)).to_rfc3339();
+        {
+            let conn = shared.lock().unwrap();
+            write_decline(
+                &conn,
+                &SuggestionDecline::new(("work", "ev-a"), ("private", "ev-b"), ahead),
+            )
+            .unwrap();
+        }
+        assert_eq!(repo.declined_suggestions().unwrap().len(), 1);
+
+        let grouped = repo
+            .group(&[member("work", "ev-a"), member("private", "ev-b")])
+            .unwrap();
+        assert_eq!(grouped.cleared.len(), 1);
+        assert!(
+            repo.declined_suggestions().unwrap().is_empty(),
+            "the clearing is clamped above the refusal, not stamped from this clock",
+        );
+        assert_eq!(
+            repo.get(&grouped.group.id).unwrap().unwrap().members.len(),
+            2
+        );
     }
 
     #[test]
