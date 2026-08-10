@@ -1507,7 +1507,8 @@
           "cleared": "Scheduled day removed.",
           "addDate": "Add scheduled day",
           "addTime": "Add time",
-          "clearTime": "Clear time"
+          "clearTime": "Remove the time",
+          "timeCleared": "Time removed; the day stays."
         },
         "deadline": {
           "legend": "Due by",
@@ -1518,7 +1519,8 @@
           "cleared": "Deadline removed.",
           "addDate": "Add deadline day",
           "addTime": "Add time",
-          "clearTime": "Clear time"
+          "clearTime": "Remove the time",
+          "timeCleared": "Time removed; the day stays."
         },
         "deadlineReminder": {
           "label": "Early reminder",

@@ -12,7 +12,9 @@ your day or week, and work through them.
    task** (`Alt+Shift+N`) the full form.
 3. Enter a **title**. Optionally:
    - the **task list** it is stored in,
-   - a **due date** (and optionally a time),
+   - a **due date** (and optionally a time), each removable on its own:
+     **Remove the time** strikes just the time and leaves the day standing,
+     **Remove** clears the whole slot,
    - a **priority**,
    - a **description**,
    - a **color label**,

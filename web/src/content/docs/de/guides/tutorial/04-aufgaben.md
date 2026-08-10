@@ -14,6 +14,8 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
 3. Gib einen **Titel** ein. Optional:
    - **Aufgabenliste**, in der sie gespeichert wird,
    - **Fälligkeitsdatum** (und optional Uhrzeit),
+     jeweils einzeln wieder entfernbar: **Uhrzeit entfernen** streicht nur die
+     Uhrzeit und lässt den Tag stehen, **Entfernen** räumt den ganzen Eintrag,
    - **Priorität**,
    - **Beschreibung**,
    - **Farb-Label**,

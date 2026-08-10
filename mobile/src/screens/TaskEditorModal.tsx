@@ -914,6 +914,7 @@ export default function TaskEditorModal({
         clearLabel={t('dialogs.task.fields.scheduled.clear')}
         addTimeLabel={t('dialogs.task.fields.scheduled.addTime')}
         clearTimeLabel={t('dialogs.task.fields.scheduled.clearTime')}
+        timeClearedLabel={t('dialogs.task.fields.scheduled.timeCleared')}
         dateValue={form.scheduledDate}
         timeValue={form.scheduledTime}
         onChangeDate={(v) => update('scheduledDate', v)}
@@ -932,6 +933,7 @@ export default function TaskEditorModal({
         clearLabel={t('dialogs.task.fields.deadline.clear')}
         addTimeLabel={t('dialogs.task.fields.deadline.addTime')}
         clearTimeLabel={t('dialogs.task.fields.deadline.clearTime')}
+        timeClearedLabel={t('dialogs.task.fields.deadline.timeCleared')}
         dateValue={form.deadlineDate}
         timeValue={form.deadlineTime}
         onChangeDate={(v) => update('deadlineDate', v)}
@@ -1123,6 +1125,7 @@ function DateTimeField({
   clearLabel,
   addTimeLabel,
   clearTimeLabel,
+  timeClearedLabel,
   dateValue,
   timeValue,
   onChangeDate,
@@ -1139,6 +1142,9 @@ function DateTimeField({
   clearLabel: string;
   addTimeLabel: string;
   clearTimeLabel: string;
+  /** Spoken when the time alone is removed — the day stays, and that is the
+   *  point. */
+  timeClearedLabel: string;
   dateValue: string;
   timeValue: string;
   onChangeDate: (v: string) => void;
@@ -1150,6 +1156,24 @@ function DateTimeField({
   const styles = useThemedStyles(makeStyles);
   const hasDate = dateValue.trim() !== '';
   const hasTime = timeValue.trim() !== '';
+  /**
+   * Where focus goes when the TIME alone is removed.
+   *
+   * Pressing "remove the time" takes that button off the screen — the row it
+   * sits in is replaced by the "add a time" one. Without a repark VoiceOver is
+   * left on a control that no longer exists and falls back to the top of the
+   * screen, which in a long editor means finding your way back down through
+   * every field. The button that replaced it is the honest landing place: same
+   * spot, and it undoes what was just done.
+   */
+  const addTimeRef = useRef<View>(null);
+  const reparkOnAddTime = useRef(false);
+  useEffect(() => {
+    if (hasTime || !reparkOnAddTime.current) return;
+    reparkOnAddTime.current = false;
+    const tag = findNodeHandle(addTimeRef.current);
+    if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+  }, [hasTime]);
   // Native date/time pickers (the same compact @expo/ui control the calendar
   // jump-to-date uses), mounted on demand: no day until the user adds one, no
   // time slot until they add that. The form still holds 'YYYY-MM-DD' / 'HH:MM'
@@ -1195,6 +1219,7 @@ function DateTimeField({
           </View>
           {!hasTime ? (
             <Pressable
+              ref={addTimeRef}
               accessibilityRole="button"
               accessibilityLabel={`${legend} – ${addTimeLabel}`}
               accessibilityState={{ disabled: !editable }}
@@ -1223,7 +1248,13 @@ function DateTimeField({
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`${legend} – ${clearTimeLabel}`}
-                onPress={() => onChangeTime('')}
+                onPress={() => {
+                  reparkOnAddTime.current = true;
+                  onChangeTime('');
+                  // Said out loud: the day stays, and that is the whole point
+                  // of removing the time on its own.
+                  AccessibilityInfo.announceForAccessibility(timeClearedLabel);
+                }}
                 style={({ pressed }) => [styles.ghostButton, pressed && styles.ghostPressed]}
               >
                 <Text style={styles.ghostButtonText}>{clearTimeLabel}</Text>

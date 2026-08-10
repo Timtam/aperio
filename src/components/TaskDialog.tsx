@@ -291,6 +291,10 @@ export function TaskDialog({
   // the date is empty, so focus would otherwise fall to <body>).
   const scheduledDateRef = useRef<HTMLInputElement>(null);
   const deadlineDateRef = useRef<HTMLInputElement>(null);
+  // The time fields take focus back when only the TIME is cleared — the field
+  // stays, so leaving focus on a button that has just vanished would strand it.
+  const scheduledTimeRef = useRef<HTMLInputElement>(null);
+  const deadlineTimeRef = useRef<HTMLInputElement>(null);
   // The edit-mode "add subtask" input. Focus returns here after each add so the
   // user can keep typing the next subtask (the button blurs to <body> when its
   // title clears — this keeps focus inside the dialog).
@@ -590,6 +594,17 @@ export function TaskDialog({
     scheduledDateRef.current?.focus();
     announce(t('dialogs.task.fields.scheduled.cleared'));
   }, [announce, t]);
+  // …and the TIME alone, keeping the day. A task moves from "Tuesday at 14:00"
+  // to "some time on Tuesday" often enough that having to clear the whole slot
+  // and type the date again was the wrong shape — and a native
+  // `<input type="time">` is no more emptiable by keyboard than a date one.
+  // Focus stays on the time field: it is still there, just empty, and it is
+  // where the user was.
+  const clearScheduledTime = useCallback(() => {
+    setForm((prev) => ({ ...prev, scheduledTime: '' }));
+    scheduledTimeRef.current?.focus();
+    announce(t('dialogs.task.fields.scheduled.timeCleared'));
+  }, [announce, t]);
   const clearDeadline = useCallback(() => {
     // Drop the per-task reminder override alongside the date+time — the
     // override is meaningless without a deadline (mirrors deadlineTime).
@@ -601,6 +616,15 @@ export function TaskDialog({
     }));
     deadlineDateRef.current?.focus();
     announce(t('dialogs.task.fields.deadline.cleared'));
+  }, [announce, t]);
+
+  const clearDeadlineTime = useCallback(() => {
+    // The deadline's reminder override counts in DAYS before the deadline, so
+    // it still means something without a time of day — unlike the date, which
+    // it cannot survive.
+    setForm((prev) => ({ ...prev, deadlineTime: '' }));
+    deadlineTimeRef.current?.focus();
+    announce(t('dialogs.task.fields.deadline.timeCleared'));
   }, [announce, t]);
 
   // Subtask mutations apply immediately (not staged with the parent
@@ -1488,6 +1512,7 @@ export function TaskDialog({
                 {t('dialogs.task.fields.scheduled.time')}
               </span>
               <input
+                ref={scheduledTimeRef}
                 type="time"
                 value={form.scheduledTime}
                 onChange={(e) => update('scheduledTime', e.target.value)}
@@ -1496,6 +1521,15 @@ export function TaskDialog({
               />
             </label>
           </div>
+          {form.scheduledTime && form.scheduledDate && (
+            <button
+              type="button"
+              className="form__inline-clear"
+              onClick={clearScheduledTime}
+            >
+              {t('dialogs.task.fields.scheduled.clearTime')}
+            </button>
+          )}
           {form.scheduledDate && (
             <button
               type="button"
@@ -1531,6 +1565,7 @@ export function TaskDialog({
                 {t('dialogs.task.fields.deadline.time')}
               </span>
               <input
+                ref={deadlineTimeRef}
                 type="time"
                 value={form.deadlineTime}
                 onChange={(e) => update('deadlineTime', e.target.value)}
@@ -1539,6 +1574,15 @@ export function TaskDialog({
               />
             </label>
           </div>
+          {form.deadlineTime && form.deadlineDate && (
+            <button
+              type="button"
+              className="form__inline-clear"
+              onClick={clearDeadlineTime}
+            >
+              {t('dialogs.task.fields.deadline.clearTime')}
+            </button>
+          )}
           {form.deadlineDate && (
             <label className="form__field">
               <span className="form__label">
