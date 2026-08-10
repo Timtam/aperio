@@ -33,6 +33,7 @@ import {
   writeSeriesSplit,
 } from '../intl/recurrence';
 import {
+  eventPrefillFrom,
   planCarry,
   worthCarrying,
   type CarryableFields,
@@ -62,6 +63,11 @@ import {
   toIso,
 } from '@aperio/shared';
 import { EventRsvp } from './EventRsvp';
+import { TitleSuggestBox } from './TitleSuggestBox';
+import {
+  rankEventSuggestions,
+  useTitleSuggestions,
+} from '../state/useTitleSuggestions';
 import { readLastUsedCalendar, writeLastUsedCalendar } from './lastUsedCalendar';
 import { Modal } from './Modal';
 import { RecurrenceSelector } from './RecurrenceSelector';
@@ -338,6 +344,63 @@ export function EventDialog({
 
 
   const [form, setForm] = useState<FormState>(initialState);
+  /**
+   * Earlier appointments with this name, offered while a NEW one is typed.
+   *
+   * Only while creating: opening an existing event and touching its title must
+   * not offer to overwrite it with an older version of itself.
+   */
+  const titleMatches = useTitleSuggestions(form.title, 'events', !isEdit && isOpen);
+  const titleOptions = useMemo(
+    () =>
+      rankEventSuggestions(titleMatches, form.title).map(({ item }) => ({
+        id: item.id,
+        title: item.title,
+        hint: calendars.find((c) => c.id === item.calendar_id)?.name,
+      })),
+    [titleMatches, form.title, calendars],
+  );
+  const acceptTitleSuggestion = useCallback(
+    (id: string) => {
+      const source = titleMatches.find((e) => e.id === id);
+      if (!source) return;
+      const fill = eventPrefillFrom(source);
+      setForm((prev) => {
+        // The DAY stays exactly as it was — it is what makes this a new
+        // appointment, and it came from wherever the user opened the editor.
+        // Only the LENGTH travels, laid onto that day.
+        const start = new Date(`${prev.startDate}T${prev.startTime || '00:00'}`);
+        const end = new Date(start.getTime() + fill.durationMinutes * 60_000);
+        return {
+          ...prev,
+          title: fill.title,
+          description: fill.description ?? '',
+          location: fill.location ?? '',
+          allDay: fill.all_day,
+          endDate: fill.all_day ? prev.endDate : dateInput(end),
+          endTime: fill.all_day ? prev.endTime : timeInput(end),
+          rrule: fill.rrule,
+          colorLabel: fill.color_label,
+          reminders: fill.reminders as Reminder[],
+          attendees: fill.attendees,
+          calendarId:
+            calendars.some((c) => c.id === fill.calendar_id && !c.read_only)
+              ? fill.calendar_id
+              : prev.calendarId,
+        };
+      });
+      // Attendees came along, so the invitation toggle goes OFF. Filling a
+      // form from something you wrote once is not the same as deciding to
+      // email eight people about it, and that decision has to stay the user's
+      // — the toggle is right there, and it is announced.
+      if (fill.attendees.length > 0) setNotifyAttendees(false);
+      // The reminders came from a real earlier event, so they are the user's
+      // own and must be written as such — not treated as the calendar default
+      // the editor would otherwise send as an empty list.
+      setKeepRemindersAsDefault(false);
+    },
+    [titleMatches, calendars],
+  );
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // Flips to `false` the moment the user touches the reminders editor.
@@ -1088,16 +1151,14 @@ export function EventDialog({
         {isEdit && event && (
           <EventRsvp event={event} onResponded={onClose} />
         )}
-        <label className="form__field">
-          <span className="form__label">{t('dialogs.event.fields.title')}</span>
-          <input
-            type="text"
-            value={form.title}
-            onChange={(e) => update('title', e.target.value)}
-            required
-            autoComplete="off"
-          />
-        </label>
+        <TitleSuggestBox
+          label={t('dialogs.event.fields.title')}
+          value={form.title}
+          onChange={(v) => update('title', v)}
+          options={titleOptions}
+          onAccept={acceptTitleSuggestion}
+          required
+        />
 
         <label className="form__field">
           <span className="form__label">

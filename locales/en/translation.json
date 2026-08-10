@@ -2116,5 +2116,11 @@
       "statusOpen": "Open",
       "statusInProgress": "In progress"
     }
+  },
+  "suggestions": {
+    "popupLabel": "Earlier entries with this name",
+    "count_one": "One earlier entry, reachable with the arrow keys.",
+    "count_other": "{{count}} earlier entries, reachable with the arrow keys.",
+    "applied": "Filled in from \"{{title}}\". The day stays as it was."
   }
 }

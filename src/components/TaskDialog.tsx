@@ -27,7 +27,11 @@ import {
   type ContextMenuItemRequest,
 } from '../api/client';
 import { invoke } from '@tauri-apps/api/core';
-import { selectableTaskLists, selfAssignOnStatusChange } from '@aperio/shared';
+import {
+  selectableTaskLists,
+  selfAssignOnStatusChange,
+  taskPrefillFrom,
+} from '@aperio/shared';
 import { todayIsoKey } from '../intl/taskDay';
 import {
   effortSuffix,
@@ -67,6 +71,11 @@ import { readLastUsedTaskList, writeLastUsedTaskList } from './lastUsedTaskList'
 import { AssigneePicker } from './AssigneePicker';
 import { ColorLabelSelect } from './ColorLabelSelect';
 import { Modal } from './Modal';
+import { TitleSuggestBox } from './TitleSuggestBox';
+import {
+  rankTaskSuggestions,
+  useTitleSuggestions,
+} from '../state/useTitleSuggestions';
 import { RemindersEditor } from './RemindersEditor';
 import { SoundPrefField } from './SoundPrefField';
 import { TaskRecurrenceSelector } from './TaskRecurrenceSelector';
@@ -280,6 +289,47 @@ export function TaskDialog({
   );
 
   const [form, setForm] = useState<FormState>(initialState);
+  /**
+   * Earlier tasks with this name, offered while a NEW one is typed.
+   *
+   * Only while creating: opening an existing task and touching its title must
+   * not offer to overwrite it with an older version of itself.
+   */
+  const titleMatches = useTitleSuggestions(form.title, 'tasks', !isEdit && isOpen);
+  const titleOptions = useMemo(
+    () =>
+      rankTaskSuggestions(titleMatches, form.title).map(({ item }) => ({
+        id: item.id,
+        title: item.title,
+        hint: taskLists.find((l) => l.id === item.list_id)?.name,
+      })),
+    [titleMatches, form.title, taskLists],
+  );
+  const acceptTitleSuggestion = useCallback(
+    (id: string) => {
+      const source = titleMatches.find((task) => task.id === id);
+      if (!source) return;
+      const fill = taskPrefillFrom(source);
+      setForm((prev) => ({
+        ...prev,
+        title: fill.title,
+        description: fill.description ?? '',
+        priority: fill.priority as FormState['priority'],
+        effort: fill.effort as FormState['effort'],
+        colorLabel: fill.color_label,
+        reminders: fill.reminders as Reminder[],
+        recurrence: recurrenceFromBackend(fill.recurrence),
+        deadlineReminderDays: fill.deadline_reminder_days,
+        // The DAYS stay exactly as they were: what makes this a new task is
+        // when it is due, and that came from wherever the user opened the
+        // editor. The list travels, though — a task called this belongs where
+        // the last one did — unless it is a subtask, which is glued to its
+        // parent's list.
+        listId: isSubtask ? prev.listId : (fill.list_id ?? prev.listId),
+      }));
+    },
+    [titleMatches, isSubtask],
+  );
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // Create mode only: subtask titles staged on the form. A brand-new
@@ -1193,17 +1243,15 @@ export function TaskDialog({
       dismissOnBackdrop={false}
     >
       <form onSubmit={onSubmit} className="form">
-        <label className="form__field">
-          <span className="form__label">{t('dialogs.task.fields.title')}</span>
-          <input
-            ref={titleInputRef}
-            type="text"
-            value={form.title}
-            onChange={(e) => update('title', e.target.value)}
-            required
-            autoComplete="off"
-          />
-        </label>
+        <TitleSuggestBox
+          label={t('dialogs.task.fields.title')}
+          value={form.title}
+          onChange={(v) => update('title', v)}
+          options={titleOptions}
+          onAccept={acceptTitleSuggestion}
+          inputRef={titleInputRef}
+          required
+        />
 
         <label className="form__field">
           <span className="form__label">{t('dialogs.task.fields.list')}</span>

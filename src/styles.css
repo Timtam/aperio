@@ -5209,6 +5209,70 @@ button[aria-disabled='true'] {
   }
 }
 
+/* ── Title suggestions (the two editors' title field) ───────────────────── */
+
+/*
+ * The same shape as the attendee popup, because it is the same interaction:
+ * a combobox over a text field. Only the ANCHOR differs — the title field is a
+ * plain form row, so the wrapper carries the positioning context.
+ */
+.title-suggest {
+  position: relative;
+}
+
+.title-suggest__label {
+  /* The wrapper is already a `form__field`; the inner label must not stack a
+     second field's worth of spacing on top of it. */
+  margin: 0;
+  padding: 0;
+}
+
+.title-suggest__popup {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  left: 0;
+  right: 0;
+  list-style: none;
+  margin: 0;
+  padding: var(--space-1);
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  z-index: 50;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+.title-suggest__option {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.title-suggest__option--focused {
+  background: var(--color-bg-elevated);
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.title-suggest__option-hint {
+  font-size: 0.85em;
+  opacity: 0.7;
+}
+
+@media (forced-colors: active) {
+  .title-suggest__popup {
+    box-shadow: none;
+  }
+  /* `background` is ignored in forced colours, so the highlight has to be a
+     border — otherwise the arrowed-to row looks like every other one. */
+  .title-suggest__option--focused {
+    border: 1px solid Highlight;
+  }
+}
+
 /* ── Toast stack (Undo-Toast for silent task batches) ───────────────────── */
 
 /*

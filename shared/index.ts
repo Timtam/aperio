@@ -28,6 +28,7 @@ export * from './accountSchema';
 export * from './conferencing';
 export * from './meetingEvents';
 export * from './seriesSplit';
+export * from './titleSuggestions';
 export * from './eventGroups';
 export * from './collapseEventGroups';
 export * from './groupCarry';
