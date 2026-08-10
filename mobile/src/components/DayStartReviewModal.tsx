@@ -35,6 +35,7 @@ import { refreshRemindersSoon } from '../reminders/scheduler';
 import { snoozeDayStartReview } from '../state/dayStartSnooze';
 import {
   effectiveForList,
+  priorityScaleFor,
   readTaskBehaviour,
   TASK_BEHAVIOUR_DEFAULTS,
   type TaskBehaviour,
@@ -95,6 +96,8 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   // modal opens; until then we render a loading state (cascade grouping needs
   // the real values). resolvedIds also resets per opening.
   const [behaviour, setBehaviour] = useState<TaskBehaviour | null>(null);
+  // Until the prefs land, read the world as three levels — the default.
+  const priorityScale = priorityScaleFor(behaviour?.twoLevelPriority ?? false);
   const [busy, setBusy] = useState(false);
   // Rows the user just handled vanish instantly even before the update_task
   // round-trip + refetch land — otherwise every tap feels laggy.
@@ -634,7 +637,7 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
   };
 
   const rowLabel = (task: Task, meta: string | null): string => {
-    const base = `${task.title}${prioritySuffix(tr, task.priority)}`;
+    const base = `${task.title}${prioritySuffix(tr, task.priority, priorityScale)}`;
     return meta ? `${base}, ${meta}` : base;
   };
 
@@ -644,7 +647,7 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
     actions: { label: string; primary?: boolean; destructive?: boolean; onPress: () => void }[],
   ) => {
     const meta = dateMeta(task, kind);
-    const marker = priorityMarker(task.priority);
+    const marker = priorityMarker(task.priority, priorityScale);
     return (
       <View key={task.id} style={styles.row}>
         <Text
@@ -657,7 +660,7 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
           style={styles.rowTitle}
         >
           {task.title}
-          {task.priority !== 'medium' ? (
+          {marker !== '' ? (
             <Text style={styles.rowPriority} importantForAccessibility="no">
               {'  '}
               {marker}

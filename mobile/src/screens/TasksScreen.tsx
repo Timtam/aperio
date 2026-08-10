@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import type { Entry, Task } from '@aperio/shared';
+import type { Entry, PriorityScale, Task } from '@aperio/shared';
 import {
   assigneeSuffix,
   buildEntries,
@@ -48,7 +48,7 @@ import { hapticLoadBegin, hapticLoadEnd } from '../state/haptics';
 import { useCurrentUserByList } from '../state/currentUser';
 import { useTaskStore } from '../state/taskStoreContext';
 import { surfaceTaskNow } from '../state/moveActions';
-import { readTaskBehaviour } from '../state/taskBehaviour';
+import { priorityScaleFor, readTaskBehaviour } from '../state/taskBehaviour';
 import { applyTaskToggle, recomputeAncestors, statusAnnounce } from '../state/taskToggle';
 import { useTasks } from '../state/useTasks';
 import { MagicTapView } from '../components/MagicTapView';
@@ -140,9 +140,13 @@ export default function TasksScreen({
   // or a peer's sync — reflects here without an app restart. Purely visual; the
   // SR effort suffix is appended unconditionally below regardless of this flag.
   const [effortSizing, setEffortSizing] = useState(true);
+  const [priorityScale, setPriorityScale] = useState<PriorityScale>('three');
   useEffect(() => {
     const read = () =>
-      void readTaskBehaviour().then((b) => setEffortSizing(b.visualEffortSizing));
+      void readTaskBehaviour().then((b) => {
+        setEffortSizing(b.visualEffortSizing);
+        setPriorityScale(priorityScaleFor(b.twoLevelPriority));
+      });
     read();
     const unsubscribe = navigation.addListener('focus', read);
     return unsubscribe;
@@ -244,6 +248,7 @@ export default function TasksScreen({
         today,
         currentUserByList,
         groupBy,
+        priorityScale,
       ).entries,
     [
       tasks,
@@ -254,6 +259,7 @@ export default function TasksScreen({
       today,
       currentUserByList,
       groupBy,
+      priorityScale,
     ],
   );
 
@@ -568,7 +574,7 @@ export default function TasksScreen({
       t('views.tasks.optionLabel', {
         title: task.title,
         state: t(statusI18nKey(task.status)),
-        priority: prioritySuffix(tr, task.priority),
+        priority: prioritySuffix(tr, task.priority, priorityScale),
         progress: subtaskProgressSuffix(tr, task.id, tasks),
         due: describeDue(task, tr, today, formatDate),
         assignee: assigneeSuffix(tr, task.assignees),

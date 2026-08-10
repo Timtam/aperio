@@ -10,9 +10,17 @@ import {
   View,
 } from 'react-native';
 
-import type { Task, TaskList, TaskPriority, TaskStatus } from '@aperio/shared';
+import type {
+  PriorityScale,
+  Task,
+  TaskList,
+  TaskPriority,
+  TaskStatus,
+} from '@aperio/shared';
 import {
   effortSuffix,
+  isImportantPriority,
+  normalPriority,
   prioritySuffix,
   statusI18nKey,
   statusMarker,
@@ -62,6 +70,7 @@ function errorMessage(err: unknown): string {
 export function SubtaskSection({
   parentTask,
   list,
+  priorityScale,
   onChanged,
   onParentSync,
 }: {
@@ -70,6 +79,8 @@ export function SubtaskSection({
   /** The parent's owning list (for the `supports_in_progress` capability + the
    *  per-list cascade/auto-date knobs). */
   list: TaskList | undefined;
+  /** The user's priority system, read once by the editor above. */
+  priorityScale: PriorityScale;
   /** Bump the editor's data version so the underlying list refetches on close. */
   onChanged: () => void;
   /** Report the parent's fresh state after a mutation so the editor adopts a
@@ -189,19 +200,38 @@ export function SubtaskSection({
     [all, list, reload, onChanged, t],
   );
 
+  // One rotor action, two behaviours. With three levels it walks the scale;
+  // with two there is no scale to walk, so it flips the mark — and clearing
+  // lands on `medium`, because what the task was before is not recorded.
   const cyclePriority = useCallback(
     async (sub: Task) => {
-      const next = nextPriority(sub.priority);
+      const twoLevel = priorityScale === 'two';
+      const next = twoLevel
+        ? isImportantPriority(sub.priority)
+          ? normalPriority()
+          : 'high'
+        : nextPriority(sub.priority);
       try {
         await updateTask({ ...sub, priority: next });
         await reload();
         onChanged();
-        announce(t('mobile.priorityCycled', { priority: t(`dialogs.task.priority.${next}`) }));
+        announce(
+          twoLevel
+            ? t(
+                isImportantPriority(next)
+                  ? 'chipMenu.importantSet'
+                  : 'chipMenu.importantCleared',
+                { title: sub.title },
+              )
+            : t('mobile.priorityCycled', {
+                priority: t(`dialogs.task.priority.${next}`),
+              }),
+        );
       } catch (err) {
         announce(errorMessage(err));
       }
     },
-    [reload, onChanged, t],
+    [reload, onChanged, t, priorityScale],
   );
 
   const remove = useCallback(
@@ -275,7 +305,13 @@ export function SubtaskSection({
             if (sub.status !== 'cancelled') {
               actions.push({ name: 'cancel', label: t('dialogs.task.status.cancelled') });
             }
-            actions.push({ name: 'priority', label: t('mobile.cyclePriority') });
+            actions.push({
+              name: 'priority',
+              label:
+                priorityScale === 'two'
+                  ? t('mobile.toggleImportant')
+                  : t('mobile.cyclePriority'),
+            });
             actions.push({ name: 'delete', label: t('mobile.delete') });
             return (
               <Pressable
@@ -287,7 +323,7 @@ export function SubtaskSection({
                   t('dialogs.task.subtasks.rowLabel', {
                     title: sub.title,
                     state: t(statusI18nKey(sub.status)),
-                    priority: prioritySuffix(t, sub.priority),
+                    priority: prioritySuffix(t, sub.priority, priorityScale),
                   }) + effortSuffix(t, sub.effort)
                 }
                 accessibilityHint={t('mobile.subtaskRowHint')}

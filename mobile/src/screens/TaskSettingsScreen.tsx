@@ -21,6 +21,7 @@ import {
   writeRemindDeadlineArrived,
   writeRemindDeadlineCountdown,
   writeRemindUntimedToday,
+  writeTwoLevelPriority,
   writeVisualEffortSizing,
   type CarryOverDefault,
   type CheckoffMode,
@@ -85,6 +86,7 @@ export default function TaskSettingsScreen() {
   const [autoDate, setAutoDate] = useState(true);
   const [autoSelfAssign, setAutoSelfAssign] = useState(true);
   const [visualEffortSizing, setVisualEffortSizing] = useState(true);
+  const [twoLevelPriority, setTwoLevelPriority] = useState(false);
   // Synced (default on): offer hidden task lists as targets in the pickers.
   const [showHiddenListTargets, setShowHiddenListTargets] = useState(true);
   const [remindUntimedToday, setRemindUntimedToday] = useState(true);
@@ -104,6 +106,7 @@ export default function TaskSettingsScreen() {
         setAutoDate(b.autoDate);
         setAutoSelfAssign(b.autoSelfAssign);
         setVisualEffortSizing(b.visualEffortSizing);
+        setTwoLevelPriority(b.twoLevelPriority);
         setRemindUntimedToday(b.remindUntimedToday);
         setRemindDeadlineArrived(b.remindDeadlineArrived);
         setRemindDeadlineCountdown(b.remindDeadlineCountdown);
@@ -166,6 +169,14 @@ export default function TaskSettingsScreen() {
     setVisualEffortSizing((prev) => {
       const next = !prev;
       void writeVisualEffortSizing(next);
+      return next;
+    });
+  }, []);
+
+  const onTwoLevelPriorityToggle = useCallback(() => {
+    setTwoLevelPriority((prev) => {
+      const next = !prev;
+      void writeTwoLevelPriority(next);
       return next;
     });
   }, []);
@@ -275,6 +286,20 @@ export default function TaskSettingsScreen() {
         />
         <Text style={styles.hint} accessibilityRole="text">
           {t('dialogs.tasks.autoSelfAssign.hint')}
+        </Text>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.heading} accessibilityRole="header">
+          {t('dialogs.tasks.twoLevelPriority.heading')}
+        </Text>
+        <SwitchRow
+          label={t('dialogs.tasks.twoLevelPriority.label')}
+          value={twoLevelPriority}
+          onToggle={onTwoLevelPriorityToggle}
+        />
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.tasks.twoLevelPriority.hint')}
         </Text>
       </View>
 

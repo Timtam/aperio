@@ -20,6 +20,7 @@ import type {
   DayGridItem,
   MultiDayInfo,
   PositionedSpan,
+  PriorityScale,
   Section,
   Task,
   TaskList,
@@ -103,7 +104,7 @@ import { confirmDeleteEvent } from '../state/eventDeleteScope';
 import { confirmDeleteTask } from '../state/taskDeleteScope';
 import { usePullRefresh } from '../state/usePullRefresh';
 import { editEventWithScope } from '../state/eventEditScope';
-import { readTaskBehaviour } from '../state/taskBehaviour';
+import { priorityScaleFor, readTaskBehaviour } from '../state/taskBehaviour';
 import { applyTaskToggle, statusAnnounce } from '../state/taskToggle';
 import { useTaskListShowCompleted } from '../state/useTaskListShowCompleted';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -353,6 +354,7 @@ export function CalendarDayList({
   // and re-read on focus so a Settings toggle / peer sync reflects without a
   // restart. Purely visual — the SR effort suffix is always appended below.
   const [effortSizing, setEffortSizing] = useState(true);
+  const [priorityScale, setPriorityScale] = useState<PriorityScale>('three');
   // The synced visible day-window of the hour-grid (`calendar.dayStartMin` /
   // `dayEndMin`, minutes from midnight; default 0/1440 = the full day). The
   // single-day grid spans only [dayStartMin, dayEndMin]: the canvas height +
@@ -366,6 +368,7 @@ export function CalendarDayList({
     const read = () =>
       void readTaskBehaviour().then((b) => {
         setEffortSizing(b.visualEffortSizing);
+        setPriorityScale(priorityScaleFor(b.twoLevelPriority));
         setDayStartMin(b.dayStartMin);
         setDayEndMin(b.dayEndMin);
       });
@@ -922,7 +925,13 @@ export function CalendarDayList({
         // eventSpanForDay clamp each day's portion).
         (ev) => !ev.all_day && daysCoveredKeys(ev).includes(key),
       );
-      const dayTasks = filterTasksOnDay(expandedTasks, key, showCompletedForList, meFor);
+      const dayTasks = filterTasksOnDay(
+        expandedTasks,
+        key,
+        showCompletedForList,
+        meFor,
+        priorityScale,
+      );
       // One row per appointment instead of one per copy, decided PER DAY —
       // the contract `collapseEventGroups` documents, because a recurring
       // appointment renders a row per day and across a week its own days
@@ -970,6 +979,7 @@ export function CalendarDayList({
     eventGroups,
     showCompletedForList,
     meFor,
+    priorityScale,
   ]);
 
   const totalItems = useMemo(
@@ -1197,7 +1207,7 @@ export function CalendarDayList({
       const common = {
         title: task.title,
         state: t(statusI18nKey(task.status)),
-        priority: prioritySuffix(tr, task.priority),
+        priority: prioritySuffix(tr, task.priority, priorityScale),
         progress: subtaskProgressSuffix(tr, task.id, tasks),
         assignee: assigneeSuffix(tr, task.assignees),
       };
@@ -1235,7 +1245,7 @@ export function CalendarDayList({
       // toggle) so a screen reader always hears it; '' for medium.
       return label + effortSuffix(tr, task.effort) + subtaskParentSuffix(tr, task, tasks);
     },
-    [fmtDateOnly, fmtTime, t, tasks, tr],
+    [fmtDateOnly, fmtTime, t, tasks, tr, priorityScale],
   );
 
   // `slot` (grid mode only) absolutely positions the row inside the 24h canvas

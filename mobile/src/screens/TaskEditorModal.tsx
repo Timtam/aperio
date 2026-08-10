@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 
 import type {
+  PriorityScale,
   Reminder,
   Task,
   TaskEffort,
@@ -29,6 +30,7 @@ import type {
 import {
   TASK_RECURRENCE_DEFAULT,
   fromBackend,
+  isImportantPriority,
   selectableTaskLists,
   selfAssignOnStatusChange,
   taskPrefillFrom,
@@ -58,13 +60,14 @@ import { RemindersEditor } from '../components/RemindersEditor';
 import { SegmentedSelect } from '../components/SegmentedSelect';
 import { SoundSelect } from '../components/SoundSelect';
 import { SubtaskSection } from '../components/SubtaskSection';
+import { SwitchRow } from '../components/SwitchRow';
 import { TaskRecurrenceSelector } from '../components/TaskRecurrenceSelector';
 import { useCancelHeader } from '../components/useCancelHeader';
 import { formatLocalDate, formatLocalTime } from '../intl/dateTimeField';
 import { useShowHiddenTaskListTargets } from '../settings/hiddenTargets';
 import { currentUserForList } from '../state/currentUser';
 import { writeLastUsedTaskList } from '../state/lastUsedTaskList';
-import { readTaskBehaviour } from '../state/taskBehaviour';
+import { priorityScaleFor, readTaskBehaviour } from '../state/taskBehaviour';
 import { useSoundPref } from '../state/useSoundPref';
 import { useTaskStore } from '../state/taskStoreContext';
 import {
@@ -250,6 +253,28 @@ export default function TaskEditorModal({
   // real subtasks live via SubtaskSection instead.
   const [draftSubtasks, setDraftSubtasks] = useState<string[]>([]);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
+  // Which priority system to draw: three levels (the default) or the
+  // normal/important pair. Read once — it is a setting, not live data.
+  const [priorityScale, setPriorityScale] = useState<PriorityScale>('three');
+  useEffect(() => {
+    let cancelled = false;
+    void readTaskBehaviour().then((b) => {
+      if (!cancelled) setPriorityScale(priorityScaleFor(b.twoLevelPriority));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  // What "not important" means for the task in front of us: the value it had
+  // while the switch was off. Turning it off again restores THAT rather than
+  // writing `medium` over a provider's `low` — a rewrite nobody would see
+  // here and everybody would see elsewhere.
+  const lastNormalPriority = useRef<TaskPriority>('medium');
+  useEffect(() => {
+    if (!isImportantPriority(form.priority)) {
+      lastNormalPriority.current = form.priority;
+    }
+  }, [form.priority]);
   // Per-task sound OVERRIDE (§14.4 item level) — a host-local `sound.item.{id}`
   // pref, NOT the inline Task.sound (which the reminder resolver ignores).
   // Edit-only: a new task has no id to key the pref on yet, so it inherits the
@@ -973,12 +998,29 @@ export default function TaskEditorModal({
         </Text>
       )}
 
-      <SegmentedSelect<TaskPriority>
-        label={t('dialogs.task.fields.priority')}
-        value={form.priority}
-        options={priorityOptions}
-        onChange={(v) => update('priority', v)}
-      />
+      {/* Two systems, one field: with two levels a task is important or it
+          is not, so the question is a switch, not a choice of three. */}
+      {priorityScale === 'two' ? (
+        <SwitchRow
+          label={t('dialogs.task.fields.important')}
+          value={isImportantPriority(form.priority)}
+          onToggle={() =>
+            update(
+              'priority',
+              isImportantPriority(form.priority)
+                ? lastNormalPriority.current
+                : 'high',
+            )
+          }
+        />
+      ) : (
+        <SegmentedSelect<TaskPriority>
+          label={t('dialogs.task.fields.priority')}
+          value={form.priority}
+          options={priorityOptions}
+          onChange={(v) => update('priority', v)}
+        />
+      )}
 
       <SegmentedSelect<TaskEffort>
         label={t('dialogs.task.fields.effort')}
@@ -1104,6 +1146,7 @@ export default function TaskEditorModal({
         <SubtaskSection
           parentTask={loaded}
           list={loadedList}
+          priorityScale={priorityScale}
           onChanged={invalidateData}
           onParentSync={syncParent}
         />

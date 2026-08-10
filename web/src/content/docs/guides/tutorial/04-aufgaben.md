@@ -44,6 +44,15 @@ your day or week, and work through them.
 > submenus. Change either in a single click without opening the editor; the
 > current value carries a check-mark.
 
+> **Two levels instead of three:** Under *Settings → Tasks* you can switch
+> the whole app to a **two-level** priority system: a task is either
+> **important** — marked with a **star** — or normal, and normal carries no
+> mark at all. The editor then shows a single **Important** checkbox, and the
+> context menu a single **Important** row. Priorities coming from providers
+> with more levels read as normal unless they are the top one. Nothing is
+> rewritten: switch back and low / medium / high are all still there, on every
+> device (the setting itself syncs).
+
 > **Priority & providers:** Every provider keeps a task's priority except
 > **Google Tasks**, which has no priority field of its own — a priority you set
 > on a Google task isn't stored on Google's side and reads back as *Medium*
@@ -292,8 +301,9 @@ Turn the toggle off to keep assignments fully manual.
 > **Screen-reader note:** Tasks are announced with title, status (done /
 > open), due date, priority and — if anyone is assigned — the **assignee**
 > (in **every** view: the task, week, day and month views, plus the
-> backlog). **High** priority also shows a "↑", **low** a "↓"; medium
-> priority (the default) shows nothing. The **list and
+> backlog). In the three-level system **high** priority also shows "!!!",
+> **medium** "!!" and **low** "!"; in the two-level one **important** shows a
+> star and everything else nothing at all. The **list and
 > section** are no longer repeated in each task's label — they come from the
 > surrounding **group rows** (Backlog → list → section) you pass through as
 > you arrow down, expanding or collapsing them with `Enter`/`Space`. Checking

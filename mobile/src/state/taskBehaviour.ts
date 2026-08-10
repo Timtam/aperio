@@ -1,4 +1,10 @@
-import { FULL_DAY_WINDOW, MINUTES_PER_DAY, type TaskList, type TaskStatus } from '@aperio/shared';
+import {
+  FULL_DAY_WINDOW,
+  MINUTES_PER_DAY,
+  type PriorityScale,
+  type TaskList,
+  type TaskStatus,
+} from '@aperio/shared';
 
 import { getUserPref, setUserPref } from '../api/prefs';
 
@@ -44,6 +50,9 @@ export interface TaskBehaviour {
   autoSelfAssign: boolean;
   /** Render task tiles at different sizes by effort (small/medium/large). Default on. */
   visualEffortSizing: boolean;
+  /** Two priority levels (normal / important) instead of low-medium-high.
+   *  Default OFF — the three-level system is what everyone had. */
+  twoLevelPriority: boolean;
   /** Remind of today's untimed (date-only) scheduled tasks. Default on. */
   remindUntimedToday: boolean;
   /** Remind when a task's deadline day has arrived. Default on. */
@@ -74,6 +83,8 @@ const CASCADE_KEY = 'tasks.cascadeStatusCoupling';
 const AUTO_DATE_KEY = 'tasks.autoDateOnStart';
 const AUTO_SELF_ASSIGN_KEY = 'tasks.autoSelfAssign';
 const VISUAL_EFFORT_SIZING_KEY = 'tasks.visualEffortSizing';
+// Same key string as the desktop TaskCascadeProvider, so the two sync 1:1.
+const TWO_LEVEL_PRIORITY_KEY = 'tasks.twoLevelPriority';
 // Day-start reminder knobs (synced). Three on/off booleans (default ON) + a
 // numeric "X days before" lead time stored as a string like dayStartTrigger
 // (parsed + clamped 1..30 on hydrate). The reminder LOGIC that consumes these
@@ -101,6 +112,7 @@ export const TASK_BEHAVIOUR_DEFAULTS: TaskBehaviour = {
   autoDate: true,
   autoSelfAssign: true,
   visualEffortSizing: true,
+  twoLevelPriority: false,
   remindUntimedToday: true,
   remindDeadlineArrived: true,
   remindDeadlineCountdown: true,
@@ -134,6 +146,16 @@ export function isDayStartTrigger(v: unknown): v is DayStartTrigger {
  *  the desktop TaskCascadeProvider hydration). */
 function parseBool(stored: string | null): boolean {
   return stored !== 'false';
+}
+
+/** The priority system as the shared display + ordering helpers want it. */
+export function priorityScaleFor(twoLevelPriority: boolean): PriorityScale {
+  return twoLevelPriority ? 'two' : 'three';
+}
+
+/** The opposite default: a knob that is OFF until a literal 'true' says so. */
+function parseOptIn(stored: string | null): boolean {
+  return stored === 'true';
 }
 
 function parseCheckoff(stored: string | null): CheckoffMode {
@@ -235,6 +257,7 @@ export async function readTaskBehaviour(): Promise<TaskBehaviour> {
       autoDate,
       selfAssign,
       effortSizing,
+      twoLevelPriority,
       remindUntimed,
       remindDeadlineArrived,
       remindDeadlineCountdown,
@@ -251,6 +274,7 @@ export async function readTaskBehaviour(): Promise<TaskBehaviour> {
       getUserPref(AUTO_DATE_KEY),
       getUserPref(AUTO_SELF_ASSIGN_KEY),
       getUserPref(VISUAL_EFFORT_SIZING_KEY),
+      getUserPref(TWO_LEVEL_PRIORITY_KEY),
       getUserPref(REMIND_UNTIMED_TODAY_KEY),
       getUserPref(REMIND_DEADLINE_ARRIVED_KEY),
       getUserPref(REMIND_DEADLINE_COUNTDOWN_KEY),
@@ -269,6 +293,7 @@ export async function readTaskBehaviour(): Promise<TaskBehaviour> {
       autoDate: parseBool(autoDate),
       autoSelfAssign: parseBool(selfAssign),
       visualEffortSizing: parseBool(effortSizing),
+      twoLevelPriority: parseOptIn(twoLevelPriority),
       remindUntimedToday: parseBool(remindUntimed),
       remindDeadlineArrived: parseBool(remindDeadlineArrived),
       remindDeadlineCountdown: parseBool(remindDeadlineCountdown),
@@ -302,6 +327,8 @@ export const writeAutoSelfAssign = (v: boolean): Promise<void> =>
   writeBest(AUTO_SELF_ASSIGN_KEY, v ? 'true' : 'false');
 export const writeVisualEffortSizing = (v: boolean): Promise<void> =>
   writeBest(VISUAL_EFFORT_SIZING_KEY, v ? 'true' : 'false');
+export const writeTwoLevelPriority = (v: boolean): Promise<void> =>
+  writeBest(TWO_LEVEL_PRIORITY_KEY, v ? 'true' : 'false');
 export const writeRemindUntimedToday = (v: boolean): Promise<void> =>
   writeBest(REMIND_UNTIMED_TODAY_KEY, v ? 'true' : 'false');
 export const writeRemindDeadlineArrived = (v: boolean): Promise<void> =>

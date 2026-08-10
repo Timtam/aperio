@@ -47,6 +47,16 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
 > ändern, ohne den Editor zu öffnen; der aktuelle Wert ist mit einem Häkchen
 > markiert.
 
+> **Zwei Stufen statt drei:** Unter *Einstellungen → Aufgaben* lässt sich die
+> ganze App auf ein **zweistufiges** Prioritätssystem umstellen: Eine Aufgabe
+> ist entweder **wichtig** – mit einem **Sternchen** markiert – oder normal,
+> und normal trägt gar keine Markierung. Der Editor zeigt dann ein einzelnes
+> Kästchen **Wichtig**, das Kontextmenü einen einzelnen Eintrag **Wichtig**.
+> Prioritäten von Anbietern mit mehr Stufen gelten als normal, sofern sie
+> nicht die höchste sind. Gespeichert wird nichts um: Beim Zurückschalten sind
+> niedrig / mittel / hoch unverändert da – auf allen Geräten, denn die
+> Einstellung selbst wird synchronisiert.
+
 > **Priorität & Anbieter:** Alle Anbieter speichern die Priorität einer
 > Aufgabe – außer **Google Tasks**, das kein eigenes Prioritätsfeld hat: Eine
 > Priorität, die du an einer Google-Aufgabe setzt, wird auf Google-Seite nicht
@@ -324,9 +334,10 @@ Schalte die Option aus, wenn Zuweisungen rein manuell bleiben sollen.
 > **Screenreader-Hinweis:** Aufgaben werden mit Titel, Status (erledigt /
 > offen), Fälligkeit, Priorität und – sofern jemand zugewiesen ist – der
 > **zugewiesenen Person** angesagt (in **allen** Ansichten: Aufgaben-,
-> Wochen-, Tages- und Monatsansicht sowie im Backlog). Eine **hohe**
-> Priorität zeigt zusätzlich ein „↑", eine **niedrige** ein „↓"; die mittlere
-> Priorität (Standard) zeigt nichts. **Liste und Abschnitt** werden nicht mehr im
+> Wochen-, Tages- und Monatsansicht sowie im Backlog). Im dreistufigen
+> System zeigt eine **hohe** Priorität zusätzlich „!!!", eine **mittlere**
+> „!!" und eine **niedrige** „!"; im zweistufigen zeigt **wichtig** ein
+> Sternchen und alles andere gar nichts. **Liste und Abschnitt** werden nicht mehr im
 > Aufgaben-Label wiederholt, sondern ergeben sich aus den übergeordneten
 > **Gruppenzeilen** (Backlog → Liste → Abschnitt), die du beim Navigieren mit
 > den Pfeiltasten durchläufst und mit `Eingabe`/`Leertaste` auf- und zuklappst.
