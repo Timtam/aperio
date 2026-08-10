@@ -24,6 +24,7 @@ import { useDateFormat } from '../intl/dateFormat';
 import { seriesIdOf } from '../intl/recurrence';
 import { expandAll } from '../intl/recurrence';
 import { useCalendarStore } from '../state/calendarStoreContext';
+import { useDialogState } from '../state/dialogStateContext';
 import { Modal } from './Modal';
 
 /**
@@ -78,6 +79,7 @@ export function EventGroupDialog({
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { calendars, selectedCalendarIds } = useCalendarStore();
+  const { openEventDialog } = useDialogState();
   const calendarName = useCallback(
     (id: string) => calendars.find((c) => c.id === id)?.name ?? id,
     [calendars],
@@ -234,6 +236,17 @@ export function EventGroupDialog({
    * member that is not in the loaded range (where a stale name still beats no
    * name at all).
    */
+  /** The loaded row a member points at, when this day holds it. */
+  const liveMember = useCallback(
+    (m: { calendar_id: string; event_id: string }) => {
+      const key = eventGroupMemberKey(m.calendar_id, m.event_id);
+      return events.find(
+        (ev) => eventGroupMemberKey(ev.calendar_id, seriesIdOf(ev)) === key,
+      );
+    },
+    [events],
+  );
+
   const memberTitle = useCallback(
     (m: { calendar_id: string; event_id: string; title: string }) => {
       const key = eventGroupMemberKey(m.calendar_id, m.event_id);
@@ -405,17 +418,41 @@ export function EventGroupDialog({
             : t('dialogs.eventGroup.notGrouped', { title: event.title })}
       </FocusableNote>
 
-      {members.map((m) => (
-        <FocusableNote
-          key={eventGroupMemberKey(m.calendar_id, m.event_id)}
-          className="form__message"
-        >
-          {t('dialogs.eventGroup.member', {
-            title: memberTitle(m),
-            calendar: calendarName(m.calendar_id),
+      {members.length > 0 && (
+        <ul className="form__list group-members" aria-label={t('dialogs.eventGroup.membersLabel')}>
+          {members.map((m) => {
+            const live = liveMember(m);
+            const label = t('dialogs.eventGroup.member', {
+              title: memberTitle(m),
+              calendar: calendarName(m.calendar_id),
+            });
+            return (
+              <li key={eventGroupMemberKey(m.calendar_id, m.event_id)}>
+                {live ? (
+                  // Activatable: from here you can open any copy's own editor
+                  // and come back — the group dialog stays underneath. Reading
+                  // the members was possible before; reaching them was not, so
+                  // "which of the four is the one with the reminder" meant
+                  // leaving, hunting for the row, and starting again.
+                  <button
+                    type="button"
+                    className="form__list-action"
+                    onClick={() => openEventDialog(live)}
+                  >
+                    {label}
+                  </button>
+                ) : (
+                  // No row for it in this day: the member is real but not in
+                  // hand (its id was re-minted, or the copy was deleted
+                  // elsewhere), so it is named and not offered — a button that
+                  // opens nothing is worse than a line that says what it knows.
+                  <FocusableNote className="form__message">{label}</FocusableNote>
+                )}
+              </li>
+            );
           })}
-        </FocusableNote>
-      ))}
+        </ul>
+      )}
 
       <label className="form__field">
         <span className="form__label">{t('dialogs.eventGroup.pickLabel')}</span>

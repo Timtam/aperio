@@ -7,6 +7,7 @@ import { detectConference } from '@aperio/shared';
 import { useAnnouncer } from '../a11y/announcerContext';
 import {
   deleteEventById,
+  eventGroupsForEvents,
   isCommandError,
   openExternalUrl,
   setEventColor,
@@ -179,6 +180,22 @@ export function useChipContextMenu(): ChipContextMenuActions {
       // opening the editor and hunting for the button. Detection is the shared
       // one: provider-independent and language-independent, so an invitation
       // that arrived from Outlook or eM Client offers this too.
+      // Is this event already in a group? The entry has to say which of the
+      // two things it does: "belongs together with…" reads like nothing has
+      // been grouped yet, and on an event that IS grouped it hid the fact that
+      // this is also where the group is read, added to and taken apart.
+      //
+      // A local read, unlike the who-am-I lookup below: one query against
+      // Aperio's own table, no provider, so the menu can wait for it.
+      let grouped = false;
+      try {
+        const found = await eventGroupsForEvents([
+          { calendar_id: event.calendar_id, event_id: seriesIdOf(event) },
+        ]);
+        grouped = found.length > 0;
+      } catch {
+        // Unknown: the neutral wording is the one that is never wrong.
+      }
       const conference = detectConference({
         location: event.location,
         description: event.description,
@@ -205,7 +222,10 @@ export function useChipContextMenu(): ChipContextMenuActions {
         // with edit/move/copy rather than near delete because it is a
         // statement about the event, not something done TO it: no provider
         // hears of it, and taking it back leaves nothing changed.
-        { id: 'group', label: t('chipMenu.groupWith') },
+        {
+          id: 'group',
+          label: t(grouped ? 'chipMenu.manageGroup' : 'chipMenu.groupWith'),
+        },
         colorSubmenu,
         { kind: 'separator' },
         ...(offersChoice

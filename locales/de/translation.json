@@ -179,7 +179,8 @@
       "completed": "Erledigt",
       "cancelled": "Abgebrochen"
     },
-    "plan": "Einplanen"
+    "plan": "Einplanen",
+    "manageGroup": "Gruppierung verwalten…"
   },
   "reminders": {
     "label": "Erinnerungen",
@@ -1225,7 +1226,9 @@
       "ungrouped": "„{{title}}“ ist nicht mehr gruppiert.",
       "dissolved": "Gruppe aufgelöst. Die Termine bleiben unverändert.",
       "conflict": "Beide Termine gehören bereits zu verschiedenen Gruppen. Lösen Sie einen davon zuerst heraus — zwei Gruppen zusammenzuführen entscheidet Aperio nicht für Sie.",
-      "candidateHiddenSuffix": " (Kalender ausgeblendet)"
+      "candidateHiddenSuffix": " (Kalender ausgeblendet)",
+      "membersLabel": "Die Termine dieser Gruppe",
+      "memberHint": "Öffnet diese Kopie im Editor"
     },
     "deleteScope": {
       "title": "Serientermin löschen",

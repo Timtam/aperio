@@ -104,6 +104,17 @@ export default function EventGroupModal({
     [calendars],
   );
 
+  /** The loaded row a member points at, when this day holds it. */
+  const liveMember = useCallback(
+    (m: { calendar_id: string; event_id: string }) => {
+      const key = eventGroupMemberKey(m.calendar_id, m.event_id);
+      return dayEvents.find(
+        (ev) => eventGroupMemberKey(ev.calendar_id, seriesIdOf(ev)) === key,
+      );
+    },
+    [dayEvents],
+  );
+
   /**
    * What to call a member.
    *
@@ -384,18 +395,46 @@ export default function EventGroupModal({
         </Text>
       )}
 
-      {members.map((m) => (
-        <Text
-          key={eventGroupMemberKey(m.calendar_id, m.event_id)}
-          style={styles.member}
-          accessibilityRole="text"
-        >
-          {t('dialogs.eventGroup.member', {
-            title: memberTitle(m),
-            calendar: calendarName(m.calendar_id),
-          })}
-        </Text>
-      ))}
+      {members.map((m) => {
+        const live = liveMember(m);
+        const label = t('dialogs.eventGroup.member', {
+          title: memberTitle(m),
+          calendar: calendarName(m.calendar_id),
+        });
+        // Openable: from here you can reach any copy's own editor and come
+        // back. Reading the members was possible before; reaching them was
+        // not, so "which of the four carries the reminder" meant leaving,
+        // finding the row again and starting over.
+        //
+        // A member with no row in this day is named and NOT offered: its id
+        // was re-minted or the copy was deleted elsewhere, and a button that
+        // opens nothing is worse than a line that says what it knows.
+        return live ? (
+          <Pressable
+            key={eventGroupMemberKey(m.calendar_id, m.event_id)}
+            accessibilityRole="button"
+            accessibilityLabel={label}
+            accessibilityHint={t('dialogs.eventGroup.memberHint')}
+            onPress={() =>
+              navigation.navigate('EventEditor', {
+                eventId: seriesIdOf(live),
+                calendarId: live.calendar_id,
+              })
+            }
+            style={({ pressed }) => [styles.memberRow, pressed && styles.memberPressed]}
+          >
+            <Text style={styles.member}>{label}</Text>
+          </Pressable>
+        ) : (
+          <Text
+            key={eventGroupMemberKey(m.calendar_id, m.event_id)}
+            style={styles.member}
+            accessibilityRole="text"
+          >
+            {label}
+          </Text>
+        );
+      })}
 
       {options.length > 0 ? (
         <>
@@ -469,6 +508,12 @@ function makeStyles(c: ThemeColors) {
     content: { padding: 16, gap: 12 },
     heading: { fontSize: 20, fontWeight: '600', color: c.textPrimary },
     intro: { fontSize: 15, color: c.textPrimary },
+    memberRow: {
+      minHeight: 44,
+      justifyContent: 'center',
+      paddingVertical: 6,
+    },
+    memberPressed: { opacity: 0.7 },
     member: { fontSize: 15, color: c.textSecondary },
     hint: { fontSize: 14, color: c.textSecondary },
     error: { fontSize: 15, color: c.danger },

@@ -140,14 +140,19 @@ ebenfalls liest. Für jeden Anbieter sind das unabhängige Termine — Aperio ka
 man es sagen.
 
 Öffnen Sie das Kontextmenü eines Termins (Rechtsklick, `Umschalt+F10`, am
-Telefon langer Druck) und wählen Sie **Gehört zusammen mit…**. Der Dialog
+Telefon langer Druck) und wählen Sie **Gehört zusammen mit…**. Ist der Termin
+bereits gruppiert, heißt der Eintrag **Gruppierung verwalten…** — dasselbe
+Fenster, aber der Name sagt jetzt, dass es dort auch etwas zu verwalten gibt.
+Der Dialog
 listet die übrigen Termine dieses Tages; wählen Sie den Zwilling und bestätigen
 Sie mit **Gruppieren**. Die Liste reicht dabei auch in **ausgeblendete
 Kalender** — der Kollegenkalender ist oft genau deshalb aus, weil er laut ist,
 und liegt dort doch die dritte Kopie. Solche Vorschläge tragen den Zusatz
 „(Kalender ausgeblendet)", damit kein Termin aus dem Nichts auftaucht. Derselbe Dialog löst einen Termin wieder heraus
 (**Diesen Termin herauslösen**) oder hebt die Gruppe ganz auf (**Gruppe
-auflösen**).
+auflösen**). Die Mitglieder stehen dort als **Liste**, und jedes lässt sich
+öffnen: So kommen Sie von der Gruppe direkt in den Editor der Kopie, die Sie
+gerade meinen, und danach wieder zurück.
 
 Nichts davon erreicht den Anbieter. Das Gruppieren ändert keinen der beiden
 Termine, das Auflösen lässt beide genau so zurück, wie sie waren — die Kalender

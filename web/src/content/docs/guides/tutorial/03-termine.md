@@ -138,7 +138,10 @@ precisely because it is noisy, and that is where the third copy sits. Those
 entries carry a "(calendar switched off)" note, so no event turns up out of
 nowhere. The same dialog takes an
 event back out (**Take this event out**) or drops the whole grouping
-(**Dissolve group**).
+(**Dissolve group**). Its members are a **list**, and each one opens: you get
+from the group straight into the editor of whichever copy you mean, and back
+again. On an event that is already grouped the menu entry reads **Manage
+grouping…**, so its name says there is something to manage.
 
 Nothing reaches the provider. Grouping two events changes neither of them, and
 ungrouping leaves both exactly as they were — the calendars keep their own

@@ -645,7 +645,15 @@ export default function AgendaScreen({
     if (readOnlyIds.has(ev.calendar_id)) {
       const readOnlyActions: MenuAction[] = [
         ...(readOnlyJoin ? [readOnlyJoin.action] : []),
-        { name: 'group', label: t('chipMenu.groupWith') },
+        {
+          name: 'group',
+          // // "Belongs together with…" reads like nothing has been grouped yet. On an
+          // event that IS grouped, that hid the fact that this is also where the
+          // group is read, added to and taken apart — so the entry says which of
+          // the two it does. The groups are already in hand for the folding, so
+          // this costs no lookup.
+          label: t(groupRow?.group ? 'chipMenu.manageGroup' : 'chipMenu.groupWith'),
+        },
       ];
       const runReadOnlyAction = (name: string) => {
         if (name === 'group') groupEvent(ev);
@@ -706,11 +714,14 @@ export default function AgendaScreen({
       ...(join ? [join.action] : []),
       { name: 'activate', label: t('mobile.editTaskLabel') },
       { name: 'moveCopy', label: t('mobile.moveCopy') },
-      // "Belongs together with…" — the agenda is the screen where the same
-      // appointment showing up four times is most obvious, so leaving the
-      // entry point out of it would be leaving it out of the view that needs
-      // it most.
-      { name: 'group', label: t('chipMenu.groupWith') },
+      // The agenda is the screen where the same appointment showing up four
+      // times is most obvious, so leaving the entry point out of it would be
+      // leaving it out of the view that needs it most. Named by state — see
+      // the read-only list above.
+      {
+        name: 'group',
+        label: t(groupRow?.group ? 'chipMenu.manageGroup' : 'chipMenu.groupWith'),
+      },
       { name: 'delete', label: t('dialogs.event.delete'), destructive: true },
     ];
     const runAction = (name: string) => {
