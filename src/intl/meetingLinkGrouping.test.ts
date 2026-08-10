@@ -124,6 +124,35 @@ describe('grouping a meeting with its appointment', () => {
     expect(pairs).toEqual([]);
   });
 
+  it('leaves a meeting that already belongs to an appointment alone', () => {
+    // The hole the counting rule had: it counts the claimants IN VIEW, and the
+    // appointment the meeting is already grouped with is not one of them. A
+    // second, unrelated appointment claiming the same link would have been
+    // merged into that group — and which appointments got merged would have
+    // depended on nothing but the calendars that happened to be switched on.
+    const pairs = findMeetingLinkPairs(
+      [row('m1', 'acc::meetings', LINK), row('e2', 'private', LINK)],
+      [group(['acc::meetings', 'm1'], ['work', 'e1'])],
+      [],
+      seriesId,
+    );
+    expect(pairs).toEqual([]);
+  });
+
+  it('obeys a refusal naming a copy that is not in view', () => {
+    // Taking the meeting out wrote a mark against every member it left. A copy
+    // added to the appointment afterwards has no mark of its own, so asking
+    // only the rows on screen makes the refusal invisible exactly when that
+    // younger copy is the one being rendered.
+    const pairs = findMeetingLinkPairs(
+      [row('m1', 'acc::meetings', LINK), row('e2', 'private', LINK)],
+      [group(['work', 'e1'], ['private', 'e2'])],
+      [decline(['acc::meetings', 'm1'], ['work', 'e1'])],
+      seriesId,
+    );
+    expect(pairs).toEqual([]);
+  });
+
   it('adds one meeting per account, however often the provider remints its id', () => {
     // Webex lists a recurring meeting as one row per occurrence, each with its
     // own id, and its list response carries no series id to collapse them by.

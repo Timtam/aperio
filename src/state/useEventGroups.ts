@@ -9,7 +9,6 @@ import {
   memberFromEvent,
   withoutDuplicateMeetings,
   type EventGroup,
-  type SuggestionDecline,
 } from '@aperio/shared';
 
 import {
@@ -68,6 +67,17 @@ export function useEventGroups(
 ): GroupedEvents {
   const { dataVersion } = useDialogState();
   const [groups, setGroups] = useState<EventGroup[]>([]);
+  /**
+   * The window `groups` actually describes.
+   *
+   * `groups` alone cannot say whether it is an answer or a starting value:
+   * `[]` means both "not asked yet" and "there are none". And it is never
+   * cleared when the window changes, so after paging it holds the PREVIOUS
+   * day's answer. Anything that WRITES on the strength of it has to know the
+   * difference — see the link pass below, which formed groups that already
+   * existed because it read `[]` as "none".
+   */
+  const [groupsKey, setGroupsKey] = useState<string | null>(null);
 
   // The distinct (calendar, series) pairs as one stable string — the same
   // trick `useEvents` uses for its calendar set, and for the same reason: the
@@ -86,6 +96,7 @@ export function useEventGroups(
   useEffect(() => {
     if (refsKey === '') {
       setGroups([]);
+      setGroupsKey('');
       return;
     }
     let cancelled = false;
@@ -95,11 +106,15 @@ export function useEventGroups(
     });
     eventGroupsForEvents(refs)
       .then((found) => {
-        if (!cancelled) setGroups(found);
+        if (cancelled) return;
+        setGroups(found);
+        setGroupsKey(refsKey);
       })
       .catch(() => {
         // A failed lookup means no folding this round — which is exactly what
-        // the app did before groups existed. Never an empty day.
+        // the app did before groups existed. Never an empty day. The key stays
+        // behind on purpose: an empty list from a FAILURE must not read as
+        // "there are no groups here" to anything that writes.
         if (!cancelled) setGroups([]);
       });
     return () => {
@@ -128,7 +143,7 @@ export function useEventGroups(
   // group still names the old id) does that forever, one round trip per turn.
   const attempted = useRef(new Set<string>());
   useEffect(() => {
-    if (range == null || groups.length === 0) return;
+    if (range == null || groupsKey !== refsKey || groups.length === 0) return;
     // Keep the signatures describing the events as they ARE. Written once at
     // joining they went stale the first time the appointment moved — and then
     // the healing below, which searches by exactly them, could never match
@@ -172,26 +187,7 @@ export function useEventGroups(
     return () => {
       cancelled = true;
     };
-  }, [groups, events, range, refsKey]);
-
-  // The pairs the user has already pulled apart. `null` until they are known —
-  // NOT an empty list, because acting on "nothing is refused" before the
-  // refusals have arrived is exactly how a group the user dissolved would come
-  // back.
-  const [declines, setDeclines] = useState<SuggestionDecline[] | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    groupSuggestionDeclines()
-      .then((found) => {
-        if (!cancelled) setDeclines(found);
-      })
-      .catch(() => {
-        if (!cancelled) setDeclines(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [dataVersion]);
+  }, [groups, groupsKey, events, range, refsKey]);
 
   /**
    * Group a videoconference meeting with the appointment it belongs to.
@@ -201,23 +197,49 @@ export function useEventGroups(
    * Two devices doing it at once converge the way every other group does, by
    * timestamp.
    *
+   * ## It may only act on evidence that describes THESE events
+   *
+   * `groupsKey !== refsKey` means the groups in hand answer a different
+   * question — the fetch has not landed, or it landed for the window we have
+   * since paged away from. Reading that as "these events are ungrouped" made
+   * this pass re-form groups that already existed, on every cold load and
+   * after every page step: a write, a sync-log entry and a fresh `updated_at`
+   * per pair, for nothing. Worse, a re-affirmation stamped NOW outranks
+   * another device's older dissolve — so the group the user pulled apart there
+   * came back here.
+   *
+   * The refusals are read HERE rather than kept in a state of their own, and
+   * that is the same rule again. As two effects they raced: after a sync round
+   * carrying "group dissolved" plus its refusal, whichever promise resolved
+   * first decided the render, and if it was the groups this pass ran with the
+   * OLD refusals and re-created the group. Mobile always read them in one
+   * chain; this now matches it.
+   *
    * Guarded by the same `attempted` ref: a pair that cannot be grouped (the
    * two turn out to be in different groups, say) must be tried once and then
    * left alone, or every render would ask again.
    */
   useEffect(() => {
-    if (range == null || declines == null) return;
-    const pairs = findMeetingLinkPairs(events, groups, declines, seriesIdOf).filter(
-      (pair) => {
-        const key = `link\n${eventGroupMemberKey(pair.meeting.calendar_id, seriesIdOf(pair.meeting))}\n${eventGroupMemberKey(pair.event.calendar_id, seriesIdOf(pair.event))}`;
-        if (attempted.current.has(key)) return false;
-        attempted.current.add(key);
-        return true;
-      },
-    );
-    if (pairs.length === 0) return;
+    if (range == null || groupsKey !== refsKey) return;
+    // Cheap first look, with no refusals in hand: it can only ever find MORE
+    // than the real answer, so nothing here means nothing to ask about — and
+    // no reason to touch the database at all.
+    if (findMeetingLinkPairs(events, groups, [], seriesIdOf).length === 0) return;
     let cancelled = false;
     void (async () => {
+      const declines = await groupSuggestionDeclines().catch(() => null);
+      // Not knowing what has been refused is not the same as nothing having
+      // been refused.
+      if (cancelled || declines == null) return;
+      const pairs = findMeetingLinkPairs(events, groups, declines, seriesIdOf).filter(
+        (pair) => {
+          const key = `link\n${eventGroupMemberKey(pair.meeting.calendar_id, seriesIdOf(pair.meeting))}\n${eventGroupMemberKey(pair.event.calendar_id, seriesIdOf(pair.event))}`;
+          if (attempted.current.has(key)) return false;
+          attempted.current.add(key);
+          return true;
+        },
+      );
+      if (pairs.length === 0) return;
       let grouped = false;
       for (const pair of pairs) {
         try {
@@ -243,7 +265,7 @@ export function useEventGroups(
     return () => {
       cancelled = true;
     };
-  }, [groups, events, range, refsKey, declines]);
+  }, [groups, groupsKey, events, range, refsKey]);
 
   const visible = useMemo(() => {
     const byMember = indexEventGroups(groups);

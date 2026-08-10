@@ -11,6 +11,7 @@
 
 import type { EventGroup } from './eventGroups';
 import { eventGroupMemberKey, indexEventGroups } from './eventGroups';
+import { isMeetingCalendarEvent } from './meetingEvents';
 
 /** The minimum a row has to carry to be foldable. */
 export interface CollapsibleEvent {
@@ -89,6 +90,29 @@ export function collapseEventGroups<E extends CollapsibleEvent>(
   events: readonly E[],
   groups: readonly EventGroup[],
   seriesId: (event: E) => string,
+  /**
+   * Whether this row is one the user can ACT on — the tie-breaker for which
+   * member a folded group shows.
+   *
+   * Position alone decided it before, and position is not a property of the
+   * data: the members of a folded group are at the identical instant (a
+   * difference marks the group diverged and nothing folds), so the sort is a
+   * tie and the order falls through to whatever the calendar fan-out happened
+   * to produce — arrival order, or a HashMap's iteration order. The row could
+   * therefore be the read-only videoconference copy: no editor, no delete, no
+   * move, and on mobile not even a button. Which one won could differ between
+   * two launches with the same data.
+   *
+   * Worse for a screen reader, it changed UNDER the user: at first paint the
+   * meeting row is filtered out and the appointment is the row; a beat later
+   * the groups arrive, the meeting is re-admitted, and the row at the same
+   * index silently becomes a different event.
+   *
+   * The default answers for the only rows Aperio has that cannot be acted on.
+   * A caller that knows more — which calendars are read-only, say — passes its
+   * own.
+   */
+  actionable: (event: E) => boolean = (event) => !isMeetingCalendarEvent(event),
 ): CollapsedRow<E>[] {
   if (groups.length === 0) {
     return events.map((event) => ({ event, otherMembers: 0, calendarIds: [event.calendar_id], diverged: false }));
@@ -108,6 +132,20 @@ export function collapseEventGroups<E extends CollapsibleEvent>(
     startsByGroup.set(group.id, seen);
   }
 
+  // Which member each group SHOWS: the first actionable one, else the first at
+  // all. Decided over the whole window before anything is emitted, because the
+  // row that stands for the group has to be chosen from all of its members and
+  // not from the one that happened to come first.
+  const showFor = new Map<string, E>();
+  for (const event of events) {
+    const group = byMember.get(eventGroupMemberKey(event.calendar_id, seriesId(event)));
+    if (!group) continue;
+    const current = showFor.get(group.id);
+    if (current == null || (!actionable(current) && actionable(event))) {
+      showFor.set(group.id, event);
+    }
+  }
+
   const represented = new Set<string>();
   const out: CollapsedRow<E>[] = [];
   for (const event of events) {
@@ -121,15 +159,19 @@ export function collapseEventGroups<E extends CollapsibleEvent>(
     // visible, each marked, because that disagreement is the thing to act on.
     if (!diverged && represented.has(group.id)) continue;
     represented.add(group.id);
+    // The SLOT is this row's (folding removes rows, it never moves one); the
+    // row SHOWN is the group's chosen member. They are the same event unless
+    // an unactionable copy came first.
+    const shown = diverged ? event : (showFor.get(group.id) ?? event);
     out.push({
-      event,
+      event: shown,
       group,
       otherMembers: Math.max(0, group.members.length - 1),
       calendarIds: [
-        event.calendar_id,
+        shown.calendar_id,
         ...group.members
           .map((m) => m.calendar_id)
-          .filter((id) => id !== event.calendar_id),
+          .filter((id) => id !== shown.calendar_id),
       ].filter((id, i, all) => all.indexOf(id) === i),
       diverged,
     });

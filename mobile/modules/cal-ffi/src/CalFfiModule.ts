@@ -334,7 +334,11 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
    * Take one event out of its group. Returns the remaining group as JSON, or
    * `null` when that dissolved it or the event was not grouped at all.
    */
-  ungroupEventJson(calendarId: string, eventId: string): Promise<string | null>;
+  ungroupEventJson(
+    calendarId: string,
+    eventId: string,
+    bookkeeping: boolean,
+  ): Promise<string | null>;
   /** Dissolve a whole group; the events themselves are untouched. */
   dissolveEventGroup(groupId: string): Promise<void>;
   /**

@@ -6780,14 +6780,24 @@ impl Host {
     /// Take one event out of its group. Returns the group as it stands
     /// afterwards, or `None` when the removal dissolved it (fewer than two
     /// members left) or the event was not grouped at all.
+    ///
+    /// `bookkeeping` says this is NOT the user taking something out — see
+    /// `Removal`. The series carry sets it, because a copy it takes out is on
+    /// its way straight back into the new group.
     pub fn ungroup_event_json(
         &self,
         calendar_id: String,
         event_id: String,
+        bookkeeping: bool,
     ) -> Result<Option<String>, StoreError> {
         let shared = self.db.shared();
+        let removal = if bookkeeping {
+            Removal::Bookkeeping
+        } else {
+            Removal::ByUser
+        };
         let outcome = EventGroupsRepo::new(&shared)
-            .ungroup(&calendar_id, &event_id, Removal::ByUser)
+            .ungroup(&calendar_id, &event_id, removal)
             .map_err(map_group_err)?;
         match outcome {
             Some(Ungrouped::Remains { group, declines }) => {
@@ -8503,9 +8513,9 @@ impl Host {
     /// delete that actually happened as a failure.
     fn forget_event_grouping(&self, calendar_id: &str, event_id: &str) {
         let shared = self.db.shared();
-        // `EventGone`: a deleted event has not said that it is a different
+        // Bookkeeping: a deleted event has not said that it is a different
         // appointment from anything — see `Removal`.
-        match EventGroupsRepo::new(&shared).ungroup(calendar_id, event_id, Removal::EventGone) {
+        match EventGroupsRepo::new(&shared).ungroup(calendar_id, event_id, Removal::Bookkeeping) {
             Ok(Some(Ungrouped::Remains { group, .. })) => self.emit_event_group(&group),
             Ok(Some(Ungrouped::Dissolved { group_id, .. })) => {
                 self.writer

@@ -185,10 +185,18 @@ export function findMeetingLinkPairs<E extends LinkableEvent>(
     const a = { calendar_id: meeting.calendar_id, event_id: seriesId(meeting) };
     const meetingGroup = grouped.get(memberKey(meeting));
     const appointmentGroup = grouped.get(memberKey(event));
-    // Already said: both sides in a group. The same one means there is nothing
-    // to do; two different ones would be a merge, which only the user can ask
-    // for — `group_events` refuses it for that reason.
-    if (meetingGroup && appointmentGroup) continue;
+    // A meeting that is ALREADY in a group is finished business, whatever the
+    // entry in front of us is.
+    //
+    // Same group: nothing to do. Different group: a merge, which only the user
+    // can ask for. And — the case this rule exists for — the entry ungrouped
+    // while the meeting is grouped: the meeting already belongs to an
+    // appointment, so a second one claiming the same link means the link
+    // identifies two appointments, which is the ambiguity this whole function
+    // refuses. Letting it through would have merged them, and WHICH ones got
+    // merged would have depended on nothing but the calendars that happened to
+    // be switched on — the count above only ever sees the rows in view.
+    if (meetingGroup) continue;
     // ONE meeting per account per appointment, and this is load-bearing.
     //
     // A provider may list a recurring meeting as one row per occurrence, each
@@ -205,16 +213,24 @@ export function findMeetingLinkPairs<E extends LinkableEvent>(
     ) {
       continue;
     }
-    // Already refused, against any copy of the appointment.
-    const refused = entries.some((entry) =>
-      declined.has(
-        suggestionPairKey(a, {
+    // Already refused — against every copy of the appointment there IS, not
+    // merely the ones in view.
+    //
+    // `ungroup` writes one mark per member the event left AT THAT MOMENT, so a
+    // copy added to the appointment afterwards carries no mark of its own. Ask
+    // the rows in view and the refusal is invisible whenever that younger copy
+    // is the one on screen — and the pair the user pulled apart comes back.
+    // The group knows all of them, so when there is one, it answers.
+    const against = appointmentGroup
+      ? appointmentGroup.members.map((m) => ({
+          calendar_id: m.calendar_id,
+          event_id: m.event_id,
+        }))
+      : entries.map((entry) => ({
           calendar_id: entry.calendar_id,
           event_id: seriesId(entry),
-        }),
-      ),
-    );
-    if (refused) continue;
+        }));
+    if (against.some((ref) => declined.has(suggestionPairKey(a, ref)))) continue;
     out.push({ meeting, event, joinUrl });
   }
   return out;

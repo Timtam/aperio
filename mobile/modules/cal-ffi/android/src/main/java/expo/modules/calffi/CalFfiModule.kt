@@ -432,8 +432,8 @@ class CalFfiModule : Module() {
       groupCoded { host.groupEventsJson(membersJson) }
     }
 
-    AsyncFunction("ungroupEventJson") { calendarId: String, eventId: String ->
-      host.ungroupEventJson(calendarId, eventId)
+    AsyncFunction("ungroupEventJson") { calendarId: String, eventId: String, bookkeeping: Boolean ->
+      host.ungroupEventJson(calendarId, eventId, bookkeeping)
     }
 
     AsyncFunction("dissolveEventGroup") { groupId: String ->

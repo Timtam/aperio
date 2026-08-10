@@ -35,8 +35,17 @@ export const groupEvents = async (
 export const ungroupEvent = async (
   calendarId: string,
   eventId: string,
+  /**
+   * This is Aperio tidying up its own records, not the user taking something
+   * out — so it leaves no "these are not the same appointment" behind.
+   *
+   * The series carry sets it: a copy it cannot split is taken out of the head
+   * group and put straight back into the new one, and recording that as a
+   * refusal would bind a pair nobody ruled on, on every device, for good.
+   */
+  bookkeeping = false,
 ): Promise<EventGroup | null> => {
-  const json = await CalFfi.ungroupEventJson(calendarId, eventId);
+  const json = await CalFfi.ungroupEventJson(calendarId, eventId, bookkeeping);
   return json == null ? null : (JSON.parse(json) as EventGroup);
 };
 

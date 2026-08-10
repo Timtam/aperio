@@ -85,16 +85,29 @@ pub async fn group_events(
 
 /// Take one event out of its group, dissolving the group if that leaves fewer
 /// than two members.
+///
+/// `bookkeeping` says this is NOT the user taking something out. The series
+/// carry sets it: when "this and all following" splits a group, a copy that
+/// cannot be split is taken out and put straight back into the new group, and
+/// recording that as "these are not the same appointment" would be a refusal
+/// nobody made — one that syncs, never expires, and silences the pair for good.
+/// See `Removal`.
 #[tauri::command]
 pub async fn ungroup_event(
     db: State<'_, DbHandle>,
     event_log: State<'_, Arc<EventLogWriter>>,
     calendar_id: String,
     event_id: String,
+    bookkeeping: Option<bool>,
 ) -> CommandResult<Option<cal_core::EventGroup>> {
     let shared = db.shared();
+    let removal = if bookkeeping.unwrap_or(false) {
+        Removal::Bookkeeping
+    } else {
+        Removal::ByUser
+    };
     let outcome = EventGroupsRepo::new(&shared)
-        .ungroup(&calendar_id, &event_id, Removal::ByUser)
+        .ungroup(&calendar_id, &event_id, removal)
         .map_err(map_group_err)?;
     Ok(match outcome {
         Some(Ungrouped::Remains { group, declines }) => {
@@ -238,9 +251,9 @@ pub(crate) fn forget_event_grouping(
     event_id: &str,
 ) {
     let shared = db.shared();
-    // `EventGone`: a deleted event has not said that it is a different
+    // Bookkeeping: a deleted event has not said that it is a different
     // appointment from anything — see `Removal`.
-    match EventGroupsRepo::new(&shared).ungroup(calendar_id, event_id, Removal::EventGone) {
+    match EventGroupsRepo::new(&shared).ungroup(calendar_id, event_id, Removal::Bookkeeping) {
         Ok(Some(Ungrouped::Remains { group, .. })) => emit_group(event_log, &group),
         Ok(Some(Ungrouped::Dissolved { group_id, .. })) => {
             event_log.append(SyncEvent::EventGroupDissolved(IdPayload { id: group_id }));

@@ -65,16 +65,18 @@ pub enum Ungrouped {
 /// those marks, and without them a group formed from a meeting link would come
 /// back on the next render, every day.
 ///
-/// A deleted event says nothing about anything. Its membership is bookkeeping
-/// that no longer points at a row, and clearing it must not leave a refusal
-/// behind — one that would outlive the event and quietly bind an id the
-/// provider may hand out again.
+/// Everything else is bookkeeping and says nothing about anything. A deleted
+/// event's membership no longer points at a row; a copy taken out mid-way
+/// through a series split is on its way straight back into a new group. Neither
+/// may leave a refusal behind — one that would outlive the reason for it and
+/// quietly bind a pair the user never ruled on, on every device, forever.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Removal {
     /// The user took this event out.
     ByUser,
-    /// The event is gone; only its membership is being cleared up.
-    EventGone,
+    /// Aperio is tidying up its own records — a deleted event's membership, or
+    /// a copy being moved from one group to another.
+    Bookkeeping,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -941,6 +943,37 @@ mod tests {
         assert_eq!(repo.dissolve(&group.id).unwrap(), None);
     }
 
+    /// The series carry takes a copy out of the head group and puts it straight
+    /// back into the new one. Recorded as a refusal, that would bind a pair
+    /// nobody ruled on — and the very next step groups them, so the database
+    /// would claim both things at once.
+    #[test]
+    fn regrouping_a_copy_is_not_a_refusal() {
+        let (_tmp, db) = fresh();
+        let shared = db.shared();
+        let repo = EventGroupsRepo::new(&shared);
+        repo.group(&[
+            member("work", "series"),
+            member("private", "copy"),
+            member("colleague", "other"),
+        ])
+        .unwrap();
+
+        let Some(Ungrouped::Remains { declines, .. }) = repo
+            .ungroup("private", "copy", Removal::Bookkeeping)
+            .unwrap()
+        else {
+            panic!("two members left, so the group stands");
+        };
+        assert!(declines.is_empty());
+        assert!(repo.declined_suggestions().unwrap().is_empty());
+
+        // …and the copy can be grouped again straight away, which is what the
+        // carry does two steps later.
+        repo.group(&[member("private", "copy"), member("work", "series")])
+            .expect("regrouping is not blocked");
+    }
+
     #[test]
     fn a_deleted_event_has_not_refused_anything() {
         let (_tmp, db) = fresh();
@@ -957,7 +990,7 @@ mod tests {
         // A refusal here would outlive the event and quietly bind an id the
         // provider may hand out again.
         let Some(Ungrouped::Remains { declines, .. }) = repo
-            .ungroup("colleague", "ev-c", Removal::EventGone)
+            .ungroup("colleague", "ev-c", Removal::Bookkeeping)
             .unwrap()
         else {
             panic!("two members left, so the group stands");

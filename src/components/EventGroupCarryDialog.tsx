@@ -278,7 +278,9 @@ export function EventGroupCarryDialog({
             // leaves the group of heads and joins the new rows, or the split
             // would strand it with a group it no longer belongs to.
             await updateEvent(row, target.calendar_id);
-            await ungroupEvent(target.calendar_id, target.event_id).catch(
+            // Bookkeeping, not a refusal: this copy is on its way straight
+            // back into the new group two steps down.
+            await ungroupEvent(target.calendar_id, target.event_id, true).catch(
               () => undefined,
             );
             created.push({

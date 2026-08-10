@@ -32,6 +32,73 @@ const group = (id: string, members: [string, string][]): EventGroup => ({
 
 const seriesId = (r: Row) => r.id;
 
+describe('which member the folded row shows', () => {
+  const LINK_GROUP = group('g-meeting', [
+    ['acc::meetings', 'vc::1'],
+    ['work', 'ev-a'],
+  ]);
+
+  it('never shows the read-only meetings copy when a real one is there', () => {
+    // The two are at the identical instant — anything else marks the group
+    // diverged and nothing folds — so the sort is a tie and the order is
+    // whatever the calendar fan-out produced. Position must not decide which
+    // row the user gets: the meetings copy has no editor, no delete, no move,
+    // and on mobile is not even a button.
+    const folded = collapseEventGroups(
+      [
+        row('vc::1', 'acc::meetings', '2026-08-10T08:00:00Z'),
+        row('ev-a', 'work', '2026-08-10T08:00:00Z'),
+      ],
+      [LINK_GROUP],
+      seriesId,
+    );
+    expect(folded).toHaveLength(1);
+    expect(folded[0].event.id).toBe('ev-a');
+    // The calendars it spans still lead with the row actually shown.
+    expect(folded[0].calendarIds[0]).toBe('work');
+  });
+
+  it('shows the meetings copy when it is the only member in view', () => {
+    // A meeting whose appointment is in a switched-off calendar is still a
+    // meeting the user has, and hiding it would be the old filter's mistake.
+    const folded = collapseEventGroups(
+      [row('vc::1', 'acc::meetings', '2026-08-10T08:00:00Z')],
+      [LINK_GROUP],
+      seriesId,
+    );
+    expect(folded).toHaveLength(1);
+    expect(folded[0].event.id).toBe('vc::1');
+  });
+
+  it('does not fold at all when the copies disagree about the time', () => {
+    // The case the whole feature exists for: appointment moved, meeting not.
+    // Both rows stay, and neither is quietly promoted over the other.
+    const folded = collapseEventGroups(
+      [
+        row('vc::1', 'acc::meetings', '2026-08-10T08:00:00Z'),
+        row('ev-a', 'work', '2026-08-10T09:00:00Z'),
+      ],
+      [LINK_GROUP],
+      seriesId,
+    );
+    expect(folded.map((f) => f.event.id)).toEqual(['vc::1', 'ev-a']);
+    expect(folded.every((f) => f.diverged)).toBe(true);
+  });
+
+  it('lets a caller answer for itself which rows are actionable', () => {
+    const folded = collapseEventGroups(
+      [
+        row('ev-a', 'work', '2026-08-10T08:00:00Z'),
+        row('ev-b', 'private', '2026-08-10T08:00:00Z'),
+      ],
+      [group('g2', [['work', 'ev-a'], ['private', 'ev-b']])],
+      seriesId,
+      (r) => r.calendar_id !== 'work',
+    );
+    expect(folded[0].event.id).toBe('ev-b');
+  });
+});
+
 describe('collapsing groups into one row', () => {
   it('keeps the first member and drops the rest, without reordering', () => {
     const events = [
