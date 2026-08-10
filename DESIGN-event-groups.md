@@ -1,8 +1,10 @@
 # Termingruppen — Entwurf
 
-Status: **Stufen 0 bis 3 gebaut**, auf beiden Plattformen und im Widget. Dieses
-Dokument hat entschieden, ob und in welcher Form gebaut wird; die Stufenliste am
-Ende sagt, was davon steht. Nichts davon lief bisher auf einem Gerät.
+Status: **Stufen 0 bis 3 gebaut**, auf beiden Plattformen und im Widget;
+**Stufe 4** (Meeting-Kalender als echte Kalender, automatisch gruppiert) ist
+Entwurf. Dieses Dokument hat entschieden, ob und in welcher Form gebaut wird;
+die Stufenliste am Ende sagt, was davon steht. Nichts davon lief bisher auf
+einem Gerät.
 
 ## Der Anlass
 
@@ -214,6 +216,99 @@ anzubieten ist der eine Fehler, den diese Funktion nicht machen darf.
 
 Angeboten wird nur auf den EINTÄGIGEN Oberflächen. In Woche und Monat würde die
 Frage einen Tag betreffen, den der Nutzer gerade nicht liest.
+
+**Stufe 4** — Die Meeting-Kalender sichtbar machen und ihre Zeilen automatisch
+mit dem Termin gruppieren, zu dem sie gehören. **ENTWURF**, noch nicht gebaut.
+
+### Das Problem, das heute versteckt wird
+
+Ein Videokonferenz-Konto liefert einen eigenen, nur lesbaren Kalender seiner
+Meetings. Die meisten dieser Meetings haben auch einen Kalendereintrag — Aperios
+eigenen oder die Einladung, die Outlook geschrieben hat —, also erschienen sie
+doppelt. `withoutDuplicateMeetings` wirft darum in der Ansicht die
+Meeting-Zeile weg, sobald ein echter Termin dieselbe **Beitritts-URL** trägt.
+
+Das Ergebnis stimmt meistens, aber der Weg dahin ist derselbe, den dieses ganze
+Dokument sonst ablehnt: **Aperio wirft Daten weg, um eine Doppelung zu
+verbergen.** Greift die Regel daneben, verschwindet ein Meeting, das es wirklich
+gibt, und nichts sagt es. Und der Meeting-Kalender ist überhaupt nicht
+anwählbar, es gibt also keinen Ort, an dem man nachsehen könnte.
+
+Eine Gruppe erzeugt dasselbe Ergebnis auf ehrliche Weise: **beide Zeilen
+bleiben**, gefaltet wird eine, die Marke sagt „2×", „Beitreten" liest ohnehin
+schon über alle Kopien (`MeetingsRepo::get_including_copies`), und laufen die
+beiden auseinander, wird das sichtbar statt weggeworfen.
+
+### Warum hier automatisch gruppiert werden DARF
+
+Stufe 3 lehnt automatisches Gruppieren ausdrücklich ab, und die Begründung
+bleibt richtig: Ein Büro voller „Team-Meeting" um 10:00 würde zu Gruppen
+führen, um die niemand gebeten hat. Diese Begründung zielt aber auf das
+**Raten** — auf Namensgleichheit als Indiz.
+
+Ein Meeting und sein Kalendereintrag sind nicht über den Namen verwandt,
+sondern über eine **vom Anbieter ausgestellte Kennung**: die Beitritts-URL, die
+im Termin steht. `withoutDuplicateMeetings` benutzt bereits genau die, und der
+Kommentar dort sagt auch, warum sie und nichts anderes: Aperio schreibt den
+Titel des Termins in das Meeting, das es anlegt — Titelgleichheit trägt hier
+also fast keine Information —, und die Zeiten laufen genau dann auseinander,
+wenn ein Termin verschoben wird, also genau dann, wenn man die beiden am
+dringendsten als eines sehen will.
+
+Automatisch gruppieren auf einer **Identität** ist damit etwas grundsätzlich
+anderes als automatisch gruppieren auf einer **Ähnlichkeit**. Das erste ist
+vertretbar, das zweite bleibt es nicht.
+
+### Was zu entscheiden ist, bevor das gebaut wird
+
+**Woher die Gruppe kommt, muss man ihr ansehen.** Eine automatisch entstandene
+Gruppe darf nicht aussehen wie eine, die der Nutzer angelegt hat: Er muss sie
+auflösen können, ohne dass sie beim nächsten Abgleich wiederkommt, und die
+Auflösung darf nicht so wirken, als hätte er seine eigene Aussage verloren. Das
+heißt eine Herkunft an der Gruppe (etwa `origin: 'meeting-link'`), die
+synchronisiert wie alles andere.
+
+**Aufgelöst heißt aufgelöst.** Der Mechanismus dafür existiert schon: die
+Ablehnungs-Marken aus Migration 0037, die ein Paar dauerhaft und geräteübergreifend
+von Vorschlägen ausnehmen. Eine automatische Gruppe, die der Nutzer auflöst,
+schreibt dieselbe Marke — und wird nicht neu gebildet. Ohne das ist die Funktion
+eine tägliche Zumutung statt einer Hilfe.
+
+**Nicht eindeutig heißt nicht gruppieren.** Eine Beitritts-URL kann auf mehrere
+Termine passen — ein Dauer-Meetingraum, der in einer Serie wiederverwendet wird,
+oder zwei Termine, die auf denselben Raum verweisen. Trifft die Kennung mehr als
+einen Termin, wird **nichts** gruppiert: dieselbe Eindeutigkeits-Regel, die die
+Selbstheilung schon anwendet, aus demselben Grund — eine falsche Gruppe ist
+schlimmer als keine, weil sie authoritativ aussieht.
+
+**Der Kalender wird sichtbar, aber nicht laut.** Er wird ein normaler Kalender
+in der Seitenleiste, nur lesbar wie bisher. Offene Frage: an- oder abgeschaltet
+beim ersten Erscheinen. Für „abgeschaltet" spricht, dass die Faltung ihn ohnehin
+unsichtbar macht, sobald die Gruppen stehen; für „angeschaltet", dass ein Meeting
+ohne Kalendereintrag — der eigentliche Grund, warum es diesen Kalender gibt —
+sonst verschwindet. Ich empfehle **angeschaltet**: Das ist der Zustand, in dem
+nichts fehlt, und die Faltung räumt die Doppelungen weg.
+
+**Die Reihenfolge der Umstellung ist heikel.** `withoutDuplicateMeetings` darf
+erst weg, wenn die Gruppen tatsächlich existieren — sonst erscheint jedes
+Meeting zwei Mal, und zwar bei jedem, der aktualisiert, bevor der erste Abgleich
+gelaufen ist. Also: erst gruppieren, dann filtern lassen, und den Filter erst
+danach ausbauen. Solange beides läuft, muss der Filter Zeilen in Ruhe lassen,
+die bereits Mitglied einer Gruppe sind — sonst faltet die Gruppe eine Zeile weg,
+die der Filter schon entfernt hat, und die Zählung stimmt nicht mehr.
+
+**Schreibrechte klären sich von selbst.** Der Meeting-Kalender ist nur lesbar,
+und das ist bereits überall richtig behandelt: Gruppieren geht auf nur lesbaren
+Zeilen (die Gruppe ist Aperios Aussage, kein Schreibvorgang), und das Mitziehen
+nennt sie als das, was es nicht schreiben kann, statt sie still zu überspringen.
+
+### Was es wert ist
+
+Der sichtbare Gewinn ist klein — die Doppelung verschwindet heute auch schon.
+Der Gewinn liegt darin, dass sie **richtig** verschwindet: nachvollziehbar, mit
+beiden Zeilen erhalten, mit einer Zahl, die sagt was es gibt, und mit einer
+Stelle, an der man nachsehen kann. Dazu fällt eine Heuristik weg, die still
+Daten unterdrückt — die einzige, die dieses Projekt noch hat.
 
 ## Größenordnung
 

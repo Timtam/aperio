@@ -308,11 +308,17 @@ Vollständiger Entwurf samt der schwierigen Teile (woher die Mitgliedschaft komm
 wie eine Gruppe anbieterseitige Kennungswechsel überlebt, was bei fehlenden
 Schreibrechten passiert) und einem Stufenplan: `DESIGN-event-groups.md`.
 
-Gebaut sind alle vier Stufen: Modell und Synchronisation, das Falten in allen
+Gebaut sind die Stufen 0 bis 3: Modell und Synchronisation, das Falten in allen
 sechs Ansichten, das Mitziehen einer Bearbeitung in allen drei Umfängen (ganze
 Serie, nur dieses Vorkommen, dieses und alle folgenden), Erkennung samt
 Vorschlagszeile mit endgültigem „Nein", das Meeting an der Gruppe und die
 Selbstheilung nach Kennungswechseln. Nichts davon lief bisher auf einem Gerät.
+
+Als **Entwurf** liegt daneben Stufe 4: die Meeting-Kalender als echte Kalender
+sichtbar machen und ihre Zeilen automatisch mit dem Termin gruppieren, zu dem
+sie gehören — über die Beitritts-URL, also über eine Kennung statt über eine
+Ähnlichkeit. Das ersetzt die einzige Heuristik im Projekt, die still Daten
+unterdrückt (`withoutDuplicateMeetings`). Entscheidungsgrundlage im Entwurf.
 
 **Stufe 0 und 1 sind gebaut**: Migration 0035/0036, `EventGroupsRepo`, Sync über
 `event_group.updated`/`.dissolved` samt Snapshot und Auflösungs-Marken, die
