@@ -10,7 +10,8 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
 1. Öffne die **Aufgaben-Ansicht** oder eine Aufgabenliste in der
    Seitenleiste.
 2. Lege eine Aufgabe an: **Aufgabe schnell anlegen** (`Alt+N`) öffnet den
-   Schnell-Dialog, **Neue Aufgabe** (`Alt+Umschalt+N`) das vollständige Formular.
+   Schnell-Dialog — auch dort werden dir frühere Einträge angeboten, und
+   nimmst du einen an, öffnet sich der bereits ausgefüllte Editor, **Neue Aufgabe** (`Alt+Umschalt+N`) das vollständige Formular.
 3. Gib einen **Titel** ein. Beim Tippen bietet Aperio **frühere Einträge mit
    diesem Namen** an (Pfeiltasten, `Eingabe` übernimmt; am Telefon als Liste
    unter dem Feld). Übernimmst du einen, füllt sich der Rest des Editors aus

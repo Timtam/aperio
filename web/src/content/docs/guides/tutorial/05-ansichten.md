@@ -27,6 +27,10 @@ to know them and switch between them.
 ## Navigating within a view
 
 - **Arrow keys:** move the selection (day/hour/event).
+- **One list per day:** in the day view, events **and** tasks live in the same
+  list — everything with a time first, then the tasks without one. You never
+  have to leave the list to learn what else the day holds. The band under the
+  grid shows the same tasks for sighted users.
 - **Back and forward:** use `Page Up` / `Page Down` to page to the
   previous/next period (week, month …).
 - **Today:** jumps back to the current day (default: `T` or "Today" in the

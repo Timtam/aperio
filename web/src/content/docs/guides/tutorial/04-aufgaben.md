@@ -8,7 +8,8 @@ your day or week, and work through them.
 ## Creating a task
 
 1. Open the **task view** or a task list in the sidebar.
-2. Create a task: **Quick add task** (`Alt+N`) opens the quick dialog, **New
+2. Create a task: **Quick add task** (`Alt+N`) opens the quick dialog — it offers earlier
+   entries too, and accepting one opens the already-filled editor, **New
    task** (`Alt+Shift+N`) the full form.
 3. Enter a **title**. As you type, Aperio offers **earlier entries with that
    name** (arrow keys, `Enter` accepts; on the phone as a list under the

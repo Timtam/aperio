@@ -27,6 +27,11 @@ Kapitel lernst du sie kennen und wechselst zwischen ihnen.
 ## Navigieren in einer Ansicht
 
 - **Pfeiltasten:** bewegen die Markierung (Tag/Stunde/Termin).
+- **Eine Liste pro Tag:** In der Tagesansicht liegen Termine **und** Aufgaben in
+  derselben Liste — erst alles mit Uhrzeit, danach die Aufgaben ohne. Du
+  brauchst die Liste also nicht zu verlassen, um zu erfahren, was der Tag noch
+  bringt. Das Band unter dem Raster zeigt dieselben Aufgaben für sehende
+  Nutzer.
 - **Vor und zurück:** mit `Bild auf` / `Bild ab` blätterst du zum
   vorigen/nächsten Zeitraum (Woche, Monat …).
 - **Heute:** springt zurück auf den aktuellen Tag (Standard: `T` oder
