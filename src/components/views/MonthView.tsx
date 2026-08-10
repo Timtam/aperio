@@ -194,6 +194,27 @@ export function MonthView() {
     return { eventsByDay: folded, groupRows: rows };
   }, [events, groups]);
 
+  /**
+   * The events the all-day LANE may draw.
+   *
+   * The lane is where an all-day event actually appears — its chip inside the
+   * cell is clipped to a 1x1 rect — so drawing it from the unfolded list left
+   * one bar per copy above a listbox that had folded them into one row: the
+   * screen contradicted what it announced, and each bar was separately
+   * draggable, so moving the second one silently pulled the group apart.
+   *
+   * Filtered by what survived folding on ANY day rather than rebuilt per day,
+   * so a multi-day bar stays one bar instead of fragmenting where different
+   * days picked different representatives.
+   */
+  const laneEvents = useMemo(() => {
+    const kept = new Set<string>();
+    for (const dayEvents of eventsByDay.values()) {
+      for (const ev of dayEvents) kept.add(eventInstanceKey(ev));
+    }
+    return events.filter((ev) => kept.has(eventInstanceKey(ev)));
+  }, [events, eventsByDay]);
+
   // Expand recurring SCHEDULED tasks into one occurrence per planned day across
   // the visible month grid — so a task recurring every day/week shows on EVERY
   // due day (like a recurring event), not only its single current
@@ -696,7 +717,7 @@ export function MonthView() {
           {Array.from({ length: rowCount }, (_, row) => {
             const rowStart = cells[row * 7];
             const rowCells = cells.slice(row * 7, row * 7 + 7);
-            const rowBars = buildAllDayBars(events, rowCells);
+            const rowBars = buildAllDayBars(laneEvents, rowCells);
             const laneRows = rowBars.reduce(
               (m, b) => Math.max(m, b.lane + 1),
               0,

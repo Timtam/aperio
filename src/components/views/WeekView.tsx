@@ -364,6 +364,27 @@ export function WeekView() {
     return { eventsByDay: folded, groupRows: rows };
   }, [events, days, groups]);
 
+  /**
+   * The events the all-day LANE may draw.
+   *
+   * The lane is where an all-day event actually appears — its chip inside the
+   * cell is clipped to a 1x1 rect — so drawing it from the unfolded list left
+   * one bar per copy above a listbox that had folded them into one row: the
+   * screen contradicted what it announced, and each bar was separately
+   * draggable, so moving the second one silently pulled the group apart.
+   *
+   * Filtered by what survived folding on ANY day rather than rebuilt per day,
+   * so a multi-day bar stays one bar instead of fragmenting where different
+   * days picked different representatives.
+   */
+  const laneEvents = useMemo(() => {
+    const kept = new Set<string>();
+    for (const dayEvents of eventsByDay.values()) {
+      for (const ev of dayEvents) kept.add(eventInstanceKey(ev));
+    }
+    return events.filter((ev) => kept.has(eventInstanceKey(ev)));
+  }, [events, eventsByDay]);
+
   // Bucket tasks per visible day (§9.4). A task lands on a day when it
   // is scheduled for that day OR due (deadline) that day — the deadline
   // shows as a point marker on its deadline day, not a span across every
@@ -571,8 +592,8 @@ export function WeekView() {
   // inside the cells (those carry the listbox options) — the lane
   // here is `aria-hidden` and exists only for sighted users.
   const allDayBars = useMemo(
-    () => buildAllDayBars(events, days),
-    [events, days],
+    () => buildAllDayBars(laneEvents, days),
+    [laneEvents, days],
   );
   const laneRows = allDayBars.reduce((m, b) => Math.max(m, b.lane + 1), 0);
 

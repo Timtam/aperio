@@ -856,11 +856,22 @@ export function CalendarDayList({
       // the contract `collapseEventGroups` documents, because a recurring
       // appointment renders a row per day and across a week its own days
       // would look exactly like copies that disagree.
-      const foldedAllDay = collapseEventGroups(allDay, eventGroups, seriesIdOf);
-      const foldedTimed = collapseEventGroups(timedEvents, eventGroups, seriesIdOf);
-      for (const row of [...foldedAllDay, ...foldedTimed]) {
+      //
+      // ONE call over the whole day, then split back. Folding all-day and
+      // timed separately hid a real divergence: a group whose copies are
+      // all-day in one calendar and timed in another disagrees about when the
+      // appointment is, and split into two calls neither half could see it —
+      // both folded quietly, and the desktop reported what the phone did not.
+      const foldedDay = collapseEventGroups(
+        [...allDay, ...timedEvents],
+        eventGroups,
+        seriesIdOf,
+      );
+      for (const row of foldedDay) {
         if (row.group) rows.set(`${eventInstanceKey(row.event)}@${key}`, row);
       }
+      const foldedAllDay = foldedDay.filter((row) => row.event.all_day);
+      const foldedTimed = foldedDay.filter((row) => !row.event.all_day);
       const { timed, untimed } = mergeDayItems(
         foldedTimed.map((row) => row.event),
         dayTasks,
@@ -873,7 +884,10 @@ export function CalendarDayList({
         allDay: foldedAllDay.map((row) => row.event),
         timed,
         untimed,
-        count: allDay.length + timed.length + untimed.length,
+        // The FOLDED all-day rows: the header is what a screen-reader user
+        // lands on when jumping by heading, and it counted copies the list
+        // below no longer shows.
+        count: foldedAllDay.length + timed.length + untimed.length,
       };
     });
     return { buckets: built, groupRows: rows };
