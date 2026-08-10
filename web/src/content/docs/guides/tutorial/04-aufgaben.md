@@ -10,7 +10,12 @@ your day or week, and work through them.
 1. Open the **task view** or a task list in the sidebar.
 2. Create a task: **Quick add task** (`Alt+N`) opens the quick dialog, **New
    task** (`Alt+Shift+N`) the full form.
-3. Enter a **title**. Optionally:
+3. Enter a **title**. As you type, Aperio offers **earlier entries with that
+   name** (arrow keys, `Enter` accepts; on the phone as a list under the
+   field). Accept one and the rest of the editor fills from it — the length or
+   the priority and effort, the repetition, the description, the reminders.
+   **The day stays as it was:** that is what makes this a new entry.
+   Optionally:
    - the **task list** it is stored in,
    - a **due date** (and optionally a time), each removable on its own:
      **Remove the time** strikes just the time and leaves the day standing,

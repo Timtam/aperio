@@ -31,6 +31,7 @@ import {
   fromBackend,
   selectableTaskLists,
   selfAssignOnStatusChange,
+  taskPrefillFrom,
   toBackend,
 } from '@aperio/shared';
 
@@ -45,6 +46,11 @@ import {
 import { AssigneePicker } from '../components/AssigneePicker';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
+import { TitleSuggestions } from '../components/TitleSuggestions';
+import {
+  rankTaskSuggestions,
+  useTitleSuggestions,
+} from '../state/useTitleSuggestions';
 import { DescriptionLinks } from '../components/DescriptionLinks';
 import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
@@ -429,6 +435,47 @@ export default function TaskEditorModal({
       }).map((l) => ({ value: l.id, label: l.name })),
     [taskLists, selectedTaskListIds, form.listId, showHiddenTaskListTargets],
   );
+  /**
+   * Earlier tasks with this name, offered while a NEW one is typed.
+   *
+   * Only while creating: opening an existing task and touching its title must
+   * not offer to overwrite it with an older version of itself.
+   */
+  const titleMatches = useTitleSuggestions(form.title, 'tasks', taskId == null);
+  const titleOptions = useMemo(
+    () =>
+      rankTaskSuggestions(titleMatches, form.title).map(({ item }) => ({
+        id: item.id,
+        title: item.title,
+        hint: taskLists.find((l) => l.id === item.list_id)?.name,
+      })),
+    [titleMatches, form.title, taskLists],
+  );
+  const acceptTitleSuggestion = useCallback(
+    (id: string) => {
+      const source = titleMatches.find((task) => task.id === id);
+      if (!source) return;
+      const fill = taskPrefillFrom(source);
+      setForm((prev) => ({
+        ...prev,
+        title: fill.title,
+        description: fill.description ?? '',
+        priority: fill.priority as FormState['priority'],
+        effort: fill.effort as FormState['effort'],
+        colorLabel: fill.color_label ?? '',
+        reminders: fill.reminders as Reminder[],
+        recurrence: fromBackend(fill.recurrence),
+        deadlineReminderDays: fill.deadline_reminder_days,
+        // The DAYS stay exactly as they were: what makes this a new task is
+        // when it is due, and that came from wherever the editor was opened.
+        // The list travels, though — a task called this belongs where the last
+        // one did, unless it is a subtask glued to its parent's list.
+        listId: parentId != null ? prev.listId : fill.list_id || prev.listId,
+      }));
+    },
+    [titleMatches, parentId],
+  );
+
   const sectionOptions = useMemo(
     () => [
       { value: '', label: t('dialogs.task.noSection') },
@@ -843,6 +890,11 @@ export default function TaskEditorModal({
           accessibilityLabel={t('dialogs.task.fields.title')}
           editable={!loading}
           returnKeyType="next"
+        />
+        <TitleSuggestions
+          options={titleOptions}
+          onAccept={acceptTitleSuggestion}
+          editable={!loading}
         />
       </View>
 

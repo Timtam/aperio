@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -18,6 +18,7 @@ import type {
 } from '@aperio/shared';
 import {
   allDayFormEndDate,
+  eventPrefillFrom,
   allDayWireEnd,
   applyDateTimeChange,
   dateInput,
@@ -32,6 +33,11 @@ import {
 } from '@aperio/shared';
 
 import { AttendeesEditor } from '../components/AttendeesEditor';
+import { TitleSuggestions } from '../components/TitleSuggestions';
+import {
+  rankEventSuggestions,
+  useTitleSuggestions,
+} from '../state/useTitleSuggestions';
 import { AvailabilityChecker } from '../components/AvailabilityChecker';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { ConferenceSection } from '../components/ConferenceSection';
@@ -154,6 +160,62 @@ export default function EventEditorModal({
     [],
   );
   const [location, setLocation] = useState('');
+  /**
+   * Earlier appointments with this name, offered while a NEW one is typed.
+   *
+   * Only while creating: opening an existing event and touching its title must
+   * not offer to overwrite it with an older version of itself.
+   */
+  const titleMatches = useTitleSuggestions(title, 'events', !editing);
+  const titleOptions = useMemo(
+    () =>
+      rankEventSuggestions(titleMatches, title).map(({ item }) => ({
+        id: item.id,
+        title: item.title,
+        hint: calendars.find((c) => c.id === item.calendar_id)?.name,
+      })),
+    [titleMatches, title, calendars],
+  );
+  const acceptTitleSuggestion = useCallback(
+    (id: string) => {
+      const source = titleMatches.find((e) => e.id === id);
+      if (!source) return;
+      const fill = eventPrefillFrom(source);
+      setTitle(fill.title);
+      setDescription(fill.description ?? '');
+      setLocation(fill.location ?? '');
+      setRecurrence(fill.rrule);
+      setColorLabel(fill.color_label ?? '');
+      setReminders(fill.reminders as Reminder[]);
+      setAttendees(fill.attendees);
+      // Attendees came along, so the invitation toggle goes OFF. Filling a
+      // form from something written once is not the same as deciding to email
+      // people about it, and that decision stays the user's.
+      if (fill.attendees.length > 0) setNotifyAttendees(false);
+      // The reminders are the user's own now, not the calendar's default.
+      setKeepRemindersAsDefault(false);
+      if (
+        calendars.some((c) => c.id === fill.calendar_id && !c.read_only)
+      ) {
+        setCalId(fill.calendar_id);
+      }
+      // The DAY stays exactly as it is — only the LENGTH travels, laid onto
+      // whatever day the editor was opened on.
+      setTimes((prev) => {
+        if (fill.all_day) return { ...prev, allDay: true };
+        const start = new Date(`${prev.startDate}T${prev.startTime || '00:00'}`);
+        if (!Number.isFinite(start.getTime())) return prev;
+        const end = new Date(start.getTime() + fill.durationMinutes * 60_000);
+        return {
+          ...prev,
+          allDay: false,
+          endDate: dateInput(end),
+          endTime: timeInput(end),
+        };
+      });
+    },
+    [titleMatches, calendars],
+  );
   const [description, setDescription] = useState('');
   // The bound colour-label id ('' = none). Only LOCAL events carry it on their
   // own row; on an external calendar the colour is a host-local override (the
@@ -821,6 +883,11 @@ export default function EventEditorModal({
           value={title}
           onChangeText={setTitle}
           accessibilityLabel={t('dialogs.event.fields.title')}
+        />
+        <TitleSuggestions
+          options={titleOptions}
+          onAccept={acceptTitleSuggestion}
+          editable={!saving}
         />
       </View>
 

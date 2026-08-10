@@ -2121,6 +2121,7 @@
     "popupLabel": "Frühere Einträge mit diesem Namen",
     "count_one": "Ein früherer Eintrag, mit den Pfeiltasten erreichbar.",
     "count_other": "{{count}} frühere Einträge, mit den Pfeiltasten erreichbar.",
-    "applied": "Aus „{{title}}\" übernommen. Der Tag bleibt, wie er war."
+    "applied": "Aus „{{title}}\" übernommen. Der Tag bleibt, wie er war.",
+    "acceptHint": "Übernimmt alles außer dem Tag"
   }
 }
