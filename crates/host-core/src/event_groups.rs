@@ -395,6 +395,12 @@ impl<'a> EventGroupsRepo<'a> {
             tx.commit()?;
             return Ok(None);
         };
+        let signature: (String, String) = tx.query_row(
+            "SELECT title, starts_at FROM event_group_members
+              WHERE calendar_id = ? AND event_id = ?",
+            params![old_calendar_id, old_event_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
         // The target may already be in a group (the user moved an event onto
         // one it was grouped with). Its own membership wins; ours goes.
         tx.execute(
@@ -404,10 +410,21 @@ impl<'a> EventGroupsRepo<'a> {
         tx.execute(
             "INSERT INTO event_group_members
                  (group_id, calendar_id, event_id, title, starts_at, added_at)
-             SELECT ?, ?, ?, title, starts_at, added_at
-               FROM event_group_members WHERE group_id = ? LIMIT 1
+             VALUES (?, ?, ?, ?, ?, ?)
              ON CONFLICT(calendar_id, event_id) DO NOTHING",
-            params![group_id, new_calendar_id, new_event_id, group_id],
+            params![
+                group_id,
+                new_calendar_id,
+                new_event_id,
+                // ITS own signature, carried across the move. The row this
+                // replaced was picked with `LIMIT 1` from the group, so a
+                // moved member used to inherit whichever other member SQLite
+                // happened to return — and the signature is exactly what has
+                // to survive, since it is how the member is found again.
+                signature.0,
+                signature.1,
+                now
+            ],
         )?;
         tx.execute(
             "UPDATE event_groups SET updated_at = ? WHERE id = ?",
@@ -465,10 +482,16 @@ impl<'a> EventGroupsRepo<'a> {
     /// event can be found again; this writes down what was found.
     ///
     /// A repair of Aperio's own bookkeeping, not a change to the group: the
-    /// same events mean the same appointment before and after. `updated_at`
-    /// still moves, because the other devices have to be told which id to use
-    /// — they will each have discovered the same thing, and the newest write
-    /// simply wins, as everywhere else.
+    /// same events mean the same appointment before and after.
+    ///
+    /// `updated_at` deliberately does NOT move, and nothing is emitted. A heal
+    /// is derived from evidence every device has — its own view of the events
+    /// — so each repairs itself when it next renders the range, and none of
+    /// them has to be told. Broadcasting it was worse than useless twice over:
+    /// a silent repair stamped "now" would outrank a DISSOLVE another device
+    /// had just made, resurrecting a group the user got rid of; and two
+    /// devices whose caches disagree about an id would heal each other back
+    /// and forth without end.
     ///
     /// Returns the group afterwards, or `None` when the old member was already
     /// gone (two views healing the same thing at once is not an error).
@@ -479,7 +502,6 @@ impl<'a> EventGroupsRepo<'a> {
         old_event_id: &str,
         new_event_id: &str,
     ) -> Result<Option<EventGroup>, EventGroupsError> {
-        let now = Utc::now().to_rfc3339();
         let mut conn = self.db.lock().expect("db mutex poisoned");
         let tx = conn.transaction()?;
         let changed = tx.execute(
@@ -492,10 +514,6 @@ impl<'a> EventGroupsRepo<'a> {
             tx.commit()?;
             return Ok(None);
         }
-        tx.execute(
-            "UPDATE event_groups SET updated_at = ? WHERE id = ?",
-            params![now, group_id],
-        )?;
         let group = read_group(&tx, group_id)?;
         tx.commit()?;
         Ok(group)

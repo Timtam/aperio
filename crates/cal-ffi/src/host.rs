@@ -6874,12 +6874,12 @@ impl Host {
         new_event_id: String,
     ) -> Result<(), StoreError> {
         let shared = self.db.shared();
-        let healed = EventGroupsRepo::new(&shared)
+        // Local only: every device has the same evidence and repairs itself.
+        // See `EventGroupsRepo::heal_member` for why broadcasting it was
+        // harmful.
+        EventGroupsRepo::new(&shared)
             .heal_member(&group_id, &calendar_id, &old_event_id, &new_event_id)
             .map_err(map_group_err)?;
-        if let Some(group) = healed {
-            self.emit_event_group(&group);
-        }
         Ok(())
     }
 

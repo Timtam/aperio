@@ -194,19 +194,17 @@ pub async fn group_suggestion_declines(
 #[tauri::command]
 pub async fn heal_event_group_member(
     db: State<'_, DbHandle>,
-    event_log: State<'_, Arc<EventLogWriter>>,
     group_id: String,
     calendar_id: String,
     old_event_id: String,
     new_event_id: String,
 ) -> CommandResult<()> {
     let shared = db.shared();
-    let healed = EventGroupsRepo::new(&shared)
+    // Local only: every device has the same evidence and repairs itself. See
+    // `EventGroupsRepo::heal_member` for why broadcasting it was harmful.
+    EventGroupsRepo::new(&shared)
         .heal_member(&group_id, &calendar_id, &old_event_id, &new_event_id)
         .map_err(map_group_err)?;
-    if let Some(group) = healed {
-        emit_group(&event_log, &group);
-    }
     Ok(())
 }
 
