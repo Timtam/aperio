@@ -69,9 +69,9 @@ describe('grouping a meeting with its appointment', () => {
   });
 
   it('does nothing when the link identifies more than one appointment', () => {
-    // A standing meeting room reused by two entries: the link stops being an
-    // identity and becomes a resemblance again, which is exactly what this
-    // feature must not act on.
+    // A standing meeting room reused by two unrelated entries: the link stops
+    // being an identity and becomes a resemblance again, which is exactly what
+    // this feature must not act on.
     const pairs = findMeetingLinkPairs(
       [
         row('m1', 'acc::meetings', LINK),
@@ -80,6 +80,79 @@ describe('grouping a meeting with its appointment', () => {
       ],
       [],
       [],
+      seriesId,
+    );
+    expect(pairs).toEqual([]);
+  });
+
+  it('joins the group when every copy carrying the link is in it', () => {
+    // The leading case of this whole feature: one appointment kept in several
+    // calendars, each copy carrying the same forwarded join link. Counting the
+    // ROWS would call that ambiguous and refuse — refusing precisely for an
+    // appointment the user has already declared to be one thing. The group IS
+    // the answer to "which appointment is this meeting?".
+    const pairs = findMeetingLinkPairs(
+      [
+        row('m1', 'acc::meetings', LINK),
+        row('e1', 'work', LINK),
+        row('e2', 'private', LINK),
+      ],
+      [group(['work', 'e1'], ['private', 'e2'])],
+      [],
+      seriesId,
+    );
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0].meeting.id).toBe('m1');
+    // Either copy names the group, and `group_events` joins it rather than
+    // starting a second one.
+    expect(pairs[0].event.calendar_id).toBe('work');
+  });
+
+  it('still refuses when one claimant is outside the group', () => {
+    // The rule is "count appointments, not rows" — not "ignore the extras".
+    const pairs = findMeetingLinkPairs(
+      [
+        row('m1', 'acc::meetings', LINK),
+        row('e1', 'work', LINK),
+        row('e2', 'private', LINK),
+        row('e3', 'somebody-else', LINK),
+      ],
+      [group(['work', 'e1'], ['private', 'e2'])],
+      [],
+      seriesId,
+    );
+    expect(pairs).toEqual([]);
+  });
+
+  it('adds one meeting per account, however often the provider remints its id', () => {
+    // Webex lists a recurring meeting as one row per occurrence, each with its
+    // own id, and its list response carries no series id to collapse them by.
+    // Today's row is not yesterday's — so without this rule the day view would
+    // add a new member every morning and the count would climb forever.
+    const pairs = findMeetingLinkPairs(
+      [
+        row('m-tuesday', 'acc::meetings', LINK),
+        row('e1', 'work', LINK),
+      ],
+      [group(['work', 'e1'], ['acc::meetings', 'm-monday'])],
+      [],
+      seriesId,
+    );
+    expect(pairs).toEqual([]);
+  });
+
+  it('obeys a refusal made against any copy of the appointment', () => {
+    // Taking the meeting out of the group wrote a mark against EVERY member it
+    // left. Checking only the first copy would let the pair back in as soon as
+    // the rows arrived in another order.
+    const pairs = findMeetingLinkPairs(
+      [
+        row('m1', 'acc::meetings', LINK),
+        row('e1', 'work', LINK),
+        row('e2', 'private', LINK),
+      ],
+      [group(['work', 'e1'], ['private', 'e2'])],
+      [decline(['acc::meetings', 'm1'], ['private', 'e2'])],
       seriesId,
     );
     expect(pairs).toEqual([]);
@@ -180,24 +253,42 @@ describe('grouping a meeting with its appointment', () => {
     ).toEqual([]);
   });
 
-  it('groups a recurring pair once, however many days are in view', () => {
-    // A range renders one row per occurrence; the membership is the series
-    // master's, so the same pair would otherwise be handed over five times.
+  it('counts a series once, however many days are in view', () => {
+    // A range renders one row per occurrence, and membership is keyed by the
+    // series master — so three days of one appointment are one appointment,
+    // not three claimants. Counting rows would have made the same data
+    // ambiguous in the week view and fine in the day view, which is a property
+    // of the open range rather than of the data.
+    //
+    // (These rows have no RRULE of their own: this is one appointment listed
+    // three times, which is what the deduplication is about. A genuinely
+    // recurring appointment is refused outright — see below.)
     const days = ['1', '2', '3'].flatMap(() => [
       row('m1', 'acc::meetings', LINK),
       row('e1', 'work', LINK),
     ]);
-    expect(findMeetingLinkPairs(days, [], [], seriesId)).toHaveLength(0);
-    // (Three occurrences of each make the link ambiguous, which is refused —
-    // so a view hands in one day at a time, exactly like the folding rule.)
-    expect(
-      findMeetingLinkPairs(
-        [row('m1', 'acc::meetings', LINK), row('e1', 'work', LINK)],
-        [],
-        [],
-        seriesId,
-      ),
-    ).toHaveLength(1);
+    const pairs = findMeetingLinkPairs(days, [], [], seriesId);
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0].event.id).toBe('e1');
+  });
+
+  it('leaves a recurring appointment alone', () => {
+    // A group's members are series. Webex has no series for a meeting row to
+    // name — it lists one row per occurrence — and a meeting that does not
+    // recur while the appointment does really is absent on most days. Either
+    // way the group would claim, on every day but one, a copy that is not
+    // there.
+    const weekly = {
+      ...row('e1', 'work', LINK),
+      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=TU' },
+    };
+    const pairs = findMeetingLinkPairs(
+      [row('m1', 'acc::meetings', LINK), weekly],
+      [],
+      [],
+      seriesId,
+    );
+    expect(pairs).toEqual([]);
   });
 
   it('sees through the spellings of one link, but not through its query', () => {

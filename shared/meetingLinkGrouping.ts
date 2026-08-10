@@ -42,6 +42,13 @@ export interface LinkableEvent {
   calendar_id: string;
   location?: string | null;
   description?: string | null;
+  /** Present with an RRULE when the row belongs to a recurring series. */
+  recurrence?: { rrule?: string | null } | null;
+}
+
+/** Whether the row belongs to a recurring series. */
+function recurs(event: LinkableEvent): boolean {
+  return (event.recurrence?.rrule ?? '').trim() !== '';
 }
 
 /** A meeting row and the appointment it belongs to. */
@@ -83,16 +90,38 @@ export function normalizeJoinUrl(url: string): string {
  * refusals the user has already made. Only a view has all of a window's rows
  * in hand, which is why this lives here and not in an adapter.
  *
- * A link is only acted on when it identifies exactly ONE meeting row and
- * exactly ONE appointment. A standing meeting room reused across a series, or
- * two appointments pointing at the same link, make the identity ambiguous —
- * and an ambiguous identity is a resemblance again. Then nothing happens: a
- * wrong group is worse than none, because it still looks authoritative.
+ * A link is only acted on when it identifies exactly ONE meeting and exactly
+ * ONE appointment. A standing meeting room reused by two unrelated
+ * appointments makes the identity ambiguous — and an ambiguous identity is a
+ * resemblance again. Then nothing happens: a wrong group is worse than none,
+ * because it still looks authoritative.
+ *
+ * ## What counts as one appointment
+ *
+ * Two things, and both of them matter more than they look:
+ *
+ * **A series counts once.** A recurring appointment renders one row per day, so
+ * a week's rows hold five of it. Counting rows would make every recurring
+ * meeting permanently ambiguous — and it would depend on how wide a range
+ * happened to be open, which is not a property of the data. Membership is keyed
+ * by the series master, so that is what is counted.
+ *
+ * **A group counts once.** Copies of one appointment in several calendars each
+ * carry the same join URL — that is what a forwarded invitation does. Counting
+ * them separately would refuse exactly the case this feature exists for: an
+ * appointment the user has ALREADY declared to be one thing. "Which appointment
+ * is this meeting?" has one answer there, and the group is that answer. The
+ * meeting joins the group rather than starting a second one.
+ *
+ * A claimant OUTSIDE the group still makes it ambiguous, and still stops
+ * everything. The rule is not "ignore the extras", it is "count appointments,
+ * not rows".
  *
  * `declines` is what stops this being a daily nuisance. Taking a member out of
  * a group, or dissolving one, writes exactly those marks (`EventGroupsRepo`),
  * and they sync — so a pair the user has pulled apart on any device stays
- * apart on all of them.
+ * apart on all of them. Checked against EVERY copy of the appointment, because
+ * a refusal names the pair the user actually saw.
  */
 export function findMeetingLinkPairs<E extends LinkableEvent>(
   events: readonly E[],
@@ -110,37 +139,82 @@ export function findMeetingLinkPairs<E extends LinkableEvent>(
     ),
   );
 
-  const byUrl = new Map<string, { meetings: E[]; entries: E[] }>();
+  /** What the row is, as far as membership is concerned. */
+  const memberKey = (event: E) =>
+    eventGroupMemberKey(event.calendar_id, seriesId(event));
+  /**
+   * Which appointment the row belongs to: its group when it has one, else
+   * itself. This is the identity the counting below is about.
+   */
+  const appointmentOf = (event: E) =>
+    grouped.get(memberKey(event))?.id ?? `alone:${memberKey(event)}`;
+
+  // Keyed by member key on both sides, so a series' own days collapse into the
+  // one thing they are.
+  const byUrl = new Map<string, { meetings: Map<string, E>; entries: Map<string, E> }>();
   for (const event of events) {
     const raw = meetingJoinUrl(event);
     if (!raw) continue;
     const url = normalizeJoinUrl(raw);
     if (url === '') continue;
-    const bucket = byUrl.get(url) ?? { meetings: [], entries: [] };
-    (isMeetingCalendarEvent(event) ? bucket.meetings : bucket.entries).push(event);
+    const bucket = byUrl.get(url) ?? { meetings: new Map(), entries: new Map() };
+    const side = isMeetingCalendarEvent(event) ? bucket.meetings : bucket.entries;
+    if (!side.has(memberKey(event))) side.set(memberKey(event), event);
     byUrl.set(url, bucket);
   }
 
   const out: MeetingLinkPair<E>[] = [];
-  const spokenFor = new Set<string>();
   for (const [joinUrl, bucket] of byUrl) {
-    if (bucket.meetings.length !== 1 || bucket.entries.length !== 1) continue;
-    const meeting = bucket.meetings[0];
-    const event = bucket.entries[0];
+    if (bucket.meetings.size !== 1) continue;
+    const entries = [...bucket.entries.values()];
+    if (entries.length === 0) continue;
+    // One appointment, however many rows say so.
+    if (new Set(entries.map(appointmentOf)).size !== 1) continue;
+    // A recurring appointment is left alone, and that is not caution.
+    //
+    // A group's members are SERIES. A provider that lists a recurring meeting
+    // as one row per occurrence (Webex) has no series for one to name, and a
+    // provider whose meeting does NOT recur while the appointment does has a
+    // meeting that genuinely is not there on most of the days. Either way the
+    // group would claim a copy that does not exist on the day being read, on
+    // every day but one. The filter goes on hiding the duplicate, exactly as
+    // before, and grouping by hand is still there for whoever wants it.
+    if (entries.some(recurs)) continue;
+    const meeting = [...bucket.meetings.values()][0];
+    const event = entries[0];
     const a = { calendar_id: meeting.calendar_id, event_id: seriesId(meeting) };
-    const b = { calendar_id: event.calendar_id, event_id: seriesId(event) };
-    const keyA = eventGroupMemberKey(a.calendar_id, a.event_id);
-    const keyB = eventGroupMemberKey(b.calendar_id, b.event_id);
-    // A recurring appointment renders one row per day, so the same pair can
-    // arrive several times over a range. Group it once.
-    if (spokenFor.has(keyA) || spokenFor.has(keyB)) continue;
-    const groupA = grouped.get(keyA);
-    const groupB = grouped.get(keyB);
-    // Already said, or already refused.
-    if (groupA && groupB) continue;
-    if (declined.has(suggestionPairKey(a, b))) continue;
-    spokenFor.add(keyA);
-    spokenFor.add(keyB);
+    const meetingGroup = grouped.get(memberKey(meeting));
+    const appointmentGroup = grouped.get(memberKey(event));
+    // Already said: both sides in a group. The same one means there is nothing
+    // to do; two different ones would be a merge, which only the user can ask
+    // for — `group_events` refuses it for that reason.
+    if (meetingGroup && appointmentGroup) continue;
+    // ONE meeting per account per appointment, and this is load-bearing.
+    //
+    // A provider may list a recurring meeting as one row per occurrence, each
+    // with an id of its own — Webex does, and its list response carries no
+    // series id for us to collapse them by. Without this rule the day view
+    // would hand over a different meeting id every morning, each one a new
+    // member: the group would grow by one a day, forever, and the count on the
+    // row would climb with it. An appointment has one meeting per account; once
+    // this calendar is represented in the group, the job is done.
+    if (
+      appointmentGroup?.members.some(
+        (m) => m.calendar_id === meeting.calendar_id,
+      )
+    ) {
+      continue;
+    }
+    // Already refused, against any copy of the appointment.
+    const refused = entries.some((entry) =>
+      declined.has(
+        suggestionPairKey(a, {
+          calendar_id: entry.calendar_id,
+          event_id: seriesId(entry),
+        }),
+      ),
+    );
+    if (refused) continue;
     out.push({ meeting, event, joinUrl });
   }
   return out;

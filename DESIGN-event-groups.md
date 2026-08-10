@@ -291,11 +291,43 @@ automatisch sein. Die richtige Körnung ist das **Paar**, und genau die haben
 die Ablehnungs-Marken.
 
 **Nicht eindeutig heißt nicht gruppieren.** Eine Beitritts-URL kann auf mehrere
-Termine passen — ein Dauer-Meetingraum, der in einer Serie wiederverwendet wird,
-oder zwei Termine, die auf denselben Raum verweisen. Trifft die Kennung mehr als
-einen Termin, wird **nichts** gruppiert: dieselbe Eindeutigkeits-Regel, die die
-Selbstheilung schon anwendet, aus demselben Grund — eine falsche Gruppe ist
-schlimmer als keine, weil sie authoritativ aussieht.
+Termine passen — ein Dauer-Meetingraum etwa, auf den zwei Termine verweisen.
+Trifft die Kennung mehr als einen Termin, wird **nichts** gruppiert: dieselbe
+Eindeutigkeits-Regel, die die Selbstheilung schon anwendet, aus demselben Grund
+— eine falsche Gruppe ist schlimmer als keine, weil sie authoritativ aussieht.
+
+Gezählt werden dabei **Termine, nicht Zeilen**, und daran hängt mehr, als es
+aussieht:
+
+*Eine Serie zählt einmal.* Ein wiederkehrender Termin liefert eine Zeile pro
+Tag; Zeilen zu zählen hätte dieselben Daten in der Wochenansicht mehrdeutig
+gemacht und in der Tagesansicht nicht — eine Eigenschaft des geöffneten
+Zeitraums, nicht der Daten. Mitgliedschaften laufen ohnehin über den
+Serien-Master, und der wird gezählt.
+
+*Eine Gruppe zählt einmal.* Kopien eines Termins in mehreren Kalendern tragen
+dieselbe Beitritts-URL — genau das macht eine weitergeleitete Einladung. Sie
+einzeln zu zählen hieße, ausgerechnet den Fall abzulehnen, für den es diese
+Funktion gibt: einen Termin, den der Nutzer **bereits** für eine Sache erklärt
+hat. „Zu welchem Termin gehört dieses Meeting?" hat dort genau eine Antwort, und
+die Gruppe ist sie. Das Meeting tritt der Gruppe bei, statt eine zweite zu
+eröffnen. Ein Anspruchsteller **außerhalb** der Gruppe macht es wieder
+mehrdeutig und stoppt alles.
+
+**Ein wiederkehrender Termin wird nicht angefasst.** Mitglieder einer Gruppe
+sind Serien. Webex listet ein wiederkehrendes Meeting als eine Zeile **pro
+Termin** mit je eigener ID, und eine Serien-ID liefert die Listen-Antwort nicht
+— es gibt also keine Serie, die ein Mitglied benennen könnte. Und ein Meeting,
+das *nicht* wiederkehrt, während der Termin es tut, ist an den meisten Tagen
+tatsächlich nicht da. In beiden Fällen behauptete die Gruppe an jedem Tag außer
+einem eine Kopie, die es dort nicht gibt. Der Filter versteckt die Doppelung
+weiter wie bisher; von Hand gruppieren geht unverändert.
+
+**Ein Meeting pro Konto und Termin.** Aus demselben Grund: Ist der
+Meeting-Kalender in der Gruppe schon vertreten, kommt nichts mehr hinzu. Ohne
+diese Regel reichte die Tagesansicht jeden Morgen eine andere Meeting-ID
+herein, jede davon ein neues Mitglied — die Gruppe wüchse täglich, und die Zahl
+auf der Zeile mit ihr.
 
 **Der Kalender war immer schon ein Kalender.** Der Entwurf behauptete, der
 Meeting-Kalender sei nicht anwählbar; das stimmte nicht. `VcCalendar` liefert
