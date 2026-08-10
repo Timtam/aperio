@@ -54,16 +54,16 @@ impl SuggestionDecline {
 
     /// Whether this row currently refuses the pair.
     ///
-    /// The later statement wins, and a TIE goes to the clearing. Grouping by
-    /// hand clamps its stamp to at least the refusal it is taking back, so a
-    /// clock running behind another device's cannot make the clearing dead on
-    /// arrival; that clamp is only worth anything if the equal case counts as
-    /// cleared. And the asymmetry is the right way round: a refusal that is
-    /// merely as old as the statement contradicting it has not outlived it.
+    /// The later statement wins, and a TIE goes to the refusal.
+    ///
+    /// Neither side clamps its stamp: a clamp on one would have to be mirrored
+    /// on the other, and both mirrors need the equal case to go their own way.
+    /// So the tie is given to the more cautious reading — a pair Aperio is
+    /// unsure about is one it does not offer to group by itself.
     pub fn is_declined(&self) -> bool {
         match &self.cleared_at {
             None => true,
-            Some(cleared) => self.declined_at > *cleared,
+            Some(cleared) => self.declined_at >= *cleared,
         }
     }
 
