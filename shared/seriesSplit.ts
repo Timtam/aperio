@@ -127,7 +127,6 @@ export function planSeriesSplit<E extends SplittableEvent>(
 export function firstOccurrenceFrom<E extends SplittableEvent>(
   master: E,
   fromIso: string,
-  horizonDays = 800,
 ): string | null {
   const from = new Date(fromIso);
   if (!Number.isFinite(from.getTime())) return null;
@@ -138,13 +137,23 @@ export function firstOccurrenceFrom<E extends SplittableEvent>(
       ? master.start
       : null;
   }
-  const horizon = new Date(from.getTime() + horizonDays * 24 * 60 * 60 * 1000);
-  const occurrences = expandEvent(master, { start: from, end: horizon });
-  // `expandEvent` selects by start, so the first row it returns for a range
-  // beginning at the cutoff is the occurrence at or after it.
-  const first = occurrences[0];
-  if (!first) return null;
-  return new Date(first.start).getTime() >= from.getTime() ? first.start : null;
+  // Widening rather than one fixed window. A weekly series answers in the first
+  // step; a three-yearly one would have fallen outside any horizon short enough
+  // to keep the common case cheap, and "no occurrence" is not a harmless answer
+  // here — it tells the carry this copy has nothing left, and the copy is
+  // reported as one it could not do. The last step reaches forty years out,
+  // past any series a calendar sensibly holds.
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  for (const days of [400, 1_200, 4_000, 15_000]) {
+    const horizon = new Date(from.getTime() + days * DAY_MS);
+    // `expandEvent` selects by start, so the first row it returns for a range
+    // beginning at the cutoff is the occurrence at or after it.
+    const first = expandEvent(master, { start: from, end: horizon })[0];
+    if (first && new Date(first.start).getTime() >= from.getTime()) {
+      return first.start;
+    }
+  }
+  return null;
 }
 
 /**

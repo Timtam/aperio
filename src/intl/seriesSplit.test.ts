@@ -124,6 +124,20 @@ describe('firstOccurrenceFrom', () => {
     );
   });
 
+  it('finds an occurrence years out', () => {
+    // A three-yearly series has nothing within any horizon short enough to keep
+    // the common case cheap — and "nothing" is not harmless here: it tells the
+    // carry this copy has no appointment left, and the copy is reported as one
+    // it could not carry to.
+    const everyThreeYears = {
+      ...weekly,
+      recurrence: { ...weekly.recurrence, rrule: 'FREQ=YEARLY;INTERVAL=3;COUNT=5' },
+    };
+    expect(firstOccurrenceFrom(everyThreeYears, '2026-08-24T08:00:00.000Z')).toBe(
+      '2029-08-03T08:00:00.000Z',
+    );
+  });
+
   it('is nothing when the series has already ended', () => {
     const short = {
       ...weekly,
