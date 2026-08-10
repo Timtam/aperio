@@ -67,14 +67,21 @@ The state is remembered across restarts.
 ## The backlog (week & month planner)
 
 To the left of the week/month grid sits the **backlog** — your top-level tasks
-that have **no day** assigned yet. It is split into two parts:
+that have **no day** assigned yet. It is split into three parts, by how far away
+the deadline is:
 
-- **Deadline** (top): every open or in-progress task **with a deadline**, the
-  **earliest deadline first** (overdue ones at the very top). A task already
-  scheduled onto a day still appears here, so this is your one place to see what
-  is due soonest. Each chip shows its due date.
-- **By priority** (bottom): the remaining backlog (tasks **without** a deadline),
+- **This week** (top): deadlines in the **current calendar week**. That is not
+  "the next seven days" — the section ends when the week ends, wherever your
+  week-start setting puts that. **Overdue** deadlines are here too, at the very
+  top.
+- **Next week**: deadlines in the following calendar week, by the same rule.
+- **Everything else**: first the deadlines further out (still **earliest
+  first**), below them the remaining backlog — tasks **without** a deadline,
   **highest priority first**.
+
+Every open or in-progress task with a deadline appears, even one already
+scheduled onto a day, so this is your one place to see what is due soonest. Each
+of those chips shows its due date.
 
 Drag a chip onto a day cell to **schedule** it there, or drop a scheduled task
 back onto the backlog to **clear** its day and deadline.

@@ -8,6 +8,8 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { backlogWeeks, splitDeadlinesByWeek } from '@aperio/shared';
+
 import { useAnnouncer } from '../a11y/announcerContext';
 import { isCommandError } from '../api/client';
 import type { Task } from '../api/types';
@@ -38,6 +40,7 @@ import {
   useBacklogWidth,
 } from '../state/useBacklogWidth';
 import { useChipContextMenu } from '../state/useChipContextMenu';
+import { useViewState } from '../state/viewStateContext';
 import { useTasks } from '../state/useTasks';
 import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
 import { isTaskDeferred } from './views/taskGrouping';
@@ -49,22 +52,28 @@ function parseDayKey(key: string): Date {
 }
 
 /**
- * Backlog rail for the week / month planner — split in two.
+ * Backlog rail for the week / month planner — three sections, by horizon.
  *
- *   - **Deadline** (top): EVERY open / in-progress task that has a deadline,
- *     earliest deadline first. Independent of the day plan, so a task already
- *     scheduled onto a day still shows here (it also keeps its grid due-marker)
- *     and a started task is included — the rail becomes the one place to see
- *     what's due soonest.
- *   - **By priority** (bottom): the classic active backlog — open / in-progress,
- *     top-level tasks with no `scheduled_date` AND no deadline (those moved up),
- *     not deferred, high → low priority.
+ *   - **This week** (top): deadlines falling in the CALENDAR week that holds
+ *     today, which is not "the next seven days" — it ends when the week ends,
+ *     wherever the user's week-start setting puts that. Overdue deadlines land
+ *     here too: the date sort puts them at the very top of the whole rail, and
+ *     the tail is the last place the most urgent thing belongs.
+ *   - **Next week**: the calendar week after that one, same rule.
+ *   - **Everything else**: the deadlines beyond next week, still by date, and
+ *     below them the classic priority backlog — open / in-progress, top-level
+ *     tasks with no `scheduled_date` AND no deadline, not deferred, high → low.
  *
- * Both lists are drag sources (drop a chip on a day cell to schedule it) and the
- * rail is a drop target (drop a scheduled task back here to clear its plan).
- * Each list is its own single-tab-stop `listbox` (Arrow/Home/End move the active
- * option via `aria-activedescendant`, Enter opens, Shift+D plans, ContextMenu /
- * Shift+F10 opens the task menu), so the rail stays fully keyboard/SR usable.
+ * A deadline task appears regardless of the day plan, so one already scheduled
+ * onto a day still shows here (it also keeps its grid due-marker) and a started
+ * task is included — the rail is the one place to see what's due soonest.
+ *
+ * All three lists are drag sources (drop a chip on a day cell to schedule it)
+ * and the rail is a drop target (drop a scheduled task back here to clear its
+ * plan). Each list is its own single-tab-stop `listbox` (Arrow/Home/End move the
+ * active option via `aria-activedescendant`, Enter opens, Shift+D plans,
+ * ContextMenu / Shift+F10 opens the task menu), so the rail stays fully
+ * keyboard/SR usable.
  *
  * Rendered as a fixed-width resizable column left of the grid; it joins the F6
  * region cycle. Each chip carries its hierarchical color (task → section → list)
@@ -79,6 +88,9 @@ export function BacklogRail() {
   const { colorLabels, sectionsByList, loadSections } = useCalendarStore();
   const headingId = useId();
   const { width, setWidth } = useBacklogWidth();
+  // Where a week begins is the user's setting, not a constant — the same one
+  // the month grid lays its columns out by.
+  const { weekStartsOn } = useViewState();
   const rootRef = useRef<HTMLElement>(null);
 
   // Drag the column's right edge to resize; the width persists and the grid
@@ -151,8 +163,19 @@ export function BacklogRail() {
     [tasks],
   );
 
+  // The two calendar weeks the deadlines are split across. The user's own
+  // week-start setting decides where a week begins — see `backlogWeeks`.
+  const weeks = useMemo(
+    () => backlogWeeks(todayKey, weekStartsOn),
+    [todayKey, weekStartsOn],
+  );
+  const byWeek = useMemo(
+    () => splitDeadlinesByWeek(deadlineTasks, weeks),
+    [deadlineTasks, weeks],
+  );
+
   // Priority backlog: the classic active backlog MINUS deadline tasks (those are
-  // in the section above), high → low priority.
+  // in the sections above), high → low priority.
   const priorityBacklog = useMemo(
     () =>
       tasks
@@ -160,8 +183,8 @@ export function BacklogRail() {
           (row) =>
             row.status !== 'completed' &&
             !row.scheduled_date &&
-            // deadline tasks live in the section above — keep them out of here
-            // so a task never appears in both halves.
+            // deadline tasks are placed by their horizon — keep them out of
+            // here so a task never appears in two sections.
             !row.deadline_date &&
             // a deferred backlog task (resurfaces on a future day) waits in the
             // task view's "Zukünftig" group, not the active rail.
@@ -170,6 +193,15 @@ export function BacklogRail() {
         )
         .sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority)),
     [tasks, todayKey, isTopLevel],
+  );
+
+  // Everything else, as one list: the deadlines beyond next week first — still
+  // by date, so the nearest is nearest the top — and the undated backlog below
+  // them by priority. Two populations, one section, because that is what "the
+  // rest" means to someone reading down the column.
+  const everythingElse = useMemo(
+    () => [...byWeek.later, ...priorityBacklog],
+    [byWeek.later, priorityBacklog],
   );
 
   // Per-chip color follows the task → section → list chain. Sections load
@@ -232,29 +264,45 @@ export function BacklogRail() {
           <p className="backlog-rail__empty">{t('views.backlog.empty')}</p>
         ) : (
           <>
-            {deadlineTasks.length > 0 && (
+            {byWeek.thisWeek.length > 0 && (
               <BacklogList
-                items={deadlineTasks}
-                heading={t('views.backlog.deadlineHeading', {
-                  count: deadlineTasks.length,
+                items={byWeek.thisWeek}
+                heading={t('views.backlog.thisWeekHeading', {
+                  count: byWeek.thisWeek.length,
                 })}
-                listLabel={t('views.backlog.deadlineListLabel')}
-                optionPrefix="backlog-deadline"
+                listLabel={t('views.backlog.thisWeekListLabel')}
+                optionPrefix="backlog-this-week"
                 labelById={labelById}
                 todayKey={todayKey}
                 showDeadline
               />
             )}
-            {priorityBacklog.length > 0 && (
+            {byWeek.nextWeek.length > 0 && (
               <BacklogList
-                items={priorityBacklog}
-                heading={t('views.backlog.priorityHeading', {
-                  count: priorityBacklog.length,
+                items={byWeek.nextWeek}
+                heading={t('views.backlog.nextWeekHeading', {
+                  count: byWeek.nextWeek.length,
                 })}
-                listLabel={t('views.backlog.listLabel')}
-                optionPrefix="backlog-priority"
+                listLabel={t('views.backlog.nextWeekListLabel')}
+                optionPrefix="backlog-next-week"
                 labelById={labelById}
                 todayKey={todayKey}
+                showDeadline
+              />
+            )}
+            {everythingElse.length > 0 && (
+              <BacklogList
+                items={everythingElse}
+                heading={t('views.backlog.restHeading', {
+                  count: everythingElse.length,
+                })}
+                listLabel={t('views.backlog.restListLabel')}
+                optionPrefix="backlog-rest"
+                labelById={labelById}
+                todayKey={todayKey}
+                // The section mixes dated and undated rows; a chip without a
+                // deadline simply renders none.
+                showDeadline
               />
             )}
           </>
@@ -282,15 +330,15 @@ interface BacklogListProps {
   heading: string;
   listLabel: string;
   /** Unique id prefix so each list's `aria-activedescendant` targets are
-   *  distinct across the two listboxes in the rail. */
+   *  distinct across the listboxes in the rail. */
   optionPrefix: string;
   labelById: ReturnType<typeof labelsLookup>;
   todayKey: string;
-  /** Render the due date on each chip (the deadline section). */
+  /** Render the due date on each chip; a chip without a deadline shows none. */
   showDeadline?: boolean;
 }
 
-/** One labelled `listbox` section of the rail (deadline or priority). */
+/** One labelled `listbox` section of the rail. */
 function BacklogList({
   items,
   heading,

@@ -252,3 +252,76 @@ export function mergeDayItems<TEvent, TTask extends Task>(
   timed.sort((a, b) => a.sortKey - b.sortKey);
   return { timed, untimed };
 }
+
+/** The two week windows the backlog rail splits its deadlines into. */
+export interface BacklogWeeks {
+  /** First day of the week `todayKey` falls in, as a `YYYY-MM-DD` key. */
+  thisWeekStart: string;
+  /** Last day of that week, inclusive. */
+  thisWeekEnd: string;
+  nextWeekStart: string;
+  /** Last day of the following week, inclusive. */
+  nextWeekEnd: string;
+}
+
+/**
+ * The current and following CALENDAR week, as inclusive day-key bounds.
+ *
+ * Calendar weeks, not rolling windows: "this week" ends on the week's last day
+ * however near that is, so a Friday deadline stops being "this week" the moment
+ * the week turns — which is what a plan for the week means. Seven days from now
+ * would keep sliding and never tell the user where a week ends.
+ *
+ * `weekStartsOn` is the user's own setting (0 = Sunday … 6 = Saturday), so a
+ * Sunday week runs Sunday–Saturday and a Monday week Monday–Sunday.
+ *
+ * All arithmetic is on LOCAL dates. A deadline is a day the user wrote down,
+ * and reading it in UTC puts everyone west of Greenwich a day out.
+ */
+export function backlogWeeks(todayKey: string, weekStartsOn: number): BacklogWeeks {
+  const [y, m, d] = todayKey.split('-').map(Number);
+  const today = new Date(y, m - 1, d);
+  const start = new Date(today);
+  // How far back the week's first day lies. The +7 keeps the result positive
+  // for every combination of weekday and setting.
+  start.setDate(today.getDate() - ((today.getDay() - weekStartsOn + 7) % 7));
+  const dayAfter = (from: Date, days: number) => {
+    const out = new Date(from);
+    out.setDate(from.getDate() + days);
+    return out;
+  };
+  return {
+    thisWeekStart: localDateKey(start),
+    thisWeekEnd: localDateKey(dayAfter(start, 6)),
+    nextWeekStart: localDateKey(dayAfter(start, 7)),
+    nextWeekEnd: localDateKey(dayAfter(start, 13)),
+  };
+}
+
+/**
+ * Split deadline-carrying tasks into this week, next week and everything after.
+ *
+ * The input keeps whatever order it arrives in — the rail sorts by date, then
+ * priority, then creation, and every bucket preserves that.
+ *
+ * A deadline that has already passed goes in with THIS week rather than into
+ * the tail: it is the most urgent thing the rail holds, the date sort puts it
+ * at the very top of the first section, and burying last Tuesday's deadline
+ * below everything else would be the one placement that helps nobody.
+ */
+export function splitDeadlinesByWeek<T extends { deadline_date?: string | null }>(
+  tasks: readonly T[],
+  weeks: BacklogWeeks,
+): { thisWeek: T[]; nextWeek: T[]; later: T[] } {
+  const thisWeek: T[] = [];
+  const nextWeek: T[] = [];
+  const later: T[] = [];
+  for (const task of tasks) {
+    const due = task.deadline_date;
+    if (!due) continue;
+    if (due <= weeks.thisWeekEnd) thisWeek.push(task);
+    else if (due <= weeks.nextWeekEnd) nextWeek.push(task);
+    else later.push(task);
+  }
+  return { thisWeek, nextWeek, later };
+}

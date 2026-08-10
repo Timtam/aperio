@@ -70,14 +70,21 @@ Platz**. Der Zustand bleibt über Neustarts erhalten.
 
 Links neben dem Wochen-/Monatsraster liegt der **Backlog** – deine
 übergeordneten Aufgaben, die noch **keinem Tag** zugeordnet sind. Er ist
-zweigeteilt:
+dreigeteilt, nach der Nähe der Deadline:
 
-- **Deadline** (oben): alle offenen oder begonnenen Aufgaben **mit Deadline**,
-  das **früheste Datum zuerst** (überfällige ganz oben). Eine bereits auf einen
-  Tag geplante Aufgabe erscheint hier ebenfalls – so siehst du an einer Stelle,
-  was als Nächstes fällig ist. Jeder Eintrag zeigt sein Fälligkeitsdatum.
-- **Nach Priorität** (unten): der übrige Backlog (Aufgaben **ohne** Deadline),
-  **höchste Priorität zuerst**.
+- **Diese Woche** (oben): Deadlines in der **laufenden Kalenderwoche**. Das sind
+  nicht „die nächsten sieben Tage" – der Abschnitt endet, wenn die Woche endet,
+  je nachdem, worauf dein Wochenbeginn eingestellt ist. **Überfällige** Deadlines
+  stehen ebenfalls hier, ganz oben.
+- **Nächste Woche**: Deadlines in der folgenden Kalenderwoche, nach derselben
+  Regel.
+- **Alles Weitere**: zuerst die Deadlines danach (weiterhin das **früheste Datum
+  zuerst**), darunter der übrige Backlog – Aufgaben **ohne** Deadline, **höchste
+  Priorität zuerst**.
+
+Jede offene oder begonnene Aufgabe mit Deadline erscheint hier, auch eine bereits
+auf einen Tag geplante – so siehst du an einer Stelle, was als Nächstes fällig
+ist. Diese Einträge zeigen jeweils ihr Fälligkeitsdatum.
 
 Ziehe einen Eintrag auf eine Tageszelle, um ihn dort **einzuplanen**, oder lege
 eine geplante Aufgabe wieder auf dem Backlog ab, um Tag und Deadline zu
