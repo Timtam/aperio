@@ -534,10 +534,17 @@ function BacklogList({
                   ↳ {parentTitle}
                 </span>
               )}
-              {/* The list is NOT drawn here. A sighted reader gets the list
-                  from the chip's colour label, which is the same information
-                  in a form that costs no line; a screen reader has no colour
-                  to read, so the list stays in the aria-label above. */}
+              {/* The list is NOT drawn here: the colour carries the belonging
+                  for a sighted reader, in a form that costs no line, and a
+                  screen reader has no colour to read so the list stays in the
+                  aria-label above.
+                  Worth knowing what the stripe actually resolves to
+                  (`resolveTaskColor`): the task's OWN colour label first, then
+                  its section's, and the list only as the fallback — and an
+                  overdue chip paints the stripe red regardless. So a task the
+                  user has coloured personally shows ITS colour here, not its
+                  list's. That is the point of setting a label, but it does
+                  mean the list is not always readable off the rail. */}
               {due && (
                 <span className="backlog-rail__chip-meta">
                   <span

@@ -678,6 +678,14 @@ export function TaskDialog({
   // is not quietly rewritten to `medium` — both read as normal here, and the
   // rewrite would only be visible somewhere the user is not looking.
   const lastNormalPriority = useRef<TaskPriority>('medium');
+  // Re-seed per task. The host keeps this dialog mounted for as long as the
+  // open dialog is A task dialog, so opening a different task can reuse the
+  // component — and a ref that outlived the switch would write the previous
+  // task's priority onto this one. Declared before the tracker below so the
+  // live value wins when both fire in the same commit.
+  useEffect(() => {
+    lastNormalPriority.current = normalPriority(task?.priority);
+  }, [task]);
   useEffect(() => {
     if (!isImportantPriority(form.priority)) {
       lastNormalPriority.current = form.priority;

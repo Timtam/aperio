@@ -31,6 +31,7 @@ import {
   TASK_RECURRENCE_DEFAULT,
   fromBackend,
   isImportantPriority,
+  normalPriority,
   selectableTaskLists,
   selfAssignOnStatusChange,
   taskPrefillFrom,
@@ -270,6 +271,16 @@ export default function TaskEditorModal({
   // writing `medium` over a provider's `low` — a rewrite nobody would see
   // here and everybody would see elsewhere.
   const lastNormalPriority = useRef<TaskPriority>('medium');
+  // Re-seed on every task, because this screen is not always a fresh one.
+  // Navigating to TaskEditor while TaskEditor is already the current route
+  // updates its params instead of pushing, so the component — and this ref —
+  // survives the switch. Without the re-seed, unticking "Wichtig" on the new
+  // task would write the PREVIOUS task's priority onto it: invisible here,
+  // permanent at the provider. Declared before the tracker below so that when
+  // both fire in one commit, the live value wins.
+  useEffect(() => {
+    lastNormalPriority.current = normalPriority(loaded?.priority);
+  }, [taskId, loaded]);
   useEffect(() => {
     if (!isImportantPriority(form.priority)) {
       lastNormalPriority.current = form.priority;
