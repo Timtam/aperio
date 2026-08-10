@@ -1199,7 +1199,8 @@
       "scopeOccurrence": "Betrifft nur dieses eine Vorkommen.",
       "scopeFuture": "Betrifft dieses und alle folgenden Vorkommen. Die Serie jeder Kopie wird an derselben Stelle geteilt.",
       "regroupFailed_one": "Die Kopie wurde geändert, aber die neuen Einträge konnten nicht wieder als eine Verabredung verknüpft werden.",
-      "regroupFailed_other": "Die {{count}} Kopien wurden geändert, aber die neuen Einträge konnten nicht wieder als eine Verabredung verknüpft werden."
+      "regroupFailed_other": "Die {{count}} Kopien wurden geändert, aber die neuen Einträge konnten nicht wieder als eine Verabredung verknüpft werden.",
+      "truncatedNotRestored": "Die Serie in {{calendar}} wurde gekürzt und konnte nicht wiederhergestellt werden — sie endet jetzt bei diesem Vorkommen."
     },
     "eventGroup": {
       "title": "Derselbe Termin",

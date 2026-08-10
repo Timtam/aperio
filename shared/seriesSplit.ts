@@ -112,12 +112,18 @@ export function planSeriesSplit<E extends SplittableEvent>(
 }
 
 /**
- * The first occurrence this series has at or after `fromIso`.
+ * The first occurrence of this series that is not yet OVER at `fromIso`.
  *
  * The anchor of a split is the occurrence the user picked, and on that copy it
  * IS an occurrence. On another copy of the same appointment it need not be:
  * copies are separate series and may be patterned differently, so the honest
  * anchor for "and all following" over there is that copy's own next occurrence.
+ *
+ * "Not yet over" rather than "starting at or after": copies of one appointment
+ * often start a little apart — the work copy at 09:00 and the private one at
+ * 08:45 for the walk over — and by START alone the copy that is already
+ * running at the cutoff counted as past. It was then cut a whole period late:
+ * today's appointment stayed as it was and next week's carried the change.
  *
  * `null` when the series has none left — the copy ends before the cutoff, and
  * there is nothing to carry to it. Reported to the user rather than treated as
@@ -130,12 +136,13 @@ export function firstOccurrenceFrom<E extends SplittableEvent>(
 ): string | null {
   const from = new Date(fromIso);
   if (!Number.isFinite(from.getTime())) return null;
+  const duration = Math.max(
+    0,
+    new Date(master.end).getTime() - new Date(master.start).getTime(),
+  );
   if (!master.recurrence?.rrule) {
-    // A single event is its own only occurrence — and only if it is not behind
-    // us already.
-    return new Date(master.start).getTime() >= from.getTime()
-      ? master.start
-      : null;
+    // A single event is its own only occurrence — and only if it is not over.
+    return new Date(master.end).getTime() > from.getTime() ? master.start : null;
   }
   // Widening rather than one fixed window. A weekly series answers in the first
   // step; a three-yearly one would have fallen outside any horizon short enough
@@ -143,15 +150,18 @@ export function firstOccurrenceFrom<E extends SplittableEvent>(
   // here — it tells the carry this copy has nothing left, and the copy is
   // reported as one it could not do. The last step reaches forty years out,
   // past any series a calendar sensibly holds.
+  //
+  // The range starts one duration EARLIER than the cutoff because `expandEvent`
+  // selects by start: an occurrence already running at the cutoff begins before
+  // it, and it is the one being split at, not the next one.
   const DAY_MS = 24 * 60 * 60 * 1000;
+  const searchFrom = new Date(from.getTime() - duration);
   for (const days of [400, 1_200, 4_000, 15_000]) {
     const horizon = new Date(from.getTime() + days * DAY_MS);
-    // `expandEvent` selects by start, so the first row it returns for a range
-    // beginning at the cutoff is the occurrence at or after it.
-    const first = expandEvent(master, { start: from, end: horizon })[0];
-    if (first && new Date(first.start).getTime() >= from.getTime()) {
-      return first.start;
-    }
+    const found = expandEvent(master, { start: searchFrom, end: horizon }).find(
+      (occ) => new Date(occ.start).getTime() + duration > from.getTime(),
+    );
+    if (found) return found.start;
   }
   return null;
 }
@@ -186,6 +196,27 @@ export interface SeriesSplitIo<Created> {
   restore(): Promise<unknown>;
 }
 
+/** Marks a thrown error whose series was left truncated. */
+const RESTORE_FAILED = Symbol.for('aperio.seriesSplit.restoreFailed');
+
+/**
+ * Whether this failure left the series SHORTER than it was.
+ *
+ * The ordinary failure of a split changes nothing: the tail could not be
+ * created, the head went back as it was, and the caller reports an error over
+ * an untouched calendar. When the restore fails too, the series really does end
+ * at the cutoff now — every appointment from there on is gone. That is a
+ * different thing to tell the user, and reporting it as "not changed" would be
+ * the opposite of true.
+ */
+export function seriesLeftTruncated(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as Record<symbol, unknown>)[RESTORE_FAILED] === true
+  );
+}
+
 /**
  * Truncate, then create the tail — and put the master back if the tail fails.
  *
@@ -195,8 +226,10 @@ export interface SeriesSplitIo<Created> {
  * head turns that into an ordinary error the caller can report, with the
  * calendar exactly as it was.
  *
- * A failing restore is deliberately swallowed: the original failure is the one
- * worth reporting, and it is the one the caller is waiting for.
+ * The ORIGINAL failure is what gets thrown either way — it is what the caller is
+ * waiting for, and a second message about a failed repair would bury it. But a
+ * failed restore is marked on it, so a caller that wants to say "and this one is
+ * now short" can (`seriesLeftTruncated`).
  */
 export async function writeSeriesSplit<Created>(
   io: SeriesSplitIo<Created>,
@@ -206,7 +239,13 @@ export async function writeSeriesSplit<Created>(
   try {
     return await io.createTail(plan.tail);
   } catch (err) {
-    await io.restore().catch(() => undefined);
+    try {
+      await io.restore();
+    } catch {
+      if (typeof err === 'object' && err !== null) {
+        (err as Record<symbol, unknown>)[RESTORE_FAILED] = true;
+      }
+    }
     throw err;
   }
 }

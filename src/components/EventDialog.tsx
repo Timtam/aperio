@@ -298,8 +298,13 @@ export function EventDialog({
         // outside it too, so they are tied to this one afterwards — otherwise
         // the appointment the user just made one row would be four again from
         // that point on.
+        // Not for a row whose id carries `::rid::`: that is a provider-side
+        // override, every group lookup resolves such a row through
+        // `seriesIdOf` to its MASTER, and a member registered under the
+        // composite id could never be matched by anything. The copies' new
+        // rows are still tied to each other.
         const successor =
-          scope === 'series'
+          scope === 'series' || seriesIdOf(next) !== next.id
             ? null
             : {
                 calendar_id: next.calendar_id,

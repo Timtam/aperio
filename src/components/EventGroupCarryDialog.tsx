@@ -4,9 +4,11 @@ import { useTranslation } from 'react-i18next';
 import {
   carryOnto,
   firstOccurrenceFrom,
+  futureCarryRow,
   occurrenceCarryRow,
   planCarry,
   planSeriesSplit,
+  seriesLeftTruncated,
   writeSeriesSplit,
   type CarryableFields,
   type CarryScope,
@@ -21,6 +23,7 @@ import {
   getEventById,
   groupEvents,
   isCommandError,
+  ungroupEvent,
   updateEvent,
   type NewGroupMember,
 } from '../api/client';
@@ -115,6 +118,19 @@ export function EventGroupCarryDialog({
   const [createdRows, setCreatedRows] = useState<NewGroupMember[]>([]);
   const closeRef = useRef<HTMLButtonElement>(null);
   const outcomeRef = useRef<HTMLParagraphElement>(null);
+  /**
+   * Whether this dialog is still the one on screen.
+   *
+   * The carry is a loop of provider round trips and the dialog stays closable
+   * throughout (Escape, the backdrop, "Leave the others"). Without this it went
+   * on writing copy after copy into a dialog the user had dismissed, and its
+   * closing `onClose()` popped whatever they had opened since. The writes
+   * already issued cannot be recalled; the remaining ones stop.
+   */
+  const open = useRef(isOpen);
+  useEffect(() => {
+    open.current = isOpen;
+  }, [isOpen]);
   const messageId = useId();
 
   const calendarName = useCallback(
@@ -152,8 +168,18 @@ export function EventGroupCarryDialog({
     queueMicrotask(() => closeRef.current?.focus());
   }, [isOpen]);
 
+  // The outcome note takes focus once React has actually rendered it. Focusing
+  // it from inside `carry` could not work: the note does not exist yet at that
+  // point, so the call found nothing and the report went unread.
+  useEffect(() => {
+    if (outcome) outcomeRef.current?.focus();
+  }, [outcome]);
+
   // After a partial carry, only what is still outstanding.
   const targets = pending ?? plan.targets;
+  // A regroup that failed is retried on its own — there are no copies left to
+  // write, and the button must not look like it does nothing.
+  const canRetry = targets.length > 0 || outcome?.kind === 'regroup';
 
   const carry = async () => {
     if (busy) return;
@@ -165,6 +191,8 @@ export function EventGroupCarryDialog({
     const created: NewGroupMember[] = [...createdRows];
     let done = outcome?.done ?? 0;
     for (const target of targets) {
+      // The user closed it. Stop writing copies into a dialog that is gone.
+      if (!open.current) return;
       try {
         const current = await getEventById(target.event_id, target.calendar_id);
         if (current == null) {
@@ -228,9 +256,14 @@ export function EventGroupCarryDialog({
             failed.push(target);
             continue;
           }
-          const row = occurrenceCarryRow(
+          // The MOVE, applied to this copy's own cut point — not the
+          // anchor's instant. See `futureCarryRow`: writing the anchor's
+          // instant onto a copy cut somewhere else left the two halves not
+          // meeting, and could even put the end before the start.
+          const row = futureCarryRow(
             current as CalendarEvent & CarryableFields,
             anchorIso,
+            before,
             after,
             plan.changed,
           );
@@ -241,9 +274,19 @@ export function EventGroupCarryDialog({
           const currentRecurrence = current.recurrence;
           if (splitPlan == null || currentRecurrence == null) {
             // The copy is a single event: it has one occurrence, and "this and
-            // all following" is that one. It keeps its id, so it also keeps
-            // its membership — nothing to regroup.
+            // all following" is that one — so the whole copy IS the tail. It
+            // leaves the group of heads and joins the new rows, or the split
+            // would strand it with a group it no longer belongs to.
             await updateEvent(row, target.calendar_id);
+            await ungroupEvent(target.calendar_id, target.event_id).catch(
+              () => undefined,
+            );
+            created.push({
+              calendar_id: target.calendar_id,
+              event_id: target.event_id,
+              title: row.title,
+              starts_at: row.start,
+            });
           } else {
             const tail = await writeSeriesSplit(
               {
@@ -309,7 +352,18 @@ export function EventGroupCarryDialog({
         done += 1;
       } catch (err) {
         failed.push(target);
-        if (isCommandError(err)) setError(err.message);
+        // A split that failed AND could not be undone leaves this copy's series
+        // ending at the cutoff. Reporting that as "not changed" would be the
+        // opposite of true, so it gets said in its own words.
+        if (seriesLeftTruncated(err)) {
+          setError(
+            t('dialogs.eventGroupCarry.truncatedNotRestored', {
+              calendar: calendarName(target.calendar_id),
+            }),
+          );
+        } else if (isCommandError(err)) {
+          setError(err.message);
+        }
       }
     }
     // The rows this carry created are copies of each other exactly as the ones
@@ -320,15 +374,23 @@ export function EventGroupCarryDialog({
     // A failure here leaves the writes done and correct, so it is not counted
     // against any copy; it is said in its own words, because the group is what
     // the user came for.
-    setCreatedRows(created);
+    // Tie the new rows together even if the user has already closed this: they
+    // are written either way, and the grouping is a local step that needs no
+    // dialog. The successor is left out when the anchor's own new row is an
+    // override — its id carries `::rid::`, which no group lookup resolves, so
+    // registering it would add a member nothing can ever match; the created
+    // rows are still tied to each other.
+    const members = [...(successor ? [successor] : []), ...created];
     let regroupFailed = false;
-    if (successor && created.length > 0) {
+    if (members.length >= 2) {
       try {
-        await groupEvents([successor, ...created]);
+        await groupEvents(members);
       } catch {
         regroupFailed = true;
       }
     }
+    if (!open.current) return;
+    setCreatedRows(created);
     setBusy(false);
     onChanged?.();
     // The whole point of the dialog: say what actually happened, including
@@ -345,7 +407,8 @@ export function EventGroupCarryDialog({
       );
       // Stays open. A half-carried group is exactly the state this feature
       // exists to prevent, so the user has to see it and can retry the rest.
-      queueMicrotask(() => outcomeRef.current?.focus());
+      // (The focus happens in the effect below — at this point React has not
+      // rendered the note yet, so there is nothing here to focus.)
       return;
     }
     if (regroupFailed) {
@@ -355,7 +418,6 @@ export function EventGroupCarryDialog({
       setOutcome({ kind: 'regroup', done });
       setPending([]);
       announce(t('dialogs.eventGroupCarry.regroupFailed', { count: done }));
-      queueMicrotask(() => outcomeRef.current?.focus());
       return;
     }
     announce(t('dialogs.eventGroupCarry.done', { count: done }));
@@ -458,7 +520,7 @@ export function EventGroupCarryDialog({
           type="button"
           onClick={() => void carry()}
           className="form__action form__action--primary"
-          aria-disabled={busy || undefined}
+          aria-disabled={busy || !canRetry || undefined}
         >
           {t(
             outcome

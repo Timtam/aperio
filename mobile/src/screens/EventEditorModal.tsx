@@ -326,6 +326,33 @@ export default function EventEditorModal({
    * goBack, so the user lands on one question instead of watching the editor
    * close and something else appear.
    */
+  /**
+   * The master as the EDITED OCCURRENCE looked, for the carry's "what changed".
+   *
+   * `original` is the series master — `editEventWithScope` navigates with
+   * `seriesIdOf(ev)` and the editor loads that — so its start is the series'
+   * DTSTART, weeks or months before the occurrence on screen. Handed to the
+   * carry as the "before", every occurrence edit therefore looked like a move
+   * of both start and end, and the copies had those instants written onto them
+   * even when the user had only renamed the appointment.
+   */
+  const occurrenceBefore = useCallback(
+    (master: CalendarEvent, occurrenceIso: string): CalendarEvent => {
+      const duration = Math.max(
+        0,
+        new Date(master.end).getTime() - new Date(master.start).getTime(),
+      );
+      const startMs = new Date(occurrenceIso).getTime();
+      if (!Number.isFinite(startMs)) return master;
+      return {
+        ...master,
+        start: new Date(startMs).toISOString(),
+        end: new Date(startMs + duration).toISOString(),
+      };
+    },
+    [],
+  );
+
   const offerToCarry = useCallback(
     async (
       saved: CalendarEvent,
@@ -387,8 +414,13 @@ export default function EventEditorModal({
           // are outside it too, so they are tied to this one afterwards —
           // otherwise the appointment the user just made one row would be four
           // again from that point on.
+          // Not for a row whose id carries `::rid::`: that is a provider-side
+          // override, every group lookup resolves such a row through
+          // `seriesIdOf` to its MASTER, and a member registered under the
+          // composite id could never be matched by anything. The copies' new
+          // rows are still tied to each other.
           successor:
-            scope === 'series'
+            scope === 'series' || seriesIdOf(next) !== next.id
               ? null
               : {
                   calendar_id: next.calendar_id,
@@ -498,7 +530,14 @@ export default function EventEditorModal({
         );
         // The other copies have a series each, so carrying this means carving
         // the same occurrence out of them — not updating a row.
-        if (await offerToCarry(original, created, 'occurrence', occurrence)) {
+        if (
+          await offerToCarry(
+            occurrenceBefore(original, occurrence),
+            created,
+            'occurrence',
+            occurrence,
+          )
+        ) {
           return;
         }
         navigation.goBack();
@@ -577,7 +616,14 @@ export default function EventEditorModal({
         );
         // The other copies have a series each, so carrying this means splitting
         // theirs at the same point — not updating a row.
-        if (await offerToCarry(original, created, 'future', occurrence)) {
+        if (
+          await offerToCarry(
+            occurrenceBefore(original, occurrence),
+            created,
+            'future',
+            occurrence,
+          )
+        ) {
           return;
         }
         navigation.goBack();
@@ -676,6 +722,7 @@ export default function EventEditorModal({
     navigation,
     notifyAttendees,
     occurrence,
+    occurrenceBefore,
     offerToCarry,
     original,
     recurrence,

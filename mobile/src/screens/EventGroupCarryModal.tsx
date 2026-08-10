@@ -5,9 +5,11 @@ import { AccessibilityInfo, Platform, Pressable, StyleSheet, Text } from 'react-
 import {
   carryOnto,
   firstOccurrenceFrom,
+  futureCarryRow,
   occurrenceCarryRow,
   planCarry,
   planSeriesSplit,
+  seriesLeftTruncated,
   writeSeriesSplit,
   type CarryableFields,
 } from '@aperio/shared';
@@ -21,7 +23,11 @@ import {
   type Calendar,
   type CalendarEvent,
 } from '../api/calendar';
-import { groupEvents, type NewGroupMember } from '../api/eventGroups';
+import {
+  groupEvents,
+  ungroupEvent,
+  type NewGroupMember,
+} from '../api/eventGroups';
 import { FormScrollView } from '../components/FormScrollView';
 import { useCancelHeader } from '../components/useCancelHeader';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -148,6 +154,10 @@ export default function EventGroupCarryModal({
 
   // After a partial carry, only what is still outstanding.
   const targets = pending ?? plan.targets;
+  // A regroup that failed is retried on its own — there are no copies left to
+  // write, and the button must not announce itself disabled when it is the only
+  // way to put the appointment back together.
+  const canRetry = targets.length > 0 || outcome?.kind === 'regroup';
 
   const carry = useCallback(async () => {
     if (busy) return;
@@ -222,9 +232,14 @@ export default function EventGroupCarryModal({
             failed.push(target);
             continue;
           }
-          const row = occurrenceCarryRow(
+          // The MOVE, applied to this copy's own cut point — not the
+          // anchor's instant. See `futureCarryRow`: writing the anchor's
+          // instant onto a copy cut somewhere else left the two halves not
+          // meeting, and could even put the end before the start.
+          const row = futureCarryRow(
             current as CalendarEvent & CarryableFields,
             anchorIso,
+            before,
             after,
             plan.changed,
           );
@@ -235,9 +250,19 @@ export default function EventGroupCarryModal({
           const currentRecurrence = current.recurrence;
           if (splitPlan == null || currentRecurrence == null) {
             // The copy is a single event: it has one occurrence, and "this and
-            // all following" is that one. It keeps its id, so it also keeps its
-            // membership — nothing to regroup.
+            // all following" is that one — so the whole copy IS the tail. It
+            // leaves the group of heads and joins the new rows, or the split
+            // would strand it with a group it no longer belongs to.
             await updateEvent(row, target.calendar_id);
+            await ungroupEvent(target.calendar_id, target.event_id).catch(
+              () => undefined,
+            );
+            created.push({
+              calendar_id: target.calendar_id,
+              event_id: target.event_id,
+              title: row.title,
+              starts_at: row.start,
+            });
           } else {
             const tail = await writeSeriesSplit(
               {
@@ -303,7 +328,14 @@ export default function EventGroupCarryModal({
         done += 1;
       } catch (err) {
         failed.push(target);
-        const message = errorMessage(err);
+        // A split that failed AND could not be undone leaves this copy's series
+        // ending at the cutoff. Reporting that as "not changed" would be the
+        // opposite of true, so it gets said in its own words.
+        const message = seriesLeftTruncated(err)
+          ? t('dialogs.eventGroupCarry.truncatedNotRestored', {
+              calendar: calendarName(target.calendar_id),
+            })
+          : errorMessage(err);
         if (!alive.current) return;
         setError(message);
         // `accessibilityLiveRegion` below is ANDROID ONLY, so on iOS this
@@ -311,21 +343,29 @@ export default function EventGroupCarryModal({
         if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(message);
       }
     }
-    if (!alive.current) return;
-    setCreatedRows(created);
     // The rows this carry created are copies of each other exactly as the ones
     // it came from were — so they are told so. Without this, an occurrence or
     // "and all following" edit would quietly UNDO the grouping from that point
     // on: the appointment the user had just made one row would be four again.
+    //
+    // Done even if the user has already left: the rows are written either way,
+    // and tying them together is a local step that needs no screen. Leaving it
+    // undone would be the one lasting consequence of walking away.
+    // The successor is left out when the anchor's own new row is an override —
+    // its id carries `::rid::`, which no group lookup resolves, so registering
+    // it would add a member nothing can ever match; the created rows are still
+    // tied to each other.
+    const members = [...(successor ? [successor] : []), ...created];
     let regroupFailed = false;
-    if (successor && created.length > 0) {
+    if (members.length >= 2) {
       try {
-        await groupEvents([successor, ...created]);
+        await groupEvents(members);
       } catch {
         regroupFailed = true;
       }
     }
     if (!alive.current) return;
+    setCreatedRows(created);
     setBusy(false);
     // The whole point of the screen: say what actually happened, including
     // what did not.
@@ -365,6 +405,7 @@ export default function EventGroupCarryModal({
     createdRows,
     successor,
     plan.changed,
+    before,
     after,
     scope,
     occurrence,
@@ -465,12 +506,12 @@ export default function EventGroupCarryModal({
         accessibilityLabel={t(
           outcome ? 'dialogs.eventGroupCarry.retry' : 'dialogs.eventGroupCarry.carry',
         )}
-        accessibilityState={{ disabled: busy || targets.length === 0 }}
+        accessibilityState={{ disabled: busy || !canRetry }}
         onPress={() => void carry()}
         style={styles.action}
       >
         <Text
-          style={[styles.actionText, (busy || targets.length === 0) && styles.disabled]}
+          style={[styles.actionText, (busy || !canRetry) && styles.disabled]}
         >
           {t(
             outcome ? 'dialogs.eventGroupCarry.retry' : 'dialogs.eventGroupCarry.carry',

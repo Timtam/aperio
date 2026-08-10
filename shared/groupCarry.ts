@@ -176,6 +176,72 @@ export function occurrenceCarryRow<T extends CarryableFields>(
   return carryOnto(row, after, changed);
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The row a carried "this and all following" edit creates in a member's calendar.
+ *
+ * Unlike `occurrenceCarryRow` this one carries the MOVE, not the instant. The
+ * two scopes differ exactly there: an occurrence edit lands on one instant that
+ * every copy shares, while "and all following" cuts each copy at ITS own next
+ * occurrence — which need not be the anchor's, because a copy may run to a
+ * different pattern, or have that one occurrence deleted.
+ *
+ * Writing the anchor's new instant onto such a copy was wrong twice over: the
+ * head was truncated before the copy's own occurrence while the tail began at
+ * the anchor's, so the two halves did not meet — the copy lost a real
+ * appointment, gained one on a day it never had, and every occurrence after it
+ * fell out of phase. So what travels is the SHIFT the user made (start moved by
+ * so much, duration is now so long), applied to the copy's own cut point.
+ *
+ * Two deliberate narrowings:
+ *   - an ALL-DAY copy moves in whole days, whatever the anchor's shift was to
+ *     the minute; a start that is not local midnight is not an all-day event;
+ *   - the anchor's new DURATION is adopted only when both agree about being
+ *     all-day, so an hour-long edit cannot shrink an all-day copy to an hour.
+ *
+ * The duration is always derived, never an instant taken from the anchor: an
+ * end lifted verbatim onto a copy cut at a different point could precede its
+ * own start, which no provider will accept and some will accept and mangle.
+ */
+export function futureCarryRow<T extends CarryableFields>(
+  master: T,
+  anchorIso: string,
+  before: CarryableFields,
+  after: CarryableFields,
+  changed: readonly (keyof CarryableFields)[],
+): T {
+  const anchorMs = new Date(anchorIso).getTime();
+  const ownDuration = Math.max(
+    0,
+    new Date(master.end).getTime() - new Date(master.start).getTime(),
+  );
+  const movedBy = changed.includes('start')
+    ? new Date(after.start).getTime() - new Date(before.start).getTime()
+    : 0;
+  const shift = master.all_day
+    ? Math.round(movedBy / DAY_MS) * DAY_MS
+    : movedBy;
+  const sameKind = master.all_day === after.all_day;
+  const duration =
+    changed.includes('end') && sameKind
+      ? Math.max(0, new Date(after.end).getTime() - new Date(after.start).getTime())
+      : ownDuration;
+  const start = Number.isFinite(anchorMs) ? anchorMs + shift : anchorMs;
+  const row = {
+    ...master,
+    start: new Date(start).toISOString(),
+    end: new Date(start + duration).toISOString(),
+  } as T;
+  // Everything else travels as it does everywhere else; start and end were just
+  // decided above and must not be overwritten with the anchor's instants.
+  return carryOnto(
+    row,
+    after,
+    changed.filter((field) => field !== 'start' && field !== 'end'),
+  );
+}
+
 /** Apply the carried fields onto one member's own current values.
  *
  *  A member keeps everything else it has — its calendar, its colour, and above

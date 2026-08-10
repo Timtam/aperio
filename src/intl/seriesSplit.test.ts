@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   firstOccurrenceFrom,
-  occurrenceCarryRow,
+  futureCarryRow,
   planSeriesSplit,
+  seriesLeftTruncated,
+  truncateRRuleBefore,
   writeSeriesSplit,
   type SeriesSplitPlan,
 } from '@aperio/shared';
@@ -83,18 +85,47 @@ describe('planSeriesSplit', () => {
     expect(plan?.headRule).toContain('UNTIL=');
   });
 
-  it('emits a date-only UNTIL for an all-day series', () => {
+  it('emits a date-only UNTIL for an all-day series, on the day BEFORE the cut', () => {
     // A DATE-valued series needs a DATE-valued UNTIL, or strict providers drop
-    // the rule outright.
+    // the rule outright — and UNTIL is INCLUSIVE in date space, so it must name
+    // the day before the split or the occurrence the user split away stays in
+    // the truncated half as well, existing twice.
+    //
+    // The instants are built as LOCAL midnight, which is what an all-day event
+    // actually holds (adapter-caldav's `naive_date_to_utc`). Read as UTC days
+    // the bound lands on the cutoff day itself west of Greenwich, which is the
+    // whole point of the local reading in `formatRRuleUntilDate`.
+    const localMidnight = (y: number, m: number, d: number) =>
+      new Date(y, m - 1, d).toISOString();
     const allDay = {
       ...weekly,
       all_day: true,
-      start: '2026-08-03T00:00:00.000Z',
-      end: '2026-08-04T00:00:00.000Z',
+      start: localMidnight(2026, 8, 3),
+      end: localMidnight(2026, 8, 4),
     };
-    const plan = planSeriesSplit(allDay, '2026-08-24T00:00:00.000Z');
+    const plan = planSeriesSplit(allDay, localMidnight(2026, 8, 24));
     expect(plan?.headRule).toContain('UNTIL=20260823');
     expect(plan?.headRule).not.toContain('UNTIL=20260823T');
+  });
+
+  it('keeps a timed series UNTIL to the second', () => {
+    // The counterpart: a timed series' UNTIL is a UTC datetime, one second
+    // before the cutoff, and must NOT be read in local terms.
+    const plan = planSeriesSplit(weekly, '2026-08-24T08:00:00.000Z');
+    expect(plan?.headRule).toContain('UNTIL=20260824T075959Z');
+  });
+
+  it('truncates an all-day series to the day before, in local terms', () => {
+    // Straight at the rule helper, since this is where the day is decided.
+    const cut = new Date(2026, 7, 24);
+    const rule = truncateRRuleBefore('FREQ=WEEKLY;COUNT=10', cut, { allDay: true });
+    const p = (n: number) => String(n).padStart(2, '0');
+    const dayBefore = new Date(cut.getTime() - 86_400_000);
+    expect(rule).toContain(
+      `UNTIL=${dayBefore.getFullYear()}${p(dayBefore.getMonth() + 1)}${p(
+        dayBefore.getDate(),
+      )}`,
+    );
   });
 
   it('refuses an event that carries no rule', () => {
@@ -109,6 +140,22 @@ describe('firstOccurrenceFrom', () => {
   it('is the cutoff itself when the series has an occurrence there', () => {
     expect(firstOccurrenceFrom(weekly, '2026-08-24T08:00:00.000Z')).toBe(
       '2026-08-24T08:00:00.000Z',
+    );
+  });
+
+  it('is the occurrence already RUNNING at the cutoff, not the next one', () => {
+    // Copies of one appointment often start a little apart — the work copy at
+    // 09:00, the private one at 08:45 for the walk over. Selected by start
+    // alone, the copy already under way at the cutoff counted as past and was
+    // cut a whole period late: today stayed as it was and next week carried
+    // the change.
+    const startsEarlier = {
+      ...weekly,
+      start: '2026-08-03T07:45:00.000Z',
+      end: '2026-08-03T09:00:00.000Z',
+    };
+    expect(firstOccurrenceFrom(startsEarlier, '2026-08-24T08:00:00.000Z')).toBe(
+      '2026-08-24T07:45:00.000Z',
     );
   });
 
@@ -205,6 +252,46 @@ describe('writeSeriesSplit', () => {
     expect(restore).toHaveBeenCalledOnce();
   });
 
+  it('marks the failure when the restore failed, so the caller can say so', async () => {
+    // Reporting "not changed" would be the opposite of true: the series really
+    // does end at the cutoff now.
+    let caught: unknown;
+    try {
+      await writeSeriesSplit(
+        {
+          truncate: async () => undefined,
+          createTail: async () => {
+            throw new Error('the server said no');
+          },
+          restore: async () => {
+            throw new Error('and the restore failed as well');
+          },
+        },
+        plan,
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(seriesLeftTruncated(caught)).toBe(true);
+    // An ordinary failure — restore worked — is NOT marked.
+    let ordinary: unknown;
+    try {
+      await writeSeriesSplit(
+        {
+          truncate: async () => undefined,
+          createTail: async () => {
+            throw new Error('the server said no');
+          },
+          restore: async () => undefined,
+        },
+        plan,
+      );
+    } catch (err) {
+      ordinary = err;
+    }
+    expect(seriesLeftTruncated(ordinary)).toBe(false);
+  });
+
   it('reports the original failure even when the restore fails too', async () => {
     // The restore failing is worth nothing to the user; the write that failed
     // is what they are waiting to hear about.
@@ -256,6 +343,14 @@ describe('carrying a future edit to another copy', () => {
       recurrence: (typeof copy)['recurrence'] | null;
     },
     cutoffIso: string,
+    before: {
+      title: string;
+      start: string;
+      end: string;
+      all_day: boolean;
+      location: string | null;
+      description: string | null;
+    },
     after: {
       title: string;
       start: string;
@@ -277,7 +372,7 @@ describe('carrying a future edit to another copy', () => {
   } | null> {
     const anchorIso = firstOccurrenceFrom(current, cutoffIso);
     if (anchorIso == null) return null;
-    const row = occurrenceCarryRow(current, anchorIso, after, changed);
+    const row = futureCarryRow(current, anchorIso, before, after, changed);
     const plan = planSeriesSplit(current, anchorIso);
     if (plan == null) {
       return { anchorIso, row, split: false, headRule: null, tailRule: null };
@@ -300,20 +395,30 @@ describe('carrying a future edit to another copy', () => {
     return { anchorIso, row, split: true, headRule, tailRule };
   }
 
-  const movedAnHourLater = {
+  /** The anchor's occurrence as it stood before the edit. */
+  const stood = {
     title: 'Wochenplanung',
-    start: '2026-08-24T09:00:00.000Z',
-    end: '2026-08-24T10:00:00.000Z',
+    start: '2026-08-24T08:00:00.000Z',
+    end: '2026-08-24T09:00:00.000Z',
     all_day: false,
     location: 'Raum 3',
     description: null,
   };
+  /** …and after it was moved an hour later. */
+  const movedAnHourLater = {
+    ...stood,
+    start: '2026-08-24T09:00:00.000Z',
+    end: '2026-08-24T10:00:00.000Z',
+  };
 
   it('cuts the copy series and hands the tail the change, not the copy own life', async () => {
-    const result = await carryFuture(copy, '2026-08-24T08:00:00.000Z', movedAnHourLater, [
-      'start',
-      'end',
-    ]);
+    const result = await carryFuture(
+      copy,
+      '2026-08-24T08:00:00.000Z',
+      stood,
+      movedAnHourLater,
+      ['start', 'end'],
+    );
     expect(result?.split).toBe(true);
     expect(result?.headRule).toContain('UNTIL=20260824T075959Z');
     expect(result?.tailRule).toBe('FREQ=WEEKLY;COUNT=7');
@@ -335,7 +440,8 @@ describe('carrying a future edit to another copy', () => {
     const result = await carryFuture(
       fortnightly,
       '2026-08-24T08:00:00.000Z',
-      { ...movedAnHourLater, title: 'Wochenplanung kurz' },
+      stood,
+      { ...stood, title: 'Wochenplanung kurz' },
       ['title'],
     );
     expect(result?.anchorIso).toBe('2026-08-31T08:00:00.000Z');
@@ -343,6 +449,73 @@ describe('carrying a future edit to another copy', () => {
     expect(result?.row.start).toBe('2026-08-31T08:00:00.000Z');
     expect(result?.row.title).toBe('Wochenplanung kurz');
     expect(result?.headRule).toContain('UNTIL=20260831T075959Z');
+  });
+
+  it('moves a differently-patterned copy BY the edit, not TO the anchor instant', async () => {
+    // The bug this pins down: the head was cut at the copy's own occurrence
+    // (08-31) while the tail was created at the anchor's new instant (08-24
+    // 09:00). The copy lost its real 08-31 appointment, gained one on a day it
+    // never had, and every occurrence after it fell a week out of phase.
+    const fortnightly = {
+      ...copy,
+      recurrence: { ...copy.recurrence, rrule: 'FREQ=WEEKLY;INTERVAL=2;COUNT=10' },
+    };
+    const result = await carryFuture(
+      fortnightly,
+      '2026-08-24T08:00:00.000Z',
+      stood,
+      movedAnHourLater,
+      ['start', 'end'],
+    );
+    // Its own cut point, one hour later — the move, not the instant.
+    expect(result?.anchorIso).toBe('2026-08-31T08:00:00.000Z');
+    expect(result?.row.start).toBe('2026-08-31T09:00:00.000Z');
+    expect(result?.row.end).toBe('2026-08-31T10:00:00.000Z');
+    // And the head ends just before the same point, so the halves meet.
+    expect(result?.headRule).toContain('UNTIL=20260831T075959Z');
+  });
+
+  it('never writes an end before its start when only the duration changed', async () => {
+    // A duration-only edit puts just 'end' in `changed`. Taking the anchor's
+    // end verbatim gave a misaligned copy an end a week BEFORE its start.
+    const fortnightly = {
+      ...copy,
+      recurrence: { ...copy.recurrence, rrule: 'FREQ=WEEKLY;INTERVAL=2;COUNT=10' },
+    };
+    const result = await carryFuture(
+      fortnightly,
+      '2026-08-24T08:00:00.000Z',
+      stood,
+      { ...stood, end: '2026-08-24T08:30:00.000Z' },
+      ['end'],
+    );
+    expect(result?.row.start).toBe('2026-08-31T08:00:00.000Z');
+    expect(result?.row.end).toBe('2026-08-31T08:30:00.000Z');
+    expect(new Date(result!.row.end).getTime()).toBeGreaterThan(
+      new Date(result!.row.start).getTime(),
+    );
+  });
+
+  it('moves an all-day copy in whole days and keeps its length', async () => {
+    // The anchor is timed and was moved an hour; an all-day copy cannot be, and
+    // an hour-long all-day event is not a thing either.
+    const localMidnight = (y: number, m: number, d: number) =>
+      new Date(y, m - 1, d).toISOString();
+    const allDayCopy = {
+      ...copy,
+      all_day: true,
+      start: localMidnight(2026, 8, 3),
+      end: localMidnight(2026, 8, 4),
+    };
+    const result = await carryFuture(
+      allDayCopy,
+      localMidnight(2026, 8, 24),
+      stood,
+      movedAnHourLater,
+      ['start', 'end'],
+    );
+    expect(result?.row.start).toBe(localMidnight(2026, 8, 24));
+    expect(result?.row.end).toBe(localMidnight(2026, 8, 25));
   });
 
   it('leaves a copy alone when its series ends before the cutoff', async () => {
@@ -353,19 +526,25 @@ describe('carrying a future edit to another copy', () => {
       ...copy,
       recurrence: { ...copy.recurrence, rrule: 'FREQ=WEEKLY;COUNT=2' },
     };
-    expect(await carryFuture(short, '2026-08-24T08:00:00.000Z', movedAnHourLater, ['start']))
-      .toBeNull();
+    expect(
+      await carryFuture(short, '2026-08-24T08:00:00.000Z', stood, movedAnHourLater, [
+        'start',
+      ]),
+    ).toBeNull();
   });
 
   it('updates a copy that is a single event instead of splitting it', async () => {
     // One occurrence, so "this and all following" is that one.
     const single = { ...copy, recurrence: null };
-    const result = await carryFuture(single, '2026-08-03T08:00:00.000Z', movedAnHourLater, [
-      'start',
-      'end',
-    ]);
+    const result = await carryFuture(
+      single,
+      '2026-08-03T08:00:00.000Z',
+      { ...stood, start: '2026-08-03T08:00:00.000Z', end: '2026-08-03T09:00:00.000Z' },
+      { ...stood, start: '2026-08-03T09:00:00.000Z', end: '2026-08-03T10:00:00.000Z' },
+      ['start', 'end'],
+    );
     expect(result?.split).toBe(false);
-    expect(result?.row.start).toBe('2026-08-24T09:00:00.000Z');
+    expect(result?.row.start).toBe('2026-08-03T09:00:00.000Z');
     expect(result?.row.reminders).toEqual(['-PT30M']);
   });
 });

@@ -456,7 +456,15 @@ function formatRRuleUntilUtc(d: Date): string {
  *  or silently drop the RRULE. */
 function formatRRuleUntilDate(d: Date): string {
   const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}`;
+  // The LOCAL day, not the UTC one. An all-day event is stored as local
+  // midnight expressed as an instant, so the moment one second before an
+  // all-day cutoff is 23:59:59 of the previous LOCAL day — and west of
+  // Greenwich that instant still falls on the cutoff's UTC day. Read in UTC it
+  // therefore named the cutoff day itself, and a date-only UNTIL is INCLUSIVE:
+  // the occurrence the user split away stayed in the truncated series, so it
+  // existed twice, once in each half. East of Greenwich the two readings agree,
+  // which is why it went unseen.
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`;
 }
 
 /** Parse an RRULE `UNTIL` value (`YYYYMMDD` or `YYYYMMDDTHHMMSSZ`) to an epoch

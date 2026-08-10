@@ -548,11 +548,14 @@ describe('truncateRRuleBefore', () => {
   });
 
   it('all-day series emits a date-only UNTIL (RFC-5545 value-type match)', () => {
-    const out = truncateRRuleBefore(
-      'FREQ=WEEKLY;BYDAY=MO',
-      new Date('2026-06-15T00:00:00.000Z'),
-      { allDay: true },
-    );
+    // LOCAL midnight, which is what an all-day instant actually holds
+    // (adapter-caldav's `naive_date_to_utc`) and how the whole app reads such a
+    // start back (`localDateKey`). The emitted day is read the same way — a UTC
+    // reading names the cutoff day itself west of Greenwich, and a date-only
+    // UNTIL is inclusive, so the occurrence being split away would stay.
+    const out = truncateRRuleBefore('FREQ=WEEKLY;BYDAY=MO', new Date(2026, 5, 15), {
+      allDay: true,
+    });
     // A datetime UNTIL on a DATE-valued series is malformed and strict providers
     // (iCloud) drop the rule; the day before the cutoff is kept.
     expect(out).toBe('FREQ=WEEKLY;BYDAY=MO;UNTIL=20260614');
@@ -635,7 +638,8 @@ describe('splitRRuleForEdit', () => {
   it('all-day option: oldRule carries a date-only UNTIL, new keeps remaining COUNT', () => {
     const { oldRule, newRule } = splitRRuleForEdit(
       'FREQ=WEEKLY;BYDAY=MO;COUNT=8',
-      new Date('2026-06-15T00:00:00.000Z'),
+      // LOCAL midnight — see the truncateRRuleBefore all-day test above.
+      new Date(2026, 5, 15),
       2, // two occurrences kept on the old series
       { allDay: true },
     );
