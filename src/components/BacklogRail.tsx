@@ -86,6 +86,9 @@ export function BacklogRail() {
   const { tasks } = useTasks();
   const { invalidateData } = useDialogState();
   const { colorLabels, sectionsByList, loadSections } = useCalendarStore();
+  // Two-level priority collapses low+medium into one band, so the rail's two
+  // priority sorts have to ask which system is on (see `taskOrder`).
+  const { priorityScale } = useTaskCascadeEnabled();
   const headingId = useId();
   const { width, setWidth } = useBacklogWidth();
   // Where a week begins is the user's setting, not a constant — the same one
@@ -157,10 +160,11 @@ export function BacklogRail() {
         .sort(
           (a, b) =>
             (a.deadline_date ?? '').localeCompare(b.deadline_date ?? '') ||
-            priorityRank(a.priority) - priorityRank(b.priority) ||
+            priorityRank(a.priority, priorityScale) -
+              priorityRank(b.priority, priorityScale) ||
             a.created_at.localeCompare(b.created_at),
         ),
-    [tasks],
+    [tasks, priorityScale],
   );
 
   // The two calendar weeks the deadlines are split across. The user's own
@@ -191,8 +195,12 @@ export function BacklogRail() {
             !isTaskDeferred(row, todayKey) &&
             isTopLevel(row),
         )
-        .sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority)),
-    [tasks, todayKey, isTopLevel],
+        .sort(
+          (a, b) =>
+            priorityRank(a.priority, priorityScale) -
+            priorityRank(b.priority, priorityScale),
+        ),
+    [tasks, todayKey, isTopLevel, priorityScale],
   );
 
   // Everything else, as one list: the deadlines beyond next week first — still
@@ -355,7 +363,7 @@ function BacklogList({
   const { openTaskDialog, openPlanTask, invalidateData } = useDialogState();
   const { sectionColorById } = useCalendarStore();
   const { openForTask } = useChipContextMenu();
-  const { visualEffortSizing } = useTaskCascadeEnabled();
+  const { visualEffortSizing, priorityScale } = useTaskCascadeEnabled();
   const [activeIndex, setActiveIndex] = useState(0);
   const headingId = useId();
 
@@ -444,7 +452,7 @@ function BacklogList({
             labelById,
             sectionColorById,
           );
-          const priorityGlyph = priorityMarker(task.priority);
+          const priorityGlyph = priorityMarker(task.priority, priorityScale);
           const effortMod = visualEffortSizing
             ? effortSizeModifier(task.effort)
             : '';
@@ -464,13 +472,13 @@ function BacklogList({
                   list: listName,
                   deadline: due,
                   overdue: overdue ? t('views.backlog.overdueSuffix') : '',
-                  priority: prioritySuffix(t, task.priority),
+                  priority: prioritySuffix(t, task.priority, priorityScale),
                   assignee: assigneeSuffix(t, task.assignees),
                 })
               : t('views.backlog.chipLabel', {
                   title: task.title,
                   list: listName,
-                  priority: prioritySuffix(t, task.priority),
+                  priority: prioritySuffix(t, task.priority, priorityScale),
                   assignee: assigneeSuffix(t, task.assignees),
                 });
           return (

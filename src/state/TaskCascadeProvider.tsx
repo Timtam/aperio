@@ -7,7 +7,11 @@ import {
   type ReactNode,
 } from 'react';
 
-import { FULL_DAY_WINDOW, MINUTES_PER_DAY } from '@aperio/shared';
+import {
+  FULL_DAY_WINDOW,
+  MINUTES_PER_DAY,
+  type PriorityScale,
+} from '@aperio/shared';
 
 import { getUserPref, setUserPref } from '../api/client';
 import { TaskCascadeContext } from './taskCascadeContext';
@@ -51,6 +55,11 @@ const DAY_START_TRIGGER_KEY = 'tasks.dayStartTrigger';
 const CHECKOFF_MODE_KEY = 'tasks.checkoffMode';
 const AUTO_SELF_ASSIGN_KEY = 'tasks.autoSelfAssign';
 const VISUAL_EFFORT_SIZING_KEY = 'tasks.visualEffortSizing';
+// Two-level priority (normal / important) instead of low-medium-high. Default
+// off = the three-level original; only a literal stored 'true' switches. A
+// preference about how the user works, not about this device, so it rides the
+// synced `tasks.` prefix like every other knob on the Tasks tab.
+const TWO_LEVEL_PRIORITY_KEY = 'tasks.twoLevelPriority';
 const CALENDAR_DAY_VIEW_MODE_KEY = 'calendar.dayViewMode';
 // Visible day-window of the calendar hour-grid (synced). Two integer minute
 // values from midnight stored as strings (e.g. "420" = 07:00). Parsed +
@@ -277,6 +286,15 @@ export interface TaskCascadeContextValue {
   visualEffortSizing: boolean;
   /** Set the visual-effort-sizing preference. Debounced-persisted (synced). */
   setVisualEffortSizing: (value: boolean) => void;
+  /** True when the user's priority system has two levels (normal / important)
+   *  rather than three. */
+  twoLevelPriority: boolean;
+  /** Set the two-level-priority preference. Debounced-persisted (synced). */
+  setTwoLevelPriority: (value: boolean) => void;
+  /** The same choice as {@link twoLevelPriority}, in the form every display /
+   *  ordering helper in `@aperio/shared` takes — so no consumer has to spell
+   *  the boolean→scale mapping out again. */
+  priorityScale: PriorityScale;
   /** Remind of today's untimed (date-only) scheduled tasks. Default on. */
   remindUntimedToday: boolean;
   /** Set the untimed-today reminder preference. Debounced-persisted (synced). */
@@ -346,6 +364,9 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
   const [autoSelfAssign, setAutoSelfAssignState] = useState(true);
   // Visual effort-sizing defaults ON; only a literal stored 'false' disables.
   const [visualEffortSizing, setVisualEffortSizingState] = useState(true);
+  // Two-level priority defaults OFF (three levels, as before); only a literal
+  // stored 'true' switches it on.
+  const [twoLevelPriority, setTwoLevelPriorityState] = useState(false);
   // Day-start reminder knobs. The three booleans default ON (only a
   // literal stored 'false' disables); the countdown lead time defaults
   // to 3 days (parsed + clamped 1..30 on hydrate).
@@ -392,6 +413,7 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       getUserPref(CHECKOFF_MODE_KEY).catch(() => null),
       getUserPref(AUTO_SELF_ASSIGN_KEY).catch(() => null),
       getUserPref(VISUAL_EFFORT_SIZING_KEY).catch(() => null),
+      getUserPref(TWO_LEVEL_PRIORITY_KEY).catch(() => null),
       getUserPref(REMIND_UNTIMED_TODAY_KEY).catch(() => null),
       getUserPref(REMIND_DEADLINE_ARRIVED_KEY).catch(() => null),
       getUserPref(REMIND_DEADLINE_COUNTDOWN_KEY).catch(() => null),
@@ -410,6 +432,7 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
           checkoffRaw,
           autoSelfAssignRaw,
           visualEffortSizingRaw,
+          twoLevelPriorityRaw,
           remindUntimedTodayRaw,
           remindDeadlineArrivedRaw,
           remindDeadlineCountdownRaw,
@@ -427,6 +450,8 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
           if (autoSelfAssignRaw === 'false') setAutoSelfAssignState(false);
           if (visualEffortSizingRaw === 'false')
             setVisualEffortSizingState(false);
+          // Two-level priority is the opt-IN, so only a literal 'true' flips it.
+          if (twoLevelPriorityRaw === 'true') setTwoLevelPriorityState(true);
           // Day-start reminder booleans default ON; only a literal
           // 'false' disables them (same convention as the others).
           if (remindUntimedTodayRaw === 'false')
@@ -587,6 +612,26 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       }
     };
   }, [visualEffortSizing, hydrating]);
+
+  const twoLevelPriorityTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (hydrating) return;
+    if (twoLevelPriorityTimer.current !== null) {
+      window.clearTimeout(twoLevelPriorityTimer.current);
+    }
+    twoLevelPriorityTimer.current = window.setTimeout(() => {
+      void setUserPref(
+        TWO_LEVEL_PRIORITY_KEY,
+        twoLevelPriority ? 'true' : 'false',
+      );
+    }, WRITE_DEBOUNCE_MS);
+    return () => {
+      if (twoLevelPriorityTimer.current !== null) {
+        window.clearTimeout(twoLevelPriorityTimer.current);
+        twoLevelPriorityTimer.current = null;
+      }
+    };
+  }, [twoLevelPriority, hydrating]);
 
   const remindUntimedTodayTimer = useRef<number | null>(null);
   useEffect(() => {
@@ -806,6 +851,11 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
   const setVisualEffortSizing = useCallback((value: boolean) => {
     setVisualEffortSizingState(value);
   }, []);
+  const setTwoLevelPriority = useCallback((value: boolean) => {
+    setTwoLevelPriorityState(value);
+  }, []);
+  // The boolean, said the way the shared helpers want to hear it.
+  const priorityScale: PriorityScale = twoLevelPriority ? 'two' : 'three';
   const setRemindUntimedToday = useCallback((value: boolean) => {
     setRemindUntimedTodayState(value);
   }, []);
@@ -901,6 +951,9 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       setAutoSelfAssign,
       visualEffortSizing,
       setVisualEffortSizing,
+      twoLevelPriority,
+      setTwoLevelPriority,
+      priorityScale,
       remindUntimedToday,
       setRemindUntimedToday,
       remindDeadlineArrived,
@@ -934,6 +987,9 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       setAutoSelfAssign,
       visualEffortSizing,
       setVisualEffortSizing,
+      twoLevelPriority,
+      setTwoLevelPriority,
+      priorityScale,
       remindUntimedToday,
       setRemindUntimedToday,
       remindDeadlineArrived,

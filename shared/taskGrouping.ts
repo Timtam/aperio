@@ -1,6 +1,6 @@
 import type { Section, Task, TaskUser } from './types';
 import { classifyDoneByMe } from './taskAssignment';
-import { priorityRank } from './taskStatus';
+import { priorityRank, type PriorityScale } from './taskStatus';
 
 /** Sentinel id of the synthetic "Done (N)" group row. */
 export const DONE_GROUP_ID = '__aperio_done_group__';
@@ -170,10 +170,15 @@ function naturalCompare(a: string, b: string): number {
  *  (unchanged), then natural ascending title — replacing the old insertion-order
  *  tiebreaker so each group reads A→Z within a priority band. Exported as THE
  *  task ordering: the calendar day surfaces (`filterTasksOnDay`) sort a day's
- *  tasks with the same comparator so the planner reads like the task list. */
-export function taskOrder(a: Task, b: Task): number {
+ *  tasks with the same comparator so the planner reads like the task list.
+ *
+ *  `scale` is the user's priority system (see `PriorityScale`); in the
+ *  two-level one there are two bands instead of three, so everything that is
+ *  not important reads A→Z as one run. It defaults to `'three'` so a bare
+ *  `.sort(taskOrder)` still compiles and behaves as it always did. */
+export function taskOrder(a: Task, b: Task, scale: PriorityScale = 'three'): number {
   return (
-    priorityRank(a.priority) - priorityRank(b.priority) ||
+    priorityRank(a.priority, scale) - priorityRank(b.priority, scale) ||
     naturalCompare(a.title, b.title)
   );
 }
@@ -225,7 +230,11 @@ export function buildEntries(
   /** Top-level grouping (see {@link TaskGroupBy}). Defaults to `'state'` so
    *  existing callers keep the historical lifecycle grouping. */
   groupBy: TaskGroupBy = 'state',
+  /** The user's priority system — decides how many bands the sibling ordering
+   *  has (see {@link taskOrder}). Defaults to the three-level original. */
+  scale: PriorityScale = 'three',
 ): { entries: Entry[]; flatTasks: Task[] } {
+  const order = (a: Task, b: Task) => taskOrder(a, b, scale);
   // Bucket children under their parent for O(1) subtask lookup. Tasks whose
   // parent_id points at a missing row are orphans → surfaced at top level.
   const childrenByParent = new Map<string, Task[]>();
@@ -243,7 +252,7 @@ export function buildEntries(
   });
   // Subtask siblings sort the same way as top-level tasks (priority band, then
   // natural title) — so a parent's children also read A→Z, not add-order.
-  childrenByParent.forEach((bucket) => bucket.sort(taskOrder));
+  childrenByParent.forEach((bucket) => bucket.sort(order));
 
   // Cycle guard: parent links can come from external providers (e.g. two
   // Vikunja tasks each carrying a `parenttask` relation onto the other), and
@@ -318,7 +327,7 @@ export function buildEntries(
   // (`taskOrder`) — so each group reads A→Z instead of add-order. Every
   // downstream bucket is filled by walking `openTopLevel` in order, so this one
   // sort covers backlog + scheduled lists + sections + ungrouped alike.
-  openTopLevel.sort(taskOrder);
+  openTopLevel.sort(order);
 
   // Deferred (DESIGN §9.12): a backlog task whose resurface day is still in the
   // future is held out of the active groups. It joins the fixed-future-scheduled

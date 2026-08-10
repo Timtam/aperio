@@ -84,6 +84,7 @@ import {
   MINUTES_PER_DAY,
   minutesFromMidnight,
   type PositionedSpan,
+  type PriorityScale,
   type TimedSpan,
 } from '@aperio/shared';
 
@@ -217,8 +218,13 @@ export function DayView() {
   const range = useMemo(() => visibleRange('day', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
   const { tasks, taskListById } = useTasks();
-  const { visualEffortSizing, dayViewMode, dayStartMin, dayEndMin } =
-    useTaskCascadeEnabled();
+  const {
+    visualEffortSizing,
+    dayViewMode,
+    dayStartMin,
+    dayEndMin,
+    priorityScale,
+  } = useTaskCascadeEnabled();
   // Compact-list layout vs the proportional hour-grid. In list mode the timed
   // listbox is normal vertical flow (no positioned 24h canvas), the ruler +
   // all-day band are not rendered, and each option is sized inline instead of a
@@ -360,8 +366,9 @@ export function DayView() {
         localDateKey(anchor),
         shouldShowCompletedForList,
         meFor,
+        priorityScale,
       ),
-    [expandedTasks, anchor, shouldShowCompletedForList, meFor],
+    [expandedTasks, anchor, shouldShowCompletedForList, meFor, priorityScale],
   );
 
   // Split tasks into "timed" (carry a deadline_time on this specific
@@ -1023,7 +1030,7 @@ export function DayView() {
                 sectionColorById,
               );
               const state = t(statusI18nKey(task.status));
-              const priorityGlyph = priorityMarker(task.priority);
+              const priorityGlyph = priorityMarker(task.priority, priorityScale);
               const effortMod = visualEffortSizing
                 ? effortSizeModifier(task.effort)
                 : '';
@@ -1038,7 +1045,7 @@ export function DayView() {
                       title: task.title,
                       time: timeStr,
                       state,
-                      priority: prioritySuffix(t, task.priority),
+                      priority: prioritySuffix(t, task.priority, priorityScale),
                       progress: subtaskProgressSuffix(t, task.id, tasks),
                       assignee: assigneeSuffix(t, task.assignees),
                     }) +
@@ -1366,6 +1373,7 @@ export function DayView() {
           labelById={labelById}
           sectionColorById={sectionColorById}
           visualEffortSizing={visualEffortSizing}
+          priorityScale={priorityScale}
           onToggle={toggleTaskStatus}
           onOpen={openTaskDialog}
           onContextMenu={openTaskMenu}
@@ -1434,6 +1442,7 @@ function DayUntimedTasks({
   labelById,
   sectionColorById,
   visualEffortSizing,
+  priorityScale,
   onToggle,
   onOpen,
   onContextMenu,
@@ -1448,6 +1457,7 @@ function DayUntimedTasks({
   labelById: Map<string, ColorLabel>;
   sectionColorById: Map<string, string>;
   visualEffortSizing: boolean;
+  priorityScale: PriorityScale;
   onToggle: (task: Task) => void | Promise<void>;
   onOpen: (task: Task) => void;
   onContextMenu: (
@@ -1497,7 +1507,7 @@ function DayUntimedTasks({
             sectionColorById,
           );
           const state = t(statusI18nKey(task.status));
-          const priorityGlyph = priorityMarker(task.priority);
+          const priorityGlyph = priorityMarker(task.priority, priorityScale);
           const effortMod = visualEffortSizing
             ? effortSizeModifier(task.effort)
             : '';
@@ -1594,7 +1604,7 @@ function DayUntimedTasks({
                         )
                       : '',
                     state,
-                    priority: prioritySuffix(t, task.priority),
+                    priority: prioritySuffix(t, task.priority, priorityScale),
                     progress: subtaskProgressSuffix(t, task.id, allTasks),
                     assignee: assigneeSuffix(t, task.assignees),
                   }) +

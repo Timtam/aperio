@@ -2,7 +2,11 @@ import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
-import { detectConference } from '@aperio/shared';
+import {
+  detectConference,
+  isImportantPriority,
+  normalPriority,
+} from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import {
@@ -30,6 +34,7 @@ import {
   warmCalendarUserEmail,
 } from './currentUserEmail';
 import { surfaceTaskNow } from './moveActions';
+import { useTaskCascadeEnabled } from './taskCascadeContext';
 import { useTaskPriorityAction } from './useTaskPriority';
 import { useTaskStatusActions } from './useTaskStatusToggle';
 
@@ -73,7 +78,8 @@ function normalizeEmail(value: string | null | undefined): string {
  *         · Mittel
  *         · Hoch
  *       (same check-row shape as Status — a one-click priority change
- *        without opening the editor)
+ *        without opening the editor; in the two-level priority system
+ *        this collapses to a single "Wichtig" check row)
  *     - Verschieben nach…
  *     - Kopieren nach…
  *     - ──
@@ -119,6 +125,7 @@ export function useChipContextMenu(): ChipContextMenuActions {
   } = useDialogState();
   const { set: setTaskStatus } = useTaskStatusActions();
   const setTaskPriority = useTaskPriorityAction();
+  const { priorityScale } = useTaskCascadeEnabled();
   const { colorLabels, calendars } = useCalendarStore();
   const calById = useMemo(
     () => new Map(calendars.map((c) => [c.id, c])),
@@ -363,16 +370,27 @@ export function useChipContextMenu(): ChipContextMenuActions {
       // status submenu. Reuses the dialog's priority labels so the wording
       // lives in one place; medium is the neutral default. A one-click
       // priority change without opening the editor.
-      const prioritySubmenu: ContextMenuItemRequest = {
-        kind: 'submenu',
-        label: t('chipMenu.priority'),
-        items: (['low', 'medium', 'high'] as TaskPriority[]).map((p) => ({
-          kind: 'check' as const,
-          id: `priority:${p}`,
-          label: t(`dialogs.task.priority.${p}`),
-          checked: task.priority === p,
-        })),
-      };
+      // Two levels: one check row. A submenu of three would offer a scale
+      // the user has switched off, and two of its rows would mean the same
+      // thing.
+      const prioritySubmenu: ContextMenuItemRequest =
+        priorityScale === 'two'
+          ? {
+              kind: 'check',
+              id: 'important',
+              label: t('chipMenu.important'),
+              checked: isImportantPriority(task.priority),
+            }
+          : {
+              kind: 'submenu',
+              label: t('chipMenu.priority'),
+              items: (['low', 'medium', 'high'] as TaskPriority[]).map((p) => ({
+                kind: 'check' as const,
+                id: `priority:${p}`,
+                label: t(`dialogs.task.priority.${p}`),
+                checked: task.priority === p,
+              })),
+            };
       // Subtasks can't be moved or copied independently — they're
       // glued to their parent. Hide the Move/Copy entries entirely
       // so the user doesn't see a path that leads nowhere; the
@@ -440,6 +458,13 @@ export function useChipContextMenu(): ChipContextMenuActions {
       } else if (selected?.startsWith('status:')) {
         const next = selected.slice('status:'.length) as TaskStatus;
         await setTaskStatus(task, next);
+      } else if (selected === 'important') {
+        // Clearing lands on `medium`, the neutral middle: what the task was
+        // before it became important is not recorded anywhere.
+        await setTaskPriority(
+          task,
+          isImportantPriority(task.priority) ? normalPriority() : 'high',
+        );
       } else if (selected?.startsWith('priority:')) {
         const next = selected.slice('priority:'.length) as TaskPriority;
         await setTaskPriority(task, next);
@@ -485,6 +510,7 @@ export function useChipContextMenu(): ChipContextMenuActions {
       invalidateData,
       setTaskStatus,
       setTaskPriority,
+      priorityScale,
     ],
   );
 

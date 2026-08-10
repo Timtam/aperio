@@ -41,11 +41,67 @@ export function statusMarker(status: TaskStatus): string {
 }
 
 /**
- * Per-priority glyph for the on-chip / on-row indicator: exclamation marks, one
- * per level — `!` low, `!!` medium, `!!!` high. The glyph carries the meaning;
- * the SR label still spells the priority out via {@link prioritySuffix}.
+ * How many levels the user's priority system has — the synced
+ * `tasks.twoLevelPriority` setting (Settings → Tasks), as a value rather than a
+ * bare boolean so every reader says what it means.
+ *
+ *   - `'three'` — low / medium / high, the original system.
+ *   - `'two'` — normal / important. Everything that is not the top level is
+ *     simply normal, carries no indicator at all, and sorts in one band with
+ *     the rest of normal. Modelled on a bullet journal, where the only mark a
+ *     task gets is the star that says "this one".
+ *
+ * The STORED value is untouched by the setting. A task that arrived from a
+ * provider as `low` stays `low` in the database and on the provider — the
+ * two-level system is a lens over the same three values, so switching back and
+ * forth loses nothing and no provider's data is rewritten behind the user's
+ * back. That is also what makes the "collapse everything below the top" rule
+ * safe for providers with five or six levels: their extra levels were already
+ * folded into these three by their adapter, and this folds two of the three
+ * into one for reading.
  */
-export function priorityMarker(priority: TaskPriority): string {
+export type PriorityScale = 'three' | 'two';
+
+/**
+ * Whether the task carries the TOP priority — the one level that survives in
+ * the two-level system, where it is called "important" rather than "high".
+ */
+export function isImportantPriority(priority: TaskPriority): boolean {
+  return priority === 'high';
+}
+
+/**
+ * The priority a task gets when the user clears "important" in the two-level
+ * system: the value it already had, as long as that value is not the top one.
+ *
+ * Unchecking must not rewrite `low` into `medium`. Both read as "normal" and
+ * both look identical on every surface, so the write would change nothing the
+ * user can see while changing what other clients — and the three-level system,
+ * if they switch back — display. `previous` is what the task carried before it
+ * was marked important; `medium` is the neutral answer when there is none.
+ */
+export function normalPriority(previous?: TaskPriority | null): TaskPriority {
+  return previous && !isImportantPriority(previous) ? previous : 'medium';
+}
+
+/**
+ * Per-priority glyph for the on-chip / on-row indicator.
+ *
+ * Three-level: exclamation marks, one per level — `!` low, `!!` medium, `!!!`
+ * high. Two-level: a star on the important one and NOTHING on the rest, which
+ * is the point of the second system — normal is the absence of a mark, not a
+ * quieter mark.
+ *
+ * The glyph carries the meaning; the SR label still spells the priority out via
+ * {@link prioritySuffix}. `scale` is required rather than defaulted so that
+ * adding a surface cannot silently print exclamation marks to a user who turned
+ * them off.
+ */
+export function priorityMarker(
+  priority: TaskPriority,
+  scale: PriorityScale,
+): string {
+  if (scale === 'two') return isImportantPriority(priority) ? '★' : '';
   switch (priority) {
     case 'high':
       return '!!!';
@@ -60,8 +116,21 @@ export function priorityMarker(priority: TaskPriority): string {
  * Numeric sort rank for a priority (ascending = most urgent first): `high` → 0,
  * `medium` → 1, `low` → 2. Pair with a *stable* sort so the existing order is
  * the tiebreaker within one priority bucket.
+ *
+ * Two-level collapses low and medium into ONE band (important → 0, normal → 1).
+ * It has to: the two are indistinguishable on screen there, so ranking them
+ * apart would order a list by an attribute the reader cannot perceive, and the
+ * A→Z tiebreak that each band promises would appear to break at random.
+ *
+ * `scale` defaults to `'three'`, the historical behaviour, because this feeds
+ * comparators handed straight to `Array.sort` — a caller that omits it sorts
+ * exactly as before rather than failing to compile.
  */
-export function priorityRank(priority: TaskPriority): number {
+export function priorityRank(
+  priority: TaskPriority,
+  scale: PriorityScale = 'three',
+): number {
+  if (scale === 'two') return isImportantPriority(priority) ? 0 : 1;
   switch (priority) {
     case 'high':
       return 0;
@@ -73,10 +142,21 @@ export function priorityRank(priority: TaskPriority): number {
 }
 
 /**
- * i18n key for the SR-announced priority label, or `null` for `medium` (no
- * announcement — keeps the common case unchanged).
+ * i18n key for the SR-announced priority label, or `null` when there is nothing
+ * to announce — `medium` in the three-level system, and everything below the
+ * top in the two-level one.
+ *
+ * Two-level says "important", not "high priority": in a system with one mark,
+ * naming a level the user cannot choose between would describe a scale that is
+ * no longer there.
  */
-export function priorityI18nKey(priority: TaskPriority): string | null {
+export function priorityI18nKey(
+  priority: TaskPriority,
+  scale: PriorityScale,
+): string | null {
+  if (scale === 'two') {
+    return isImportantPriority(priority) ? 'views.tasks.priorityImportant' : null;
+  }
   switch (priority) {
     case 'high':
       return 'views.tasks.priorityHigh';
@@ -88,16 +168,17 @@ export function priorityI18nKey(priority: TaskPriority): string | null {
 }
 
 /**
- * SR-friendly priority suffix for aria-labels. Empty string for `medium`, so it
- * can be appended unconditionally to any task label. Comma-prefixed, so the
- * calling i18n template (`{{state}}{{priority}}{{progress}}`) needs no
- * conditional.
+ * SR-friendly priority suffix for aria-labels. Empty string when there is
+ * nothing to say, so it can be appended unconditionally to any task label.
+ * Comma-prefixed, so the calling i18n template
+ * (`{{state}}{{priority}}{{progress}}`) needs no conditional.
  */
 export function prioritySuffix(
   t: (key: string, vars?: Record<string, unknown>) => string,
   priority: TaskPriority,
+  scale: PriorityScale,
 ): string {
-  const key = priorityI18nKey(priority);
+  const key = priorityI18nKey(priority, scale);
   return key ? `, ${t(key)}` : '';
 }
 

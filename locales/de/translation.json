@@ -67,6 +67,7 @@
     "moveCopy": "Verschieben/Kopieren",
     "cyclePriority": "Priorität ändern",
     "priorityCycled": "Priorität auf {{priority}} gesetzt.",
+    "toggleImportant": "Wichtig ein/aus",
     "subtaskStatusSet": "{{title}} auf {{status}} gesetzt.",
     "subtaskRowHint": "Zum Umschalten doppeltippen. Weitere Aktionen verfügbar.",
     "noContacts": "Noch keine Kontakte.",
@@ -170,6 +171,9 @@
     "status": "Status",
     "priority": "Priorität",
     "prioritySet": "Priorität für „{{title}}\" auf {{priority}} gesetzt.",
+    "important": "Wichtig",
+    "importantSet": "„{{title}}\" als wichtig markiert.",
+    "importantCleared": "„{{title}}\" ist nicht mehr wichtig.",
     "color": "Farbe",
     "colorNone": "Keine Farbe",
     "colorSet": "Farbe für „{{title}}\" gesetzt.",
@@ -995,6 +999,11 @@
         "label": "In geteilten Listen mir zuweisen",
         "hint": "Wenn aktiviert, weist sich eine noch niemandem zugewiesene Aufgabe in einer geteilten Liste (z.B. Vikunja) automatisch mir zu, sobald ich sie auf in Arbeit oder erledigt setze; setze ich sie zurück auf offen, wird nur meine Zuweisung wieder entfernt. Bei wiederkehrenden Aufgaben gilt das nur für die erledigte Aufgabe — die neue Aufgabe bleibt ohne Zuweisung. Deaktiviert: Zuweisungen bleiben manuell."
       },
+      "twoLevelPriority": {
+        "heading": "Prioritätsstufen",
+        "label": "Zwei Stufen: normal und wichtig",
+        "hint": "Statt niedrig / mittel / hoch ist eine Aufgabe entweder wichtig — mit einem Sternchen markiert — oder normal, ganz ohne Markierung. Prioritäten von Anbietern mit mehr Stufen gelten als normal, sofern sie nicht die höchste sind. Gespeichert wird nichts um: beim Zurückschalten sind die drei Stufen unverändert da."
+      },
       "visualEffortSizing": {
         "heading": "Aufwand als Kachelgröße",
         "label": "Aufgaben je nach Aufwand größer/kleiner darstellen",
@@ -1502,6 +1511,7 @@
         "assignees": "Zugewiesen an",
         "status": "Status",
         "priority": "Priorität",
+        "important": "Wichtig",
         "effort": "Aufwand",
         "completedAt": "Erledigt am {{date}}",
         "scheduled": {
@@ -2053,6 +2063,7 @@
       "subtaskProgress": ", {{done}} von {{total}} Unteraufgaben erledigt",
       "subtaskParent": ", Unteraufgabe von „{{parent}}\"",
       "priorityHigh": "hohe Priorität",
+      "priorityImportant": "wichtig",
       "priorityLow": "niedrige Priorität",
       "effortSmall": "geringer Aufwand",
       "effortLarge": "großer Aufwand",

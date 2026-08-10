@@ -25,6 +25,7 @@ import {
   statusMarker,
   subtaskProgress,
   subtaskProgressSuffix,
+  type PriorityScale,
 } from '../../intl/taskStatus';
 import { useCalendarStore } from '../../state/calendarStoreContext';
 import { useTaskCascadeEnabled } from '../../state/taskCascadeContext';
@@ -84,7 +85,7 @@ export function TaskView() {
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { tasks, taskListById, loading } = useTasks();
-  const { visualEffortSizing } = useTaskCascadeEnabled();
+  const { visualEffortSizing, priorityScale } = useTaskCascadeEnabled();
   const { colorLabels, sectionsByList, loadSections, sectionColorById } =
     useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
@@ -169,6 +170,7 @@ export function TaskView() {
         todayKey,
         currentUserByList,
         groupBy,
+        priorityScale,
       ),
     [
       tasks,
@@ -179,6 +181,7 @@ export function TaskView() {
       todayKey,
       currentUserByList,
       groupBy,
+      priorityScale,
     ],
   );
 
@@ -623,6 +626,7 @@ export function TaskView() {
     itemId,
     today: todayKey,
     visualEffortSizing,
+    priorityScale,
   };
 
   // Dispatch a row. A real task delegates to renderTreeItem (which renders
@@ -893,6 +897,8 @@ interface RenderTreeCtx {
   today: string;
   /** Synced pref: when true, a task row gets an effort-size tile modifier. */
   visualEffortSizing: boolean;
+  /** Synced pref: how many priority levels the user's system has. */
+  priorityScale: PriorityScale;
 }
 
 /**
@@ -923,6 +929,7 @@ function renderTreeItem(
     itemId,
     today,
     visualEffortSizing,
+    priorityScale,
   } = ctx;
   const { task, index, depth, hasChildren } = entry;
   const effortMod = visualEffortSizing ? effortSizeModifier(task.effort) : '';
@@ -944,7 +951,7 @@ function renderTreeItem(
   const due = describeDue(task, fmt, t, today);
   const color = resolveTaskColor(task, taskListById, labelById, sectionColorById);
   const marker = statusMarker(task.status);
-  const priorityGlyph = priorityMarker(task.priority);
+  const priorityGlyph = priorityMarker(task.priority, priorityScale);
   const progress = subtaskProgress(task.id, tasks);
   // The list and section a task sits in are now conveyed structurally by
   // the surrounding group-header treeitems (a screen-reader user lands on
@@ -954,7 +961,7 @@ function renderTreeItem(
     t('views.tasks.optionLabel', {
       title: task.title,
       state: t(statusI18nKey(task.status)),
-      priority: prioritySuffix(t, task.priority),
+      priority: prioritySuffix(t, task.priority, priorityScale),
       progress: subtaskProgressSuffix(t, task.id, tasks),
       due,
       assignee: assigneeSuffix(t, task.assignees),

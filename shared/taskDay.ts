@@ -1,6 +1,7 @@
 import { localDateKey } from './dateKey';
 import { isMineOrUnassigned } from './taskAssignment';
 import { taskOrder } from './taskGrouping';
+import type { PriorityScale } from './taskStatus';
 import type { Task, TaskUser } from './types';
 
 // Pure date + calendar-bucketing helpers shared by the desktop and mobile
@@ -82,6 +83,9 @@ export function filterTasksOnDay(
   dayIsoKey: string,
   isCompletedVisible?: (listId: string) => boolean,
   meFor?: (listId: string) => TaskUser | null,
+  /** The user's priority system — how many bands the ordering below has.
+   *  Defaults to the three-level original (see {@link taskOrder}). */
+  scale: PriorityScale = 'three',
 ): Task[] {
   const onDay = tasks.filter((task) => {
     // A subtask surfaces only when it carries its own date — an undated subtask
@@ -125,7 +129,7 @@ export function filterTasksOnDay(
   // re-sorted chronologically by `mergeDayItems`; the untimed lane and the
   // month cells keep this order. (`filter` returned a fresh array, so the
   // in-place sort can't reorder the caller's snapshot.)
-  return onDay.sort(taskOrder);
+  return onDay.sort((a, b) => taskOrder(a, b, scale));
 }
 
 /**
@@ -137,10 +141,13 @@ export function groupTasksByDay(
   dayKeys: string[],
   isCompletedVisible?: (listId: string) => boolean,
   meFor?: (listId: string) => TaskUser | null,
+  /** The user's priority system — passed straight through to the per-day
+   *  ordering (see {@link filterTasksOnDay}). */
+  scale: PriorityScale = 'three',
 ): Map<string, Task[]> {
   const out = new Map<string, Task[]>();
   for (const key of dayKeys) {
-    out.set(key, filterTasksOnDay(tasks, key, isCompletedVisible, meFor));
+    out.set(key, filterTasksOnDay(tasks, key, isCompletedVisible, meFor, scale));
   }
   return out;
 }

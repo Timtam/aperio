@@ -2,10 +2,13 @@ import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
+import { isImportantPriority } from '@aperio/shared';
+
 import { useAnnouncer } from '../a11y/announcerContext';
 import { isCommandError } from '../api/client';
 import type { Task, TaskPriority } from '../api/types';
 import { useDialogState } from './dialogStateContext';
+import { useTaskCascadeEnabled } from './taskCascadeContext';
 
 /**
  * Set a task's priority.
@@ -19,6 +22,11 @@ import { useDialogState } from './dialogStateContext';
  *
  * Re-picking the task's current priority is a no-op: no write fires and no
  * (misleading) "set to …" announcement is made.
+ *
+ * The ANNOUNCEMENT follows the user's priority system. In the two-level one
+ * there is no "set to medium" to report — a task became important or stopped
+ * being important — and naming a level that system does not show would
+ * describe a scale the user has switched off.
  */
 export function useTaskPriorityAction(): (
   task: Task,
@@ -27,6 +35,7 @@ export function useTaskPriorityAction(): (
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const { invalidateData } = useDialogState();
+  const { priorityScale } = useTaskCascadeEnabled();
 
   return useCallback(
     async (task: Task, next: TaskPriority): Promise<void> => {
@@ -36,10 +45,17 @@ export function useTaskPriorityAction(): (
           task: { ...task, priority: next },
         });
         announce(
-          t('chipMenu.prioritySet', {
-            title: task.title,
-            priority: t(`dialogs.task.priority.${next}`),
-          }),
+          priorityScale === 'two'
+            ? t(
+                isImportantPriority(next)
+                  ? 'chipMenu.importantSet'
+                  : 'chipMenu.importantCleared',
+                { title: task.title },
+              )
+            : t('chipMenu.prioritySet', {
+                title: task.title,
+                priority: t(`dialogs.task.priority.${next}`),
+              }),
         );
         invalidateData();
       } catch (err) {
@@ -50,6 +66,6 @@ export function useTaskPriorityAction(): (
         }
       }
     },
-    [t, announce, invalidateData],
+    [t, announce, invalidateData, priorityScale],
   );
 }

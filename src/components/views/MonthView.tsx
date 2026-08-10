@@ -138,7 +138,7 @@ export function MonthView() {
   const range = useMemo(() => visibleRange('month', anchor), [anchor]);
   const { events: allEvents, calendarById, loading } = useEvents(range);
   const { tasks, taskListById } = useTasks();
-  const { visualEffortSizing } = useTaskCascadeEnabled();
+  const { visualEffortSizing, priorityScale } = useTaskCascadeEnabled();
   const currentUserByList = useCurrentUserByList(tasks);
   // Hide tasks assigned to a concrete OTHER user from MY calendar (mine +
   // unassigned stay) — the day-start review's ownership filter (DESIGN §9.7).
@@ -273,6 +273,7 @@ export function MonthView() {
         key,
         shouldShowCompletedForList,
         meFor,
+        priorityScale,
       ).map((task) => ({
         kind: 'task',
         id: `task-${task.id}`,
@@ -292,7 +293,14 @@ export function MonthView() {
       ]);
     }
     return map;
-  }, [cells, eventsByDay, expandedTasks, shouldShowCompletedForList, meFor]);
+  }, [
+    cells,
+    eventsByDay,
+    expandedTasks,
+    shouldShowCompletedForList,
+    meFor,
+    priorityScale,
+  ]);
 
   const focusIndex = useMemo(() => {
     const i = cells.findIndex((c) => isSameDay(c, anchor));
@@ -937,7 +945,7 @@ export function MonthView() {
                             labelById,
                             sectionColorById,
                           );
-                          const priorityGlyph = priorityMarker(task.priority);
+                          const priorityGlyph = priorityMarker(task.priority, priorityScale);
                           const effortMod = visualEffortSizing
                             ? effortSizeModifier(task.effort)
                             : '';
@@ -968,7 +976,7 @@ export function MonthView() {
                                     )
                                   : '',
                                 state: t(statusI18nKey(task.status)),
-                                priority: prioritySuffix(t, task.priority),
+                                priority: prioritySuffix(t, task.priority, priorityScale),
                                 progress: subtaskProgressSuffix(
                                   t,
                                   task.id,

@@ -87,6 +87,7 @@ import {
   minutesFromMidnight,
   type CollapsedRow,
   type PositionedSpan,
+  type PriorityScale,
   type TimedSpan,
 } from '@aperio/shared';
 
@@ -248,8 +249,13 @@ export function WeekView() {
   );
   const { events: allEvents, calendarById, loading } = useEvents(range);
   const { tasks, taskListById } = useTasks();
-  const { visualEffortSizing, dayViewMode, dayStartMin, dayEndMin } =
-    useTaskCascadeEnabled();
+  const {
+    visualEffortSizing,
+    dayViewMode,
+    dayStartMin,
+    dayEndMin,
+    priorityScale,
+  } = useTaskCascadeEnabled();
   // Compact-list layout vs the proportional hour-grid. In list mode the
   // per-day <ul> is normal vertical flow (no positioned 24h canvas), the
   // ruler + all-day lane are not rendered, and each chip carries an inline
@@ -415,8 +421,14 @@ export function WeekView() {
       dayKeys.length > 0
         ? expandScheduledRecurringTasks(tasks, fromKey, toKey)
         : tasks;
-    return groupTasksByDay(expanded, dayKeys, shouldShowCompletedForList, meFor);
-  }, [tasks, days, shouldShowCompletedForList, meFor]);
+    return groupTasksByDay(
+      expanded,
+      dayKeys,
+      shouldShowCompletedForList,
+      meFor,
+      priorityScale,
+    );
+  }, [tasks, days, shouldShowCompletedForList, meFor, priorityScale]);
 
   // Resolve a (possibly projected) task back to its real series task so opening
   // a projection opens the underlying task, not a non-existent occurrence id. A
@@ -1559,7 +1571,7 @@ export function WeekView() {
                           labelById,
                           sectionColorById,
                         );
-                        const priorityGlyph = priorityMarker(task.priority);
+                        const priorityGlyph = priorityMarker(task.priority, priorityScale);
                         const effortMod = visualEffortSizing
                           ? effortSizeModifier(task.effort)
                           : '';
@@ -1627,7 +1639,13 @@ export function WeekView() {
                               // announcement, so confirmation lands
                               // either way.
                               aria-label={
-                                taskChipAriaLabel(t, task, time, tasks) +
+                                taskChipAriaLabel(
+                                  t,
+                                  task,
+                                  time,
+                                  tasks,
+                                  priorityScale,
+                                ) +
                                 (task.recurrence
                                   ? t('views.tasks.recurringOccurrence')
                                   : '')
@@ -2171,7 +2189,7 @@ function WeekDayTasks({
   const { t } = useTranslation();
   const fmt = useDateFormat();
   const { sectionColorById } = useCalendarStore();
-  const { visualEffortSizing } = useTaskCascadeEnabled();
+  const { visualEffortSizing, priorityScale } = useTaskCascadeEnabled();
   if (tasks.length === 0) return null;
   return (
     <ul
@@ -2209,7 +2227,7 @@ function WeekDayTasks({
           sectionColorById,
         );
         const state = t(statusI18nKey(task.status));
-        const priorityGlyph = priorityMarker(task.priority);
+        const priorityGlyph = priorityMarker(task.priority, priorityScale);
         const effortMod = visualEffortSizing
           ? effortSizeModifier(task.effort)
           : '';
@@ -2276,7 +2294,7 @@ function WeekDayTasks({
                       )
                     : '',
                   state,
-                  priority: prioritySuffix(t, task.priority),
+                  priority: prioritySuffix(t, task.priority, priorityScale),
                   progress: subtaskProgressSuffix(t, task.id, allTasks),
                   assignee: assigneeSuffix(t, task.assignees),
                 }) +
@@ -2337,6 +2355,7 @@ function taskChipAriaLabel(
   task: Task,
   time: string,
   allTasks: Task[],
+  scale: PriorityScale,
 ): string {
   const state = t(statusI18nKey(task.status));
   return (
@@ -2344,7 +2363,7 @@ function taskChipAriaLabel(
       title: task.title,
       time,
       state,
-      priority: prioritySuffix(t, task.priority),
+      priority: prioritySuffix(t, task.priority, scale),
       progress: subtaskProgressSuffix(t, task.id, allTasks),
       assignee: assigneeSuffix(t, task.assignees),
     }) +

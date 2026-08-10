@@ -77,6 +77,8 @@ export function TasksPanel() {
     setAutoSelfAssign,
     visualEffortSizing,
     setVisualEffortSizing,
+    twoLevelPriority,
+    setTwoLevelPriority,
     remindUntimedToday,
     setRemindUntimedToday,
     remindDeadlineArrived,
@@ -144,6 +146,8 @@ export function TasksPanel() {
   const autoSelfAssignHintId = useId();
   const visualEffortSizingHeadingId = useId();
   const visualEffortSizingHintId = useId();
+  const twoLevelPriorityHeadingId = useId();
+  const twoLevelPriorityHintId = useId();
   const showHiddenTargetsHeadingId = useId();
   const showHiddenTargetsHintId = useId();
   const carryOverHeadingId = useId();
@@ -311,6 +315,27 @@ export function TasksPanel() {
             onChange={(e) => setVisualEffortSizing(e.target.checked)}
           />
           <span>{t('dialogs.tasks.visualEffortSizing.label')}</span>
+        </label>
+      </section>
+
+      <section
+        aria-labelledby={twoLevelPriorityHeadingId}
+        className="tasks-settings__section"
+      >
+        <h3 id={twoLevelPriorityHeadingId} className="color-labels__heading">
+          {t('dialogs.tasks.twoLevelPriority.heading')}
+        </h3>
+        <p id={twoLevelPriorityHintId} className="tasks-settings__hint">
+          {t('dialogs.tasks.twoLevelPriority.hint')}
+        </p>
+        <label className="tasks-settings__toggle">
+          <input
+            type="checkbox"
+            checked={twoLevelPriority}
+            aria-describedby={twoLevelPriorityHintId}
+            onChange={(e) => setTwoLevelPriority(e.target.checked)}
+          />
+          <span>{t('dialogs.tasks.twoLevelPriority.label')}</span>
         </label>
       </section>
 

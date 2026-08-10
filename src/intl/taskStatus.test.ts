@@ -3,6 +3,10 @@ import { describe, expect, it } from 'vitest';
 import type { Task } from '../api/types';
 import {
   assigneeSuffix,
+  normalPriority,
+  priorityMarker,
+  priorityRank,
+  prioritySuffix,
   statusI18nKey,
   statusMarker,
   subtaskProgress,
@@ -128,5 +132,50 @@ describe('assigneeSuffix', () => {
         { id: 'u2', name: 'Ben', email: 'ben@example.test' },
       ]),
     ).toBe('views.tasks.assigneeSuffix({"names":"Anna, Ben"})');
+  });
+});
+
+describe('the two-level priority system', () => {
+  const t = (k: string) => k;
+
+  it('marks only the top level, and marks nothing else at all', () => {
+    // The whole point of the second system: normal is the ABSENCE of a mark,
+    // not a quieter one, so low and medium must both render empty.
+    expect(priorityMarker('high', 'two')).toBe('★');
+    expect(priorityMarker('medium', 'two')).toBe('');
+    expect(priorityMarker('low', 'two')).toBe('');
+    // Three levels are untouched.
+    expect(priorityMarker('high', 'three')).toBe('!!!');
+    expect(priorityMarker('medium', 'three')).toBe('!!');
+    expect(priorityMarker('low', 'three')).toBe('!');
+  });
+
+  it('says "important", and says nothing for the rest', () => {
+    expect(prioritySuffix(t, 'high', 'two')).toBe(', views.tasks.priorityImportant');
+    expect(prioritySuffix(t, 'medium', 'two')).toBe('');
+    // `low` announced "niedrige Priorität" in the three-level system; in this
+    // one it is indistinguishable from medium and must stay silent.
+    expect(prioritySuffix(t, 'low', 'two')).toBe('');
+    expect(prioritySuffix(t, 'low', 'three')).toBe(', views.tasks.priorityLow');
+  });
+
+  it('sorts low and medium into ONE band', () => {
+    // Ranking them apart would order a list by something the reader cannot
+    // see — and would break the A→Z tiebreak inside the band.
+    expect(priorityRank('high', 'two')).toBeLessThan(priorityRank('medium', 'two'));
+    expect(priorityRank('medium', 'two')).toBe(priorityRank('low', 'two'));
+    // Three levels keep their three ranks.
+    expect(priorityRank('medium', 'three')).toBeLessThan(priorityRank('low', 'three'));
+  });
+
+  it('keeps the stored value when "important" is cleared', () => {
+    // A `low` from a provider stays `low`: rewriting it to `medium` would
+    // change nothing the user can see and everything another client sees.
+    expect(normalPriority('low')).toBe('low');
+    expect(normalPriority('medium')).toBe('medium');
+    // Nothing to restore → the neutral middle.
+    expect(normalPriority('high')).toBe('medium');
+    expect(normalPriority()).toBe('medium');
+    expect(normalPriority(null)).toBe('medium');
   });
 });

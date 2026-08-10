@@ -91,6 +91,7 @@ export function DayStartReviewDialog({
   // handlers walk descendants the same way.
   const {
     effectiveForList,
+    priorityScale,
     remindUntimedToday,
     remindDeadlineArrived,
     remindDeadlineCountdown,
@@ -356,12 +357,12 @@ export function DayStartReviewDialog({
   const rowAriaLabel = useCallback(
     (task: Task, dateText: string | null): string => {
       const parts = [task.title];
-      const pk = priorityI18nKey(task.priority);
+      const pk = priorityI18nKey(task.priority, priorityScale);
       if (pk) parts.push(t(pk));
       if (dateText) parts.push(dateText);
       return parts.join(', ');
     },
-    [t],
+    [t, priorityScale],
   );
 
   /**
@@ -775,9 +776,9 @@ export function DayStartReviewDialog({
                     <span className="missed-tasks__name" aria-hidden="true">
                       {task.title}
                     </span>
-                    {priorityMarker(task.priority) && (
+                    {priorityMarker(task.priority, priorityScale) && (
                       <span className="missed-tasks__priority" aria-hidden="true">
-                        {priorityMarker(task.priority)}
+                        {priorityMarker(task.priority, priorityScale)}
                       </span>
                     )}
                     {dateText && (
@@ -901,9 +902,9 @@ export function DayStartReviewDialog({
                     <span className="missed-tasks__name" aria-hidden="true">
                       {task.title}
                     </span>
-                    {priorityMarker(task.priority) && (
+                    {priorityMarker(task.priority, priorityScale) && (
                       <span className="missed-tasks__priority" aria-hidden="true">
-                        {priorityMarker(task.priority)}
+                        {priorityMarker(task.priority, priorityScale)}
                       </span>
                     )}
                     {dateText && (

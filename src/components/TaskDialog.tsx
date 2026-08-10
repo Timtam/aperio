@@ -35,6 +35,8 @@ import {
 import { todayIsoKey } from '../intl/taskDay';
 import {
   effortSuffix,
+  isImportantPriority,
+  normalPriority,
   priorityMarker,
   prioritySuffix,
   statusI18nKey,
@@ -178,8 +180,12 @@ export function TaskDialog({
   // toggle. The first short-circuits both planners; the second drops
   // the `todayKey` companion-write so a started backlog task isn't
   // auto-pinned to today.
-  const { enabled: cascadeEnabled, autoDate, autoSelfAssign } =
-    useTaskCascadeEnabled();
+  const {
+    enabled: cascadeEnabled,
+    autoDate,
+    autoSelfAssign,
+    priorityScale,
+  } = useTaskCascadeEnabled();
 
   const isEdit = task !== null;
   // Subtask = a task that has a parent. The list dropdown locks
@@ -666,6 +672,18 @@ export function TaskDialog({
     [],
   );
 
+  // What "not important" means for the task currently in the editor, in the
+  // two-level priority system: the value it carried while the box was
+  // unticked. Unticking restores THAT, so a `low` that came from a provider
+  // is not quietly rewritten to `medium` — both read as normal here, and the
+  // rewrite would only be visible somewhere the user is not looking.
+  const lastNormalPriority = useRef<TaskPriority>('medium');
+  useEffect(() => {
+    if (!isImportantPriority(form.priority)) {
+      lastNormalPriority.current = form.priority;
+    }
+  }, [form.priority]);
+
   // Clear an optional date slot back to unset. A native `<input
   // type="date">` can't be reliably emptied by keyboard / screen
   // reader, so each slot gets an explicit button that wipes both the
@@ -878,16 +896,25 @@ export function TaskDialog({
             checked: subtask.status === s,
           })),
         },
-        {
-          kind: 'submenu',
-          label: t('chipMenu.priority'),
-          items: (['low', 'medium', 'high'] as TaskPriority[]).map((p) => ({
-            kind: 'check' as const,
-            id: `priority:${p}`,
-            label: t(`dialogs.task.priority.${p}`),
-            checked: subtask.priority === p,
-          })),
-        },
+        // Two levels means one check row, not a submenu of three: there is
+        // no scale to walk, only a mark to set or clear.
+        priorityScale === 'two'
+          ? {
+              kind: 'check' as const,
+              id: 'important',
+              label: t('chipMenu.important'),
+              checked: isImportantPriority(subtask.priority),
+            }
+          : {
+              kind: 'submenu',
+              label: t('chipMenu.priority'),
+              items: (['low', 'medium', 'high'] as TaskPriority[]).map((p) => ({
+                kind: 'check' as const,
+                id: `priority:${p}`,
+                label: t(`dialogs.task.priority.${p}`),
+                checked: subtask.priority === p,
+              })),
+            },
         { kind: 'separator' },
         { id: 'delete', label: t('chipMenu.delete') },
       ];
@@ -900,6 +927,15 @@ export function TaskDialog({
       }
       if (selected?.startsWith('status:')) {
         await setSubtaskStatus(subtask, selected.slice('status:'.length) as TaskStatus);
+      } else if (selected === 'important') {
+        // Clearing falls back to `medium`: the value the task had BEFORE it
+        // was marked important is not recorded anywhere, and medium is the
+        // neutral middle. (The editor, which watches the field while it is
+        // open, can do better and does.)
+        await setSubtaskPriority(
+          subtask,
+          isImportantPriority(subtask.priority) ? normalPriority() : 'high',
+        );
       } else if (selected?.startsWith('priority:')) {
         await setSubtaskPriority(
           subtask,
@@ -909,7 +945,7 @@ export function TaskDialog({
         await deleteSubtask(subtask);
       }
     },
-    [t, setSubtaskStatus, setSubtaskPriority, deleteSubtask],
+    [t, setSubtaskStatus, setSubtaskPriority, deleteSubtask, priorityScale],
   );
 
   const onSubtaskListKey = useCallback(
@@ -1511,23 +1547,43 @@ export function TaskDialog({
             </select>
           </label>
 
-          <label className="form__field">
-            <span className="form__label">
-              {t('dialogs.task.fields.priority')}
-            </span>
-            <select
-              value={form.priority}
-              onChange={(e) =>
-                update('priority', e.target.value as TaskPriority)
-              }
-            >
-              <option value="low">{t('dialogs.task.priority.low')}</option>
-              <option value="medium">
-                {t('dialogs.task.priority.medium')}
-              </option>
-              <option value="high">{t('dialogs.task.priority.high')}</option>
-            </select>
-          </label>
+          {/* Two priority systems, one field. With two levels there is
+              nothing to choose BETWEEN — a task is important or it is not —
+              so a three-option picker would ask a question with one real
+              answer. The checkbox is that question. */}
+          {priorityScale === 'two' ? (
+            <label className="form__field form__field--inline">
+              <input
+                type="checkbox"
+                checked={isImportantPriority(form.priority)}
+                onChange={(e) =>
+                  update(
+                    'priority',
+                    e.target.checked ? 'high' : lastNormalPriority.current,
+                  )
+                }
+              />
+              <span>{t('dialogs.task.fields.important')}</span>
+            </label>
+          ) : (
+            <label className="form__field">
+              <span className="form__label">
+                {t('dialogs.task.fields.priority')}
+              </span>
+              <select
+                value={form.priority}
+                onChange={(e) =>
+                  update('priority', e.target.value as TaskPriority)
+                }
+              >
+                <option value="low">{t('dialogs.task.priority.low')}</option>
+                <option value="medium">
+                  {t('dialogs.task.priority.medium')}
+                </option>
+                <option value="high">{t('dialogs.task.priority.high')}</option>
+              </select>
+            </label>
+          )}
 
           <label className="form__field">
             <span className="form__label">
@@ -1812,7 +1868,7 @@ export function TaskDialog({
                         t('dialogs.task.subtasks.rowLabel', {
                           title: sub.title,
                           state: stateLabel,
-                          priority: prioritySuffix(t, sub.priority),
+                          priority: prioritySuffix(t, sub.priority, priorityScale),
                         }) + effortSuffix(t, sub.effort)
                       }
                       className={
@@ -1843,13 +1899,13 @@ export function TaskDialog({
                         }
                       >
                         {sub.title}
-                        {priorityMarker(sub.priority) && (
+                        {priorityMarker(sub.priority, priorityScale) && (
                           <span
                             className="subtasks__priority"
                             aria-hidden="true"
                           >
                             {' '}
-                            {priorityMarker(sub.priority)}
+                            {priorityMarker(sub.priority, priorityScale)}
                           </span>
                         )}
                       </span>

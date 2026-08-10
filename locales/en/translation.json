@@ -67,6 +67,7 @@
     "moveCopy": "Move / copy",
     "cyclePriority": "Change priority",
     "priorityCycled": "Priority set to {{priority}}.",
+    "toggleImportant": "Important on/off",
     "subtaskStatusSet": "{{title}} set to {{status}}.",
     "subtaskRowHint": "Double tap to toggle done. More actions available.",
     "noContacts": "No contacts yet.",
@@ -170,6 +171,9 @@
     "status": "Status",
     "priority": "Priority",
     "prioritySet": "Priority for \"{{title}}\" set to {{priority}}.",
+    "important": "Important",
+    "importantSet": "\"{{title}}\" marked as important.",
+    "importantCleared": "\"{{title}}\" no longer important.",
     "color": "Color",
     "colorNone": "No color",
     "colorSet": "Color set for \"{{title}}\".",
@@ -998,6 +1002,11 @@
         "label": "Assign shared-list tasks to me",
         "hint": "When enabled, an unassigned task in a shared list (e.g. Vikunja) is assigned to me automatically the moment I set it in progress or done; setting it back to open removes only my assignment. For recurring tasks only the completed instance is assigned — the next instance stays unassigned. Disable to keep assignments manual."
       },
+      "twoLevelPriority": {
+        "heading": "Priority levels",
+        "label": "Two levels: normal and important",
+        "hint": "Instead of low / medium / high, a task is either important — marked with a star — or normal, with no mark at all. Priorities coming from providers with more levels read as normal unless they are the top one. Nothing is rewritten: switch back and the three levels are all still there."
+      },
       "visualEffortSizing": {
         "heading": "Effort as tile size",
         "label": "Show tasks larger/smaller by effort",
@@ -1502,6 +1511,7 @@
         "assignees": "Assigned to",
         "status": "Status",
         "priority": "Priority",
+        "important": "Important",
         "effort": "Effort",
         "completedAt": "Completed on {{date}}",
         "scheduled": {
@@ -2053,6 +2063,7 @@
       "subtaskProgress": ", {{done}} of {{total}} subtasks done",
       "subtaskParent": ", subtask of \"{{parent}}\"",
       "priorityHigh": "high priority",
+      "priorityImportant": "important",
       "effortSmall": "low effort",
       "effortLarge": "high effort",
       "priorityLow": "low priority",
