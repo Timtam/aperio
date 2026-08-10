@@ -981,6 +981,15 @@ export function CalendarDayList({
     [navigation],
   );
 
+  // "Plan" — deciding WHEN a task happens, without opening the editor. The
+  // task list has offered it for a while; the calendar's task rows are where
+  // rescheduling is most often decided, and they did not.
+  const planTask = useCallback(
+    (task: Task) =>
+      navigation.navigate('PlanTask', { taskId: task.id, listId: task.list_id }),
+    [navigation],
+  );
+
   // Per-day "+ new event": seed a new event on that day (first writable
   // calendar) — the mobile twin of the desktop's day-anchored create.
   const firstWritableCalendarId = useMemo(
@@ -1406,6 +1415,10 @@ export function CalendarDayList({
       : [
           { name: 'toggle', label: done ? t('mobile.reopen') : t('mobile.complete') },
           { name: 'edit', label: t('mobile.rename') },
+          // Not for a recurring PROJECTION: it is a read-only shadow of its
+          // series, and planning one occurrence of it is not a thing the
+          // series can hold.
+          { name: 'plan', label: t('mobile.plan') },
           { name: 'moveCopy', label: t('mobile.moveCopy') },
           { name: 'delete', label: t('mobile.delete'), destructive: true },
         ];
@@ -1417,6 +1430,7 @@ export function CalendarDayList({
       if (name === 'toggle') void toggleTask(task);
       else if (name === 'delete') removeTask(task);
       else if (name === 'moveCopy') moveCopyTask(task);
+      else if (name === 'plan') planTask(task);
       else openTask(task);
     };
     return (

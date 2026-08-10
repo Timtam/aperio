@@ -178,7 +178,8 @@
       "in_progress": "In progress",
       "completed": "Completed",
       "cancelled": "Cancelled"
-    }
+    },
+    "plan": "Plan"
   },
   "reminders": {
     "label": "Reminders",

@@ -134,7 +134,9 @@ Aperio distinguishes between tasks with and without a fixed date:
 - **Backlog:** Tasks without a **scheduled day** collect here — including
   ones that have a deadline but no fixed work day.
 - **Schedule:** Give a task a due date (or, in the week planner, drag it
-  onto a day) to schedule it firmly.
+  onto a day) to schedule it firmly. The quickest way is **Plan** in any
+  task's context menu (right-click, `Shift+F10`, long-press or rotor action on
+  the phone) — or `Shift+D` on the focused task.
 - **Auto-schedule to today:** Setting a backlog task to **"In progress"**
   schedules it for **today** automatically — you've started the work after
   all. (Can be turned off under *Settings → Tasks*.)

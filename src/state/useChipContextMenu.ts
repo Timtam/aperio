@@ -113,6 +113,7 @@ export function useChipContextMenu(): ChipContextMenuActions {
     openTaskDialog,
     openMoveCopy,
     openEventGroup,
+    openPlanTask,
     invalidateData,
   } = useDialogState();
   const { set: setTaskStatus } = useTaskStatusActions();
@@ -364,6 +365,12 @@ export function useChipContextMenu(): ChipContextMenuActions {
       const isDeferred = task.resurface_date !== null;
       const items: ContextMenuItemRequest[] = [
         { id: 'edit', label: t('chipMenu.edit') },
+        // Planning had a keystroke (Shift+D) and nothing else — no entry
+        // anywhere in the UI, so on a touchpad, or for anyone who had not
+        // memorised it, deciding WHEN a task happens meant opening the whole
+        // editor. It sits right after Edit because for a backlog task it is
+        // the most frequent thing anyone wants to do to it.
+        { id: 'plan', label: t('chipMenu.plan') },
         { id: 'duplicate', label: t('chipMenu.duplicate') },
         statusSubmenu,
         prioritySubmenu,
@@ -390,6 +397,8 @@ export function useChipContextMenu(): ChipContextMenuActions {
       }
       if (selected === 'edit') {
         openTaskDialog(task);
+      } else if (selected === 'plan') {
+        openPlanTask(task);
       } else if (selected === 'duplicate') {
         // Same primitive as the Ctrl+D shortcut and the mobile menu — a flat,
         // in-place copy in the same list (no subtree, parent_id reset).
@@ -452,6 +461,7 @@ export function useChipContextMenu(): ChipContextMenuActions {
       announce,
       openTaskDialog,
       openMoveCopy,
+      openPlanTask,
       invalidateData,
       setTaskStatus,
       setTaskPriority,

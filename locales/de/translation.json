@@ -178,7 +178,8 @@
       "in_progress": "In Arbeit",
       "completed": "Erledigt",
       "cancelled": "Abgebrochen"
-    }
+    },
+    "plan": "Einplanen"
   },
   "reminders": {
     "label": "Erinnerungen",
