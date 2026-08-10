@@ -1,8 +1,12 @@
-// Local full-text search api-client — events + tasks via the Host's search_json
-// (the desktop `search` command's LOCAL half; the external snapshot-cache half
-// needs the SWR cache mobile lacks, so it's a known parity gap). This is a READ
-// path, so — unlike the mutating clients — it does NOT schedule a background
-// push. Types mirror the desktop search wire shape (src/api/client.ts).
+// Full-text search api-client — events + tasks via the Host's search_json.
+//
+// Covers BOTH halves, exactly as the desktop `search` command does: the local
+// tables' FTS and the external snapshot cache's mirrors, so an iCloud, Google
+// or Exchange item is found here too. (The comment that used to stand here said
+// otherwise; the cache half landed in cal-ffi and this was never updated.)
+//
+// A READ path, so — unlike the mutating clients — it does NOT schedule a
+// background push. Types mirror the desktop search wire shape (src/api/client.ts).
 
 import type { Task } from '@aperio/shared';
 

@@ -13,11 +13,14 @@ import { search } from '../api/search';
  * creating, not before two characters, and matched on the title alone — so
  * both platforms offer the same things for the same reasons.
  *
- * One difference is honest rather than chosen: mobile's search covers the
- * LOCAL tables only. The external snapshot cache the desktop also searches
- * needs the SWR layer mobile does not have yet, so an appointment that only
- * ever lived in iCloud will not be offered here. It is a known parity gap of
- * the search itself, not of this feature.
+ * The history it draws on is the same on both platforms: the local tables AND
+ * the external snapshot cache, so an appointment that has only ever lived in
+ * iCloud, Google or Exchange is offered here as readily as a local one.
+ *
+ * What it cannot offer is something never cached — a calendar whose older
+ * months this device has never actually looked at has no rows to match. That
+ * is a property of the cache, not of the search: nothing prunes it, so it
+ * deepens as the app is used.
  */
 export function useTitleSuggestions<K extends 'events' | 'tasks'>(
   query: string,

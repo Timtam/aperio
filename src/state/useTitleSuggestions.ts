@@ -13,6 +13,11 @@ import type { CalendarEvent, Task } from '../api/types';
  * which is exactly the history worth offering — "what have I called this
  * before" is a question about all of it, not about one calendar.
  *
+ * The one thing it cannot offer is something never cached: a calendar whose
+ * older months this device has never looked at has no rows to match. That is a
+ * property of the cache rather than of the search — nothing prunes it, so it
+ * deepens as the app is used.
+ *
  * Three deliberate limits:
  *   - only while CREATING. Opening an existing item and touching its title
  *     must not offer to overwrite it with an older version of itself;
