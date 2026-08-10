@@ -36,6 +36,7 @@ import {
   planCarry,
   worthCarrying,
   type CarryableFields,
+  type CarryScope,
 } from '@aperio/shared';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
@@ -254,7 +255,12 @@ export function EventDialog({
    * came from is how focus ends up somewhere nobody asked for.
    */
   const offerToCarry = useCallback(
-    async (saved: CalendarEvent, next: CalendarEvent) => {
+    async (
+      saved: CalendarEvent,
+      next: CalendarEvent,
+      scope: CarryScope = 'series',
+      occurrence?: string | null,
+    ) => {
       const fieldsOf = (ev: CalendarEvent): CarryableFields => ({
         title: ev.title,
         start: ev.start,
@@ -287,7 +293,7 @@ export function EventDialog({
           (_cal, ev) => ev,
         );
         if (!worthCarrying(plan)) return;
-        openEventGroupCarry({ group, anchor, before, after });
+        openEventGroupCarry({ group, anchor, before, after, scope, occurrence });
       } catch {
         // The grouping lookup is bookkeeping beside a save that already
         // succeeded; failing it must not report the save as failed.
@@ -594,6 +600,14 @@ export function EventDialog({
             announce(
               t('dialogs.event.occurrenceUpdated', { title: trimmedTitle }),
             );
+            // The other copies have a series each, so carrying this means
+            // carving the same occurrence out of them — not updating a row.
+            await offerToCarry(
+              event,
+              overrideRow,
+              'occurrence',
+              occurrenceIsoOf(event),
+            );
             onClose();
             return;
           }
@@ -630,6 +644,7 @@ export function EventDialog({
               announce(
                 t('dialogs.event.occurrenceUpdated', { title: trimmedTitle }),
               );
+              await offerToCarry(event, created, 'occurrence', occIso);
               onClose();
               return;
             }

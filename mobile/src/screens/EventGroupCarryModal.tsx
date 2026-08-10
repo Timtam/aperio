@@ -2,9 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AccessibilityInfo, Platform, Pressable, StyleSheet, Text } from 'react-native';
 
-import { carryOnto, planCarry, type CarryableFields } from '@aperio/shared';
+import {
+  carryOnto,
+  occurrenceCarryRow,
+  planCarry,
+  type CarryableFields,
+} from '@aperio/shared';
 
 import {
+  addEventExdate,
+  createEvent,
   getEventById,
   listCalendars,
   updateEvent,
@@ -34,7 +41,7 @@ export default function EventGroupCarryModal({
   route,
   navigation,
 }: RootStackScreenProps<'EventGroupCarry'>) {
-  const { group, anchor, before, after } = route.params;
+  const { group, anchor, before, after, scope = 'series', occurrence } = route.params;
   const { t } = useTranslation();
   const styles = useThemedStyles(makeStyles);
   useCancelHeader(navigation);
@@ -100,12 +107,42 @@ export default function EventGroupCarryModal({
           failed.push(target.title);
           continue;
         }
-        const next = carryOnto(
-          current as CalendarEvent & CarryableFields,
-          after,
-          plan.changed,
-        );
-        await updateEvent(next, target.calendar_id);
+        if (scope === 'occurrence' && occurrence) {
+          // What the edit did to the anchor, done to this copy: carve the
+          // occurrence out of its series and put a standalone event there.
+          // Updating the row would move EVERY occurrence of the copy because
+          // one of them was edited — the outcome the scope prompt prevents.
+          const row = occurrenceCarryRow(
+            current as CalendarEvent & CarryableFields,
+            occurrence,
+            after,
+            plan.changed,
+          );
+          await addEventExdate(target.event_id, occurrence, target.calendar_id);
+          await createEvent({
+            calendar_id: target.calendar_id,
+            title: row.title,
+            description: row.description,
+            location: row.location,
+            start: row.start,
+            end: row.end,
+            all_day: row.all_day,
+            recurrence: null,
+            // The copy keeps its own: what travels is what the appointment IS.
+            color_label: current.color_label,
+            reminders: current.reminders,
+            sound: null,
+            attendees: current.attendees,
+            send_invitations: false,
+          });
+        } else {
+          const next = carryOnto(
+            current as CalendarEvent & CarryableFields,
+            after,
+            plan.changed,
+          );
+          await updateEvent(next, target.calendar_id);
+        }
         done += 1;
       } catch (err) {
         failed.push(target.title);
@@ -125,7 +162,7 @@ export default function EventGroupCarryModal({
         : t('dialogs.eventGroupCarry.done', { count: done }),
     );
     navigation.goBack();
-  }, [busy, plan, after, t, navigation]);
+  }, [busy, plan, after, scope, occurrence, t, navigation]);
 
   return (
     <FormScrollView

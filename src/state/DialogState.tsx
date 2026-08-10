@@ -7,7 +7,7 @@ import {
 } from 'react';
 
 import { isSeriesOccurrence } from '@aperio/shared';
-import type { CarryableFields, EventGroup } from '@aperio/shared';
+import type { CarryableFields, CarryScope, EventGroup } from '@aperio/shared';
 
 import type {
   Account,
@@ -104,6 +104,8 @@ export type DialogMode =
       anchor: { calendar_id: string; event_id: string };
       before: CarryableFields;
       after: CarryableFields;
+      scope?: CarryScope;
+      occurrence?: string | null;
     }
   | { kind: 'planTask'; task: Task }
   | { kind: 'sectionEdit'; listId: string; section: Section | null }
@@ -233,6 +235,8 @@ export interface DialogStateValue {
     anchor: { calendar_id: string; event_id: string };
     before: CarryableFields;
     after: CarryableFields;
+    scope?: CarryScope;
+    occurrence?: string | null;
   }) => void;
   openPlanTask: (task: Task) => void;
   /** Open the create/rename section dialog. Pass `section=null` (or omit)
@@ -498,6 +502,8 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       anchor: { calendar_id: string; event_id: string };
       before: CarryableFields;
       after: CarryableFields;
+      scope?: CarryScope;
+      occurrence?: string | null;
     }) => push({ kind: 'eventGroupCarry', ...payload }),
     [push],
   );

@@ -121,6 +121,8 @@ export function DialogHost() {
           anchor={mode.anchor}
           before={mode.before}
           after={mode.after}
+          scope={mode.scope}
+          occurrence={mode.occurrence}
           onChanged={invalidateData}
         />
       );

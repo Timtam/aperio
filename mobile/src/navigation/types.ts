@@ -1,6 +1,6 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
-import type { CarryableFields, EventGroup } from '@aperio/shared';
+import type { CarryableFields, CarryScope, EventGroup } from '@aperio/shared';
 import type { CalendarEvent } from '../api/calendar';
 
 /**
@@ -65,6 +65,10 @@ export type RootStackParamList = {
     anchor: { calendar_id: string; event_id: string };
     before: CarryableFields;
     after: CarryableFields;
+    /** Which occurrences the carry is about — `occurrence` does to each copy
+     *  what the edit did to the anchor rather than moving its whole series. */
+    scope?: CarryScope;
+    occurrence?: string | null;
   };
   Lists: undefined;
   ListEditor: { listId: string };

@@ -42,6 +42,9 @@ export interface CarryTarget {
   writable: boolean;
 }
 
+/** Which occurrences an edit — and therefore its carry — is about. */
+export type CarryScope = 'series' | 'occurrence';
+
 /** What carrying would do, decided before anything is written. */
 export interface CarryPlan {
   /** The fields that actually differ from the saved event. */
@@ -110,6 +113,41 @@ export function planCarry(
 /** Whether the plan is worth asking the user about at all. */
 export function worthCarrying(plan: CarryPlan): boolean {
   return plan.changed.length > 0 && plan.targets.length > 0;
+}
+
+/**
+ * The standalone row a carried OCCURRENCE edit creates in a member's calendar.
+ *
+ * An occurrence edit is not an update: the series gets an EXDATE and a single
+ * event is created in its place. Carrying it means doing that on each copy, and
+ * the row created there is NOT the anchor's — it is the member's own occurrence
+ * with the carried fields laid over it. So a private copy keeps its own
+ * reminder, its own colour and its own calendar; what travels is what the
+ * appointment IS.
+ *
+ * Start and end come from the member's own occurrence unless the edit MOVED it:
+ * a title-only edit must not drag the copy to the master's start, and a moved
+ * occurrence must land where the user put it. The copies are aligned by the
+ * premise of the group, so the anchor's new instants are the right ones.
+ */
+export function occurrenceCarryRow<T extends CarryableFields>(
+  master: T,
+  occurrenceIso: string,
+  after: CarryableFields,
+  changed: readonly (keyof CarryableFields)[],
+): T {
+  const masterStart = new Date(master.start).getTime();
+  const masterEnd = new Date(master.end).getTime();
+  const durationMs = Number.isFinite(masterStart) && Number.isFinite(masterEnd)
+    ? Math.max(0, masterEnd - masterStart)
+    : 0;
+  const occurrenceStart = new Date(occurrenceIso);
+  const row = {
+    ...master,
+    start: occurrenceIso,
+    end: new Date(occurrenceStart.getTime() + durationMs).toISOString(),
+  } as T;
+  return carryOnto(row, after, changed);
 }
 
 /** Apply the carried fields onto one member's own current values.

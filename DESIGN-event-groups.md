@@ -143,10 +143,21 @@ was der Termin IST (Titel, wann, wo, Beschreibung); Erinnerungen, Farbe, Kalende
 und Teilnehmer gehören der Kopie. Nur-lese-Kalender werden VOR der Entscheidung
 genannt, nicht still übersprungen.
 
-Offen an Stufe 2: eine Bearbeitung mit Serien-Umfang („nur dieses Vorkommen",
-„dieses und alle folgenden") bietet das Mitziehen noch nicht an — „welche Kopie
-welchen Vorkommens" ist eine Frage, die der jetzige Stand nicht beantworten
-kann.
+„**Nur dieses Vorkommen**" zieht ebenfalls mit, und zwar richtig: Was die
+Bearbeitung mit dem Ausgangstermin gemacht hat — Vorkommen per EXDATE aus der
+Serie schneiden und einen Einzeltermin an seine Stelle setzen —, geschieht mit
+jeder Kopie. Ein Aktualisieren der Kopie-Zeile hätte JEDES Vorkommen dieser
+Kopie verschoben, weil eines bearbeitet wurde; genau das verhindert die
+Umfangs-Rückfrage ja. Die erzeugte Zeile ist dabei die Kopie SELBST — ihre
+Erinnerung, ihre Farbe, ihr Kalender —, nur mit den geänderten Feldern
+überschrieben; Beginn und Ende kommen aus dem eigenen Vorkommen der Kopie,
+außer die Bearbeitung hat den Termin verschoben.
+
+Offen bleibt „**dieses und alle folgenden**": das Aufteilen einer Serie
+(COUNT-Arithmetik, EXDATE-Übergabe an den Rest, Benachrichtigungen) steht heute
+zweimal inline in den beiden Editoren. Es je Mitglied zu wiederholen hieße,
+diese heikle Rechnung an vier Stellen zu haben — der ehrliche Weg ist, sie
+vorher in ein geteiltes Modul zu ziehen.
 
 **Stufe 3** — Erkennung und Vorschlag; das Meeting wandert an die Gruppe, die
 heutige Verknüpfungs-Rückfrage entfällt.

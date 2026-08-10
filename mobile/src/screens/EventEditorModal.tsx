@@ -61,6 +61,7 @@ import {
   seriesIdOf,
   worthCarrying,
   type CarryableFields,
+  type CarryScope,
 } from '@aperio/shared';
 import { eventGroupsForEvents } from '../api/eventGroups';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -326,7 +327,12 @@ export default function EventEditorModal({
    * close and something else appear.
    */
   const offerToCarry = useCallback(
-    async (saved: CalendarEvent, next: CalendarEvent): Promise<boolean> => {
+    async (
+      saved: CalendarEvent,
+      next: CalendarEvent,
+      scope: CarryScope = 'series',
+      occurrenceIso?: string | null,
+    ): Promise<boolean> => {
       const fieldsOf = (ev: CalendarEvent): CarryableFields => ({
         title: ev.title,
         start: ev.start,
@@ -360,7 +366,14 @@ export default function EventEditorModal({
           (_cal, ev) => ev,
         );
         if (!worthCarrying(plan)) return false;
-        navigation.replace('EventGroupCarry', { group, anchor, before, after });
+        navigation.replace('EventGroupCarry', {
+          group,
+          anchor,
+          before,
+          after,
+          scope,
+          occurrence: occurrenceIso,
+        });
         return true;
       } catch {
         // Bookkeeping beside a save that already succeeded; failing it must
@@ -460,6 +473,11 @@ export default function EventEditorModal({
         AccessibilityInfo.announceForAccessibility(
           t('dialogs.event.occurrenceUpdated', { title: trimmedTitle }),
         );
+        // The other copies have a series each, so carrying this means carving
+        // the same occurrence out of them — not updating a row.
+        if (await offerToCarry(original, created, 'occurrence', occurrence)) {
+          return;
+        }
         navigation.goBack();
         return;
       }

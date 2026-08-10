@@ -3,14 +3,22 @@ import { useTranslation } from 'react-i18next';
 
 import {
   carryOnto,
+  occurrenceCarryRow,
   planCarry,
   type CarryableFields,
+  type CarryScope,
   type EventGroup,
 } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import { FocusableNote } from '../a11y/FocusableNote';
-import { getEventById, isCommandError, updateEvent } from '../api/client';
+import {
+  addEventExdate,
+  createEvent,
+  getEventById,
+  isCommandError,
+  updateEvent,
+} from '../api/client';
 import type { CalendarEvent } from '../api/types';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { Modal } from './Modal';
@@ -35,6 +43,15 @@ export interface EventGroupCarryDialogProps {
   anchor: { calendar_id: string; event_id: string };
   before: CarryableFields;
   after: CarryableFields;
+  /** Which occurrences this carry is about.
+   *
+   *  `series` updates each copy's row. `occurrence` does to each copy what the
+   *  edit did to the anchor: EXDATE the series at that instant and put a
+   *  standalone event in its place — anything else would move every occurrence
+   *  of a copy because one of them was edited. */
+  scope?: CarryScope;
+  /** The occurrence's original instant, for `scope: 'occurrence'`. */
+  occurrence?: string | null;
   onChanged?: () => void;
 }
 
@@ -45,6 +62,8 @@ export function EventGroupCarryDialog({
   anchor,
   before,
   after,
+  scope = 'series',
+  occurrence,
   onChanged,
 }: EventGroupCarryDialogProps) {
   const { t } = useTranslation();
@@ -101,8 +120,43 @@ export function EventGroupCarryDialog({
           failed.push(target.title);
           continue;
         }
-        const next = carryOnto(current as CalendarEvent & CarryableFields, after, plan.changed);
-        await updateEvent(next, target.calendar_id);
+        if (scope === 'occurrence' && occurrence) {
+          // What the edit did to the anchor, done to this copy: carve the
+          // occurrence out of its series and put a standalone event there.
+          // Updating the row instead would move EVERY occurrence of the copy
+          // because one of them was edited — the outcome the scope prompt
+          // exists to prevent.
+          const row = occurrenceCarryRow(
+            current as CalendarEvent & CarryableFields,
+            occurrence,
+            after,
+            plan.changed,
+          );
+          await addEventExdate(target.event_id, occurrence, target.calendar_id);
+          await createEvent({
+            calendar_id: target.calendar_id,
+            title: row.title,
+            description: row.description,
+            location: row.location,
+            start: row.start,
+            end: row.end,
+            all_day: row.all_day,
+            recurrence: null,
+            // The copy keeps its own: what travels is what the appointment IS.
+            color_label: current.color_label,
+            reminders: current.reminders,
+            sound: null,
+            attendees: current.attendees,
+            send_invitations: false,
+          });
+        } else {
+          const next = carryOnto(
+            current as CalendarEvent & CarryableFields,
+            after,
+            plan.changed,
+          );
+          await updateEvent(next, target.calendar_id);
+        }
         done += 1;
       } catch (err) {
         failed.push(target.title);
