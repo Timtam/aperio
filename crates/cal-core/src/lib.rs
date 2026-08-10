@@ -13,6 +13,7 @@ pub mod extras;
 pub mod recurrence;
 pub mod reminder;
 pub mod spawn;
+pub mod suggestion_decline;
 pub mod types;
 
 pub use adapter::{
@@ -29,6 +30,7 @@ pub use extras::{
 pub use recurrence::{rrule_to_task_recurrence, rrule_until_instant, task_recurrence_to_rrule};
 pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};
 pub use spawn::{advance, completion_record_for, next_recurrence_instance};
+pub use suggestion_decline::SuggestionDecline;
 pub use types::{
     AttendeeResponse, AttendeeStatus, Calendar, Contact, ContactAddress, ContactList, ContactPhoto,
     DateRange, Event, EventRecurrence, FreeBusy, FreeBusySlot, GroupMember, MemberRight, MonthDay,

@@ -395,6 +395,16 @@ impl EventLogApplier {
                 self.apply_event_group_upsert(payload)?;
                 Ok(true)
             }
+            SyncEvent::EventGroupSuggestionDeclined(payload) => {
+                let decline: cal_core::SuggestionDecline =
+                    serde_json::from_value(payload.fields.clone()).map_err(|err| {
+                        SyncError::protocol(format!("suggestion decline payload not valid: {err}",))
+                    })?;
+                self.adapter
+                    .upsert_suggestion_decline_from_sync(&decline)
+                    .map_err(core_to_sync)?;
+                Ok(true)
+            }
             SyncEvent::EventGroupDissolved(payload) => {
                 // The envelope's timestamp, not ours: it says WHEN the other
                 // device decided, which is what an arriving update has to be

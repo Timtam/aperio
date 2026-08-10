@@ -159,6 +159,17 @@ pub enum SyncEvent {
     #[serde(rename = "event_group.updated")]
     EventGroupUpdated(EventPayload),
 
+    /// The user said two events are NOT the same appointment, so the offer to
+    /// group them stops being made (DESIGN-event-groups.md, Stufe 3).
+    ///
+    /// Synced, and the easiest thing in this file to reason about: the
+    /// declines are a set that only ever GROWS, so two devices declining
+    /// different pairs converge by union and no ordering rule is needed. That
+    /// is a deliberate contrast with the group events above, whose membership
+    /// moves in both directions.
+    #[serde(rename = "event_group_suggestion.declined")]
+    EventGroupSuggestionDeclined(EventPayload),
+
     /// A group was dissolved. The events themselves are untouched —
     /// this says only that Aperio no longer claims they are one.
     #[serde(rename = "event_group.dissolved")]

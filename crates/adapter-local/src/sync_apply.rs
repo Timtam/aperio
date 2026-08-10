@@ -559,6 +559,33 @@ impl LocalAdapter {
         Ok(())
     }
 
+    /// Remember a decline another device made.
+    ///
+    /// Insert-only, and that is the whole story: the declines are a set that
+    /// only grows, so applying the same one twice or in any order lands in the
+    /// same place.
+    pub fn upsert_suggestion_decline_from_sync(
+        &self,
+        decline: &cal_core::SuggestionDecline,
+    ) -> cal_core::Result<()> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        conn.execute(
+            "INSERT INTO event_group_suggestion_declines
+                 (calendar_a, event_a, calendar_b, event_b, declined_at)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(calendar_a, event_a, calendar_b, event_b) DO NOTHING",
+            params![
+                decline.calendar_a,
+                decline.event_a,
+                decline.calendar_b,
+                decline.event_b,
+                decline.declined_at
+            ],
+        )
+        .map_err(map_sql_err)?;
+        Ok(())
+    }
+
     /// Record a dissolve mark that arrived in a snapshot.
     ///
     /// Separate from `delete_event_group_from_sync` because a snapshot's marks

@@ -221,3 +221,16 @@ export interface ColorLabel {
    *  resolves like any label. Optional so older payloads default to named. */
   ad_hoc?: boolean;
 }
+
+/** A pair the user has said is NOT one appointment (migration 0037).
+ *
+ *  Stored in a canonical order — the smaller (calendar, event) first as text —
+ *  so "A and B" and "B and A" are one decision. Mirrors
+ *  `cal_core::SuggestionDecline`. */
+export interface SuggestionDecline {
+  calendar_a: string;
+  event_a: string;
+  calendar_b: string;
+  event_b: string;
+  declined_at: string;
+}

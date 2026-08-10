@@ -6817,6 +6817,50 @@ impl Host {
         Ok(())
     }
 
+    /// Record that two events are NOT the same appointment, so Aperio stops
+    /// offering to group them. Takes the two refs as JSON `{calendar_id,
+    /// event_id}` objects.
+    pub fn decline_group_suggestion_json(
+        &self,
+        first_json: String,
+        second_json: String,
+    ) -> Result<(), StoreError> {
+        #[derive(serde::Deserialize)]
+        struct Ref {
+            calendar_id: String,
+            event_id: String,
+        }
+        let first: Ref = from_json("event ref", &first_json)?;
+        let second: Ref = from_json("event ref", &second_json)?;
+        let shared = self.db.shared();
+        let decline = EventGroupsRepo::new(&shared)
+            .decline_suggestion(
+                (&first.calendar_id, &first.event_id),
+                (&second.calendar_id, &second.event_id),
+            )
+            .map_err(map_group_err)?;
+        if let Ok(fields) = serde_json::to_value(&decline) {
+            self.writer
+                .append(SyncEvent::EventGroupSuggestionDeclined(EventPayload {
+                    id: format!(
+                        "{} {} {} {}",
+                        decline.calendar_a, decline.event_a, decline.calendar_b, decline.event_b
+                    ),
+                    fields,
+                }));
+        }
+        Ok(())
+    }
+
+    /// Every pair the user has said is not one appointment, as JSON.
+    pub fn group_suggestion_declines_json(&self) -> Result<String, StoreError> {
+        let shared = self.db.shared();
+        let declines = EventGroupsRepo::new(&shared)
+            .declined_suggestions()
+            .map_err(map_group_err)?;
+        to_json(&declines)
+    }
+
     /// One member, found again under the id its event carries now.
     ///
     /// Silent on purpose: it repairs Aperio's own bookkeeping and changes

@@ -32,5 +32,6 @@ export * from './collapseEventGroups';
 export * from './groupCarry';
 export * from './suggestGroupMate';
 export * from './healEventGroups';
+export * from './groupSuggestions';
 export * from './deviceRegistry';
 export * from './widgetSnapshot';

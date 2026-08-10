@@ -20,7 +20,7 @@ use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
 use std::collections::HashMap;
 
-use cal_core::{EventGroup, EventGroupMember};
+use cal_core::{EventGroup, EventGroupMember, SuggestionDecline};
 
 use crate::db::SharedConn;
 
@@ -85,6 +85,48 @@ fn mark_dissolved(
         params![group_id, dissolved_at],
     )?;
     Ok(())
+}
+
+/// Insert a decline, idempotently. A set that only ever grows: two devices
+/// declining different pairs converge by union, and there is nothing for a
+/// last-writer rule to decide.
+fn write_decline(
+    conn: &rusqlite::Connection,
+    decline: &SuggestionDecline,
+) -> Result<(), EventGroupsError> {
+    conn.execute(
+        "INSERT INTO event_group_suggestion_declines
+             (calendar_a, event_a, calendar_b, event_b, declined_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(calendar_a, event_a, calendar_b, event_b) DO NOTHING",
+        params![
+            decline.calendar_a,
+            decline.event_a,
+            decline.calendar_b,
+            decline.event_b,
+            decline.declined_at
+        ],
+    )?;
+    Ok(())
+}
+
+fn read_declines(conn: &rusqlite::Connection) -> Result<Vec<SuggestionDecline>, EventGroupsError> {
+    let mut stmt = conn.prepare(
+        "SELECT calendar_a, event_a, calendar_b, event_b, declined_at
+           FROM event_group_suggestion_declines",
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(SuggestionDecline {
+                calendar_a: row.get(0)?,
+                event_a: row.get(1)?,
+                calendar_b: row.get(2)?,
+                event_b: row.get(3)?,
+                declined_at: row.get(4)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
 }
 
 /// Read one group and its members.
@@ -507,6 +549,32 @@ impl<'a> EventGroupsRepo<'a> {
         let group = read_group(&tx, &group_id)?.ok_or(EventGroupsError::Vanished)?;
         tx.commit()?;
         Ok(Some(Ungrouped::Remains(group)))
+    }
+
+    /// Record that these two events are NOT the same appointment.
+    ///
+    /// Silences the OFFER, nothing else — grouping them by hand still works
+    /// and never consults this. Idempotent: declining twice is one decision,
+    /// and the pair is canonicalised so declining "B and A" answers "A and B".
+    pub fn decline_suggestion(
+        &self,
+        first: (&str, &str),
+        second: (&str, &str),
+    ) -> Result<SuggestionDecline, EventGroupsError> {
+        let decline = SuggestionDecline::new(first, second, Utc::now().to_rfc3339());
+        let conn = self.db.lock().expect("db mutex poisoned");
+        write_decline(&conn, &decline)?;
+        Ok(decline)
+    }
+
+    /// Every pair the user has said is not one appointment.
+    ///
+    /// Read whole rather than asked per pair: the set is small (it grows only
+    /// when someone says no) and a view checks every candidate pair it has, so
+    /// one read beats one query per row.
+    pub fn declined_suggestions(&self) -> Result<Vec<SuggestionDecline>, EventGroupsError> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        read_declines(&conn)
     }
 
     /// Dissolve a whole group. The events themselves are untouched.

@@ -107,6 +107,14 @@ pub struct SnapshotDump {
     /// re-create the group there and nowhere else. The mark is two strings.
     #[serde(default)]
     pub event_group_tombstones: Vec<EventGroupTombstone>,
+    /// Pairs the user has said are NOT one appointment (migration 0037).
+    ///
+    /// In the snapshot for the same reason as everything else here: after a
+    /// compaction it is the whole state a joining device receives, and a
+    /// device that never learned of a decline would start offering that pair
+    /// again — which is exactly the nagging the record exists to stop.
+    #[serde(default)]
+    pub suggestion_declines: Vec<cal_core::SuggestionDecline>,
 }
 
 /// A group that was dissolved, and the moment it was.
@@ -133,6 +141,7 @@ impl LocalAdapter {
             color_labels: self.dump_color_labels_for_snapshot()?,
             event_groups: self.dump_event_groups_for_snapshot()?,
             event_group_tombstones: self.dump_event_group_tombstones_for_snapshot()?,
+            suggestion_declines: self.dump_suggestion_declines_for_snapshot()?,
         })
     }
 
@@ -385,6 +394,33 @@ impl LocalAdapter {
         Ok(rows)
     }
 
+    /// Read every decline.
+    pub fn dump_suggestion_declines_for_snapshot(
+        &self,
+    ) -> cal_core::Result<Vec<cal_core::SuggestionDecline>> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let mut stmt = conn
+            .prepare(
+                "SELECT calendar_a, event_a, calendar_b, event_b, declined_at
+                   FROM event_group_suggestion_declines",
+            )
+            .map_err(map_sql_err)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(cal_core::SuggestionDecline {
+                    calendar_a: row.get(0)?,
+                    event_a: row.get(1)?,
+                    calendar_b: row.get(2)?,
+                    event_b: row.get(3)?,
+                    declined_at: row.get(4)?,
+                })
+            })
+            .map_err(map_sql_err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(map_sql_err)?;
+        Ok(rows)
+    }
+
     /// Apply a `SnapshotDump` onto local SQLite, upserting every row.
     ///
     /// Order matters: parent rows go in before children so the FK
@@ -500,6 +536,16 @@ impl LocalAdapter {
                 Ok(()) => report.applied += 1,
                 Err(err) => {
                     warn!(group_id = %group.id, ?err, "snapshot apply: event group upsert failed");
+                    report.failed += 1;
+                }
+            }
+        }
+        // Declines: insert-only, order-free, and nothing here depends on them.
+        for decline in &dump.suggestion_declines {
+            match self.upsert_suggestion_decline_from_sync(decline) {
+                Ok(()) => report.applied += 1,
+                Err(err) => {
+                    warn!(?err, "snapshot apply: suggestion decline failed");
                     report.failed += 1;
                 }
             }
@@ -1007,6 +1053,7 @@ mod tests {
             color_labels: vec![],
             event_groups: vec![],
             event_group_tombstones: vec![],
+            suggestion_declines: vec![],
         };
         let dst = make_adapter();
         let first = dst.apply_snapshot_dump(&dump).unwrap();

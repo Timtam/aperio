@@ -144,6 +144,46 @@ pub async fn event_groups_for_events(
         .map_err(map_group_err)
 }
 
+/// Record that two events are NOT the same appointment, so Aperio stops
+/// offering to group them.
+#[tauri::command]
+pub async fn decline_group_suggestion(
+    db: State<'_, DbHandle>,
+    event_log: State<'_, Arc<EventLogWriter>>,
+    first: EventRef,
+    second: EventRef,
+) -> CommandResult<()> {
+    let shared = db.shared();
+    let decline = EventGroupsRepo::new(&shared)
+        .decline_suggestion(
+            (&first.calendar_id, &first.event_id),
+            (&second.calendar_id, &second.event_id),
+        )
+        .map_err(map_group_err)?;
+    if let Ok(fields) = serde_json::to_value(&decline) {
+        event_log.append(SyncEvent::EventGroupSuggestionDeclined(EventPayload {
+            // The pair IS the identity; there is no id of its own to mint.
+            id: format!(
+                "{} {} {} {}",
+                decline.calendar_a, decline.event_a, decline.calendar_b, decline.event_b
+            ),
+            fields,
+        }));
+    }
+    Ok(())
+}
+
+/// Every pair the user has said is not one appointment.
+#[tauri::command]
+pub async fn group_suggestion_declines(
+    db: State<'_, DbHandle>,
+) -> CommandResult<Vec<cal_core::SuggestionDecline>> {
+    let shared = db.shared();
+    EventGroupsRepo::new(&shared)
+        .declined_suggestions()
+        .map_err(map_group_err)
+}
+
 /// One member, found again under the id its event carries now.
 ///
 /// The frontend spots this while folding a range it has in hand: a member
