@@ -1979,9 +1979,9 @@
       "taskRescheduled": "Aufgabe „{{title}}“ auf {{date}} verschoben."
     },
     "day": {
-      "eventList": "Termine des Tages",
+      "eventList": "Termine und Aufgaben des Tages",
       "tasksHeading": "Aufgaben",
-      "empty": "Keine Termine an diesem Tag.",
+      "empty": "Nichts an diesem Tag.",
       "eventLabel": "Termin: {{title}}, {{start}} bis {{end}}, Kalender: {{calendar}}",
       "taskLabel": "Aufgabe: {{title}}, {{time}}, {{state}}{{priority}}{{progress}}{{assignee}}",
       "gridLabel": "Einträge des Tages",

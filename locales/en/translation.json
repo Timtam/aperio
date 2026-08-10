@@ -1979,8 +1979,8 @@
       "taskRescheduled": "Task \"{{title}}\" moved to {{date}}."
     },
     "day": {
-      "eventList": "Events on this day",
-      "empty": "No events on this day.",
+      "eventList": "Events and tasks on this day",
+      "empty": "Nothing on this day.",
       "eventLabel": "Event: {{title}}, {{start}} to {{end}}, calendar: {{calendar}}",
       "taskLabel": "Task: {{title}}, {{time}}, {{state}}{{priority}}{{progress}}{{assignee}}",
       "tasksHeading": "Tasks",

@@ -499,15 +499,46 @@ export function DayView() {
     [timedItems],
   );
 
+  /**
+   * Everything the listbox holds: the timed items, then the day's UNDATED
+   * tasks.
+   *
+   * Those tasks used to be buttons in a band of their own — one tab stop each,
+   * outside the list, after it. So reading a day with a screen reader meant
+   * arrowing the events, leaving the list, then tabbing through the tasks one
+   * by one, and the two halves of "what is on today" answered to different
+   * keys. They are options here now, and the band below stays as the SIGHTED
+   * view of the same rows — the pattern the outside-the-window band already
+   * uses.
+   *
+   * Appended rather than merged by time on purpose: they have no time. They
+   * come after everything that does, which is also where the band draws them.
+   *
+   * The slot map is built from the TIMED items alone, so an appended index
+   * simply has no slot — the option renders without a canvas position, exactly
+   * as an all-day event does.
+   */
+  const listItems = useMemo(
+    () => [
+      ...timedItems,
+      ...untimedTasks.map((task) => ({
+        kind: 'task' as const,
+        task,
+        sortKey: Number.POSITIVE_INFINITY,
+      })),
+    ],
+    [timedItems, untimedTasks],
+  );
+
   const [focusIndex, setFocusIndex] = useState(0);
 
   // If the day changes (or events arrive) and the previous focus index
   // is past the end of the new list, snap back to the last valid item.
   useEffect(() => {
-    if (focusIndex >= timedItems.length) {
-      setFocusIndex(Math.max(0, timedItems.length - 1));
+    if (focusIndex >= listItems.length) {
+      setFocusIndex(Math.max(0, listItems.length - 1));
     }
-  }, [timedItems.length, focusIndex]);
+  }, [listItems.length, focusIndex]);
 
   // Loading indicator is gated on `showLoading` (the deferred
   // variant), not the raw `loading` flag. That way a sub-200ms
@@ -540,7 +571,7 @@ export function DayView() {
     // it (it's shown in its band); nudge only in-window options.
     if (
       listMode ||
-      timedItems.length === 0 ||
+      listItems.length === 0 ||
       slotByIdx.get(focusIndex)?.placement !== 'in'
     )
       return;
@@ -550,7 +581,7 @@ export function DayView() {
     // `dayKey` is a dep so switching to a different day always re-scrolls the
     // active option into view, even when the new day has the same item count
     // and focusIndex is unchanged (otherwise the effect wouldn't re-run).
-  }, [focusIndex, itemId, timedItems.length, dayKey, listMode, slotByIdx]);
+  }, [focusIndex, itemId, listItems.length, dayKey, listMode, slotByIdx]);
   const listRef = useAutoFocus<HTMLUListElement>(!loading);
 
   const [confirmTarget, setConfirmTarget] = useState<CalendarEvent | null>(
@@ -701,7 +732,7 @@ export function DayView() {
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      const focusedItem = timedItems[focusIndex];
+      const focusedItem = listItems[focusIndex];
       // Ctrl+D duplicates the focused event in place; Shift+M opens
       // the move/copy dialog. Bare keys cover the rest of the listbox
       // navigation. Both shortcuts are event-only — duplicating a
@@ -729,11 +760,11 @@ export function DayView() {
         }
         return;
       }
-      if (timedItems.length === 0) return;
+      if (listItems.length === 0) return;
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault();
-          setFocusIndex((i) => Math.min(i + 1, timedItems.length - 1));
+          setFocusIndex((i) => Math.min(i + 1, listItems.length - 1));
           return;
         case 'ArrowUp':
           e.preventDefault();
@@ -745,7 +776,7 @@ export function DayView() {
           return;
         case 'End':
           e.preventDefault();
-          setFocusIndex(timedItems.length - 1);
+          setFocusIndex(listItems.length - 1);
           return;
         case 'Enter': {
           // Enter always opens the editor — for events the
@@ -817,7 +848,7 @@ export function DayView() {
       }
     },
     [
-      timedItems,
+      listItems,
       focusIndex,
       openEventDialog,
       openTaskDialog,
@@ -936,7 +967,7 @@ export function DayView() {
               : { height: gridHeight, backgroundPositionY: gridLineOffset }
           }
           aria-activedescendant={
-            timedItems.length > 0 ? itemId(focusIndex) : undefined
+            listItems.length > 0 ? itemId(focusIndex) : undefined
           }
           onKeyDown={handleKeyDown}
           onDragOver={handleGridDragOver}
@@ -948,12 +979,12 @@ export function DayView() {
             (gridDragOver ? ' day-list--drag-over' : '')
           }
         >
-        {timedItems.length === 0 ? (
+        {listItems.length === 0 ? (
           <li role="presentation" className="day-list__empty">
             {t('views.day.empty')}
           </li>
         ) : (
-          timedItems.map((item, i) => {
+          listItems.map((item, i) => {
             const focused = i === focusIndex;
             // Absolute slot inside the 24h canvas (every timed item has one —
             // see slotByIdx). Positioning is purely visual; the <li> keeps its
@@ -1023,7 +1054,15 @@ export function DayView() {
                     // identically by effort.
                     (effortMod ? ` day-task--effort-${effortMod}` : '') +
                     (slotIn ? ' day-list__slot' : '') +
-                    (slotOut ? ' day-list__item--outside' : '')
+                    (slotOut ? ' day-list__item--outside' : '') +
+                    // No slot, no outside band, and a positioned canvas to sit
+                    // in: an UNDATED task. Clipped like an all-day event — it
+                    // stays a navigable option, and the band under the grid is
+                    // where a sighted user sees it. In list mode there is no
+                    // canvas, so it flows as a plain visible row.
+                    (!slotIn && !slotOut && !listMode
+                      ? ' day-list__item--allday'
+                      : '')
                   }
                   style={{
                     ...(slotIn && slot
@@ -1304,12 +1343,14 @@ export function DayView() {
       {/* §9.4 untimed tasks — always BELOW the grid (per Toni: the task band
           stays under the grid, not above it). GRID mode styles them as a compact
           band (`variant="band"`), LIST mode as the pre-grid full-width section.
-          The chips are natural-Tab-order buttons either way (NOT listbox
-          options), so the reading order is events first, then tasks. Tasks with a
-          concrete deadline_time were already interleaved with events in the
-          listbox above (sorted by time), so only scheduled-only tasks and
-          By-window intermediate days surface here. Click / Enter / Space opens
-          the TaskDialog; status toggles via the marker / Space. */}
+          This is the SIGHTED half only: every one of these tasks is also an
+          option in the listbox above (appended after the timed items), which is
+          where the keyboard and the screen reader meet it — so the section is
+          `aria-hidden` and its chips are not tab stops. Tasks with a concrete
+          deadline_time were already interleaved with events in the listbox
+          (sorted by time), so only scheduled-only tasks and By-window
+          intermediate days surface here. Click opens the TaskDialog; status
+          toggles via the marker. */}
       {untimedTasks.length > 0 && (
         <DayUntimedTasks
           variant={listMode ? 'section' : 'band'}
@@ -1416,7 +1457,13 @@ function DayUntimedTasks({
       className={
         'day-tasks' + (variant === 'band' ? ' day-tasks--band' : '')
       }
-      aria-label={t('views.day.tasksHeading')}
+      // The SIGHTED view of rows that are also options in the listbox above —
+      // the same split the outside-the-window band uses. Every one of these
+      // tasks is reachable there with the arrow keys and reads with its state,
+      // priority and progress; leaving them here as well would put each of
+      // them in the tab order a second time, and answer "what is on today" in
+      // two places that a reader has to visit separately.
+      aria-hidden="true"
     >
       <h3 className="day-tasks__heading">{t('views.day.tasksHeading')}</h3>
       <ul className="day-tasks__list">
@@ -1463,6 +1510,9 @@ function DayUntimedTasks({
             <li key={task.id} className="day-tasks__item">
               <button
                 type="button"
+                // Not a tab stop: the listbox option above is where the
+                // keyboard and the screen reader meet this task.
+                tabIndex={-1}
                 className={
                   'day-task' +
                   (projection ? ' day-task--projection' : '') +
