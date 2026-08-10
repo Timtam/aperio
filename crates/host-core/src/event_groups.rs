@@ -39,12 +39,42 @@ pub struct NewMember {
 /// group that still stands travels as its new membership, a dissolved one as
 /// its id. Collapsing both into `Option<EventGroup>` loses exactly the id the
 /// dissolve event needs.
+///
+/// Both carry the refusals the removal wrote (see [`Removal`]), because those
+/// have to travel too: a device that hears only "the group is gone" will form
+/// it again the moment it sees the same join URL.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ungrouped {
     /// The group stands, with the members left in it.
-    Remains(EventGroup),
+    Remains {
+        group: EventGroup,
+        declines: Vec<SuggestionDecline>,
+    },
     /// Fewer than two were left, so the group is gone.
-    Dissolved { group_id: String },
+    Dissolved {
+        group_id: String,
+        declines: Vec<SuggestionDecline>,
+    },
+}
+
+/// Why a member is leaving its group — and so whether it means anything.
+///
+/// Only [`Removal::ByUser`] is a statement. Someone taking an event out is
+/// saying "this is not the same appointment as those", and Aperio writes that
+/// down: automatic grouping (`DESIGN-event-groups.md`, Stufe 4) reads exactly
+/// those marks, and without them a group formed from a meeting link would come
+/// back on the next render, every day.
+///
+/// A deleted event says nothing about anything. Its membership is bookkeeping
+/// that no longer points at a row, and clearing it must not leave a refusal
+/// behind — one that would outlive the event and quietly bind an id the
+/// provider may hand out again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Removal {
+    /// The user took this event out.
+    ByUser,
+    /// The event is gone; only its membership is being cleared up.
+    EventGone,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -553,10 +583,13 @@ impl<'a> EventGroupsRepo<'a> {
     /// dissolves it rather than leaving a single event claiming to be grouped
     /// with nothing. `None` means the event was not grouped in the first place
     /// — nothing happened, and nothing needs to be told to the other devices.
+    ///
+    /// `removal` decides whether this leaves a refusal behind; see [`Removal`].
     pub fn ungroup(
         &self,
         calendar_id: &str,
         event_id: &str,
+        removal: Removal,
     ) -> Result<Option<Ungrouped>, EventGroupsError> {
         let now = Utc::now().to_rfc3339();
         let mut conn = self.db.lock().expect("db mutex poisoned");
@@ -573,6 +606,35 @@ impl<'a> EventGroupsRepo<'a> {
             tx.commit()?;
             return Ok(None);
         };
+        // Who it is leaving. Read BEFORE the delete, and — when the user is the
+        // one taking it out — written down as what that means: this event and
+        // those are not one appointment.
+        //
+        // It binds the suggestion line too, and that is right rather than a
+        // side effect: "I took this out" is the same statement as "no, not the
+        // same thing". An explicit Group action is never blocked by it.
+        let mut declines = Vec::new();
+        if removal == Removal::ByUser {
+            let others: Vec<(String, String)> = {
+                let mut stmt = tx.prepare(
+                    "SELECT calendar_id, event_id FROM event_group_members
+                      WHERE group_id = ? AND NOT (calendar_id = ? AND event_id = ?)",
+                )?;
+                let rows = stmt.query_map(params![group_id, calendar_id, event_id], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })?;
+                rows.collect::<std::result::Result<Vec<_>, _>>()?
+            };
+            for (other_cal, other_id) in &others {
+                let decline = SuggestionDecline::new(
+                    (calendar_id, event_id),
+                    (other_cal.as_str(), other_id.as_str()),
+                    now.clone(),
+                );
+                write_decline(&tx, &decline)?;
+                declines.push(decline);
+            }
+        }
         tx.execute(
             "DELETE FROM event_group_members WHERE calendar_id = ? AND event_id = ?",
             params![calendar_id, event_id],
@@ -586,7 +648,7 @@ impl<'a> EventGroupsRepo<'a> {
             tx.execute("DELETE FROM event_groups WHERE id = ?", params![group_id])?;
             mark_dissolved(&tx, &group_id, &now)?;
             tx.commit()?;
-            return Ok(Some(Ungrouped::Dissolved { group_id }));
+            return Ok(Some(Ungrouped::Dissolved { group_id, declines }));
         }
         tx.execute(
             "UPDATE event_groups SET updated_at = ? WHERE id = ?",
@@ -594,7 +656,7 @@ impl<'a> EventGroupsRepo<'a> {
         )?;
         let group = read_group(&tx, &group_id)?.ok_or(EventGroupsError::Vanished)?;
         tx.commit()?;
-        Ok(Some(Ungrouped::Remains(group)))
+        Ok(Some(Ungrouped::Remains { group, declines }))
     }
 
     /// Record that these two events are NOT the same appointment.
@@ -624,16 +686,51 @@ impl<'a> EventGroupsRepo<'a> {
     }
 
     /// Dissolve a whole group. The events themselves are untouched.
-    pub fn dissolve(&self, group_id: &str) -> Result<bool, EventGroupsError> {
+    ///
+    /// Every pair in it is written down as declined, for the same reason
+    /// [`Self::ungroup`] does it: "these are not one appointment" is what
+    /// taking the group apart says, and Stage 4's automatic grouping has to
+    /// hear it — otherwise a group built from meeting links comes back on the
+    /// next render, every day.
+    ///
+    /// `None` means there was no such group and nothing happened; `Some` gives
+    /// the refusals written, which the caller has to pass on.
+    pub fn dissolve(
+        &self,
+        group_id: &str,
+    ) -> Result<Option<Vec<SuggestionDecline>>, EventGroupsError> {
         let now = Utc::now().to_rfc3339();
         let mut conn = self.db.lock().expect("db mutex poisoned");
         let tx = conn.transaction()?;
+        // Read before the delete: the members go with the group (ON DELETE
+        // CASCADE), so afterwards there is nothing left to say no about.
+        let members: Vec<(String, String)> = {
+            let mut stmt = tx.prepare(
+                "SELECT calendar_id, event_id FROM event_group_members WHERE group_id = ?",
+            )?;
+            let rows = stmt.query_map(params![group_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()?
+        };
         let removed = tx.execute("DELETE FROM event_groups WHERE id = ?", params![group_id])?;
-        if removed > 0 {
-            mark_dissolved(&tx, group_id, &now)?;
+        if removed == 0 {
+            tx.commit()?;
+            return Ok(None);
         }
+        let mut declines = Vec::new();
+        for (i, (cal_a, id_a)) in members.iter().enumerate() {
+            for (cal_b, id_b) in members.iter().skip(i + 1) {
+                let decline = SuggestionDecline::new(
+                    (cal_a.as_str(), id_a.as_str()),
+                    (cal_b.as_str(), id_b.as_str()),
+                    now.clone(),
+                );
+                write_decline(&tx, &decline)?;
+                declines.push(decline);
+            }
+        }
+        mark_dissolved(&tx, group_id, &now)?;
         tx.commit()?;
-        Ok(removed > 0)
+        Ok(Some(declines))
     }
 }
 
@@ -782,12 +879,13 @@ mod tests {
 
         // Removing one of two leaves a single event that would otherwise claim
         // to be grouped with nothing.
-        assert_eq!(
-            repo.ungroup("work", "ev-a").unwrap(),
-            Some(Ungrouped::Dissolved {
-                group_id: group.id.clone()
-            }),
-        );
+        let Some(Ungrouped::Dissolved { group_id, declines }) =
+            repo.ungroup("work", "ev-a", Removal::ByUser).unwrap()
+        else {
+            panic!("one member left, so the group goes");
+        };
+        assert_eq!(group_id, group.id);
+        assert_eq!(declines.len(), 1, "the pair it was in is now refused");
         assert_eq!(repo.get(&group.id).unwrap(), None);
         assert!(repo
             .for_events(&[("private".into(), "ev-b".into())])
@@ -807,10 +905,65 @@ mod tests {
         ])
         .unwrap();
 
-        let Some(Ungrouped::Remains(left)) = repo.ungroup("colleague", "ev-c").unwrap() else {
+        let Some(Ungrouped::Remains {
+            group: left,
+            declines,
+        }) = repo.ungroup("colleague", "ev-c", Removal::ByUser).unwrap()
+        else {
             panic!("two members left, so the group stands");
         };
         assert_eq!(left.members.len(), 2);
+        // One refusal per member it left, and none between the two that stay.
+        assert_eq!(declines.len(), 2);
+    }
+
+    #[test]
+    fn taking_a_group_apart_says_these_are_not_the_same_appointment() {
+        let (_tmp, db) = fresh();
+        let shared = db.shared();
+        let repo = EventGroupsRepo::new(&shared);
+        let group = repo
+            .group(&[
+                member("work", "ev-a"),
+                member("private", "ev-b"),
+                member("colleague", "ev-c"),
+            ])
+            .unwrap();
+
+        let declines = repo.dissolve(&group.id).unwrap().expect("it was there");
+        // Every pair, not just the ones somebody looked at: after this the
+        // group is gone, and each of the three could otherwise be offered
+        // against each of the others again.
+        assert_eq!(declines.len(), 3);
+        assert_eq!(repo.declined_suggestions().unwrap().len(), 3);
+
+        // And a second dissolve of the same id is not an event.
+        assert_eq!(repo.dissolve(&group.id).unwrap(), None);
+    }
+
+    #[test]
+    fn a_deleted_event_has_not_refused_anything() {
+        let (_tmp, db) = fresh();
+        let shared = db.shared();
+        let repo = EventGroupsRepo::new(&shared);
+        repo.group(&[
+            member("work", "ev-a"),
+            member("private", "ev-b"),
+            member("colleague", "ev-c"),
+        ])
+        .unwrap();
+
+        // The event is gone; its membership is bookkeeping, not a statement.
+        // A refusal here would outlive the event and quietly bind an id the
+        // provider may hand out again.
+        let Some(Ungrouped::Remains { declines, .. }) = repo
+            .ungroup("colleague", "ev-c", Removal::EventGone)
+            .unwrap()
+        else {
+            panic!("two members left, so the group stands");
+        };
+        assert!(declines.is_empty());
+        assert!(repo.declined_suggestions().unwrap().is_empty());
     }
 
     #[test]

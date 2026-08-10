@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use host_core::event_groups::{EventGroupsRepo, NewMember, Ungrouped};
+use host_core::event_groups::{EventGroupsRepo, NewMember, Removal, Ungrouped};
 use serde::Deserialize;
 use sync_core::{EventPayload, IdPayload, SyncEvent};
 use tauri::State;
@@ -94,15 +94,17 @@ pub async fn ungroup_event(
 ) -> CommandResult<Option<cal_core::EventGroup>> {
     let shared = db.shared();
     let outcome = EventGroupsRepo::new(&shared)
-        .ungroup(&calendar_id, &event_id)
+        .ungroup(&calendar_id, &event_id, Removal::ByUser)
         .map_err(map_group_err)?;
     Ok(match outcome {
-        Some(Ungrouped::Remains(group)) => {
+        Some(Ungrouped::Remains { group, declines }) => {
             emit_group(&event_log, &group);
+            emit_declines(&event_log, &declines);
             Some(group)
         }
-        Some(Ungrouped::Dissolved { group_id }) => {
+        Some(Ungrouped::Dissolved { group_id, declines }) => {
             event_log.append(SyncEvent::EventGroupDissolved(IdPayload { id: group_id }));
+            emit_declines(&event_log, &declines);
             None
         }
         // The event was not grouped. Nothing happened, so nothing is told.
@@ -118,11 +120,12 @@ pub async fn dissolve_event_group(
     group_id: String,
 ) -> CommandResult<()> {
     let shared = db.shared();
-    if EventGroupsRepo::new(&shared)
+    if let Some(declines) = EventGroupsRepo::new(&shared)
         .dissolve(&group_id)
         .map_err(map_group_err)?
     {
         event_log.append(SyncEvent::EventGroupDissolved(IdPayload { id: group_id }));
+        emit_declines(&event_log, &declines);
     }
     Ok(())
 }
@@ -177,16 +180,7 @@ pub async fn decline_group_suggestion(
             (&second.calendar_id, &second.event_id),
         )
         .map_err(map_group_err)?;
-    if let Ok(fields) = serde_json::to_value(&decline) {
-        event_log.append(SyncEvent::EventGroupSuggestionDeclined(EventPayload {
-            // The pair IS the identity; there is no id of its own to mint.
-            id: format!(
-                "{} {} {} {}",
-                decline.calendar_a, decline.event_a, decline.calendar_b, decline.event_b
-            ),
-            fields,
-        }));
-    }
+    emit_declines(&event_log, std::slice::from_ref(&decline));
     Ok(())
 }
 
@@ -244,9 +238,11 @@ pub(crate) fn forget_event_grouping(
     event_id: &str,
 ) {
     let shared = db.shared();
-    match EventGroupsRepo::new(&shared).ungroup(calendar_id, event_id) {
-        Ok(Some(Ungrouped::Remains(group))) => emit_group(event_log, &group),
-        Ok(Some(Ungrouped::Dissolved { group_id })) => {
+    // `EventGone`: a deleted event has not said that it is a different
+    // appointment from anything — see `Removal`.
+    match EventGroupsRepo::new(&shared).ungroup(calendar_id, event_id, Removal::EventGone) {
+        Ok(Some(Ungrouped::Remains { group, .. })) => emit_group(event_log, &group),
+        Ok(Some(Ungrouped::Dissolved { group_id, .. })) => {
             event_log.append(SyncEvent::EventGroupDissolved(IdPayload { id: group_id }));
         }
         Ok(None) => {}
@@ -293,6 +289,26 @@ pub(crate) fn forget_calendar_groupings(
             }
         }
         Err(err) => tracing::warn!(?err, "could not clear the calendar's groupings"),
+    }
+}
+
+/// Tell the other devices which pairs are not one appointment.
+///
+/// Taking a group apart writes these as well as removing the membership, and
+/// both halves have to travel: a device that hears only "the group is gone"
+/// would form it again from the same evidence.
+fn emit_declines(event_log: &EventLogWriter, declines: &[cal_core::SuggestionDecline]) {
+    for decline in declines {
+        if let Ok(fields) = serde_json::to_value(decline) {
+            event_log.append(SyncEvent::EventGroupSuggestionDeclined(EventPayload {
+                // The pair IS the identity; there is no id of its own to mint.
+                id: format!(
+                    "{} {} {} {}",
+                    decline.calendar_a, decline.event_a, decline.calendar_b, decline.event_b
+                ),
+                fields,
+            }));
+        }
     }
 }
 

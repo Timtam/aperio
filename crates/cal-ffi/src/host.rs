@@ -61,7 +61,7 @@ use host_core::conflicts::{
 };
 use host_core::contact_sync::{ContactSyncCore, ContactSyncObserver, ContactsSyncedPayload};
 use host_core::db::SharedConn;
-use host_core::event_groups::{EventGroupsError, EventGroupsRepo, NewMember, Ungrouped};
+use host_core::event_groups::{EventGroupsError, EventGroupsRepo, NewMember, Removal, Ungrouped};
 use host_core::event_log::OnboardingService;
 use host_core::meetings::{
     attendee_addresses, should_provider_announce_removal, should_provider_notify, MeetingsRepo,
@@ -6787,16 +6787,18 @@ impl Host {
     ) -> Result<Option<String>, StoreError> {
         let shared = self.db.shared();
         let outcome = EventGroupsRepo::new(&shared)
-            .ungroup(&calendar_id, &event_id)
+            .ungroup(&calendar_id, &event_id, Removal::ByUser)
             .map_err(map_group_err)?;
         match outcome {
-            Some(Ungrouped::Remains(group)) => {
+            Some(Ungrouped::Remains { group, declines }) => {
                 self.emit_event_group(&group);
+                self.emit_declines(&declines);
                 Ok(Some(to_json(&group)?))
             }
-            Some(Ungrouped::Dissolved { group_id }) => {
+            Some(Ungrouped::Dissolved { group_id, declines }) => {
                 self.writer
                     .append(SyncEvent::EventGroupDissolved(IdPayload { id: group_id }));
+                self.emit_declines(&declines);
                 Ok(None)
             }
             // Not grouped: nothing happened, so nothing is told.
@@ -6807,12 +6809,13 @@ impl Host {
     /// Dissolve a whole group. The events themselves are untouched.
     pub fn dissolve_event_group(&self, group_id: String) -> Result<(), StoreError> {
         let shared = self.db.shared();
-        if EventGroupsRepo::new(&shared)
+        if let Some(declines) = EventGroupsRepo::new(&shared)
             .dissolve(&group_id)
             .map_err(map_group_err)?
         {
             self.writer
                 .append(SyncEvent::EventGroupDissolved(IdPayload { id: group_id }));
+            self.emit_declines(&declines);
         }
         Ok(())
     }
@@ -6855,16 +6858,7 @@ impl Host {
                 (&second.calendar_id, &second.event_id),
             )
             .map_err(map_group_err)?;
-        if let Ok(fields) = serde_json::to_value(&decline) {
-            self.writer
-                .append(SyncEvent::EventGroupSuggestionDeclined(EventPayload {
-                    id: format!(
-                        "{} {} {} {}",
-                        decline.calendar_a, decline.event_a, decline.calendar_b, decline.event_b
-                    ),
-                    fields,
-                }));
-        }
+        self.emit_declines(std::slice::from_ref(&decline));
         Ok(())
     }
 
@@ -8509,15 +8503,41 @@ impl Host {
     /// delete that actually happened as a failure.
     fn forget_event_grouping(&self, calendar_id: &str, event_id: &str) {
         let shared = self.db.shared();
-        match EventGroupsRepo::new(&shared).ungroup(calendar_id, event_id) {
-            Ok(Some(Ungrouped::Remains(group))) => self.emit_event_group(&group),
-            Ok(Some(Ungrouped::Dissolved { group_id })) => {
+        // `EventGone`: a deleted event has not said that it is a different
+        // appointment from anything — see `Removal`.
+        match EventGroupsRepo::new(&shared).ungroup(calendar_id, event_id, Removal::EventGone) {
+            Ok(Some(Ungrouped::Remains { group, .. })) => self.emit_event_group(&group),
+            Ok(Some(Ungrouped::Dissolved { group_id, .. })) => {
                 self.writer
                     .append(SyncEvent::EventGroupDissolved(IdPayload { id: group_id }));
             }
             Ok(None) => {}
             Err(err) => {
                 tracing::warn!(?err, "could not clear the deleted event's grouping")
+            }
+        }
+    }
+
+    /// Tell the other devices which pairs are not one appointment.
+    ///
+    /// Taking a group apart writes these as well as removing the membership,
+    /// and both halves have to travel: a device that hears only "the group is
+    /// gone" would form it again from the same evidence.
+    fn emit_declines(&self, declines: &[cal_core::SuggestionDecline]) {
+        for decline in declines {
+            if let Ok(fields) = serde_json::to_value(decline) {
+                self.writer
+                    .append(SyncEvent::EventGroupSuggestionDeclined(EventPayload {
+                        // The pair IS the identity; there is no id to mint.
+                        id: format!(
+                            "{} {} {} {}",
+                            decline.calendar_a,
+                            decline.event_a,
+                            decline.calendar_b,
+                            decline.event_b
+                        ),
+                        fields,
+                    }));
             }
         }
     }
