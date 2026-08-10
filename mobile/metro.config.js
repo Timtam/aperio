@@ -13,8 +13,10 @@ const config = getDefaultConfig(__dirname);
 // `@aperio/locales/de/translation.json` (it resolved only in the dev server, so
 // the gap surfaced as a release-bundle failure on EAS). We deliberately keep
 // them as plain file: deps rather than an npm workspace — the desktop pins React
-// 18 and mobile React 19, and these two packages are dependency-free, so there's
-// nothing to hoist or clash.
+// 18 and mobile React 19, so hoisting them into one tree would clash.
+//
+// @aperio/shared is NOT dependency-free (it imports rrule and linkify-it); that
+// is what the resolver root below is for. @aperio/locales is pure JSON.
 //
 // We still watch the real folders so edits to the shared code hot-reload in dev.
 const localesDir = path.resolve(__dirname, '..', 'locales');

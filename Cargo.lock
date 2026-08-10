@@ -10,7 +10,7 @@ dependencies = [
  "base64 0.22.1",
  "cal-core",
  "chrono",
- "chrono-tz 0.9.0",
+ "chrono-tz",
  "icalendar",
  "mockito",
  "quick-xml 0.36.2",
@@ -36,15 +36,12 @@ name = "adapter-caldav-plugin"
 version = "0.1.0"
 dependencies = [
  "adapter-caldav",
- "async-trait",
  "cal-core",
  "chrono",
  "plugin-core",
  "plugin-sdk",
  "serde",
  "serde_json",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -93,7 +90,6 @@ name = "adapter-dropbox-plugin"
 version = "0.1.0"
 dependencies = [
  "adapter-dropbox",
- "async-trait",
  "base64 0.22.1",
  "plugin-core",
  "plugin-sdk",
@@ -101,8 +97,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sync-core",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -139,15 +133,12 @@ name = "adapter-ews-plugin"
 version = "0.1.0"
 dependencies = [
  "adapter-ews",
- "async-trait",
  "cal-core",
  "chrono",
  "plugin-core",
  "plugin-sdk",
  "serde",
  "serde_json",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -160,7 +151,6 @@ dependencies = [
  "serde",
  "suppaftp",
  "sync-core",
- "thiserror 1.0.69",
  "tokio",
  "tracing",
  "webpki-roots 0.26.11",
@@ -179,15 +169,12 @@ name = "adapter-ftp-plugin"
 version = "0.1.0"
 dependencies = [
  "adapter-ftp",
- "async-trait",
  "base64 0.22.1",
  "plugin-core",
  "plugin-sdk",
  "serde",
  "serde_json",
  "sync-core",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -227,18 +214,14 @@ name = "adapter-google-plugin"
 version = "0.1.0"
 dependencies = [
  "adapter-google",
- "async-trait",
  "base64 0.22.1",
  "cal-core",
  "chrono",
  "plugin-core",
  "plugin-sdk",
- "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sync-core",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -274,15 +257,11 @@ name = "adapter-ical-plugin"
 version = "0.1.0"
 dependencies = [
  "adapter-ical",
- "async-trait",
  "cal-core",
- "chrono",
  "plugin-core",
  "plugin-sdk",
  "serde",
  "serde_json",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -298,7 +277,6 @@ dependencies = [
  "serde_json",
  "sync-core",
  "tempfile",
- "thiserror 1.0.69",
  "tokio",
  "tracing",
  "uuid",
@@ -312,7 +290,7 @@ dependencies = [
  "base64 0.22.1",
  "cal-core",
  "chrono",
- "chrono-tz 0.9.0",
+ "chrono-tz",
  "hex",
  "mockito",
  "open",
@@ -340,15 +318,12 @@ name = "adapter-microsoft-graph-plugin"
 version = "0.1.0"
 dependencies = [
  "adapter-microsoft-graph",
- "async-trait",
  "cal-core",
  "chrono",
  "plugin-core",
  "plugin-sdk",
  "serde",
  "serde_json",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -362,10 +337,8 @@ dependencies = [
  "russh-sftp",
  "serde",
  "sync-core",
- "thiserror 1.0.69",
  "tokio",
  "tracing",
- "url",
 ]
 
 [[package]]
@@ -381,15 +354,12 @@ name = "adapter-sftp-plugin"
 version = "0.1.0"
 dependencies = [
  "adapter-sftp",
- "async-trait",
  "base64 0.22.1",
  "plugin-core",
  "plugin-sdk",
  "serde",
  "serde_json",
  "sync-core",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -423,14 +393,11 @@ name = "adapter-todoist-plugin"
 version = "0.1.0"
 dependencies = [
  "adapter-todoist",
- "async-trait",
  "cal-core",
  "plugin-core",
  "plugin-sdk",
  "serde",
  "serde_json",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -463,14 +430,11 @@ name = "adapter-vikunja-plugin"
 version = "0.1.0"
 dependencies = [
  "adapter-vikunja",
- "async-trait",
  "cal-core",
  "plugin-core",
  "plugin-sdk",
  "serde",
  "serde_json",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -484,10 +448,8 @@ dependencies = [
  "mockito",
  "quick-xml 0.36.2",
  "reqwest 0.12.28",
- "serde",
  "serde_json",
  "sync-core",
- "thiserror 1.0.69",
  "tokio",
  "tracing",
  "url",
@@ -506,7 +468,6 @@ name = "adapter-webdav-plugin"
 version = "0.1.0"
 dependencies = [
  "adapter-webdav",
- "async-trait",
  "base64 0.22.1",
  "plugin-core",
  "plugin-sdk",
@@ -514,7 +475,6 @@ dependencies = [
  "serde_json",
  "sync-core",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -552,14 +512,12 @@ name = "adapter-webex-plugin"
 version = "0.1.0"
 dependencies = [
  "adapter-webex",
- "async-trait",
  "chrono",
  "plugin-core",
  "plugin-sdk",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "tokio",
  "tracing",
  "vc-core",
 ]
@@ -690,23 +648,15 @@ version = "0.1.0"
 dependencies = [
  "adapter-local",
  "anyhow",
- "aperio-db",
- "async-trait",
  "base64 0.22.1",
- "builtin-oauth",
  "cal-core",
  "chrono",
- "chrono-tz 0.9.0",
- "dirs 5.0.1",
  "host-core",
  "hostname",
  "keyring",
  "opener",
  "plugin-core",
- "regex",
  "rodio",
- "rrule",
- "rusqlite",
  "serde",
  "serde_json",
  "sync-core",
@@ -717,7 +667,6 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-notification",
  "tempfile",
- "thiserror 1.0.69",
  "tokio",
  "tracing",
  "tracing-appender",
@@ -1326,11 +1275,9 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "chrono",
- "chrono-tz 0.9.0",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
- "uuid",
 ]
 
 [[package]]
@@ -1500,34 +1447,12 @@ dependencies = [
 
 [[package]]
 name = "chrono-tz"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93698b29de5e97ad0ae26447b344c482a7284c737d9ddc5f9e52b74a336671bb"
-dependencies = [
- "chrono",
- "chrono-tz-build",
- "phf 0.11.3",
-]
-
-[[package]]
-name = "chrono-tz"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6139a8597ed92cf816dfb33f5dd6cf0bb93a6adc938f11039f371bc5bcd26c3"
 dependencies = [
  "chrono",
  "phf 0.12.1",
-]
-
-[[package]]
-name = "chrono-tz-build"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c088aee841df9c3041febbb73934cfc39708749bf96dc827e3359cd39ef11b1"
-dependencies = [
- "parse-zoneinfo",
- "phf 0.11.3",
- "phf_codegen 0.11.3",
 ]
 
 [[package]]
@@ -3140,6 +3065,7 @@ dependencies = [
  "builtin-oauth",
  "cal-core",
  "chrono",
+ "chrono-tz",
  "dirs 5.0.1",
  "plugin-core",
  "regex",
@@ -4750,15 +4676,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "parse-zoneinfo"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f2a05b18d44e2957b88f96ba460715e295bc1d7510468a2f3d3b44535d26c24"
-dependencies = [
- "regex",
-]
-
-[[package]]
 name = "password-hash"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4802,15 +4719,6 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "phf"
-version = "0.11.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fd6780a80ae0c52cc120a26a1a42c1ae51b247a253e4e06113d23d2c2edd078"
-dependencies = [
- "phf_shared 0.11.3",
-]
-
-[[package]]
-name = "phf"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "913273894cec178f401a31ec4b656318d95473527be05c0752cc41cdc32be8b7"
@@ -4831,32 +4739,12 @@ dependencies = [
 
 [[package]]
 name = "phf_codegen"
-version = "0.11.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aef8048c789fa5e851558d709946d6d79a8ff88c0440c587967f8e94bfb1216a"
-dependencies = [
- "phf_generator 0.11.3",
- "phf_shared 0.11.3",
-]
-
-[[package]]
-name = "phf_codegen"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49aa7f9d80421bca176ca8dbfebe668cc7a2684708594ec9f3c0db0805d5d6e1"
 dependencies = [
- "phf_generator 0.13.1",
+ "phf_generator",
  "phf_shared 0.13.1",
-]
-
-[[package]]
-name = "phf_generator"
-version = "0.11.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c80231409c20246a13fddb31776fb942c38553c51e871f8cbd687a4cfb5843d"
-dependencies = [
- "phf_shared 0.11.3",
- "rand 0.8.6",
 ]
 
 [[package]]
@@ -4875,20 +4763,11 @@ version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "812f032b54b1e759ccd5f8b6677695d5268c588701effba24601f6932f8269ef"
 dependencies = [
- "phf_generator 0.13.1",
+ "phf_generator",
  "phf_shared 0.13.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "phf_shared"
-version = "0.11.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67eabc2ef2a60eb7faa00097bd1ffdb5bd28e62bf39990626a582201b7a754e5"
-dependencies = [
- "siphasher",
 ]
 
 [[package]]
@@ -5608,7 +5487,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "720acfb4980b9d8a6a430f6d7a11933e701ebbeba5eee39cc9d8c5f932aaff74"
 dependencies = [
  "chrono",
- "chrono-tz 0.10.4",
+ "chrono-tz",
  "log",
  "regex",
  "thiserror 2.0.18",
@@ -6035,7 +5914,7 @@ dependencies = [
  "log",
  "new_debug_unreachable",
  "phf 0.13.1",
- "phf_codegen 0.13.1",
+ "phf_codegen",
  "precomputed-hash",
  "rustc-hash",
  "servo_arc",
@@ -6468,7 +6347,7 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "585635e46db231059f76c5849798146164652513eb9e8ab2685939dd90f29b69"
 dependencies = [
- "phf_generator 0.13.1",
+ "phf_generator",
  "phf_shared 0.13.1",
  "proc-macro2",
  "quote",
@@ -6698,7 +6577,6 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
- "tracing",
  "uuid",
 ]
 
@@ -8081,7 +7959,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7cff6eef815df1834fd250e3a2ff436044d82a9f1bc1980ca1dbdf07effc538"
 dependencies = [
  "phf 0.13.1",
- "phf_codegen 0.13.1",
+ "phf_codegen",
  "string_cache",
  "string_cache_codegen",
 ]

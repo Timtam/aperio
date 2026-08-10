@@ -18,13 +18,9 @@ sync-core.workspace = true
 
 serde.workspace = true
 serde_json.workspace = true
-async-trait.workspace = true
-tracing.workspace = true
 base64 = "0.22"
 
 [dev-dependencies]
 plugin-core.workspace = true
-tokio = { workspace = true }
-
 [lints]
 workspace = true

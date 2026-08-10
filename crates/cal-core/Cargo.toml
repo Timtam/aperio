@@ -12,9 +12,7 @@ description = "Aperio — shared types, traits, and error definitions for all ad
 async-trait.workspace = true
 serde.workspace = true
 chrono.workspace = true
-chrono-tz.workspace = true
 thiserror.workspace = true
-uuid.workspace = true
 # Photo bytes round-trip across the Tauri IPC and adapter wire
 # formats (vCard PHOTO body, EWS contact-picture attachment) as
 # base64. Defining the encoding once at the cal-core layer means

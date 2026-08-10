@@ -21,17 +21,11 @@ cal-core.workspace = true
 sync-core.workspace = true
 base64 = "0.22"
 # `interactive_auth` runs the OAuth token exchange over HTTP.
-reqwest.workspace = true
-
 serde.workspace = true
 serde_json.workspace = true
-async-trait.workspace = true
-tracing.workspace = true
 chrono.workspace = true
 
 [dev-dependencies]
 plugin-core.workspace = true
-tokio = { workspace = true }
-
 [lints]
 workspace = true

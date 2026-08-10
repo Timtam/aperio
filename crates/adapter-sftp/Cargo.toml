@@ -10,11 +10,9 @@ description = "Aperio sync adapter targeting SFTP over SSH (pure-Rust, mobile-ta
 
 [dependencies]
 async-trait.workspace = true
-chrono.workspace = true
 futures.workspace = true
 serde.workspace = true
 sync-core.workspace = true
-thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "sync", "io-util"] }
 tracing.workspace = true
 
@@ -26,9 +24,11 @@ russh-sftp = "2"
 # Used to decode the base path safely + URL-like helpers if we
 # ever take a sftp://-style URL on the wire. v1 takes host/port/
 # path separately so this is currently just for the helpers.
-url = "2"
-
 [dev-dependencies]
+# Test-only: the adapters themselves speak in `SystemTime`/strings; only
+# their tests build instants. Declared here so it does not ship in the
+# cdylib.
+chrono.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]

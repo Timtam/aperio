@@ -29,8 +29,6 @@ uuid.workspace = true
 # command layer, individual sync adapters) get one place to map errors.
 thiserror.workspace = true
 # tracing for diagnostics, aligned with the rest of the workspace.
-tracing.workspace = true
-
 # E2E encryption (Phase Sk, DESIGN.md §19.7). AES-256-GCM gives
 # authenticated encryption; argon2 derives the key from the user's
 # passphrase with strong KDF parameters. base64 is the wire

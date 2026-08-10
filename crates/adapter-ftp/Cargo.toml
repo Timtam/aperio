@@ -10,10 +10,8 @@ description = "Aperio sync adapter targeting FTP over TLS (FTPS), implicit + exp
 
 [dependencies]
 async-trait.workspace = true
-chrono.workspace = true
 serde.workspace = true
 sync-core.workspace = true
-thiserror.workspace = true
 # `rt-multi-thread` is required for tokio::task::spawn_blocking,
 # which is how we adapt suppaftp's sync API into our async
 # SyncAdapter trait — suppaftp's async surface only supports
@@ -46,6 +44,12 @@ rustls = { version = "0.23", default-features = false, features = [
     "std",
 ] }
 webpki-roots = "0.26"
+
+[dev-dependencies]
+# Test-only: the adapters themselves speak in `SystemTime`/strings; only
+# their tests build instants. Declared here so it does not ship in the
+# cdylib.
+chrono.workspace = true
 
 [lints]
 workspace = true

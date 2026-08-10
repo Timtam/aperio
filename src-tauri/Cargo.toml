@@ -49,14 +49,10 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-appender.workspace = true
-regex.workspace = true
-dirs.workspace = true
 anyhow.workspace = true
 
-aperio-db.workspace = true
 cal-core.workspace = true
 adapter-local.workspace = true
-builtin-oauth.workspace = true
 host-core.workspace = true
 sync-core.workspace = true
 sync-engine.workspace = true
@@ -97,15 +93,9 @@ base64 = "0.22"
 # `libasound2-dev` in the CI / artifact Linux setup steps.
 rodio = { version = "0.19", default-features = false, features = ["symphonia-all"] }
 
-rusqlite.workspace = true
 chrono.workspace = true
-chrono-tz.workspace = true
-async-trait.workspace = true
-thiserror.workspace = true
 uuid.workspace = true
 keyring.workspace = true
-rrule.workspace = true
-
 [target.'cfg(windows)'.dependencies]
 # Setting the process AppUserModelID at startup + writing the AUMID
 # entry to HKCU is what lets Windows show "Aperio" instead of

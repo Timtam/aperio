@@ -2,6 +2,6 @@
   "name": "@aperio/shared",
   "version": "0.0.0",
   "private": true,
-  "description": "Shared, platform-agnostic frontend TypeScript for Aperio — domain types and pure logic reused by the desktop frontend (Vite) and the mobile app (Expo/Metro). Starts with the task domain (types, grouping, status/label helpers); calendar hooks, settings handlers, and other reusable bits move in here over time.",
-  "//": "No runtime deps. Resolved via a path alias on each side (no bundler-specific main/exports), so imports like '@aperio/shared' work in both Vite and Metro — same mechanism as @aperio/locales."
+  "description": "Shared, platform-agnostic frontend TypeScript for Aperio \u2014 domain types and pure logic reused by the desktop frontend (Vite) and the mobile app (Expo/Metro). Starts with the task domain (types, grouping, status/label helpers); calendar hooks, settings handlers, and other reusable bits move in here over time.",
+  "//": "Resolved via a path alias on each side (no bundler-specific main/exports), so imports like '@aperio/shared' work in both Vite and Metro \u2014 same mechanism as @aperio/locales. This package MAY take pure-JS runtime dependencies (it already imports rrule and linkify-it), but every one of them must be declared in BOTH the repo-root package.json and mobile/package.json: Metro does not hoist from here, and a dependency missing on the mobile side fails the EAS production bundle while the dev server keeps working. Never a dependency with native code \u2014 mobile pays for that twice."
 }
