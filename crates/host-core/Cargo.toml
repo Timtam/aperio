@@ -60,6 +60,10 @@ adapter-ical-plugin = { path = "../adapter-ical-plugin" }
 # hand-written twin in this workspace has. WebDAV, because the folder adapter
 # folded into the built-in store and stopped being sync-ONLY in that sense.
 adapter-webdav-plugin = { path = "../adapter-webdav-plugin" }
+# "Does a videoconference account contribute its meetings calendar?" is a
+# question about the REAL plugin: whether it exports `list_meetings` at all is
+# what decides it, and a hand-written twin cannot answer that.
+adapter-webex-plugin = { path = "../adapter-webex-plugin" }
 # Re-declare the engine + local adapter with their test-support features so the
 # moved applier/onboarding/sync tests reach FakeSecrets / the in-memory store.
 # Dev-only: the normal (mobile) build never enables these.

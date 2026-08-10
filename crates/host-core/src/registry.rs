@@ -1285,6 +1285,77 @@ mod tests {
             .map(|(_, adapter)| adapter)
     }
 
+    // ── the videoconference account's meetings calendar ────────────────────
+
+    /// Registry backed by the real Webex plugin, with the two credentials it
+    /// opens against already in the (fake) keychain.
+    fn webex_registry() -> (AdapterRegistry, Arc<sync_engine::test_support::FakeSecrets>) {
+        let manager = Arc::new(PluginManager::new("0.1.0"));
+        let descriptor = unsafe { adapter_webex_plugin::build_descriptor() };
+        manager
+            .register_static(
+                PluginManifest::from_bytes(include_bytes!(
+                    "../../adapter-webex-plugin/plugin.json"
+                ))
+                .expect("the shipped Webex manifest parses"),
+                descriptor,
+                adapter_webex_plugin::DESTROY_FN,
+            )
+            .expect("register the static Webex plugin");
+        let secrets = Arc::new(sync_engine::test_support::FakeSecrets::default());
+        (
+            AdapterRegistry::new(manager, Arc::clone(&secrets) as Arc<dyn SecretStore>),
+            secrets,
+        )
+    }
+
+    /// A videoconference account contributes a read-only calendar of its own
+    /// meetings — the one that makes a meeting created in the provider's web UI
+    /// visible at all (`vc_calendar`).
+    ///
+    /// Asked of the REAL plugin on purpose: the calendar exists only when the
+    /// adapter can enumerate its meetings, and for a plugin that is decided by
+    /// whether it exports the `list_meetings` vtable slot. Nothing short of the
+    /// shipped library can answer that.
+    #[test]
+    fn a_videoconference_account_brings_its_meetings_calendar() {
+        let db = DbHandle::open_in_memory().expect("in-memory db");
+        let shared = db.shared();
+        let repo = AccountsRepo::new(&shared);
+        let (registry, secrets) = webex_registry();
+
+        let account = repo
+            .create(
+                AdapterKind::new("webex"),
+                "Webex",
+                &serde_json::json!({ "client_id": "cid", "site_url": Value::Null }).to_string(),
+            )
+            .expect("create the account");
+        secrets
+            .store(
+                &account.id,
+                sync_engine::SecretSlot::OauthClientSecret,
+                "shh",
+            )
+            .expect("store the client secret");
+        secrets
+            .store(&account.id, sync_engine::SecretSlot::RefreshToken, "RT")
+            .expect("store the refresh token");
+
+        registry.register(&account).expect("register the account");
+
+        let adapter = cal_adapter(&registry, &account.id)
+            .expect("a videoconference account contributes a calendar");
+        let cals = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime")
+            .block_on(adapter.list_calendars())
+            .expect("listing the meetings calendar touches no network");
+        assert_eq!(cals.len(), 1, "one calendar, for this account's meetings");
+        assert_eq!(cals[0].name, "Webex", "named after the account");
+        assert!(cals[0].read_only, "it shows what exists at the provider");
+    }
+
     // ── host-key pins ──────────────────────────────────────────────────────
 
     fn pin_schema() -> plugin_core::account_schema::AccountSchema {
