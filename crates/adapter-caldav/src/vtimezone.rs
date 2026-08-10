@@ -237,7 +237,14 @@ fn is_dst(tz: &Tz, utc: NaiveDateTime) -> bool {
 }
 
 fn abbreviation(tz: &Tz, utc: NaiveDateTime) -> String {
-    tz.offset_from_utc_datetime(&utc).abbreviation().to_string()
+    // chrono-tz 0.10 returns `Option<&str>`: a zone can have no abbreviation at
+    // all (several do — the numeric-offset ones). The empty string is what an
+    // absent TZNAME means to the caller, which writes the property only when it
+    // has something to write.
+    tz.offset_from_utc_datetime(&utc)
+        .abbreviation()
+        .unwrap_or_default()
+        .to_string()
 }
 
 fn midyear(year: i32) -> Option<NaiveDateTime> {

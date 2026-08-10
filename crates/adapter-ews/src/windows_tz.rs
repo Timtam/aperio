@@ -9,6 +9,19 @@
 //! commonly-used zones. It is intentionally not exhaustive: an unmapped Windows
 //! name resolves to `None`, and the event then expands in UTC (the prior
 //! behaviour), never worse. Extend the table as needed.
+//!
+//! ## The two directions are not the same mapping
+//!
+//! Windows to IANA is one-to-one: each Windows id has one default territory.
+//! IANA to Windows is MANY-to-one, and that asymmetry was a real bug. The
+//! reverse lookup used to search the table below, which stores only the
+//! default member, so Vienna, Zurich, Amsterdam, Stockholm, Madrid, Brussels,
+//! Rome, Copenhagen, Oslo, Lisbon and Dublin all resolved to `None` — and
+//! `mapping.rs` then wrote the appointment to Exchange with NO time zone at
+//! all. Half of Europe, silently, on every create and update.
+//!
+//! So the write direction has its own table of the CLDR MEMBERS that share a
+//! Windows id. It only needs the names a device is likely to report.
 
 /// (Windows zone id, primary IANA zone) pairs, grouped loosely by region.
 const WINDOWS_IANA: &[(&str, &str)] = &[
@@ -137,13 +150,113 @@ pub fn windows_to_iana(windows: &str) -> Option<&'static str> {
         .map(|(_, iana)| *iana)
 }
 
+/// The OTHER CLDR members of a Windows zone — the ones the table above does
+/// not store, because it keeps one default territory each.
+///
+/// Only the write direction needs these, and only for names a device actually
+/// reports: `Intl.DateTimeFormat().resolvedOptions().timeZone` on a machine in
+/// Vienna says `Europe/Vienna`, never `Europe/Berlin`.
+const IANA_MEMBERS: &[(&str, &str)] = &[
+    // UTC spellings that are not the canonical one.
+    ("Etc/GMT", "UTC"),
+    ("Etc/Universal", "UTC"),
+    ("Etc/Zulu", "UTC"),
+    ("UTC", "UTC"),
+    // GMT Standard Time — the British Isles, Portugal, the Atlantic isles.
+    ("Europe/Dublin", "GMT Standard Time"),
+    ("Europe/Lisbon", "GMT Standard Time"),
+    ("Europe/Guernsey", "GMT Standard Time"),
+    ("Europe/Isle_of_Man", "GMT Standard Time"),
+    ("Europe/Jersey", "GMT Standard Time"),
+    ("Atlantic/Canary", "GMT Standard Time"),
+    ("Atlantic/Faroe", "GMT Standard Time"),
+    ("Atlantic/Madeira", "GMT Standard Time"),
+    // W. Europe Standard Time — Germany's neighbours and the Alpine states.
+    ("Europe/Amsterdam", "W. Europe Standard Time"),
+    ("Europe/Andorra", "W. Europe Standard Time"),
+    ("Europe/Gibraltar", "W. Europe Standard Time"),
+    ("Europe/Luxembourg", "W. Europe Standard Time"),
+    ("Europe/Malta", "W. Europe Standard Time"),
+    ("Europe/Monaco", "W. Europe Standard Time"),
+    ("Europe/Oslo", "W. Europe Standard Time"),
+    ("Europe/Rome", "W. Europe Standard Time"),
+    ("Europe/San_Marino", "W. Europe Standard Time"),
+    ("Europe/Stockholm", "W. Europe Standard Time"),
+    ("Europe/Vaduz", "W. Europe Standard Time"),
+    ("Europe/Vatican", "W. Europe Standard Time"),
+    ("Europe/Vienna", "W. Europe Standard Time"),
+    ("Europe/Zurich", "W. Europe Standard Time"),
+    ("Europe/Busingen", "W. Europe Standard Time"),
+    ("Arctic/Longyearbyen", "W. Europe Standard Time"),
+    // Romance Standard Time.
+    ("Europe/Brussels", "Romance Standard Time"),
+    ("Europe/Copenhagen", "Romance Standard Time"),
+    ("Europe/Madrid", "Romance Standard Time"),
+    ("Africa/Ceuta", "Romance Standard Time"),
+    // Central Europe Standard Time.
+    ("Europe/Bratislava", "Central Europe Standard Time"),
+    ("Europe/Ljubljana", "Central Europe Standard Time"),
+    ("Europe/Podgorica", "Central Europe Standard Time"),
+    ("Europe/Prague", "Central Europe Standard Time"),
+    ("Europe/Tirane", "Central Europe Standard Time"),
+    ("Europe/Belgrade", "Central Europe Standard Time"),
+    // Central European Standard Time.
+    ("Europe/Sarajevo", "Central European Standard Time"),
+    ("Europe/Skopje", "Central European Standard Time"),
+    ("Europe/Zagreb", "Central European Standard Time"),
+    // FLE Standard Time — the Baltics, Finland, Ukraine, Bulgaria.
+    ("Europe/Helsinki", "FLE Standard Time"),
+    ("Europe/Mariehamn", "FLE Standard Time"),
+    ("Europe/Riga", "FLE Standard Time"),
+    ("Europe/Sofia", "FLE Standard Time"),
+    ("Europe/Tallinn", "FLE Standard Time"),
+    ("Europe/Vilnius", "FLE Standard Time"),
+    // `Europe/Kiev` became `Europe/Kyiv` in tzdata 2022b. The table above
+    // stores the old spelling because every runtime still resolves it; a
+    // device on current data reports the new one.
+    ("Europe/Kyiv", "FLE Standard Time"),
+    // GTB Standard Time.
+    ("Europe/Athens", "GTB Standard Time"),
+    ("Asia/Nicosia", "GTB Standard Time"),
+    ("Europe/Nicosia", "GTB Standard Time"),
+    // Greenwich Standard Time — West Africa, on UTC without DST.
+    ("Africa/Abidjan", "Greenwich Standard Time"),
+    ("Africa/Accra", "Greenwich Standard Time"),
+    ("Africa/Dakar", "Greenwich Standard Time"),
+    ("Atlantic/St_Helena", "Greenwich Standard Time"),
+    // North America.
+    ("America/Detroit", "Eastern Standard Time"),
+    ("America/Toronto", "Eastern Standard Time"),
+    ("America/Nassau", "Eastern Standard Time"),
+    ("America/Iqaluit", "Eastern Standard Time"),
+    ("America/Winnipeg", "Central Standard Time"),
+    ("America/Matamoros", "Central Standard Time"),
+    ("America/Boise", "Mountain Standard Time"),
+    ("America/Edmonton", "Mountain Standard Time"),
+    ("America/Vancouver", "Pacific Standard Time"),
+    ("America/Tijuana", "Pacific Standard Time"),
+    // Asia and the Pacific.
+    ("Asia/Hong_Kong", "China Standard Time"),
+    ("Asia/Macau", "China Standard Time"),
+    ("Australia/Melbourne", "AUS Eastern Standard Time"),
+];
+
 /// Translate an IANA zone to a Windows zone id for writing back to EWS, or
 /// `None` when there's no mapping (then we omit the zone rather than guess).
+///
+/// Checks the default-territory table first, then the other CLDR members —
+/// see the module docs for why the write direction needs its own table.
 pub fn iana_to_windows(iana: &str) -> Option<&'static str> {
     WINDOWS_IANA
         .iter()
         .find(|(_, i)| i.eq_ignore_ascii_case(iana))
         .map(|(w, _)| *w)
+        .or_else(|| {
+            IANA_MEMBERS
+                .iter()
+                .find(|(i, _)| i.eq_ignore_ascii_case(iana))
+                .map(|(_, w)| *w)
+        })
 }
 
 #[cfg(test)]
@@ -168,6 +281,56 @@ mod tests {
         assert_eq!(
             iana_to_windows("Europe/Berlin"),
             Some("W. Europe Standard Time")
+        );
+    }
+
+    #[test]
+    fn the_write_direction_covers_the_other_members_of_a_windows_zone() {
+        // The bug this pins down: each of these is a CLDR member of a Windows
+        // zone whose DEFAULT member is another city, so the reverse lookup over
+        // the one-to-one table returned None — and `mapping.rs` then wrote the
+        // appointment to Exchange with no time zone at all.
+        for (iana, windows) in [
+            ("Europe/Vienna", "W. Europe Standard Time"),
+            ("Europe/Zurich", "W. Europe Standard Time"),
+            ("Europe/Amsterdam", "W. Europe Standard Time"),
+            ("Europe/Stockholm", "W. Europe Standard Time"),
+            ("Europe/Rome", "W. Europe Standard Time"),
+            ("Europe/Oslo", "W. Europe Standard Time"),
+            ("Europe/Madrid", "Romance Standard Time"),
+            ("Europe/Brussels", "Romance Standard Time"),
+            ("Europe/Copenhagen", "Romance Standard Time"),
+            ("Europe/Lisbon", "GMT Standard Time"),
+            ("Europe/Dublin", "GMT Standard Time"),
+            ("Europe/Prague", "Central Europe Standard Time"),
+            ("Europe/Helsinki", "FLE Standard Time"),
+            ("Europe/Athens", "GTB Standard Time"),
+            ("America/Toronto", "Eastern Standard Time"),
+            ("America/Vancouver", "Pacific Standard Time"),
+        ] {
+            assert_eq!(iana_to_windows(iana), Some(windows), "{iana}");
+        }
+    }
+
+    #[test]
+    fn the_renamed_ukrainian_zone_resolves_under_both_spellings() {
+        // tzdata 2022b renamed Europe/Kiev to Europe/Kyiv; a current runtime
+        // reports the new name, the table stores the old one.
+        assert_eq!(iana_to_windows("Europe/Kiev"), Some("FLE Standard Time"));
+        assert_eq!(iana_to_windows("Europe/Kyiv"), Some("FLE Standard Time"));
+    }
+
+    #[test]
+    fn a_default_member_still_wins_over_the_member_table() {
+        // Both tables are consulted; the default-territory one answers first,
+        // so a zone that is in both keeps its own Windows id.
+        assert_eq!(
+            iana_to_windows("Europe/Berlin"),
+            Some("W. Europe Standard Time")
+        );
+        assert_eq!(
+            iana_to_windows("Europe/Paris"),
+            Some("Romance Standard Time")
         );
     }
 

@@ -690,6 +690,7 @@ fn occurrence_triggers(
             master_start,
             &rec.rrule,
             &rec.exceptions,
+            rec.tzid.as_deref(),
             window_start,
             window_end,
         ),
@@ -746,10 +747,17 @@ fn occurrence_triggers(
 ///     occurrence — same fall-through the JS expansion uses.
 ///   - `RRULESET_LIMIT` caps unbounded series (e.g. "weekly
 ///     forever") so a runaway rule can't allocate gigabytes.
+///   - `tzid` is the zone the series was AUTHORED in, and it decides the
+///     wall-clock the rule repeats at. Expanding in UTC instead is right only
+///     for a floating or UTC series; for a zoned one the occurrences drift by
+///     the DST offset the moment the series crosses a transition — an hour,
+///     and near midnight a whole day. `cal_core::EventRecurrence::tzid`
+///     documents exactly that, and this function used to ignore it.
 fn expand_occurrences(
     dt_start_utc: DateTime<Utc>,
     rrule_body: &str,
     exceptions: &[DateTime<Utc>],
+    tzid: Option<&str>,
     start_bound: DateTime<Utc>,
     end_bound: DateTime<Utc>,
 ) -> Vec<DateTime<Utc>> {
@@ -768,7 +776,24 @@ fn expand_occurrences(
         }
     };
 
-    let dt_start = dt_start_utc.with_timezone(&RruleTz::UTC);
+    // The zone the rule repeats in. An unknown name degrades to UTC — the
+    // previous behaviour for everything — rather than dropping the series.
+    let zone = tzid
+        .map(str::trim)
+        .filter(|z| !z.is_empty())
+        .and_then(|z| match z.parse::<chrono_tz::Tz>() {
+            Ok(tz) => Some(RruleTz::Tz(tz)),
+            Err(_) => {
+                warn!(tzid = %z, "unknown TZID on a recurring event; expanding reminders in UTC");
+                None
+            }
+        })
+        .unwrap_or(RruleTz::UTC);
+    // DTSTART carries the zone: rrule repeats at ITS wall clock, so a weekly
+    // 09:00 series stays 09:00 across the DST boundary instead of sliding to
+    // 08:00 or 10:00. The bounds and EXDATEs stay instants — they are compared,
+    // not repeated, and an instant means the same moment in any zone.
+    let dt_start = dt_start_utc.with_timezone(&zone);
     let validated = match unvalidated.validate(dt_start) {
         Ok(v) => v,
         Err(err) => {
@@ -1180,7 +1205,73 @@ fn format_task_body(due: &DateTime<Utc>) -> String {
 mod tests {
     use super::*;
     use cal_core::{EventRecurrence, Reminder, ReminderKind, Task, TaskStatus, TaskUser};
-    use chrono::{NaiveDate, NaiveTime};
+    use chrono::{Datelike, NaiveDate, NaiveTime, Timelike};
+
+    /// A zoned weekly series keeps its WALL CLOCK across a DST boundary.
+    ///
+    /// The bug this pins down: the expansion pinned DTSTART to UTC and threw
+    /// `tzid` away, so a series authored at 09:00 Berlin in winter fired its
+    /// summer occurrences at 08:00 local — every reminder an hour early, and
+    /// near midnight a day out. `EventRecurrence::tzid` documents exactly that,
+    /// and nothing honoured it.
+    #[test]
+    fn a_zoned_series_keeps_its_wall_clock_across_dst() {
+        // 09:00 Europe/Berlin on a winter Monday is 08:00 UTC (UTC+1).
+        let winter = Utc.with_ymd_and_hms(2026, 1, 5, 8, 0, 0).unwrap();
+        let occurrences = expand_occurrences(
+            winter,
+            "FREQ=WEEKLY;COUNT=30",
+            &[],
+            Some("Europe/Berlin"),
+            winter,
+            Utc.with_ymd_and_hms(2026, 12, 31, 0, 0, 0).unwrap(),
+        );
+        // A summer Monday: 09:00 Berlin is 07:00 UTC (UTC+2). Pinned to UTC the
+        // expansion would put it at 08:00 UTC, i.e. 10:00 local.
+        let july = occurrences
+            .iter()
+            .find(|o| o.month() == 7)
+            .expect("the series reaches July");
+        assert_eq!(july.hour(), 7, "summer occurrence should be 07:00 UTC");
+        // …and the winter ones are untouched.
+        assert_eq!(occurrences[0].hour(), 8);
+    }
+
+    /// A series with no zone still expands, in UTC, exactly as before.
+    #[test]
+    fn a_floating_series_expands_in_utc() {
+        let start = Utc.with_ymd_and_hms(2026, 1, 5, 8, 0, 0).unwrap();
+        let occurrences = expand_occurrences(
+            start,
+            "FREQ=WEEKLY;COUNT=30",
+            &[],
+            None,
+            start,
+            Utc.with_ymd_and_hms(2026, 12, 31, 0, 0, 0).unwrap(),
+        );
+        let july = occurrences
+            .iter()
+            .find(|o| o.month() == 7)
+            .expect("the series reaches July");
+        assert_eq!(july.hour(), 8);
+    }
+
+    /// An unreadable zone degrades to UTC rather than dropping the series —
+    /// the behaviour everything had before the zone was honoured at all.
+    #[test]
+    fn an_unknown_zone_falls_back_to_utc() {
+        let start = Utc.with_ymd_and_hms(2026, 1, 5, 8, 0, 0).unwrap();
+        let occurrences = expand_occurrences(
+            start,
+            "FREQ=WEEKLY;COUNT=4",
+            &[],
+            Some("Mars/Olympus_Mons"),
+            start,
+            Utc.with_ymd_and_hms(2026, 3, 1, 0, 0, 0).unwrap(),
+        );
+        assert_eq!(occurrences.len(), 4);
+        assert!(occurrences.iter().all(|o| o.hour() == 8));
+    }
 
     fn user(id: &str) -> TaskUser {
         TaskUser {

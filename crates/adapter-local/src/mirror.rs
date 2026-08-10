@@ -147,26 +147,47 @@ impl LocalFsSyncAdapter {
         result
     }
 
-    /// Atomic write of `bytes` to `path`. Write to a sibling
-    /// `.tmp`, then rename over the destination. Rename within
-    /// the same filesystem is atomic.
+    /// Atomic write of `bytes` to `path`. Write to a sibling temp file, then
+    /// rename over the destination. Rename within the same filesystem is
+    /// atomic.
+    ///
+    /// The temp name carries a fresh id per write, and that is the whole point.
+    /// It used to be derived from the destination alone — one fixed
+    /// `meta.json.tmp` — while this module's own docs name a shared network
+    /// share, and two instances pointed at one path, as first-class uses. Two
+    /// writers then truncated and interleaved into the SAME temp file before
+    /// either renamed, and the file that survived was neither writer's: a
+    /// torn `meta.json` that no device wrote and none can read back.
+    ///
+    /// A per-write name cannot prevent the second rename from winning — that is
+    /// last-writer-wins, which the sync protocol already expects — but each
+    /// rename now publishes a file exactly one writer produced.
     async fn atomic_write(path: &Path, bytes: &[u8]) -> SyncResult<()> {
+        let unique = uuid::Uuid::new_v4();
         let tmp = path.with_extension(match path.extension() {
-            Some(ext) => format!("{}.tmp", ext.to_string_lossy()),
-            None => "tmp".to_string(),
+            Some(ext) => format!("{}.{unique}.tmp", ext.to_string_lossy()),
+            None => format!("{unique}.tmp"),
         });
         {
             let mut file = fs::OpenOptions::new()
-                .create(true)
+                // `create_new`, not `create`: with a fresh id a collision means
+                // something is wrong, and clobbering it would be the very bug
+                // this is here to stop.
+                .create_new(true)
                 .write(true)
-                .truncate(true)
                 .open(&tmp)
                 .await?;
             file.write_all(bytes).await?;
             file.flush().await?;
             file.sync_data().await.ok();
         }
-        fs::rename(&tmp, path).await?;
+        // A failed rename would otherwise leave the temp file behind for ever —
+        // with a fixed name the next write reused it, with a fresh one it would
+        // accumulate.
+        if let Err(err) = fs::rename(&tmp, path).await {
+            let _ = fs::remove_file(&tmp).await;
+            return Err(err.into());
+        }
         Ok(())
     }
 }
