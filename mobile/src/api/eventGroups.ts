@@ -4,7 +4,7 @@
 // Nothing here reaches a provider: grouping two events changes neither of
 // them, and ungrouping leaves both exactly as they were.
 
-import type { EventGroup } from '@aperio/shared';
+import type { EventGroup, SuggestionDecline } from '@aperio/shared';
 
 import CalFfi from '../../modules/cal-ffi';
 
@@ -70,3 +70,17 @@ export const healEventGroupMember = (payload: {
     payload.old_event_id,
     payload.new_event_id,
   );
+
+/** Record that two events are NOT the same appointment.
+ *
+ *  Silences the OFFER only — grouping them by hand still works and never
+ *  consults this. */
+export const declineGroupSuggestion = (
+  first: { calendar_id: string; event_id: string },
+  second: { calendar_id: string; event_id: string },
+): Promise<void> =>
+  CalFfi.declineGroupSuggestionJson(JSON.stringify(first), JSON.stringify(second));
+
+/** Every pair the user has said is not one appointment. */
+export const groupSuggestionDeclines = async (): Promise<SuggestionDecline[]> =>
+  JSON.parse(await CalFfi.groupSuggestionDeclinesJson()) as SuggestionDecline[];

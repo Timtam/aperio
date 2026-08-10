@@ -85,6 +85,7 @@ import {
   healEventGroupMember,
 } from '../api/eventGroups';
 import { ActionsMenu, type MenuAction } from './ActionsMenu';
+import { GroupSuggestionNotice } from './GroupSuggestionNotice';
 import { useCacheReload } from '../state/cacheObserver';
 import { hapticLoadBegin, hapticLoadEnd } from '../state/haptics';
 import { useCalendarVisibility } from '../state/calendarVisibility';
@@ -1728,6 +1729,18 @@ export function CalendarDayList({
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
         >
+          {/* Above the days, and only when there is something to ask: the whole
+              proactive surface of event groups is one dismissible row. The
+              single-day surfaces are where a duplicate is actually noticed;
+              multi-day views would ask about a day the user is not reading. */}
+          {dayLayout != null && buckets.length === 1 && (
+            <GroupSuggestionNotice
+              events={visibleEvents}
+              groups={eventGroups}
+              calendars={calendars}
+              onChanged={() => void load()}
+            />
+          )}
           {buckets.map((b) => {
             // Single-day paths. Gated on the explicit `dayLayout` prop, which
             // ONLY the single-day caller (EventsScreen) passes — multi-day

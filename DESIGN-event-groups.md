@@ -167,9 +167,19 @@ Migration gekostet, für etwas, das die Abfrage beantwortet, und hätte entschei
 müssen, was beim Auflösen der Gruppe mit dem Meeting geschieht — danach hat
 niemand gefragt.
 
-Offen bleibt das Vorschlagen von sich aus (ein Hinweis in der Ansicht, „einmal
-bestätigt, dauerhaft gemerkt") — das braucht eine Ablage für abgelehnte
-Vorschläge, also eine weitere Migration.
+Das **Vorschlagen von sich aus** ist gebaut: EINE Zeile über dem Tag, nur wenn
+es etwas zu fragen gibt, mit zwei endgültigen Antworten — „Ja, eine Verabredung"
+gruppiert, „Nein, nicht dasselbe" wird gemerkt (Migration 0037) und das Paar nie
+wieder angeboten, auf keinem Gerät, weil der Vermerk synchronisiert.
+
+Die Größe ist der Punkt: Ein Angebot, das man nicht endgültig loswird, ist eine
+tägliche Störung — für einen Screenreader-Nutzer jeden Morgen eine Zeile mehr,
+bevor der eigentliche Tag beginnt. Kann die Ablehnungsliste nicht gelesen
+werden, bleibt die Zeile **stumm**: ein bereits abgelehntes Paar erneut
+anzubieten ist der eine Fehler, den diese Funktion nicht machen darf.
+
+Angeboten wird nur auf den EINTÄGIGEN Oberflächen. In Woche und Monat würde die
+Frage einen Tag betreffen, den der Nutzer gerade nicht liest.
 
 ## Größenordnung
 

@@ -1920,6 +1920,15 @@
     "allDay": "Ganztags",
     "multiDayCompact": "({{day}}/{{total}})",
     "multiDaySuffix": ", Tag {{day}} von {{total}}",
+    "groupSuggestion": {
+      "title": "Möglicher Doppelter",
+      "message": "„{{title}}“ liegt zur selben Zeit in {{first}} und in {{second}}. Dieselbe Verabredung?",
+      "accept": "Ja, eine Verabredung",
+      "refuse": "Nein, nicht dasselbe",
+      "grouped": "„{{title}}“ ist jetzt eine Verabredung.",
+      "declined": "Notiert. Dieses Paar wird nicht wieder vorgeschlagen.",
+      "failed": "Das hat nicht geklappt. Es wurde nichts geändert."
+    },
     "eventGroupSuffix_one": ", ein Termin mit {{count}} weiteren, in {{calendars}}",
     "eventGroupSuffix_other": ", ein Termin mit {{count}} weiteren, in {{calendars}}",
     "eventGroupDivergedSuffix_one": ", gruppiert mit {{count}} weiteren Termin, der jetzt zu einer anderen Zeit liegt",

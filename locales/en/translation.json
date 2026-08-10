@@ -1920,6 +1920,15 @@
     "allDay": "All day",
     "multiDayCompact": "({{day}}/{{total}})",
     "multiDaySuffix": ", day {{day}} of {{total}}",
+    "groupSuggestion": {
+      "title": "Possible duplicate",
+      "message": "\"{{title}}\" is in {{first}} and in {{second}} at the same time. The same appointment?",
+      "accept": "Yes, one appointment",
+      "refuse": "No, not the same",
+      "grouped": "\"{{title}}\" is now one appointment.",
+      "declined": "Noted. This pair will not be suggested again.",
+      "failed": "That did not work. Nothing was changed."
+    },
     "eventGroupSuffix_one": ", one appointment with {{count}} other, in {{calendars}}",
     "eventGroupSuffix_other": ", one appointment with {{count}} others, in {{calendars}}",
     "eventGroupDivergedSuffix_one": ", grouped with {{count}} other event, which is now at a different time",

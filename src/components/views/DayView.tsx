@@ -60,6 +60,7 @@ import { useTaskCascadeEnabled } from '../../state/taskCascadeContext';
 import { duplicateEvent } from '../duplicateActions';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
+import { GroupSuggestionNotice } from '../GroupSuggestionNotice';
 import {
   addEventExdate,
   deleteEventById,
@@ -836,6 +837,9 @@ export function DayView() {
 
   return (
     <section className="view view--day" aria-label={fmt.format(anchor, 'PPPP')}>
+      {/* Above the day, and only when there is something to ask: the whole
+          proactive surface of event groups is one dismissible row. */}
+      <GroupSuggestionNotice events={eventsToday} groups={groups} />
       <header className="view__header">
         <h2 aria-current={isToday ? 'date' : undefined}>
           {fmt.format(anchor, 'PPPP')}

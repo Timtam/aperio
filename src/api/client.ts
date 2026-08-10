@@ -632,7 +632,11 @@ export type {
   AccountFormOauth,
   AccountFormSpec,
 } from '@aperio/shared';
-import type { AccountFormSpec, EventGroup } from '@aperio/shared';
+import type {
+  AccountFormSpec,
+  EventGroup,
+  SuggestionDecline,
+} from '@aperio/shared';
 
 /** One adapter this build can connect an account for. */
 export interface AdapterKindInfo {
@@ -800,6 +804,19 @@ export const ungroupEvent = (calendar_id: string, event_id: string) =>
 /** Dissolve a whole group. The events themselves are untouched. */
 export const dissolveEventGroup = (group_id: string) =>
   invoke<void>('dissolve_event_group', { groupId: group_id });
+
+/** Record that two events are NOT the same appointment.
+ *
+ *  Silences the OFFER only — grouping them by hand still works and never
+ *  consults this. */
+export const declineGroupSuggestion = (
+  first: { calendar_id: string; event_id: string },
+  second: { calendar_id: string; event_id: string },
+) => invoke<void>('decline_group_suggestion', { first, second });
+
+/** Every pair the user has said is not one appointment. */
+export const groupSuggestionDeclines = () =>
+  invoke<SuggestionDecline[]>('group_suggestion_declines');
 
 /** Point one member at the id its event carries now.
  *

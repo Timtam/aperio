@@ -444,6 +444,14 @@ class CalFfiModule : Module() {
       host.eventGroupsForEventsJson(eventsJson)
     }
 
+    AsyncFunction("declineGroupSuggestionJson") { firstJson: String, secondJson: String ->
+      host.declineGroupSuggestionJson(firstJson, secondJson)
+    }
+
+    AsyncFunction("groupSuggestionDeclinesJson") { ->
+      host.groupSuggestionDeclinesJson()
+    }
+
     AsyncFunction("healEventGroupMember") {
       groupId: String, calendarId: String, oldEventId: String, newEventId: String ->
       host.healEventGroupMember(groupId, calendarId, oldEventId, newEventId)
