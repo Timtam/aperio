@@ -73,6 +73,25 @@ describe('collapsing groups into one row', () => {
     expect(rows[0].calendarIds).toEqual(['work', 'private', 'colleague']);
   });
 
+  it('folds two spellings of the SAME instant', () => {
+    // The bug an adversarial review found: `expandAll` rewrites a recurring
+    // occurrence through toISOString() while a one-off keeps the backend's own
+    // serialisation. Compared as strings those look like two different times,
+    // so a series grouped with a single event never folded — and BOTH copies
+    // announced "which is now at a different time", every day.
+    const rows = collapseEventGroups(
+      [
+        row('ev-a', 'work', '2026-08-10T08:00:00.000Z'),
+        row('ev-b', 'private', '2026-08-10T08:00:00Z'),
+      ],
+      [group('g1', [['work', 'ev-a'], ['private', 'ev-b']])],
+      seriesId,
+    );
+
+    expect(rows.map((r) => r.event.id)).toEqual(['ev-a']);
+    expect(rows[0].diverged).toBe(false);
+  });
+
   it('refuses to fold a group whose copies have drifted apart', () => {
     // One copy was moved and the others were not, so the group is a claim
     // that has stopped being true. Folding would hide exactly the problem.

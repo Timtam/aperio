@@ -86,14 +86,29 @@ export function findHealableMembers<E extends HealableEvent>(
       if (!inRange(member)) continue;
       const wantedTitle = normalizeTitle(member.title);
       if (wantedTitle === '') continue;
-      const replacement = eventsInRange.find((ev) => {
+      // Every candidate, not the first: a calendar can hold two events with
+      // the same name at the same time, and picking one of them would send the
+      // group to an appointment nobody pointed it at — silently, since the
+      // repair says nothing. Ambiguity therefore heals NOTHING; the group
+      // keeps a member it cannot resolve, which is visible and fixable, rather
+      // than gaining one that is wrong and is not.
+      const matches = eventsInRange.filter((ev) => {
         if (ev.calendar_id !== member.calendar_id) return false;
         if (normalizeTitle(ev.title) !== wantedTitle) return false;
-        // The member's stored start is an instant; an all-day event's own
-        // start is a date. Compare on the same footing as the event.
+        // Compared on the candidate's own footing: an all-day event agrees on
+        // the DAY, a timed one on the instant.
+        //
+        // KNOWN LIMIT: a member's signature cannot say whether IT was all-day
+        // — `Event.start` is an instant either way — so a timed member could in
+        // principle match an all-day event on the same day. The uniqueness rule
+        // above contains it: that only bites when the day holds exactly one
+        // event with the same name, and it is all-day. Closing it properly
+        // means widening the signature, which is a migration for a case nobody
+        // has hit.
         return whenKey(ev.start, ev.all_day) === whenKey(member.starts_at, ev.all_day);
       });
-      if (!replacement) continue;
+      if (matches.length !== 1) continue;
+      const replacement = matches[0];
       const newId = seriesId(replacement);
       // Already a member under the new id (both rows are in the group) —
       // nothing to rewrite, and rewriting would collide.

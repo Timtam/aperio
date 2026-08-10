@@ -101,6 +101,25 @@ describe('carrying an edit to the other copies', () => {
     expect(worthCarrying(plan)).toBe(false);
   });
 
+  it('does not call a re-serialised start a change', () => {
+    // The editor rebuilds start/end through `toIso`, which is not the spelling
+    // the backend sent. Compared as strings, EVERY save looked like a move: a
+    // reminder-only edit asked to carry, and carrying rewrote start and end
+    // onto every copy.
+    const plan = planCarry(
+      group,
+      anchor,
+      fields({ start: '2026-08-10T08:00:00Z', end: '2026-08-10T09:00:00Z' }),
+      fields({
+        start: '2026-08-10T08:00:00.000Z',
+        end: '2026-08-10T09:00:00.000Z',
+      }),
+      writable,
+      titleOf,
+    );
+    expect(plan.changed).toEqual([]);
+  });
+
   it('treats empty and absent as the same value', () => {
     // Providers disagree about which they return for a field nobody filled
     // in; a null-to-empty flip is not a change anyone made.

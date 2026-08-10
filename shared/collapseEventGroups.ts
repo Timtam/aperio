@@ -46,8 +46,21 @@ export interface CollapsedRow<E> {
   diverged: boolean;
 }
 
+/** The moment, as an INSTANT rather than as the string it arrived in.
+ *
+ *  The same instant reaches this module spelled two ways: `expandAll` rewrites
+ *  every recurring occurrence through `toISOString()` ("…T08:00:00.000Z")
+ *  while a one-off passes through with the backend's own serialisation
+ *  ("…T08:00:00Z"), and some providers add sub-second precision. Comparing the
+ *  raw strings made a series grouped with a single event permanently
+ *  "diverged": it never folded, and BOTH copies announced "which is now at a
+ *  different time" — every day, for two events at the identical instant. The
+ *  sibling modules (`suggestGroupMate`, `groupSuggestions`, `healEventGroups`)
+ *  all normalise for this reason; this one did not. */
 function startKey(event: CollapsibleEvent): string {
-  return event.all_day ? `day:${(event.start ?? '').slice(0, 10)}` : `at:${event.start ?? ''}`;
+  if (event.all_day) return `day:${(event.start ?? '').slice(0, 10)}`;
+  const at = new Date(event.start ?? '').getTime();
+  return `at:${Number.isFinite(at) ? at : (event.start ?? '')}`;
 }
 
 /**

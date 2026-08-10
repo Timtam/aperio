@@ -72,6 +72,19 @@ function same(a: unknown, b: unknown): boolean {
   return norm(a) === norm(b);
 }
 
+/** The same, for the two fields that are INSTANTS.
+ *
+ *  The editor rebuilds start/end through `toIso`, which is not the spelling the
+ *  backend sent ("…T08:00:00.000Z" vs "…T08:00:00Z"). Compared as strings, every
+ *  save looked like it had moved the appointment — so a reminder-only edit asked
+ *  to carry, and carrying rewrote start and end onto every copy. */
+function sameInstant(a: string, b: string): boolean {
+  const at = new Date(a).getTime();
+  const bt = new Date(b).getTime();
+  if (Number.isFinite(at) && Number.isFinite(bt)) return at === bt;
+  return same(a, b);
+}
+
 /**
  * What carrying this edit to the group's other copies would do.
  *
@@ -91,7 +104,11 @@ export function planCarry(
   isWritable: (calendarId: string) => boolean,
   titleOf: (calendarId: string, eventId: string) => string,
 ): CarryPlan {
-  const changed = CARRIED.filter((field) => !same(before[field], after[field]));
+  const changed = CARRIED.filter((field) =>
+    field === 'start' || field === 'end'
+      ? !sameInstant(String(before[field]), String(after[field]))
+      : !same(before[field], after[field]),
+  );
   const anchorKey = eventGroupMemberKey(anchor.calendar_id, anchor.event_id);
   const targets: CarryTarget[] = [];
   const skipped: CarryTarget[] = [];

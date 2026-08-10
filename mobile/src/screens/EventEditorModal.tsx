@@ -366,6 +366,15 @@ export default function EventEditorModal({
           (_cal, ev) => ev,
         );
         if (!worthCarrying(plan)) return false;
+        // The carry screen lives on the CALENDAR stack only. The editor is
+        // also reachable from Tasks and Settings (search results, a task's
+        // linked event), and replacing with a route this navigator does not
+        // have would strand the user in an editor that will not close. Ask
+        // first; when it is not there, the save simply stands on its own.
+        const reachable = navigation
+          .getState()
+          ?.routeNames?.includes('EventGroupCarry');
+        if (!reachable) return false;
         navigation.replace('EventGroupCarry', {
           group,
           anchor,

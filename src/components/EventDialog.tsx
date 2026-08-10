@@ -260,7 +260,7 @@ export function EventDialog({
       next: CalendarEvent,
       scope: CarryScope = 'series',
       occurrence?: string | null,
-    ) => {
+    ): Promise<boolean> => {
       const fieldsOf = (ev: CalendarEvent): CarryableFields => ({
         title: ev.title,
         start: ev.start,
@@ -274,7 +274,7 @@ export function EventDialog({
           { calendar_id: saved.calendar_id, event_id: seriesIdOf(saved) },
         ]);
         const group = groups[0];
-        if (!group) return;
+        if (!group) return false;
         const anchor = {
           calendar_id: saved.calendar_id,
           event_id: seriesIdOf(saved),
@@ -292,14 +292,21 @@ export function EventDialog({
           },
           (_cal, ev) => ev,
         );
-        if (!worthCarrying(plan)) return;
+        if (!worthCarrying(plan)) return false;
+        // CLOSE FIRST, then ask. The editor's own `onClose` pops the top frame,
+        // and pushing before it meant popping the question instead of the
+        // editor: the dialog never appeared and the editor stayed open — stage
+        // 2 did nothing at all on this platform.
+        onClose();
         openEventGroupCarry({ group, anchor, before, after, scope, occurrence });
+        return true;
       } catch {
         // The grouping lookup is bookkeeping beside a save that already
         // succeeded; failing it must not report the save as failed.
+        return false;
       }
     },
-    [calendars, openEventGroupCarry],
+    [calendars, onClose, openEventGroupCarry],
   );
 
 
@@ -555,6 +562,10 @@ export function EventDialog({
           targetCal?.account_id === 'local' ||
           targetCal?.supports_event_color === true;
 
+        // Whether the carry question has already taken over the dialog stack:
+        // it closes this editor itself, so closing again below would pop the
+        // question instead.
+        let carriedToGroup = false;
         if (isEdit && event) {
           const seriesId = seriesIdOf(event);
 
@@ -602,13 +613,18 @@ export function EventDialog({
             );
             // The other copies have a series each, so carrying this means
             // carving the same occurrence out of them — not updating a row.
-            await offerToCarry(
-              event,
-              overrideRow,
-              'occurrence',
-              occurrenceIsoOf(event),
-            );
-            onClose();
+            // `offerToCarry` closes the editor itself when it asks; when it
+            // stays silent nothing has closed yet.
+            if (
+              !(await offerToCarry(
+                event,
+                overrideRow,
+                'occurrence',
+                occurrenceIsoOf(event),
+              ))
+            ) {
+              onClose();
+            }
             return;
           }
 
@@ -644,8 +660,9 @@ export function EventDialog({
               announce(
                 t('dialogs.event.occurrenceUpdated', { title: trimmedTitle }),
               );
-              await offerToCarry(event, created, 'occurrence', occIso);
-              onClose();
+              if (!(await offerToCarry(event, created, 'occurrence', occIso))) {
+                onClose();
+              }
               return;
             }
           }
@@ -814,7 +831,7 @@ export function EventDialog({
           // Only for a whole-event edit: an occurrence override and a
           // series truncation each return above, because "which copy of
           // which occurrence" is a question this cannot answer yet.
-          await offerToCarry(event, updated);
+          carriedToGroup = await offerToCarry(event, updated);
         } else {
           const created = await apiCreateEvent({
             calendar_id: form.calendarId,
@@ -845,7 +862,7 @@ export function EventDialog({
           writeLastUsedCalendar(form.calendarId);
           announce(t('dialogs.event.created', { title: trimmedTitle }));
         }
-        onClose();
+        if (!carriedToGroup) onClose();
       } catch (err) {
         if (isCommandError(err)) {
           setError(`${err.code}: ${err.message}`);

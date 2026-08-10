@@ -46,7 +46,9 @@ export default function EventGroupCarryModal({
   const styles = useThemedStyles(makeStyles);
   useCancelHeader(navigation);
 
-  const [calendars, setCalendars] = useState<Calendar[]>([]);
+  // `null` until they arrive: an empty list makes every copy look read-only,
+  // and the screen would state that as fact while it simply did not know yet.
+  const [calendars, setCalendars] = useState<Calendar[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,9 +59,9 @@ export default function EventGroupCarryModal({
         if (!cancelled) setCalendars(cals);
       })
       .catch(() => {
-        // Without the calendar list nothing is known to be writable, so the
-        // plan below comes out empty and the screen says so rather than
-        // writing somewhere it should not.
+        // Still `null`, so the screen keeps saying "loading" rather than
+        // announcing every copy as read-only — which is a claim, not a
+        // fallback.
         if (!cancelled) setCalendars([]);
       });
     return () => {
@@ -68,7 +70,7 @@ export default function EventGroupCarryModal({
   }, []);
 
   const calendarName = useCallback(
-    (id: string) => calendars.find((c) => c.id === id)?.name ?? id,
+    (id: string) => calendars?.find((c) => c.id === id)?.name ?? id,
     [calendars],
   );
 
@@ -80,7 +82,7 @@ export default function EventGroupCarryModal({
         before,
         after,
         (id) => {
-          const cal = calendars.find((c) => c.id === id);
+          const cal = calendars?.find((c) => c.id === id);
           // Unknown means a calendar this device no longer holds — treated as
           // unwritable rather than tried and failed halfway through.
           return cal != null && !cal.read_only;
@@ -175,15 +177,18 @@ export default function EventGroupCarryModal({
       </Text>
 
       <Text style={styles.intro} accessibilityRole="text">
-        {t('dialogs.eventGroupCarry.message', {
+        {calendars == null
+          ? t('dialogs.eventGroup.loading')
+          : t('dialogs.eventGroupCarry.message', {
           count: plan.targets.length,
           fields: plan.changed
             .map((field) => t(`dialogs.eventGroupCarry.field.${field}`))
             .join(', '),
-        })}
+            })}
       </Text>
 
-      {plan.targets.map((target) => (
+      {calendars != null &&
+        plan.targets.map((target) => (
         <Text
           key={`${target.calendar_id} ${target.event_id}`}
           style={styles.member}

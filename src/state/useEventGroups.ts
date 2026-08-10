@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   eventGroupMemberKey,
@@ -85,10 +85,25 @@ export function useEventGroups(
    * groups are read back rather than patched locally, because the write also
    * travels to the other devices.
    */
+  // Every repair this hook has already attempted. Without it the effect feeds
+  // itself: it heals, reads the groups back, `groups` changes, the effect runs
+  // again — and a repair that CANNOT succeed (the write fails, or the arriving
+  // group still names the old id) does that forever, one round trip per turn.
+  const attempted = useRef(new Set<string>());
   useEffect(() => {
     if (range == null || groups.length === 0) return;
-    const healable = findHealableMembers(groups, events, range, seriesIdOf);
+    const healable = findHealableMembers(groups, events, range, seriesIdOf).filter(
+      (member) =>
+        !attempted.current.has(
+          `${member.group_id}\n${member.calendar_id}\n${member.old_event_id}\n${member.new_event_id}`,
+        ),
+    );
     if (healable.length === 0) return;
+    for (const member of healable) {
+      attempted.current.add(
+        `${member.group_id}\n${member.calendar_id}\n${member.old_event_id}\n${member.new_event_id}`,
+      );
+    }
     let cancelled = false;
     void (async () => {
       for (const member of healable) {
