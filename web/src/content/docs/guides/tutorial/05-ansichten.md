@@ -75,9 +75,9 @@ the deadline is:
   week-start setting puts that. **Overdue** deadlines are here too, at the very
   top.
 - **Next week**: deadlines in the following calendar week, by the same rule.
-- **Everything else**: first the deadlines further out (still **earliest
-  first**), below them the remaining backlog — tasks **without** a deadline,
-  **highest priority first**.
+- **Other**: first the deadlines further out (still **earliest first**), below
+  them the remaining backlog — tasks **without** a deadline, **highest priority
+  first**.
 
 Every open or in-progress task with a deadline appears, even one already
 scheduled onto a day, so this is your one place to see what is due soonest. Each

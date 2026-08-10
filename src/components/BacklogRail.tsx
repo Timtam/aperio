@@ -60,7 +60,7 @@ function parseDayKey(key: string): Date {
  *     here too: the date sort puts them at the very top of the whole rail, and
  *     the tail is the last place the most urgent thing belongs.
  *   - **Next week**: the calendar week after that one, same rule.
- *   - **Everything else**: the deadlines beyond next week, still by date, and
+ *   - **Other**: the deadlines beyond next week, still by date, and
  *     below them the classic priority backlog — open / in-progress, top-level
  *     tasks with no `scheduled_date` AND no deadline, not deferred, high → low.
  *
@@ -526,8 +526,12 @@ function BacklogList({
                   ↳ {parentTitle}
                 </span>
               )}
-              <span className="backlog-rail__chip-meta">
-                {due && (
+              {/* The list is NOT drawn here. A sighted reader gets the list
+                  from the chip's colour label, which is the same information
+                  in a form that costs no line; a screen reader has no colour
+                  to read, so the list stays in the aria-label above. */}
+              {due && (
+                <span className="backlog-rail__chip-meta">
                   <span
                     className={
                       'backlog-rail__chip-deadline' +
@@ -537,9 +541,8 @@ function BacklogList({
                   >
                     {due}
                   </span>
-                )}
-                <span className="backlog-rail__chip-list">{listName}</span>
-              </span>
+                </span>
+              )}
             </li>
           );
         })}

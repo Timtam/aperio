@@ -1958,7 +1958,7 @@
       "thisWeekListLabel": "Tasks due this week",
       "nextWeekHeading": "Next week ({{count}})",
       "nextWeekListLabel": "Tasks due next week",
-      "restHeading": "Everything else ({{count}})",
+      "restHeading": "Other ({{count}})",
       "restListLabel": "The remaining backlog tasks",
       "resize": "Resize the backlog column",
       "empty": "No tasks in the backlog.",

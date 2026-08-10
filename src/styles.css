@@ -4388,15 +4388,7 @@ button[aria-disabled='true'] {
   flex-shrink: 0;
   color: var(--color-fg-muted);
 }
-.backlog-rail__chip-list {
-  font-size: 0.85em;
-  opacity: 0.7;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* The two stacked sections of the rail (Deadline above, By-priority below). */
+/* The stacked sections of the rail (this week / next week / the rest). */
 .backlog-rail__section {
   margin-bottom: var(--space-2);
 }

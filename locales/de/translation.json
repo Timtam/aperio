@@ -1958,7 +1958,7 @@
       "thisWeekListLabel": "Aufgaben mit Frist in dieser Woche",
       "nextWeekHeading": "Nächste Woche ({{count}})",
       "nextWeekListLabel": "Aufgaben mit Frist in der nächsten Woche",
-      "restHeading": "Alles Weitere ({{count}})",
+      "restHeading": "Weiteres ({{count}})",
       "restListLabel": "Die übrigen Backlog-Aufgaben",
       "resize": "Backlog-Spalte breiter/schmaler ziehen",
       "empty": "Keine Aufgaben im Backlog.",

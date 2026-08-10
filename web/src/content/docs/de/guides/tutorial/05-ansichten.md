@@ -78,7 +78,7 @@ dreigeteilt, nach der Nähe der Deadline:
   stehen ebenfalls hier, ganz oben.
 - **Nächste Woche**: Deadlines in der folgenden Kalenderwoche, nach derselben
   Regel.
-- **Alles Weitere**: zuerst die Deadlines danach (weiterhin das **früheste Datum
+- **Weiteres**: zuerst die Deadlines danach (weiterhin das **früheste Datum
   zuerst**), darunter der übrige Backlog – Aufgaben **ohne** Deadline, **höchste
   Priorität zuerst**.
 
