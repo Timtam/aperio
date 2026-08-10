@@ -150,6 +150,14 @@ impl SyncRoundReport {
         self.skipped_unsupported += report.skipped_unsupported;
         self.apply_failures += report.failed;
         self.conflicts += report.conflicts;
+        // De-duplicated: several logs in one round can carry the same key
+        // (two devices, or one device that changed its mind), and the
+        // frontend only needs to know that the key moved.
+        for key in report.settings_keys {
+            if !self.settings_keys.contains(&key) {
+                self.settings_keys.push(key);
+            }
+        }
     }
 }
 

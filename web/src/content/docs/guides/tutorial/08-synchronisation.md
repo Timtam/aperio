@@ -67,6 +67,10 @@ it over a share on the local network.
 - You can also trigger a reconciliation **manually**.
 - If two devices edit the same entry, Aperio detects the **conflict** and
   resolves it in a comprehensible way, or asks which version should win.
+- **Settings** travel too, and they arrive while the app is running: change a
+  task setting on your phone and the open desktop window picks it up with the
+  next reconciliation, no restart. If the settings page happens to be open, the
+  change is announced.
 
 ## Your devices
 

@@ -38,11 +38,17 @@ import { setUserPref } from '../api/client';
  * Updated whenever we write, so the baseline is always this device's best
  * knowledge of the stored content.
  *
- * The baseline is NOT refreshed when another device changes the key mid-run.
- * Nothing in the desktop re-hydrates these providers while the app is open, so
- * the running app would not show such a change either — one honest limitation
- * rather than two mechanisms disagreeing. When that re-hydration lands, this
- * hook wants a way to re-seed with it.
+ * ## When the value arrives from ANOTHER device
+ *
+ * A provider that re-reads its keys after a sync round (see
+ * `useUserPrefsChanged`) hands this hook a value it did not ask for. Writing
+ * that back would restate a peer's change as our own, with our newer
+ * timestamp — the same echo, one round later, and every device would repeat
+ * every change it received.
+ *
+ * So the caller bumps `revision` whenever the value came from storage rather
+ * than from the user. On a bump the baseline is re-seeded and nothing is
+ * written; the next genuine edit compares against the new baseline.
  *
  * @param key         the `user_prefs` key
  * @param serialized  the value AS STORED — the caller does its own
@@ -51,19 +57,38 @@ import { setUserPref } from '../api/client';
  * @param hydrating   true until the provider's initial read has been applied
  * @param debounceMs  quiet period before writing, so a flurry of clicks in a
  *                    settings panel is one write
+ * @param revision    increment to say "this value came from storage"; the
+ *                    default 0 never changes, so a caller that never re-reads
+ *                    passes nothing
  */
 export function useDebouncedPrefWrite(
   key: string,
   serialized: string,
   hydrating: boolean,
   debounceMs: number,
+  revision = 0,
 ): void {
   /** What storage holds, as far as this device knows. `null` = not seeded. */
   const stored = useRef<string | null>(null);
   const timer = useRef<number | null>(null);
+  /** The revision the baseline was last seeded at. */
+  const seenRevision = useRef(revision);
 
   useEffect(() => {
     if (hydrating) return;
+    if (seenRevision.current !== revision) {
+      // A re-read landed: adopt it as the baseline, say nothing. A pending
+      // write from just before it is dropped — the storage value is newer
+      // than what the user was doing, and re-stating it would restart the
+      // echo this hook exists to stop.
+      seenRevision.current = revision;
+      stored.current = serialized;
+      if (timer.current !== null) {
+        window.clearTimeout(timer.current);
+        timer.current = null;
+      }
+      return;
+    }
     if (stored.current === null) {
       // First look after hydration: this IS the stored value. Remember it and
       // say nothing.
@@ -86,5 +111,5 @@ export function useDebouncedPrefWrite(
         timer.current = null;
       }
     };
-  }, [key, serialized, hydrating, debounceMs]);
+  }, [key, serialized, hydrating, debounceMs, revision]);
 }

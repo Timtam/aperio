@@ -402,7 +402,7 @@ fn settings_updated_writes_user_prefs() {
         repo.set("appearance.colorScheme", "blue").unwrap();
     }
 
-    applier.apply_envelopes(vec![env, env_delete]).unwrap();
+    let report = applier.apply_envelopes(vec![env, env_delete]).unwrap();
 
     let shared = db.clone();
     let repo = UserPrefsRepo::new(&shared);
@@ -411,6 +411,41 @@ fn settings_updated_writes_user_prefs() {
     assert_eq!(dark.as_deref(), Some("true"));
     // The delete event wiped the seeded row.
     assert!(repo.get("appearance.colorScheme").unwrap().is_none());
+    // …and the report NAMES both keys. The frontend holds these settings in
+    // memory and would otherwise show the old value until the next launch;
+    // a count could not tell it what to re-read. A delete counts too — the
+    // key going away is a change like any other.
+    assert_eq!(
+        report.settings_keys,
+        vec![
+            "appearance.darkMode".to_string(),
+            "appearance.colorScheme".to_string(),
+        ],
+    );
+}
+
+#[test]
+fn a_settings_event_that_did_not_land_is_not_reported() {
+    // Own-device envelopes were applied at write time, so the loopback pass
+    // changes nothing — announcing them would make every device re-read its
+    // own settings after every round it pushed.
+    let (adapter, db) = fixture();
+    let me = DeviceId::from_string("dev-me".into());
+    let applier = make_applier(&db, &adapter, me.clone());
+
+    let mine = fixture_envelope(
+        me,
+        SyncEvent::SettingsUpdated(SettingsPayload {
+            key: "tasks.twoLevelPriority".into(),
+            value: serde_json::json!("true"),
+        }),
+        1000,
+    );
+
+    let report = applier.apply_envelopes(vec![mine]).unwrap();
+
+    assert_eq!(report.skipped_own, 1);
+    assert!(report.settings_keys.is_empty());
 }
 
 #[test]

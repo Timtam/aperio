@@ -15,6 +15,7 @@ import {
 import { getUserPref } from '../api/client';
 import { TaskCascadeContext } from './taskCascadeContext';
 import { useDebouncedPrefWrite } from './useDebouncedPrefWrite';
+import { useUserPrefsChanged } from './useUserPrefsChanged';
 
 /**
  * Global task-behaviour preferences. Owns three independent knobs the
@@ -79,6 +80,47 @@ const REMIND_DEADLINE_ARRIVED_KEY = 'tasks.remindDeadlineArrived';
 const REMIND_DEADLINE_COUNTDOWN_KEY = 'tasks.remindDeadlineCountdown';
 const DEADLINE_COUNTDOWN_DAYS_KEY = 'tasks.deadlineCountdownDays';
 /**
+ * Parse the per-list override blob: `Record<listId, ListOverrides>`, validated
+ * per list AND per field so one corrupt entry cannot poison the others.
+ *
+ * Returns an EMPTY map for an absent or unparseable value, which is what
+ * "no overrides" looks like — and what a re-read after another device cleared
+ * them has to produce.
+ */
+function parseListOverrides(stored: string | null): Record<string, ListOverrides> {
+  if (!stored) return {};
+  try {
+    const parsed = JSON.parse(stored) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const sanitised: Record<string, ListOverrides> = {};
+    for (const [listId, raw] of Object.entries(parsed)) {
+      if (!raw || typeof raw !== 'object') continue;
+      const entry: ListOverrides = {};
+      const r = raw as Record<string, unknown>;
+      if (typeof r.cascade === 'boolean') entry.cascade = r.cascade;
+      if (typeof r.autoDate === 'boolean') entry.autoDate = r.autoDate;
+      if (isCarryOverDefault(r.carryOverDefault)) {
+        entry.carryOverDefault = r.carryOverDefault;
+      }
+      // Drop entries with no surviving fields so the in-memory map matches
+      // what we would persist.
+      if (
+        entry.cascade !== undefined ||
+        entry.autoDate !== undefined ||
+        entry.carryOverDefault !== undefined
+      ) {
+        sanitised[listId] = entry;
+      }
+    }
+    return sanitised;
+  } catch {
+    // Bad JSON: no overrides, so consumers fall back to the globals. The next
+    // write overwrites the corrupt value.
+    return {};
+  }
+}
+
+/**
  * Single JSON pref holding the per-list override map. Keyed by
  * task-list id, value is a `ListOverrides` record carrying any
  * subset of the three knobs the user wants to override for that
@@ -91,6 +133,32 @@ const DEADLINE_COUNTDOWN_DAYS_KEY = 'tasks.deadlineCountdownDays';
  * — the JSON blob is self-describing.
  */
 const LIST_OVERRIDES_KEY = 'tasks.listOverrides';
+
+/**
+ * Every key this provider owns, for the "a sync round wrote a preference"
+ * listener. Kept beside the constants so a new knob that forgets this list
+ * simply does not re-read — rather than the listener silently re-reading keys
+ * that belong to somebody else.
+ */
+const OWNED_KEYS: readonly string[] = [
+  CASCADE_KEY,
+  AUTO_DATE_KEY,
+  CARRY_OVER_KEY,
+  DAY_START_TRIGGER_KEY,
+  CHECKOFF_MODE_KEY,
+  AUTO_SELF_ASSIGN_KEY,
+  VISUAL_EFFORT_SIZING_KEY,
+  TWO_LEVEL_PRIORITY_KEY,
+  CALENDAR_DAY_VIEW_MODE_KEY,
+  CALENDAR_DAY_START_MIN_KEY,
+  CALENDAR_DAY_END_MIN_KEY,
+  REMIND_UNTIMED_TODAY_KEY,
+  REMIND_DEADLINE_ARRIVED_KEY,
+  REMIND_DEADLINE_COUNTDOWN_KEY,
+  DEADLINE_COUNTDOWN_DAYS_KEY,
+  LIST_OVERRIDES_KEY,
+];
+
 const WRITE_DEBOUNCE_MS = 150;
 
 /** Default "X days before a deadline" reminder lead time. */
@@ -354,6 +422,11 @@ export interface TaskCascadeContextValue {
   effectiveForList: (listId: string) => EffectiveListSettings;
   /** True until the initial hydration round-trip returns. */
   hydrating: boolean;
+  /** Increments whenever these settings were re-read because a sync round
+   *  brought a change from another device. Consumers that show the settings
+   *  can use it to say so — a control that changes under the user's hands
+   *  without a word is worse than the stale value it replaced. */
+  prefRevision: number;
 }
 
 export function TaskCascadeProvider({ children }: { children: ReactNode }) {
@@ -403,138 +476,116 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
   >({});
   const [hydrating, setHydrating] = useState(true);
 
+  /**
+   * A revision that increments whenever the values below came from STORAGE
+   * rather than from the user — i.e. a sync round wrote one of our keys and
+   * we re-read them. Passed to every write-back so it re-seeds its baseline
+   * instead of restating a peer's change as our own.
+   */
+  const [prefRevision, setPrefRevision] = useState(0);
+
+  /**
+   * Read every key and apply it. Runs once at startup and again whenever a
+   * sync round reports that one of them changed, so this must be idempotent
+   * and must assign in BOTH directions: an early version only ever set the
+   * non-default value ("if the stored string is 'false', turn it off"), which
+   * is fine for a one-shot hydration and wrong for a re-read — a peer turning
+   * something back ON would never have arrived.
+   *
+   * `external` marks the re-read case, and bumps the revision in the same
+   * batch as the values so no write-back ever sees a new value with an old
+   * revision.
+   */
+  const readAndApply = useCallback(
+    async (isCancelled: () => boolean, external: boolean) => {
+      const [
+        cascadeRaw,
+        autoDateRaw,
+        carryOverRaw,
+        triggerRaw,
+        checkoffRaw,
+        autoSelfAssignRaw,
+        visualEffortSizingRaw,
+        twoLevelPriorityRaw,
+        remindUntimedTodayRaw,
+        remindDeadlineArrivedRaw,
+        remindDeadlineCountdownRaw,
+        deadlineCountdownDaysRaw,
+        dayViewModeRaw,
+        dayStartMinRaw,
+        dayEndMinRaw,
+        listOverridesRaw,
+      ] = await Promise.all([
+        getUserPref(CASCADE_KEY).catch(() => null),
+        getUserPref(AUTO_DATE_KEY).catch(() => null),
+        getUserPref(CARRY_OVER_KEY).catch(() => null),
+        getUserPref(DAY_START_TRIGGER_KEY).catch(() => null),
+        getUserPref(CHECKOFF_MODE_KEY).catch(() => null),
+        getUserPref(AUTO_SELF_ASSIGN_KEY).catch(() => null),
+        getUserPref(VISUAL_EFFORT_SIZING_KEY).catch(() => null),
+        getUserPref(TWO_LEVEL_PRIORITY_KEY).catch(() => null),
+        getUserPref(REMIND_UNTIMED_TODAY_KEY).catch(() => null),
+        getUserPref(REMIND_DEADLINE_ARRIVED_KEY).catch(() => null),
+        getUserPref(REMIND_DEADLINE_COUNTDOWN_KEY).catch(() => null),
+        getUserPref(DEADLINE_COUNTDOWN_DAYS_KEY).catch(() => null),
+        getUserPref(CALENDAR_DAY_VIEW_MODE_KEY).catch(() => null),
+        getUserPref(CALENDAR_DAY_START_MIN_KEY).catch(() => null),
+        getUserPref(CALENDAR_DAY_END_MIN_KEY).catch(() => null),
+        getUserPref(LIST_OVERRIDES_KEY).catch(() => null),
+      ]);
+      if (isCancelled()) return;
+      // The on/off knobs default ON: absent or unparseable reads as on, only
+      // a literal 'false' turns them off.
+      setEnabledState(cascadeRaw !== 'false');
+      setAutoDateState(autoDateRaw !== 'false');
+      setAutoSelfAssignState(autoSelfAssignRaw !== 'false');
+      setVisualEffortSizingState(visualEffortSizingRaw !== 'false');
+      // Two-level priority is the opt-IN, so only a literal 'true' flips it.
+      setTwoLevelPriorityState(twoLevelPriorityRaw === 'true');
+      setRemindUntimedTodayState(remindUntimedTodayRaw !== 'false');
+      setRemindDeadlineArrivedState(remindDeadlineArrivedRaw !== 'false');
+      setRemindDeadlineCountdownState(remindDeadlineCountdownRaw !== 'false');
+      // Countdown lead time: parse + clamp 1..30, fall back to 3.
+      setDeadlineCountdownDaysState(parseCountdownDays(deadlineCountdownDaysRaw));
+      // Calendar day-view mode: only a literal stored 'list' switches away
+      // from the grid default; anything else is grid.
+      setDayViewModeState(dayViewModeRaw === 'list' ? 'list' : 'grid');
+      // Visible day window: parse + validate the two minute strings as a pair
+      // (snap to the half-hour grid, clamp; full-day fallback when start >=
+      // end). Always both, so a one-sided stored value still lands on a
+      // consistent window.
+      {
+        const win = parseDayWindow(dayStartMinRaw, dayEndMinRaw);
+        setDayStartMinState(win.startMin);
+        setDayEndMinState(win.endMin);
+      }
+      // The three enums accept only their known members; anything else is the
+      // documented default.
+      setCarryOverDefaultState(isCarryOverDefault(carryOverRaw) ? carryOverRaw : 'ask');
+      setDayStartTriggerState(isDayStartTrigger(triggerRaw) ? triggerRaw : '00:00');
+      setCheckoffModeState(isCheckoffMode(checkoffRaw) ? checkoffRaw : 'toggle');
+      setListOverridesState(parseListOverrides(listOverridesRaw));
+      if (external) setPrefRevision((r) => r + 1);
+    },
+    [],
+  );
+
   useEffect(() => {
     let cancelled = false;
-    Promise.all([
-      getUserPref(CASCADE_KEY).catch(() => null),
-      getUserPref(AUTO_DATE_KEY).catch(() => null),
-      getUserPref(CARRY_OVER_KEY).catch(() => null),
-      getUserPref(DAY_START_TRIGGER_KEY).catch(() => null),
-      getUserPref(CHECKOFF_MODE_KEY).catch(() => null),
-      getUserPref(AUTO_SELF_ASSIGN_KEY).catch(() => null),
-      getUserPref(VISUAL_EFFORT_SIZING_KEY).catch(() => null),
-      getUserPref(TWO_LEVEL_PRIORITY_KEY).catch(() => null),
-      getUserPref(REMIND_UNTIMED_TODAY_KEY).catch(() => null),
-      getUserPref(REMIND_DEADLINE_ARRIVED_KEY).catch(() => null),
-      getUserPref(REMIND_DEADLINE_COUNTDOWN_KEY).catch(() => null),
-      getUserPref(DEADLINE_COUNTDOWN_DAYS_KEY).catch(() => null),
-      getUserPref(CALENDAR_DAY_VIEW_MODE_KEY).catch(() => null),
-      getUserPref(CALENDAR_DAY_START_MIN_KEY).catch(() => null),
-      getUserPref(CALENDAR_DAY_END_MIN_KEY).catch(() => null),
-      getUserPref(LIST_OVERRIDES_KEY).catch(() => null),
-    ])
-      .then(
-        ([
-          cascadeRaw,
-          autoDateRaw,
-          carryOverRaw,
-          triggerRaw,
-          checkoffRaw,
-          autoSelfAssignRaw,
-          visualEffortSizingRaw,
-          twoLevelPriorityRaw,
-          remindUntimedTodayRaw,
-          remindDeadlineArrivedRaw,
-          remindDeadlineCountdownRaw,
-          deadlineCountdownDaysRaw,
-          dayViewModeRaw,
-          dayStartMinRaw,
-          dayEndMinRaw,
-          listOverridesRaw,
-        ]) => {
-          if (cancelled) return;
-          // Cascade + auto-date follow the same on/off convention as
-          // before — only literal "false" toggles the default off.
-          if (cascadeRaw === 'false') setEnabledState(false);
-          if (autoDateRaw === 'false') setAutoDateState(false);
-          if (autoSelfAssignRaw === 'false') setAutoSelfAssignState(false);
-          if (visualEffortSizingRaw === 'false')
-            setVisualEffortSizingState(false);
-          // Two-level priority is the opt-IN, so only a literal 'true' flips it.
-          if (twoLevelPriorityRaw === 'true') setTwoLevelPriorityState(true);
-          // Day-start reminder booleans default ON; only a literal
-          // 'false' disables them (same convention as the others).
-          if (remindUntimedTodayRaw === 'false')
-            setRemindUntimedTodayState(false);
-          if (remindDeadlineArrivedRaw === 'false')
-            setRemindDeadlineArrivedState(false);
-          if (remindDeadlineCountdownRaw === 'false')
-            setRemindDeadlineCountdownState(false);
-          // Countdown lead time: parse + clamp 1..30, fall back to 3.
-          setDeadlineCountdownDaysState(
-            parseCountdownDays(deadlineCountdownDaysRaw),
-          );
-          // Calendar day-view mode: only a literal stored 'list' switches
-          // away from the grid default; anything else keeps 'grid'.
-          if (dayViewModeRaw === 'list') setDayViewModeState('list');
-          // Visible day window: parse + validate the two minute strings as a
-          // pair (snap to the half-hour grid, clamp; full-day fallback when
-          // start >= end). Always set both so a one-sided stored value still
-          // lands on a consistent window.
-          {
-            const win = parseDayWindow(dayStartMinRaw, dayEndMinRaw);
-            setDayStartMinState(win.startMin);
-            setDayEndMinState(win.endMin);
-          }
-          // Carry-over default is a tri-state enum; reject anything
-          // that doesn't match the allowed values and keep the default.
-          if (isCarryOverDefault(carryOverRaw)) {
-            setCarryOverDefaultState(carryOverRaw);
-          }
-          // Day-start trigger: same approach — accept only the known
-          // enum members. Garbage falls back to the default '00:00'.
-          if (isDayStartTrigger(triggerRaw)) {
-            setDayStartTriggerState(triggerRaw);
-          }
-          // Check-off mode: accept only the known enum members; garbage
-          // falls back to the default 'toggle'.
-          if (isCheckoffMode(checkoffRaw)) {
-            setCheckoffModeState(checkoffRaw);
-          }
-          // Per-list overrides: a JSON blob of `Record<listId,
-          // ListOverrides>`. Validate per-list-per-field so a corrupt
-          // entry for one list doesn't poison the others.
-          if (listOverridesRaw) {
-            try {
-              const parsed = JSON.parse(listOverridesRaw) as unknown;
-              if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                const sanitised: Record<string, ListOverrides> = {};
-                for (const [listId, raw] of Object.entries(parsed)) {
-                  if (!raw || typeof raw !== 'object') continue;
-                  const entry: ListOverrides = {};
-                  const r = raw as Record<string, unknown>;
-                  if (typeof r.cascade === 'boolean') entry.cascade = r.cascade;
-                  if (typeof r.autoDate === 'boolean') entry.autoDate = r.autoDate;
-                  if (isCarryOverDefault(r.carryOverDefault)) {
-                    entry.carryOverDefault = r.carryOverDefault;
-                  }
-                  // Drop entries with no surviving fields so the
-                  // in-memory map matches what we'd persist.
-                  if (
-                    entry.cascade !== undefined ||
-                    entry.autoDate !== undefined ||
-                    entry.carryOverDefault !== undefined
-                  ) {
-                    sanitised[listId] = entry;
-                  }
-                }
-                setListOverridesState(sanitised);
-              }
-            } catch {
-              // Bad JSON; leave the map empty so consumers fall back
-              // to globals. The next write will overwrite the
-              // corrupt value.
-            }
-          }
-        },
-      )
-      .finally(() => {
-        if (!cancelled) setHydrating(false);
-      });
+    void readAndApply(() => cancelled, false).finally(() => {
+      if (!cancelled) setHydrating(false);
+    });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [readAndApply]);
+
+  // A sync round wrote one of our keys: read it back and adopt it. Without
+  // this, a setting changed on another device sat in SQLite while this window
+  // went on showing the old value until the next launch.
+  useUserPrefsChanged(OWNED_KEYS, () => {
+    void readAndApply(() => false, true);
+  });
 
   // ── Persistence: debounced, and only when something actually changed ──
   //
@@ -549,51 +600,76 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
   // Serialisation stays here, next to the parse that reads it back, so the two
   // cannot drift apart.
 
-  useDebouncedPrefWrite(CASCADE_KEY, enabled ? 'true' : 'false', hydrating, WRITE_DEBOUNCE_MS);
-  useDebouncedPrefWrite(AUTO_DATE_KEY, autoDate ? 'true' : 'false', hydrating, WRITE_DEBOUNCE_MS);
+  useDebouncedPrefWrite(
+    CASCADE_KEY,
+    enabled ? 'true' : 'false',
+    hydrating,
+    WRITE_DEBOUNCE_MS,
+    prefRevision,
+  );
+  useDebouncedPrefWrite(
+    AUTO_DATE_KEY,
+    autoDate ? 'true' : 'false',
+    hydrating,
+    WRITE_DEBOUNCE_MS,
+    prefRevision,
+  );
   useDebouncedPrefWrite(
     AUTO_SELF_ASSIGN_KEY,
     autoSelfAssign ? 'true' : 'false',
     hydrating,
     WRITE_DEBOUNCE_MS,
+    prefRevision,
   );
   useDebouncedPrefWrite(
     VISUAL_EFFORT_SIZING_KEY,
     visualEffortSizing ? 'true' : 'false',
     hydrating,
     WRITE_DEBOUNCE_MS,
+    prefRevision,
   );
   useDebouncedPrefWrite(
     TWO_LEVEL_PRIORITY_KEY,
     twoLevelPriority ? 'true' : 'false',
     hydrating,
     WRITE_DEBOUNCE_MS,
+    prefRevision,
   );
   useDebouncedPrefWrite(
     REMIND_UNTIMED_TODAY_KEY,
     remindUntimedToday ? 'true' : 'false',
     hydrating,
     WRITE_DEBOUNCE_MS,
+    prefRevision,
   );
   useDebouncedPrefWrite(
     REMIND_DEADLINE_ARRIVED_KEY,
     remindDeadlineArrived ? 'true' : 'false',
     hydrating,
     WRITE_DEBOUNCE_MS,
+    prefRevision,
   );
   useDebouncedPrefWrite(
     REMIND_DEADLINE_COUNTDOWN_KEY,
     remindDeadlineCountdown ? 'true' : 'false',
     hydrating,
     WRITE_DEBOUNCE_MS,
+    prefRevision,
   );
   useDebouncedPrefWrite(
     DEADLINE_COUNTDOWN_DAYS_KEY,
     String(deadlineCountdownDays),
     hydrating,
     WRITE_DEBOUNCE_MS,
+    prefRevision,
   );
-  useDebouncedPrefWrite(CALENDAR_DAY_VIEW_MODE_KEY, dayViewMode, hydrating, WRITE_DEBOUNCE_MS);
+  useDebouncedPrefWrite(
+    CALENDAR_DAY_VIEW_MODE_KEY,
+    dayViewMode,
+    hydrating,
+    WRITE_DEBOUNCE_MS,
+    prefRevision,
+  );
   // The visible day window: state already holds validated, snapped minutes
   // (the setter and the hydrate parse both guarantee it), so this is just the
   // integer as a string.
@@ -602,11 +678,36 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
     String(dayStartMin),
     hydrating,
     WRITE_DEBOUNCE_MS,
+    prefRevision,
   );
-  useDebouncedPrefWrite(CALENDAR_DAY_END_MIN_KEY, String(dayEndMin), hydrating, WRITE_DEBOUNCE_MS);
-  useDebouncedPrefWrite(CARRY_OVER_KEY, carryOverDefault, hydrating, WRITE_DEBOUNCE_MS);
-  useDebouncedPrefWrite(DAY_START_TRIGGER_KEY, dayStartTrigger, hydrating, WRITE_DEBOUNCE_MS);
-  useDebouncedPrefWrite(CHECKOFF_MODE_KEY, checkoffMode, hydrating, WRITE_DEBOUNCE_MS);
+  useDebouncedPrefWrite(
+    CALENDAR_DAY_END_MIN_KEY,
+    String(dayEndMin),
+    hydrating,
+    WRITE_DEBOUNCE_MS,
+    prefRevision,
+  );
+  useDebouncedPrefWrite(
+    CARRY_OVER_KEY,
+    carryOverDefault,
+    hydrating,
+    WRITE_DEBOUNCE_MS,
+    prefRevision,
+  );
+  useDebouncedPrefWrite(
+    DAY_START_TRIGGER_KEY,
+    dayStartTrigger,
+    hydrating,
+    WRITE_DEBOUNCE_MS,
+    prefRevision,
+  );
+  useDebouncedPrefWrite(
+    CHECKOFF_MODE_KEY,
+    checkoffMode,
+    hydrating,
+    WRITE_DEBOUNCE_MS,
+    prefRevision,
+  );
   // The override map compares as its JSON, which is exactly the comparison
   // that matters: a re-render that rebuilds an equal object writes nothing.
   useDebouncedPrefWrite(
@@ -614,6 +715,7 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
     JSON.stringify(listOverrides),
     hydrating,
     WRITE_DEBOUNCE_MS,
+    prefRevision,
   );
 
   const setEnabled = useCallback((value: boolean) => {
@@ -754,6 +856,7 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       setListOverride,
       effectiveForList,
       hydrating,
+      prefRevision,
     }),
     [
       enabled,
@@ -790,6 +893,7 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       setListOverride,
       effectiveForList,
       hydrating,
+      prefRevision,
     ],
   );
 

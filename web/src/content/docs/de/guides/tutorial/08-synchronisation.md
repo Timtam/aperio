@@ -67,6 +67,10 @@ selben Netz auf denselben Datensatz zugreifen.
 - Bearbeiten zwei Geräte denselben Eintrag, erkennt Aperio den **Konflikt**
   und löst ihn nachvollziehbar auf bzw. fragt nach, welche Fassung gelten
   soll.
+- **Einstellungen** wandern ebenfalls mit, und zwar im laufenden Betrieb:
+  Änderst du eine Aufgaben-Einstellung am Handy, übernimmt das offene
+  Desktop-Fenster sie beim nächsten Abgleich, ohne Neustart. Steht die
+  Einstellungsseite gerade offen, wird die Änderung angesagt.
 
 ## Deine Geräte
 

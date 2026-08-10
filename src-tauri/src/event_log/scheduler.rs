@@ -293,6 +293,7 @@ impl SyncScheduler {
                         warn!(?err, "failed to emit sync-conflicts-changed");
                     }
                 }
+                Self::emit_settings_changed(app, report);
                 // The round may have created external ACCOUNTS (a restore
                 // into a fresh install, or an account added on another
                 // device). Same reasoning as the conflicts emit above: the
@@ -442,6 +443,33 @@ impl SyncScheduler {
         }
     }
 
+    /// Tell the frontend which preferences this round wrote.
+    ///
+    /// The providers that own the settings read them ONCE, at startup, and
+    /// hold them in memory — so without this a value changed on another
+    /// device sat in SQLite while the running app went on showing the old
+    /// one, until the next launch. The applier only writes rows (it holds no
+    /// app handle), which is why the announcement happens up here, exactly
+    /// like `sync-conflicts-changed`.
+    ///
+    /// Silent when nothing settings-shaped landed, which is almost every
+    /// round. The payload names the keys so a listener re-reads its own and
+    /// ignores the rest.
+    ///
+    /// KNOWN GAP: a SNAPSHOT apply (a join, or the §19.10 stale-resume) can
+    /// rewrite preferences too, and its outcome is discarded before the
+    /// round's report is built — so those still need a restart to show.
+    /// Both paths already restart or onboard around here; worth closing if
+    /// that ever stops being true.
+    fn emit_settings_changed<R: Runtime>(app: &AppHandle<R>, report: &SyncRoundReport) {
+        if report.settings_keys.is_empty() {
+            return;
+        }
+        if let Err(err) = app.emit("user-prefs-changed", &report.settings_keys) {
+            warn!(?err, "failed to emit user-prefs-changed");
+        }
+    }
+
     /// Public counterpart of [`Self::write_sync_log`] for the
     /// manual `sync_now` Tauri command + the app-exit push path.
     /// The scheduler loop uses `write_sync_log` directly; callers
@@ -463,7 +491,10 @@ impl SyncScheduler {
         // click and never gets the clearing event back — the
         // Sync now button stayed stuck on "Synchronisiert …".
         match result {
-            Ok(report) => self.emit_status(app, Some(report.clone()), None),
+            Ok(report) => {
+                self.emit_status(app, Some(report.clone()), None);
+                Self::emit_settings_changed(app, report);
+            }
             Err(err) => self.emit_status(app, None, Some(err.to_string())),
         }
     }

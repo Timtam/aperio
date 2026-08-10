@@ -1,6 +1,8 @@
-import { useId, useMemo } from 'react';
+import { useEffect, useId, useMemo, useRef } from 'react';
 import { FocusableNote } from '../a11y/FocusableNote';
 import { useTranslation } from 'react-i18next';
+
+import { useAnnouncer } from '../a11y/announcerContext';
 
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
@@ -95,7 +97,20 @@ export function TasksPanel() {
     setCheckoffMode,
     listOverrides,
     setListOverride,
+    prefRevision,
   } = useTaskCascadeEnabled();
+  const announce = useAnnouncer();
+  // A synced change landing while this panel is open moves a control the user
+  // may have their hands on. Saying so is the least we owe them: the value
+  // really did change everywhere, so showing the old one would be a lie, and
+  // changing it silently is how a screen-reader user ends up mistrusting the
+  // control. The ref skips the value the panel mounted with.
+  const seenPrefRevision = useRef(prefRevision);
+  useEffect(() => {
+    if (seenPrefRevision.current === prefRevision) return;
+    seenPrefRevision.current = prefRevision;
+    announce(t('dialogs.tasks.changedElsewhere'));
+  }, [prefRevision, announce, t]);
   const { taskLists, accounts } = useCalendarStore();
   const { showHiddenTaskListTargets, setShowHiddenTaskListTargets } =
     useViewState();

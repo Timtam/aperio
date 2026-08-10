@@ -999,6 +999,7 @@
         "label": "In geteilten Listen mir zuweisen",
         "hint": "Wenn aktiviert, weist sich eine noch niemandem zugewiesene Aufgabe in einer geteilten Liste (z.B. Vikunja) automatisch mir zu, sobald ich sie auf in Arbeit oder erledigt setze; setze ich sie zurück auf offen, wird nur meine Zuweisung wieder entfernt. Bei wiederkehrenden Aufgaben gilt das nur für die erledigte Aufgabe — die neue Aufgabe bleibt ohne Zuweisung. Deaktiviert: Zuweisungen bleiben manuell."
       },
+      "changedElsewhere": "Eine Einstellung wurde auf einem anderen Gerät geändert und hier übernommen.",
       "twoLevelPriority": {
         "heading": "Prioritätsstufen",
         "label": "Zwei Stufen: normal und wichtig",

@@ -11,8 +11,16 @@ import { useDebouncedPrefWrite } from './useDebouncedPrefWrite';
 const KEY = 'tasks.example';
 const DEBOUNCE = 150;
 
-function Probe({ value, hydrating }: { value: string; hydrating: boolean }) {
-  useDebouncedPrefWrite(KEY, value, hydrating, DEBOUNCE);
+function Probe({
+  value,
+  hydrating,
+  revision = 0,
+}: {
+  value: string;
+  hydrating: boolean;
+  revision?: number;
+}) {
+  useDebouncedPrefWrite(KEY, value, hydrating, DEBOUNCE, revision);
   return null;
 }
 
@@ -95,6 +103,44 @@ describe('useDebouncedPrefWrite', () => {
   it('does not write while hydration is still running', () => {
     const { rerender } = render(<Probe value="a" hydrating />);
     rerender(<Probe value="b" hydrating />);
+    settle();
+    expect(setUserPref).not.toHaveBeenCalled();
+  });
+});
+
+describe('useDebouncedPrefWrite with a value from another device', () => {
+  it('adopts a re-read value without writing it back', () => {
+    // Otherwise every device restates every change it receives, with its own
+    // newer timestamp — the launch echo again, one round later.
+    const { rerender } = render(<Probe value="a" hydrating />);
+    rerender(<Probe value="a" hydrating={false} />);
+    settle();
+    rerender(<Probe value="b" hydrating={false} revision={1} />);
+    settle();
+    expect(setUserPref).not.toHaveBeenCalled();
+  });
+
+  it('writes the next edit against the NEW baseline', () => {
+    const { rerender } = render(<Probe value="a" hydrating />);
+    rerender(<Probe value="a" hydrating={false} />);
+    settle();
+    rerender(<Probe value="b" hydrating={false} revision={1} />);
+    settle();
+    // Back to what this device had before the sync: a real change now.
+    rerender(<Probe value="a" hydrating={false} revision={1} />);
+    settle();
+    expect(setUserPref).toHaveBeenCalledTimes(1);
+    expect(setUserPref).toHaveBeenCalledWith(KEY, 'a');
+  });
+
+  it('drops a write still in the quiet period when a re-read overtakes it', () => {
+    // The stored value is newer than what the user was in the middle of
+    // saying; re-stating theirs would undo a change that already won.
+    const { rerender } = render(<Probe value="a" hydrating />);
+    rerender(<Probe value="a" hydrating={false} />);
+    settle();
+    rerender(<Probe value="b" hydrating={false} />);
+    rerender(<Probe value="c" hydrating={false} revision={1} />);
     settle();
     expect(setUserPref).not.toHaveBeenCalled();
   });

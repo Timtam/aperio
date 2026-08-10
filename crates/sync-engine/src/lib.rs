@@ -101,6 +101,11 @@ pub struct SyncRoundReport {
     pub fetch_failures: usize,
     /// Field-level conflicts recorded this round (DESIGN.md §19.3).
     pub conflicts: usize,
+    /// `user_prefs` keys this round wrote, de-duplicated. The desktop turns a
+    /// non-empty list into a `user-prefs-changed` event so the running app
+    /// re-reads exactly those settings instead of showing a value another
+    /// device already changed until the next launch.
+    pub settings_keys: Vec<String>,
 }
 
 /// Read-only snapshot of the engine's state, surfaced by `get_sync_status`.

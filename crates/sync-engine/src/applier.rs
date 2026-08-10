@@ -142,6 +142,12 @@ pub struct ApplyReport {
     /// signals whether we should warn the user that some data
     /// didn't make it.
     pub failed: usize,
+    /// The `user_prefs` keys this pass actually wrote (DESIGN.md §19.2.1
+    /// settings). Named rather than counted, because the frontend needs to
+    /// know WHICH setting arrived: a running app holds these in memory and
+    /// would otherwise show a value another device has already changed until
+    /// the next launch. Empty for the overwhelming majority of rounds.
+    pub settings_keys: Vec<String>,
     /// Field-level conflicts the applier wrote into
     /// `sync_conflicts` during this pass (DESIGN.md §19.3).
     /// Surfaced through `SyncRoundReport` so the scheduler can
@@ -299,6 +305,14 @@ impl EventLogApplier {
                         report.failed += 1;
                     } else {
                         report.applied += 1;
+                        // Remember the key of a settings write. Collected
+                        // here rather than inside the handler so the dispatch
+                        // keeps its plain `Ok(bool)` shape, and only for
+                        // envelopes that actually landed — an event that was
+                        // skipped or failed changed nothing to re-read.
+                        if let SyncEvent::SettingsUpdated(payload) = &env.event {
+                            report.settings_keys.push(payload.key.clone());
+                        }
                     }
                 }
                 Ok(false) => {
