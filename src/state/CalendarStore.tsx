@@ -150,6 +150,18 @@ export interface CalendarStoreState {
 }
 
 
+/** Read the stored selection.
+ *
+ *  An EMPTY `known` array reads as "never reconciled" rather than as "nothing
+ *  has ever existed". It is the residue of the bug `reconcileSelectionTracked`
+ *  now refuses to create: a cold startup listing that froze `known` on
+ *  nothing. Left as an empty SET it takes the steady-state path, where every
+ *  container is one nobody has seen before — and gets switched on. Read as
+ *  null it takes the upgrade path instead, which keeps the user's selection
+ *  exactly as it stands and learns what exists from the first real listing.
+ *
+ *  A user who genuinely owns no containers is unharmed: their selection is
+ *  empty too, so the first real listing is a first run, which is what it is. */
 function readPersisted(): PersistedSelection {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -181,7 +193,7 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
     const persisted = readPersisted();
     return {
       selected: new Set(persisted.calendars ?? []),
-      known: persisted.knownCalendarIds
+      known: persisted.knownCalendarIds?.length
         ? new Set(persisted.knownCalendarIds)
         : null,
       origin: persisted.calendarOrigins ?? {},
@@ -191,7 +203,7 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
     const persisted = readPersisted();
     return {
       selected: new Set(persisted.taskLists ?? []),
-      known: persisted.knownTaskListIds
+      known: persisted.knownTaskListIds?.length
         ? new Set(persisted.knownTaskListIds)
         : null,
       origin: persisted.taskListOrigins ?? {},
@@ -201,7 +213,7 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
     const persisted = readPersisted();
     return {
       selected: new Set(persisted.contactLists ?? []),
-      known: persisted.knownContactListIds
+      known: persisted.knownContactListIds?.length
         ? new Set(persisted.knownContactListIds)
         : null,
       origin: persisted.contactListOrigins ?? {},

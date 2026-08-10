@@ -54,6 +54,34 @@ describe('reconcileSelectionTracked', () => {
     // 'b' is known now, so it is NOT auto-selected later.
   });
 
+  it('an upgrade against a COLD listing must not freeze known on nothing', () => {
+    // The reported bug. `known` is null (a blob from before it existed, or one
+    // that never got written), the user has 'a' ticked and 'b' deliberately
+    // unticked, and at startup the listing is still cold — every external
+    // catalog is served from a snapshot that has not warmed yet.
+    //
+    // Freezing `known := selected ∪ []` here records "the only container that
+    // ever existed is 'a'". When the real listing lands a beat later, 'b' has
+    // never been seen — so it is auto-selected, and the user's untick is gone.
+    // The cold-listing rule that guards the steady state has to guard this too.
+    const cold = reconcileSelectionTracked(slice(['a'], null), []);
+    const warm = reconcileSelectionTracked(cold, [item('a'), item('b')]);
+    expect(sel(warm)).toEqual(['a']);
+    expect(known(warm)).toEqual(['a', 'b']);
+  });
+
+  it('a first run against a COLD listing waits rather than learning nothing', () => {
+    // Same hole from the other side: with nothing selected and nothing known,
+    // an empty listing would set `known` to the empty SET — no longer null, so
+    // the next listing takes the steady-state path and every container counts
+    // as new. That happens to be right on a genuine first run, and wrong the
+    // moment anything was ever unticked. Deferring is right in both.
+    const cold = reconcileSelectionTracked(slice([], null), []);
+    expect(cold.known).toBeNull();
+    const warm = reconcileSelectionTracked(cold, [item('a'), item('b')]);
+    expect(sel(warm)).toEqual(['a', 'b']);
+  });
+
   it('auto-selects a truly new id but not a known unticked one', () => {
     const prev = slice(['a'], ['a', 'unticked'], {
       a: 'acc1',

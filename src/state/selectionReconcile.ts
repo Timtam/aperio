@@ -77,6 +77,23 @@ export function reconcileSelectionTracked<
   existingAccountIds?: ReadonlySet<string> | null,
 ): SelectionSlice {
   const listIds = new Set(list.map((x) => x.id));
+
+  // An EMPTY listing says nothing, and the two "learn what exists now" cases
+  // below would write down exactly that nothing.
+  //
+  // At startup a listing is routinely empty for a moment: every external
+  // catalog is served from a snapshot that has not warmed yet, and the local
+  // store answers first. Freezing `known` there records "these few are all
+  // there is" — and when the real listing lands a beat later, every other
+  // container has never been seen and is therefore auto-selected. That is the
+  // reported failure: task lists and contact lists the user had deliberately
+  // hidden came back switched on after a restart.
+  //
+  // The steady state below already refuses to read a cold listing as a
+  // removal, for the same reason. This is the other half of that rule: a cold
+  // listing is not a discovery either. Waiting costs nothing — the next
+  // refresh arrives within the same second and decides on real evidence.
+  if (prev.known === null && list.length === 0) return prev;
   const isNewDefaultOn = (item: T) =>
     autoSelectNew ? autoSelectNew(item) : true;
   const originFrom = (base: Iterable<string>): Record<string, string> => {
