@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
-import { getUserPref, setUserPref } from '../api/client';
+import { getUserPref } from '../api/client';
+import { useDebouncedPrefWrite } from './useDebouncedPrefWrite';
 
 /**
  * Width (in px) of the backlog column in the week / month planner, persisted
@@ -56,23 +57,11 @@ export function useBacklogWidth(): BacklogWidth {
     };
   }, []);
 
-  // Debounced persistence.
-  const writeTimer = useRef<number | null>(null);
-  useEffect(() => {
-    if (hydrating) return;
-    if (writeTimer.current !== null) {
-      window.clearTimeout(writeTimer.current);
-    }
-    writeTimer.current = window.setTimeout(() => {
-      void setUserPref(PREF_KEY, String(width));
-    }, WRITE_DEBOUNCE_MS);
-    return () => {
-      if (writeTimer.current !== null) {
-        window.clearTimeout(writeTimer.current);
-        writeTimer.current = null;
-      }
-    };
-  }, [width, hydrating]);
+  // Debounced persistence — and only on a real change. `backlog.width` syncs,
+  // so a write-back of the value hydration just read would be a launch echo
+  // able to overrule a width set on another device (see
+  // `useDebouncedPrefWrite`).
+  useDebouncedPrefWrite(PREF_KEY, String(width), hydrating, WRITE_DEBOUNCE_MS);
 
   const setWidth = useCallback((px: number) => {
     setWidthState(clamp(px));

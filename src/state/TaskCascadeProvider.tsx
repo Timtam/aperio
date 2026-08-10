@@ -2,7 +2,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -13,8 +12,9 @@ import {
   type PriorityScale,
 } from '@aperio/shared';
 
-import { getUserPref, setUserPref } from '../api/client';
+import { getUserPref } from '../api/client';
 import { TaskCascadeContext } from './taskCascadeContext';
+import { useDebouncedPrefWrite } from './useDebouncedPrefWrite';
 
 /**
  * Global task-behaviour preferences. Owns three independent knobs the
@@ -450,10 +450,7 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
           if (autoSelfAssignRaw === 'false') setAutoSelfAssignState(false);
           if (visualEffortSizingRaw === 'false')
             setVisualEffortSizingState(false);
-          // Two-level priority is the opt-IN, so only a literal 'true' flips
-          // it. Remember what was stored, so the write-back below can tell a
-          // real change from an echo of what we just read.
-          storedTwoLevelPriority.current = twoLevelPriorityRaw === 'true';
+          // Two-level priority is the opt-IN, so only a literal 'true' flips it.
           if (twoLevelPriorityRaw === 'true') setTwoLevelPriorityState(true);
           // Day-start reminder booleans default ON; only a literal
           // 'false' disables them (same convention as the others).
@@ -539,328 +536,85 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // ── Debounced persistence, one timer per knob ─────────────────────
+  // ── Persistence: debounced, and only when something actually changed ──
   //
-  // A separate timer per field keeps the writes scoped — flipping the
-  // cascade doesn't flush a stale auto-date write, etc. The pattern
-  // matches the original single-field implementation, just repeated.
+  // One call per knob, all of them through `useDebouncedPrefWrite`, which
+  // keeps a baseline of what storage holds and stays silent when the value
+  // matches it. That silence is the point: these keys SYNC, `set_user_pref`
+  // appends an event for every write without comparing values, and conflicts
+  // resolve by "later wins" — so the write-back that used to fire the moment
+  // hydration finished stamped a fresh timestamp on an old choice and could
+  // beat a genuine change made on another device. See the hook's own comment.
+  //
+  // Serialisation stays here, next to the parse that reads it back, so the two
+  // cannot drift apart.
 
-  const cascadeTimer = useRef<number | null>(null);
-  useEffect(() => {
-    if (hydrating) return;
-    if (cascadeTimer.current !== null) {
-      window.clearTimeout(cascadeTimer.current);
-    }
-    cascadeTimer.current = window.setTimeout(() => {
-      void setUserPref(CASCADE_KEY, enabled ? 'true' : 'false');
-    }, WRITE_DEBOUNCE_MS);
-    return () => {
-      if (cascadeTimer.current !== null) {
-        window.clearTimeout(cascadeTimer.current);
-        cascadeTimer.current = null;
-      }
-    };
-  }, [enabled, hydrating]);
-
-  const autoDateTimer = useRef<number | null>(null);
-  useEffect(() => {
-    if (hydrating) return;
-    if (autoDateTimer.current !== null) {
-      window.clearTimeout(autoDateTimer.current);
-    }
-    autoDateTimer.current = window.setTimeout(() => {
-      void setUserPref(AUTO_DATE_KEY, autoDate ? 'true' : 'false');
-    }, WRITE_DEBOUNCE_MS);
-    return () => {
-      if (autoDateTimer.current !== null) {
-        window.clearTimeout(autoDateTimer.current);
-        autoDateTimer.current = null;
-      }
-    };
-  }, [autoDate, hydrating]);
-
-  const autoSelfAssignTimer = useRef<number | null>(null);
-  useEffect(() => {
-    if (hydrating) return;
-    if (autoSelfAssignTimer.current !== null) {
-      window.clearTimeout(autoSelfAssignTimer.current);
-    }
-    autoSelfAssignTimer.current = window.setTimeout(() => {
-      void setUserPref(AUTO_SELF_ASSIGN_KEY, autoSelfAssign ? 'true' : 'false');
-    }, WRITE_DEBOUNCE_MS);
-    return () => {
-      if (autoSelfAssignTimer.current !== null) {
-        window.clearTimeout(autoSelfAssignTimer.current);
-        autoSelfAssignTimer.current = null;
-      }
-    };
-  }, [autoSelfAssign, hydrating]);
-
-  const visualEffortSizingTimer = useRef<number | null>(null);
-  useEffect(() => {
-    if (hydrating) return;
-    if (visualEffortSizingTimer.current !== null) {
-      window.clearTimeout(visualEffortSizingTimer.current);
-    }
-    visualEffortSizingTimer.current = window.setTimeout(() => {
-      void setUserPref(
-        VISUAL_EFFORT_SIZING_KEY,
-        visualEffortSizing ? 'true' : 'false',
-      );
-    }, WRITE_DEBOUNCE_MS);
-    return () => {
-      if (visualEffortSizingTimer.current !== null) {
-        window.clearTimeout(visualEffortSizingTimer.current);
-        visualEffortSizingTimer.current = null;
-      }
-    };
-  }, [visualEffortSizing, hydrating]);
-
-  const twoLevelPriorityTimer = useRef<number | null>(null);
-  /**
-   * What `user_prefs` holds for this key, as far as this device knows: the
-   * value hydration read, then whatever we have written since.
-   *
-   * It exists because a write is not free. `set_user_pref` appends a
-   * `SettingsUpdated` event for every whitelisted key it is handed, without
-   * comparing values, and the applier resolves conflicts by "later wins". A
-   * write-back of the value we just READ therefore stamps a fresh timestamp on
-   * an old choice — and a launch after another device flipped this setting
-   * would beat that device's genuine change with this device's startup echo.
-   * The user's choice would silently revert with nothing to see.
-   *
-   * So: only write what actually differs from what is stored. (The knobs
-   * around this one share the write-back shape and the same exposure; that is
-   * a pre-existing bug in its own right, not one to fix quietly inside a
-   * feature commit.)
-   */
-  const storedTwoLevelPriority = useRef<boolean | null>(null);
-  useEffect(() => {
-    if (hydrating) return;
-    if (storedTwoLevelPriority.current === twoLevelPriority) return;
-    if (twoLevelPriorityTimer.current !== null) {
-      window.clearTimeout(twoLevelPriorityTimer.current);
-    }
-    twoLevelPriorityTimer.current = window.setTimeout(() => {
-      storedTwoLevelPriority.current = twoLevelPriority;
-      void setUserPref(
-        TWO_LEVEL_PRIORITY_KEY,
-        twoLevelPriority ? 'true' : 'false',
-      );
-    }, WRITE_DEBOUNCE_MS);
-    return () => {
-      if (twoLevelPriorityTimer.current !== null) {
-        window.clearTimeout(twoLevelPriorityTimer.current);
-        twoLevelPriorityTimer.current = null;
-      }
-    };
-  }, [twoLevelPriority, hydrating]);
-
-  const remindUntimedTodayTimer = useRef<number | null>(null);
-  useEffect(() => {
-    if (hydrating) return;
-    if (remindUntimedTodayTimer.current !== null) {
-      window.clearTimeout(remindUntimedTodayTimer.current);
-    }
-    remindUntimedTodayTimer.current = window.setTimeout(() => {
-      void setUserPref(
-        REMIND_UNTIMED_TODAY_KEY,
-        remindUntimedToday ? 'true' : 'false',
-      );
-    }, WRITE_DEBOUNCE_MS);
-    return () => {
-      if (remindUntimedTodayTimer.current !== null) {
-        window.clearTimeout(remindUntimedTodayTimer.current);
-        remindUntimedTodayTimer.current = null;
-      }
-    };
-  }, [remindUntimedToday, hydrating]);
-
-  const remindDeadlineArrivedTimer = useRef<number | null>(null);
-  useEffect(() => {
-    if (hydrating) return;
-    if (remindDeadlineArrivedTimer.current !== null) {
-      window.clearTimeout(remindDeadlineArrivedTimer.current);
-    }
-    remindDeadlineArrivedTimer.current = window.setTimeout(() => {
-      void setUserPref(
-        REMIND_DEADLINE_ARRIVED_KEY,
-        remindDeadlineArrived ? 'true' : 'false',
-      );
-    }, WRITE_DEBOUNCE_MS);
-    return () => {
-      if (remindDeadlineArrivedTimer.current !== null) {
-        window.clearTimeout(remindDeadlineArrivedTimer.current);
-        remindDeadlineArrivedTimer.current = null;
-      }
-    };
-  }, [remindDeadlineArrived, hydrating]);
-
-  const remindDeadlineCountdownTimer = useRef<number | null>(null);
-  useEffect(() => {
-    if (hydrating) return;
-    if (remindDeadlineCountdownTimer.current !== null) {
-      window.clearTimeout(remindDeadlineCountdownTimer.current);
-    }
-    remindDeadlineCountdownTimer.current = window.setTimeout(() => {
-      void setUserPref(
-        REMIND_DEADLINE_COUNTDOWN_KEY,
-        remindDeadlineCountdown ? 'true' : 'false',
-      );
-    }, WRITE_DEBOUNCE_MS);
-    return () => {
-      if (remindDeadlineCountdownTimer.current !== null) {
-        window.clearTimeout(remindDeadlineCountdownTimer.current);
-        remindDeadlineCountdownTimer.current = null;
-      }
-    };
-  }, [remindDeadlineCountdown, hydrating]);
-
-  const deadlineCountdownDaysTimer = useRef<number | null>(null);
-  useEffect(() => {
-    if (hydrating) return;
-    if (deadlineCountdownDaysTimer.current !== null) {
-      window.clearTimeout(deadlineCountdownDaysTimer.current);
-    }
-    deadlineCountdownDaysTimer.current = window.setTimeout(() => {
-      // Persist the clamped value as a string (mirrors dayStartTrigger).
-      void setUserPref(
-        DEADLINE_COUNTDOWN_DAYS_KEY,
-        String(deadlineCountdownDays),
-      );
-    }, WRITE_DEBOUNCE_MS);
-    return () => {
-      if (deadlineCountdownDaysTimer.current !== null) {
-        window.clearTimeout(deadlineCountdownDaysTimer.current);
-        deadlineCountdownDaysTimer.current = null;
-      }
-    };
-  }, [deadlineCountdownDays, hydrating]);
-
-  const dayViewModeTimer = useRef<number | null>(null);
-  useEffect(() => {
-    if (hydrating) return;
-    if (dayViewModeTimer.current !== null) {
-      window.clearTimeout(dayViewModeTimer.current);
-    }
-    dayViewModeTimer.current = window.setTimeout(() => {
-      void setUserPref(CALENDAR_DAY_VIEW_MODE_KEY, dayViewMode);
-    }, WRITE_DEBOUNCE_MS);
-    return () => {
-      if (dayViewModeTimer.current !== null) {
-        window.clearTimeout(dayViewModeTimer.current);
-        dayViewModeTimer.current = null;
-      }
-    };
-  }, [dayViewMode, hydrating]);
-
-  // Visible day window — one debounced timer per key (mirrors dayViewMode).
-  // State already holds validated, snapped minute values (the setter + the
-  // hydrate parse guarantee it), so we just stringify the integer.
-  const dayStartMinTimer = useRef<number | null>(null);
-  useEffect(() => {
-    if (hydrating) return;
-    if (dayStartMinTimer.current !== null) {
-      window.clearTimeout(dayStartMinTimer.current);
-    }
-    dayStartMinTimer.current = window.setTimeout(() => {
-      void setUserPref(CALENDAR_DAY_START_MIN_KEY, String(dayStartMin));
-    }, WRITE_DEBOUNCE_MS);
-    return () => {
-      if (dayStartMinTimer.current !== null) {
-        window.clearTimeout(dayStartMinTimer.current);
-        dayStartMinTimer.current = null;
-      }
-    };
-  }, [dayStartMin, hydrating]);
-
-  const dayEndMinTimer = useRef<number | null>(null);
-  useEffect(() => {
-    if (hydrating) return;
-    if (dayEndMinTimer.current !== null) {
-      window.clearTimeout(dayEndMinTimer.current);
-    }
-    dayEndMinTimer.current = window.setTimeout(() => {
-      void setUserPref(CALENDAR_DAY_END_MIN_KEY, String(dayEndMin));
-    }, WRITE_DEBOUNCE_MS);
-    return () => {
-      if (dayEndMinTimer.current !== null) {
-        window.clearTimeout(dayEndMinTimer.current);
-        dayEndMinTimer.current = null;
-      }
-    };
-  }, [dayEndMin, hydrating]);
-
-  const carryOverTimer = useRef<number | null>(null);
-  useEffect(() => {
-    if (hydrating) return;
-    if (carryOverTimer.current !== null) {
-      window.clearTimeout(carryOverTimer.current);
-    }
-    carryOverTimer.current = window.setTimeout(() => {
-      void setUserPref(CARRY_OVER_KEY, carryOverDefault);
-    }, WRITE_DEBOUNCE_MS);
-    return () => {
-      if (carryOverTimer.current !== null) {
-        window.clearTimeout(carryOverTimer.current);
-        carryOverTimer.current = null;
-      }
-    };
-  }, [carryOverDefault, hydrating]);
-
-  const dayStartTriggerTimer = useRef<number | null>(null);
-  useEffect(() => {
-    if (hydrating) return;
-    if (dayStartTriggerTimer.current !== null) {
-      window.clearTimeout(dayStartTriggerTimer.current);
-    }
-    dayStartTriggerTimer.current = window.setTimeout(() => {
-      void setUserPref(DAY_START_TRIGGER_KEY, dayStartTrigger);
-    }, WRITE_DEBOUNCE_MS);
-    return () => {
-      if (dayStartTriggerTimer.current !== null) {
-        window.clearTimeout(dayStartTriggerTimer.current);
-        dayStartTriggerTimer.current = null;
-      }
-    };
-  }, [dayStartTrigger, hydrating]);
-
-  const checkoffModeTimer = useRef<number | null>(null);
-  useEffect(() => {
-    if (hydrating) return;
-    if (checkoffModeTimer.current !== null) {
-      window.clearTimeout(checkoffModeTimer.current);
-    }
-    checkoffModeTimer.current = window.setTimeout(() => {
-      void setUserPref(CHECKOFF_MODE_KEY, checkoffMode);
-    }, WRITE_DEBOUNCE_MS);
-    return () => {
-      if (checkoffModeTimer.current !== null) {
-        window.clearTimeout(checkoffModeTimer.current);
-        checkoffModeTimer.current = null;
-      }
-    };
-  }, [checkoffMode, hydrating]);
-
-  const listOverridesTimer = useRef<number | null>(null);
-  useEffect(() => {
-    if (hydrating) return;
-    if (listOverridesTimer.current !== null) {
-      window.clearTimeout(listOverridesTimer.current);
-    }
-    listOverridesTimer.current = window.setTimeout(() => {
-      // Empty map serialises to "{}" — still a valid value, but we
-      // don't need to keep an empty pref hanging around. Storing
-      // the empty object is harmless either way; keep it simple.
-      void setUserPref(LIST_OVERRIDES_KEY, JSON.stringify(listOverrides));
-    }, WRITE_DEBOUNCE_MS);
-    return () => {
-      if (listOverridesTimer.current !== null) {
-        window.clearTimeout(listOverridesTimer.current);
-        listOverridesTimer.current = null;
-      }
-    };
-  }, [listOverrides, hydrating]);
+  useDebouncedPrefWrite(CASCADE_KEY, enabled ? 'true' : 'false', hydrating, WRITE_DEBOUNCE_MS);
+  useDebouncedPrefWrite(AUTO_DATE_KEY, autoDate ? 'true' : 'false', hydrating, WRITE_DEBOUNCE_MS);
+  useDebouncedPrefWrite(
+    AUTO_SELF_ASSIGN_KEY,
+    autoSelfAssign ? 'true' : 'false',
+    hydrating,
+    WRITE_DEBOUNCE_MS,
+  );
+  useDebouncedPrefWrite(
+    VISUAL_EFFORT_SIZING_KEY,
+    visualEffortSizing ? 'true' : 'false',
+    hydrating,
+    WRITE_DEBOUNCE_MS,
+  );
+  useDebouncedPrefWrite(
+    TWO_LEVEL_PRIORITY_KEY,
+    twoLevelPriority ? 'true' : 'false',
+    hydrating,
+    WRITE_DEBOUNCE_MS,
+  );
+  useDebouncedPrefWrite(
+    REMIND_UNTIMED_TODAY_KEY,
+    remindUntimedToday ? 'true' : 'false',
+    hydrating,
+    WRITE_DEBOUNCE_MS,
+  );
+  useDebouncedPrefWrite(
+    REMIND_DEADLINE_ARRIVED_KEY,
+    remindDeadlineArrived ? 'true' : 'false',
+    hydrating,
+    WRITE_DEBOUNCE_MS,
+  );
+  useDebouncedPrefWrite(
+    REMIND_DEADLINE_COUNTDOWN_KEY,
+    remindDeadlineCountdown ? 'true' : 'false',
+    hydrating,
+    WRITE_DEBOUNCE_MS,
+  );
+  useDebouncedPrefWrite(
+    DEADLINE_COUNTDOWN_DAYS_KEY,
+    String(deadlineCountdownDays),
+    hydrating,
+    WRITE_DEBOUNCE_MS,
+  );
+  useDebouncedPrefWrite(CALENDAR_DAY_VIEW_MODE_KEY, dayViewMode, hydrating, WRITE_DEBOUNCE_MS);
+  // The visible day window: state already holds validated, snapped minutes
+  // (the setter and the hydrate parse both guarantee it), so this is just the
+  // integer as a string.
+  useDebouncedPrefWrite(
+    CALENDAR_DAY_START_MIN_KEY,
+    String(dayStartMin),
+    hydrating,
+    WRITE_DEBOUNCE_MS,
+  );
+  useDebouncedPrefWrite(CALENDAR_DAY_END_MIN_KEY, String(dayEndMin), hydrating, WRITE_DEBOUNCE_MS);
+  useDebouncedPrefWrite(CARRY_OVER_KEY, carryOverDefault, hydrating, WRITE_DEBOUNCE_MS);
+  useDebouncedPrefWrite(DAY_START_TRIGGER_KEY, dayStartTrigger, hydrating, WRITE_DEBOUNCE_MS);
+  useDebouncedPrefWrite(CHECKOFF_MODE_KEY, checkoffMode, hydrating, WRITE_DEBOUNCE_MS);
+  // The override map compares as its JSON, which is exactly the comparison
+  // that matters: a re-render that rebuilds an equal object writes nothing.
+  useDebouncedPrefWrite(
+    LIST_OVERRIDES_KEY,
+    JSON.stringify(listOverrides),
+    hydrating,
+    WRITE_DEBOUNCE_MS,
+  );
 
   const setEnabled = useCallback((value: boolean) => {
     setEnabledState(value);
