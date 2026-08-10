@@ -1,6 +1,7 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import type { CarryableFields, CarryScope, EventGroup } from '@aperio/shared';
+import type { Task } from '@aperio/shared';
 import type { CalendarEvent } from '../api/calendar';
 import type { NewGroupMember } from '../api/eventGroups';
 
@@ -34,6 +35,10 @@ export type RootStackParamList = {
     parentId?: string | null;
     initialTitle?: string;
     initialScheduledDate?: string;
+    // An earlier task to fill this one from — the quick-add's hand-off when
+    // the user picks one of its offers. Everything but the dates travels; see
+    // `taskPrefillFrom`. Create only.
+    prefillFrom?: Task;
   };
   // One-tap task capture (title + optional day + list); "More details …" hands
   // off to TaskEditor. The mobile twin of the desktop QuickAddTaskDialog.
@@ -116,6 +121,10 @@ export type RootStackParamList = {
     // the editor's edit scope; absent ⇒ 'occurrence'. When set, the editor
     // confirms the scope read-only instead of showing the segmented control.
     initialScope?: 'occurrence' | 'series' | 'this_and_future';
+    // An earlier appointment to fill this one from — the quick-add's hand-off
+    // when the user picks one of its offers. Everything but the day travels;
+    // see `eventPrefillFrom`. Create only.
+    prefillFrom?: CalendarEvent;
   };
   Calendars: undefined;
   CalendarEditor: { calendarId: string };

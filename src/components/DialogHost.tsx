@@ -43,6 +43,7 @@ export function DialogHost() {
           defaultTime={mode.defaultTime}
           defaultTitle={mode.defaultTitle}
           initialScope={mode.initialScope}
+          prefillFrom={mode.prefillFrom}
         />
       );
     case 'eventEditScope':
@@ -65,6 +66,7 @@ export function DialogHost() {
           defaultListId={mode.listId}
           defaultDate={mode.defaultDate}
           defaultTitle={mode.defaultTitle}
+          prefillFrom={mode.prefillFrom}
         />
       );
     case 'quickAdd':

@@ -136,6 +136,10 @@ export interface EventDialogProps {
   /** When editing a recurring occurrence, the scope the up-front prompt
    *  resolved to. Seeds the editScope radios; absent ⇒ 'occurrence'. */
   initialScope?: EditScope;
+  /** An earlier appointment to fill this one from — the quick-add's hand-off
+   *  when the user picked one of its offers. Everything but the day travels;
+   *  see `eventPrefillFrom`. Create only. */
+  prefillFrom?: CalendarEvent | null;
 }
 
 interface FormState {
@@ -182,6 +186,7 @@ export function EventDialog({
   defaultTime,
   defaultTitle,
   initialScope,
+  prefillFrom,
 }: EventDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
@@ -360,10 +365,15 @@ export function EventDialog({
       })),
     [titleMatches, form.title, calendars],
   );
-  const acceptTitleSuggestion = useCallback(
-    (id: string) => {
-      const source = titleMatches.find((e) => e.id === id);
-      if (!source) return;
+  /**
+   * Fill the editor from an earlier appointment.
+   *
+   * Split out from the suggestion list because the QUICK-ADD hands one in
+   * too: picking an offer there opens this editor already filled, instead of
+   * filling a one-line capture form the user then has to expand anyway.
+   */
+  const applyEventPrefill = useCallback(
+    (source: CalendarEvent) => {
       const fill = eventPrefillFrom(source);
       setForm((prev) => {
         // The DAY stays exactly as it was — it is what makes this a new
@@ -399,8 +409,30 @@ export function EventDialog({
       // the editor would otherwise send as an empty list.
       setKeepRemindersAsDefault(false);
     },
-    [titleMatches, calendars],
+    [calendars],
   );
+
+  const acceptTitleSuggestion = useCallback(
+    (id: string) => {
+      const source = titleMatches.find((e) => e.id === id);
+      if (source) applyEventPrefill(source);
+    },
+    [titleMatches, applyEventPrefill],
+  );
+
+  // A prefill handed in by the quick-add. Applied once per opening, after the
+  // form has its initial state: the day and the calendar the user picked over
+  // there are already in it, and the prefill deliberately leaves those alone.
+  const prefillApplied = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isOpen || isEdit || !prefillFrom) {
+      if (!isOpen) prefillApplied.current = null;
+      return;
+    }
+    if (prefillApplied.current === prefillFrom.id) return;
+    prefillApplied.current = prefillFrom.id;
+    applyEventPrefill(prefillFrom);
+  }, [isOpen, isEdit, prefillFrom, applyEventPrefill]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // Flips to `false` the moment the user touches the reminders editor.

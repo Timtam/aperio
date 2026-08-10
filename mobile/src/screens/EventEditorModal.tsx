@@ -118,6 +118,7 @@ export default function EventEditorModal({
     initialTitle,
     initialTime,
     initialScope,
+    prefillFrom,
   } = route.params;
   const editing = eventId != null;
   // A single occurrence of a recurring series was opened (occurrence = its
@@ -176,10 +177,15 @@ export default function EventEditorModal({
       })),
     [titleMatches, title, calendars],
   );
-  const acceptTitleSuggestion = useCallback(
-    (id: string) => {
-      const source = titleMatches.find((e) => e.id === id);
-      if (!source) return;
+  /**
+   * Fill the editor from an earlier appointment.
+   *
+   * Split out from the suggestion list because the QUICK-ADD hands one in too:
+   * picking an offer there opens this screen already filled, instead of
+   * filling a one-line capture form the user then has to expand anyway.
+   */
+  const applyEventPrefill = useCallback(
+    (source: CalendarEvent) => {
       const fill = eventPrefillFrom(source);
       setTitle(fill.title);
       setDescription(fill.description ?? '');
@@ -214,8 +220,26 @@ export default function EventEditorModal({
         };
       });
     },
-    [titleMatches, calendars],
+    [calendars],
   );
+
+  const acceptTitleSuggestion = useCallback(
+    (id: string) => {
+      const source = titleMatches.find((e) => e.id === id);
+      if (source) applyEventPrefill(source);
+    },
+    [titleMatches, applyEventPrefill],
+  );
+
+  // A prefill handed in by the quick-add. Once, after the form has its initial
+  // state: the day and the calendar picked over there are already in it, and
+  // the prefill deliberately leaves those alone.
+  const prefillApplied = useRef(false);
+  useEffect(() => {
+    if (editing || !prefillFrom || prefillApplied.current || loading) return;
+    prefillApplied.current = true;
+    applyEventPrefill(prefillFrom);
+  }, [editing, prefillFrom, loading, applyEventPrefill]);
   const [description, setDescription] = useState('');
   // The bound colour-label id ('' = none). Only LOCAL events carry it on their
   // own row; on an external calendar the colour is a host-local override (the

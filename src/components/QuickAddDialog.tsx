@@ -21,6 +21,11 @@ import {
   toIso,
 } from '@aperio/shared';
 import { Modal } from './Modal';
+import { TitleSuggestBox } from './TitleSuggestBox';
+import {
+  rankEventSuggestions,
+  useTitleSuggestions,
+} from '../state/useTitleSuggestions';
 
 /**
  * Quick-add dialog (DESIGN.md section 7.4).
@@ -63,6 +68,24 @@ export function QuickAddDialog({
   );
 
   const [title, setTitle] = useState(initial.title);
+  /**
+   * Earlier appointments with this name.
+   *
+   * Picking one does NOT fill the quick-add: it opens the full editor already
+   * filled from that appointment. A one-line capture form has nowhere to put a
+   * description, a repetition or a reminder, and the whole point of accepting
+   * an offer is that all of it comes along.
+   */
+  const titleMatches = useTitleSuggestions(title, 'events', isOpen);
+  const titleOptions = useMemo(
+    () =>
+      rankEventSuggestions(titleMatches, title).map(({ item }) => ({
+        id: item.id,
+        title: item.title,
+        hint: calendars.find((c) => c.id === item.calendar_id)?.name,
+      })),
+    [titleMatches, title, calendars],
+  );
   const [date, setDate] = useState(initial.date);
   const [time, setTime] = useState(initial.time);
   const [calendarId, setCalendarId] = useState(initial.calendarId);
@@ -196,18 +219,28 @@ export function QuickAddDialog({
       dismissOnBackdrop={false}
     >
       <form onSubmit={onSubmit} className="form">
-        <label className="form__field">
-          <span className="form__label">
-            {t('dialogs.event.fields.title')}
-          </span>
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            required
-            autoComplete="off"
-          />
-        </label>
+        <TitleSuggestBox
+          label={t('dialogs.event.fields.title')}
+          value={title}
+          onChange={setTitle}
+          options={titleOptions}
+          onAccept={(id) => {
+            const source = titleMatches.find((e) => e.id === id);
+            if (!source) return;
+            // `replace`, like "weitere Details": the editor inherits this
+            // dialog's frame, so closing it returns focus where the quick-add
+            // was opened from rather than to a dialog that is already gone.
+            openEventDialog(null, {
+              calendarId,
+              defaultDate: date,
+              defaultTime: time,
+              defaultTitle: source.title,
+              prefillFrom: source,
+              replace: true,
+            });
+          }}
+          required
+        />
 
         <div className="form__row">
           <label className="form__field">

@@ -61,6 +61,9 @@ export type DialogMode =
        *  resolved to — the editor opens locked to it. Absent ⇒ the editor's
        *  own default ('occurrence'). */
       initialScope?: EventEditScope;
+      /** An earlier item to fill the editor from — the quick-add hands one in
+       *  when the user picks one of its offers. Create only. */
+      prefillFrom?: CalendarEvent | null;
     }
   | {
       // Outlook-style "this occurrence vs the whole series?" prompt shown
@@ -77,6 +80,9 @@ export type DialogMode =
       /** Pre-fill the title when creating — used by quick-add → "more
        *  details" so the in-progress title isn't lost on the hand-off. */
       defaultTitle?: string;
+      /** An earlier item to fill the editor from — the quick-add hands one in
+       *  when the user picks one of its offers. Create only. */
+      prefillFrom?: Task | null;
     }
   | { kind: 'quickAdd'; defaultDate?: string }
   | { kind: 'quickAddTask'; defaultDate?: string }
@@ -166,6 +172,9 @@ export interface OpenEventOptions {
   /** Pre-fill the title when creating — carries the in-progress title over
    *  from the event quick-add's "weitere Details" hand-off. */
   defaultTitle?: string;
+  /** An earlier item to fill the editor from — the quick-add's hand-off when
+   *  the user picked one of its offers. Everything but the day travels. */
+  prefillFrom?: CalendarEvent | null;
   /** Replace the current top dialog frame instead of stacking on top — used by
    *  the quick-add's "weitere Details" hand-off so the editor inherits the
    *  quick-add's trigger and focus returns to the original opener (the
@@ -178,6 +187,9 @@ export interface OpenTaskOptions {
   defaultDate?: string;
   /** Pre-fill the title when creating a new task (quick-add hand-off). */
   defaultTitle?: string;
+  /** An earlier item to fill the editor from — the quick-add's hand-off when
+   *  the user picked one of its offers. Everything but the day travels. */
+  prefillFrom?: Task | null;
   /** Replace the current top frame instead of stacking — the quick-add-task
    *  "weitere Details" hand-off, so focus returns to the original opener when
    *  the editor closes. Create hand-off only. */
@@ -405,6 +417,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
         defaultDate: options?.defaultDate,
         defaultTime: options?.defaultTime,
         defaultTitle: options?.defaultTitle,
+        prefillFrom: options?.prefillFrom,
       };
       // The quick-add "weitere Details" hand-off swaps its own frame for the
       // editor (no new trigger capture, no close()) so the editor inherits the
@@ -436,6 +449,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
         listId: options?.listId,
         defaultDate: options?.defaultDate,
         defaultTitle: options?.defaultTitle,
+        prefillFrom: options?.prefillFrom,
       };
       // Quick-add-task "weitere Details" hand-off — replace the frame in place
       // (see openEventDialog) so focus returns to the original opener on close.

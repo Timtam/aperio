@@ -21,6 +21,11 @@ import {
 import { createEvent, listCalendars, type Calendar } from '../api/calendar';
 import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { FormScrollView } from '../components/FormScrollView';
+import { TitleSuggestions } from '../components/TitleSuggestions';
+import {
+  rankEventSuggestions,
+  useTitleSuggestions,
+} from '../state/useTitleSuggestions';
 import { RadioGroup } from '../components/RadioGroup';
 import { useCancelHeader } from '../components/useCancelHeader';
 import { useShowHiddenCalendarTargets } from '../settings/hiddenTargets';
@@ -62,6 +67,41 @@ export default function QuickAddEventModal({
   const [calId, setCalId] = useState(route.params.calendarId);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  /**
+   * Earlier appointments with this name.
+   *
+   * Picking one does NOT fill this form: it opens the full editor already
+   * filled from that appointment. A one-line capture screen has nowhere to put
+   * a description, a repetition or a reminder, and the point of accepting an
+   * offer is that all of it comes along.
+   */
+  const titleMatches = useTitleSuggestions(title, 'events', true);
+  const titleOptions = useMemo(
+    () =>
+      rankEventSuggestions(titleMatches, title).map(({ item }) => ({
+        id: item.id,
+        title: item.title,
+        hint: calendars.find((c) => c.id === item.calendar_id)?.name,
+      })),
+    [titleMatches, title, calendars],
+  );
+  const acceptSuggestion = useCallback(
+    (id: string) => {
+      const source = titleMatches.find((e) => e.id === id);
+      if (!source) return;
+      // `replace`, not push: the quick-add must not linger behind the editor.
+      navigation.replace('EventEditor', {
+        eventId: null,
+        calendarId: calId,
+        anchor: date.trim() || undefined,
+        initialTitle: source.title,
+        initialTime: time.trim() || undefined,
+        prefillFrom: source,
+      });
+    },
+    [titleMatches, navigation, calId, date, time],
+  );
 
   const titleRef = useRef<TextInput | null>(null);
   // Live mirrors for the mount-only default-calendar resolution below — refs so
@@ -223,6 +263,7 @@ export default function QuickAddEventModal({
           onSubmitEditing={() => void onCreate()}
           autoComplete="off"
         />
+        <TitleSuggestions options={titleOptions} onAccept={acceptSuggestion} />
       </View>
 
       {/* Date/time as accessible field buttons (value in the label, picker in

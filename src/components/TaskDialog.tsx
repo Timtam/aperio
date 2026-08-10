@@ -113,6 +113,10 @@ export interface TaskDialogProps {
   /** Pre-fill the title when creating — carries the in-progress title over
    *  from the quick-add dialog's "more details" hand-off. */
   defaultTitle?: string;
+  /** An earlier task to fill this one from — the quick-add's hand-off when the
+   *  user picked one of its offers. Everything but the dates travels; see
+   *  `taskPrefillFrom`. Create only. */
+  prefillFrom?: Task | null;
 }
 
 
@@ -154,6 +158,7 @@ export function TaskDialog({
   defaultListId,
   defaultDate,
   defaultTitle,
+  prefillFrom,
 }: TaskDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
@@ -305,10 +310,15 @@ export function TaskDialog({
       })),
     [titleMatches, form.title, taskLists],
   );
-  const acceptTitleSuggestion = useCallback(
-    (id: string) => {
-      const source = titleMatches.find((task) => task.id === id);
-      if (!source) return;
+  /**
+   * Fill the editor from an earlier task.
+   *
+   * Split out from the suggestion list because the QUICK-ADD hands one in
+   * too: picking an offer there opens this editor already filled, instead of
+   * filling a one-line capture form the user then has to expand anyway.
+   */
+  const applyTaskPrefill = useCallback(
+    (source: Task) => {
       const fill = taskPrefillFrom(source);
       setForm((prev) => ({
         ...prev,
@@ -328,8 +338,30 @@ export function TaskDialog({
         listId: isSubtask ? prev.listId : (fill.list_id ?? prev.listId),
       }));
     },
-    [titleMatches, isSubtask],
+    [isSubtask],
   );
+
+  const acceptTitleSuggestion = useCallback(
+    (id: string) => {
+      const source = titleMatches.find((task) => task.id === id);
+      if (source) applyTaskPrefill(source);
+    },
+    [titleMatches, applyTaskPrefill],
+  );
+
+  // A prefill handed in by the quick-add. Applied once per opening, after the
+  // form has its initial state: the day and the list the user picked over
+  // there are already in it, and the prefill leaves the day alone.
+  const prefillApplied = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isOpen || isEdit || !prefillFrom) {
+      if (!isOpen) prefillApplied.current = null;
+      return;
+    }
+    if (prefillApplied.current === prefillFrom.id) return;
+    prefillApplied.current = prefillFrom.id;
+    applyTaskPrefill(prefillFrom);
+  }, [isOpen, isEdit, prefillFrom, applyTaskPrefill]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // Create mode only: subtask titles staged on the form. A brand-new

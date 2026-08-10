@@ -17,6 +17,11 @@ import { useDialogState } from '../state/dialogStateContext';
 import { useViewState } from '../state/viewStateContext';
 import { readLastUsedTaskList, writeLastUsedTaskList } from './lastUsedTaskList';
 import { Modal } from './Modal';
+import { TitleSuggestBox } from './TitleSuggestBox';
+import {
+  rankTaskSuggestions,
+  useTitleSuggestions,
+} from '../state/useTitleSuggestions';
 
 /**
  * Quick-add *task* dialog — the task counterpart of {@link QuickAddDialog}.
@@ -49,6 +54,24 @@ export function QuickAddTaskDialog({
   );
 
   const [title, setTitle] = useState(initial.title);
+  /**
+   * Earlier tasks with this name.
+   *
+   * Picking one does NOT fill the quick-add: it opens the full editor already
+   * filled from that task. A one-line capture form has nowhere to put a
+   * description, a priority or a repetition, and the whole point of accepting
+   * an offer is that all of it comes along.
+   */
+  const titleMatches = useTitleSuggestions(title, 'tasks', isOpen);
+  const titleOptions = useMemo(
+    () =>
+      rankTaskSuggestions(titleMatches, title).map(({ item }) => ({
+        id: item.id,
+        title: item.title,
+        hint: taskLists.find((l) => l.id === item.list_id)?.name,
+      })),
+    [titleMatches, title, taskLists],
+  );
   const [date, setDate] = useState(initial.date);
   const [listId, setListId] = useState(initial.listId);
   const [error, setError] = useState<string | null>(null);
@@ -181,18 +204,27 @@ export function QuickAddTaskDialog({
       dismissOnBackdrop={false}
     >
       <form onSubmit={(e) => void onSubmit(e)} className="form">
-        <label className="form__field">
-          <span className="form__label">
-            {t('dialogs.task.fields.title')}
-          </span>
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            required
-            autoComplete="off"
-          />
-        </label>
+        <TitleSuggestBox
+          label={t('dialogs.task.fields.title')}
+          value={title}
+          onChange={setTitle}
+          options={titleOptions}
+          onAccept={(id) => {
+            const source = titleMatches.find((task) => task.id === id);
+            if (!source) return;
+            // `replace`, like "weitere Details": the editor inherits this
+            // dialog's frame, so closing it returns focus where the quick-add
+            // was opened from rather than to a dialog that is already gone.
+            openTaskDialog(null, {
+              listId: listId || undefined,
+              defaultDate: date || undefined,
+              defaultTitle: source.title,
+              prefillFrom: source,
+              replace: true,
+            });
+          }}
+          required
+        />
 
         <label className="form__field">
           <span className="form__label">

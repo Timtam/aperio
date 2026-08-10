@@ -213,7 +213,14 @@ export default function TaskEditorModal({
 }: RootStackScreenProps<'TaskEditor'>) {
   const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
-  const { taskId, listId, parentId, initialTitle, initialScheduledDate } = route.params;
+  const {
+    taskId,
+    listId,
+    parentId,
+    initialTitle,
+    initialScheduledDate,
+    prefillFrom,
+  } = route.params;
   const {
     taskLists,
     selectedTaskListIds,
@@ -451,10 +458,15 @@ export default function TaskEditorModal({
       })),
     [titleMatches, form.title, taskLists],
   );
-  const acceptTitleSuggestion = useCallback(
-    (id: string) => {
-      const source = titleMatches.find((task) => task.id === id);
-      if (!source) return;
+  /**
+   * Fill the editor from an earlier task.
+   *
+   * Split out from the suggestion list because the QUICK-ADD hands one in too:
+   * picking an offer there opens this screen already filled, instead of
+   * filling a one-line capture form the user then has to expand anyway.
+   */
+  const applyTaskPrefill = useCallback(
+    (source: Task) => {
       const fill = taskPrefillFrom(source);
       setForm((prev) => ({
         ...prev,
@@ -473,8 +485,26 @@ export default function TaskEditorModal({
         listId: parentId != null ? prev.listId : fill.list_id || prev.listId,
       }));
     },
-    [titleMatches, parentId],
+    [parentId],
   );
+
+  const acceptTitleSuggestion = useCallback(
+    (id: string) => {
+      const source = titleMatches.find((task) => task.id === id);
+      if (source) applyTaskPrefill(source);
+    },
+    [titleMatches, applyTaskPrefill],
+  );
+
+  // A prefill handed in by the quick-add. Once, after the form has its initial
+  // state: the day and the list picked over there are already in it, and the
+  // prefill leaves the day alone.
+  const prefillApplied = useRef(false);
+  useEffect(() => {
+    if (taskId != null || !prefillFrom || prefillApplied.current || loading) return;
+    prefillApplied.current = true;
+    applyTaskPrefill(prefillFrom);
+  }, [taskId, prefillFrom, loading, applyTaskPrefill]);
 
   const sectionOptions = useMemo(
     () => [

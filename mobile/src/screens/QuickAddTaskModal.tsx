@@ -15,6 +15,11 @@ import { selectableTaskLists } from '@aperio/shared';
 import { createTask } from '../api/client';
 import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { FormScrollView } from '../components/FormScrollView';
+import { TitleSuggestions } from '../components/TitleSuggestions';
+import {
+  rankTaskSuggestions,
+  useTitleSuggestions,
+} from '../state/useTitleSuggestions';
 import { RadioGroup } from '../components/RadioGroup';
 import { useCancelHeader } from '../components/useCancelHeader';
 import { formatLocalDate } from '../intl/dateTimeField';
@@ -69,6 +74,39 @@ export default function QuickAddTaskModal({
   );
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  /**
+   * Earlier tasks with this name.
+   *
+   * Picking one does NOT fill this form: it opens the full editor already
+   * filled from that task. A one-line capture screen has nowhere to put a
+   * description, a priority or a repetition, and the point of accepting an
+   * offer is that all of it comes along.
+   */
+  const titleMatches = useTitleSuggestions(title, 'tasks', true);
+  const titleOptions = useMemo(
+    () =>
+      rankTaskSuggestions(titleMatches, title).map(({ item }) => ({
+        id: item.id,
+        title: item.title,
+      })),
+    [titleMatches, title],
+  );
+  const acceptSuggestion = useCallback(
+    (id: string) => {
+      const source = titleMatches.find((task) => task.id === id);
+      if (!source) return;
+      // `replace`, not push: the quick-add must not linger behind the editor.
+      navigation.replace('TaskEditor', {
+        taskId: null,
+        listId,
+        initialTitle: source.title,
+        initialScheduledDate: date.trim() || undefined,
+        prefillFrom: source,
+      });
+    },
+    [titleMatches, navigation, listId, date],
+  );
 
   const titleRef = useRef<TextInput | null>(null);
   // Don't let the async last-used read clobber a list the user already picked.
@@ -209,6 +247,7 @@ export default function QuickAddTaskModal({
           onSubmitEditing={() => void onCreate()}
           autoComplete="off"
         />
+        <TitleSuggestions options={titleOptions} onAccept={acceptSuggestion} />
       </View>
 
       <View style={styles.field}>
