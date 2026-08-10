@@ -73,6 +73,51 @@ describe('collapsing groups into one row', () => {
     expect(rows[0].calendarIds).toEqual(['work', 'private', 'colleague']);
   });
 
+  it('shows the group through whichever copy is still switched on', () => {
+    // Hiding a calendar must not hide the appointment. The row that stands for
+    // a group is whichever member the view handed in first, so switching off
+    // the calendar of the copy that used to represent it simply promotes the
+    // next one — the group stays on screen as long as ANY of its calendars is
+    // on, and the row that is drawn is one the view can actually open.
+    const rows = collapseEventGroups(
+      [
+        row('ev-b', 'private', '2026-08-10T08:00:00Z'),
+        row('ev-c', 'colleague', '2026-08-10T08:00:00Z'),
+      ],
+      [
+        group('g1', [
+          ['work', 'ev-a'],
+          ['private', 'ev-b'],
+          ['colleague', 'ev-c'],
+        ]),
+      ],
+      seriesId,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].event.id).toBe('ev-b');
+    // Still three copies, and the hidden calendar is still named.
+    expect(rows[0].otherMembers).toBe(2);
+    expect(rows[0].calendarIds).toEqual(['private', 'work', 'colleague']);
+  });
+
+  it('shows nothing when every calendar of the group is switched off', () => {
+    // The other half of the same rule: a group is not a row of its own, it is
+    // one of its members. With none of them in view there is nothing to draw —
+    // and drawing a placeholder would put an appointment on a day the user has
+    // deliberately emptied.
+    const rows = collapseEventGroups(
+      [],
+      [
+        group('g1', [
+          ['work', 'ev-a'],
+          ['private', 'ev-b'],
+        ]),
+      ],
+      seriesId,
+    );
+    expect(rows).toEqual([]);
+  });
+
   it('folds two spellings of the SAME instant', () => {
     // The bug an adversarial review found: `expandAll` rewrites a recurring
     // occurrence through toISOString() while a one-off keeps the backend's own
