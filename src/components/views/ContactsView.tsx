@@ -8,7 +8,15 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { searchContacts as apiSearchContacts } from '../../api/client';
+import {
+  deleteContact as apiDeleteContact,
+  isCommandError,
+  searchContacts as apiSearchContacts,
+  showContextMenu,
+  type ContextMenuItemRequest,
+} from '../../api/client';
+import { useAnnouncer } from '../../a11y/announcerContext';
+import { ConfirmDialog } from '../ConfirmDialog';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import type { Contact, ContactList } from '../../api/types';
@@ -29,6 +37,8 @@ import { useDialogState } from '../../state/dialogStateContext';
  *   - Home / End jump to first / last contact
  *   - Enter opens the dialog in edit mode
  *   - Insert / Ctrl+N opens the dialog in create mode
+ *   - Delete removes the focused contact, after a confirmation
+ *   - Menu key / Shift+F10 (and right-click) open the row's context menu
  *
  * The earlier hard-freeze on big directory listings (~2000 GAL
  * entries) was driven by `aria-setsize` + `content-visibility:
@@ -48,7 +58,8 @@ export function ContactsView() {
   const { t, i18n } = useTranslation();
   const { contactLists, selectedContactListIds } = useCalendarStore();
   const { contacts, loading, contactListById } = useContacts();
-  const { openContactDialog } = useDialogState();
+  const { openContactDialog, invalidateData } = useDialogState();
+  const announce = useAnnouncer();
   // Phase 10j: contact sync scheduler bridge. Sets up the
   // `contacts-synced` event listener that re-drives `useContacts`
   // after every periodic / manual / app-start pass, and exposes
@@ -79,6 +90,13 @@ export function ContactsView() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Contact[]>([]);
   const [searching, setSearching] = useState(false);
+  // Bumped after a delete so an ACTIVE search re-runs. Its results come from
+  // the server fan-out, not from `useContacts`, so invalidating the data hooks
+  // leaves them untouched — the deleted person would go on being offered by a
+  // list that no longer has them.
+  const [searchNonce, setSearchNonce] = useState(0);
+  /** The contact the confirmation is currently about. */
+  const [pendingDelete, setPendingDelete] = useState<Contact | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -112,7 +130,7 @@ export function ContactsView() {
     return () => {
       cancelled = true;
     };
-  }, [searchQuery]);
+  }, [searchQuery, searchNonce]);
 
   // While searching: display the server fan-out results,
   // filtered by which lists the user has selected (so the GAL
@@ -150,6 +168,80 @@ export function ContactsView() {
     [openContactDialog],
   );
 
+  /**
+   * Whether this contact can be removed at all.
+   *
+   * A read-only book — a GAL, a Workspace directory, Google's "Other
+   * Contacts" — is somebody else's data mirrored here. Offering Delete on it
+   * would be offering something the provider will refuse, and the refusal
+   * would arrive as a provider error the user cannot act on. So the menu does
+   * not show it, the key says why, and both agree.
+   */
+  const deletable = useCallback(
+    (c: Contact) => !(contactListById.get(c.list_id)?.read_only ?? false),
+    [contactListById],
+  );
+
+  const requestDelete = useCallback(
+    (c: Contact) => {
+      if (!deletable(c)) {
+        announce(t('views.contacts.deleteReadOnly'));
+        return;
+      }
+      setPendingDelete(c);
+    },
+    [deletable, announce, t],
+  );
+
+  const performDelete = useCallback(async () => {
+    const target = pendingDelete;
+    if (!target) return;
+    setPendingDelete(null);
+    try {
+      await apiDeleteContact(target.id, target.list_id);
+      announce(t('dialogs.contact.deleted', { name: target.display_name }));
+      invalidateData();
+      setSearchNonce((n) => n + 1);
+    } catch (err) {
+      announce(isCommandError(err) ? `${err.code}: ${err.message}` : String(err));
+    }
+    // The confirmation took focus out of the list; the list is where the user
+    // was and where the next row now sits. `focusIndex` is clamped by the
+    // effect above once the shorter list arrives.
+    listRef.current?.focus();
+  }, [pendingDelete, announce, t, invalidateData, listRef]);
+
+  /**
+   * The row's own menu — Edit and Delete, the two things a row can do.
+   *
+   * Same shape as the task and event chips (`useChipContextMenu`): a native
+   * menu, opened at the cursor for a right-click and at the row for a keyboard
+   * trigger, so it never appears where the pointer was last left.
+   */
+  const openRowMenu = useCallback(
+    async (c: Contact, position?: { x: number; y: number }) => {
+      const items: ContextMenuItemRequest[] = [
+        { id: 'edit', label: t('chipMenu.edit') },
+        ...(deletable(c)
+          ? ([
+              { kind: 'separator' },
+              { id: 'delete', label: t('chipMenu.delete') },
+            ] as ContextMenuItemRequest[])
+          : []),
+      ];
+      let selected: string | null = null;
+      try {
+        selected = await showContextMenu(items, position);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('show_context_menu failed', err);
+      }
+      if (selected === 'edit') openEdit(c);
+      else if (selected === 'delete') requestDelete(c);
+    },
+    [t, deletable, openEdit, requestDelete],
+  );
+
   const openCreate = useCallback(() => {
     // Prefer the focused contact's list (so the user can iterate
     // through one book), fall back to whatever the dialog's own
@@ -185,6 +277,26 @@ export function ContactsView() {
         e.preventDefault();
         openCreate();
         return;
+      case 'Delete':
+        e.preventDefault();
+        if (focusedContact) requestDelete(focusedContact);
+        return;
+      case 'ContextMenu':
+      case 'F10': {
+        if (e.key === 'F10' && !e.shiftKey) return;
+        e.preventDefault();
+        if (!focusedContact) return;
+        // At the ROW, not at the pointer: a keyboard user has no cursor, and a
+        // menu opening at the last mouse position is a menu they cannot find.
+        const rect = document
+          .getElementById(optionId(focusIndex))
+          ?.getBoundingClientRect();
+        void openRowMenu(
+          focusedContact,
+          rect ? { x: rect.left, y: rect.bottom } : undefined,
+        );
+        return;
+      }
       default:
         return;
     }
@@ -214,6 +326,7 @@ export function ContactsView() {
   // flight; combined with `aria-live` on the loading text the
   // user hears both signals.
   return (
+    <>
     <section
       aria-labelledby={`${headingId}-heading`}
       aria-busy={showLoading || undefined}
@@ -303,11 +416,18 @@ export function ContactsView() {
         </p>
       )}
 
+      {/* What the list can do, where a screen reader meets it. Enter and
+          Insert were undiscoverable before; Delete and the menu key would
+          have been too. */}
+      <span id={`${headingId}-keys`} className="sr-only">
+        {t('views.contacts.keyboardHint')}
+      </span>
       <ul
         ref={listRef}
         role="listbox"
         tabIndex={0}
         aria-label={t('views.contacts.listLabel')}
+        aria-describedby={`${headingId}-keys`}
         aria-activedescendant={
           listHasFocus && flatContacts.length > 0
             ? optionId(focusIndex)
@@ -366,6 +486,13 @@ export function ContactsView() {
                   setFocusIndex(entry.index);
                   openEdit(entry.contact);
                 }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setFocusIndex(entry.index);
+                  // No position: a right-click has a cursor, and the OS puts
+                  // the menu there.
+                  void openRowMenu(entry.contact);
+                }}
               >
                 <span className="contacts-list__name">
                   {entry.contact.display_name}
@@ -418,6 +545,24 @@ export function ContactsView() {
           })}
       </ul>
     </section>
+    {/* Deleting a person is not undoable and the row it starts from is one
+        arrow key away from the wrong one, so it asks first — the same
+        confirmation the editor's own Delete button uses, with the name in
+        the message. */}
+    <ConfirmDialog
+      isOpen={pendingDelete !== null}
+      onClose={() => {
+        setPendingDelete(null);
+        listRef.current?.focus();
+      }}
+      onConfirm={() => void performDelete()}
+      title={t('dialogs.contact.deleteTitle')}
+      message={t('dialogs.contact.deleteMessage', {
+        name: pendingDelete?.display_name ?? '',
+      })}
+      confirmLabel={t('dialogs.contact.delete')}
+    />
+    </>
   );
 }
 

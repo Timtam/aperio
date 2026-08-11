@@ -31,6 +31,18 @@ always authoritative.
 | Check off / reopen task | `Space` |
 | Delete entry | `Delete` |
 
+## Contacts
+
+| Action | Shortcut |
+|---|---|
+| Edit contact | `Enter` |
+| Add contact | `Insert` |
+| Delete contact | `Delete` |
+| The contact's context menu | `Menu key` / `Shift+F10` |
+
+Deleting asks first. In a read-only address book — a global address list, say
+— the command is not offered: those entries belong to the provider.
+
 ## Views and navigation
 
 | Action | Shortcut |

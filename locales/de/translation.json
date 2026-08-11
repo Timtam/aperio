@@ -2102,6 +2102,8 @@
       "groupBadgeAria_zero": "Verteilerliste, leer",
       "groupBadgeAria_one": "Verteilerliste mit 1 Mitglied",
       "groupBadgeAria_other": "Verteilerliste mit {{count}} Mitgliedern",
+      "keyboardHint": "Eingabe bearbeitet den Kontakt, Einfügen legt einen an, Entfernen löscht den ausgewählten Kontakt, und die Kontextmenü-Taste oder Umschalt+F10 öffnet sein Menü.",
+      "deleteReadOnly": "Dieses Adressbuch ist schreibgeschützt — seine Einträge lassen sich hier nicht löschen.",
       "galListName": "Globale Adressliste",
       "googleListName": "Google-Kontakte",
       "googleOtherListName": "Andere Kontakte (Google)",

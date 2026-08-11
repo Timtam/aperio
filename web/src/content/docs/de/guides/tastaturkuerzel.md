@@ -31,6 +31,19 @@ Tastaturkürzel**, wo du jedes Kürzel ändern kannst.
 | Aufgabe abhaken / wieder öffnen | `Leertaste` |
 | Eintrag löschen | `Entf` |
 
+## Kontakte
+
+| Aktion | Kürzel |
+|---|---|
+| Kontakt bearbeiten | `Eingabe` |
+| Kontakt anlegen | `Einfg` |
+| Kontakt löschen | `Entf` |
+| Kontextmenü des Kontakts | `Anwendungstaste` / `Umschalt+F10` |
+
+Löschen fragt vorher nach. In schreibgeschützten Adressbüchern – einer
+globalen Adressliste etwa – gibt es den Befehl nicht: dort gehören die
+Einträge dem Anbieter.
+
 ## Ansichten und Navigation
 
 | Aktion | Kürzel |

@@ -2102,6 +2102,8 @@
       "groupBadgeAria_zero": "Distribution list, empty",
       "groupBadgeAria_one": "Distribution list with 1 member",
       "groupBadgeAria_other": "Distribution list with {{count}} members",
+      "keyboardHint": "Enter edits the contact, Insert adds one, Delete removes the selected contact, and the Menu key or Shift+F10 opens its menu.",
+      "deleteReadOnly": "This address book is read-only — its entries cannot be deleted here.",
       "galListName": "Global Address List",
       "googleListName": "Google Contacts",
       "googleOtherListName": "Other Contacts (Google)",
