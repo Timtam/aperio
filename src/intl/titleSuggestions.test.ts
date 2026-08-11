@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   eventPrefillFrom,
+  joinSuggestionPasses,
   rankTitleSuggestions,
   taskPrefillFrom,
   type PrefillableEvent,
@@ -260,5 +261,39 @@ describe('which of two rows with one title', () => {
       recency,
     );
     expect((out[0].item as { id: string }).id).toBe('b');
+  });
+});
+
+describe('joining the two passes the task offers run', () => {
+  const row = (id: string, title: string) => ({ id, title });
+
+  it('keeps the unfinished pass first and drops the duplicate', () => {
+    // The live task appears in BOTH passes — it matches the query and it is
+    // unfinished. Offering it twice would spend two of six slots on one
+    // answer.
+    const out = joinSuggestionPasses(
+      [row('live', 'Handtücher wechseln')],
+      [row('record-1', 'Handtücher wechseln'), row('live', 'Handtücher wechseln')],
+    );
+    expect(out.map((r) => r.id)).toEqual(['live', 'record-1']);
+  });
+
+  it('brings the history when nothing is unfinished', () => {
+    // The ordinary case: a task done once, months ago. The first pass is
+    // empty and the offer comes entirely from the second.
+    const out = joinSuggestionPasses([], [row('done', 'Steuer abgeben')]);
+    expect(out.map((r) => r.id)).toEqual(['done']);
+  });
+
+  it('survives a history that would have crowded the live row out', () => {
+    // What the second pass looks like for a weekly task after a few years:
+    // 200 completion records and no room for the task itself. The separate
+    // pass is the only reason it is here at all.
+    const history = Array.from({ length: 200 }, (_, i) =>
+      row(`record-${i}`, 'Handtücher wechseln'),
+    );
+    const out = joinSuggestionPasses([row('live', 'Handtücher wechseln')], history);
+    expect(out[0].id).toBe('live');
+    expect(out).toHaveLength(201);
   });
 });

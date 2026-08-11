@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 
 import type { Task } from '@aperio/shared';
-import { rankTitleSuggestions } from '@aperio/shared';
+import {
+  joinSuggestionPasses,
+  rankTitleSuggestions,
+  UNFINISHED_TASK_STATUSES,
+} from '@aperio/shared';
 
 import type { CalendarEvent } from '../api/calendar';
 import { search } from '../api/search';
@@ -51,10 +55,28 @@ export function useTitleSuggestions<K extends 'events' | 'tasks'>(
     // genuine pause costs a suggestion list half a second nobody was reading
     // yet, and keeps the app out of the way while someone is still speaking.
     const timer = setTimeout(() => {
-      void search(trimmed, { kind })
-        .then((results) => {
+      // TWO passes for tasks, one for events — see `joinSuggestionPasses`.
+      // The index answers with the best 200 matches, and for a title whose
+      // history is mostly completion records (one per tick of a repeating
+      // task, forever) the live task can be pushed out of its own result set
+      // by its own past.
+      const lookup =
+        kind === 'events'
+          ? search(trimmed, { kind }).then((r) => r.events as Item[])
+          : Promise.all([
+              search(trimmed, {
+                kind,
+                task_statuses: [...UNFINISHED_TASK_STATUSES],
+              }),
+              search(trimmed, { kind }),
+            ]).then(
+              ([live, history]) =>
+                joinSuggestionPasses(live.tasks, history.tasks) as Item[],
+            );
+      void lookup
+        .then((items) => {
           if (round.current !== mine) return;
-          setMatches((kind === 'events' ? results.events : results.tasks) as Item[]);
+          setMatches(items);
         })
         .catch(() => {
           // No offers this round. The title field is a title field first.

@@ -56,6 +56,45 @@ function rankOf(title: string, query: string): number {
 }
 
 /**
+ * The task statuses that mean "still to do".
+ *
+ * Named here because two things need the same answer: the tier that decides
+ * which row of a title wins, and the SEARCH PASS that guarantees such a row is
+ * in the result set at all.
+ */
+export const UNFINISHED_TASK_STATUSES = ['open', 'in_progress'] as const;
+
+/**
+ * Join the two passes the task suggestions run, keeping the first sighting of
+ * each id.
+ *
+ * One pass would do if the index answered fairly, and it does not: it returns
+ * the best 200 matches by relevance, and for a repeating task on a provider
+ * with native recurrence the matches for one title are mostly its completion
+ * records — one per tick, forever. A user with years of history can therefore
+ * push their own LIVE task out of its own result set, and no amount of
+ * cleverness afterwards can offer a row that never arrived.
+ *
+ * So the unfinished rows are asked for separately, where the finished ones
+ * cannot crowd them out, and the general pass still brings the history that
+ * makes one-off tasks worth offering. Order matters: the unfinished pass comes
+ * first, so a row present in both keeps the identity it had there.
+ */
+export function joinSuggestionPasses<T extends { id: string }>(
+  first: readonly T[],
+  second: readonly T[],
+): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const item of [...first, ...second]) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    out.push(item);
+  }
+  return out;
+}
+
+/**
  * The offers for what has been typed, best first.
  *
  * Matching is on the TITLE only. The search index behind this also covers

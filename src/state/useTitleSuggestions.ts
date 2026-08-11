@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { rankTitleSuggestions } from '@aperio/shared';
+import {
+  joinSuggestionPasses,
+  rankTitleSuggestions,
+  UNFINISHED_TASK_STATUSES,
+} from '@aperio/shared';
 
 import { search } from '../api/client';
 import type { CalendarEvent, Task } from '../api/types';
@@ -49,10 +53,28 @@ export function useTitleSuggestions<K extends 'events' | 'tasks'>(
     // burst of round trips into one, and nobody reads a list that is being
     // rebuilt under them anyway.
     const timer = setTimeout(() => {
-      void search(trimmed, { kind })
-        .then((results) => {
+      // TWO passes for tasks, one for events — see `joinSuggestionPasses`.
+      // The index answers with the best 200 matches, and for a title whose
+      // history is mostly completion records (one per tick of a repeating
+      // task, forever) the live task can be pushed out of its own result set
+      // by its own past. Asking for the unfinished rows separately is what
+      // guarantees the row the user actually meant is there to be offered.
+      const lookup =
+        kind === 'events'
+          ? search(trimmed, { kind }).then((r) => r.events as Item[])
+          : Promise.all([
+              search(trimmed, {
+                kind,
+                task_statuses: [...UNFINISHED_TASK_STATUSES],
+              }),
+              search(trimmed, { kind }),
+            ]).then(
+              ([live, history]) =>
+                joinSuggestionPasses(live.tasks, history.tasks) as Item[],
+            );
+      void lookup
+        .then((items) => {
           if (round.current !== mine) return;
-          const items = (kind === 'events' ? results.events : results.tasks) as Item[];
           setMatches(items);
         })
         .catch(() => {
