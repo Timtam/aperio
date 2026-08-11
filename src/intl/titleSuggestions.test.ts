@@ -189,3 +189,76 @@ describe('what an earlier task lends a new one', () => {
     expect(fill).not.toHaveProperty('assignees');
   });
 });
+
+describe('which of two rows with one title', () => {
+  /** The shape the tier callback judges: a row that is finished, or not. */
+  const row = (id: string, title: string, at: string, done: boolean) => ({
+    id,
+    title,
+    at,
+    done,
+  });
+  const liveFirst = (i: { done: boolean }) => (i.done ? 1 : 0);
+
+  it('offers the living task, not the newer completion record', () => {
+    // THE bug. A repeating task on a provider with native recurrence
+    // (Vikunja) leaves a completion record behind on every tick: a finished,
+    // deliberately non-repeating copy under the same title, written just now.
+    // Being the newest row of its name it won every time — so accepting the
+    // offer filled the editor from the one copy that is guaranteed to have no
+    // repetition and no reminders, and the repetition the user wanted was
+    // silently absent.
+    const out = rankTitleSuggestions(
+      [
+        row('live', 'Handtücher wechseln', '2026-08-01T07:00:00Z', false),
+        row('record', 'Handtücher wechseln', '2026-08-11T19:30:00Z', true),
+      ],
+      'handtücher',
+      recency,
+      undefined,
+      liveFirst,
+    );
+    expect(out).toHaveLength(1);
+    expect((out[0].item as { id: string }).id).toBe('live');
+  });
+
+  it('still offers a finished task when that is all there is', () => {
+    // Most tasks are one-offs done once. The history is exactly what makes
+    // them worth offering; only the tiebreak changed.
+    const out = rankTitleSuggestions(
+      [row('done', 'Steuer abgeben', '2026-05-01T07:00:00Z', true)],
+      'steuer',
+      recency,
+      undefined,
+      liveFirst,
+    );
+    expect(out.map((s) => s.title)).toEqual(['Steuer abgeben']);
+  });
+
+  it('falls back to the most recent within one tier', () => {
+    const out = rankTitleSuggestions(
+      [
+        row('old', 'Müll rausbringen', '2026-01-01T07:00:00Z', false),
+        row('new', 'Müll rausbringen', '2026-08-01T07:00:00Z', false),
+      ],
+      'müll',
+      recency,
+      undefined,
+      liveFirst,
+    );
+    expect((out[0].item as { id: string }).id).toBe('new');
+  });
+
+  it('behaves exactly as before when the caller names no tiers', () => {
+    // Events pass none today; the newest still wins there.
+    const out = rankTitleSuggestions(
+      [
+        row('a', 'Zahnarzt', '2026-01-01T07:00:00Z', false),
+        row('b', 'Zahnarzt', '2026-08-01T07:00:00Z', true),
+      ],
+      'zahnarzt',
+      recency,
+    );
+    expect((out[0].item as { id: string }).id).toBe('b');
+  });
+});

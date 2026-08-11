@@ -63,9 +63,22 @@ function rankOf(title: string, query: string): number {
  * wrong here: an offer whose title has nothing to do with the typed words
  * looks like the app inventing things.
  *
- * One offer per distinct title, the most RECENT of its kind: writing the same
- * appointment twelve times should not fill the list twelve times, and the
- * latest one is the one that reflects how the habit looks now.
+ * One offer per distinct title: writing the same appointment twelve times
+ * should not fill the list twelve times.
+ *
+ * WHICH of the twelve, though, is not simply the newest — and that cost a
+ * repetition. A repeating task on a provider with native recurrence (Vikunja)
+ * leaves a COMPLETION RECORD behind on every tick: a finished, deliberately
+ * non-repeating copy under the same title, created just now. It is therefore
+ * always the most recent row of its name, so it always won, and accepting the
+ * offer filled the editor from a copy whose whole purpose is to have no
+ * repetition and no reminders. The living task — the one still repeating in
+ * the future, the one the user meant — sat right there in the same result set.
+ *
+ * So `tierOf` decides first and recency only breaks ties inside a tier: a
+ * caller says which of its items make better templates (lower is better), and
+ * for tasks that is "not finished yet". A caller that has no such distinction
+ * passes nothing and gets the old behaviour exactly.
  *
  * `recencyOf` returns whatever the caller can order by (an ISO instant, a
  * timestamp); items without one sort last but are still offered.
@@ -75,17 +88,20 @@ export function rankTitleSuggestions<T extends SuggestibleItem>(
   query: string,
   recencyOf: (item: T) => string | null | undefined,
   limit = 6,
+  tierOf: (item: T) => number = () => 0,
 ): TitleSuggestion<T>[] {
   if (fold(query) === '') return [];
-  const best = new Map<string, { item: T; rank: number; at: number }>();
+  const best = new Map<string, { item: T; rank: number; at: number; tier: number }>();
   for (const item of items) {
     const rank = rankOf(item.title, query);
     if (rank < 0) continue;
     const key = fold(item.title);
     const at = new Date(recencyOf(item) ?? '').getTime();
     const when = Number.isFinite(at) ? at : Number.NEGATIVE_INFINITY;
+    const tier = tierOf(item);
     const held = best.get(key);
-    if (!held || when > held.at) best.set(key, { item, rank, at: when });
+    const better = !held || tier < held.tier || (tier === held.tier && when > held.at);
+    if (better) best.set(key, { item, rank, at: when, tier });
   }
   return [...best.values()]
     .sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : b.at - a.at))

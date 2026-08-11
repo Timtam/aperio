@@ -69,10 +69,27 @@ export function useTitleSuggestions<K extends 'events' | 'tasks'>(
 
 /** Offers from earlier appointments, ordered by when the appointment WAS. */
 export function rankEventSuggestions(events: readonly CalendarEvent[], query: string) {
-  return rankTitleSuggestions(events, query, (e) => e.start);
+  return rankTitleSuggestions(
+    events,
+    query,
+    (e) => e.start,
+    undefined,
+    // A cancelled appointment is a poor template for the same reason.
+    (e) => (e.cancelled ? 1 : 0),
+  );
 }
 
 /** The task twin — ordered by when the task was last touched. */
 export function rankTaskSuggestions(tasks: readonly Task[], query: string) {
-  return rankTitleSuggestions(tasks, query, (t) => t.updated_at ?? t.created_at);
+  return rankTitleSuggestions(
+    tasks,
+    query,
+    (t) => t.updated_at ?? t.created_at,
+    undefined,
+    // A finished task is a worse template than a living one — and for a
+    // REPEATING task it is the wrong one outright: the completion record left
+    // behind on every tick carries no repetition and no reminders by design,
+    // and being the newest row of its name it used to win every time.
+    (t) => (t.status === 'completed' || t.status === 'cancelled' ? 1 : 0),
+  );
 }
