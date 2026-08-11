@@ -417,6 +417,14 @@ export function canStoreInProgress(list: TaskList | undefined): boolean {
   return list?.task_capabilities?.supports_in_progress ?? true;
 }
 
+/** Whether tasks in `list` can be filed into a section (a Vikunja bucket, a
+ *  Todoist section). The desktop twin lives in `src/state/taskMoves.ts`; both
+ *  read the adapter's own `sections` capability, which defaults to false —
+ *  offering a picker a provider cannot store would lose the choice on save. */
+export function canAssignSection(list: TaskList | undefined): boolean {
+  return list?.task_capabilities?.sections ?? false;
+}
+
 /**
  * Next status for a check-off, honouring the mode. Ported verbatim from the
  * desktop useTaskStatusToggle:

@@ -1,6 +1,9 @@
 import {
   useCallback,
+  useEffect,
+  useId,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
 } from 'react';
@@ -9,7 +12,11 @@ import { useTranslation } from 'react-i18next';
 import { selectableEventCalendars, selectableTaskLists } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
-import { createTask as apiCreateTask, isCommandError } from '../api/client';
+import {
+  createSection as apiCreateSection,
+  createTask as apiCreateTask,
+  isCommandError,
+} from '../api/client';
 import type { Task } from '../api/types';
 import { isSeriesOccurrence } from '../intl/recurrence';
 import {
@@ -18,6 +25,7 @@ import {
   type MoveCopyScope,
 } from '../state/moveActions';
 import { useCalendarStore } from '../state/calendarStoreContext';
+import { canAssignSection } from '../state/taskMoves';
 import type { MoveCopyTarget } from '../state/DialogState';
 import { useTasks } from '../state/useTasks';
 import { useViewState } from '../state/viewStateContext';
@@ -28,7 +36,10 @@ import { Modal } from './Modal';
  *
  * The dialog handles both kinds with one shape:
  *  - For events: pick a target calendar.
- *  - For tasks: pick a target list.
+ *  - For tasks: pick a target list — and, where the list has them, the
+ *    SECTION inside it, which can be created here rather than in a detour
+ *    through the editor. Filing something is one thought; it should not need
+ *    two dialogs.
  *
  * "Move" within the same container is a no-op; we still show it as a
  * valid choice so the user can confirm without remembering which
@@ -55,8 +66,14 @@ export function MoveCopyDialog({
 }: MoveCopyDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
-  const { calendars, taskLists, selectedCalendarIds, selectedTaskListIds } =
-    useCalendarStore();
+  const {
+    calendars,
+    taskLists,
+    selectedCalendarIds,
+    selectedTaskListIds,
+    sectionsByList,
+    loadSections,
+  } = useCalendarStore();
   const { showHiddenCalendarTargets, showHiddenTaskListTargets } =
     useViewState();
 
@@ -73,6 +90,13 @@ export function MoveCopyDialog({
     target.kind === 'event' && isSeriesOccurrence(target.event);
   const [scope, setScope] = useState<MoveCopyScope>('occurrence');
   const [targetContainerId, setTargetContainerId] = useState(initialContainerId);
+  /** The section inside the target list; `''` is "no section". */
+  const [targetSectionId, setTargetSectionId] = useState('');
+  /** Non-null while the inline "new section" name box is open. */
+  const [sectionDraft, setSectionDraft] = useState<string | null>(null);
+  const [sectionBusy, setSectionBusy] = useState(false);
+  const sectionSelectRef = useRef<HTMLSelectElement>(null);
+  const sectionFieldId = useId();
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -118,6 +142,71 @@ export function MoveCopyDialog({
     showHiddenTaskListTargets,
   ]);
 
+  // Sections belong to the TARGET list, not the source: what the user is
+  // choosing is where the task lands.
+  const targetList = useMemo(
+    () => taskLists.find((l) => l.id === targetContainerId),
+    [taskLists, targetContainerId],
+  );
+  const sectionsEnabled = target.kind === 'task' && canAssignSection(targetList);
+  // Creating one needs the adapter to say it can (local lists, Todoist,
+  // Vikunja). A provider that only exposes sections read-only still gets the
+  // picker — it just cannot grow a new one from here.
+  const sectionsManageable =
+    sectionsEnabled && !!targetList?.task_capabilities?.manageable_sections;
+  const sectionsForTarget = useMemo(
+    () => sectionsByList[targetContainerId] ?? [],
+    [sectionsByList, targetContainerId],
+  );
+
+  useEffect(() => {
+    if (!isOpen || !sectionsEnabled) return;
+    if (targetContainerId in sectionsByList) return;
+    void loadSections(targetContainerId);
+  }, [isOpen, sectionsEnabled, targetContainerId, sectionsByList, loadSections]);
+
+  // A section id only means something inside its own list, so switching the
+  // target drops the choice rather than carrying a stale one across.
+  useEffect(() => {
+    setTargetSectionId('');
+    setSectionDraft(null);
+  }, [targetContainerId]);
+
+  /**
+   * Make a section in the target list and select it.
+   *
+   * Immediate, like the editor's: the section is a real row the moment it is
+   * named, and the move that follows files into it. Position 0 puts a section
+   * made in passing at the top, where the thing being filed is about to be.
+   */
+  const createTargetSection = useCallback(async () => {
+    const name = (sectionDraft ?? '').trim();
+    if (!name) {
+      setSectionDraft(null);
+      sectionSelectRef.current?.focus({ preventScroll: true });
+      return;
+    }
+    setSectionBusy(true);
+    try {
+      const created = await apiCreateSection({
+        list_id: targetContainerId,
+        name,
+        position: 0,
+      });
+      await loadSections(targetContainerId);
+      setTargetSectionId(created.id);
+      announce(t('dialogs.task.section.created', { name: created.name }));
+      setSectionDraft(null);
+    } catch (err) {
+      setError(isCommandError(err) ? `${err.code}: ${err.message}` : String(err));
+    } finally {
+      setSectionBusy(false);
+      // Back to the picker, which now holds the new section — the user asked
+      // where this lands, and that is the control that answers.
+      sectionSelectRef.current?.focus({ preventScroll: true });
+    }
+  }, [sectionDraft, targetContainerId, loadSections, announce, t]);
+
   const itemTitle =
     target.kind === 'event' ? target.event.title : target.task.title;
 
@@ -148,6 +237,7 @@ export function MoveCopyDialog({
             targetContainerId,
             mode,
             children,
+            sectionsEnabled ? targetSectionId || null : null,
           );
         }
         announce(
@@ -180,6 +270,8 @@ export function MoveCopyDialog({
       itemTitle,
       t,
       children,
+      sectionsEnabled,
+      targetSectionId,
     ],
   );
 
@@ -277,6 +369,86 @@ export function MoveCopyDialog({
           </select>
         </label>
 
+        {sectionsEnabled && (
+          <div className="form__field">
+            <label className="form__label" htmlFor={sectionFieldId}>
+              {t('dialogs.task.fields.section')}
+            </label>
+            <div className="section-field">
+              <select
+                id={sectionFieldId}
+                ref={sectionSelectRef}
+                value={targetSectionId}
+                onChange={(e) => setTargetSectionId(e.target.value)}
+                disabled={sectionDraft !== null}
+              >
+                <option value="">{t('dialogs.task.noSection')}</option>
+                {sectionsForTarget.map((section) => (
+                  <option key={section.id} value={section.id}>
+                    {section.name}
+                  </option>
+                ))}
+              </select>
+              {sectionsManageable && sectionDraft === null && (
+                <button
+                  type="button"
+                  className="section-field__button"
+                  onClick={() => setSectionDraft('')}
+                >
+                  {t('dialogs.task.section.add')}
+                </button>
+              )}
+            </div>
+            {/* Naming it here rather than in a second dialog: filing
+                something into a section that does not exist yet is one
+                thought, and the detour through the editor was the reason
+                people left things unfiled. */}
+            {sectionDraft !== null && (
+              <div className="section-field__edit">
+                <input
+                  type="text"
+                  value={sectionDraft}
+                  autoFocus
+                  aria-label={t('dialogs.task.section.nameField')}
+                  placeholder={t('dialogs.task.section.namePlaceholder')}
+                  onChange={(e) => setSectionDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      // Enter must not submit the surrounding form — that
+                      // would move the task before its section exists.
+                      e.preventDefault();
+                      void createTargetSection();
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setSectionDraft(null);
+                      sectionSelectRef.current?.focus({ preventScroll: true });
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="section-field__button"
+                  aria-disabled={sectionBusy || undefined}
+                  onClick={() => void createTargetSection()}
+                >
+                  {t('dialogs.task.section.create')}
+                </button>
+                <button
+                  type="button"
+                  className="section-field__button"
+                  onClick={() => {
+                    setSectionDraft(null);
+                    sectionSelectRef.current?.focus({ preventScroll: true });
+                  }}
+                >
+                  {t('dialogs.task.section.cancel')}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {target.kind === 'task' && children.length > 0 && (
           <p className="form__hint">
             {/* Subtasks always travel with their parent; the
@@ -325,11 +497,12 @@ async function moveOrCopyTask(
   targetListId: string,
   mode: Mode,
   children: Task[],
+  sectionId: string | null,
 ): Promise<void> {
   if (mode === 'move') {
     // Reuses the shared move primitive (see moveActions.ts for the
     // move-hint + child-re-threading rationale).
-    await moveTaskToList(task, targetListId, children);
+    await moveTaskToList(task, targetListId, children, sectionId);
     return;
   }
 
@@ -349,8 +522,10 @@ async function moveOrCopyTask(
     deadline_reminder_days: task.deadline_reminder_days,
     recurrence: task.recurrence,
     parent_id: null,
-    // Copy lands in another list whose sections differ — start ungrouped.
-    section_id: null,
+    // The section the user picked in the target list, or none. It used to be
+    // unconditionally null, with "another list's sections differ" as the
+    // reason — true, and the reason to ASK rather than to decide.
+    section_id: sectionId,
     color_label: task.color_label,
     reminders: task.reminders,
     // Copy lands in another list whose members differ — start unassigned.
@@ -372,7 +547,9 @@ async function moveOrCopyTask(
       deadline_reminder_days: child.deadline_reminder_days,
       recurrence: child.recurrence,
       parent_id: newParent.id,
-      section_id: null,
+      // Children file where their parent does; a family split across
+      // sections is the same surprise as one split across lists.
+      section_id: sectionId,
       color_label: child.color_label,
       reminders: child.reminders,
       assignees: [],

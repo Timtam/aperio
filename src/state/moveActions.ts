@@ -99,14 +99,30 @@ export async function moveTaskToList(
   task: Task,
   targetListId: string,
   children: Task[],
+  /**
+   * Where inside the target list it lands — a section id, or `null` for none.
+   *
+   * Explicit, and required, because the old code carried the task's existing
+   * `section_id` across: an id that means something only inside the list the
+   * task just left. Every caller that has no section in mind says `null`,
+   * which is the honest answer for a drag onto a list; the move/copy dialog
+   * asks the user and passes what they chose.
+   */
+  sectionId: string | null,
 ): Promise<Task> {
   const movedParent = await invoke<Task>('update_task', {
-    task: { ...task, list_id: targetListId },
+    task: { ...task, list_id: targetListId, section_id: sectionId },
     previousListId: task.list_id,
   });
   for (const child of children) {
     await invoke<Task>('update_task', {
-      task: { ...child, list_id: targetListId, parent_id: movedParent.id },
+      task: {
+        ...child,
+        list_id: targetListId,
+        parent_id: movedParent.id,
+        // A family in two sections is the same surprise as one in two lists.
+        section_id: sectionId,
+      },
       previousListId: child.list_id,
     });
   }

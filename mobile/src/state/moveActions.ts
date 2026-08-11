@@ -39,11 +39,24 @@ export async function moveTaskToList(
   task: Task,
   targetListId: string,
   children: Task[],
+  /** Where inside the target list it lands, or `null` for no section. The
+   *  task's existing `section_id` is not it: that id means something only
+   *  inside the list it just left. */
+  sectionId: string | null,
 ): Promise<Task> {
-  const movedParent = await updateTask({ ...task, list_id: targetListId }, task.list_id);
+  const movedParent = await updateTask(
+    { ...task, list_id: targetListId, section_id: sectionId },
+    task.list_id,
+  );
   for (const child of children) {
     await updateTask(
-      { ...child, list_id: targetListId, parent_id: movedParent.id },
+      {
+        ...child,
+        list_id: targetListId,
+        parent_id: movedParent.id,
+        // A family in two sections is the same surprise as one in two lists.
+        section_id: sectionId,
+      },
       child.list_id,
     );
   }
@@ -51,19 +64,21 @@ export async function moveTaskToList(
 }
 
 /**
- * Move or copy a task to another list. A move re-uses the shared move primitive;
- * a copy creates a fresh parent row on the target, then re-parents each child
- * copy onto the new id — the original family stays put. Copies land in another
- * list whose sections/members differ, so they start ungrouped + unassigned.
+ * Move or copy a task to another list, and into a section of it. A move
+ * re-uses the shared move primitive; a copy creates a fresh parent row on the
+ * target, then re-parents each child copy onto the new id — the original
+ * family stays put. Copies land in a list whose MEMBERS differ, so they still
+ * start unassigned; the section is now asked for rather than assumed.
  */
 export async function moveOrCopyTask(
   task: Task,
   targetListId: string,
   mode: MoveCopyMode,
   children: Task[],
+  sectionId: string | null,
 ): Promise<void> {
   if (mode === 'move') {
-    await moveTaskToList(task, targetListId, children);
+    await moveTaskToList(task, targetListId, children, sectionId);
     return;
   }
   const newParent = await createTask({
@@ -80,7 +95,7 @@ export async function moveOrCopyTask(
     deadline_reminder_days: task.deadline_reminder_days,
     recurrence: task.recurrence,
     parent_id: null,
-    section_id: null,
+    section_id: sectionId,
     color_label: task.color_label,
     reminders: task.reminders,
     assignees: [],
@@ -101,7 +116,7 @@ export async function moveOrCopyTask(
       deadline_reminder_days: child.deadline_reminder_days,
       recurrence: child.recurrence,
       parent_id: newParent.id,
-      section_id: null,
+      section_id: sectionId,
       color_label: child.color_label,
       reminders: child.reminders,
       assignees: [],

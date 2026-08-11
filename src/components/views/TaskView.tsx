@@ -405,8 +405,10 @@ export function TaskView() {
         if (task.list_id === sectionListId) {
           await moveTaskToSection(task, sectionId);
         } else {
-          const moved = await moveTaskToList(task, sectionListId, children);
-          await moveTaskToSection(moved, sectionId);
+          // The drop target IS a section, so the move files there
+          // directly — no intermediate state where the task sits in the
+          // new list under the old list's section id.
+          await moveTaskToList(task, sectionListId, children, sectionId);
         }
         invalidateData();
         announce(t('views.tasks.movedToSection', { title: task.title }));

@@ -1947,7 +1947,9 @@ function LeafRow({
     async (payload: TaskDragPayload, listId: string) => {
       if (payload.task.list_id === listId) return; // already in this list
       try {
-        await moveTaskToList(payload.task, listId, payload.children);
+        // No section: a drop onto a LIST names no place inside it, and
+        // the section the task came from belongs to the list it left.
+        await moveTaskToList(payload.task, listId, payload.children, null);
         invalidateData();
         announce(t('sidebar.dnd.taskMoved', { title: payload.task.title }));
       } catch (err) {
