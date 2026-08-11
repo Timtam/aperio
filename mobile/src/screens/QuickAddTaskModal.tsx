@@ -15,6 +15,7 @@ import { selectableTaskLists } from '@aperio/shared';
 import { createTask } from '../api/client';
 import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { FormScrollView } from '../components/FormScrollView';
+import { TitleField } from '../components/TitleField';
 import { TitleSuggestions } from '../components/TitleSuggestions';
 import {
   rankTaskSuggestions,
@@ -211,6 +212,13 @@ export default function QuickAddTaskModal({
     }
   }, [date, fail, listId, navigation, t, title]);
 
+  // Stable, so the memoised title field is not re-rendered by everything that
+  // happens around it — the suggestion list arriving, above all (see
+  // `TitleField`).
+  const submitFromKeyboard = useCallback(() => {
+    void onCreate();
+  }, [onCreate]);
+
   // Hand off to the full editor, carrying the typed title/day + the picked list.
   // Replace (not push) so the quick-add doesn't linger behind the editor.
   const openFullEditor = useCallback(() => {
@@ -236,7 +244,7 @@ export default function QuickAddTaskModal({
 
       <View style={styles.field}>
         <Text style={styles.legend}>{t('dialogs.task.fields.title')}</Text>
-        <TextInput
+        <TitleField
           ref={titleRef}
           style={styles.input}
           value={title}
@@ -244,8 +252,7 @@ export default function QuickAddTaskModal({
           placeholder={t('mobile.newTaskPlaceholder')}
           accessibilityLabel={t('dialogs.task.fields.title')}
           returnKeyType="done"
-          onSubmitEditing={() => void onCreate()}
-          autoComplete="off"
+          onSubmitEditing={submitFromKeyboard}
         />
         <TitleSuggestions options={titleOptions} onAccept={acceptSuggestion} />
       </View>

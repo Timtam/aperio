@@ -61,6 +61,7 @@ import { RemindersEditor } from '../components/RemindersEditor';
 import { SegmentedSelect } from '../components/SegmentedSelect';
 import { SoundSelect } from '../components/SoundSelect';
 import { SubtaskSection } from '../components/SubtaskSection';
+import { TitleField } from '../components/TitleField';
 import { SwitchRow } from '../components/SwitchRow';
 import { TaskRecurrenceSelector } from '../components/TaskRecurrenceSelector';
 import { useCancelHeader } from '../components/useCancelHeader';
@@ -395,6 +396,14 @@ export default function TaskEditorModal({
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
       setForm((f) => ({ ...f, [key]: value })),
     [],
+  );
+
+  // Stable, because the title field is memoised against the renders the
+  // suggestion search causes — a fresh closure here would let every arriving
+  // result reach the input again (see `TitleField`).
+  const changeTitle = useCallback(
+    (v: string) => update('title', v),
+    [update],
   );
 
   // Whether the user has manually picked a status this session. When they
@@ -947,11 +956,11 @@ export default function TaskEditorModal({
 
       <View style={styles.field}>
         <Text style={styles.legend}>{t('dialogs.task.fields.title')}</Text>
-        <TextInput
+        <TitleField
           ref={titleRef}
           style={styles.input}
           value={form.title}
-          onChangeText={(v) => update('title', v)}
+          onChangeText={changeTitle}
           placeholder={t('mobile.newTaskPlaceholder')}
           accessibilityLabel={t('dialogs.task.fields.title')}
           editable={!loading}

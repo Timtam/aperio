@@ -33,6 +33,7 @@ import {
 } from '@aperio/shared';
 
 import { AttendeesEditor } from '../components/AttendeesEditor';
+import { TitleField } from '../components/TitleField';
 import { TitleSuggestions } from '../components/TitleSuggestions';
 import {
   rankEventSuggestions,
@@ -902,7 +903,7 @@ export default function EventEditorModal({
 
       <View style={styles.field}>
         <Text style={styles.label}>{t('dialogs.event.fields.title')}</Text>
-        <TextInput
+        <TitleField
           style={styles.input}
           value={title}
           onChangeText={setTitle}

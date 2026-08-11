@@ -22,6 +22,9 @@ import { search } from '../api/search';
  * is a property of the cache, not of the search: nothing prunes it, so it
  * deepens as the app is used.
  */
+/** How long the text must sit still before the history is searched. */
+const SEARCH_IDLE_MS = 500;
+
 export function useTitleSuggestions<K extends 'events' | 'tasks'>(
   query: string,
   kind: K,
@@ -38,8 +41,15 @@ export function useTitleSuggestions<K extends 'events' | 'tasks'>(
       return;
     }
     const mine = (round.current += 1);
-    // A short pause turns a burst of round trips into one; nobody reads a list
-    // that is being rebuilt under them anyway.
+    // A pause turns a burst of round trips into one; nobody reads a list that
+    // is being rebuilt under them anyway.
+    //
+    // Long enough to sit out a spoken phrase, not just a fast typist. iOS
+    // dictation reports its recognition continuously, so a 200 ms window fired
+    // a search — and a state update, and a render — several times into every
+    // utterance, while the keyboard still owned the field. Waiting for a
+    // genuine pause costs a suggestion list half a second nobody was reading
+    // yet, and keeps the app out of the way while someone is still speaking.
     const timer = setTimeout(() => {
       void search(trimmed, { kind })
         .then((results) => {
@@ -50,7 +60,7 @@ export function useTitleSuggestions<K extends 'events' | 'tasks'>(
           // No offers this round. The title field is a title field first.
           if (round.current === mine) setMatches([]);
         });
-    }, 200);
+    }, SEARCH_IDLE_MS);
     return () => clearTimeout(timer);
   }, [query, kind, enabled]);
 

@@ -18,6 +18,9 @@ import { useThemedStyles, type ThemeColors } from '../theme';
  * fills the day — that is what makes this a new entry, and it came from
  * wherever the editor was opened.
  */
+/** How long the offers must hold still before VoiceOver is told about them. */
+const ANNOUNCE_IDLE_MS = 800;
+
 export interface TitleSuggestionOption {
   id: string;
   title: string;
@@ -47,12 +50,21 @@ export function TitleSuggestions({
       return;
     }
     if (options.length === spoken.current) return;
-    spoken.current = options.length;
-    if (Platform.OS === 'ios') {
-      AccessibilityInfo.announceForAccessibility(
-        t('suggestions.count', { count: options.length }),
-      );
-    }
+    // Not immediately. While someone DICTATES a title the list keeps changing,
+    // and an announcement then talks over the recognition the user is still
+    // producing — on iOS, where this announce is VoiceOver's only channel for
+    // the list, that is the worst possible moment for it. Waiting for the
+    // offers to hold still means it lands in the pause after the phrase, which
+    // is when anyone would act on it anyway.
+    const timer = setTimeout(() => {
+      spoken.current = options.length;
+      if (Platform.OS === 'ios') {
+        AccessibilityInfo.announceForAccessibility(
+          t('suggestions.count', { count: options.length }),
+        );
+      }
+    }, ANNOUNCE_IDLE_MS);
+    return () => clearTimeout(timer);
   }, [options.length, t]);
 
   if (options.length === 0) return null;

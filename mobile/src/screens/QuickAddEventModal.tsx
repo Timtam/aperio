@@ -21,6 +21,7 @@ import {
 import { createEvent, listCalendars, type Calendar } from '../api/calendar';
 import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { FormScrollView } from '../components/FormScrollView';
+import { TitleField } from '../components/TitleField';
 import { TitleSuggestions } from '../components/TitleSuggestions';
 import {
   rankEventSuggestions,
@@ -220,6 +221,13 @@ export default function QuickAddEventModal({
     }
   }, [calId, date, fail, navigation, t, time, title]);
 
+  // Stable, so the memoised title field is not re-rendered by everything that
+  // happens around it — the suggestion list arriving, above all (see
+  // `TitleField`).
+  const submitFromKeyboard = useCallback(() => {
+    void onCreate();
+  }, [onCreate]);
+
   // Hand off to the full editor, carrying the title/day/TIME/calendar. Replace
   // (not push) so the quick-add doesn't linger behind the editor. The picked
   // time rides along so the editor keeps it instead of re-deriving its own
@@ -252,7 +260,7 @@ export default function QuickAddEventModal({
 
       <View style={styles.field}>
         <Text style={styles.legend}>{t('dialogs.event.fields.title')}</Text>
-        <TextInput
+        <TitleField
           ref={titleRef}
           style={styles.input}
           value={title}
@@ -260,8 +268,7 @@ export default function QuickAddEventModal({
           placeholder={t('dialogs.event.fields.title')}
           accessibilityLabel={t('dialogs.event.fields.title')}
           returnKeyType="done"
-          onSubmitEditing={() => void onCreate()}
-          autoComplete="off"
+          onSubmitEditing={submitFromKeyboard}
         />
         <TitleSuggestions options={titleOptions} onAccept={acceptSuggestion} />
       </View>
