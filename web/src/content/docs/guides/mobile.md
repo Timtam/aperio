@@ -61,6 +61,12 @@ concepts), adapted to the way VoiceOver and TalkBack work:
   exactly as on the desktop.
 - **Group headings** (e.g. a task list or a section) are collapsible buttons
   that announce whether they are expanded or collapsed.
+- **The catalogues** – calendars, task lists, address books – give each entry a
+  single focus stop: a **switch** that shows or hides it, carrying the name, the
+  account and the colour. Managing it (or, for an address book, editing and
+  deleting it) is an action on that same stop, so reading through twelve
+  calendars is twelve swipes rather than thirty-six. The buttons stay visible
+  for everyone else.
 - **Dates and times** use the **native pickers**, so they read and behave the
   way you already know from other apps on your phone.
 

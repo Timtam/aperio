@@ -18,6 +18,7 @@ import type { ColorLabel } from '@aperio/shared';
 import { listAccounts, type Account } from '../api/accounts';
 import { Calendar, createCalendar, listCalendars } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
+import { useCancelHeader } from '../components/useCancelHeader';
 import type { RootStackScreenProps } from '../navigation/types';
 import { refreshRemindersSoon } from '../reminders/scheduler';
 import { useCacheReload } from '../state/cacheObserver';
@@ -31,6 +32,13 @@ import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 // deferred), so they're listed read-only — no Manage entry. Each row shows the
 // calendar's bound colour as a real swatch for sighted users + the name on the
 // accessible label.
+//
+// A row is ONE accessible element: a switch carrying the calendar's identity,
+// with Manage as a rotor action. It used to be three — a switch, a text
+// element, and a button — so reading down a list of twelve calendars meant
+// thirty-six swipes for twelve facts. The Manage BUTTON stays on screen for
+// sighted users and is hidden from the reader, which is the trade: one element
+// for the reader, an unchanged surface for everyone else.
 
 const LOCAL = 'local';
 
@@ -42,6 +50,9 @@ export default function CalendarsScreen({
   navigation,
 }: RootStackScreenProps<'Calendars'>) {
   const { t } = useTranslation();
+  // The stack draws a back chevron, but it isn't reachable by swiping with
+  // VoiceOver — so the way out of the catalogue is a real element too.
+  useCancelHeader(navigation, 'mobile.back');
   // Per-account refresh-error surface (silent-staleness warning banner).
   const { errorsByAccount } = useRefreshErrors();
   const styles = useThemedStyles(makeStyles);
@@ -192,20 +203,54 @@ export default function CalendarsScreen({
             const label =
               `${cal.name}, ${accountLabel}` +
               (colourName ? t('mobile.colorLabelSuffix', { name: colourName }) : '');
+            // Manageable calendars: a local one carries its colour/name on its
+            // row; an external one stores a host-local colour/name override
+            // (delete stays local-only). Synthetic birthday calendars are
+            // read-only with no backing row, so rename/colour/delete wouldn't
+            // apply — but the editor still hosts their default reminders (e.g.
+            // "one week before"), so it opens for them too, reduced to just that.
+            const manageLabel = isBirthdayCalendarId(cal.id)
+              ? t('mobile.birthdayCalendarReminders')
+              : t('mobile.manageCalendar');
+            const openEditor = () =>
+              navigation.navigate('CalendarEditor', { calendarId: cal.id });
             return (
               <View key={cal.id} style={styles.row}>
                 <Pressable
+                  ref={(node) => {
+                    rowTags.current[cal.id] = node ? findNodeHandle(node) : null;
+                  }}
                   accessible
                   accessibilityRole="switch"
                   accessibilityState={{ checked: !hidden.has(cal.id) }}
-                  accessibilityLabel={t('mobile.calendarVisible', { name: cal.name })}
+                  accessibilityLabel={label}
+                  accessibilityHint={t('mobile.visibilityRowHint')}
+                  accessibilityActions={[{ name: 'manage', label: manageLabel }]}
+                  onAccessibilityAction={(e) => {
+                    if (e.nativeEvent.actionName === 'manage') openEditor();
+                  }}
                   onPress={() => {
                     toggleVisibility(cal.id);
                     // Re-filter scheduled OS notifications for the new visibility.
                     refreshRemindersSoon();
                   }}
-                  style={({ pressed }) => [styles.visToggle, pressed && styles.pressed]}
+                  style={({ pressed }) => [styles.rowToggle, pressed && styles.rowPressed]}
                 >
+                  {hex != null && (
+                    <View
+                      accessible={false}
+                      importantForAccessibility="no"
+                      style={[styles.colorDot, { backgroundColor: hex }]}
+                    />
+                  )}
+                  <View style={styles.rowText} importantForAccessibility="no">
+                    <Text style={styles.calName} importantForAccessibility="no">
+                      {cal.name}
+                    </Text>
+                    <Text style={styles.account} importantForAccessibility="no">
+                      {accountLabel}
+                    </Text>
+                  </View>
                   {/* Visual only — the Pressable owns the toggle + the switch
                       a11y trait (announced on toggle). */}
                   <View pointerEvents="none">
@@ -217,54 +262,17 @@ export default function CalendarsScreen({
                     />
                   </View>
                 </Pressable>
-                <View
-                  ref={(node) => {
-                    rowTags.current[cal.id] = node ? findNodeHandle(node) : null;
-                  }}
-                  accessible
-                  accessibilityRole="text"
-                  accessibilityLabel={label}
-                  style={styles.rowText}
+                {/* Sighted-only twin of the row's Manage action: the same tap
+                    target it always was, taken out of the reader's tree so the
+                    row stays one element. */}
+                <Pressable
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                  onPress={openEditor}
+                  style={({ pressed }) => [styles.manageButton, pressed && styles.rowPressed]}
                 >
-                  {hex != null && (
-                    <View
-                      accessible={false}
-                      importantForAccessibility="no"
-                      style={[styles.colorDot, { backgroundColor: hex }]}
-                    />
-                  )}
-                  <Text style={styles.calName} importantForAccessibility="no">
-                    {cal.name}
-                  </Text>
-                  <Text style={styles.account} importantForAccessibility="no">
-                    {accountLabel}
-                  </Text>
-                </View>
-                {/* Manageable calendars: a local one carries its colour/name on
-                    its row; an external one stores a host-local colour/name
-                    override (delete stays local-only). Synthetic birthday
-                    calendars are read-only with no backing row, so rename/colour/
-                    delete wouldn't apply — but the editor still hosts their
-                    default reminders (e.g. "one week before"), so it opens for
-                    them too, reduced to just that. */}
-                {(() => {
-                  const isBirthday = isBirthdayCalendarId(cal.id);
-                  const buttonLabel = isBirthday
-                    ? t('mobile.birthdayCalendarReminders')
-                    : t('mobile.manageCalendar');
-                  return (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`${buttonLabel}: ${cal.name}`}
-                      onPress={() =>
-                        navigation.navigate('CalendarEditor', { calendarId: cal.id })
-                      }
-                      style={({ pressed }) => [styles.manageButton, pressed && styles.rowPressed]}
-                    >
-                      <Text style={styles.manageButtonText}>{buttonLabel}</Text>
-                    </Pressable>
-                  );
-                })()}
+                  <Text style={styles.manageButtonText}>{manageLabel}</Text>
+                </Pressable>
               </View>
             );
           })}
@@ -315,12 +323,17 @@ const makeStyles = (c: ThemeColors) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 10,
+    },
+    // The whole left side of the row: swatch, name, account and the switch.
+    rowToggle: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
       paddingVertical: 10,
       paddingHorizontal: 6,
     },
     rowPressed: { backgroundColor: c.surfacePressed },
-    pressed: { opacity: 0.7 },
-    visToggle: { paddingVertical: 8, paddingHorizontal: 2 },
     colorDot: {
       width: 12,
       height: 12,

@@ -65,6 +65,12 @@ von VoiceOver und TalkBack:
   Erinnerungen – genau wie am Desktop.
 - **Gruppenüberschriften** (z. B. eine Aufgabenliste oder ein Abschnitt) sind
   zusammenklappbare Schalter, die ansagen, ob sie auf- oder zugeklappt sind.
+- **Die Verwaltungslisten** – Kalender, Aufgabenlisten, Adressbücher – geben
+  jedem Eintrag genau eine Fokusstelle: einen **Schalter**, der ihn ein- oder
+  ausblendet und dabei Name, Konto und Farbe ansagt. Das Verwalten (beim
+  Adressbuch: Bearbeiten und Löschen) liegt als Aktion auf derselben Stelle –
+  zwölf Kalender sind damit zwölf Wischer statt sechsunddreißig. Die
+  Schaltflächen bleiben für alle anderen sichtbar.
 - **Datum und Uhrzeit** nutzen die **nativen Auswahlfelder**, lesen und verhalten
   sich also so, wie du es von anderen Apps auf deinem Handy kennst.
 

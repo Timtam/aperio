@@ -24,6 +24,7 @@ import {
   listContactLists,
 } from '../api/contacts';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
+import { useCancelHeader } from '../components/useCancelHeader';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useCacheReload } from '../state/cacheObserver';
 import { useContactVisibility } from '../state/contactVisibility';
@@ -37,6 +38,11 @@ import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 // source) + a colour picker (ALL books, even read-only/provider ones: a contact
 // list's colour is a host-local override, not a provider write). Delete is
 // writable-only. Create makes a LOCAL book (the bridge takes the name only).
+//
+// A row is ONE accessible element: a switch carrying the book's identity, with
+// Edit and Delete as rotor actions. The buttons stay on screen for sighted
+// users and are hidden from the reader — one element for the reader, an
+// unchanged surface for everyone else.
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -46,6 +52,9 @@ export default function ContactListsScreen({
   navigation,
 }: RootStackScreenProps<'ContactLists'>) {
   const { t } = useTranslation();
+  // The stack draws a back chevron, but it isn't reachable by swiping with
+  // VoiceOver — so the way out of the catalogue is a real element too.
+  useCancelHeader(navigation, 'mobile.back');
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   // Address-book visibility (hide a book from the Contacts browse + search).
@@ -262,8 +271,16 @@ export default function ContactListsScreen({
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
         >
-          {lists.map((book) =>
-            editingId === book.id ? (
+          {lists.map((book) => {
+            // The swatch is nothing to a reader, so the colour's NAME rides the
+            // row label — same as the calendar catalogue.
+            const colourName = book.color_label
+              ? colorLabels.find((l) => l.id === book.color_label)?.name
+              : undefined;
+            const rowLabel = colourName
+              ? `${book.name}${t('mobile.colorLabelSuffix', { name: colourName })}`
+              : book.name;
+            return editingId === book.id ? (
               <View key={book.id} style={styles.editPanel}>
                 {!book.read_only && (
                   <TextInput
@@ -303,32 +320,31 @@ export default function ContactListsScreen({
             ) : (
               <View key={book.id} style={styles.row}>
                 <Pressable
-                  accessible
-                  accessibilityRole="switch"
-                  accessibilityState={{ checked: !hiddenBooks.has(book.id) }}
-                  accessibilityLabel={t('mobile.contactBookVisible', { name: book.name })}
-                  onPress={() => toggleVisibility(book.id)}
-                  style={({ pressed }) => [styles.visToggle, pressed && styles.pressed]}
-                >
-                  {/* Visual only — the Pressable owns the toggle + the switch
-                      a11y trait (announced on toggle, unlike the old checkbox). */}
-                  <View pointerEvents="none">
-                    <Switch
-                      value={!hiddenBooks.has(book.id)}
-                      trackColor={{ false: colors.border, true: colors.accent }}
-                      importantForAccessibility="no"
-                      accessibilityElementsHidden
-                    />
-                  </View>
-                </Pressable>
-                <View
                   ref={(node) => {
                     rowTags.current[book.id] = node ? findNodeHandle(node) : null;
                   }}
                   accessible
-                  accessibilityRole="text"
-                  accessibilityLabel={book.name}
-                  style={styles.rowText}
+                  accessibilityRole="switch"
+                  accessibilityState={{ checked: !hiddenBooks.has(book.id) }}
+                  accessibilityLabel={rowLabel}
+                  accessibilityHint={t('mobile.visibilityRowHint')}
+                  accessibilityActions={
+                    book.read_only
+                      ? [{ name: 'edit', label: t('mobile.edit') }]
+                      : [
+                          { name: 'edit', label: t('mobile.edit') },
+                          { name: 'delete', label: t('mobile.delete') },
+                        ]
+                  }
+                  onAccessibilityAction={(e) => {
+                    const action = e.nativeEvent.actionName;
+                    if (action === 'edit') startEdit(book);
+                    // Read-only books offer no delete action at all, so the
+                    // guard is belt and braces against a stale action list.
+                    else if (action === 'delete' && !book.read_only) removeBook(book);
+                  }}
+                  onPress={() => toggleVisibility(book.id)}
+                  style={({ pressed }) => [styles.rowToggle, pressed && styles.pressed]}
                 >
                   {colorHex(book) != null && (
                     <View
@@ -340,10 +356,21 @@ export default function ContactListsScreen({
                   <Text style={styles.bookName} importantForAccessibility="no">
                     {book.name}
                   </Text>
-                </View>
+                  {/* Visual only — the Pressable owns the toggle + the switch
+                      a11y trait (announced on toggle, unlike the old checkbox). */}
+                  <View pointerEvents="none">
+                    <Switch
+                      value={!hiddenBooks.has(book.id)}
+                      trackColor={{ false: colors.border, true: colors.accent }}
+                      importantForAccessibility="no"
+                      accessibilityElementsHidden
+                    />
+                  </View>
+                </Pressable>
+                {/* Sighted-only twins of the row's rotor actions. */}
                 <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`${t('mobile.edit')}: ${book.name}`}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
                   onPress={() => startEdit(book)}
                   style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
                 >
@@ -351,8 +378,8 @@ export default function ContactListsScreen({
                 </Pressable>
                 {!book.read_only && (
                   <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`${t('mobile.delete')}: ${book.name}`}
+                    accessibilityElementsHidden
+                    importantForAccessibility="no-hide-descendants"
                     onPress={() => removeBook(book)}
                     style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
                   >
@@ -360,8 +387,8 @@ export default function ContactListsScreen({
                   </Pressable>
                 )}
               </View>
-            ),
-          )}
+            );
+          })}
         </ScrollView>
       )}
     </View>
@@ -403,8 +430,15 @@ const makeStyles = (c: ThemeColors) =>
       borderColor: c.border,
       backgroundColor: c.surfaceAlt,
     },
-    visToggle: { paddingVertical: 8, paddingHorizontal: 2 },
-    rowText: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+    // The whole left side of the row: swatch, name and the switch.
+    rowToggle: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingVertical: 8,
+      paddingHorizontal: 2,
+    },
     bookName: { flex: 1, fontSize: 18, fontWeight: '600', color: c.textPrimary },
     colorDot: {
       width: 14,

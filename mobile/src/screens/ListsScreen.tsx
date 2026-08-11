@@ -17,6 +17,7 @@ import type { TaskList } from '@aperio/shared';
 
 import { listAccounts } from '../api/accounts';
 import { createTaskList } from '../api/client';
+import { useCancelHeader } from '../components/useCancelHeader';
 import { useCacheReload } from '../state/cacheObserver';
 import { useTaskStore } from '../state/taskStoreContext';
 import { useRefreshErrors } from '../state/useRefreshErrors';
@@ -37,6 +38,9 @@ export default function ListsScreen() {
   // Per-account refresh-error surface (silent-staleness warning banner).
   const { errorsByAccount } = useRefreshErrors();
   const navigation = useNavigation();
+  // The stack draws a back chevron, but it isn't reachable by swiping with
+  // VoiceOver — so the way out of the catalogue is a real element too.
+  useCancelHeader(navigation, 'mobile.back');
   const { taskLists, selectedTaskListIds, toggleTaskList, refreshTaskLists, colorLabels } =
     useTaskStore();
   const styles = useThemedStyles(makeStyles);
@@ -188,6 +192,15 @@ export default function ListsScreen() {
                   accessibilityRole="switch"
                   accessibilityState={{ checked: selected }}
                   accessibilityLabel={fullLabel}
+                  accessibilityHint={t('mobile.visibilityRowHint')}
+                  accessibilityActions={[
+                    { name: 'manage', label: t('mobile.manageList') },
+                  ]}
+                  onAccessibilityAction={(e) => {
+                    if (e.nativeEvent.actionName === 'manage') {
+                      navigation.navigate('ListEditor', { listId: list.id });
+                    }
+                  }}
                   onPress={() => onToggle(list)}
                   style={({ pressed }) => [styles.rowToggle, pressed && styles.rowPressed]}
                 >
@@ -217,9 +230,12 @@ export default function ListsScreen() {
                     />
                   </View>
                 </Pressable>
+                {/* Sighted-only twin of the row's Manage action: the same
+                    tap target it always was, taken out of the reader's tree so
+                    the row stays ONE element instead of two. */}
                 <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`${t('mobile.manageList')}: ${list.name}`}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
                   onPress={() => navigation.navigate('ListEditor', { listId: list.id })}
                   style={({ pressed }) => [styles.manageButton, pressed && styles.rowPressed]}
                 >
