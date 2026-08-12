@@ -2273,4 +2273,59 @@ mod tests {
             .await
             .unwrap();
     }
+    // ── the planned block ─────────────────────────────────────
+
+    #[test]
+    fn a_duration_in_minutes_becomes_the_planned_end() {
+        let entry = TaskEntry {
+            id: "T1".into(),
+            project_id: "P1".into(),
+            content: Some("Deep work".into()),
+            due: Some(DueEntry {
+                date: Some("2026-08-12".into()),
+                datetime: Some("2026-08-12T09:00:00Z".into()),
+            }),
+            duration: Some(DurationEntry {
+                amount: 90,
+                unit: Some("minute".into()),
+            }),
+            ..Default::default()
+        };
+        let task = map_task(entry, "L1");
+        assert_eq!(
+            task.scheduled_end_time,
+            Some(NaiveTime::from_hms_opt(10, 30, 0).unwrap()),
+        );
+    }
+
+    #[test]
+    fn a_duration_in_days_is_not_a_block_this_model_can_hold() {
+        let entry = TaskEntry {
+            id: "T1".into(),
+            project_id: "P1".into(),
+            content: Some("Sprint".into()),
+            due: Some(DueEntry {
+                date: Some("2026-08-12".into()),
+                datetime: Some("2026-08-12T09:00:00Z".into()),
+            }),
+            duration: Some(DurationEntry {
+                amount: 3,
+                unit: Some("day".into()),
+            }),
+            ..Default::default()
+        };
+        assert_eq!(map_task(entry, "L1").scheduled_end_time, None);
+    }
+
+    #[test]
+    fn a_block_is_written_back_as_minutes_with_its_unit() {
+        let mut nt = sample_new_task();
+        nt.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 8, 12).unwrap());
+        nt.scheduled_time = Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap());
+        nt.scheduled_end_time = Some(NaiveTime::from_hms_opt(10, 30, 0).unwrap());
+        let body = new_task_to_create_body("P1", &nt);
+        assert_eq!(body.duration, Some(90));
+        // The amount means nothing without the unit beside it.
+        assert_eq!(body.duration_unit, Some("minute"));
+    }
 }

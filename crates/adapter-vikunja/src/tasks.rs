@@ -1813,6 +1813,53 @@ mod tests {
         assert_eq!(list.color.unwrap().hex, "#abcdef");
     }
 
+    // ── the planned block ─────────────────────────────────────
+
+    #[test]
+    fn a_same_day_end_date_becomes_the_planned_block() {
+        let entry = TaskEntry {
+            id: 1,
+            title: Some("Deep work".into()),
+            start_date: Some("2026-08-12T09:00:00Z".into()),
+            end_date: Some("2026-08-12T10:30:00Z".into()),
+            ..Default::default()
+        };
+        let task = map_task(entry, "L1");
+        assert_eq!(
+            task.scheduled_time,
+            Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap()),
+        );
+        assert_eq!(
+            task.scheduled_end_time,
+            Some(NaiveTime::from_hms_opt(10, 30, 0).unwrap()),
+        );
+    }
+
+    #[test]
+    fn an_end_date_on_a_later_day_is_left_where_it_is() {
+        // A multi-day Gantt bar is a shape this task model has no room for.
+        // Truncating it to the first day would misreport the plan, so the
+        // block is simply not taken.
+        let entry = TaskEntry {
+            id: 1,
+            title: Some("Sprint".into()),
+            start_date: Some("2026-08-12T09:00:00Z".into()),
+            end_date: Some("2026-08-15T10:30:00Z".into()),
+            ..Default::default()
+        };
+        assert_eq!(map_task(entry, "L1").scheduled_end_time, None);
+    }
+
+    #[test]
+    fn a_block_is_written_back_to_end_date() {
+        let mut nt = sample_new_task();
+        nt.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 8, 12).unwrap());
+        nt.scheduled_time = Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap());
+        nt.scheduled_end_time = Some(NaiveTime::from_hms_opt(10, 30, 0).unwrap());
+        let body = new_task_to_body(&nt);
+        assert_eq!(body.end_date.as_deref(), Some("2026-08-12T10:30:00Z"));
+    }
+
     // ── map_task ──────────────────────────────────────────────
 
     #[test]

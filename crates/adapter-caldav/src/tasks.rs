@@ -1767,6 +1767,60 @@ END:VCALENDAR</c:calendar-data>
     }
 
     #[test]
+    fn a_planned_block_travels_as_duration_when_due_is_free() {
+        // DURATION is the standard carrier and the one Thunderbird lays out as
+        // a real block, so it is used wherever RFC 5545 allows it.
+        let mut new = sample_new_task();
+        new.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 8, 12).unwrap());
+        new.scheduled_time = Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap());
+        new.scheduled_end_time = Some(NaiveTime::from_hms_opt(10, 30, 0).unwrap());
+        new.deadline_date = None;
+        new.deadline_time = None;
+        let body = build_vtodo_body("uid-span", &new, None);
+        assert!(body.contains("DURATION:PT90M"), "got:\n{body}");
+        assert!(!body.contains("X-APERIO-SCHEDULED-END"), "got:\n{body}");
+    }
+
+    #[test]
+    fn a_deadline_pushes_the_block_end_onto_an_x_property() {
+        // RFC 5545 §3.8.2.3: DUE and DURATION are mutually exclusive, and DUE
+        // is already spoken for by the deadline. Emitting both would be
+        // malformed, which is how tasks lost their dates on iCloud before.
+        let mut new = sample_new_task();
+        new.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 8, 12).unwrap());
+        new.scheduled_time = Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap());
+        new.scheduled_end_time = Some(NaiveTime::from_hms_opt(10, 30, 0).unwrap());
+        new.deadline_date = Some(NaiveDate::from_ymd_opt(2026, 8, 20).unwrap());
+        let body = build_vtodo_body("uid-both", &new, None);
+        assert!(!body.contains("DURATION"), "got:\n{body}");
+        assert!(
+            body.contains("X-APERIO-SCHEDULED-END:103000"),
+            "got:\n{body}",
+        );
+    }
+
+    #[test]
+    fn an_iso_duration_reads_back_as_the_hours_and_minutes_it_names() {
+        assert_eq!(
+            parse_iso_duration("PT1H30M"),
+            Some(chrono::TimeDelta::minutes(90)),
+        );
+        assert_eq!(
+            parse_iso_duration("PT45M"),
+            Some(chrono::TimeDelta::minutes(45))
+        );
+        assert_eq!(
+            parse_iso_duration("P1D"),
+            Some(chrono::TimeDelta::hours(24))
+        );
+        // A week is a span no single day can hold, and a zero-length one is not
+        // a block at all.
+        assert_eq!(parse_iso_duration("P2W"), None);
+        assert_eq!(parse_iso_duration("PT0M"), None);
+        assert_eq!(parse_iso_duration("nonsense"), None);
+    }
+
+    #[test]
     fn build_vtodo_matches_the_value_types_of_dtstart_and_due() {
         // RFC 5545 §3.8.2.3: DUE's value type MUST be the same as DTSTART's. A
         // task planned for a day but due at a time would otherwise emit a bare

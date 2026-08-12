@@ -1579,6 +1579,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_block_needs_a_start_and_has_to_run_forwards() {
+        let (a, list) = adapter_with_list();
+        let day = NaiveDate::from_ymd_opt(2026, 8, 12).unwrap();
+
+        // A real block round-trips.
+        let mut nt = mk_task("Deep work");
+        nt.scheduled_date = Some(day);
+        nt.scheduled_time = Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap());
+        nt.scheduled_end_time = Some(NaiveTime::from_hms_opt(11, 0, 0).unwrap());
+        let created = a.create_task(&list.id, nt).await.unwrap();
+        assert_eq!(
+            created.scheduled_end_time,
+            Some(NaiveTime::from_hms_opt(11, 0, 0).unwrap()),
+        );
+        let read = a.get_task_by_id(&created.id).unwrap().unwrap();
+        assert_eq!(read.scheduled_end_time, created.scheduled_end_time);
+
+        // An end with no start is not a block …
+        let mut orphan = mk_task("No start");
+        orphan.scheduled_date = Some(day);
+        orphan.scheduled_time = None;
+        orphan.scheduled_end_time = Some(NaiveTime::from_hms_opt(11, 0, 0).unwrap());
+        let created = a.create_task(&list.id, orphan).await.unwrap();
+        assert_eq!(created.scheduled_end_time, None);
+
+        // … and neither is one that ends before it begins.
+        let mut backwards = mk_task("Backwards");
+        backwards.scheduled_date = Some(day);
+        backwards.scheduled_time = Some(NaiveTime::from_hms_opt(11, 0, 0).unwrap());
+        backwards.scheduled_end_time = Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap());
+        let created = a.create_task(&list.id, backwards).await.unwrap();
+        assert_eq!(created.scheduled_end_time, None);
+    }
+
+    #[tokio::test]
     async fn idempotent_spawner_skips_when_series_already_open() {
         let (a, list) = adapter_with_list();
         let mut nt = mk_task("Empty dishwasher");
