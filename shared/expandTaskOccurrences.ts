@@ -97,9 +97,13 @@ function isoWeekday(d: Date): number {
   return day === 0 ? 7 : day;
 }
 
-/** Next listed weekday strictly after `anchor`; falls forward a whole
- *  interval-week block when none of the next 7 days match. Mirrors Rust's
- *  `next_weekday_after`. */
+/** The next listed weekday after `anchor`: within the anchor's own week if one
+ *  is left there, otherwise the first listed day of the week `intervalWeeks`
+ *  later. Weeks start on MONDAY (RFC 5545's default `WKST`, not the user's
+ *  display setting). Mirrors Rust's `next_weekday_after` — including why it
+ *  counts weeks: scanning the next seven days can never reach further than
+ *  seven days, so "every 2 weeks on Monday" advanced by one week and the
+ *  interval was silently dropped whenever the rule named its weekdays. */
 function nextWeekdayAfter(
   anchor: Date,
   byDay: string[],
@@ -107,11 +111,15 @@ function nextWeekdayAfter(
 ): Date | null {
   const allowed = byDay.map((d) => ISO_WEEKDAY[d]).filter(Boolean);
   if (allowed.length === 0) return null;
-  for (let offset = 1; offset <= 7; offset++) {
-    const cand = addDays(anchor, offset);
-    if (allowed.includes(isoWeekday(cand))) return cand;
-  }
-  return addDays(anchor, 7 * Math.max(1, intervalWeeks));
+  const weekStart = addDays(anchor, -(isoWeekday(anchor) - 1));
+  // A listed day still to come this week wins, whatever the interval.
+  const restOfWeek = allowed
+    .map((iso) => addDays(weekStart, iso - 1))
+    .filter((cand) => cand.getTime() > anchor.getTime())
+    .sort((a, b) => a.getTime() - b.getTime());
+  if (restOfWeek.length > 0) return restOfWeek[0];
+  const nextBlock = addDays(weekStart, 7 * Math.max(1, intervalWeeks));
+  return addDays(nextBlock, Math.min(...allowed) - 1);
 }
 
 /** Earliest fixed (month, day) trigger strictly after `from`, scanning this

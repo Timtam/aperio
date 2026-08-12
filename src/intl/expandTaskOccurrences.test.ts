@@ -238,6 +238,37 @@ describe('expandScheduledRecurringTasks — expansion', () => {
     expect(dates(out)).toEqual(['2026-07-06', '2026-07-09']);
   });
 
+  it('honours the interval when the rule names its weekdays', () => {
+    // "Every 2 weeks on Monday" used to project EVERY Monday: naming the days
+    // dropped the interval, because the seven-day scan can never reach the
+    // fortnight. 2026-08-03 is a Monday.
+    const task: Task = {
+      ...baseTask,
+      scheduled_date: '2026-08-03',
+      recurrence: rule({ freq: 'WEEKLY', interval: 2, byDay: ['MO'] }),
+    };
+    const out = expandScheduledRecurringTasks([task], '2026-08-03', '2026-09-01');
+    expect(dates(out)).toEqual(['2026-08-03', '2026-08-17', '2026-08-31']);
+  });
+
+  it('keeps every listed day of the weeks the interval lands on', () => {
+    // Mon+Thu every two weeks is BOTH days of every second week — not one day
+    // per week, and not a fortnight between Monday and Thursday.
+    const task: Task = {
+      ...baseTask,
+      scheduled_date: '2026-08-03',
+      recurrence: rule({ freq: 'WEEKLY', interval: 2, byDay: ['MO', 'TH'] }),
+    };
+    const out = expandScheduledRecurringTasks([task], '2026-08-03', '2026-08-31');
+    expect(dates(out)).toEqual([
+      '2026-08-03',
+      '2026-08-06',
+      '2026-08-17',
+      '2026-08-20',
+      '2026-08-31',
+    ]);
+  });
+
   it('emits nothing when an UNTIL bound ends before the window (and terminates)', () => {
     const task: Task = {
       ...baseTask,

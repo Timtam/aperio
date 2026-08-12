@@ -290,28 +290,43 @@ pub fn advance(anchor: NaiveDate, rule: &TaskRecurrence) -> Option<NaiveDate> {
     }
 }
 
-/// Within the same week (or the next interval-week block), find the
-/// first weekday listed in `days` after the anchor.
+/// The next listed weekday after `anchor`: within the anchor's own week if one
+/// is left there, otherwise the first listed day of the week `interval_weeks`
+/// later.
+///
+/// The interval is why this counts WEEKS rather than days. Scanning the next
+/// seven days for a listed weekday looks equivalent and is, for every-week
+/// rules — but it can never return anything further out than seven days, so
+/// "every 2 weeks on Monday" advanced by one week, every time, and the interval
+/// was silently dropped for any rule that names its weekdays. The line meant to
+/// catch that sat after a loop that always returned first, so it never ran.
+///
+/// Weeks start on MONDAY here, which is RFC 5545's default `WKST` and therefore
+/// what the providers we round-trip RRULEs with assume. It is not the user's
+/// `weekStartsOn` display setting: that one decides which column a calendar
+/// starts on, and the core has no business reading it.
 fn next_weekday_after(
     anchor: NaiveDate,
     days: &[Weekday],
     interval_weeks: u64,
 ) -> Option<NaiveDate> {
     let allowed: Vec<u32> = days.iter().map(|w| weekday_to_iso(*w)).collect();
-    if allowed.is_empty() {
-        return None;
+    let first_listed = allowed.iter().min().copied()?;
+    let week_start = anchor.checked_sub_days(Days::new(u64::from(
+        anchor.weekday().number_from_monday() - 1,
+    )))?;
+    // A listed day still to come in this week wins, whatever the interval:
+    // Mon+Thu every two weeks means BOTH days of every second week.
+    let rest_of_week = allowed
+        .iter()
+        .filter_map(|iso| week_start.checked_add_days(Days::new(u64::from(iso - 1))))
+        .filter(|cand| *cand > anchor)
+        .min();
+    if rest_of_week.is_some() {
+        return rest_of_week;
     }
-    // Step day by day up to 7 days; if none of the next 7 days match,
-    // jump to the start of the interval-week block after.
-    for offset in 1..=7 {
-        let candidate = anchor.checked_add_days(Days::new(offset))?;
-        let iso = candidate.weekday().number_from_monday();
-        if allowed.contains(&iso) {
-            return Some(candidate);
-        }
-    }
-    // Fallback for interval > 1: skip the whole gap.
-    anchor.checked_add_days(Days::new(7 * interval_weeks.max(1)))
+    let next_block = week_start.checked_add_days(Days::new(7 * interval_weeks.max(1)))?;
+    next_block.checked_add_days(Days::new(u64::from(first_listed - 1)))
 }
 
 fn weekday_to_iso(w: Weekday) -> u32 {
@@ -726,6 +741,69 @@ mod tests {
             next.scheduled_date,
             Some(NaiveDate::from_ymd_opt(2026, 4, 1).unwrap()),
         );
+    }
+
+    /// "Every 2 weeks on Monday" used to advance ONE week: naming the weekdays
+    /// dropped the interval entirely, because the day-by-day scan always found
+    /// a match before the line that applies it.
+    #[test]
+    fn weekly_interval_survives_naming_the_weekdays() {
+        let mut r = rule(
+            RecurrenceFrequency::Weekly,
+            2,
+            RecurrenceAnchor::FromDate,
+            RecurrencePlacement::Schedule,
+            None,
+        );
+        r.day_of_week = Some(vec![Weekday::Monday]);
+        // Monday 3 August + 2 weeks = Monday 17 August, not the 10th.
+        assert_eq!(
+            advance(NaiveDate::from_ymd_opt(2026, 8, 3).unwrap(), &r),
+            NaiveDate::from_ymd_opt(2026, 8, 17),
+        );
+    }
+
+    /// Several named days belong to the SAME week, so an every-two-weeks Mon+Thu
+    /// rule runs Mon, Thu, then skips a week — not Mon, Thu, Mon, Thu weekly.
+    #[test]
+    fn weekly_interval_keeps_every_listed_day_of_its_own_week() {
+        let mut r = rule(
+            RecurrenceFrequency::Weekly,
+            2,
+            RecurrenceAnchor::FromDate,
+            RecurrencePlacement::Schedule,
+            None,
+        );
+        r.day_of_week = Some(vec![Weekday::Monday, Weekday::Thursday]);
+        let mon = NaiveDate::from_ymd_opt(2026, 8, 3).unwrap();
+        let thu = advance(mon, &r).unwrap();
+        assert_eq!(thu, NaiveDate::from_ymd_opt(2026, 8, 6).unwrap());
+        // Nothing listed is left that week, so the next block starts on the
+        // 17th and its first listed day is the Monday.
+        assert_eq!(advance(thu, &r), NaiveDate::from_ymd_opt(2026, 8, 17),);
+    }
+
+    /// Every-week rules keep exactly the dates they always had — the fix must
+    /// not move the common case by a day.
+    #[test]
+    fn weekly_interval_one_is_unchanged() {
+        let mut r = rule(
+            RecurrenceFrequency::Weekly,
+            1,
+            RecurrenceAnchor::FromDate,
+            RecurrencePlacement::Schedule,
+            None,
+        );
+        r.day_of_week = Some(vec![Weekday::Monday, Weekday::Thursday]);
+        // Mon → Thu of the same week …
+        let mon = NaiveDate::from_ymd_opt(2026, 8, 3).unwrap();
+        assert_eq!(advance(mon, &r), NaiveDate::from_ymd_opt(2026, 8, 6));
+        // … Thu → the Monday after, crossing the week boundary.
+        let thu = NaiveDate::from_ymd_opt(2026, 8, 6).unwrap();
+        assert_eq!(advance(thu, &r), NaiveDate::from_ymd_opt(2026, 8, 10));
+        // A Sunday anchor is the week's LAST day, so it always crosses.
+        let sun = NaiveDate::from_ymd_opt(2026, 8, 9).unwrap();
+        assert_eq!(advance(sun, &r), NaiveDate::from_ymd_opt(2026, 8, 10));
     }
 
     /// A rule whose end lies inside the skipped stretch spawns nothing at all —
