@@ -22,6 +22,7 @@
     ]
   },
   "tasks": {
+    "task_time_of_day": false,
     "subtasks": false,
     "create_lists": true,
     "delete_lists": true,

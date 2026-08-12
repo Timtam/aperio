@@ -24,6 +24,7 @@ const DEFAULT_CAPS: TaskCapabilities = {
   task_recurrence: true,
   supports_in_progress: true,
   move_between_projects: true,
+  task_time_of_day: true,
   create_lists: false,
   delete_lists: false,
   manageable: false,
@@ -70,6 +71,19 @@ export function canStoreInProgress(list: TaskList | undefined): boolean {
  *  backend can store (e.g. Vikunja's limited set). */
 export function canRecur(list: TaskList | undefined): boolean {
   return capabilitiesOf(list).task_recurrence;
+}
+
+/**
+ * Can a task in `list` carry a TIME OF DAY, or only a day?
+ *
+ * Google Tasks records only date information, Microsoft To Do normalises the
+ * time component to midnight, and an Exchange task's dates must be midnight.
+ * All three accepted the write and dropped the value, so the time vanished on
+ * the next refresh with nothing anywhere to say why. The editor asks first and
+ * leaves the control out where the answer is no.
+ */
+export function canSetTaskTime(list: TaskList | undefined): boolean {
+  return capabilitiesOf(list).task_time_of_day ?? true;
 }
 
 /** Can `list` host nested child projects / be reparented at all?

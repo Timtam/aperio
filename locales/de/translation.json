@@ -1509,6 +1509,7 @@
         "title": "Titel",
         "list": "Liste",
         "section": "Abschnitt",
+        "noTimeOfDay": "Diese Liste speichert nur ganze Tage — eine Aufgabe darin kann keine Uhrzeit tragen.",
         "assignees": "Zugewiesen an",
         "status": "Status",
         "priority": "Priorität",
@@ -1964,6 +1965,7 @@
     "eventCancelledSuffix": ", abgesagt",
     "eventMovedToDay": "„{{title}}“ auf {{date}} verschoben.",
     "taskScheduledAtTime": "Aufgabe „{{title}}“ am {{date}} um {{time}} eingeplant.",
+    "taskScheduledDayOnly": "{{title}} für {{date}} geplant. Diese Liste speichert nur ganze Tage, die Uhrzeit wurde daher nicht übernommen.",
     "backlog": {
       "heading": "Backlog ({{count}})",
       "thisWeekHeading": "Diese Woche ({{count}})",

@@ -425,6 +425,14 @@ export function canAssignSection(list: TaskList | undefined): boolean {
   return list?.task_capabilities?.sections ?? false;
 }
 
+/** Whether a task in `list` can carry a time of day at all. The desktop twin is
+ *  `canSetTaskTime` in `src/state/taskMoves.ts`. Google Tasks, Microsoft To Do
+ *  and Exchange keep whole days and drop anything finer without complaining, so
+ *  the editor stops offering a time rather than losing it on the round trip. */
+export function canSetTaskTime(list: TaskList | undefined): boolean {
+  return list?.task_capabilities?.task_time_of_day ?? true;
+}
+
 /**
  * Next status for a check-off, honouring the mode. Ported verbatim from the
  * desktop useTaskStatusToggle:

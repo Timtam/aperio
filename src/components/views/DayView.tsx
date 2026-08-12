@@ -18,9 +18,11 @@ import {
   seriesIdOf,
 } from '../../intl/recurrence';
 import { useCalendarStore } from '../../state/calendarStoreContext';
+import { canSetTaskTime } from '../../state/taskMoves';
 import {
   readTaskDrag,
   scheduleTaskAtTime,
+  scheduleTaskOnDay,
   setEventDrag,
   setTaskDrag,
   TASK_DND_TYPE,
@@ -281,7 +283,7 @@ export function DayView() {
     useTaskListShowCompleted();
   const { openForEvent: openEventMenu, openForTask: openTaskMenu } =
     useChipContextMenu();
-  const { colorLabels, sectionColorById, sectionsByList, loadSections } =
+  const { colorLabels, sectionColorById, sectionsByList, loadSections, taskLists } =
     useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
@@ -656,9 +658,21 @@ export function DayView() {
       tasks.find((row) => row.id === payload.task.id) ?? payload.task;
     void (async () => {
       try {
-        await scheduleTaskAtTime(current, dayKey, minute);
+        // Google Tasks, Microsoft To Do and Exchange keep whole days. Writing
+        // the minute there succeeds and the value is gone by the next refresh,
+        // so the drop takes the DAY — which those sources can hold — and says
+        // that is what happened rather than announcing a time that will not
+        // survive the trip.
+        const keepsTime = canSetTaskTime(
+          taskLists.find((l) => l.id === current.list_id),
+        );
+        if (keepsTime) {
+          await scheduleTaskAtTime(current, dayKey, minute);
+        } else {
+          await scheduleTaskOnDay(current, dayKey);
+        }
         announce(
-          t('views.taskScheduledAtTime', {
+          t(keepsTime ? 'views.taskScheduledAtTime' : 'views.taskScheduledDayOnly', {
             title: current.title,
             date: fmt.format(new Date(`${dayKey}T00:00:00`), 'PPP'),
             time: fmt.format(new Date(`${dayKey}T${clock}`), 'p'),

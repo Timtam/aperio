@@ -571,6 +571,10 @@ export default function TaskEditorModal({
     [taskLists, form.listId],
   );
   const canRecur = caps?.task_recurrence ?? true;
+  // Google Tasks, Microsoft To Do and Exchange keep whole days: the write is
+  // accepted, the server drops the time, and the next refresh returns a task
+  // with no time and no error. Do not offer what cannot survive the trip.
+  const canSetTime = caps?.task_time_of_day ?? true;
   const recurrenceCaps = useMemo(
     () => taskLists.find((l) => l.id === form.listId)?.recurrence_capabilities,
     [taskLists, form.listId],
@@ -1066,6 +1070,8 @@ export default function TaskEditorModal({
         onClear={() => clearSlot('scheduled')}
         fieldRef={scheduledDateRef}
         editable={!loading}
+        timeStorable={canSetTime}
+        noTimeLabel={t('dialogs.task.fields.noTimeOfDay')}
       />
 
       <DateTimeField
@@ -1085,6 +1091,8 @@ export default function TaskEditorModal({
         onClear={() => clearSlot('deadline')}
         fieldRef={deadlineDateRef}
         editable={!loading}
+        timeStorable={canSetTime}
+        noTimeLabel={t('dialogs.task.fields.noTimeOfDay')}
       />
 
       {/* The per-task reminder override only matters when a deadline is set; it
@@ -1278,6 +1286,8 @@ function DateTimeField({
   onClear,
   fieldRef,
   editable,
+  timeStorable,
+  noTimeLabel,
 }: {
   legend: string;
   hint: string;
@@ -1297,6 +1307,10 @@ function DateTimeField({
   onClear: () => void;
   fieldRef: RefObject<View | null>;
   editable: boolean;
+  /** Whether the owning source can store a time of day at all. */
+  timeStorable: boolean;
+  /** Said in place of the time control when it cannot. */
+  noTimeLabel: string;
 }) {
   const styles = useThemedStyles(makeStyles);
   const hasDate = dateValue.trim() !== '';
@@ -1362,7 +1376,13 @@ function DateTimeField({
               disabled={!editable}
             />
           </View>
-          {!hasTime ? (
+          {!timeStorable ? (
+            // Not a disabled control: a greyed-out button still reads as
+            // something to reach for, and there is nothing here to reach for.
+            <Text style={styles.hint} accessibilityRole="text">
+              {noTimeLabel}
+            </Text>
+          ) : !hasTime ? (
             <Pressable
               ref={addTimeRef}
               accessibilityRole="button"

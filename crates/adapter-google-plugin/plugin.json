@@ -12,6 +12,7 @@
   "adopts_adapter_kinds": ["googledrive"],
   "signed": false,
   "tasks": {
+    "task_time_of_day": false,
     "subtasks": true,
     "max_subtask_depth": 1,
     "task_recurrence": false,

@@ -1509,6 +1509,7 @@
         "title": "Title",
         "list": "List",
         "section": "Section",
+        "noTimeOfDay": "This list stores whole days only, so a task here cannot carry a time.",
         "assignees": "Assigned to",
         "status": "Status",
         "priority": "Priority",
@@ -1964,6 +1965,7 @@
     "eventCancelledSuffix": ", cancelled",
     "eventMovedToDay": "Moved \"{{title}}\" to {{date}}.",
     "taskScheduledAtTime": "Task \"{{title}}\" scheduled for {{date}} at {{time}}.",
+    "taskScheduledDayOnly": "{{title}} planned for {{date}}. This list stores whole days only, so the time was not kept.",
     "backlog": {
       "heading": "Backlog ({{count}})",
       "thisWeekHeading": "This week ({{count}})",

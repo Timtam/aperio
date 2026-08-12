@@ -64,6 +64,15 @@ export interface TaskCapabilities {
    *  Callers that want to move a single occurrence advance the series by one
    *  step instead, which is what the source can actually do. */
   reschedule_single_occurrence?: boolean;
+  /** The source can store a TIME OF DAY on a task's dates, not just the day.
+   *  Absent → true.
+   *
+   *  False for Google Tasks (only date information is recorded), Microsoft To
+   *  Do (the time component is normalised to midnight) and Exchange (a task
+   *  date must be midnight). Where it is false the editor does not offer a
+   *  time — the write used to succeed, the server dropped the value, and the
+   *  next refresh returned a task with no time and no error anywhere. */
+  task_time_of_day?: boolean;
   /** The adapter can create new task lists (projects) at the source. */
   create_lists: boolean;
   /** The adapter can delete task lists at the source. */

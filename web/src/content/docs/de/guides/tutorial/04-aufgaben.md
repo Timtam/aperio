@@ -243,6 +243,14 @@ Aperio automatisch die nächste Fälligkeit.
 > Aufgabe** zählen; *ab Abschluss* und *im Backlog wiedervorlegen* lassen sich
 > nicht vorausberechnen und erscheinen weiter nur an ihrem nächsten Tag.
 
+> **Uhrzeiten & Anbieter:** Nicht jeder Dienst kann an einer Aufgabe eine
+> **Uhrzeit** speichern. **Google Tasks**, **Microsoft To Do** und **Exchange**
+> kennen nur ganze Tage: eine Uhrzeit wurde bisher angenommen, vom Server
+> verworfen und war nach der nächsten Aktualisierung stillschweigend weg. In
+> solchen Listen bietet der Editor jetzt **gar keine Uhrzeit** mehr an und sagt
+> warum. Zieht man dort eine Aufgabe ins Stundenraster, wird der **Tag**
+> übernommen — und die Ansage nennt genau das.
+>
 > **Wiederholung & Anbieter:** Ob – und wie viel – von einer Wiederholung
 > gespeichert werden kann, hängt vom Anbieter ab. Der Editor erscheint nur
 > dort, wo die Liste sie auch speichern kann, und **blendet einzelne Felder

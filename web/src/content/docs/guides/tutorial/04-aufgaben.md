@@ -217,6 +217,13 @@ check off a recurring task, Aperio automatically creates the next due date.
 > completion* and *resurface-in-backlog* recurrences can't be projected ahead,
 > so they still show only on their next day.
 
+> **Times of day & providers:** not every service can store a **time** on a
+> task. **Google Tasks**, **Microsoft To Do** and **Exchange** keep whole days:
+> a time used to be accepted, dropped by the server, and silently gone after the
+> next refresh. In those lists the editor no longer offers a time at all, and
+> says why. Drag a task onto the hour grid there and the **day** is taken — and
+> the announcement says so.
+>
 > **Recurrence & providers:** Whether — and how much of — a recurrence can be
 > stored depends on the provider. The editor only appears where the list can
 > store it, and **greys out individual fields the provider can't do** (rather

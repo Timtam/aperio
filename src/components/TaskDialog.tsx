@@ -57,6 +57,7 @@ import {
   canAssignSection,
   canMoveTaskBetweenLists,
   canRecur,
+  canSetTaskTime,
 } from '../state/taskMoves';
 import { useDialogState } from '../state/dialogStateContext';
 import {
@@ -465,6 +466,11 @@ export function TaskDialog({
   // all. Cross-list moves are gated on the *source* list's
   // move_between_projects (Todoist locks it).
   const listForSections = taskLists.find((l) => l.id === form.listId);
+  // Google Tasks, Microsoft To Do and Exchange keep whole days: the write goes
+  // through, the server drops the time, and the next refresh returns a task
+  // with no time and no error. Ask the adapter rather than offering a control
+  // whose value cannot survive.
+  const timeOfDayStorable = canSetTaskTime(listForSections);
   const sourceList = task
     ? taskLists.find((l) => l.id === task.list_id)
     : undefined;
@@ -1651,21 +1657,28 @@ export function TaskDialog({
                 onChange={(e) => update('scheduledDate', e.target.value)}
               />
             </label>
-            <label className="form__field">
-              <span className="form__label">
-                {t('dialogs.task.fields.scheduled.time')}
-              </span>
-              <input
-                ref={scheduledTimeRef}
-                type="time"
-                value={form.scheduledTime}
-                onChange={(e) => update('scheduledTime', e.target.value)}
-                disabled={!form.scheduledDate}
-                aria-disabled={!form.scheduledDate || undefined}
-              />
-            </label>
+            {timeOfDayStorable && (
+              <label className="form__field">
+                <span className="form__label">
+                  {t('dialogs.task.fields.scheduled.time')}
+                </span>
+                <input
+                  ref={scheduledTimeRef}
+                  type="time"
+                  value={form.scheduledTime}
+                  onChange={(e) => update('scheduledTime', e.target.value)}
+                  disabled={!form.scheduledDate}
+                  aria-disabled={!form.scheduledDate || undefined}
+                />
+              </label>
+            )}
           </div>
-          {form.scheduledTime && form.scheduledDate && (
+          {!timeOfDayStorable && (
+            <p className="form__hint">
+              {t('dialogs.task.fields.noTimeOfDay')}
+            </p>
+          )}
+          {timeOfDayStorable && form.scheduledTime && form.scheduledDate && (
             <button
               type="button"
               className="form__inline-clear"
@@ -1704,21 +1717,23 @@ export function TaskDialog({
                 onChange={(e) => update('deadlineDate', e.target.value)}
               />
             </label>
-            <label className="form__field">
-              <span className="form__label">
-                {t('dialogs.task.fields.deadline.time')}
-              </span>
-              <input
-                ref={deadlineTimeRef}
-                type="time"
-                value={form.deadlineTime}
-                onChange={(e) => update('deadlineTime', e.target.value)}
-                disabled={!form.deadlineDate}
-                aria-disabled={!form.deadlineDate || undefined}
-              />
-            </label>
+            {timeOfDayStorable && (
+              <label className="form__field">
+                <span className="form__label">
+                  {t('dialogs.task.fields.deadline.time')}
+                </span>
+                <input
+                  ref={deadlineTimeRef}
+                  type="time"
+                  value={form.deadlineTime}
+                  onChange={(e) => update('deadlineTime', e.target.value)}
+                  disabled={!form.deadlineDate}
+                  aria-disabled={!form.deadlineDate || undefined}
+                />
+              </label>
+            )}
           </div>
-          {form.deadlineTime && form.deadlineDate && (
+          {timeOfDayStorable && form.deadlineTime && form.deadlineDate && (
             <button
               type="button"
               className="form__inline-clear"

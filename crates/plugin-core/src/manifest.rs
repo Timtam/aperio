@@ -226,6 +226,24 @@ pub struct TaskCapabilities {
     /// task, so only the odd one out has to say so.
     #[serde(default = "yes")]
     pub reschedule_single_occurrence: bool,
+    /// The source can store a TIME OF DAY on a task's dates, not just the day.
+    ///
+    /// False where the backend keeps whole days and normalises anything finer
+    /// away: Google Tasks documents that only date information is recorded,
+    /// Microsoft To Do resets the time component to midnight, and an Exchange
+    /// task's dates are specified as a local date whose time MUST be midnight.
+    ///
+    /// It is declared because the loss is otherwise SILENT. The editor offered
+    /// a time, the write succeeded, the server dropped it, and the next refresh
+    /// quietly returned a task with no time — no error anywhere, and the user
+    /// only finds out by noticing the time is gone. Where this is false the UI
+    /// does not offer the control at all.
+    ///
+    /// Defaults `true`: cal-core-native backends (local, CalDAV, Vikunja,
+    /// Todoist, the device's own reminder store) all keep the time, so only the
+    /// ones that cannot have to say so.
+    #[serde(default = "yes")]
+    pub task_time_of_day: bool,
     /// The adapter can create new task lists (projects) at the source.
     /// Defaults `false` — an adapter opts in once it implements
     /// `TasksFeature::create_task_list`; the UI gates its "new list in
@@ -273,6 +291,7 @@ impl Default for TaskCapabilities {
             supports_in_progress: true,
             move_between_projects: true,
             reschedule_single_occurrence: true,
+            task_time_of_day: true,
             create_lists: false,
             delete_lists: false,
             manageable: false,
