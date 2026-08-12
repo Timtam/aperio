@@ -244,6 +244,17 @@ pub struct TaskCapabilities {
     /// ones that cannot have to say so.
     #[serde(default = "yes")]
     pub task_time_of_day: bool,
+    /// The source can store the END of a task's planned block, so a task can
+    /// occupy a span in the calendar rather than a point
+    /// (`Task::scheduled_end_time`).
+    ///
+    /// Unlike `task_time_of_day` this defaults to `false` and is opted INTO,
+    /// because a span is the rarer shape: only the local store, CalDAV
+    /// (`DURATION`), Vikunja (`end_date`) and Todoist (`duration`) have
+    /// anywhere to put one. A new adapter that says nothing is taken at its
+    /// word rather than credited with a field it would silently drop.
+    #[serde(default)]
+    pub task_span: bool,
     /// The adapter can create new task lists (projects) at the source.
     /// Defaults `false` — an adapter opts in once it implements
     /// `TasksFeature::create_task_list`; the UI gates its "new list in
@@ -292,6 +303,7 @@ impl Default for TaskCapabilities {
             move_between_projects: true,
             reschedule_single_occurrence: true,
             task_time_of_day: true,
+            task_span: false,
             create_lists: false,
             delete_lists: false,
             manageable: false,

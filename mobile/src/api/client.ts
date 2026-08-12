@@ -44,6 +44,10 @@ export interface CreateTaskRequest {
   effort: Task['effort'];
   scheduled_date: string | null;
   scheduled_time: string | null;
+  /** End of the planned block; needs `scheduled_time`. Optional, because most
+   *  create paths (quick-add, a new subtask) plan no block at all and the
+   *  backend defaults an absent value to "none". */
+  scheduled_end_time?: string | null;
   deadline_date: string | null;
   deadline_time: string | null;
   deadline_reminder_days: Task['deadline_reminder_days'];

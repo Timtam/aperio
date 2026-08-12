@@ -52,6 +52,7 @@ import {
   isRecurringProjection,
   mergeDayItems,
   recurringSeriesTaskId,
+  taskEndTimeOnDay,
   taskTimeOnDay,
 } from '../../intl/taskDay';
 import { useCurrentUserByList } from '../../state/currentUser';
@@ -499,11 +500,20 @@ export function WeekView() {
             );
           }
         } else {
-          // A timed task is a zero-duration point; an unparseable time falls
-          // back to midnight so it ALWAYS gets a slot and never flows static
+          // A timed task is a point unless the user planned a block for it,
+          // in which case it occupies its hours exactly like an event does —
+          // that is what a planned block IS. An unparseable time falls back to
+          // midnight so the item ALWAYS gets a slot and never flows static
           // inside the positioned canvas (which would corrupt the grid).
           const m = minutesFromMidnight(taskTimeOnDay(item.task, dayKey) ?? '');
-          s = { startMin: m ?? 0, endMin: m ?? 0 };
+          const end = minutesFromMidnight(
+            taskEndTimeOnDay(item.task, dayKey) ?? '',
+          );
+          const startMin = m ?? 0;
+          s = {
+            startMin,
+            endMin: end != null && end > startMin ? end : startMin,
+          };
         }
         if (s) {
           spans.push(s);
@@ -1573,8 +1583,21 @@ export function WeekView() {
                         // backs taskTimeOnDay-based sorting upstream,
                         // so chips line up consistently.
                         const timeOnDay = taskTimeOnDay(task, dayKey);
+                        // A planned block reads as a span, like an event's.
+                        const endOnDay = taskEndTimeOnDay(task, dayKey);
                         const time = timeOnDay
-                          ? fmt.format(
+                          ? endOnDay
+                            ? t('views.timeRange', {
+                                start: fmt.format(
+                                  new Date(`${dayKey}T${timeOnDay}`),
+                                  'p',
+                                ),
+                                end: fmt.format(
+                                  new Date(`${dayKey}T${endOnDay}`),
+                                  'p',
+                                ),
+                              })
+                            : fmt.format(
                               new Date(`${dayKey}T${timeOnDay}`),
                               'p',
                             )

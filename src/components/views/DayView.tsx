@@ -44,6 +44,7 @@ import {
   isRecurringProjection,
   mergeDayItems,
   recurringSeriesTaskId,
+  taskEndTimeOnDay,
   taskTimeOnDay,
 } from '../../intl/taskDay';
 import { useCurrentUserByList } from '../../state/currentUser';
@@ -412,11 +413,20 @@ export function DayView() {
           );
         }
       } else {
-        // A timed task is a zero-duration point; an unparseable time falls back
-        // to midnight so it ALWAYS gets a slot and never flows static inside
-        // the positioned canvas (which would corrupt the grid).
+        // A timed task is a point unless the user planned a block for it, in
+        // which case it occupies its hours exactly like an event does — that
+        // is what a planned block IS. An unparseable time falls back to
+        // midnight so the item ALWAYS gets a slot and never flows static
+        // inside the positioned canvas (which would corrupt the grid).
         const m = minutesFromMidnight(taskTimeOnDay(item.task, dayKey) ?? '');
-        s = { startMin: m ?? 0, endMin: m ?? 0 };
+        const end = minutesFromMidnight(
+          taskEndTimeOnDay(item.task, dayKey) ?? '',
+        );
+        const startMin = m ?? 0;
+        s = {
+          startMin,
+          endMin: end != null && end > startMin ? end : startMin,
+        };
       }
       if (s) {
         spans.push(s);
@@ -1031,11 +1041,18 @@ export function DayView() {
               // deadline_time when on the deadline day, with the
               // schedule winning on a same-day collision.
               const timeOnDay = taskTimeOnDay(task, dayKey);
+              // A planned block reads as a span, the same shape an event
+              // announces — "09:00 to 10:30" rather than a bare start, which
+              // would leave a listener with no idea how long the day's plan
+              // takes.
+              const endOnDay = taskEndTimeOnDay(task, dayKey);
               const timeStr = timeOnDay
-                ? fmt.format(
-                    new Date(`${dayKey}T${timeOnDay}`),
-                    'p',
-                  )
+                ? endOnDay
+                  ? t('views.timeRange', {
+                      start: fmt.format(new Date(`${dayKey}T${timeOnDay}`), 'p'),
+                      end: fmt.format(new Date(`${dayKey}T${endOnDay}`), 'p'),
+                    })
+                  : fmt.format(new Date(`${dayKey}T${timeOnDay}`), 'p')
                 : '';
               const color = resolveTaskColor(
                 task,

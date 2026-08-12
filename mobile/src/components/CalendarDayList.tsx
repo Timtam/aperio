@@ -66,6 +66,7 @@ import {
   statusMarker,
   subtaskParentSuffix,
   subtaskProgressSuffix,
+  taskEndTimeOnDay,
   taskTimeOnDay,
 } from '@aperio/shared';
 
@@ -1618,8 +1619,15 @@ export function CalendarDayList({
       } else {
         // A timed task is a zero-duration point; an unparseable time falls back
         // to midnight so it ALWAYS gets a slot.
+        // A planned block occupies its hours here exactly as it does on the
+        // desktop grid; without one the task stays a point.
         const m = minutesFromMidnight(taskTimeOnDay(item.task, b.key) ?? '');
-        s = { startMin: m ?? 0, endMin: m ?? 0 };
+        const end = minutesFromMidnight(taskEndTimeOnDay(item.task, b.key) ?? '');
+        const startMin = m ?? 0;
+        s = {
+          startMin,
+          endMin: end != null && end > startMin ? end : startMin,
+        };
       }
       if (s) {
         spans.push(s);

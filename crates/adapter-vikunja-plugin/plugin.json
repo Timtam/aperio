@@ -11,6 +11,7 @@
   "adapter_kind": "vikunja",
   "signed": false,
   "tasks": {
+    "task_span": true,
     "nested_projects": true,
     "sections": true,
     "manageable_sections": true,

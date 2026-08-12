@@ -5,6 +5,7 @@ export {
   filterTasksOnDay,
   groupTasksByDay,
   isDeadlineChip,
+  taskEndTimeOnDay,
   taskTimeOnDay,
   todayIsoKey,
   mergeDayItems,

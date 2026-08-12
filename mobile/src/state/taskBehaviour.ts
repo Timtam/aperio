@@ -433,6 +433,13 @@ export function canSetTaskTime(list: TaskList | undefined): boolean {
   return list?.task_capabilities?.task_time_of_day ?? true;
 }
 
+/** Whether a task in `list` can carry the END of its planned block. The desktop
+ *  twin is `canSetTaskSpan`. A span needs a time to hang off, so a source that
+ *  cannot hold a time cannot hold a block either. */
+export function canSetTaskSpan(list: TaskList | undefined): boolean {
+  return (list?.task_capabilities?.task_span ?? false) && canSetTaskTime(list);
+}
+
 /**
  * Next status for a check-off, honouring the mode. Ported verbatim from the
  * desktop useTaskStatusToggle:

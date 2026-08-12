@@ -25,6 +25,7 @@ const DEFAULT_CAPS: TaskCapabilities = {
   supports_in_progress: true,
   move_between_projects: true,
   task_time_of_day: true,
+  task_span: false,
   create_lists: false,
   delete_lists: false,
   manageable: false,
@@ -84,6 +85,16 @@ export function canRecur(list: TaskList | undefined): boolean {
  */
 export function canSetTaskTime(list: TaskList | undefined): boolean {
   return capabilitiesOf(list).task_time_of_day ?? true;
+}
+
+/**
+ * Can a task in `list` carry the END of its planned block?
+ *
+ * Rarer than a time of day: only the local store, CalDAV, Vikunja and Todoist
+ * have somewhere to put one, so this is opted into rather than assumed.
+ */
+export function canSetTaskSpan(list: TaskList | undefined): boolean {
+  return (capabilitiesOf(list).task_span ?? false) && canSetTaskTime(list);
 }
 
 /** Can `list` host nested child projects / be reparented at all?

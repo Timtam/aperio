@@ -218,6 +218,26 @@ export function taskTimeOnDay(
 }
 
 /**
+ * The END of a task's planned block on `dayIsoKey`, as `HH:MM[:SS]`, or `null`
+ * when it has none there.
+ *
+ * The mirror of {@link taskTimeOnDay}, and deliberately narrower: only the
+ * SCHEDULED slot can carry a block. A deadline is a moment — "by then" — and
+ * giving it a length would draw a bar across the hours before something is
+ * due, which is not what the user said.
+ */
+export function taskEndTimeOnDay(task: Task, dayIsoKey: string): string | null {
+  if (
+    task.scheduled_end_time &&
+    task.scheduled_time &&
+    task.scheduled_date === dayIsoKey
+  ) {
+    return task.scheduled_end_time;
+  }
+  return null;
+}
+
+/**
  * Item types that can appear in a day's time-sorted grid lane. The
  * views render an event chip for `kind: 'event'` and a task chip for
  * `kind: 'task'`, sharing the per-day time column so 09:30 events and

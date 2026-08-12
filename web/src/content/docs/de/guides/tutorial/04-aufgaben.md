@@ -243,6 +243,13 @@ Aperio automatisch die nächste Fälligkeit.
 > Aufgabe** zählen; *ab Abschluss* und *im Backlog wiedervorlegen* lassen sich
 > nicht vorausberechnen und erscheinen weiter nur an ihrem nächsten Tag.
 
+> **Ein geplanter Block:** Zu einer Uhrzeit kannst du auch ein **Bis** angeben.
+> Die Aufgabe belegt dann im Stundenraster ihre Stunden, wie ein Termin, statt
+> als Punkt zu erscheinen — und wird auch so angesagt („09:00 bis 10:30"). Das
+> Feld erscheint nur in Listen, deren Quelle ein Ende speichern kann: **lokal**,
+> **CalDAV**, **Vikunja** und **Todoist**. Bei den übrigen gibt es keinen Platz
+> dafür, also wird es gar nicht erst angeboten.
+>
 > **Uhrzeiten & Anbieter:** Nicht jeder Dienst kann an einer Aufgabe eine
 > **Uhrzeit** speichern. **Google Tasks**, **Microsoft To Do** und **Exchange**
 > kennen nur ganze Tage: eine Uhrzeit wurde bisher angenommen, vom Server

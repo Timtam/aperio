@@ -1521,6 +1521,7 @@
           "hint": "Der Tag, an dem die Aufgabe ansteht. Mit Uhrzeit wird sie zu diesem Zeitpunkt im Tagesraster verortet.",
           "date": "Datum",
           "time": "Uhrzeit",
+          "endTime": "Bis",
           "clear": "Geplanten Tag entfernen",
           "cleared": "Geplanter Tag entfernt.",
           "addDate": "Geplanten Tag hinzufügen",
@@ -1966,6 +1967,7 @@
     "eventMovedToDay": "„{{title}}“ auf {{date}} verschoben.",
     "taskScheduledAtTime": "Aufgabe „{{title}}“ am {{date}} um {{time}} eingeplant.",
     "taskScheduledDayOnly": "{{title}} für {{date}} geplant. Diese Liste speichert nur ganze Tage, die Uhrzeit wurde daher nicht übernommen.",
+    "timeRange": "{{start}} bis {{end}}",
     "backlog": {
       "heading": "Backlog ({{count}})",
       "thisWeekHeading": "Diese Woche ({{count}})",

@@ -97,6 +97,7 @@ interface FormState {
   effort: TaskEffort;
   scheduledDate: string;
   scheduledTime: string;
+  scheduledEndTime: string;
   deadlineDate: string;
   deadlineTime: string;
   /** Per-task override for how many days before the deadline the early
@@ -125,6 +126,7 @@ function buildInitialState(
       effort: 'medium',
       scheduledDate: seed?.scheduledDate ?? '',
       scheduledTime: '',
+      scheduledEndTime: '',
       deadlineDate: '',
       deadlineTime: '',
       deadlineReminderDays: null,
@@ -144,6 +146,9 @@ function buildInitialState(
     effort: loaded.effort,
     scheduledDate: loaded.scheduled_date ?? '',
     scheduledTime: loaded.scheduled_time ? loaded.scheduled_time.slice(0, 5) : '',
+    scheduledEndTime: loaded.scheduled_end_time
+      ? loaded.scheduled_end_time.slice(0, 5)
+      : '',
     deadlineDate: loaded.deadline_date ?? '',
     deadlineTime: loaded.deadline_time ? loaded.deadline_time.slice(0, 5) : '',
     deadlineReminderDays: loaded.deadline_reminder_days,
@@ -458,7 +463,7 @@ export default function TaskEditorModal({
     (which: 'scheduled' | 'deadline') => {
       setForm((f) =>
         which === 'scheduled'
-          ? { ...f, scheduledDate: '', scheduledTime: '' }
+          ? { ...f, scheduledDate: '', scheduledTime: '', scheduledEndTime: '' }
           : // Drop the per-task reminder override alongside the deadline — it
             // is meaningless without a deadline (mirrors deadlineTime).
             { ...f, deadlineDate: '', deadlineTime: '', deadlineReminderDays: null },
@@ -575,6 +580,9 @@ export default function TaskEditorModal({
   // accepted, the server drops the time, and the next refresh returns a task
   // with no time and no error. Do not offer what cannot survive the trip.
   const canSetTime = caps?.task_time_of_day ?? true;
+  // The block's end. Only the local store, CalDAV, Vikunja and Todoist keep
+  // one, and it is meaningless without a start.
+  const canSetSpan = (caps?.task_span ?? false) && canSetTime;
   const recurrenceCaps = useMemo(
     () => taskLists.find((l) => l.id === form.listId)?.recurrence_capabilities,
     [taskLists, form.listId],
@@ -735,6 +743,12 @@ export default function TaskEditorModal({
       return;
     }
     const sched = toStored(form.scheduledDate, form.scheduledTime);
+    // A block that ends before it starts is not one; the store drops it too,
+    // but agreeing here keeps the editor and the row saying the same thing.
+    const schedEnd =
+      sched.time && form.scheduledEndTime > form.scheduledTime
+        ? `${form.scheduledEndTime}:00`
+        : null;
     const dead = toStored(form.deadlineDate, form.deadlineTime);
     const description = form.description.trim() || null;
     setError(null);
@@ -749,6 +763,7 @@ export default function TaskEditorModal({
           effort: form.effort,
           scheduled_date: sched.date,
           scheduled_time: sched.time,
+          scheduled_end_time: schedEnd,
           deadline_date: dead.date,
           deadline_time: dead.time,
           // Per-task reminder override only rides along with a real deadline;
@@ -862,6 +877,7 @@ export default function TaskEditorModal({
             effort: form.effort,
             scheduled_date: sched.date,
             scheduled_time: sched.time,
+          scheduled_end_time: schedEnd,
             deadline_date: dead.date,
             deadline_time: dead.time,
             // Per-task reminder override only rides along with a real deadline;
@@ -1072,6 +1088,9 @@ export default function TaskEditorModal({
         editable={!loading}
         timeStorable={canSetTime}
         noTimeLabel={t('dialogs.task.fields.noTimeOfDay')}
+        endLabel={canSetSpan ? t('dialogs.task.fields.scheduled.endTime') : undefined}
+        endValue={form.scheduledEndTime}
+        onChangeEnd={(v) => update('scheduledEndTime', v)}
       />
 
       <DateTimeField
@@ -1288,6 +1307,9 @@ function DateTimeField({
   editable,
   timeStorable,
   noTimeLabel,
+  endLabel,
+  endValue,
+  onChangeEnd,
 }: {
   legend: string;
   hint: string;
@@ -1311,6 +1333,11 @@ function DateTimeField({
   timeStorable: boolean;
   /** Said in place of the time control when it cannot. */
   noTimeLabel: string;
+  /** Label for the block's END. Absent ⇒ this source stores no span, and the
+   *  control is not offered at all. */
+  endLabel?: string;
+  endValue?: string;
+  onChangeEnd?: (v: string) => void;
 }) {
   const styles = useThemedStyles(makeStyles);
   const hasDate = dateValue.trim() !== '';
@@ -1424,6 +1451,26 @@ function DateTimeField({
               >
                 <Text style={styles.ghostButtonText}>{clearTimeLabel}</Text>
               </Pressable>
+            </View>
+          )}
+          {/* The block's END. It hangs off the start, so it appears only once
+              there is one — and only where the source can store it. */}
+          {hasTime && endLabel !== undefined && onChangeEnd !== undefined && (
+            <View style={styles.pickerRow}>
+              <Text
+                style={styles.pickerLabel}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              >
+                {`${legend} – ${endLabel}`}
+              </Text>
+              <DateTimeFieldButton
+                label={`${legend} – ${endLabel}`}
+                mode="time"
+                value={endValue ?? ''}
+                onChange={onChangeEnd}
+                disabled={!editable}
+              />
             </View>
           )}
           <Pressable

@@ -11,6 +11,7 @@
   "adapter_kind": "caldav",
   "signed": false,
   "tasks": {
+    "task_span": true,
     "subtasks": true,
     "create_lists": true,
     "delete_lists": true

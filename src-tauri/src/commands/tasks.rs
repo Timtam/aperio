@@ -207,6 +207,8 @@ fn local_task_capabilities() -> TaskCapabilities {
         manageable_sections: true,
         create_lists: true,
         delete_lists: true,
+        // Its own column, so the planned block round-trips exactly.
+        task_span: true,
         ..TaskCapabilities::default()
     }
 }

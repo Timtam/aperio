@@ -217,6 +217,13 @@ check off a recurring task, Aperio automatically creates the next due date.
 > completion* and *resurface-in-backlog* recurrences can't be projected ahead,
 > so they still show only on their next day.
 
+> **A planned block:** alongside a time you can give an **until**. The task
+> then occupies its hours on the grid the way an event does, instead of sitting
+> at a point — and is announced that way too ("09:00 to 10:30"). The field
+> appears only in lists whose source can store an end: **local**, **CalDAV**,
+> **Vikunja** and **Todoist**. The rest have nowhere to put one, so it is not
+> offered there.
+>
 > **Times of day & providers:** not every service can store a **time** on a
 > task. **Google Tasks**, **Microsoft To Do** and **Exchange** keep whole days:
 > a time used to be accepted, dropped by the server, and silently gone after the

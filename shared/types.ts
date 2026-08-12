@@ -73,6 +73,12 @@ export interface TaskCapabilities {
    *  time — the write used to succeed, the server dropped the value, and the
    *  next refresh returned a task with no time and no error anywhere. */
   task_time_of_day?: boolean;
+  /** The source can store the END of a task's planned block, so a task can
+   *  occupy a span in the calendar rather than a point. Absent → false: only
+   *  the local store, CalDAV (`DURATION`), Vikunja (`end_date`) and Todoist
+   *  (`duration`) have anywhere to put one, and a source that says nothing is
+   *  taken at its word rather than credited with a field it would drop. */
+  task_span?: boolean;
   /** The adapter can create new task lists (projects) at the source. */
   create_lists: boolean;
   /** The adapter can delete task lists at the source. */
@@ -186,6 +192,9 @@ export interface Task {
   /** Optional time-of-day on `scheduled_date`. Requires `scheduled_date`; the
    *  DB enforces this via a CHECK constraint. */
   scheduled_time: string | null;
+  /** End of the planned block, `HH:MM:SS` on the scheduled day. Needs
+   *  `scheduled_time` and must be later than it. */
+  scheduled_end_time?: string | null;
   /** The day BY which the task must be done (the surviving deadline semantic).
    *  Until that day the task lives in the backlog and can be scheduled per-day
    *  via `scheduled_date`. */

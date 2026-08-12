@@ -57,6 +57,7 @@ import {
   canAssignSection,
   canMoveTaskBetweenLists,
   canRecur,
+  canSetTaskSpan,
   canSetTaskTime,
 } from '../state/taskMoves';
 import { useDialogState } from '../state/dialogStateContext';
@@ -140,6 +141,7 @@ interface FormState {
   // is empty) and would also fail the DB CHECK constraint.
   scheduledDate: string;
   scheduledTime: string;
+  scheduledEndTime: string;
   deadlineDate: string;
   deadlineTime: string;
   /** Per-task override for how many days before the deadline the early
@@ -471,6 +473,10 @@ export function TaskDialog({
   // with no time and no error. Ask the adapter rather than offering a control
   // whose value cannot survive.
   const timeOfDayStorable = canSetTaskTime(listForSections);
+  // The block's end. Rarer than a time — only the local store, CalDAV, Vikunja
+  // and Todoist keep one — and meaningless without a start, so it appears only
+  // once the day has a time on it.
+  const spanStorable = canSetTaskSpan(listForSections);
   const sourceList = task
     ? taskLists.find((l) => l.id === task.list_id)
     : undefined;
@@ -704,7 +710,12 @@ export function TaskDialog({
   // date and its companion time, then parks focus on the (now empty)
   // date input and announces the change.
   const clearScheduled = useCallback(() => {
-    setForm((prev) => ({ ...prev, scheduledDate: '', scheduledTime: '' }));
+    setForm((prev) => ({
+      ...prev,
+      scheduledDate: '',
+      scheduledTime: '',
+      scheduledEndTime: '',
+    }));
     scheduledDateRef.current?.focus();
     announce(t('dialogs.task.fields.scheduled.cleared'));
   }, [announce, t]);
@@ -715,7 +726,7 @@ export function TaskDialog({
   // Focus stays on the time field: it is still there, just empty, and it is
   // where the user was.
   const clearScheduledTime = useCallback(() => {
-    setForm((prev) => ({ ...prev, scheduledTime: '' }));
+    setForm((prev) => ({ ...prev, scheduledTime: '', scheduledEndTime: '' }));
     scheduledTimeRef.current?.focus();
     announce(t('dialogs.task.fields.scheduled.timeCleared'));
   }, [announce, t]);
@@ -1673,6 +1684,18 @@ export function TaskDialog({
               </label>
             )}
           </div>
+          {spanStorable && form.scheduledTime !== '' && (
+            <label className="form__field">
+              <span className="form__label">
+                {t('dialogs.task.fields.scheduled.endTime')}
+              </span>
+              <input
+                type="time"
+                value={form.scheduledEndTime}
+                onChange={(e) => update('scheduledEndTime', e.target.value)}
+              />
+            </label>
+          )}
           {!timeOfDayStorable && (
             <p className="form__hint">
               {t('dialogs.task.fields.noTimeOfDay')}
@@ -2120,6 +2143,7 @@ function buildInitialState(
       effort: task.effort,
       scheduledDate: task.scheduled_date ?? '',
       scheduledTime: task.scheduled_time?.slice(0, 5) ?? '',
+      scheduledEndTime: task.scheduled_end_time?.slice(0, 5) ?? '',
       deadlineDate: task.deadline_date ?? '',
       deadlineTime: task.deadline_time?.slice(0, 5) ?? '',
       deadlineReminderDays: task.deadline_reminder_days,
@@ -2158,6 +2182,7 @@ function buildInitialState(
     effort: 'medium',
     scheduledDate: anchored,
     scheduledTime: '',
+    scheduledEndTime: '',
     deadlineDate: '',
     deadlineTime: '',
     deadlineReminderDays: null,
@@ -2172,6 +2197,7 @@ function buildInitialState(
 interface DeadlineFields {
   scheduled_date: string | null;
   scheduled_time: string | null;
+  scheduled_end_time: string | null;
   deadline_date: string | null;
   deadline_time: string | null;
 }
@@ -2251,6 +2277,12 @@ function splitDeadline(form: FormState): DeadlineFields {
     scheduledDate && form.scheduledTime
       ? `${form.scheduledTime}:00`
       : null;
+  // A block that ends before it starts is not one. The store drops it too, but
+  // saying so here keeps the dialog and the row in agreement.
+  const scheduledEndTime =
+    scheduledTime && form.scheduledEndTime > form.scheduledTime
+      ? `${form.scheduledEndTime}:00`
+      : null;
   const deadlineDate = form.deadlineDate || null;
   const deadlineTime =
     deadlineDate && form.deadlineTime
@@ -2259,6 +2291,7 @@ function splitDeadline(form: FormState): DeadlineFields {
   return {
     scheduled_date: scheduledDate,
     scheduled_time: scheduledTime,
+    scheduled_end_time: scheduledEndTime,
     deadline_date: deadlineDate,
     deadline_time: deadlineTime,
   };
