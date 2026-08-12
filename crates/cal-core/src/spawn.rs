@@ -127,9 +127,10 @@ const MAX_CATCHUP_STEPS: u32 = 10_000;
 /// that has not already passed: yesterday's dose ticked today still leaves
 /// TODAY'S dose to take, and nothing before it.
 ///
-/// Returns `first` unchanged when it is not in the past, when the rule stops
-/// advancing, or when the walk runs past its step budget — never a date EARLIER
-/// than what the rule produced.
+/// Returns `first` unchanged when it is not in the past. When the rule stops
+/// advancing, or the walk runs out of budget, it returns the furthest point it
+/// DID reach — still short of `not_before`, but never earlier than what the rule
+/// produced on its own, so no input comes out worse than it went in.
 fn catch_up(first: NaiveDate, rule: &TaskRecurrence, not_before: NaiveDate) -> NaiveDate {
     let mut date = first;
     let mut steps = 0;
@@ -602,6 +603,56 @@ mod tests {
         assert_eq!(
             next.scheduled_date,
             Some(NaiveDate::from_ymd_opt(2026, 8, 17).unwrap()),
+        );
+    }
+
+    /// The walk goes through the WEEKDAY branch, not just the +7×interval one:
+    /// a Monday/Thursday rule steps by named day, and the catch-up has to land
+    /// on a listed weekday rather than a multiple of a week.
+    #[test]
+    fn catch_up_walks_named_weekdays() {
+        let mut r = rule(
+            RecurrenceFrequency::Weekly,
+            1,
+            RecurrenceAnchor::FromDate,
+            RecurrencePlacement::Schedule,
+            None,
+        );
+        r.day_of_week = Some(vec![Weekday::Monday, Weekday::Thursday]);
+        let mut t = template(r, NaiveDate::from_ymd_opt(2026, 8, 12).unwrap());
+        // Monday 3 August, ticked off on Wednesday 12 August. Thu 6th and Mon
+        // 10th are gone; the next listed day is Thursday the 13th.
+        t.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 8, 3).unwrap());
+        let next =
+            next_recurrence_instance(&t, NaiveDate::from_ymd_opt(2026, 8, 12).unwrap()).unwrap();
+        assert_eq!(
+            next.scheduled_date,
+            Some(NaiveDate::from_ymd_opt(2026, 8, 13).unwrap()),
+        );
+    }
+
+    /// And through the FIXED-DATES branch: a seasonal trigger skips whole years
+    /// at a time, so the walk must step by trigger rather than by interval.
+    #[test]
+    fn catch_up_walks_fixed_dates() {
+        let mut t = template(
+            rule(
+                RecurrenceFrequency::Yearly,
+                1,
+                RecurrenceAnchor::FromDate,
+                RecurrencePlacement::Schedule,
+                Some(vec![MonthDay { month: 4, day: 1 }]),
+            ),
+            NaiveDate::from_ymd_opt(2026, 8, 12).unwrap(),
+        );
+        // Last done for the season of 2024; ticked off in August 2026, by which
+        // time April 2025 and April 2026 have both gone.
+        t.scheduled_date = Some(NaiveDate::from_ymd_opt(2024, 4, 1).unwrap());
+        let next =
+            next_recurrence_instance(&t, NaiveDate::from_ymd_opt(2026, 8, 12).unwrap()).unwrap();
+        assert_eq!(
+            next.scheduled_date,
+            Some(NaiveDate::from_ymd_opt(2027, 4, 1).unwrap()),
         );
     }
 
