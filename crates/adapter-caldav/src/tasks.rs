@@ -31,7 +31,7 @@ use cal_core::{
     rrule_to_task_recurrence, task_recurrence_to_rrule, AdapterSource, Calendar, NewTask, Task,
     TaskList, TaskPriority, TaskStatus,
 };
-use chrono::{DateTime, NaiveDate, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use icalendar::{Calendar as ICalendar, CalendarDateTime, Component, DatePerhapsTime, Todo};
 use reqwest::{
     header::{HeaderName, HeaderValue, CONTENT_TYPE, ETAG, IF_MATCH, IF_NONE_MATCH},
@@ -588,24 +588,13 @@ fn apply_common(todo: &mut Todo, uid: &str, task: &NewTask, completed_at: Option
     // deadline is now "by" semantics — and the X- property is no
     // longer written. Older VTODOs with that property are read by
     // ignoring it; DTSTART and DUE flow into their natural slots.
-    if let Some(date) = task.scheduled_date {
-        let value: DatePerhapsTime = if let Some(time) = task.scheduled_time {
-            CalendarDateTime::Utc(Utc.from_utc_datetime(&date.and_time(time))).into()
-        } else {
-            DatePerhapsTime::Date(date)
-        };
-        todo.append_property(value.to_property("DTSTART"));
-    }
-    if let Some(date) = task.deadline_date {
-        let due: DatePerhapsTime = if let Some(time) = task.deadline_time {
-            // DATE+TIME → UTC date-time. The typed conversion emits
-            // `YYYYMMDDTHHMMSSZ` for us; no manual format needed.
-            CalendarDateTime::Utc(Utc.from_utc_datetime(&date.and_time(time))).into()
-        } else {
-            DatePerhapsTime::Date(date)
-        };
-        todo.due(due);
-    }
+    apply_task_dates(
+        todo,
+        task.scheduled_date,
+        task.scheduled_time,
+        task.deadline_date,
+        task.deadline_time,
+    );
     if let Some(completed) = completed_at {
         todo.add_property("COMPLETED", completed.format("%Y%m%dT%H%M%SZ").to_string());
     }
@@ -686,8 +675,8 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>, raw: Option<&str>) -
         _ => TaskPriority::Medium,
     };
 
-    let (scheduled_date, scheduled_time) = parse_dt(todo, "DTSTART");
-    let (deadline_date, deadline_time) = parse_dt(todo, "DUE");
+    let (scheduled_date, scheduled_time) = local_date_time(read_task_dt(todo, "DTSTART"));
+    let (deadline_date, deadline_time) = local_date_time(read_task_dt(todo, "DUE"));
     let completed_at = todo.property_value("COMPLETED").and_then(parse_compact_utc);
     let created_at = todo
         .property_value("CREATED")
@@ -788,28 +777,156 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>, raw: Option<&str>) -
     })
 }
 
-/// Parse an iCalendar date/date-time property by name.
+/// DTSTART or DUE as a typed value, falling back to the layouts servers emit
+/// when the property is not strictly conformant.
 ///
-/// Used for both DTSTART (the "Geplant für" tag, optionally with a
-/// time-of-day) and DUE (the "Spätestens bis" deadline, same shape).
-/// Returns the date component plus an optional time when the value
-/// was emitted as a UTC DATE-TIME. Date-only values yield a `None`
-/// time. Unrecognised formats fall through to `(None, None)`.
-fn parse_dt(todo: &Todo, prop: &str) -> (Option<NaiveDate>, Option<NaiveTime>) {
-    let Some(raw) = todo.property_value(prop) else {
-        return (None, None);
-    };
-    if let Some(date) = parse_compact_date(raw) {
-        return (Some(date), None);
+/// The typed reader is the one that understands the `TZID` parameter, so it
+/// goes first. It also insists on `VALUE=DATE` before it will read `20260520`
+/// as a date — correct per RFC 5545, and not what every server sends. A bare
+/// date with no parameter is common enough in the wild (it is what one of this
+/// module's own fixtures carries) that refusing it would re-open the bug this
+/// function exists to close, one shape further along.
+fn read_task_dt(todo: &Todo, prop: &str) -> Option<DatePerhapsTime> {
+    if let Some(typed) = match prop {
+        "DTSTART" => todo.get_start(),
+        "DUE" => todo.get_due(),
+        _ => None,
+    } {
+        return Some(typed);
     }
-    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(raw, "%Y%m%dT%H%M%SZ") {
-        return (Some(dt.date()), Some(dt.time()));
+    let raw = todo.property_value(prop)?;
+    if let Ok(date) = NaiveDate::parse_from_str(raw, "%Y%m%d") {
+        return Some(DatePerhapsTime::Date(date));
     }
-    (None, None)
+    if let Ok(naive) = NaiveDateTime::parse_from_str(raw, "%Y%m%dT%H%M%SZ") {
+        return Some(DatePerhapsTime::DateTime(CalendarDateTime::Utc(
+            Utc.from_utc_datetime(&naive),
+        )));
+    }
+    // A naive DATE-TIME. Its zone, if the property names one, rides the TZID
+    // parameter rather than the value — which is exactly the case the old
+    // string parser could not see.
+    let naive = NaiveDateTime::parse_from_str(raw, "%Y%m%dT%H%M%S").ok()?;
+    match todo
+        .properties()
+        .get(prop)
+        .and_then(|p| p.params().get("TZID"))
+        .map(|p| p.value().to_string())
+    {
+        Some(tzid) => Some(DatePerhapsTime::DateTime(CalendarDateTime::WithTimezone {
+            date_time: naive,
+            tzid,
+        })),
+        None => Some(DatePerhapsTime::DateTime(CalendarDateTime::Floating(naive))),
+    }
 }
 
-fn parse_compact_date(s: &str) -> Option<NaiveDate> {
-    chrono::NaiveDate::parse_from_str(s, "%Y%m%d").ok()
+/// An iCalendar DTSTART / DUE value as cal-core stores it: a calendar date
+/// plus an optional LOCAL wall-clock time.
+///
+/// It takes the typed `DatePerhapsTime` the icalendar crate parses (the same
+/// shape the event path resolves in `mapping.rs`) rather than re-reading the
+/// raw string, because the string alone cannot answer the question. RFC 5545
+/// gives a DATE-TIME three forms — UTC with a `Z`, zoned via a `TZID`
+/// PARAMETER, and floating — and the old string parser recognised exactly two
+/// literal layouts, `YYYYMMDD` and `YYYYMMDDTHHMMSSZ`. Everything else fell
+/// through to "no date at all": a VTODO written by Thunderbird, Tasks.org or
+/// iCloud as `DUE;TZID=Europe/Berlin:20260812T090000` did not merely lose its
+/// time in Aperio, it lost its DAY and showed up undated.
+///
+/// All three forms land on the same answer, the local wall clock, because that
+/// is what `Task.scheduled_time` / `deadline_time` mean everywhere else in the
+/// app (the reminder engine reads them back through `Local`). A zoned value is
+/// resolved in its own zone and then converted; a floating one is already local
+/// by definition and is taken verbatim.
+///
+/// A DATE value yields no time — that is iCalendar's all-day shape, and the
+/// absence of a time is how Aperio says the same thing.
+///
+/// A time of exactly 00:00 also reads as "no time". That is the price of the
+/// value-type rule on the write side (see `apply_task_dates`): a task with a
+/// deadline time but no scheduled time has to emit midnight for DTSTART, and
+/// midnight is the one wall-clock value that cannot then be told apart from a
+/// deliberate choice. A task genuinely scheduled at midnight reads back as
+/// scheduled for the day, which is the smaller of the two losses.
+fn local_date_time(value: Option<DatePerhapsTime>) -> (Option<NaiveDate>, Option<NaiveTime>) {
+    let Some(value) = value else {
+        return (None, None);
+    };
+    let local: NaiveDateTime = match value {
+        DatePerhapsTime::Date(d) => return (Some(d), None),
+        DatePerhapsTime::DateTime(CalendarDateTime::Utc(instant)) => {
+            instant.with_timezone(&Local).naive_local()
+        }
+        DatePerhapsTime::DateTime(CalendarDateTime::WithTimezone { date_time, tzid }) => {
+            match resolve_in_zone(date_time, &tzid) {
+                Some(instant) => instant.with_timezone(&Local).naive_local(),
+                // An unknown TZID must not cost the DAY. Reading the value as
+                // local wall-clock keeps the date and is at worst an
+                // offset-sized error on the time.
+                None => date_time,
+            }
+        }
+        DatePerhapsTime::DateTime(CalendarDateTime::Floating(naive)) => naive,
+    };
+    let time = local.time();
+    if time == NaiveTime::from_hms_opt(0, 0, 0).expect("00:00 is a valid time") {
+        (Some(local.date()), None)
+    } else {
+        (Some(local.date()), Some(time))
+    }
+}
+
+/// Write DTSTART and DUE for a task.
+///
+/// A time is emitted FLOATING — `20260812T090000`, no `Z`, no `TZID`. That is
+/// not a shortcut, it is the only honest encoding of what cal-core holds: a
+/// naive wall-clock time with no zone attached. The old code declared that time
+/// to be UTC, so a task set to 09:00 in Berlin reached every other client as
+/// 11:00; Aperio agreed with itself only because it made the same mistake in
+/// reverse when reading. Floating means "09:00 wherever you are", which is what
+/// the user chose, and it needs no VTIMEZONE — a TZID that no VTIMEZONE defines
+/// is the shape iCloud has already been seen to drop on the floor.
+///
+/// The two properties are written with the SAME value type, because RFC 5545
+/// §3.8.2.3 requires it of DUE ("MUST be the same as the DTSTART property").
+/// A task with a deadline time but no scheduled time therefore emits midnight
+/// for DTSTART rather than a bare DATE next to a DATE-TIME. `local_date_time`
+/// reads midnight back as "no time", which closes the round trip.
+fn apply_task_dates(
+    todo: &mut Todo,
+    scheduled_date: Option<NaiveDate>,
+    scheduled_time: Option<NaiveTime>,
+    deadline_date: Option<NaiveDate>,
+    deadline_time: Option<NaiveTime>,
+) {
+    // Either property carrying a time forces both to DATE-TIME.
+    let timed = scheduled_time.is_some() || deadline_time.is_some();
+    let value_for = |date: NaiveDate, time: Option<NaiveTime>| -> DatePerhapsTime {
+        if timed {
+            let at = time.unwrap_or_else(|| {
+                NaiveTime::from_hms_opt(0, 0, 0).expect("00:00 is a valid time")
+            });
+            DatePerhapsTime::DateTime(CalendarDateTime::Floating(date.and_time(at)))
+        } else {
+            DatePerhapsTime::Date(date)
+        }
+    };
+    if let Some(date) = scheduled_date {
+        let value = value_for(date, scheduled_time);
+        todo.append_property(value.to_property("DTSTART"));
+    }
+    if let Some(date) = deadline_date {
+        todo.due(value_for(date, deadline_time));
+    }
+}
+
+/// A naive wall-clock time read in a named IANA zone. `None` for a zone name
+/// chrono-tz does not know (Windows-style names, or a server's invention) and
+/// for a local time that does not exist there (the hour a DST jump skips).
+fn resolve_in_zone(naive: NaiveDateTime, tzid: &str) -> Option<DateTime<Utc>> {
+    let tz: chrono_tz::Tz = tzid.parse().ok()?;
+    Some(tz.from_local_datetime(&naive).single()?.with_timezone(&Utc))
 }
 
 fn parse_compact_utc(s: &str) -> Option<DateTime<Utc>> {
@@ -1423,6 +1540,62 @@ END:VCALENDAR</c:calendar-data>
         assert!(!body.contains("RELATED-TO"), "got:\n{body}");
     }
 
+    #[tokio::test]
+    async fn get_tasks_keeps_the_day_of_a_zoned_vtodo() {
+        // What Thunderbird, Tasks.org and Nextcloud write when a task has a
+        // time: the value is a naive wall clock and the zone rides a TZID
+        // PARAMETER. The old parser matched the value against two literal
+        // layouts, neither of which this is, so the task arrived with NO date
+        // and sat in the backlog as if it had never been planned.
+        let body = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:response>
+    <d:href>/calendars/alice/tasks/zoned.ics</d:href>
+    <d:propstat><d:prop>
+      <d:getetag>"zoned-1"</d:getetag>
+      <c:calendar-data>BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//test//EN
+BEGIN:VTODO
+UID:zoned@aperio
+SUMMARY:Take pills
+STATUS:NEEDS-ACTION
+DTSTART;TZID=Europe/Berlin:20260812T120000
+DUE;TZID=Europe/Berlin:20260812T180000
+END:VTODO
+END:VCALENDAR</c:calendar-data>
+    </d:prop></d:propstat>
+  </d:response>
+</d:multistatus>"#;
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("REPORT", "/calendars/alice/tasks/")
+            .with_status(207)
+            .with_body(body)
+            .create_async()
+            .await;
+        let url = Url::parse(&format!("{}/calendars/alice/tasks/", server.url())).unwrap();
+        let tasks = get_tasks(&client(), &url, &creds(&server.url()))
+            .await
+            .unwrap();
+        assert_eq!(tasks.len(), 1);
+        // Midday in Berlin is the same calendar day at every offset a test
+        // machine plausibly runs at, so the DAY is assertable outright.
+        assert_eq!(
+            tasks[0].scheduled_date,
+            Some(NaiveDate::from_ymd_opt(2026, 8, 12).unwrap()),
+            "a zoned DTSTART must not cost the task its day",
+        );
+        assert!(
+            tasks[0].scheduled_time.is_some(),
+            "and it carries a time of day",
+        );
+        assert_eq!(
+            tasks[0].deadline_date,
+            Some(NaiveDate::from_ymd_opt(2026, 8, 12).unwrap()),
+        );
+    }
+
     #[test]
     fn build_vtodo_emits_value_date_parameter_for_date_only_fields() {
         // Regression for the iCloud "task saves but date is gone"
@@ -1464,10 +1637,11 @@ END:VCALENDAR</c:calendar-data>
     }
 
     #[test]
-    fn build_vtodo_with_due_time_emits_utc_datetime() {
-        // The other half of the same property: when the user picked a
-        // specific time of day, DUE is a regular UTC DATE-TIME (no
-        // VALUE parameter, RFC 5545 default).
+    fn build_vtodo_with_due_time_emits_floating_datetime() {
+        // The other half of the same property: when the user picked a specific
+        // time of day, DUE is a FLOATING DATE-TIME — no VALUE parameter (RFC
+        // 5545's default) and no `Z`. It used to be written as UTC, which
+        // declared a Berlin user's 14:30 to be 16:30 for every other client.
         let new = NewTask {
             assignees: Vec::new(),
             title: "Status call".into(),
@@ -1491,12 +1665,141 @@ END:VCALENDAR</c:calendar-data>
         };
         let body = build_vtodo_body("uid-2", &new, None);
         assert!(
-            body.contains("DUE:20260522T143000Z"),
-            "DUE must be a UTC DATE-TIME when a time is set, got:\n{body}",
+            body.contains("DUE:20260522T143000\r\n") || body.contains("DUE:20260522T143000\n"),
+            "DUE must be a floating DATE-TIME when a time is set, got:\n{body}",
+        );
+        assert!(
+            !body.contains("DUE:20260522T143000Z"),
+            "the wall clock the user chose must not be labelled UTC, got:\n{body}",
         );
         assert!(
             !body.contains("VALUE=DATE-TIME"),
             "DUE date-time should not carry VALUE=DATE-TIME (RFC 5545 default), got:\n{body}",
+        );
+    }
+
+    #[test]
+    fn build_vtodo_matches_the_value_types_of_dtstart_and_due() {
+        // RFC 5545 §3.8.2.3: DUE's value type MUST be the same as DTSTART's. A
+        // task planned for a day but due at a time would otherwise emit a bare
+        // DATE next to a DATE-TIME, which is malformed — and malformed is the
+        // shape iCloud answers by dropping the property.
+        let mut new = sample_new_task();
+        new.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 5, 21).unwrap());
+        new.scheduled_time = None;
+        new.deadline_date = Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap());
+        new.deadline_time = Some(NaiveTime::from_hms_opt(14, 30, 0).unwrap());
+        let body = build_vtodo_body("uid-mixed", &new, None);
+        assert!(
+            body.contains("DTSTART:20260521T000000"),
+            "DTSTART must follow DUE into DATE-TIME, got:\n{body}",
+        );
+        assert!(
+            !body.contains("VALUE=DATE:"),
+            "neither property may stay a DATE while the other is a DATE-TIME, got:\n{body}",
+        );
+        // … and midnight reads back as "no time", so the round trip is closed.
+        assert_eq!(
+            local_date_time(Some(DatePerhapsTime::DateTime(CalendarDateTime::Floating(
+                NaiveDate::from_ymd_opt(2026, 5, 21)
+                    .unwrap()
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap(),
+            )))),
+            (Some(NaiveDate::from_ymd_opt(2026, 5, 21).unwrap()), None),
+        );
+    }
+
+    // ── reading every shape RFC 5545 allows ────────────────────────────────
+
+    #[test]
+    fn reads_a_floating_date_time_as_the_wall_clock_it_is() {
+        let naive = NaiveDate::from_ymd_opt(2026, 8, 12)
+            .unwrap()
+            .and_hms_opt(9, 0, 0)
+            .unwrap();
+        assert_eq!(
+            local_date_time(Some(DatePerhapsTime::DateTime(CalendarDateTime::Floating(
+                naive
+            )))),
+            (
+                Some(NaiveDate::from_ymd_opt(2026, 8, 12).unwrap()),
+                Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap()),
+            ),
+        );
+    }
+
+    #[test]
+    fn reads_a_date_value_as_a_day_without_a_time() {
+        assert_eq!(
+            local_date_time(Some(DatePerhapsTime::Date(
+                NaiveDate::from_ymd_opt(2026, 8, 12).unwrap()
+            ))),
+            (Some(NaiveDate::from_ymd_opt(2026, 8, 12).unwrap()), None),
+        );
+    }
+
+    #[test]
+    fn a_zoned_date_time_keeps_its_day() {
+        // THE regression. `DUE;TZID=Europe/Berlin:20260812T120000` matched
+        // neither branch of the old string parser, so the task arrived with no
+        // date at all — not a wrong time, no day. Midday keeps the assertion
+        // true at every offset a test machine might run at.
+        let berlin = chrono_tz::Europe::Berlin;
+        let naive = NaiveDate::from_ymd_opt(2026, 8, 12)
+            .unwrap()
+            .and_hms_opt(12, 0, 0)
+            .unwrap();
+        let expected = berlin
+            .from_local_datetime(&naive)
+            .single()
+            .unwrap()
+            .with_timezone(&Local)
+            .naive_local();
+        assert_eq!(
+            local_date_time(Some(DatePerhapsTime::DateTime(
+                CalendarDateTime::WithTimezone {
+                    date_time: naive,
+                    tzid: "Europe/Berlin".into(),
+                }
+            ))),
+            (Some(expected.date()), Some(expected.time())),
+        );
+    }
+
+    #[test]
+    fn an_unknown_zone_still_costs_only_the_offset_never_the_day() {
+        // Windows zone names and server inventions do not parse. Falling back
+        // to the wall clock keeps the day, which is the part that matters.
+        assert_eq!(
+            local_date_time(Some(DatePerhapsTime::DateTime(
+                CalendarDateTime::WithTimezone {
+                    date_time: NaiveDate::from_ymd_opt(2026, 8, 12)
+                        .unwrap()
+                        .and_hms_opt(12, 0, 0)
+                        .unwrap(),
+                    tzid: "W. Europe Standard Time".into(),
+                }
+            ))),
+            (
+                Some(NaiveDate::from_ymd_opt(2026, 8, 12).unwrap()),
+                Some(NaiveTime::from_hms_opt(12, 0, 0).unwrap()),
+            ),
+        );
+    }
+
+    #[test]
+    fn a_utc_date_time_arrives_in_local_time() {
+        let instant = Utc
+            .with_ymd_and_hms(2026, 8, 12, 12, 0, 0)
+            .single()
+            .unwrap();
+        let expected = instant.with_timezone(&Local).naive_local();
+        assert_eq!(
+            local_date_time(Some(DatePerhapsTime::DateTime(CalendarDateTime::Utc(
+                instant
+            )))),
+            (Some(expected.date()), Some(expected.time())),
         );
     }
 
