@@ -317,7 +317,26 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
     reminder.notes = write.description
     reminder.isCompleted = write.completed
     reminder.priority = write.priority
-    reminder.dueDateComponents = dueComponents(date: write.dueDate, time: write.dueTime)
+    let due = dueComponents(date: write.dueDate, time: write.dueTime)
+    reminder.dueDateComponents = due
+    // Apple: "On iOS, Event Kit requires that a start date is set if the due
+    // date is set." Aperio has been writing due-only and the saves went
+    // through, so the requirement is not enforced at runtime — but a reminder
+    // that contradicts its own store's documented shape is a bad thing to keep
+    // producing, and the start is also what Apple's own grouping reads.
+    //
+    // The day, never a time: a start time would be a second clock Aperio does
+    // not hold and the user never chose. And only when the reminder has NO
+    // start yet — one set in Reminders or another client is that client's
+    // statement about the task, and overwriting it with our due day would
+    // silently move it.
+    if let due = due, reminder.startDateComponents == nil {
+      var start = DateComponents()
+      start.year = due.year
+      start.month = due.month
+      start.day = due.day
+      reminder.startDateComponents = start
+    }
   }
 
   // ── Shared dict builders (read responses + write responses) ──
@@ -468,6 +487,19 @@ final class IosDeviceEventStore: DeviceEventStoreBridge, @unchecked Sendable {
 
   /// `YYYY-MM-DD` (+ optional `HH:MM:SS`) → due `DateComponents`, or nil for no
   /// due date.
+  ///
+  /// No `timeZone` is set, and that is a choice rather than an omission. Apple
+  /// documents both "a nil time zone represents a floating date" and "by
+  /// default, the due date is set to the system time zone", which cannot both
+  /// be the whole story — but floating is what Aperio actually holds: a naive
+  /// wall clock the user typed, with no zone attached. It is the same answer
+  /// the CalDAV task writer gives for the same reason, and it is the one that
+  /// keeps "09:00" reading as 09:00 wherever the phone happens to be.
+  ///
+  /// A reminder's `startDateComponents` is not read back into the model: with
+  /// the due mapped to `scheduled_date` there is no slot left for it, and the
+  /// write path deliberately leaves an existing one alone rather than
+  /// overwriting what another client stored.
   private static func dueComponents(date: String?, time: String?) -> DateComponents? {
     guard let date = date else { return nil }
     let dateParts = date.split(separator: "-")
