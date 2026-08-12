@@ -356,6 +356,27 @@ pub struct Task {
     // the DB enforces this via CHECK constraints (migration 0006).
     pub scheduled_date: Option<NaiveDate>,
     pub scheduled_time: Option<NaiveTime>,
+    /// When the planned block ENDS, on the scheduled day.
+    ///
+    /// `scheduled_time` says when the user means to start; this says when they
+    /// mean to stop, so a planned task can occupy a span in the calendar the
+    /// way an event does rather than sitting at a single point. Requires
+    /// `scheduled_time` — an end without a start is not a block — and must be
+    /// later than it; writers drop it otherwise instead of storing a span that
+    /// runs backwards.
+    ///
+    /// An END and not a duration, because that is the shape the sources with a
+    /// real span keep (CalDAV's `DTSTART`..`DUE` / `DURATION` pair, Vikunja's
+    /// `end_date`) and the shape a calendar grid draws. Todoist is the one that
+    /// stores an amount plus a unit, and its adapter derives that from the two
+    /// ends rather than the core carrying both shapes.
+    ///
+    /// Not every source can hold one; those that cannot declare
+    /// `task_span: false` and the UI does not offer it.
+    /// `#[serde(default)]` so task JSON synced before this field existed still
+    /// deserializes (→ `None`).
+    #[serde(default)]
+    pub scheduled_end_time: Option<NaiveTime>,
     pub deadline_date: Option<NaiveDate>,
     pub deadline_time: Option<NaiveTime>,
     /// Aperio-only per-task override for the day-start deadline countdown:
@@ -413,6 +434,9 @@ pub struct NewTask {
     pub effort: TaskEffort,
     pub scheduled_date: Option<NaiveDate>,
     pub scheduled_time: Option<NaiveTime>,
+    /// End of the planned block — see [`Task::scheduled_end_time`].
+    #[serde(default)]
+    pub scheduled_end_time: Option<NaiveTime>,
     pub deadline_date: Option<NaiveDate>,
     pub deadline_time: Option<NaiveTime>,
     /// See `Task::deadline_reminder_days`. `#[serde(default)]` → `None` when

@@ -395,6 +395,7 @@ pub async fn create_task(
         effort: new.effort,
         scheduled_date: new.scheduled_date,
         scheduled_time: new.scheduled_time,
+        scheduled_end_time: new.scheduled_end_time,
         deadline_date: new.deadline_date,
         deadline_time: new.deadline_time,
         deadline_reminder_days: new.deadline_reminder_days,
@@ -529,6 +530,7 @@ fn build_vtodo_from_task(task: &Task) -> String {
         effort: task.effort,
         scheduled_date: task.scheduled_date,
         scheduled_time: task.scheduled_time,
+        scheduled_end_time: task.scheduled_end_time,
         deadline_date: task.deadline_date,
         deadline_time: task.deadline_time,
         deadline_reminder_days: task.deadline_reminder_days,
@@ -592,6 +594,7 @@ fn apply_common(todo: &mut Todo, uid: &str, task: &NewTask, completed_at: Option
         todo,
         task.scheduled_date,
         task.scheduled_time,
+        task.scheduled_end_time,
         task.deadline_date,
         task.deadline_time,
     );
@@ -677,6 +680,7 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>, raw: Option<&str>) -
 
     let (scheduled_date, scheduled_time) = local_date_time(read_task_dt(todo, "DTSTART"));
     let (deadline_date, deadline_time) = local_date_time(read_task_dt(todo, "DUE"));
+    let scheduled_end_time = read_planned_end(todo, scheduled_time);
     let completed_at = todo.property_value("COMPLETED").and_then(parse_compact_utc);
     let created_at = todo
         .property_value("CREATED")
@@ -759,6 +763,7 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>, raw: Option<&str>) -
         effort,
         scheduled_date,
         scheduled_time,
+        scheduled_end_time,
         deadline_date,
         deadline_time,
         deadline_reminder_days,
@@ -877,6 +882,71 @@ fn local_date_time(value: Option<DatePerhapsTime>) -> (Option<NaiveDate>, Option
     }
 }
 
+/// The end of a task's planned block, from whichever of the two carriers the
+/// VTODO uses.
+///
+/// RFC 5545 says a VTODO's span is `DTSTART`..`DUE`, or `DTSTART` plus
+/// `DURATION` — and that DUE and DURATION are mutually exclusive. Aperio
+/// already spends DUE on the DEADLINE, which is a different question ("by
+/// when") from the block ("while"), so the two cannot both live in the
+/// standard slots. DURATION carries it where there is no deadline in the way,
+/// which is the common case and the one Thunderbird draws as a real block;
+/// where a deadline occupies DUE, an X- property carries it instead. Both are
+/// read, whichever a server hands back.
+fn read_planned_end(todo: &Todo, start: Option<NaiveTime>) -> Option<NaiveTime> {
+    let start = start?;
+    let end = match todo.property_value("DURATION").and_then(parse_iso_duration) {
+        Some(span) => start.overflowing_add_signed(span).0,
+        None => {
+            let raw = todo.property_value(X_SCHEDULED_END)?;
+            NaiveTime::parse_from_str(raw, "%H%M%S").ok()?
+        }
+    };
+    (end > start).then_some(end)
+}
+
+/// An iCalendar DURATION as a chrono span. Only the shapes a task block can
+/// have are accepted — days, hours, minutes, seconds, no weeks and no negative
+/// sign, since a block that runs backwards is not one.
+fn parse_iso_duration(raw: &str) -> Option<chrono::TimeDelta> {
+    let rest = raw.strip_prefix('P')?;
+    let (date_part, time_part) = match rest.split_once('T') {
+        Some((d, t)) => (d, Some(t)),
+        None => (rest, None),
+    };
+    let mut seconds: i64 = 0;
+    let mut digits = String::new();
+    for ch in date_part.chars() {
+        match ch {
+            '0'..='9' => digits.push(ch),
+            'D' => seconds += digits.parse::<i64>().ok()? * 86_400,
+            // Weeks (and anything else) describe a span no single day can hold.
+            _ => return None,
+        }
+        if !ch.is_ascii_digit() {
+            digits.clear();
+        }
+    }
+    if let Some(time_part) = time_part {
+        for ch in time_part.chars() {
+            match ch {
+                '0'..='9' => digits.push(ch),
+                'H' => seconds += digits.parse::<i64>().ok()? * 3_600,
+                'M' => seconds += digits.parse::<i64>().ok()? * 60,
+                'S' => seconds += digits.parse::<i64>().ok()?,
+                _ => return None,
+            }
+            if !ch.is_ascii_digit() {
+                digits.clear();
+            }
+        }
+    }
+    (seconds > 0).then(|| chrono::TimeDelta::seconds(seconds))
+}
+
+/// Where a planned end goes when DUE is already spoken for by the deadline.
+const X_SCHEDULED_END: &str = "X-APERIO-SCHEDULED-END";
+
 /// Write DTSTART and DUE for a task.
 ///
 /// A time is emitted FLOATING — `20260812T090000`, no `Z`, no `TZID`. That is
@@ -897,6 +967,7 @@ fn apply_task_dates(
     todo: &mut Todo,
     scheduled_date: Option<NaiveDate>,
     scheduled_time: Option<NaiveTime>,
+    scheduled_end_time: Option<NaiveTime>,
     deadline_date: Option<NaiveDate>,
     deadline_time: Option<NaiveTime>,
 ) {
@@ -918,6 +989,20 @@ fn apply_task_dates(
     }
     if let Some(date) = deadline_date {
         todo.due(value_for(date, deadline_time));
+    }
+    // The block's end. DURATION is the standard carrier and the one other
+    // clients understand, but RFC 5545 §3.8.2.3 forbids it beside DUE — so a
+    // task that also has a deadline hands the end to an X- property instead of
+    // emitting something no server should accept.
+    if let (Some(start), Some(end)) = (scheduled_time, scheduled_end_time) {
+        if end > start {
+            let minutes = (end - start).num_minutes();
+            if deadline_date.is_none() {
+                todo.add_property("DURATION", format!("PT{minutes}M"));
+            } else {
+                todo.add_property(X_SCHEDULED_END, end.format("%H%M%S").to_string());
+            }
+        }
     }
 }
 
@@ -1214,6 +1299,7 @@ mod tests {
             deadline_reminder_days: None,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 20).unwrap()),
             scheduled_time: None,
+            scheduled_end_time: None,
             deadline_date: None,
             deadline_time: None,
             recurrence: None,
@@ -1614,6 +1700,7 @@ END:VCALENDAR</c:calendar-data>
             deadline_reminder_days: None,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 21).unwrap()),
             scheduled_time: None,
+            scheduled_end_time: None,
             deadline_date: Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()),
             deadline_time: None,
             recurrence: None,
@@ -1652,6 +1739,7 @@ END:VCALENDAR</c:calendar-data>
             deadline_reminder_days: None,
             scheduled_date: None,
             scheduled_time: None,
+            scheduled_end_time: None,
             deadline_date: Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()),
             deadline_time: Some(NaiveTime::from_hms_opt(14, 30, 0).unwrap()),
             recurrence: None,
@@ -1826,6 +1914,7 @@ END:VCALENDAR</c:calendar-data>
             deadline_reminder_days: None,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 21).unwrap()),
             scheduled_time: None,
+            scheduled_end_time: None,
             deadline_date: None,
             deadline_time: None,
             recurrence: Some(rec.clone()),

@@ -276,7 +276,8 @@ impl LocalAdapter {
                         priority, scheduled_date, scheduled_time, deadline_date,
                         deadline_time, recurrence, color_label_id, reminders, sound,
                         created_at, updated_at, completed_at, etag, section_id,
-                        resurface_date, series_id, effort, deadline_reminder_days
+                        resurface_date, series_id, effort, deadline_reminder_days,
+                        scheduled_end_time
                    FROM tasks",
             )
             .map_err(map_sql_err)?;
@@ -684,6 +685,7 @@ mod tests {
             effort: TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
+            scheduled_end_time: None,
             deadline_date: None,
             deadline_time: None,
             deadline_reminder_days: None,

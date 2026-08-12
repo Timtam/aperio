@@ -1162,6 +1162,11 @@ struct TaskEntry {
     due_date: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     start_date: Option<String>,
+    /// Vikunja's own end of the planned span. Together with `start_date` it is
+    /// the bar its Gantt view draws, and it is the one native home for a task
+    /// span among the sources Aperio speaks to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    end_date: Option<String>,
     /// Vikunja priority is 0..=5 with 0 = unset. We map 0–1 → Low,
     /// 2–3 → Medium, 4–5 → High, and write Aperio's enum back as
     /// 1 / 3 / 5.
@@ -1369,6 +1374,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
     };
     let priority = vikunja_priority_to_aperio(entry.priority);
     let scheduled = entry.start_date.as_deref().and_then(parse_vikunja_datetime);
+    let planned_end = entry.end_date.as_deref().and_then(parse_vikunja_datetime);
     let deadline = entry.due_date.as_deref().and_then(parse_vikunja_datetime);
     let completed_at = entry.done_at.as_deref().and_then(parse_vikunja_datetime);
     let created_at = entry
@@ -1420,6 +1426,16 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         effort,
         scheduled_date: scheduled.map(|dt| dt.date_naive()),
         scheduled_time: scheduled.map(|dt| dt.time()).filter(non_midnight),
+        // A block lives on one day here. An `end_date` on a LATER day is a
+        // Gantt bar spanning days, which Aperio's task model has no room for
+        // and which would draw as a nonsense block, so only a same-day end is
+        // taken and the rest is left where it is rather than truncated.
+        scheduled_end_time: match (scheduled, planned_end) {
+            (Some(start), Some(end)) if end.date_naive() == start.date_naive() && end > start => {
+                Some(end.time())
+            }
+            _ => None,
+        },
         deadline_date: deadline.map(|dt| dt.date_naive()),
         deadline_time: deadline.map(|dt| dt.time()).filter(non_midnight),
         deadline_reminder_days,
@@ -1531,6 +1547,7 @@ fn new_task_to_body(new: &NewTask) -> TaskEntry {
         done_at: None,
         due_date: combine_date_time(new.deadline_date, new.deadline_time),
         start_date: combine_date_time(new.scheduled_date, new.scheduled_time),
+        end_date: combine_date_time(new.scheduled_date, new.scheduled_end_time),
         priority: aperio_priority_to_vikunja(new.priority),
         project_id: 0,
         bucket_id: 0,
@@ -1591,6 +1608,7 @@ fn task_to_body(task: &Task) -> TaskEntry {
         done_at: None,
         due_date: combine_date_time(task.deadline_date, task.deadline_time),
         start_date: combine_date_time(task.scheduled_date, task.scheduled_time),
+        end_date: combine_date_time(task.scheduled_date, task.scheduled_end_time),
         priority: aperio_priority_to_vikunja(task.priority),
         project_id: parse_id(&task.list_id, "task list id").unwrap_or(0),
         bucket_id: 0,
@@ -2156,6 +2174,7 @@ mod tests {
             deadline_reminder_days: None,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()),
             scheduled_time: Some(NaiveTime::from_hms_opt(8, 0, 0).unwrap()),
+            scheduled_end_time: None,
             deadline_date: Some(NaiveDate::from_ymd_opt(2026, 5, 23).unwrap()),
             deadline_time: None,
             recurrence: None,
@@ -2618,6 +2637,7 @@ mod tests {
             deadline_reminder_days: None,
             scheduled_date: None,
             scheduled_time: None,
+            scheduled_end_time: None,
             deadline_date: None,
             deadline_time: None,
             recurrence: None,
@@ -2945,6 +2965,7 @@ mod tests {
             deadline_reminder_days: None,
             scheduled_date: None,
             scheduled_time: None,
+            scheduled_end_time: None,
             deadline_date: None,
             deadline_time: None,
             recurrence: None,

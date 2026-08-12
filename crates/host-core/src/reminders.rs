@@ -1562,6 +1562,7 @@ mod tests {
             deadline_reminder_days: None,
             scheduled_date,
             scheduled_time,
+            scheduled_end_time: None,
             deadline_date,
             deadline_time,
             recurrence: None,

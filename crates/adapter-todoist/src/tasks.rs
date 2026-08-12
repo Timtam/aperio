@@ -516,6 +516,8 @@ struct TaskEntry {
     assignee_id: Option<WireId>,
     #[serde(default)]
     due: Option<DueEntry>,
+    #[serde(default)]
+    duration: Option<DurationEntry>,
     /// Added to the Todoist REST API in late 2024. Missing on
     /// older tasks; we tolerate either shape.
     #[serde(default)]
@@ -597,6 +599,17 @@ struct DueEntry {
     datetime: Option<String>,
 }
 
+/// Todoist's task length: an amount plus its unit, rather than an end.
+/// The unit is documented as `minute` or `day`; a `day` amount describes a
+/// span the core's one-day block cannot hold, so only minutes are taken.
+#[derive(Debug, Deserialize)]
+struct DurationEntry {
+    #[serde(default)]
+    amount: i64,
+    #[serde(default)]
+    unit: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct DeadlineEntry {
     #[serde(default)]
@@ -631,6 +644,13 @@ struct CreateTaskBody {
     due_datetime: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     deadline_date: Option<String>,
+    /// The block's length in minutes. Todoist stores a length where the core
+    /// stores an end; `duration_unit` has to travel with it or the amount is
+    /// meaningless. Omitted where there is no block, which clears it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    duration: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    duration_unit: Option<&'static str>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -656,6 +676,13 @@ struct UpdateTaskBody {
     due_datetime: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     deadline_date: Option<String>,
+    /// The block's length in minutes. Todoist stores a length where the core
+    /// stores an end; `duration_unit` has to travel with it or the amount is
+    /// meaningless. Omitted where there is no block, which clears it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    duration: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    duration_unit: Option<&'static str>,
 }
 
 // ── Mappers ────────────────────────────────────────────────────────────
@@ -779,6 +806,16 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         );
     }
 
+    // Todoist's calendar draws a task as a block this long, so the length IS
+    // the span — but the core holds an end, and an end needs a start to be one.
+    let scheduled_end_time = scheduled_time.and_then(|start| {
+        let minutes = entry.duration.as_ref().and_then(duration_minutes)?;
+        let end = start + chrono::Duration::minutes(minutes);
+        // Past midnight the block leaves the day it belongs to; the core has no
+        // room for that, so it is dropped rather than wrapped to a wrong hour.
+        (end > start).then_some(end)
+    });
+
     Task {
         assignees: extract_assignees(entry.assignee_id),
         id: entry.id,
@@ -790,6 +827,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         effort,
         scheduled_date,
         scheduled_time,
+        scheduled_end_time,
         deadline_date,
         // Todoist's deadline is date-only. We surface it as
         // date+no-time and accept that any locally-set
@@ -868,6 +906,9 @@ fn new_task_to_create_body(list_id: &str, new: &NewTask) -> CreateTaskBody {
         due_date,
         due_datetime,
         deadline_date: new.deadline_date.map(format_date),
+        duration: planned_minutes(new.scheduled_time, new.scheduled_end_time),
+        duration_unit: planned_minutes(new.scheduled_time, new.scheduled_end_time)
+            .map(|_| "minute"),
     }
 }
 
@@ -893,6 +934,9 @@ fn task_to_update_body(task: &Task) -> UpdateTaskBody {
         due_date,
         due_datetime,
         deadline_date: task.deadline_date.map(format_date),
+        duration: planned_minutes(task.scheduled_time, task.scheduled_end_time),
+        duration_unit: planned_minutes(task.scheduled_time, task.scheduled_end_time)
+            .map(|_| "minute"),
     }
 }
 
@@ -945,6 +989,23 @@ fn aperio_priority_to_todoist(p: TaskPriority) -> i32 {
 }
 
 // ── Date handling ──────────────────────────────────────────────────────
+
+/// A Todoist duration in MINUTES, or `None` when it says nothing this model can
+/// use — an absent or non-positive amount, or a unit other than minutes.
+fn duration_minutes(duration: &DurationEntry) -> Option<i64> {
+    if duration.unit.as_deref() != Some("minute") || duration.amount <= 0 {
+        return None;
+    }
+    Some(duration.amount)
+}
+
+/// The block's length in minutes, for the write side. `None` where there is no
+/// block — Todoist's own field is omitted then, which clears it.
+fn planned_minutes(start: Option<NaiveTime>, end: Option<NaiveTime>) -> Option<i64> {
+    let (start, end) = (start?, end?);
+    let minutes = (end - start).num_minutes();
+    (minutes > 0).then_some(minutes)
+}
 
 fn extract_scheduled(due: &Option<DueEntry>) -> (Option<NaiveDate>, Option<NaiveTime>) {
     let Some(due) = due else {
@@ -1190,6 +1251,7 @@ mod tests {
     #[test]
     fn map_task_translates_priority_and_deadline() {
         let entry = TaskEntry {
+            duration: None,
             id: "T1".into(),
             project_id: "P1".into(),
             content: Some("Submit invoice".into()),
@@ -1231,6 +1293,7 @@ mod tests {
     #[test]
     fn map_task_marks_completed_with_timestamp() {
         let entry = TaskEntry {
+            duration: None,
             id: "T1".into(),
             project_id: "P1".into(),
             content: Some("Done".into()),
@@ -1255,6 +1318,7 @@ mod tests {
     #[test]
     fn map_task_handles_timed_due() {
         let entry = TaskEntry {
+            duration: None,
             id: "T1".into(),
             project_id: "P1".into(),
             content: Some("Standup".into()),
@@ -1283,6 +1347,7 @@ mod tests {
 
     fn sample_new_task() -> NewTask {
         NewTask {
+            scheduled_end_time: None,
             assignees: Vec::new(),
             title: "Buy bread".into(),
             description: Some("Bakery".into()),
@@ -1363,6 +1428,7 @@ mod tests {
 
         // Read the description back as if Todoist echoed it.
         let entry = TaskEntry {
+            duration: None,
             id: "T1".into(),
             project_id: "P1".into(),
             content: Some("Empty dishwasher".into()),
@@ -1516,6 +1582,7 @@ mod tests {
             .await;
         let client = fixture_client(&server.url());
         let task = Task {
+            scheduled_end_time: None,
             assignees: Vec::new(),
             id: "T1".into(),
             list_id: "P1".into(),
@@ -1575,6 +1642,7 @@ mod tests {
             .await;
         let client = fixture_client(&server.url());
         let task = Task {
+            scheduled_end_time: None,
             assignees: Vec::new(),
             id: "T1".into(),
             list_id: "P1".into(),
@@ -1636,6 +1704,7 @@ mod tests {
             .await;
         let client = fixture_client(&server.url());
         let task = Task {
+            scheduled_end_time: None,
             assignees: Vec::new(),
             id: "T1".into(),
             list_id: "P1".into(),
@@ -1687,6 +1756,7 @@ mod tests {
             .await;
         let client = fixture_client(&server.url());
         let task = Task {
+            scheduled_end_time: None,
             assignees: Vec::new(),
             id: "T1".into(),
             list_id: "P1".into(),
@@ -1958,6 +2028,7 @@ mod tests {
         // Unassigned ⇒ assignee_id present as null so the update
         // unassigns rather than leaving a stale assignee.
         let task = Task {
+            scheduled_end_time: None,
             assignees: Vec::new(),
             id: "T1".into(),
             list_id: "P1".into(),

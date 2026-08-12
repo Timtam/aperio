@@ -222,6 +222,7 @@ mod tests {
             effort: Default::default(),
             scheduled_date: NaiveDate::from_ymd_opt(2026, 8, 3),
             scheduled_time: None,
+            scheduled_end_time: None,
             deadline_date: None,
             deadline_time: None,
             deadline_reminder_days: None,

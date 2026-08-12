@@ -190,7 +190,7 @@ impl LocalAdapter {
                         t.deadline_date, t.deadline_time, t.recurrence, t.color_label_id,
                         t.reminders, t.sound, t.created_at, t.updated_at, t.completed_at,
                         t.etag, t.section_id, t.resurface_date, t.series_id, t.effort,
-                        t.deadline_reminder_days
+                        t.deadline_reminder_days, t.scheduled_end_time
                    FROM tasks_fts f
                    JOIN tasks t ON t.id = f.id
                   WHERE tasks_fts MATCH ?{where_extra}
@@ -306,6 +306,7 @@ mod tests {
             effort: TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
+            scheduled_end_time: None,
             deadline_date: None,
             deadline_time: None,
             deadline_reminder_days: None,

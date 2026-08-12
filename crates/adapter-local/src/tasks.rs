@@ -5,7 +5,7 @@ use cal_core::{
     ColorLabelId, ContainerColor, NewTask, Reminder, Section, SoundConfig, Task, TaskEffort,
     TaskList, TaskPriority, TaskRecurrence, TaskStatus, TasksFeature,
 };
-use chrono::Utc;
+use chrono::{NaiveTime, Utc};
 use rusqlite::{params, OptionalExtension};
 use uuid::Uuid;
 
@@ -242,11 +242,12 @@ impl LocalAdapter {
             .execute(
                 "INSERT INTO tasks (
                     id, list_id, parent_id, section_id, title, description, status, priority,
-                    effort, scheduled_date, scheduled_time, deadline_date, deadline_time,
+                    effort, scheduled_date, scheduled_time, scheduled_end_time,
+                    deadline_date, deadline_time,
                     deadline_reminder_days,
                     recurrence, resurface_date, series_id, color_label_id, reminders, sound,
                     created_at, updated_at, completed_at, etag
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
                 params![
                     id,
                     list_id,
@@ -259,6 +260,9 @@ impl LocalAdapter {
                     effort,
                     task.scheduled_date.as_ref().map(fmt_date),
                     task.scheduled_time.as_ref().map(fmt_time),
+                    planned_end(task.scheduled_time, task.scheduled_end_time)
+                        .as_ref()
+                        .map(fmt_time),
                     task.deadline_date.as_ref().map(fmt_date),
                     task.deadline_time.as_ref().map(fmt_time),
                     task.deadline_reminder_days,
@@ -286,6 +290,7 @@ impl LocalAdapter {
             effort: task.effort,
             scheduled_date: task.scheduled_date,
             scheduled_time: task.scheduled_time,
+            scheduled_end_time: planned_end(task.scheduled_time, task.scheduled_end_time),
             deadline_date: task.deadline_date,
             deadline_time: task.deadline_time,
             deadline_reminder_days: task.deadline_reminder_days,
@@ -366,6 +371,7 @@ impl LocalAdapter {
                 "UPDATE tasks
                     SET list_id = ?, parent_id = ?, section_id = ?, title = ?, description = ?,
                         status = ?, priority = ?, effort = ?, scheduled_date = ?, scheduled_time = ?,
+                        scheduled_end_time = ?,
                         deadline_date = ?, deadline_time = ?, deadline_reminder_days = ?,
                         recurrence = ?, resurface_date = ?, series_id = ?, color_label_id = ?,
                         reminders = ?, sound = ?,
@@ -382,6 +388,9 @@ impl LocalAdapter {
                     effort,
                     task.scheduled_date.as_ref().map(fmt_date),
                     task.scheduled_time.as_ref().map(fmt_time),
+                    planned_end(task.scheduled_time, task.scheduled_end_time)
+                        .as_ref()
+                        .map(fmt_time),
                     task.deadline_date.as_ref().map(fmt_date),
                     task.deadline_time.as_ref().map(fmt_time),
                     task.deadline_reminder_days,
@@ -581,7 +590,8 @@ impl LocalAdapter {
                         priority, scheduled_date, scheduled_time, deadline_date,
                         deadline_time, recurrence, color_label_id, reminders, sound,
                         created_at, updated_at, completed_at, etag, section_id,
-                        resurface_date, series_id, effort, deadline_reminder_days
+                        resurface_date, series_id, effort, deadline_reminder_days,
+                        scheduled_end_time
                    FROM tasks WHERE id = ?",
             )
             .map_err(map_sql_err)?;
@@ -778,7 +788,8 @@ const TASK_SELECT: &str = "SELECT id, list_id, parent_id, title, description, st
             priority, scheduled_date, scheduled_time, deadline_date,
             deadline_time, recurrence, color_label_id, reminders, sound,
             created_at, updated_at, completed_at, etag, section_id,
-            resurface_date, series_id, effort, deadline_reminder_days
+            resurface_date, series_id, effort, deadline_reminder_days,
+                        scheduled_end_time
        FROM tasks
       WHERE list_id = ?
       ORDER BY COALESCE(scheduled_date, deadline_date, ''), created_at";
@@ -803,6 +814,20 @@ fn is_open_status(status: TaskStatus) -> bool {
 /// produce two open instances of the same `series_id`, keep only the
 /// canonical (oldest by `created_at`, then id) one in the view and drop the
 /// rest. Completed instances are history and never collapsed; untagged tasks
+/// The planned end, kept only where it is one.
+///
+/// An end needs a start — a block with no beginning is not a block — and it has
+/// to come after it. Rather than storing a span that runs backwards or hangs in
+/// the air, both are dropped at the door, so nothing downstream (the hour grid,
+/// the spoken "from … to …") has to defend itself against a shape the store
+/// should never have accepted.
+fn planned_end(start: Option<NaiveTime>, end: Option<NaiveTime>) -> Option<NaiveTime> {
+    match (start, end) {
+        (Some(start), Some(end)) if end > start => Some(end),
+        _ => None,
+    }
+}
+
 /// pass through untouched.
 fn dedupe_open_series(tasks: Vec<Task>) -> Vec<Task> {
     use std::collections::HashMap;
@@ -939,6 +964,10 @@ pub(crate) fn row_to_task(row: &rusqlite::Row<'_>) -> cal_core::Result<Task> {
     let series_id = opt_text(row, 21)?;
     let effort = parse_task_effort(&req_text(row, 22)?)?;
     let deadline_reminder_days: Option<i64> = row.get(23).map_err(map_sql_err)?;
+    let scheduled_end_time = match opt_text(row, 24)? {
+        Some(s) => Some(parse_time(&s)?),
+        None => None,
+    };
 
     Ok(Task {
         assignees: Vec::new(),
@@ -951,6 +980,7 @@ pub(crate) fn row_to_task(row: &rusqlite::Row<'_>) -> cal_core::Result<Task> {
         effort,
         scheduled_date,
         scheduled_time,
+        scheduled_end_time,
         deadline_date,
         deadline_time,
         deadline_reminder_days,
@@ -995,6 +1025,7 @@ mod tests {
             effort: TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
+            scheduled_end_time: None,
             deadline_date: None,
             deadline_time: None,
             deadline_reminder_days: None,

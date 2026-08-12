@@ -323,6 +323,8 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         // a deadline.
         scheduled_date: deadline_date,
         scheduled_time: None,
+        // Google Tasks records only date information (see the module header).
+        scheduled_end_time: None,
         deadline_date: None,
         deadline_time: None,
         // Like effort, the per-task deadline-countdown override survives the
@@ -639,6 +641,7 @@ mod tests {
             deadline_reminder_days: None,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()),
             scheduled_time: None,
+            scheduled_end_time: None,
             deadline_date: None,
             deadline_time: None,
             recurrence: None,

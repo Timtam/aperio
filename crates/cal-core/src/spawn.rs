@@ -55,6 +55,7 @@ pub fn completion_record_for(completed: &Task) -> NewTask {
         effort: completed.effort,
         scheduled_date: completed.scheduled_date,
         scheduled_time: completed.scheduled_time,
+        scheduled_end_time: completed.scheduled_end_time,
         deadline_date: completed.deadline_date,
         deadline_time: completed.deadline_time,
         deadline_reminder_days: completed.deadline_reminder_days,
@@ -244,6 +245,12 @@ fn instance_skeleton(
         effort: template.effort,
         scheduled_date,
         scheduled_time: scheduled_date.and(template.scheduled_time),
+        // The block's length is part of the plan and repeats with it — but an
+        // end with no start is not a block, so it travels only where the start
+        // does.
+        scheduled_end_time: scheduled_date
+            .and(template.scheduled_time)
+            .and(template.scheduled_end_time),
         deadline_date,
         deadline_time: deadline_date.and(template.deadline_time),
         deadline_reminder_days: deadline_date.and(template.deadline_reminder_days),
@@ -382,6 +389,7 @@ mod tests {
             effort: TaskEffort::Medium,
             scheduled_date: None,
             scheduled_time: None,
+            scheduled_end_time: None,
             deadline_date: None,
             deadline_time: None,
             deadline_reminder_days: None,

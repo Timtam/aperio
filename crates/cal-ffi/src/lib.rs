@@ -623,6 +623,9 @@ pub struct TaskDto {
     pub scheduled_date: Option<String>,
     /// `HH:MM:SS`. Requires `scheduled_date`.
     pub scheduled_time: Option<String>,
+    /// End of the planned block, `HH:MM:SS`. Needs `scheduled_time`; see
+    /// `cal_core::Task::scheduled_end_time`.
+    pub scheduled_end_time: Option<String>,
     /// `YYYY-MM-DD`. The day the task is due by.
     pub deadline_date: Option<String>,
     /// `HH:MM:SS`. Requires `deadline_date`.
@@ -666,6 +669,7 @@ impl From<cal_core::Task> for TaskDto {
             effort: t.effort.into(),
             scheduled_date: t.scheduled_date.map(date_to_string),
             scheduled_time: t.scheduled_time.map(time_to_string),
+            scheduled_end_time: t.scheduled_end_time.map(time_to_string),
             deadline_date: t.deadline_date.map(date_to_string),
             deadline_time: t.deadline_time.map(time_to_string),
             deadline_reminder_days: t.deadline_reminder_days,
@@ -699,6 +703,7 @@ impl TryFrom<TaskDto> for cal_core::Task {
             effort: t.effort.into(),
             scheduled_date: opt_date_field("scheduled_date", t.scheduled_date)?,
             scheduled_time: opt_time_field("scheduled_time", t.scheduled_time)?,
+            scheduled_end_time: opt_time_field("scheduled_end_time", t.scheduled_end_time)?,
             deadline_date: opt_date_field("deadline_date", t.deadline_date)?,
             deadline_time: opt_time_field("deadline_time", t.deadline_time)?,
             deadline_reminder_days: t.deadline_reminder_days,
@@ -742,6 +747,9 @@ pub struct NewTaskDto {
     pub effort: TaskEffort,
     pub scheduled_date: Option<String>,
     pub scheduled_time: Option<String>,
+    /// End of the planned block, `HH:MM:SS`. Needs `scheduled_time`; see
+    /// `cal_core::Task::scheduled_end_time`.
+    pub scheduled_end_time: Option<String>,
     pub deadline_date: Option<String>,
     pub deadline_time: Option<String>,
     /// Per-task override for the day-start deadline countdown; see
@@ -767,6 +775,7 @@ impl TryFrom<NewTaskDto> for cal_core::NewTask {
             effort: t.effort.into(),
             scheduled_date: opt_date_field("scheduled_date", t.scheduled_date)?,
             scheduled_time: opt_time_field("scheduled_time", t.scheduled_time)?,
+            scheduled_end_time: opt_time_field("scheduled_end_time", t.scheduled_end_time)?,
             deadline_date: opt_date_field("deadline_date", t.deadline_date)?,
             deadline_time: opt_time_field("deadline_time", t.deadline_time)?,
             deadline_reminder_days: t.deadline_reminder_days,
@@ -1320,6 +1329,7 @@ mod tests {
             deadline_reminder_days: None,
             scheduled_date: None,
             scheduled_time: None,
+            scheduled_end_time: None,
             deadline_date: None,
             deadline_time: None,
             recurrence: None,

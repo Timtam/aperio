@@ -85,6 +85,7 @@ fn task(id: &str) -> Task {
         deadline_reminder_days: None,
         scheduled_date: None,
         scheduled_time: None,
+        scheduled_end_time: None,
         deadline_date: None,
         deadline_time: None,
         recurrence: None,
