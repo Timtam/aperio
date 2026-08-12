@@ -845,7 +845,17 @@ export function WeekView() {
           if (keepsTime) {
             await scheduleTaskAtTime(current, dayKey, minute);
           } else {
-            await scheduleTaskOnDay(current, dayKey);
+            // The time goes with it. `scheduleTaskOnDay` keeps a time-of-day by
+            // design — that is right for the week planner's day drop — but here
+            // the announcement says the time was not kept, and an announcement
+            // is the only feedback a screen-reader user gets. Leaving a stale
+            // time behind would send the chip back to an hour nowhere near where
+            // it was dropped while claiming otherwise. It is also the only way
+            // left to clear a time the editor no longer offers on this list.
+            await scheduleTaskOnDay(
+              { ...current, scheduled_time: null, scheduled_end_time: null },
+              dayKey,
+            );
           }
           announce(
             t(keepsTime ? 'views.taskScheduledAtTime' : 'views.taskScheduledDayOnly', {
