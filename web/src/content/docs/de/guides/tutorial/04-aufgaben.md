@@ -218,13 +218,19 @@ Wie Termine können auch Aufgaben sich wiederholen (täglich, wöchentlich,
 monatlich, jährlich). Hakst du eine wiederkehrende Aufgabe ab, erzeugt
 Aperio automatisch die nächste Fälligkeit.
 
-> **Wenn du Tage übersprungen hast:** Die nächste Fälligkeit ist der nächste
-> Termin, der noch **nicht vorbei** ist – nicht der nächste der versäumten Tage.
-> Eine tägliche Aufgabe, die eine Woche liegen geblieben ist, ist mit **einem**
-> Haken wieder im Takt: die von gestern heute Morgen abgehakt lässt die
-> **heutige** stehen, und nur die. Die abgehakte Aufgabe bleibt an **ihrem
-> geplanten Tag** stehen – im Kalender behält damit jeder Tag genau seinen
-> Durchgang, statt dass sich alles auf dem Tag des Hakens sammelt.
+> **Wenn du Tage übersprungen hast:** Die nächste Fälligkeit ist der **letzte
+> Durchgang, der fällig war** – nicht der nächste der versäumten Tage, und auch
+> nicht der erste künftige. Eine tägliche Aufgabe, die eine Woche liegen
+> geblieben ist, ist damit mit **einem** Haken wieder im Takt: die von gestern
+> heute Morgen abgehakt lässt die **heutige** stehen, und nur die. Bei einer
+> monatlichen Aufgabe – Miete zum Ersten, die Juli-Miete am 2. August abgehakt –
+> ist die nächste Fälligkeit der **1. August**: einen Tag überfällig, aber
+> sichtbar, statt dass ein ganzer Monat lautlos ausfällt. Mehr als **einen**
+> zusätzlichen Haken kostet das Aufholen nie.
+>
+> Die abgehakte Aufgabe bleibt an **ihrem geplanten Tag** stehen – im Kalender
+> behält damit jeder Tag genau seinen Durchgang, statt dass sich alles auf dem
+> Tag des Hakens sammelt.
 
 > **Im Kalender:** Eine wiederkehrende Aufgabe mit **geplantem Tag** erscheint
 > jetzt an **jedem** geplanten Tag in der Tages-/Wochen-/Monatsansicht — wie ein

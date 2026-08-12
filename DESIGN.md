@@ -1348,12 +1348,18 @@ Bei `open→completed` einer Instanz mit Wiederholung wird die nächste Instanz 
   - `fixed_dates`: nächstes der Daten nach dem Abschluss
 - Die Instanz erbt die `series_id` der Vorlage.
 - **Aufholen statt nachholen.** Liegt der berechnete nächste Termin bereits in der
-  Vergangenheit (die Aufgabe blieb Tage liegen), rückt der Spawner weiter, bis er den
-  ersten Termin **am oder nach dem Abschlusstag** erreicht. Eine Serie trägt höchstens eine
-  offene Instanz (Idempotenz unten), die versäumten Durchgänge sind also keine wartende
-  Arbeit, sondern vorbei: sonst erzeugt jeder Haken den nächsten versäumten Tag – wieder
-  überfällig – und der Nutzer hakt einmal pro verstrichenem Tag ab. `FromCompletion` zählt
-  ohnehin ab dem Abschluss und ist davon nicht berührt.
+  Vergangenheit (die Aufgabe blieb liegen), rückt der Spawner weiter – bis zum **letzten
+  Termin, der nicht nach dem Abschlusstag liegt**. Eine Serie trägt höchstens eine offene
+  Instanz (Idempotenz unten), die Durchgänge dazwischen sind also keine wartende Arbeit:
+  sonst erzeugt jeder Haken den nächsten versäumten Tag – wieder überfällig – und der
+  Nutzer hakt einmal pro verstrichenem Tag ab.
+  Warum der **letzte** fällige und nicht der erste künftige: Letzterer wäre einfacher und
+  für tägliche Regeln identisch, verwirft aber den Durchgang der laufenden Periode. Miete
+  zum 1., die Juli-Miete am 2. August abgehakt, ließe die August-Miete lautlos ausfallen.
+  So landet eine tägliche Regel weiterhin auf dem Abhaktag selbst, eine monatliche auf dem
+  Ersten dieses Monats – einen Tag überfällig und sichtbar. Das kostet höchstens **einen**
+  weiteren Haken, nie einen pro verstrichener Periode. `FromCompletion` zählt ohnehin ab
+  dem Abschluss und ist davon nicht berührt.
 - **Läuft auch für externe Listen.** Bisher spawnt bei externen Aufgaben der Provider (über die RRULE); Bedarfs-/Backlog-Wiederholungen kennt kein Provider → **Aperio spawnt selbst**, für alle Listen.
 
 ##### Idempotenz bei geteilten Listen

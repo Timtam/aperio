@@ -114,18 +114,26 @@ fn next_fixed_date_after(from: NaiveDate, dates: &[MonthDay]) -> Option<NaiveDat
 /// steps are pathologically small.
 const MAX_CATCHUP_STEPS: u32 = 10_000;
 
-/// The first turn at or after `not_before`, walking the rule forward from
-/// `first`.
+/// The LATEST turn that is not after `not_before`, walking the rule forward
+/// from `first` — or `first` itself when every turn is still ahead.
 ///
 /// A daily task forgotten for five days used to hand back a task dated the day
 /// AFTER the one that was forgotten — itself already in the past. Completing
 /// that spawned the next missed day, and so on: one tick for every day gone by,
 /// each new task born overdue, and to the user an endless queue of the same
 /// chore on the same screen. A series carries at most one open turn (the
-/// idempotency gate in the spawner's callers), so the missed days are not turns
-/// waiting to be done — they are gone. The honest next turn is the first one
-/// that has not already passed: yesterday's dose ticked today still leaves
-/// TODAY'S dose to take, and nothing before it.
+/// idempotency gate in the spawner's callers), so the days in between are not
+/// turns waiting to be done.
+///
+/// Where it stops is the careful part. Running on to the first turn AFTER the
+/// tick would be simpler and is right for the daily case — but it throws away
+/// the turn of the period the user is standing in, and for a coarse rule that
+/// period is the whole point: rent due on the 1st, paid late on the 2nd of the
+/// next month, would skip a month's rent entirely and never mention it. So the
+/// walk stops on the last turn that has not passed the tick. A daily rule lands
+/// on the tick day itself, unchanged; a monthly one lands on this month's turn,
+/// overdue by a day and visible. At worst that costs ONE more tick — never one
+/// per period gone by, which is the loop this exists to close.
 ///
 /// Returns `first` unchanged when it is not in the past. When the rule stops
 /// advancing, or the walk runs out of budget, it returns the furthest point it
@@ -140,6 +148,11 @@ fn catch_up(first: NaiveDate, rule: &TaskRecurrence, not_before: NaiveDate) -> N
         };
         // A rule that fails to move forward would loop here forever.
         if further <= date {
+            break;
+        }
+        // The next turn is in the future: the one in hand is the last that was
+        // due, and that is the one still owed.
+        if further > not_before {
             break;
         }
         date = further;
@@ -582,10 +595,11 @@ mod tests {
         );
     }
 
-    /// A weekly rule catches up a whole week at a time: the Monday that passed
-    /// while the task sat unchecked is gone, the next one is next Monday.
+    /// A weekly rule keeps the turn of the week the user is standing in: the
+    /// Monday two days ago was missed and is still owed, so that is what the
+    /// tick leaves behind — not next Monday, which would drop a week silently.
     #[test]
-    fn weekly_catch_up_lands_on_the_next_future_turn() {
+    fn weekly_catch_up_keeps_the_current_periods_turn() {
         let mut t = template(
             rule(
                 RecurrenceFrequency::Weekly,
@@ -596,13 +610,70 @@ mod tests {
             ),
             NaiveDate::from_ymd_opt(2026, 8, 12).unwrap(),
         );
-        // Monday 3 August, ticked off on Wednesday 12 August.
+        // Monday 3 August, ticked off on Wednesday 12 August. The 10th was the
+        // last Monday due; the 17th has not come round yet.
         t.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 8, 3).unwrap());
         let next =
             next_recurrence_instance(&t, NaiveDate::from_ymd_opt(2026, 8, 12).unwrap()).unwrap();
         assert_eq!(
             next.scheduled_date,
-            Some(NaiveDate::from_ymd_opt(2026, 8, 17).unwrap()),
+            Some(NaiveDate::from_ymd_opt(2026, 8, 10).unwrap()),
+        );
+    }
+
+    /// The case the rule is written for: rent on the 1st, July's paid on the
+    /// 2nd of August. August's rent is a day overdue and must be what comes
+    /// next — stepping on to September would drop a month's rent in silence.
+    #[test]
+    fn monthly_catch_up_does_not_skip_the_month_just_started() {
+        let mut t = template(
+            rule(
+                RecurrenceFrequency::Monthly,
+                1,
+                RecurrenceAnchor::FromDate,
+                RecurrencePlacement::Schedule,
+                None,
+            ),
+            NaiveDate::from_ymd_opt(2026, 8, 2).unwrap(),
+        );
+        t.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 7, 1).unwrap());
+        let next =
+            next_recurrence_instance(&t, NaiveDate::from_ymd_opt(2026, 8, 2).unwrap()).unwrap();
+        assert_eq!(
+            next.scheduled_date,
+            Some(NaiveDate::from_ymd_opt(2026, 8, 1).unwrap()),
+        );
+    }
+
+    /// And ticking THAT one settles the series: one extra tick, not one per
+    /// period gone by. This is the bound the whole rule rests on.
+    #[test]
+    fn the_catch_up_costs_at_most_one_further_tick() {
+        let mut t = template(
+            rule(
+                RecurrenceFrequency::Monthly,
+                1,
+                RecurrenceAnchor::FromDate,
+                RecurrencePlacement::Schedule,
+                None,
+            ),
+            NaiveDate::from_ymd_opt(2026, 8, 2).unwrap(),
+        );
+        // Seven months behind: the first tick brings it to the current month …
+        t.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap());
+        let first =
+            next_recurrence_instance(&t, NaiveDate::from_ymd_opt(2026, 8, 2).unwrap()).unwrap();
+        assert_eq!(
+            first.scheduled_date,
+            Some(NaiveDate::from_ymd_opt(2026, 8, 1).unwrap()),
+        );
+        // … and the second is already in the future.
+        t.scheduled_date = first.scheduled_date;
+        let second =
+            next_recurrence_instance(&t, NaiveDate::from_ymd_opt(2026, 8, 2).unwrap()).unwrap();
+        assert_eq!(
+            second.scheduled_date,
+            Some(NaiveDate::from_ymd_opt(2026, 9, 1).unwrap()),
         );
     }
 
@@ -620,14 +691,15 @@ mod tests {
         );
         r.day_of_week = Some(vec![Weekday::Monday, Weekday::Thursday]);
         let mut t = template(r, NaiveDate::from_ymd_opt(2026, 8, 12).unwrap());
-        // Monday 3 August, ticked off on Wednesday 12 August. Thu 6th and Mon
-        // 10th are gone; the next listed day is Thursday the 13th.
+        // Monday 3 August, ticked off on Wednesday 12 August. Thursday the 6th
+        // and Monday the 10th were both due; the 10th is the later of them, and
+        // Thursday the 13th has not come round yet.
         t.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 8, 3).unwrap());
         let next =
             next_recurrence_instance(&t, NaiveDate::from_ymd_opt(2026, 8, 12).unwrap()).unwrap();
         assert_eq!(
             next.scheduled_date,
-            Some(NaiveDate::from_ymd_opt(2026, 8, 13).unwrap()),
+            Some(NaiveDate::from_ymd_opt(2026, 8, 10).unwrap()),
         );
     }
 
@@ -645,14 +717,14 @@ mod tests {
             ),
             NaiveDate::from_ymd_opt(2026, 8, 12).unwrap(),
         );
-        // Last done for the season of 2024; ticked off in August 2026, by which
-        // time April 2025 and April 2026 have both gone.
+        // Last done for the season of 2024; ticked off in August 2026, so April
+        // 2025 is long gone but April 2026 is the season still owed.
         t.scheduled_date = Some(NaiveDate::from_ymd_opt(2024, 4, 1).unwrap());
         let next =
             next_recurrence_instance(&t, NaiveDate::from_ymd_opt(2026, 8, 12).unwrap()).unwrap();
         assert_eq!(
             next.scheduled_date,
-            Some(NaiveDate::from_ymd_opt(2027, 4, 1).unwrap()),
+            Some(NaiveDate::from_ymd_opt(2026, 4, 1).unwrap()),
         );
     }
 
