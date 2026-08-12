@@ -1547,7 +1547,14 @@ fn new_task_to_body(new: &NewTask) -> TaskEntry {
         done_at: None,
         due_date: combine_date_time(new.deadline_date, new.deadline_time),
         start_date: combine_date_time(new.scheduled_date, new.scheduled_time),
-        end_date: combine_date_time(new.scheduled_date, new.scheduled_end_time),
+        // Keyed off the END, not the date: `combine_date_time` substitutes
+        // midnight for a missing time, so keying off the date shipped an
+        // `end_date` at 00:00 on every scheduled task without a block — an end
+        // nine hours before its start, in the user's own Vikunja, invisible
+        // from inside Aperio because the read guard rejects it again.
+        end_date: new
+            .scheduled_end_time
+            .and_then(|end| combine_date_time(new.scheduled_date, Some(end))),
         priority: aperio_priority_to_vikunja(new.priority),
         project_id: 0,
         bucket_id: 0,
@@ -1608,7 +1615,14 @@ fn task_to_body(task: &Task) -> TaskEntry {
         done_at: None,
         due_date: combine_date_time(task.deadline_date, task.deadline_time),
         start_date: combine_date_time(task.scheduled_date, task.scheduled_time),
-        end_date: combine_date_time(task.scheduled_date, task.scheduled_end_time),
+        // Keyed off the END, not the date: `combine_date_time` substitutes
+        // midnight for a missing time, so keying off the date shipped an
+        // `end_date` at 00:00 on every scheduled task without a block — an end
+        // nine hours before its start, in the user's own Vikunja, invisible
+        // from inside Aperio because the read guard rejects it again.
+        end_date: task
+            .scheduled_end_time
+            .and_then(|end| combine_date_time(task.scheduled_date, Some(end))),
         priority: aperio_priority_to_vikunja(task.priority),
         project_id: parse_id(&task.list_id, "task list id").unwrap_or(0),
         bucket_id: 0,

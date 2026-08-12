@@ -646,7 +646,8 @@ struct CreateTaskBody {
     deadline_date: Option<String>,
     /// The block's length in minutes. Todoist stores a length where the core
     /// stores an end; `duration_unit` has to travel with it or the amount is
-    /// meaningless. Omitted where there is no block, which clears it.
+    /// meaningless. Omitted on CREATE where there is no block — there is
+    /// nothing yet to clear.
     #[serde(skip_serializing_if = "Option::is_none")]
     duration: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -676,12 +677,12 @@ struct UpdateTaskBody {
     due_datetime: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     deadline_date: Option<String>,
-    /// The block's length in minutes. Todoist stores a length where the core
-    /// stores an end; `duration_unit` has to travel with it or the amount is
-    /// meaningless. Omitted where there is no block, which clears it.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// The block's length in minutes, ALWAYS sent — as `null` when there is no
+    /// block. Todoist reads an omitted field as "unchanged" (the same reason
+    /// `assignee_id` above is serialised rather than skipped), so skipping it
+    /// made a cleared block come straight back on the next refresh: the one
+    /// edit the user could not make stick.
     duration: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     duration_unit: Option<&'static str>,
 }
 

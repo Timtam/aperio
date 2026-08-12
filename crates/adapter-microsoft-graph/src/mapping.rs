@@ -1540,28 +1540,31 @@ fn task_status_to_graph(s: TaskStatus) -> &'static str {
     }
 }
 
-/// A task's day (and optional time) as the UTC instant Graph should store.
+/// A task's day (and optional time) as the value Graph should store.
 ///
-/// The day a user writes down is a LOCAL day, and `todoTask` has nowhere to say
-/// so: it keeps one instant per date slot, and every client renders that instant
-/// in its own zone. The instant that renders as the right day is therefore the
-/// one that IS local midnight — not midnight UTC, which the old code sent by
-/// labelling the user's wall clock "UTC" without converting it. A task Aperio
-/// created as "due 1 July" arrived in Microsoft's own clients as 1 July only
-/// for users at or east of Greenwich; further west it read as 30 June.
+/// The day is sent AS WRITTEN, labelled UTC — no zone conversion. That looks
+/// careless and is the considered answer: a `todoTask` date slot is a whole
+/// DAY, and running a day through a zone is how days move. The adapter's twin
+/// for the same problem does the same thing (`split_ews_date`/`combine_date_time`
+/// in the EWS task mapping), and reading applies the identical rule in reverse,
+/// so Aperio's own round trip is exact wherever the user is.
 ///
-/// Reading applies the same rule in reverse (`task_local_date_time`), so a task
-/// created in the To Do app — midnight in ITS author's zone — lands on the day
-/// it was written down, instead of the day before it.
+/// UNRESOLVED, and it needs a live tenant rather than a guess: what Microsoft's
+/// own clients store when a user in a non-UTC zone sets a due date. If they
+/// write midnight UTC, this is right. If they write midnight in the author's
+/// zone (which Graph would then hand back converted), such a task reads a day
+/// early here. A conversion through the reader's LOCAL zone was tried and
+/// reverted: it fixes the second case and breaks the first, makes the stored
+/// day depend on which device opens it, and invents a time of day on a list
+/// that declares it cannot hold one.
 fn build_task_datetime(
     date: Option<NaiveDate>,
     time: Option<chrono::NaiveTime>,
 ) -> Option<GraphDateTimeWrite> {
     let date = date?;
     let t = time.unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap());
-    let instant = local_instant(date.and_time(t));
     Some(GraphDateTimeWrite {
-        date_time: instant.naive_utc().format("%Y-%m-%dT%H:%M:%S").to_string(),
+        date_time: date.and_time(t).format("%Y-%m-%dT%H:%M:%S").to_string(),
         time_zone: "UTC".into(),
     })
 }
@@ -1580,30 +1583,21 @@ fn build_start_datetime(
     build_task_datetime(date, time)
 }
 
-/// A local wall clock as a UTC instant. A time a DST jump skips does not exist;
-/// the first valid instant after it is the honest stand-in.
-fn local_instant(naive: chrono::NaiveDateTime) -> DateTime<Utc> {
-    chrono::Local
-        .from_local_datetime(&naive)
-        .earliest()
-        .map(|l| l.with_timezone(&Utc))
-        .unwrap_or_else(|| Utc.from_utc_datetime(&naive))
-}
-
-/// The stored instant as the local day (and time) cal-core holds.
+/// The stored value as the day (and time) cal-core holds, read as written.
 ///
-/// Local midnight reads as "no time of day": `todoTask` normalises the time
-/// component away, so every task would otherwise come back carrying an explicit
-/// 00:00 and show up in the calendar's hour grid at midnight. The convention is
-/// the same one the CalDAV and EWS task mappings use, and it costs the same
-/// thing — a task deliberately set to midnight reads back as untimed.
+/// Midnight reads as "no time of day": `todoTask` normalises the time component
+/// away, so every task would otherwise come back carrying an explicit 00:00 and
+/// sit in the calendar's hour grid at midnight — a time on a list that declares
+/// (`task_time_of_day: false`) it cannot hold one. The convention is the same
+/// one the CalDAV and EWS task mappings use, and it costs the same thing: a
+/// task deliberately set to midnight reads back as untimed.
 fn task_local_date_time(instant: DateTime<Utc>) -> (Option<NaiveDate>, Option<chrono::NaiveTime>) {
-    let local = instant.with_timezone(&chrono::Local).naive_local();
+    let naive = instant.naive_utc();
     let midnight = chrono::NaiveTime::from_hms_opt(0, 0, 0).expect("00:00 is a valid time");
-    if local.time() == midnight {
-        (Some(local.date()), None)
+    if naive.time() == midnight {
+        (Some(naive.date()), None)
     } else {
-        (Some(local.date()), Some(local.time()))
+        (Some(naive.date()), Some(naive.time()))
     }
 }
 
@@ -2603,15 +2597,10 @@ mod tests {
     fn a_midnight_read_carries_no_time_of_day() {
         // To Do normalises the time component away, so every task would
         // otherwise return an explicit 00:00 and land in the calendar's hour
-        // grid at midnight.
-        let local_midnight = local_instant(
-            NaiveDate::from_ymd_opt(2026, 7, 1)
-                .unwrap()
-                .and_hms_opt(0, 0, 0)
-                .unwrap(),
-        );
+        // grid at midnight — on a list that declares it cannot hold a time.
+        let midnight = Utc.with_ymd_and_hms(2026, 7, 1, 0, 0, 0).single().unwrap();
         assert_eq!(
-            task_local_date_time(local_midnight),
+            task_local_date_time(midnight),
             (Some(NaiveDate::from_ymd_opt(2026, 7, 1).unwrap()), None),
         );
     }

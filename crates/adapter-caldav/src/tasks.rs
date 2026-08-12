@@ -678,9 +678,18 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>, raw: Option<&str>) -
         _ => TaskPriority::Medium,
     };
 
-    let (scheduled_date, scheduled_time) = local_date_time(read_task_dt(todo, "DTSTART"));
+    let dtstart = read_task_dt(todo, "DTSTART");
+    // The RAW start, before the midnight sentinel: a span carrier beside it is
+    // proof the 00:00 was chosen rather than a server's way of writing a plain
+    // day, and a night-shift block deserves to survive that.
+    let raw_start = raw_local_time(dtstart.clone());
+    let (scheduled_date, scheduled_time) = local_date_time(dtstart);
     let (deadline_date, deadline_time) = local_date_time(read_task_dt(todo, "DUE"));
-    let scheduled_end_time = read_planned_end(todo, scheduled_time);
+    let scheduled_end_time = read_planned_end(todo, raw_start);
+    let scheduled_time = match (scheduled_time, scheduled_end_time) {
+        (None, Some(_)) => raw_start,
+        (start, _) => start,
+    };
     let completed_at = todo.property_value("COMPLETED").and_then(parse_compact_utc);
     let created_at = todo
         .property_value("CREATED")
@@ -848,12 +857,14 @@ fn read_task_dt(todo: &Todo, prop: &str) -> Option<DatePerhapsTime> {
 /// A DATE value yields no time — that is iCalendar's all-day shape, and the
 /// absence of a time is how Aperio says the same thing.
 ///
-/// A time of exactly 00:00 also reads as "no time". That is the price of the
-/// value-type rule on the write side (see `apply_task_dates`): a task with a
-/// deadline time but no scheduled time has to emit midnight for DTSTART, and
-/// midnight is the one wall-clock value that cannot then be told apart from a
-/// deliberate choice. A task genuinely scheduled at midnight reads back as
-/// scheduled for the day, which is the smaller of the two losses.
+/// A time of exactly 00:00 reads as "no time". Aperio no longer WRITES a
+/// synthetic midnight (see `apply_task_dates`), but plenty of servers and
+/// clients still emit `DTSTART:…T000000` for what a user meant as a plain day,
+/// and taking that literally puts a chip at midnight in the hour grid and
+/// announces it there. The cost is that a task deliberately scheduled at
+/// midnight reads back as scheduled for the day — and a block starting at
+/// midnight keeps its span, because a DURATION beside it says the start was
+/// real.
 fn local_date_time(value: Option<DatePerhapsTime>) -> (Option<NaiveDate>, Option<NaiveTime>) {
     let Some(value) = value else {
         return (None, None);
@@ -896,7 +907,19 @@ fn local_date_time(value: Option<DatePerhapsTime>) -> (Option<NaiveDate>, Option
 fn read_planned_end(todo: &Todo, start: Option<NaiveTime>) -> Option<NaiveTime> {
     let start = start?;
     let end = match todo.property_value("DURATION").and_then(parse_iso_duration) {
-        Some(span) => start.overflowing_add_signed(span).0,
+        Some(span) => {
+            // chrono hands back the wrapped SECONDS, not a flag: non-zero
+            // means the span left the day.
+            let (end, wrapped_secs) = start.overflowing_add_signed(span);
+            // A span that runs past midnight is one this model cannot hold. The
+            // overflow flag is the only thing that says so: without it P1DT2H
+            // came back as a tidy-looking two-hour block, drawn and announced
+            // as if the user had planned one.
+            if wrapped_secs != 0 {
+                return None;
+            }
+            end
+        }
         None => {
             let raw = todo.property_value(X_SCHEDULED_END)?;
             NaiveTime::parse_from_str(raw, "%H%M%S").ok()?
@@ -906,8 +929,10 @@ fn read_planned_end(todo: &Todo, start: Option<NaiveTime>) -> Option<NaiveTime> 
 }
 
 /// An iCalendar DURATION as a chrono span. Only the shapes a task block can
-/// have are accepted — days, hours, minutes, seconds, no weeks and no negative
-/// sign, since a block that runs backwards is not one.
+/// have are accepted — hours, minutes, seconds, no weeks and no negative sign,
+/// since a block that runs backwards is not one. A whole-day component is
+/// parsed so the caller can see the span and reject it; a day is longer than
+/// any block this model holds.
 fn parse_iso_duration(raw: &str) -> Option<chrono::TimeDelta> {
     let rest = raw.strip_prefix('P')?;
     let (date_part, time_part) = match rest.split_once('T') {
@@ -958,11 +983,19 @@ const X_SCHEDULED_END: &str = "X-APERIO-SCHEDULED-END";
 /// the user chose, and it needs no VTIMEZONE — a TZID that no VTIMEZONE defines
 /// is the shape iCloud has already been seen to drop on the floor.
 ///
-/// The two properties are written with the SAME value type, because RFC 5545
-/// §3.8.2.3 requires it of DUE ("MUST be the same as the DTSTART property").
-/// A task with a deadline time but no scheduled time therefore emits midnight
-/// for DTSTART rather than a bare DATE next to a DATE-TIME. `local_date_time`
-/// reads midnight back as "no time", which closes the round trip.
+/// The two properties keep their OWN value types, which for a task that has a
+/// scheduled time and a whole-day deadline (or the reverse) deviates from RFC
+/// 5545 §3.8.2.3 — DUE "MUST be the same as the DTSTART property".
+///
+/// Matching them was tried and reverted, because the only value available for
+/// the property that has no time is midnight, and midnight means opposite
+/// things on the two ends. On DTSTART it reads as "from the start of the day",
+/// which is harmless. On DUE it reads as "due at 00:00", which every other
+/// client renders as due a whole day earlier than the user wrote — silently,
+/// and invisibly from inside Aperio, which closed its own loop through the
+/// midnight sentinel. A technical deviation that servers have tolerated since
+/// before this branch is the smaller harm than telling Thunderbird, Nextcloud
+/// and Apple Reminders that a deadline is a day sooner than it is.
 fn apply_task_dates(
     todo: &mut Todo,
     scheduled_date: Option<NaiveDate>,
@@ -971,16 +1004,12 @@ fn apply_task_dates(
     deadline_date: Option<NaiveDate>,
     deadline_time: Option<NaiveTime>,
 ) {
-    // Either property carrying a time forces both to DATE-TIME.
-    let timed = scheduled_time.is_some() || deadline_time.is_some();
+    // Each property says what it actually is: a DATE when the user gave no
+    // time, a floating DATE-TIME when they did.
     let value_for = |date: NaiveDate, time: Option<NaiveTime>| -> DatePerhapsTime {
-        if timed {
-            let at = time.unwrap_or_else(|| {
-                NaiveTime::from_hms_opt(0, 0, 0).expect("00:00 is a valid time")
-            });
-            DatePerhapsTime::DateTime(CalendarDateTime::Floating(date.and_time(at)))
-        } else {
-            DatePerhapsTime::Date(date)
+        match time {
+            Some(at) => DatePerhapsTime::DateTime(CalendarDateTime::Floating(date.and_time(at))),
+            None => DatePerhapsTime::Date(date),
         }
     };
     if let Some(date) = scheduled_date {
@@ -1003,6 +1032,27 @@ fn apply_task_dates(
                 todo.add_property(X_SCHEDULED_END, end.format("%H%M%S").to_string());
             }
         }
+    }
+}
+
+/// The local time of a DTSTART/DUE value, midnight included.
+///
+/// `local_date_time` folds 00:00 into "no time"; this is the same conversion
+/// without that step, for the one caller that can tell a deliberate midnight
+/// apart — a span carrier sitting beside it.
+fn raw_local_time(value: Option<DatePerhapsTime>) -> Option<NaiveTime> {
+    match value? {
+        DatePerhapsTime::Date(_) => None,
+        DatePerhapsTime::DateTime(CalendarDateTime::Utc(instant)) => {
+            Some(instant.with_timezone(&Local).naive_local().time())
+        }
+        DatePerhapsTime::DateTime(CalendarDateTime::WithTimezone { date_time, tzid }) => {
+            Some(match resolve_in_zone(date_time, &tzid) {
+                Some(instant) => instant.with_timezone(&Local).naive_local().time(),
+                None => date_time.time(),
+            })
+        }
+        DatePerhapsTime::DateTime(CalendarDateTime::Floating(naive)) => Some(naive.time()),
     }
 }
 
@@ -1799,6 +1849,65 @@ END:VCALENDAR</c:calendar-data>
         );
     }
 
+    #[tokio::test]
+    async fn a_block_that_starts_at_midnight_survives_the_sentinel() {
+        // 00:00 normally reads as "no time" — plenty of servers write a plain
+        // day that way. A DURATION beside it says this one was chosen, and a
+        // night-shift block should not be demoted to an undated task.
+        let body = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:response>
+    <d:href>/calendars/alice/tasks/night.ics</d:href>
+    <d:propstat><d:prop>
+      <d:getetag>"night-1"</d:getetag>
+      <c:calendar-data>BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//test//EN
+BEGIN:VTODO
+UID:night@aperio
+SUMMARY:Night shift
+DTSTART:20260812T000000
+DURATION:PT90M
+END:VTODO
+END:VCALENDAR</c:calendar-data>
+    </d:prop></d:propstat>
+  </d:response>
+</d:multistatus>"#;
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("REPORT", "/calendars/alice/tasks/")
+            .with_status(207)
+            .with_body(body)
+            .create_async()
+            .await;
+        let url = Url::parse(&format!("{}/calendars/alice/tasks/", server.url())).unwrap();
+        let tasks = get_tasks(&client(), &url, &creds(&server.url()))
+            .await
+            .unwrap();
+        assert_eq!(
+            tasks[0].scheduled_time,
+            Some(NaiveTime::from_hms_opt(0, 0, 0).unwrap()),
+        );
+        assert_eq!(
+            tasks[0].scheduled_end_time,
+            Some(NaiveTime::from_hms_opt(1, 30, 0).unwrap()),
+        );
+    }
+
+    #[test]
+    fn a_span_longer_than_the_day_is_no_span_at_all() {
+        // P1DT2H wrapped to a tidy-looking two-hour block, drawn and announced
+        // as if the user had planned one. chrono reports the wrapped seconds
+        // rather than a flag, which is why it was easy to drop.
+        let start = NaiveTime::from_hms_opt(9, 0, 0).unwrap();
+        let todo = {
+            let mut t = Todo::new();
+            t.add_property("DURATION", "P1DT2H");
+            t.done()
+        };
+        assert_eq!(read_planned_end(&todo, Some(start)), None);
+    }
+
     #[test]
     fn an_iso_duration_reads_back_as_the_hours_and_minutes_it_names() {
         assert_eq!(
@@ -1821,34 +1930,21 @@ END:VCALENDAR</c:calendar-data>
     }
 
     #[test]
-    fn build_vtodo_matches_the_value_types_of_dtstart_and_due() {
-        // RFC 5545 §3.8.2.3: DUE's value type MUST be the same as DTSTART's. A
-        // task planned for a day but due at a time would otherwise emit a bare
-        // DATE next to a DATE-TIME, which is malformed — and malformed is the
-        // shape iCloud answers by dropping the property.
+    fn a_whole_day_deadline_stays_a_whole_day_beside_a_timed_start() {
+        // RFC 5545 §3.8.2.3 asks for matching value types, and matching them
+        // here would mean emitting DUE at midnight — which every other client
+        // reads as due a whole day earlier than the user wrote. The deviation
+        // is deliberate; see `apply_task_dates`.
         let mut new = sample_new_task();
-        new.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 5, 21).unwrap());
-        new.scheduled_time = None;
-        new.deadline_date = Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap());
-        new.deadline_time = Some(NaiveTime::from_hms_opt(14, 30, 0).unwrap());
+        new.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 8, 12).unwrap());
+        new.scheduled_time = Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap());
+        new.deadline_date = Some(NaiveDate::from_ymd_opt(2026, 8, 20).unwrap());
+        new.deadline_time = None;
         let body = build_vtodo_body("uid-mixed", &new, None);
+        assert!(body.contains("DTSTART:20260812T090000"), "got:\n{body}");
         assert!(
-            body.contains("DTSTART:20260521T000000"),
-            "DTSTART must follow DUE into DATE-TIME, got:\n{body}",
-        );
-        assert!(
-            !body.contains("VALUE=DATE:"),
-            "neither property may stay a DATE while the other is a DATE-TIME, got:\n{body}",
-        );
-        // … and midnight reads back as "no time", so the round trip is closed.
-        assert_eq!(
-            local_date_time(Some(DatePerhapsTime::DateTime(CalendarDateTime::Floating(
-                NaiveDate::from_ymd_opt(2026, 5, 21)
-                    .unwrap()
-                    .and_hms_opt(0, 0, 0)
-                    .unwrap(),
-            )))),
-            (Some(NaiveDate::from_ymd_opt(2026, 5, 21).unwrap()), None),
+            body.contains("DUE;VALUE=DATE:20260820"),
+            "a whole-day deadline must not be demoted to 00:00, got:\n{body}",
         );
     }
 

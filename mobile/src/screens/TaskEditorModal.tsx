@@ -1442,6 +1442,10 @@ function DateTimeField({
                 accessibilityLabel={`${legend} – ${clearTimeLabel}`}
                 onPress={() => {
                   reparkOnAddTime.current = true;
+                  // The end goes with the start: keeping it would put it back
+                  // on the task the moment a new time is added, applied and
+                  // unannounced.
+                  onChangeEnd?.('');
                   onChangeTime('');
                   // Said out loud: the day stays, and that is the whole point
                   // of removing the time on its own.

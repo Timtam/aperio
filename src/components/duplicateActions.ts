@@ -35,6 +35,7 @@ export async function duplicateTask(task: Task): Promise<void> {
     effort: task.effort,
     scheduled_date: task.scheduled_date,
     scheduled_time: task.scheduled_time,
+    scheduled_end_time: task.scheduled_end_time ?? null,
     deadline_date: task.deadline_date,
     deadline_time: task.deadline_time,
     deadline_reminder_days: task.deadline_reminder_days,

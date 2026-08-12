@@ -1065,6 +1065,7 @@ export function TaskDialog({
       const {
         scheduled_date,
         scheduled_time,
+        scheduled_end_time,
         deadline_date,
         deadline_time,
       } = splitDeadline(form);
@@ -1138,6 +1139,7 @@ export function TaskDialog({
             effort: form.effort,
             scheduled_date: rootScheduledDate,
             scheduled_time,
+            scheduled_end_time,
             deadline_date,
             deadline_time,
             // Per-task reminder override only rides along with a real deadline;
@@ -1218,6 +1220,7 @@ export function TaskDialog({
             effort: form.effort,
             scheduled_date: rootScheduledDate,
             scheduled_time,
+            scheduled_end_time,
             deadline_date,
             deadline_time,
             // Per-task reminder override only rides along with a real deadline;
@@ -1677,14 +1680,25 @@ export function TaskDialog({
                   ref={scheduledTimeRef}
                   type="time"
                   value={form.scheduledTime}
-                  onChange={(e) => update('scheduledTime', e.target.value)}
+                  onChange={(e) => {
+                    // Emptying the field by hand has to clear the end too, or a
+                    // stale one waits in the form and reappears the moment a
+                    // new time is typed — applied, unannounced, never
+                    // re-entered.
+                    const value = e.target.value;
+                    setForm((prev) => ({
+                      ...prev,
+                      scheduledTime: value,
+                      scheduledEndTime: value === '' ? '' : prev.scheduledEndTime,
+                    }));
+                  }}
                   disabled={!form.scheduledDate}
                   aria-disabled={!form.scheduledDate || undefined}
                 />
               </label>
             )}
           </div>
-          {spanStorable && form.scheduledTime !== '' && (
+          {spanStorable && form.scheduledDate !== '' && form.scheduledTime !== '' && (
             <label className="form__field">
               <span className="form__label">
                 {t('dialogs.task.fields.scheduled.endTime')}

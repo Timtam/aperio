@@ -1212,11 +1212,21 @@ export function CalendarDayList({
         progress: subtaskProgressSuffix(tr, task.id, tasks),
         assignee: assigneeSuffix(tr, task.assignees),
       };
+      // A planned block reads as a span, the same phrasing the desktop chip
+      // uses and the same shape this file's own EVENT rows already announce.
+      // Without it a two-hour plan and a bare point sound identical, while the
+      // row is silently drawn ninety minutes tall.
+      const end = taskEndTimeOnDay(task, key);
       let label: string;
       if (time) {
         label = t('views.week.taskChipTimed', {
           ...common,
-          time: fmtTime(buildTimeDate(key, time)),
+          time: end
+            ? t('views.timeRange', {
+                start: fmtTime(buildTimeDate(key, time)),
+                end: fmtTime(buildTimeDate(key, end)),
+              })
+            : fmtTime(buildTimeDate(key, time)),
         });
       } else if (task.deadline_date) {
         // Any untimed task with a deadline announces "fällig bis …": a pure
@@ -1472,8 +1482,14 @@ export function CalendarDayList({
     // if timed here, else a "due"/"planned" marker for this day. (Task-level
     // describeDue would show the scheduled day on a deadline-day row.)
     const time = taskTimeOnDay(task, key);
+    const endTime = taskEndTimeOnDay(task, key);
     let meta = time
-      ? fmtTime(buildTimeDate(key, time))
+      ? endTime
+        ? t('views.timeRange', {
+            start: fmtTime(buildTimeDate(key, time)),
+            end: fmtTime(buildTimeDate(key, endTime)),
+          })
+        : fmtTime(buildTimeDate(key, time))
       : isDeadlineChip(task, key)
         ? t('views.tasks.dueDeadline', { date: fmtDateOnly(key) })
         : t('views.tasks.dueScheduled', { date: fmtDateOnly(key) });

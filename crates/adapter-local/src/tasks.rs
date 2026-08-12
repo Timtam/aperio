@@ -810,10 +810,6 @@ fn is_open_status(status: TaskStatus) -> bool {
     matches!(status, TaskStatus::Open | TaskStatus::InProgress)
 }
 
-/// Safety net for the idempotent spawner (DESIGN §9.12): should a sync race
-/// produce two open instances of the same `series_id`, keep only the
-/// canonical (oldest by `created_at`, then id) one in the view and drop the
-/// rest. Completed instances are history and never collapsed; untagged tasks
 /// The planned end, kept only where it is one.
 ///
 /// An end needs a start — a block with no beginning is not a block — and it has
@@ -821,13 +817,21 @@ fn is_open_status(status: TaskStatus) -> bool {
 /// the air, both are dropped at the door, so nothing downstream (the hour grid,
 /// the spoken "from … to …") has to defend itself against a shape the store
 /// should never have accepted.
-fn planned_end(start: Option<NaiveTime>, end: Option<NaiveTime>) -> Option<NaiveTime> {
+///
+/// `pub(crate)` because sync applies tasks through their own writer
+/// (`sync_apply`), and a guard that only one of two write paths runs is not a
+/// guard.
+pub(crate) fn planned_end(start: Option<NaiveTime>, end: Option<NaiveTime>) -> Option<NaiveTime> {
     match (start, end) {
         (Some(start), Some(end)) if end > start => Some(end),
         _ => None,
     }
 }
 
+/// Safety net for the idempotent spawner (DESIGN §9.12): should a sync race
+/// produce two open instances of the same `series_id`, keep only the
+/// canonical (oldest by `created_at`, then id) one in the view and drop the
+/// rest. Completed instances are history and never collapsed; untagged tasks
 /// pass through untouched.
 fn dedupe_open_series(tasks: Vec<Task>) -> Vec<Task> {
     use std::collections::HashMap;
@@ -1611,6 +1615,68 @@ mod tests {
         backwards.scheduled_end_time = Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap());
         let created = a.create_task(&list.id, backwards).await.unwrap();
         assert_eq!(created.scheduled_end_time, None);
+    }
+
+    #[tokio::test]
+    async fn sync_carries_the_block_and_can_take_it_away_again() {
+        // The apply path writes its own column list, so a field added to the
+        // table reaches it only if someone remembers. Forgetting cost more than
+        // the block going missing on the second device: with no assignment in
+        // the ON CONFLICT branch, a block CLEARED on one device would have
+        // lived on forever on the other, and the two would have disagreed with
+        // no way back.
+        let (a, list) = adapter_with_list();
+        let day = NaiveDate::from_ymd_opt(2026, 8, 12).unwrap();
+        let mut nt = mk_task("Deep work");
+        nt.scheduled_date = Some(day);
+        nt.scheduled_time = Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap());
+        let created = a.create_task(&list.id, nt).await.unwrap();
+
+        // Arrives from a peer WITH a block …
+        let mut incoming = created.clone();
+        incoming.scheduled_end_time = Some(NaiveTime::from_hms_opt(10, 30, 0).unwrap());
+        a.upsert_task_from_sync(&incoming).unwrap();
+        assert_eq!(
+            a.get_task_by_id(&created.id)
+                .unwrap()
+                .unwrap()
+                .scheduled_end_time,
+            Some(NaiveTime::from_hms_opt(10, 30, 0).unwrap()),
+        );
+
+        // … and again without one, which has to take it off.
+        let mut cleared = incoming.clone();
+        cleared.scheduled_end_time = None;
+        a.upsert_task_from_sync(&cleared).unwrap();
+        assert_eq!(
+            a.get_task_by_id(&created.id)
+                .unwrap()
+                .unwrap()
+                .scheduled_end_time,
+            None,
+            "a block cleared on one device must clear on the other",
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_applies_the_same_guard_the_editor_does() {
+        // A peer on an older build (or a hand-edited payload) can hand over an
+        // end with no start. Sync is a write path like any other.
+        let (a, list) = adapter_with_list();
+        let mut nt = mk_task("No start");
+        nt.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 8, 12).unwrap());
+        let created = a.create_task(&list.id, nt).await.unwrap();
+        let mut incoming = created.clone();
+        incoming.scheduled_time = None;
+        incoming.scheduled_end_time = Some(NaiveTime::from_hms_opt(10, 30, 0).unwrap());
+        a.upsert_task_from_sync(&incoming).unwrap();
+        assert_eq!(
+            a.get_task_by_id(&created.id)
+                .unwrap()
+                .unwrap()
+                .scheduled_end_time,
+            None,
+        );
     }
 
     #[tokio::test]

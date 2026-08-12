@@ -236,12 +236,13 @@ impl LocalAdapter {
         conn.execute(
             "INSERT INTO tasks (
                 id, list_id, parent_id, section_id, title, description, status, priority,
-                effort, scheduled_date, scheduled_time, deadline_date, deadline_time,
+                effort, scheduled_date, scheduled_time, scheduled_end_time,
+                deadline_date, deadline_time,
                 deadline_reminder_days,
                 recurrence, color_label_id, reminders, sound,
                 created_at, updated_at, completed_at, etag,
                 resurface_date, series_id
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                  list_id        = excluded.list_id,
                  parent_id      = excluded.parent_id,
@@ -253,6 +254,10 @@ impl LocalAdapter {
                  effort         = excluded.effort,
                  scheduled_date = excluded.scheduled_date,
                  scheduled_time = excluded.scheduled_time,
+                 -- Assigned, not just inserted: without this a block cleared on
+                 -- one device would live on forever on every other one, and the
+                 -- two would disagree with no way back.
+                 scheduled_end_time = excluded.scheduled_end_time,
                  deadline_date  = excluded.deadline_date,
                  deadline_time  = excluded.deadline_time,
                  deadline_reminder_days = excluded.deadline_reminder_days,
@@ -277,6 +282,11 @@ impl LocalAdapter {
                 task_effort_to_text(task.effort),
                 task.scheduled_date.as_ref().map(fmt_date),
                 task.scheduled_time.as_ref().map(fmt_time),
+                // Guarded here too: sync is a write path like any other, and a
+                // peer running an older build can hand us an end with no start.
+                crate::tasks::planned_end(task.scheduled_time, task.scheduled_end_time)
+                    .as_ref()
+                    .map(fmt_time),
                 task.deadline_date.as_ref().map(fmt_date),
                 task.deadline_time.as_ref().map(fmt_time),
                 task.deadline_reminder_days,

@@ -165,9 +165,35 @@ export async function scheduleTaskAtTime(
       ...task,
       scheduled_date: dayKey,
       scheduled_time: `${hh}:${mm}:00`,
+      // A planned BLOCK moves as a block, the way a dragged event keeps its
+      // duration. Spreading the old end unchanged made the same gesture do two
+      // different things: dropped later, the end fell behind the start and the
+      // store dropped it, so the length vanished with no announcement; dropped
+      // earlier, the block silently grew to a plan the user never made.
+      scheduled_end_time: shiftedEnd(task, minuteOfDay),
       updated_at: new Date().toISOString(),
     },
   });
+}
+
+/** The block's end after a drag to `minuteOfDay`, keeping its LENGTH. `null`
+ *  when the task has no block, or when keeping the length would run the end
+ *  past midnight — a block belongs to one day, and half of one is not what the
+ *  user dropped. */
+function shiftedEnd(task: Task, minuteOfDay: number): string | null {
+  const toMinutes = (hhmmss: string): number | null => {
+    const [h, m] = hhmmss.split(':').map(Number);
+    return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
+  };
+  if (!task.scheduled_time || !task.scheduled_end_time) return null;
+  const start = toMinutes(task.scheduled_time);
+  const end = toMinutes(task.scheduled_end_time);
+  if (start == null || end == null || end <= start) return null;
+  const shifted = minuteOfDay + (end - start);
+  if (shifted >= 24 * 60) return null;
+  const hh = String(Math.floor(shifted / 60)).padStart(2, '0');
+  const mm = String(shifted % 60).padStart(2, '0');
+  return `${hh}:${mm}:00`;
 }
 
 /**
