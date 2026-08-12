@@ -379,10 +379,10 @@ describe('mergeDayItems', () => {
   });
 });
 
-describe('filterTasksOnDay — a finished task sits on the day it was finished', () => {
+describe('filterTasksOnDay — where a finished task sits', () => {
   const shown = () => true;
 
-  it('moves a completed task off its deadline and onto its completion day', () => {
+  it('moves a completed task with NO plan day onto its completion day', () => {
     // Reported from Vikunja: a deadline on the 6th, never scheduled, ticked off
     // on the 5th. It showed as done in the task list and then appeared in the
     // calendar on the 6th — a tick on a day for work that was already over,
@@ -408,7 +408,7 @@ describe('filterTasksOnDay — a finished task sits on the day it was finished',
     const done: Task = {
       ...baseTask,
       id: 'spaet',
-      scheduled_date: '2026-08-01',
+      deadline_date: '2026-08-01',
       status: 'completed',
       completed_at: lateEvening.toISOString(),
     };
@@ -417,17 +417,60 @@ describe('filterTasksOnDay — a finished task sits on the day it was finished',
     ]);
   });
 
-  it('falls back to the planned day when no completion instant was recorded', () => {
+  it('falls back to the deadline day when no completion instant was recorded', () => {
     // An adapter that keeps no timestamp must not lose the task altogether.
     const done: Task = {
       ...baseTask,
       id: 'ohne-zeitstempel',
-      scheduled_date: '2026-08-04',
+      deadline_date: '2026-08-04',
       status: 'completed',
       completed_at: null,
     };
     expect(filterTasksOnDay([done], '2026-08-04', shown).map((t) => t.id)).toEqual([
       'ohne-zeitstempel',
     ]);
+  });
+
+  it('keeps a completed task on the day it was PLANNED for', () => {
+    // Reported: a daily "take pills", forgotten one day and ticked off the
+    // next. Filing it under the day of the tick emptied yesterday and put the
+    // finished dose next to the one still to take — a log that reads as a
+    // skipped day followed by a doubled one.
+    const yesterdaysDose: Task = {
+      ...baseTask,
+      id: 'tabletten-gestern',
+      scheduled_date: '2026-08-11',
+      status: 'completed',
+      completed_at: new Date(2026, 7, 12, 8, 30).toISOString(),
+    };
+    const todaysDose: Task = {
+      ...baseTask,
+      id: 'tabletten-heute',
+      scheduled_date: '2026-08-12',
+    };
+    const tasks = [yesterdaysDose, todaysDose];
+    expect(filterTasksOnDay(tasks, '2026-08-11', shown).map((t) => t.id)).toEqual([
+      'tabletten-gestern',
+    ]);
+    expect(filterTasksOnDay(tasks, '2026-08-12', shown).map((t) => t.id)).toEqual([
+      'tabletten-heute',
+    ]);
+  });
+
+  it('follows the editor when the date of a finished task is changed', () => {
+    // Moving a finished task used to change nothing on the calendar: the
+    // completion day had already decided where it sat.
+    const done: Task = {
+      ...baseTask,
+      id: 'verschoben',
+      scheduled_date: '2026-08-11',
+      status: 'completed',
+      completed_at: new Date(2026, 7, 12, 8, 30).toISOString(),
+    };
+    const moved: Task = { ...done, scheduled_date: '2026-08-09' };
+    expect(filterTasksOnDay([moved], '2026-08-09', shown).map((t) => t.id)).toEqual([
+      'verschoben',
+    ]);
+    expect(filterTasksOnDay([moved], '2026-08-11', shown)).toEqual([]);
   });
 });

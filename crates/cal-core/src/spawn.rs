@@ -109,6 +109,44 @@ fn next_fixed_date_after(from: NaiveDate, dates: &[MonthDay]) -> Option<NaiveDat
     best
 }
 
+/// How many missed turns a single catch-up may skip over. 10 000 daily steps is
+/// roughly 27 years — far past any real gap, and a hard stop for a rule whose
+/// steps are pathologically small.
+const MAX_CATCHUP_STEPS: u32 = 10_000;
+
+/// The first turn at or after `not_before`, walking the rule forward from
+/// `first`.
+///
+/// A daily task forgotten for five days used to hand back a task dated the day
+/// AFTER the one that was forgotten — itself already in the past. Completing
+/// that spawned the next missed day, and so on: one tick for every day gone by,
+/// each new task born overdue, and to the user an endless queue of the same
+/// chore on the same screen. A series carries at most one open turn (the
+/// idempotency gate in the spawner's callers), so the missed days are not turns
+/// waiting to be done — they are gone. The honest next turn is the first one
+/// that has not already passed: yesterday's dose ticked today still leaves
+/// TODAY'S dose to take, and nothing before it.
+///
+/// Returns `first` unchanged when it is not in the past, when the rule stops
+/// advancing, or when the walk runs past its step budget — never a date EARLIER
+/// than what the rule produced.
+fn catch_up(first: NaiveDate, rule: &TaskRecurrence, not_before: NaiveDate) -> NaiveDate {
+    let mut date = first;
+    let mut steps = 0;
+    while date < not_before && steps < MAX_CATCHUP_STEPS {
+        let Some(further) = next_trigger(date, rule) else {
+            break;
+        };
+        // A rule that fails to move forward would loop here forever.
+        if further <= date {
+            break;
+        }
+        date = further;
+        steps += 1;
+    }
+    date
+}
+
 /// Build the next `Schedule`-placement instance: a dated copy of the
 /// template advanced to the next trigger. `None` when there's no anchor to
 /// advance from or the rule has ended.
@@ -121,7 +159,10 @@ fn next_scheduled_instance(
         RecurrenceAnchor::FromDate => template.scheduled_date.or(template.deadline_date)?,
         RecurrenceAnchor::FromCompletion => completion_date,
     };
-    let next_date = next_trigger(base, rule)?;
+    // Skip the turns that were missed while the task sat unchecked. A
+    // `FromCompletion` rule already starts counting at the completion day, so
+    // its first trigger is never in the past and this is a no-op there.
+    let next_date = catch_up(next_trigger(base, rule)?, rule, completion_date);
     if recurrence_ended(rule, next_date) {
         return None;
     }
@@ -459,6 +500,130 @@ mod tests {
             Some(NaiveDate::from_ymd_opt(2026, 6, 22).unwrap()),
         );
         assert_eq!(next.scheduled_date, None);
+    }
+
+    /// The reported case: a daily task forgotten for days. Ticking it off must
+    /// leave TODAY'S turn — not the next of the days already gone, which would
+    /// arrive overdue and demand another tick, and another.
+    #[test]
+    fn missed_days_collapse_into_todays_turn() {
+        let mut t = template(
+            rule(
+                RecurrenceFrequency::Daily,
+                1,
+                RecurrenceAnchor::FromDate,
+                RecurrencePlacement::Schedule,
+                None,
+            ),
+            NaiveDate::from_ymd_opt(2026, 8, 12).unwrap(),
+        );
+        t.title = "Take pills".into();
+        t.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 8, 7).unwrap());
+        let next =
+            next_recurrence_instance(&t, NaiveDate::from_ymd_opt(2026, 8, 12).unwrap()).unwrap();
+        assert_eq!(
+            next.scheduled_date,
+            Some(NaiveDate::from_ymd_opt(2026, 8, 12).unwrap()),
+        );
+    }
+
+    /// One day forgotten: yesterday's dose ticked today still leaves today's.
+    /// The catch-up must not skip PAST the completion day.
+    #[test]
+    fn one_missed_day_still_leaves_the_completion_days_turn() {
+        let mut t = template(
+            rule(
+                RecurrenceFrequency::Daily,
+                1,
+                RecurrenceAnchor::FromDate,
+                RecurrencePlacement::Schedule,
+                None,
+            ),
+            NaiveDate::from_ymd_opt(2026, 8, 12).unwrap(),
+        );
+        t.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 8, 11).unwrap());
+        let next =
+            next_recurrence_instance(&t, NaiveDate::from_ymd_opt(2026, 8, 12).unwrap()).unwrap();
+        assert_eq!(
+            next.scheduled_date,
+            Some(NaiveDate::from_ymd_opt(2026, 8, 12).unwrap()),
+        );
+    }
+
+    /// Nothing was missed, so nothing is skipped — and a task finished EARLY
+    /// still advances from its own day, not from the day it happened to be done.
+    #[test]
+    fn on_time_and_early_completions_are_untouched() {
+        let mut t = template(
+            rule(
+                RecurrenceFrequency::Daily,
+                1,
+                RecurrenceAnchor::FromDate,
+                RecurrencePlacement::Schedule,
+                None,
+            ),
+            NaiveDate::from_ymd_opt(2026, 8, 12).unwrap(),
+        );
+        t.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 8, 12).unwrap());
+        let on_time =
+            next_recurrence_instance(&t, NaiveDate::from_ymd_opt(2026, 8, 12).unwrap()).unwrap();
+        assert_eq!(
+            on_time.scheduled_date,
+            Some(NaiveDate::from_ymd_opt(2026, 8, 13).unwrap()),
+        );
+
+        t.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 8, 20).unwrap());
+        let early =
+            next_recurrence_instance(&t, NaiveDate::from_ymd_opt(2026, 8, 12).unwrap()).unwrap();
+        assert_eq!(
+            early.scheduled_date,
+            Some(NaiveDate::from_ymd_opt(2026, 8, 21).unwrap()),
+        );
+    }
+
+    /// A weekly rule catches up a whole week at a time: the Monday that passed
+    /// while the task sat unchecked is gone, the next one is next Monday.
+    #[test]
+    fn weekly_catch_up_lands_on_the_next_future_turn() {
+        let mut t = template(
+            rule(
+                RecurrenceFrequency::Weekly,
+                1,
+                RecurrenceAnchor::FromDate,
+                RecurrencePlacement::Schedule,
+                None,
+            ),
+            NaiveDate::from_ymd_opt(2026, 8, 12).unwrap(),
+        );
+        // Monday 3 August, ticked off on Wednesday 12 August.
+        t.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 8, 3).unwrap());
+        let next =
+            next_recurrence_instance(&t, NaiveDate::from_ymd_opt(2026, 8, 12).unwrap()).unwrap();
+        assert_eq!(
+            next.scheduled_date,
+            Some(NaiveDate::from_ymd_opt(2026, 8, 17).unwrap()),
+        );
+    }
+
+    /// A rule whose end lies inside the skipped stretch spawns nothing at all —
+    /// the catch-up must not carry a series past its own last day.
+    #[test]
+    fn catch_up_stops_at_the_rules_end() {
+        let mut r = rule(
+            RecurrenceFrequency::Daily,
+            1,
+            RecurrenceAnchor::FromDate,
+            RecurrencePlacement::Schedule,
+            None,
+        );
+        r.end = Some(RecurrenceEnd::OnDate {
+            date: NaiveDate::from_ymd_opt(2026, 8, 9).unwrap(),
+        });
+        let mut t = template(r, NaiveDate::from_ymd_opt(2026, 8, 12).unwrap());
+        t.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 8, 7).unwrap());
+        assert!(
+            next_recurrence_instance(&t, NaiveDate::from_ymd_opt(2026, 8, 12).unwrap()).is_none()
+        );
     }
 
     #[test]

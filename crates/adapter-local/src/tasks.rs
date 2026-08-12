@@ -1183,11 +1183,9 @@ mod tests {
         });
         let original = a.create_task(&list.id, nt).await.unwrap();
 
-        // Complete the task.
-        let mut completed = original.clone();
-        completed.status = TaskStatus::Completed;
-        completed.completed_at = Some(Utc::now());
-        a.update_task(completed).await.unwrap();
+        // Complete it ON its own day, so what is measured is the STEP and not
+        // the catch-up that skips turns already gone.
+        complete_on(&a, &original, anchor).await;
 
         // Now there should be two tasks: the original (completed) plus
         // a new open one three days later.
@@ -1226,9 +1224,11 @@ mod tests {
         let original = a.create_task(&list.id, nt).await.unwrap();
 
         // Completing it returns BOTH the completed task and the spawned next.
+        // Completed on its own day: the step is what this pins down, not the
+        // catch-up that skips turns already gone.
         let mut completed = original.clone();
         completed.status = TaskStatus::Completed;
-        completed.completed_at = Some(Utc::now());
+        completed.completed_at = Some(anchor.and_hms_opt(9, 0, 0).unwrap().and_utc());
         let (updated, spawned) = a.update_task_with_spawn(completed).unwrap();
         assert_eq!(updated.status, TaskStatus::Completed);
         let next = spawned.expect("completing a recurring task surfaces the next instance");
@@ -1269,9 +1269,9 @@ mod tests {
         });
         let original = a.create_task(&list.id, nt).await.unwrap();
 
-        let mut completed = original.clone();
-        completed.status = TaskStatus::Completed;
-        a.update_task(completed).await.unwrap();
+        // Completed on the Tuesday itself, so the Thursday two days later is
+        // still ahead and the catch-up has nothing to skip.
+        complete_on(&a, &original, anchor).await;
 
         let tasks = a.get_tasks(&list.id).await.unwrap();
         let next = tasks.iter().find(|t| t.status == TaskStatus::Open).unwrap();
@@ -1504,6 +1504,46 @@ mod tests {
         assert_eq!(
             next.resurface_date,
             Some(NaiveDate::from_ymd_opt(2027, 4, 1).unwrap()),
+        );
+    }
+
+    /// A daily task left unchecked for days: ticking it off leaves exactly ONE
+    /// open turn, dated the day it was ticked. It used to leave one dated the
+    /// NEXT missed day — already overdue on arrival — so every tick produced
+    /// another task to tick, one per day gone by.
+    #[tokio::test]
+    async fn a_long_missed_daily_task_catches_up_in_one_tick() {
+        let (a, list) = adapter_with_list();
+        let mut nt = mk_task("Take pills");
+        nt.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 8, 7).unwrap());
+        nt.recurrence = Some(rec(
+            RecurrenceFrequency::Daily,
+            1,
+            RecurrenceAnchor::FromDate,
+            RecurrencePlacement::Schedule,
+            None,
+        ));
+        let task = a.create_task(&list.id, nt).await.unwrap();
+        complete_on(&a, &task, NaiveDate::from_ymd_opt(2026, 8, 12).unwrap()).await;
+
+        let tasks = a.get_tasks(&list.id).await.unwrap();
+        let open: Vec<_> = tasks
+            .iter()
+            .filter(|t| t.status == TaskStatus::Open)
+            .collect();
+        assert_eq!(open.len(), 1, "one open turn, not one per missed day");
+        assert_eq!(
+            open[0].scheduled_date,
+            Some(NaiveDate::from_ymd_opt(2026, 8, 12).unwrap()),
+        );
+        // The finished turn keeps ITS day — that is where the calendar shows it.
+        let done = tasks
+            .iter()
+            .find(|t| t.status == TaskStatus::Completed)
+            .unwrap();
+        assert_eq!(
+            done.scheduled_date,
+            Some(NaiveDate::from_ymd_opt(2026, 8, 7).unwrap()),
         );
     }
 

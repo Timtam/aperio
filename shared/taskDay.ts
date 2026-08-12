@@ -103,16 +103,24 @@ export function filterTasksOnDay(
     if (meFor && !isMineOrUnassigned(task.assignees, meFor(task.list_id))) {
       return false;
     }
-    // A FINISHED task belongs to the day it was finished, not to the day it was
-    // once due. Anything else makes the calendar disagree with what happened: a
-    // task due Thursday and done on Wednesday left Wednesday looking empty and
-    // put a tick on Thursday for work that was already over — and read, on the
-    // day itself, as something still to do.
+    // A finished task with NO day of its own belongs to the day it was
+    // finished. That is the Vikunja case this rule was written for: a deadline
+    // on the 6th, never scheduled, ticked off on the 5th — the 5th looked like
+    // nothing had happened and the 6th carried a tick for work already over.
+    //
+    // A task the user PLANNED onto a day keeps that day, and that half is not
+    // symmetric with the other. `scheduled_date` is the answer to "which day is
+    // this task's", and it stays the answer after the tick: yesterday's dose of
+    // a daily task, ticked this morning, belongs to yesterday — moving it here
+    // empties yesterday, puts two doses on today next to the one still to take,
+    // and makes a medication log read as if a day had been skipped and another
+    // doubled. It also silently overruled the editor: changing the date of a
+    // finished task moved nothing, because this line had already decided.
     //
     // Falls through when the completion instant is missing (an adapter that
     // does not record one), because the planned day is a worse answer than the
     // right one but a much better answer than none.
-    if (task.status === 'completed') {
+    if (task.status === 'completed' && !task.scheduled_date) {
       const finished = completionDayKey(task);
       if (finished != null) return finished === dayIsoKey;
     }

@@ -195,6 +195,13 @@ holds the final deadline and stays out of your way until the work is finished.
 Like events, tasks can recur (daily, weekly, monthly, yearly). When you
 check off a recurring task, Aperio automatically creates the next due date.
 
+> **When you have missed days:** the next turn is the next one that has **not
+> already passed** — not the next of the days you missed. A daily task left for
+> a week is back in step after **one** tick: yesterday's dose checked off this
+> morning leaves today's, and only today's. The task you ticked stays on **the
+> day it was planned for**, so each day in the calendar keeps its own turn
+> instead of everything piling onto the day of the tick.
+
 > **In the calendar:** A recurring task with a **scheduled day** now shows on
 > **every** planned day in the day / week / month views — like a recurring
 > event — not just its next turn. Only the **current** instance is interactive;

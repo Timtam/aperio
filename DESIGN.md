@@ -1347,6 +1347,13 @@ Bei `open→completed` einer Instanz mit Wiederholung wird die nächste Instanz 
   - `FromCompletion`: Abschlussdatum + Intervall (sofort, wenn Intervall 0/leer)
   - `fixed_dates`: nächstes der Daten nach dem Abschluss
 - Die Instanz erbt die `series_id` der Vorlage.
+- **Aufholen statt nachholen.** Liegt der berechnete nächste Termin bereits in der
+  Vergangenheit (die Aufgabe blieb Tage liegen), rückt der Spawner weiter, bis er den
+  ersten Termin **am oder nach dem Abschlusstag** erreicht. Eine Serie trägt höchstens eine
+  offene Instanz (Idempotenz unten), die versäumten Durchgänge sind also keine wartende
+  Arbeit, sondern vorbei: sonst erzeugt jeder Haken den nächsten versäumten Tag – wieder
+  überfällig – und der Nutzer hakt einmal pro verstrichenem Tag ab. `FromCompletion` zählt
+  ohnehin ab dem Abschluss und ist davon nicht berührt.
 - **Läuft auch für externe Listen.** Bisher spawnt bei externen Aufgaben der Provider (über die RRULE); Bedarfs-/Backlog-Wiederholungen kennt kein Provider → **Aperio spawnt selbst**, für alle Listen.
 
 ##### Idempotenz bei geteilten Listen
