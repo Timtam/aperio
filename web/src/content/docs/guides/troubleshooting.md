@@ -61,6 +61,25 @@ itself — shows straight away, and a manual refresh always reports its
 result at once. The warning clears by itself as soon as an update
 succeeds again.
 
+## A task's time shifted, once
+
+Tasks with a **time of day** on a **CalDAV** account (iCloud Reminders,
+Nextcloud, Radicale, Tasks.org) used to be stored by Aperio as a UTC time, even
+though the time is a local wall clock. Aperio never noticed, because it made the
+same mistake in reverse when reading — but in every other program the task sat
+at the wrong hour, off by your time-zone offset.
+
+From this version the time is written as what it is. Tasks that **Aperio itself**
+created with a time therefore shift **once**, by exactly that offset — a 09:00
+task reads as 11:00 in central Europe. Correct it once and it stays put. Tasks
+created in another program were wrong before and are right now.
+
+Two more things are fixed with it: a task whose time carries a **time zone** (how
+Thunderbird, Tasks.org and Nextcloud write it) did not merely lose its time here,
+it lost its **whole day** and sat undated in the backlog. And a task from
+**Microsoft To Do**, created by someone in their own time zone, could show up a
+day early.
+
 ## Reporting a bug
 
 1. In Settings → Logs, set the level to **Debug**.

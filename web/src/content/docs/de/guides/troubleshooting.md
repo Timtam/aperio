@@ -67,6 +67,27 @@ Anmeldeproblem, das sich nie von selbst behebt, erscheint sofort, und eine
 manuelle Aktualisierung meldet ihr Ergebnis immer unmittelbar. Die Warnung
 verschwindet von selbst, sobald eine Aktualisierung wieder gelingt.
 
+## Eine Aufgabenzeit hat sich einmalig verschoben
+
+Aufgaben mit einer **Uhrzeit** auf einem **CalDAV**-Konto (iCloud Erinnerungen,
+Nextcloud, Radicale, Tasks.org) hat Aperio früher als UTC-Zeit abgelegt, obwohl
+die Uhrzeit eine lokale Wanduhrzeit ist. Für Aperio selbst fiel das nicht auf,
+weil beim Lesen derselbe Fehler rückwärts gemacht wurde — in jedem anderen
+Programm war die Aufgabe aber um deinen Zeitzonen-Abstand verschoben.
+
+Seit dieser Version wird die Uhrzeit als das geschrieben, was sie ist. Aufgaben,
+die **Aperio selbst** früher mit Uhrzeit angelegt hat, verschieben sich dadurch
+**einmalig** um genau diesen Abstand — eine 09:00-Aufgabe steht in
+Mitteleuropa danach auf 11:00. Korrigiere sie einmal, danach bleibt sie stehen.
+Aufgaben, die in einem anderen Programm angelegt wurden, waren bisher falsch und
+sind jetzt richtig.
+
+Zwei weitere Dinge sind damit behoben: eine Aufgabe, deren Uhrzeit eine
+**Zeitzone** mitbringt (so schreiben es Thunderbird, Tasks.org und Nextcloud),
+verlor bei uns nicht nur die Uhrzeit, sondern den **ganzen Tag** und lag ohne
+Datum im Backlog. Und eine Aufgabe aus **Microsoft To Do**, die jemand in seiner
+eigenen Zeitzone angelegt hat, konnte bei uns einen Tag zu früh erscheinen.
+
 ## Einen Fehler melden
 
 1. Stelle in Einstellungen → Protokolle die Stufe auf **Debug**.
