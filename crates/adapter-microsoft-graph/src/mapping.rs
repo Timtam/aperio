@@ -1277,14 +1277,14 @@ pub fn map_task(entry: TodoTaskEntry, list_id: &str) -> GraphResult<Task> {
         .as_ref()
         .map(|d| d.to_utc())
         .transpose()?
-        .map(|dt| (Some(dt.date_naive()), Some(dt.time())))
+        .map(task_local_date_time)
         .unwrap_or((None, None));
     let (scheduled_date, scheduled_time) = entry
         .start_date_time
         .as_ref()
         .map(|d| d.to_utc())
         .transpose()?
-        .map(|dt| (Some(dt.date_naive()), Some(dt.time())))
+        .map(task_local_date_time)
         .unwrap_or((None, None));
 
     let reminders = if entry.is_reminder_on {
@@ -1538,30 +1538,71 @@ fn task_status_to_graph(s: TaskStatus) -> &'static str {
     }
 }
 
-fn build_due_datetime(
+/// A task's day (and optional time) as the UTC instant Graph should store.
+///
+/// The day a user writes down is a LOCAL day, and `todoTask` has nowhere to say
+/// so: it keeps one instant per date slot, and every client renders that instant
+/// in its own zone. The instant that renders as the right day is therefore the
+/// one that IS local midnight — not midnight UTC, which the old code sent by
+/// labelling the user's wall clock "UTC" without converting it. A task Aperio
+/// created as "due 1 July" arrived in Microsoft's own clients as 1 July only
+/// for users at or east of Greenwich; further west it read as 30 June.
+///
+/// Reading applies the same rule in reverse (`task_local_date_time`), so a task
+/// created in the To Do app — midnight in ITS author's zone — lands on the day
+/// it was written down, instead of the day before it.
+fn build_task_datetime(
     date: Option<NaiveDate>,
     time: Option<chrono::NaiveTime>,
 ) -> Option<GraphDateTimeWrite> {
     let date = date?;
     let t = time.unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap());
-    let naive = date.and_time(t);
+    let instant = local_instant(date.and_time(t));
     Some(GraphDateTimeWrite {
-        date_time: naive.format("%Y-%m-%dT%H:%M:%S").to_string(),
+        date_time: instant.naive_utc().format("%Y-%m-%dT%H:%M:%S").to_string(),
         time_zone: "UTC".into(),
     })
+}
+
+fn build_due_datetime(
+    date: Option<NaiveDate>,
+    time: Option<chrono::NaiveTime>,
+) -> Option<GraphDateTimeWrite> {
+    build_task_datetime(date, time)
 }
 
 fn build_start_datetime(
     date: Option<NaiveDate>,
     time: Option<chrono::NaiveTime>,
 ) -> Option<GraphDateTimeWrite> {
-    let date = date?;
-    let t = time.unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap());
-    let naive = date.and_time(t);
-    Some(GraphDateTimeWrite {
-        date_time: naive.format("%Y-%m-%dT%H:%M:%S").to_string(),
-        time_zone: "UTC".into(),
-    })
+    build_task_datetime(date, time)
+}
+
+/// A local wall clock as a UTC instant. A time a DST jump skips does not exist;
+/// the first valid instant after it is the honest stand-in.
+fn local_instant(naive: chrono::NaiveDateTime) -> DateTime<Utc> {
+    chrono::Local
+        .from_local_datetime(&naive)
+        .earliest()
+        .map(|l| l.with_timezone(&Utc))
+        .unwrap_or_else(|| Utc.from_utc_datetime(&naive))
+}
+
+/// The stored instant as the local day (and time) cal-core holds.
+///
+/// Local midnight reads as "no time of day": `todoTask` normalises the time
+/// component away, so every task would otherwise come back carrying an explicit
+/// 00:00 and show up in the calendar's hour grid at midnight. The convention is
+/// the same one the CalDAV and EWS task mappings use, and it costs the same
+/// thing — a task deliberately set to midnight reads back as untimed.
+fn task_local_date_time(instant: DateTime<Utc>) -> (Option<NaiveDate>, Option<chrono::NaiveTime>) {
+    let local = instant.with_timezone(&chrono::Local).naive_local();
+    let midnight = chrono::NaiveTime::from_hms_opt(0, 0, 0).expect("00:00 is a valid time");
+    if local.time() == midnight {
+        (Some(local.date()), None)
+    } else {
+        (Some(local.date()), Some(local.time()))
+    }
 }
 
 fn first_absolute_reminder_at(reminders: &[Reminder]) -> Option<DateTime<Utc>> {
@@ -2511,11 +2552,63 @@ mod tests {
         };
         let body = task_to_body(&task).unwrap();
         let json = serde_json::to_value(&body).unwrap();
-        assert_eq!(json["dueDateTime"]["dateTime"], "2026-07-01T10:00:00");
+        // The wire value is a UTC instant, so its literal text depends on the
+        // machine's offset. What must hold everywhere is the round trip: read
+        // it back as a local wall clock and get the hour the user chose.
+        let sent = json["dueDateTime"]["dateTime"].as_str().unwrap();
+        assert_eq!(json["dueDateTime"]["timeZone"], "UTC");
+        let instant = chrono::NaiveDateTime::parse_from_str(sent, "%Y-%m-%dT%H:%M:%S")
+            .map(|n| Utc.from_utc_datetime(&n))
+            .unwrap();
+        assert_eq!(
+            task_local_date_time(instant),
+            (
+                Some(NaiveDate::from_ymd_opt(2026, 7, 1).unwrap()),
+                Some(chrono::NaiveTime::from_hms_opt(10, 0, 0).unwrap()),
+            ),
+        );
         assert_eq!(json["recurrence"]["pattern"]["type"], "weekly");
         assert_eq!(json["recurrence"]["pattern"]["daysOfWeek"][0], "monday");
         assert_eq!(json["recurrence"]["range"]["type"], "numbered");
         assert_eq!(json["recurrence"]["range"]["numberOfOccurrences"], 6);
+    }
+
+    #[test]
+    fn a_task_day_survives_the_trip_through_graph() {
+        // The reported shape: a day written down in one place, read back in
+        // another. `todoTask` stores one instant per date slot and every client
+        // renders it in its own zone, so the only instant that means "1 July"
+        // is the one that IS local midnight. Sending midnight UTC instead —
+        // which is what labelling the wall clock "UTC" amounted to — put every
+        // user west of Greenwich a day early on read.
+        let day = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
+        let sent = build_due_datetime(Some(day), None).unwrap();
+        assert_eq!(sent.time_zone, "UTC");
+        let instant = chrono::NaiveDateTime::parse_from_str(&sent.date_time, "%Y-%m-%dT%H:%M:%S")
+            .map(|n| Utc.from_utc_datetime(&n))
+            .unwrap();
+        assert_eq!(
+            task_local_date_time(instant),
+            (Some(day), None),
+            "the day must come back as the day, and without an invented time",
+        );
+    }
+
+    #[test]
+    fn a_midnight_read_carries_no_time_of_day() {
+        // To Do normalises the time component away, so every task would
+        // otherwise return an explicit 00:00 and land in the calendar's hour
+        // grid at midnight.
+        let local_midnight = local_instant(
+            NaiveDate::from_ymd_opt(2026, 7, 1)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap(),
+        );
+        assert_eq!(
+            task_local_date_time(local_midnight),
+            (Some(NaiveDate::from_ymd_opt(2026, 7, 1).unwrap()), None),
+        );
     }
 
     #[test]
