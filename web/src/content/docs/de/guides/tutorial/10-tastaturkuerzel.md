@@ -1,5 +1,5 @@
 ---
-title: "09 – Tastaturkürzel"
+title: "10 – Tastaturkürzel"
 ---
 
 Aperio ist vollständig mit der Tastatur bedienbar. In diesem Kapitel lernst

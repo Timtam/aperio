@@ -1,5 +1,5 @@
 ---
-title: "05 – Ansichten"
+title: "06 – Ansichten"
 ---
 
 Aperio zeigt deine Termine und Aufgaben in mehreren Ansichten. In diesem

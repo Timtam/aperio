@@ -1,5 +1,5 @@
 ---
-title: "05 – Views"
+title: "06 – Views"
 ---
 
 Aperio shows your events and tasks in several views. In this chapter you get

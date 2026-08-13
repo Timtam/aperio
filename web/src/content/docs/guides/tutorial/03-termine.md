@@ -7,7 +7,7 @@ In this chapter you create, edit and move events and set up recurrences.
 ## Creating an event
 
 1. Switch to a calendar view (e.g. **Week**, see
-   [Chapter 05](/guides/tutorial/05-ansichten/)).
+   [Chapter 06](/guides/tutorial/06-ansichten/)).
 2. Use the arrow keys to navigate to the day or time you want.
 3. Create an event: **Quick add event** (`Ctrl+N`) opens the quick dialog,
    **New event** (`Ctrl+Shift+N`) the full form — or via the context menu.
@@ -20,7 +20,7 @@ In the event dialog you can also set:
 - the **calendar** the event is stored in,
 - **location** and **description**,
 - a **color label** (with a color dot in the picker),
-- a **reminder** (see [Chapter 06](/guides/tutorial/06-benachrichtigungen/)),
+- a **reminder** (see [Chapter 07](/guides/tutorial/07-benachrichtigungen/)),
 - **attendees** (name and/or email address),
 - a **recurrence** (see below).
 

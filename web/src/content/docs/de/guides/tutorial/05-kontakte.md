@@ -1,15 +1,21 @@
 ---
-title: "Kontakte"
+title: "05 – Kontakte"
 ---
 
-Aperio führt neben deinen Kalendern und Aufgabenlisten auch ein Adressbuch.
-Es sind dieselben Konten: Ein iCloud- oder Nextcloud-Konto bringt seine
+In diesem Kapitel richtest du dein Adressbuch ein, lernst, wie eine
+Telefonnummer sagt, welches Telefon sie ist, und siehst, woher die Geburtstage
+kommen.
+
+Aperio führt Kontakte neben deinen Kalendern und Aufgabenlisten, aus denselben
+Konten, die du in [Kapitel 02](/de/guides/tutorial/02-konten-verbinden/)
+verbunden hast: Ein iCloud- oder Nextcloud-Konto bringt seine
 CardDAV-Adressbücher mit, ein Google- oder Microsoft-Konto seine Kontakte, ein
 Exchange-Konto deine eigenen plus das Firmenverzeichnis – und es gibt ein
 **lokales Adressbuch**, das gar kein Konto braucht.
 
 Aus den Kontakten schöpft die Teilnehmerauswahl, wenn du jemanden zu einem
-Termin einlädst, und aus ihnen entstehen die **Geburtstagskalender**.
+Termin einlädst ([Kapitel 03](/de/guides/tutorial/03-termine/)), und aus ihnen
+entstehen die **Geburtstagskalender**.
 
 ## Der Überblick
 
@@ -141,3 +147,9 @@ Anbieter selbst erhebt und wie lange er es aufbewahrt, regelt dessen eigene
 Datenschutzerklärung; die Einstellungsseite verlinkt die von Google und
 Microsoft, und für CardDAV-, iCloud- und Exchange-Server gilt die Erklärung des
 jeweiligen Servers.
+
+## Zusammenfassung
+
+Du kannst Kontakte über mehrere Adressbücher hinweg führen, jede Telefonnummer,
+E-Mail-Adresse und Webseite bezeichnen und Geburtstage im Kalender erscheinen
+lassen. Im nächsten Kapitel lernst du die Ansichten kennen.

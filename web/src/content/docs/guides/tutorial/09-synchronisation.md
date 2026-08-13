@@ -1,5 +1,5 @@
 ---
-title: "08 – Synchronization"
+title: "09 – Synchronization"
 ---
 
 Accounts such as Google or iCloud are synced directly with the respective

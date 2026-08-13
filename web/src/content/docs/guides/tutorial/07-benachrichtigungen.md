@@ -1,5 +1,5 @@
 ---
-title: "06 – Notifications"
+title: "07 – Notifications"
 ---
 
 In this chapter you set up reminders for events and tasks and learn how to

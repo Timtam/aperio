@@ -44,7 +44,7 @@ and, if you like, create local calendars.
 
 You don't need an account to get started. Local calendars and task lists
 live only on your device (and, if set up, are reconciled through your own
-[synchronization](/guides/tutorial/08-synchronisation/)):
+[synchronization](/guides/tutorial/09-synchronisation/)):
 
 1. At the bottom of the **sidebar**, click the matching add button:
    **+ New calendar**, **+ New task list** or **+ New address book**.

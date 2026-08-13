@@ -376,5 +376,5 @@ Schalte die Option aus, wenn Zuweisungen rein manuell bleiben sollen.
 ## Zusammenfassung
 
 Du kannst Aufgaben anlegen, abhaken, einplanen, wiederholen lassen und in
-geteilten Listen zuweisen. Im nächsten Kapitel lernst du die Ansichten
-kennen.
+geteilten Listen zuweisen. Im nächsten Kapitel richtest du dein Adressbuch
+ein.

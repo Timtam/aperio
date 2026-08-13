@@ -17,6 +17,9 @@ Du brauchst keine Vorkenntnisse.
   Outlook/Exchange, Vikunja, Todoist und mehr, plus lokale Kalender, die
   ohne Konto funktionieren.
 - **Termine und Aufgaben** anlegen, bearbeiten, verschieben, wiederholen.
+- **Kontakte** – Adressbücher aus denselben Konten, mit bezeichneten
+  Telefonnummern und E-Mail-Adressen, plus daraus abgeleitete
+  Geburtstagskalender.
 - **Verschiedene Ansichten** – Tag, Woche, Monat, Jahr, Agenda und eine
   eigene Aufgaben-Ansicht.
 - **Erinnerungen** mit Tönen und Snooze.
@@ -32,17 +35,17 @@ Das **Tutorial** baut aufeinander auf – am besten der Reihe nach:
 2. [Kalender und Aufgabenlisten verbinden](/de/guides/tutorial/02-konten-verbinden/)
 3. [Termine](/de/guides/tutorial/03-termine/)
 4. [Aufgaben](/de/guides/tutorial/04-aufgaben/)
-5. [Ansichten](/de/guides/tutorial/05-ansichten/)
-6. [Benachrichtigungen](/de/guides/tutorial/06-benachrichtigungen/)
-7. [Suche](/de/guides/tutorial/07-suche/)
-8. [Synchronisation](/de/guides/tutorial/08-synchronisation/)
-9. [Tastaturkürzel](/de/guides/tutorial/09-tastaturkuerzel/)
+5. [Kontakte](/de/guides/tutorial/05-kontakte/)
+6. [Ansichten](/de/guides/tutorial/06-ansichten/)
+7. [Benachrichtigungen](/de/guides/tutorial/07-benachrichtigungen/)
+8. [Suche](/de/guides/tutorial/08-suche/)
+9. [Synchronisation](/de/guides/tutorial/09-synchronisation/)
+10. [Tastaturkürzel](/de/guides/tutorial/10-tastaturkuerzel/)
 
-In der **Referenz** findest du [Kontakte](/de/guides/kontakte/) – Adressbücher,
-bezeichnete Telefonnummern und E-Mail-Adressen sowie die Geburtstagskalender –,
-die [vollständige Kürzel-Übersicht](/de/guides/tastaturkuerzel/) und eine eigene
-Seite zur [Barrierefreiheit](/de/guides/barrierefreiheit/) mit Tipps für NVDA,
-JAWS, VoiceOver und Narrator.
+In der **Referenz** findest du die
+[vollständige Kürzel-Übersicht](/de/guides/tastaturkuerzel/) und eine eigene Seite
+zur [Barrierefreiheit](/de/guides/barrierefreiheit/) mit Tipps für NVDA, JAWS,
+VoiceOver und Narrator.
 
 > **Screenreader-Hinweis:** In jedem Kapitel gibt es einen solchen Kasten.
 > Er beschreibt, wie sich Aperio mit einem Screenreader verhält und worauf

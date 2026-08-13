@@ -339,4 +339,4 @@ Turn the toggle off to keep assignments fully manual.
 ## Summary
 
 You can create, check off, schedule and repeat tasks, and assign them in
-shared lists. In the next chapter you'll get to know the views.
+shared lists. In the next chapter you'll set up your address book.

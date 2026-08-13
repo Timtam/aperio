@@ -37,9 +37,42 @@ function rehypeBaseLinks() {
   return (/** @type {any} */ tree) => walk(tree);
 }
 
+/**
+ * Chapters that moved when Contacts became chapter 05 (everything from the old
+ * 05 onwards shifted by one), plus the short-lived Reference page it replaced.
+ *
+ * These are not cosmetic: a tutorial chapter is exactly the kind of URL people
+ * bookmark and link to, and a static host answers a stale one with a bare 404.
+ * Astro emits a meta-refresh page per entry on a static build, which is what
+ * GitHub Pages can serve. Keep them — an old link staying alive costs one
+ * generated file each.
+ *
+ * Written base-relative and prefixed below: Astro bases the SOURCE of a
+ * redirect but NOT its destination, so an unprefixed target sends the reader
+ * from /aperio/guides/… to /guides/… — off the site and into a 404, which is
+ * exactly the failure these entries exist to prevent.
+ */
+const MOVED_PAGES = Object.fromEntries(
+  Object.entries({
+    '/guides/kontakte': '/guides/tutorial/05-kontakte',
+    '/de/guides/kontakte': '/de/guides/tutorial/05-kontakte',
+    '/guides/tutorial/05-ansichten': '/guides/tutorial/06-ansichten',
+    '/de/guides/tutorial/05-ansichten': '/de/guides/tutorial/06-ansichten',
+    '/guides/tutorial/06-benachrichtigungen': '/guides/tutorial/07-benachrichtigungen',
+    '/de/guides/tutorial/06-benachrichtigungen': '/de/guides/tutorial/07-benachrichtigungen',
+    '/guides/tutorial/07-suche': '/guides/tutorial/08-suche',
+    '/de/guides/tutorial/07-suche': '/de/guides/tutorial/08-suche',
+    '/guides/tutorial/08-synchronisation': '/guides/tutorial/09-synchronisation',
+    '/de/guides/tutorial/08-synchronisation': '/de/guides/tutorial/09-synchronisation',
+    '/guides/tutorial/09-tastaturkuerzel': '/guides/tutorial/10-tastaturkuerzel',
+    '/de/guides/tutorial/09-tastaturkuerzel': '/de/guides/tutorial/10-tastaturkuerzel',
+  }).map(([from, to]) => [from, `${BASE.replace(/\/$/, '')}${to}/`]),
+);
+
 export default defineConfig({
   site: SITE,
   base: BASE,
+  redirects: MOVED_PAGES,
   markdown: { rehypePlugins: [rehypeBaseLinks] },
   integrations: [
     starlight({
@@ -78,11 +111,12 @@ export default defineConfig({
                 { label: '02 – Connecting Calendars and Task Lists', translations: { de: '02 – Kalender und Aufgabenlisten verbinden' }, slug: 'guides/tutorial/02-konten-verbinden' },
                 { label: '03 – Events', translations: { de: '03 – Termine' }, slug: 'guides/tutorial/03-termine' },
                 { label: '04 – Tasks', translations: { de: '04 – Aufgaben' }, slug: 'guides/tutorial/04-aufgaben' },
-                { label: '05 – Views', translations: { de: '05 – Ansichten' }, slug: 'guides/tutorial/05-ansichten' },
-                { label: '06 – Notifications', translations: { de: '06 – Benachrichtigungen' }, slug: 'guides/tutorial/06-benachrichtigungen' },
-                { label: '07 – Search', translations: { de: '07 – Suche' }, slug: 'guides/tutorial/07-suche' },
-                { label: '08 – Synchronization', translations: { de: '08 – Synchronisation' }, slug: 'guides/tutorial/08-synchronisation' },
-                { label: '09 – Keyboard Shortcuts', translations: { de: '09 – Tastaturkürzel' }, slug: 'guides/tutorial/09-tastaturkuerzel' },
+                { label: '05 – Contacts', translations: { de: '05 – Kontakte' }, slug: 'guides/tutorial/05-kontakte' },
+                { label: '06 – Views', translations: { de: '06 – Ansichten' }, slug: 'guides/tutorial/06-ansichten' },
+                { label: '07 – Notifications', translations: { de: '07 – Benachrichtigungen' }, slug: 'guides/tutorial/07-benachrichtigungen' },
+                { label: '08 – Search', translations: { de: '08 – Suche' }, slug: 'guides/tutorial/08-suche' },
+                { label: '09 – Synchronization', translations: { de: '09 – Synchronisation' }, slug: 'guides/tutorial/09-synchronisation' },
+                { label: '10 – Keyboard Shortcuts', translations: { de: '10 – Tastaturkürzel' }, slug: 'guides/tutorial/10-tastaturkuerzel' },
               ],
             },
             {
@@ -90,7 +124,6 @@ export default defineConfig({
               translations: { de: 'Referenz' },
               items: [
                 { label: 'Mobile app', translations: { de: 'Mobile App' }, slug: 'guides/mobile' },
-                { label: 'Contacts', translations: { de: 'Kontakte' }, slug: 'guides/kontakte' },
                 { label: 'Keyboard Shortcuts', translations: { de: 'Tastaturkürzel' }, slug: 'guides/tastaturkuerzel' },
                 { label: 'Accessibility', translations: { de: 'Barrierefreiheit' }, slug: 'guides/barrierefreiheit' },
                 { label: 'Troubleshooting & Logs', translations: { de: 'Fehlersuche & Protokolle' }, slug: 'guides/troubleshooting' },

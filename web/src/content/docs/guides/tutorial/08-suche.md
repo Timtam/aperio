@@ -1,5 +1,5 @@
 ---
-title: "07 – Search"
+title: "08 – Search"
 ---
 
 In this chapter you quickly find events and tasks again – across every

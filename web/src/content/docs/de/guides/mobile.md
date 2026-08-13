@@ -100,7 +100,7 @@ Erinnerungen werden als **lokale Benachrichtigungen** zugestellt. Bei der ersten
 Nutzung fragt die App nach der **Benachrichtigungsberechtigung** – erteile sie,
 damit Erinnerungen (und das App-Symbol-Badge) erscheinen können. Erinnerungstöne,
 Vorlaufzeiten und Schlummern funktionieren wie unter
-[Benachrichtigungen](/de/guides/tutorial/06-benachrichtigungen/) beschrieben.
+[Benachrichtigungen](/de/guides/tutorial/07-benachrichtigungen/) beschrieben.
 
 ## Widget auf dem Startbildschirm (iOS)
 

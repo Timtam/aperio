@@ -1,15 +1,20 @@
 ---
-title: "Contacts"
+title: "05 – Contacts"
 ---
 
-Aperio keeps an address book beside your calendars and task lists. It is the
-same set of accounts: an iCloud or Nextcloud account brings its CardDAV
-address books, a Google or Microsoft account brings its contacts, an Exchange
-account brings yours plus the company directory — and there is a **local
-address book** that needs no account at all.
+In this chapter you set up your address book, learn how a phone number says
+which phone it is, and see where birthdays come from.
+
+Aperio keeps contacts beside your calendars and task lists, out of the same
+accounts you connected in
+[Chapter 02](/guides/tutorial/02-konten-verbinden/): an iCloud or Nextcloud
+account brings its CardDAV address books, a Google or Microsoft account brings
+its contacts, an Exchange account brings yours plus the company directory — and
+there is a **local address book** that needs no account at all.
 
 Contacts are what the attendee picker offers when you invite people to an
-event, and what the **birthday calendars** are built from.
+event ([Chapter 03](/guides/tutorial/03-termine/)), and what the **birthday
+calendars** are built from.
 
 ## Finding your way around
 
@@ -131,3 +136,9 @@ search and the attendee picker stay responsive. What a provider itself collects
 and how long it keeps it is governed by that provider's own privacy policy; the
 settings page links to Google's and Microsoft's, and for CardDAV, iCloud and
 Exchange servers the policy of that server applies.
+
+## Summary
+
+You can keep contacts across several address books, label every phone number,
+email address and website, and let birthdays appear in your calendar. In the
+next chapter you'll get to know the views.

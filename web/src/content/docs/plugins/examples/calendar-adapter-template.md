@@ -6,7 +6,7 @@ A realistic starting point for a **full** calendar adapter — every method
 present as a stub with comments on what to fill in. Split it like the
 bundled adapters: a **library crate** (`my-adapter`) with the trait impl
 and HTTP/mapping logic, and a thin **plugin crate** (`my-adapter-plugin`)
-with the SDK glue from [The Rust SDK](/plugins/examples/rust-sdk/).
+with the SDK glue from [The Rust SDK](/plugins/rust-sdk/).
 
 ## The library crate: trait impl
 
@@ -101,7 +101,7 @@ impl ContactsFeature for MyAdapter {
 
 ## The plugin crate: glue
 
-Follow [The Rust SDK](/plugins/examples/rust-sdk/): a `cal_dispatch_helpers!(MyAdapter)`,
+Follow [The Rust SDK](/plugins/rust-sdk/): a `cal_dispatch_helpers!(MyAdapter)`,
 one `ffi_*` wrapper per method you implemented, a `CalendarVtable` /
 `TasksVtable` / `ContactsVtable` filled with `Some(ffi_*)` (and
 `..Vtable::empty()`), the `AdapterVtable` pointing at the families you serve

@@ -12,7 +12,7 @@ Two worked examples, from smallest to a realistic starting point:
   scaffold for a real calendar adapter, with every method present as a stub
   and inline comments pointing at what to fill in.
 
-Both follow the structure from [The Rust SDK](/plugins/examples/rust-sdk/): a library crate
+Both follow the structure from [The Rust SDK](/plugins/rust-sdk/): a library crate
 with your trait impl, plus a `cdylib` plugin crate with the SDK macros and
 a `plugin.json`.
 

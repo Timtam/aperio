@@ -16,6 +16,8 @@ knowledge required.
   Outlook/Exchange, Vikunja, Todoist and more, plus local calendars that
   work without any account.
 - **Events and tasks** – create, edit, move and repeat them.
+- **Contacts** – address books from the same accounts, with labelled phone
+  numbers and email addresses, plus birthday calendars derived from them.
 - **Different views** – day, week, month, year, agenda and a dedicated task
   view.
 - **Reminders** with sounds and snooze.
@@ -31,17 +33,17 @@ The **Tutorial** builds on itself – it is best read in order:
 2. [Connecting Calendars and Task Lists](/guides/tutorial/02-konten-verbinden/)
 3. [Events](/guides/tutorial/03-termine/)
 4. [Tasks](/guides/tutorial/04-aufgaben/)
-5. [Views](/guides/tutorial/05-ansichten/)
-6. [Notifications](/guides/tutorial/06-benachrichtigungen/)
-7. [Search](/guides/tutorial/07-suche/)
-8. [Synchronization](/guides/tutorial/08-synchronisation/)
-9. [Keyboard Shortcuts](/guides/tutorial/09-tastaturkuerzel/)
+5. [Contacts](/guides/tutorial/05-kontakte/)
+6. [Views](/guides/tutorial/06-ansichten/)
+7. [Notifications](/guides/tutorial/07-benachrichtigungen/)
+8. [Search](/guides/tutorial/08-suche/)
+9. [Synchronization](/guides/tutorial/09-synchronisation/)
+10. [Keyboard Shortcuts](/guides/tutorial/10-tastaturkuerzel/)
 
-In the **Reference** section you will find [Contacts](/guides/kontakte/) —
-address books, labelled phone numbers and email addresses, and the birthday
-calendars — the [full shortcut overview](/guides/tastaturkuerzel/), and a
-dedicated page on [accessibility](/guides/barrierefreiheit/) with tips for
-NVDA, JAWS, VoiceOver and Narrator.
+In the **Reference** section you will find the
+[full shortcut overview](/guides/tastaturkuerzel/) and a dedicated page on
+[accessibility](/guides/barrierefreiheit/) with tips for NVDA, JAWS, VoiceOver and
+Narrator.
 
 > **Screen-reader note:** Every chapter contains a box like this one. It
 > describes how Aperio behaves with a screen reader and what to look out

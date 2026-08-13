@@ -1,5 +1,5 @@
 ---
-title: "09 – Keyboard Shortcuts"
+title: "10 – Keyboard Shortcuts"
 ---
 
 Aperio is fully operable by keyboard. In this chapter you learn the most

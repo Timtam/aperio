@@ -1,5 +1,5 @@
 ---
-title: "08 – Synchronisation"
+title: "09 – Synchronisation"
 ---
 
 Konten wie Google oder iCloud werden direkt mit dem jeweiligen Anbieter

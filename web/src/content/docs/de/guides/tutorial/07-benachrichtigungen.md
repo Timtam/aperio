@@ -1,5 +1,5 @@
 ---
-title: "06 – Benachrichtigungen"
+title: "07 – Benachrichtigungen"
 ---
 
 In diesem Kapitel richtest du Erinnerungen für Termine und Aufgaben ein und
