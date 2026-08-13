@@ -10,7 +10,7 @@
 // @aperio/shared; they hoist to @aperio/shared in a later consolidation.
 
 import CalFfi from '../../modules/cal-ffi';
-import type { ContainerColor } from '@aperio/shared';
+import type { ContainerColor, WireContactValue } from '@aperio/shared';
 
 /** An address book enriched with its owning account (the `ContactListRow`
  *  wire shape). `account_id === 'local'` marks the device-local book. */
@@ -46,10 +46,20 @@ export interface Contact {
   given_name: string | null;
   family_name: string | null;
   organization: string | null;
-  emails: string[];
-  phone_numbers: string[];
+  /** See `WireContactValue`: an object with a label, or a bare string for
+   *  anything stored before labels existed. Normalise with `toContactValues`
+   *  from `@aperio/shared` before rendering. */
+  emails: WireContactValue[];
+  phone_numbers: WireContactValue[];
+  /** Websites, same labelled shape. */
+  urls: WireContactValue[];
   /** ISO `YYYY-MM-DD`, or null. */
   birthday: string | null;
+  /** Wedding / partnership anniversary, ISO `YYYY-MM-DD` or null. Microsoft
+   *  Graph has no field for it, so it stays null on Outlook accounts. */
+  anniversary: string | null;
+  job_title: string | null;
+  department: string | null;
   notes: string | null;
   /** `null` ⇒ a person; an array (even empty) ⇒ a group / distribution list. */
   members: unknown[] | null;
@@ -66,9 +76,14 @@ export interface NewContact {
   given_name: string | null;
   family_name: string | null;
   organization: string | null;
-  emails: string[];
-  phone_numbers: string[];
+  /** See `Contact.emails`. Write with `fromContactValues`. */
+  emails: WireContactValue[];
+  phone_numbers: WireContactValue[];
+  urls: WireContactValue[];
   birthday: string | null;
+  anniversary: string | null;
+  job_title: string | null;
+  department: string | null;
   notes: string | null;
   addresses: ContactAddress[];
   members: unknown[] | null;

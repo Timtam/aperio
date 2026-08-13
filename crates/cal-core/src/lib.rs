@@ -33,8 +33,8 @@ pub use spawn::{advance, completion_record_for, next_recurrence_instance};
 pub use suggestion_decline::SuggestionDecline;
 pub use types::{
     AttendeeResponse, AttendeeStatus, Calendar, Contact, ContactAddress, ContactList, ContactPhoto,
-    DateRange, Event, EventRecurrence, FreeBusy, FreeBusySlot, GroupMember, MemberRight, MonthDay,
-    NewContact, NewEvent, NewTask, RecurrenceAnchor, RecurrenceEnd, RecurrenceFrequency,
-    RecurrencePlacement, Section, Task, TaskEffort, TaskList, TaskListShare, TaskPriority,
-    TaskRecurrence, TaskStatus, TaskUser, Weekday,
+    ContactValue, DateRange, Event, EventRecurrence, FreeBusy, FreeBusySlot, GroupMember,
+    MemberRight, MonthDay, NewContact, NewEvent, NewTask, RecurrenceAnchor, RecurrenceEnd,
+    RecurrenceFrequency, RecurrencePlacement, Section, Task, TaskEffort, TaskList, TaskListShare,
+    TaskPriority, TaskRecurrence, TaskStatus, TaskUser, Weekday,
 };

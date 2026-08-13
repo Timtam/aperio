@@ -142,7 +142,8 @@ impl ContactsFeature for LocalAdapter {
                             organization, emails, phone_numbers, birthday, notes,
                             etag, created_at, updated_at, members,
                             (photo_data IS NOT NULL) AS has_photo,
-                            addresses
+                            addresses, urls, anniversary,
+                            job_title, department
                      FROM contacts
                      WHERE list_id = ?
                      ORDER BY display_name COLLATE NOCASE",
@@ -182,7 +183,8 @@ impl ContactsFeature for LocalAdapter {
                         c.organization, c.emails, c.phone_numbers, c.birthday, c.notes,
                         c.etag, c.created_at, c.updated_at, c.members,
                         (c.photo_data IS NOT NULL) AS has_photo,
-                        c.addresses
+                        c.addresses, c.urls, c.anniversary,
+                        c.job_title, c.department
                  FROM contacts_fts f
                  JOIN contacts c ON c.id = f.id
                  WHERE contacts_fts MATCH ?
@@ -223,6 +225,7 @@ impl ContactsFeature for LocalAdapter {
         // Empty `Vec` ⇒ '[]' rather than NULL so the schema's
         // NOT NULL contract holds.
         let addresses_json = encode_json(&contact.addresses)?;
+        let urls_json = encode_json(&contact.urls)?;
         // Photo travels inline on create — Some ⇒ both columns
         // get populated, None ⇒ both stay NULL. Splitting it into
         // a follow-up `set_contact_photo` after a create would
@@ -242,8 +245,9 @@ impl ContactsFeature for LocalAdapter {
                     id, list_id, display_name, given_name, family_name,
                     organization, emails, phone_numbers, birthday, notes,
                     etag, created_at, updated_at, members,
-                    photo_data, photo_content_type, addresses
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)",
+                    photo_data, photo_content_type, addresses,
+                    urls, anniversary, job_title, department
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     id,
                     list_id,
@@ -261,11 +265,22 @@ impl ContactsFeature for LocalAdapter {
                     photo_data,
                     photo_content_type,
                     addresses_json,
+                    urls_json,
+                    contact
+                        .anniversary
+                        .as_ref()
+                        .map(|d| d.format("%Y-%m-%d").to_string()),
+                    contact.job_title.as_deref(),
+                    contact.department.as_deref(),
                 ],
             )
             .map_err(map_sql_err)?;
 
         Ok(Contact {
+            urls: contact.urls,
+            anniversary: contact.anniversary,
+            job_title: contact.job_title,
+            department: contact.department,
             id,
             list_id: list_id.to_string(),
             display_name: contact.display_name.trim().to_string(),
@@ -301,6 +316,7 @@ impl ContactsFeature for LocalAdapter {
             None => None,
         };
         let addresses_json = encode_json(&contact.addresses)?;
+        let urls_json = encode_json(&contact.urls)?;
 
         let changed = self
             .db()
@@ -311,7 +327,9 @@ impl ContactsFeature for LocalAdapter {
                     SET list_id = ?, display_name = ?, given_name = ?,
                         family_name = ?, organization = ?, emails = ?,
                         phone_numbers = ?, birthday = ?, notes = ?,
-                        members = ?, addresses = ?, updated_at = ?
+                        members = ?, addresses = ?, urls = ?,
+                        anniversary = ?, job_title = ?, department = ?,
+                        updated_at = ?
                   WHERE id = ?",
                 params![
                     contact.list_id,
@@ -325,6 +343,13 @@ impl ContactsFeature for LocalAdapter {
                     contact.notes.as_deref(),
                     members_json,
                     addresses_json,
+                    urls_json,
+                    contact
+                        .anniversary
+                        .as_ref()
+                        .map(|d| d.format("%Y-%m-%d").to_string()),
+                    contact.job_title.as_deref(),
+                    contact.department.as_deref(),
                     now_s,
                     contact.id,
                 ],
@@ -567,8 +592,11 @@ fn row_to_contact(row: &Row<'_>) -> rusqlite::Result<CoreResult<Contact>> {
         let etag = opt_text(row, 10)?;
         let created_at = parse_utc(&req_text(row, 11)?)?;
         let updated_at = parse_utc(&req_text(row, 12)?)?;
-        let emails: Vec<String> = decode_json(&emails_json)?;
-        let phone_numbers: Vec<String> = decode_json(&phones_json)?;
+        // Reads BOTH shapes: rows written before 0040 hold bare strings, rows
+        // written since hold `{value,label}`. That is `ContactValue`'s
+        // deserialiser doing its job, which is why 0040 rewrites nothing.
+        let emails: Vec<cal_core::ContactValue> = decode_json(&emails_json)?;
+        let phone_numbers: Vec<cal_core::ContactValue> = decode_json(&phones_json)?;
         // Members column (added in migration 0009) carries the
         // distribution-list payload. NULL ⇒ regular contact;
         // JSON array (possibly empty) ⇒ this is a group.
@@ -587,7 +615,21 @@ fn row_to_contact(row: &Row<'_>) -> rusqlite::Result<CoreResult<Contact>> {
         // empty list — no nullable handling required.
         let addresses_json = req_text(row, 15)?;
         let addresses: Vec<cal_core::ContactAddress> = decode_json(&addresses_json)?;
+        // The column carries a DEFAULT '[]', so a row written before 0040 reads
+        // as an empty list without a nullable branch — the same treatment
+        // `addresses` got in 0011.
+        let urls: Vec<cal_core::ContactValue> = decode_json(&req_text(row, 16)?)?;
+        let anniversary = match opt_text(row, 17)? {
+            Some(s) => Some(parse_date(&s)?),
+            None => None,
+        };
+        let job_title = opt_text(row, 18)?;
+        let department = opt_text(row, 19)?;
         Ok(Contact {
+            urls,
+            anniversary,
+            job_title,
+            department,
             id,
             list_id,
             display_name,
@@ -646,6 +688,10 @@ mod tests {
 
     fn sample_new_contact() -> NewContact {
         NewContact {
+            urls: Vec::new(),
+            anniversary: None,
+            job_title: None,
+            department: None,
             display_name: "Max Mustermann".into(),
             given_name: Some("Max".into()),
             family_name: Some("Mustermann".into()),
@@ -677,6 +723,91 @@ mod tests {
             content_type: "image/png".into(),
             data: PNG_1X1.to_vec(),
         }
+    }
+
+    #[tokio::test]
+    async fn the_local_store_keeps_every_labelled_field() {
+        // The local book is the one provider with no vocabulary of its own —
+        // it stores the label exactly as typed, including a word no external
+        // provider has a slot for, and returns every field the editor offers.
+        let adapter = fixture_adapter();
+        let mut new = sample_new_contact();
+        new.phone_numbers = vec![
+            cal_core::ContactValue {
+                value: "+49 170 1234567".into(),
+                label: Some("mobile".into()),
+            },
+            cal_core::ContactValue {
+                value: "+49 30 111".into(),
+                label: Some("Ferienhaus".into()),
+            },
+        ];
+        new.urls = vec![cal_core::ContactValue {
+            value: "https://beispiel.example".into(),
+            label: Some("work".into()),
+        }];
+        new.anniversary = NaiveDate::from_ymd_opt(2014, 6, 21);
+        new.job_title = Some("Werkstattleiter".into());
+        new.department = Some("Technik".into());
+
+        let created = adapter
+            .create_contact(LOCAL_DEFAULT_CONTACT_LIST_ID, new)
+            .await
+            .unwrap();
+        let read = adapter
+            .get_contacts(LOCAL_DEFAULT_CONTACT_LIST_ID)
+            .await
+            .unwrap()
+            .remove(0);
+        assert_eq!(read.id, created.id);
+        assert_eq!(read.phone_numbers[0].label.as_deref(), Some("mobile"));
+        assert_eq!(read.phone_numbers[1].label.as_deref(), Some("Ferienhaus"));
+        assert_eq!(read.urls[0].value, "https://beispiel.example");
+        assert_eq!(read.anniversary, NaiveDate::from_ymd_opt(2014, 6, 21));
+        assert_eq!(read.job_title.as_deref(), Some("Werkstattleiter"));
+        assert_eq!(read.department.as_deref(), Some("Technik"));
+
+        // And an update carries them through the second write path too.
+        let mut edited = read.clone();
+        edited.department = None;
+        edited.urls.clear();
+        adapter.update_contact(edited).await.unwrap();
+        let after = adapter
+            .get_contacts(LOCAL_DEFAULT_CONTACT_LIST_ID)
+            .await
+            .unwrap()
+            .remove(0);
+        assert!(after.department.is_none());
+        assert!(after.urls.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_contact_written_before_labels_existed_still_reads() {
+        // Rows already on disk hold `["max@example.com"]`, not objects. The
+        // custom Deserialize accepts both, so an upgrade must not blank an
+        // existing address book.
+        let adapter = fixture_adapter();
+        let created = adapter
+            .create_contact(LOCAL_DEFAULT_CONTACT_LIST_ID, sample_new_contact())
+            .await
+            .unwrap();
+        adapter
+            .db
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE contacts SET emails = '[\"alt@example.com\"]' WHERE id = ?",
+                [&created.id],
+            )
+            .unwrap();
+        let read = adapter
+            .get_contacts(LOCAL_DEFAULT_CONTACT_LIST_ID)
+            .await
+            .unwrap()
+            .remove(0);
+        assert_eq!(read.emails.len(), 1);
+        assert_eq!(read.emails[0].value, "alt@example.com");
+        assert!(read.emails[0].label.is_none());
     }
 
     #[tokio::test]
@@ -750,6 +881,10 @@ mod tests {
     async fn update_missing_id_yields_not_found() {
         let adapter = fixture_adapter();
         let ghost = Contact {
+            urls: Vec::new(),
+            anniversary: None,
+            job_title: None,
+            department: None,
             id: "does-not-exist".into(),
             list_id: LOCAL_DEFAULT_CONTACT_LIST_ID.into(),
             display_name: "Ghost".into(),
@@ -807,6 +942,10 @@ mod tests {
         // `family_name = Mustermann` on the second row too, which
         // would split the "muster" search across both contacts.
         let second = NewContact {
+            urls: Vec::new(),
+            anniversary: None,
+            job_title: None,
+            department: None,
             display_name: "Jane Doe".into(),
             given_name: Some("Jane".into()),
             family_name: Some("Doe".into()),

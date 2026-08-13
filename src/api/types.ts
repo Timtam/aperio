@@ -17,6 +17,7 @@ import type {
   Reminder,
   SoundConfig,
   Task,
+  WireContactValue,
 } from '@aperio/shared';
 
 export type * from '@aperio/shared';
@@ -180,10 +181,21 @@ export interface Contact {
   given_name: string | null;
   family_name: string | null;
   organization: string | null;
-  emails: string[];
-  phone_numbers: string[];
+  /** See `WireContactValue`: an object with a label, or a bare string for
+   *  anything stored before labels existed. Normalise with
+   *  `toContactValues` from `@aperio/shared` before rendering. */
+  emails: WireContactValue[];
+  phone_numbers: WireContactValue[];
+  /** Websites. Same labelled shape; CardDAV and Google carry several,
+   *  Exchange and Graph exactly one. */
+  urls: WireContactValue[];
   /** ISO date (YYYY-MM-DD) or null. */
   birthday: string | null;
+  /** Wedding / partnership anniversary as an ISO date, or null. Not every
+   *  provider has a field for it — Microsoft Graph notably does not. */
+  anniversary: string | null;
+  job_title: string | null;
+  department: string | null;
   notes: string | null;
   /** Distribution-list membership marker. `null` ⇒ regular
    *  person-contact (the default). A non-null array (possibly
@@ -237,9 +249,14 @@ export interface NewContact {
   given_name: string | null;
   family_name: string | null;
   organization: string | null;
-  emails: string[];
-  phone_numbers: string[];
+  /** See `Contact.emails`. Write with `fromContactValues`. */
+  emails: WireContactValue[];
+  phone_numbers: WireContactValue[];
+  urls: WireContactValue[];
   birthday: string | null;
+  anniversary: string | null;
+  job_title: string | null;
+  department: string | null;
   notes: string | null;
   /** See `Contact.addresses`. Empty array ⇒ no postal addresses. */
   addresses: ContactAddress[];

@@ -9,7 +9,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { formatAttendee } from '@aperio/shared';
+import { formatAttendee, primaryChannelValue } from '@aperio/shared';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import { searchContacts } from '../api/client';
@@ -333,7 +333,7 @@ export function AttendeePicker({
           >
             {suggestions.map((c, i) => {
               const focused = i === highlightedIndex;
-              const email = c.emails[0];
+              const email = primaryChannelValue(c.emails);
               return (
                 <li
                   key={c.id}

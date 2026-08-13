@@ -115,6 +115,10 @@ fn section(id: &str, order: u32) -> Section {
 
 fn contact(id: &str) -> Contact {
     Contact {
+        urls: Vec::new(),
+        anniversary: None,
+        job_title: None,
+        department: None,
         id: id.into(),
         list_id: LIST.into(),
         display_name: format!("Person {id}"),

@@ -20,6 +20,15 @@ import {
   setContactPhoto as apiSetContactPhoto,
   updateContact as apiUpdateContact,
 } from '../api/client';
+import {
+  CONTACT_LABELS,
+  fromContactValues,
+  knownLabel,
+  toContactValues,
+  type ContactValue,
+  type KnownContactLabel,
+} from '@aperio/shared';
+
 import type { Contact, ContactAddress, ContactPhoto } from '../api/types';
 import { getContactListDisplayName } from '../intl/contactList';
 import { useCalendarStore } from '../state/calendarStoreContext';
@@ -45,10 +54,13 @@ const ALLOWED_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/gif'];
 /**
  * Contact create / edit dialog (DESIGN.md §10).
  *
- * Phase 10a-3 scope: the core data-model fields. Emails and phone
- * numbers are multi-valued in the model but the dialog edits them
- * as comma-separated strings — a dedicated multi-row editor lands
- * with the attendees picker in 10c when that UX needs it.
+ * Emails, phone numbers and websites are multi-valued AND labelled:
+ * each one is its own row with a label picker, so a screen reader
+ * announces "mobile" before the digits instead of reading four
+ * numbers out of one comma-separated field with nothing to tell
+ * them apart. Providers that carry a free label (CardDAV, Google)
+ * keep whatever word the user types; the rest map it onto the
+ * nearest slot they have.
  *
  * Save dispatches `create_contact` (new) or `update_contact`
  * (edit); a `Delete` button in the footer drops the row outright
@@ -70,9 +82,16 @@ interface FormState {
   givenName: string;
   familyName: string;
   organization: string;
-  emails: string;
-  phoneNumbers: string;
+  jobTitle: string;
+  department: string;
+  /** Labelled channels, one row each. Kept structured (rather than
+   *  comma-separated as they were) because a label per value has
+   *  nowhere to live in a flat string. */
+  emails: ContactValue[];
+  phoneNumbers: ContactValue[];
+  urls: ContactValue[];
   birthday: string;
+  anniversary: string;
   notes: string;
   /** Toggles distribution-list mode. When true, the dialog hides
    *  person-only fields (given/family/birthday/phone) and surfaces
@@ -101,9 +120,13 @@ function emptyForm(): FormState {
     givenName: '',
     familyName: '',
     organization: '',
-    emails: '',
-    phoneNumbers: '',
+    jobTitle: '',
+    department: '',
+    emails: [],
+    phoneNumbers: [],
+    urls: [],
     birthday: '',
+    anniversary: '',
     notes: '',
     isGroup: false,
     membersText: '',
@@ -118,9 +141,13 @@ function fromContact(c: Contact): FormState {
     givenName: c.given_name ?? '',
     familyName: c.family_name ?? '',
     organization: c.organization ?? '',
-    emails: c.emails.join(', '),
-    phoneNumbers: c.phone_numbers.join(', '),
+    jobTitle: c.job_title ?? '',
+    department: c.department ?? '',
+    emails: toContactValues(c.emails),
+    phoneNumbers: toContactValues(c.phone_numbers),
+    urls: toContactValues(c.urls),
     birthday: c.birthday ?? '',
+    anniversary: c.anniversary ?? '',
     notes: c.notes ?? '',
     isGroup: c.members !== null,
     membersText: (c.members ?? [])
@@ -191,18 +218,6 @@ function parseMembers(raw: string): { name: string | null; email: string }[] {
     }
   }
   return out;
-}
-
-/** Split a comma-separated string into trimmed non-empty entries.
- *  The DB stores `emails` / `phone_numbers` as JSON arrays of
- *  strings; we round-trip via this helper so editing a contact
- *  with `["a@x.com", "b@x.com"]` displays as `a@x.com, b@x.com`
- *  and back. */
-function splitCsv(raw: string): string[] {
-  return raw
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
 }
 
 /** Read a `File` into the base64 `ContactPhoto` shape the
@@ -463,9 +478,13 @@ export function ContactDialog({
             given_name: null,
             family_name: null,
             organization: form.organization.trim() || null,
+            job_title: null,
+            department: null,
             emails: [],
             phone_numbers: [],
+            urls: [],
             birthday: null,
+            anniversary: null,
             notes: form.notes.trim() || null,
             // Groups don't model postal addresses (vCard `KIND:group`
             // doesn't carry ADR semantics, and EWS distribution
@@ -479,9 +498,13 @@ export function ContactDialog({
             given_name: form.givenName.trim() || null,
             family_name: form.familyName.trim() || null,
             organization: form.organization.trim() || null,
-            emails: splitCsv(form.emails),
-            phone_numbers: splitCsv(form.phoneNumbers),
+            job_title: form.jobTitle.trim() || null,
+            department: form.department.trim() || null,
+            emails: fromContactValues(form.emails),
+            phone_numbers: fromContactValues(form.phoneNumbers),
+            urls: fromContactValues(form.urls),
             birthday: form.birthday || null,
+            anniversary: form.anniversary || null,
             notes: form.notes.trim() || null,
             addresses: cleanedAddresses,
             members: null,
@@ -741,45 +764,66 @@ export function ContactDialog({
             />
           </label>
 
-          <label className="form__field">
-            <span className="form__label">
-              {t('dialogs.contact.emailsLabel')}
-            </span>
-            <input
-              type="text"
-              value={form.emails}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, emails: e.target.value }))
-              }
-              placeholder={t('dialogs.contact.emailsPlaceholder')}
-              autoComplete="off"
-              spellCheck={false}
-              readOnly={viewOnly}
-            />
-            <span className="form__hint">
-              {t('dialogs.contact.emailsHint')}
-            </span>
-          </label>
+          {!form.isGroup && (
+            <>
+              <label className="form__field">
+                <span className="form__label">
+                  {t('dialogs.contact.jobTitleLabel')}
+                </span>
+                <input
+                  type="text"
+                  value={form.jobTitle}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, jobTitle: e.target.value }))
+                  }
+                  autoComplete="organization-title"
+                  readOnly={viewOnly}
+                />
+              </label>
 
-          <label className="form__field">
-            <span className="form__label">
-              {t('dialogs.contact.phoneNumbersLabel')}
-            </span>
-            <input
-              type="text"
-              value={form.phoneNumbers}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, phoneNumbers: e.target.value }))
-              }
-              placeholder={t('dialogs.contact.phoneNumbersPlaceholder')}
-              autoComplete="off"
-              spellCheck={false}
-              readOnly={viewOnly}
-            />
-            <span className="form__hint">
-              {t('dialogs.contact.phoneNumbersHint')}
-            </span>
-          </label>
+              <label className="form__field">
+                <span className="form__label">
+                  {t('dialogs.contact.departmentLabel')}
+                </span>
+                <input
+                  type="text"
+                  value={form.department}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, department: e.target.value }))
+                  }
+                  autoComplete="off"
+                  readOnly={viewOnly}
+                />
+              </label>
+            </>
+          )}
+
+          <ChannelFieldset
+            kind="email"
+            values={form.emails}
+            viewOnly={viewOnly}
+            onChange={(next) => setForm((p) => ({ ...p, emails: next }))}
+          />
+
+          {!form.isGroup && (
+            <>
+              <ChannelFieldset
+                kind="phone"
+                values={form.phoneNumbers}
+                viewOnly={viewOnly}
+                onChange={(next) =>
+                  setForm((p) => ({ ...p, phoneNumbers: next }))
+                }
+              />
+
+              <ChannelFieldset
+                kind="url"
+                values={form.urls}
+                viewOnly={viewOnly}
+                onChange={(next) => setForm((p) => ({ ...p, urls: next }))}
+              />
+            </>
+          )}
 
           <label className="form__field">
             <span className="form__label">
@@ -804,6 +848,31 @@ export function ContactDialog({
               </button>
             )}
           </label>
+
+          {!form.isGroup && (
+            <label className="form__field">
+              <span className="form__label">
+                {t('dialogs.contact.anniversaryLabel')}
+              </span>
+              <input
+                type="date"
+                value={form.anniversary}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, anniversary: e.target.value }))
+                }
+                readOnly={viewOnly}
+              />
+              {!viewOnly && form.anniversary && (
+                <button
+                  type="button"
+                  className="form__inline-clear"
+                  onClick={() => setForm((p) => ({ ...p, anniversary: '' }))}
+                >
+                  {t('dialogs.contact.anniversaryClear')}
+                </button>
+              )}
+            </label>
+          )}
 
           <label className="form__field">
             <span className="form__label">
@@ -991,6 +1060,206 @@ export function ContactDialog({
  *  Lives as a sub-component so the parent dialog's render tree
  *  stays manageable and the address row can hold its own onChange
  *  fan-out without leaking field handlers up. */
+/** The three labelled channel kinds, and the i18n keys + input semantics that
+ *  differ between them. Everything else about a row is identical, so they
+ *  share one component instead of three near-copies. */
+const CHANNEL_KINDS = {
+  email: {
+    legend: 'dialogs.contact.emailsLabel',
+    empty: 'dialogs.contact.emailsEmpty',
+    add: 'dialogs.contact.emailAdd',
+    value: 'dialogs.contact.emailValue',
+    remove: 'dialogs.contact.emailRemove',
+    removeAria: 'dialogs.contact.emailRemoveAria',
+    inputType: 'email',
+    autoComplete: 'off',
+    defaultLabel: 'home',
+  },
+  phone: {
+    legend: 'dialogs.contact.phoneNumbersLabel',
+    empty: 'dialogs.contact.phonesEmpty',
+    add: 'dialogs.contact.phoneAdd',
+    value: 'dialogs.contact.phoneValue',
+    remove: 'dialogs.contact.phoneRemove',
+    removeAria: 'dialogs.contact.phoneRemoveAria',
+    inputType: 'tel',
+    autoComplete: 'off',
+    defaultLabel: 'mobile',
+  },
+  url: {
+    legend: 'dialogs.contact.urlsLabel',
+    empty: 'dialogs.contact.urlsEmpty',
+    add: 'dialogs.contact.urlAdd',
+    value: 'dialogs.contact.urlValue',
+    remove: 'dialogs.contact.urlRemove',
+    removeAria: 'dialogs.contact.urlRemoveAria',
+    inputType: 'url',
+    autoComplete: 'off',
+    defaultLabel: 'home',
+  },
+} as const;
+
+type ChannelKind = keyof typeof CHANNEL_KINDS;
+
+/** i18n key for one of the offered labels. */
+function labelKey(label: KnownContactLabel): string {
+  return `dialogs.contact.channelLabel.${label}`;
+}
+
+/** One list of labelled values — emails, phones or websites — with an Add
+ *  button below. Mirrors the postal-address fieldset right beside it so the
+ *  dialog has one repeating-row idiom rather than two. */
+function ChannelFieldset({
+  kind,
+  values,
+  viewOnly,
+  onChange,
+}: {
+  kind: ChannelKind;
+  values: ContactValue[];
+  viewOnly: boolean;
+  onChange: (next: ContactValue[]) => void;
+}) {
+  const { t } = useTranslation();
+  const spec = CHANNEL_KINDS[kind];
+  return (
+    <fieldset className="form__field">
+      <legend className="form__label">{t(spec.legend)}</legend>
+      {values.length === 0 ? (
+        <p className="form__hint">{t(spec.empty)}</p>
+      ) : (
+        <ul className="form__address-list">
+          {values.map((entry, idx) => (
+            <ChannelRow
+              key={idx}
+              kind={kind}
+              index={idx}
+              entry={entry}
+              viewOnly={viewOnly}
+              onChange={(next) =>
+                onChange(values.map((v, i) => (i === idx ? next : v)))
+              }
+              onRemove={() => onChange(values.filter((_, i) => i !== idx))}
+            />
+          ))}
+        </ul>
+      )}
+      {!viewOnly && (
+        <button
+          type="button"
+          className="form__action"
+          onClick={() =>
+            onChange([...values, { value: '', label: spec.defaultLabel }])
+          }
+        >
+          {t(spec.add)}
+        </button>
+      )}
+    </fieldset>
+  );
+}
+
+/** A single labelled value: the label picker, the free-text label field when
+ *  the picker is on "custom", the value, and Remove.
+ *
+ *  The custom option is not decoration — CardDAV and Google both store the
+ *  user's own word, and a contact that arrives with "Ferienhaus" on a number
+ *  must be editable without that word silently becoming "other" on save. */
+function ChannelRow({
+  kind,
+  index,
+  entry,
+  viewOnly,
+  onChange,
+  onRemove,
+}: {
+  kind: ChannelKind;
+  index: number;
+  entry: ContactValue;
+  viewOnly: boolean;
+  onChange: (next: ContactValue) => void;
+  onRemove: () => void;
+}) {
+  const { t } = useTranslation();
+  const spec = CHANNEL_KINDS[kind];
+  const known = knownLabel(entry.label);
+  const isCustom = entry.label !== null && known === null;
+  return (
+    <li className="form__address-row">
+      <div className="form__address-row-header">
+        <label className="form__field">
+          <span className="form__label">
+            {t('dialogs.contact.channelLabelFor', { index: index + 1 })}
+          </span>
+          <select
+            value={isCustom ? '__custom__' : (known ?? '__none__')}
+            onChange={(e) => {
+              const next = e.target.value;
+              if (next === '__none__') {
+                onChange({ ...entry, label: null });
+              } else if (next === '__custom__') {
+                // Seed the free-text field with the word already shown, so
+                // switching to custom doesn't blank what the user can see.
+                onChange({ ...entry, label: entry.label ?? '' });
+              } else {
+                onChange({ ...entry, label: next });
+              }
+            }}
+            disabled={viewOnly}
+          >
+            <option value="__none__">
+              {t('dialogs.contact.channelLabelNone')}
+            </option>
+            {CONTACT_LABELS.map((label) => (
+              <option key={label} value={label}>
+                {t(labelKey(label))}
+              </option>
+            ))}
+            <option value="__custom__">
+              {t('dialogs.contact.channelLabelCustom')}
+            </option>
+          </select>
+        </label>
+        {!viewOnly && (
+          <button
+            type="button"
+            className="form__action"
+            onClick={onRemove}
+            aria-label={t(spec.removeAria, { index: index + 1 })}
+          >
+            {t(spec.remove)}
+          </button>
+        )}
+      </div>
+      {isCustom && (
+        <label className="form__field">
+          <span className="form__label">
+            {t('dialogs.contact.channelLabelCustomValue')}
+          </span>
+          <input
+            type="text"
+            value={entry.label ?? ''}
+            onChange={(e) => onChange({ ...entry, label: e.target.value })}
+            readOnly={viewOnly}
+            autoComplete="off"
+          />
+        </label>
+      )}
+      <label className="form__field">
+        <span className="form__label">{t(spec.value)}</span>
+        <input
+          type={spec.inputType}
+          value={entry.value}
+          onChange={(e) => onChange({ ...entry, value: e.target.value })}
+          readOnly={viewOnly}
+          autoComplete={spec.autoComplete}
+          spellCheck={false}
+        />
+      </label>
+    </li>
+  );
+}
+
 function AddressRow({
   index,
   address,
@@ -1015,7 +1284,9 @@ function AddressRow({
     { value: 'work', key: 'dialogs.contact.addressLabelWork' },
     { value: 'other', key: 'dialogs.contact.addressLabelOther' },
   ];
-  const knownLabel = labelOptions.some((o) => o.value === address.label);
+  // Named for what it is rather than `knownLabel` — that name now belongs to
+  // the shared channel helper imported at the top of the file.
+  const labelIsOffered = labelOptions.some((o) => o.value === address.label);
   const update = <K extends keyof ContactAddress>(
     key: K,
     value: ContactAddress[K],
@@ -1028,7 +1299,7 @@ function AddressRow({
             {t('dialogs.contact.addressLabel', { index: index + 1 })}
           </span>
           <select
-            value={knownLabel ? (address.label ?? '') : '__custom__'}
+            value={labelIsOffered ? (address.label ?? '') : '__custom__'}
             onChange={(e) => {
               const next = e.target.value;
               if (next === '__custom__') return;
@@ -1041,7 +1312,7 @@ function AddressRow({
                 {t(o.key)}
               </option>
             ))}
-            {!knownLabel && address.label && (
+            {!labelIsOffered && address.label && (
               <option value="__custom__">{address.label}</option>
             )}
           </select>

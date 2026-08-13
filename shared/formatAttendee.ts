@@ -1,3 +1,5 @@
+import { primaryChannelValue, type WireContactValue } from './contactChannels';
+
 /** Display format for an attendee picked from a contact:
  *  `"Display Name <email>"` when an email is available, display name alone
  *  when not (the chip shows the contact name either way; the email is what
@@ -9,9 +11,9 @@
  *  source of truth. */
 export function formatAttendee(contact: {
   display_name: string;
-  emails: string[];
+  emails: WireContactValue[];
 }): string {
-  const email = contact.emails[0]?.trim();
+  const email = primaryChannelValue(contact.emails);
   if (email) {
     return `${contact.display_name} <${email}>`;
   }

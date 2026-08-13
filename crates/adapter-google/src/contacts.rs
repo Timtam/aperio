@@ -44,7 +44,7 @@ use std::collections::HashMap;
 
 use base64::Engine;
 use cal_core::{Contact, ContactList, ContactPhoto, GroupMember, NewContact};
-use chrono::{NaiveDate, Utc};
+use chrono::{Datelike, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::api::{
@@ -80,13 +80,13 @@ pub const GOOGLE_DIRECTORY_LIST_ID: &str = "google-directory";
 /// "read mask" cost so listing exactly what we'll use stays
 /// efficient even for 1000-contact accounts.
 const PERSON_FIELDS: &str = "names,emailAddresses,phoneNumbers,birthdays,\
-organizations,biographies,memberships,photos,addresses,metadata";
+organizations,biographies,memberships,photos,addresses,urls,events,metadata";
 
 /// Mask we send on update calls. Has to enumerate every field we
 /// might mutate — fields not in the mask are left untouched
 /// server-side, which would silently lose user edits.
 const UPDATE_PERSON_FIELDS: &str = "names,emailAddresses,phoneNumbers,birthdays,\
-    organizations,biographies,addresses";
+    organizations,biographies,addresses,urls,events";
 
 // ── Public surface ────────────────────────────────────────────────────
 
@@ -787,7 +787,7 @@ async fn update_contact_group(state: &ApiState, contact: Contact) -> GoogleResul
         if let Some(hit) = hits.into_iter().find(|c| {
             c.emails
                 .iter()
-                .any(|e| e.eq_ignore_ascii_case(&member.email))
+                .any(|e| e.value.eq_ignore_ascii_case(&member.email))
         }) {
             // Skip group-contacts in the search results — only
             // people can be members of groups.
@@ -839,7 +839,7 @@ async fn apply_group_members(
         if let Some(hit) = hits.into_iter().find(|c| {
             c.emails
                 .iter()
-                .any(|e| e.eq_ignore_ascii_case(&member.email))
+                .any(|e| e.value.eq_ignore_ascii_case(&member.email))
         }) {
             if !hit.id.starts_with("contactGroups/") {
                 to_add.push(hit.id);
@@ -883,28 +883,49 @@ fn person_to_contact(person: Person, list_id: &str) -> Contact {
         .and_then(|ns| ns.first())
         .and_then(|n| n.family_name.clone())
         .filter(|s| !s.is_empty());
-    let organization = person
-        .organizations
-        .as_deref()
-        .and_then(|os| os.first())
+    let primary_org = person.organizations.as_deref().and_then(|os| os.first());
+    let organization = primary_org
         .and_then(|o| o.name.clone())
+        .filter(|s| !s.is_empty());
+    let job_title = primary_org
+        .and_then(|o| o.title.clone())
+        .filter(|s| !s.is_empty());
+    let department = primary_org
+        .and_then(|o| o.department.clone())
         .filter(|s| !s.is_empty());
     let emails = person
         .email_addresses
         .as_deref()
         .unwrap_or(&[])
         .iter()
-        .filter_map(|e| e.value.clone())
-        .filter(|s| !s.is_empty())
+        .filter_map(|e| labelled(e.value.as_deref(), e.type_.as_deref()))
         .collect();
     let phone_numbers = person
         .phone_numbers
         .as_deref()
         .unwrap_or(&[])
         .iter()
-        .filter_map(|p| p.value.clone())
-        .filter(|s| !s.is_empty())
+        .filter_map(|p| labelled(p.value.as_deref(), p.type_.as_deref()))
         .collect();
+    let urls = person
+        .urls
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|u| labelled(u.value.as_deref(), u.type_.as_deref()))
+        .collect();
+    let anniversary = person
+        .events
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .find(|e| {
+            e.type_
+                .as_deref()
+                .is_some_and(|t| t.eq_ignore_ascii_case("anniversary"))
+        })
+        .and_then(|e| e.date.as_ref())
+        .and_then(birthday_to_date);
     let birthday = person
         .birthdays
         .as_deref()
@@ -931,6 +952,10 @@ fn person_to_contact(person: Person, list_id: &str) -> Contact {
         .collect();
     let now = Utc::now();
     Contact {
+        urls,
+        anniversary,
+        job_title,
+        department,
         id: person.resource_name,
         list_id: list_id.to_string(),
         display_name,
@@ -948,6 +973,50 @@ fn person_to_contact(person: Person, list_id: &str) -> Contact {
         updated_at: now,
         etag: person.etag,
     }
+}
+
+/// One typed channel as a `ContactValue`, or `None` when the value itself is
+/// missing. Google's `type` is free text — the canonical `home`/`work`/`mobile`
+/// render as localised labels in its own UI, anything else shows verbatim —
+/// so it passes through unchanged rather than being squeezed into a fixed set.
+fn labelled(value: Option<&str>, type_: Option<&str>) -> Option<cal_core::ContactValue> {
+    let value = value.map(str::trim).filter(|s| !s.is_empty())?;
+    Some(cal_core::ContactValue {
+        value: value.to_string(),
+        label: type_
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+    })
+}
+
+/// A People-API entry list that carries each value with the `type` it was
+/// labelled with. Entries with no label send no `type` key at all rather than
+/// an empty string — Google echoes `""` back and it reads as a nameless label.
+fn typed_channels(values: &[cal_core::ContactValue], key: &str) -> serde_json::Value {
+    serde_json::Value::Array(
+        values
+            .iter()
+            .filter(|v| !v.value.trim().is_empty())
+            .map(|v| {
+                let mut entry = serde_json::Map::new();
+                entry.insert(key.into(), serde_json::Value::String(v.value.clone()));
+                if let Some(label) = v.label.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                    entry.insert("type".into(), serde_json::Value::String(label.to_string()));
+                }
+                serde_json::Value::Object(entry)
+            })
+            .collect(),
+    )
+}
+
+/// A date in the People API's split-integer shape.
+fn google_date(date: NaiveDate) -> serde_json::Value {
+    serde_json::json!({
+        "year": date.year(),
+        "month": date.month(),
+        "day": date.day(),
+    })
 }
 
 /// Translate Google's flat `PersonAddress` into a cal-core
@@ -978,6 +1047,10 @@ fn person_address_to_core(addr: PersonAddress) -> Option<cal_core::ContactAddres
 fn group_to_contact(group: ContactGroup, members: Vec<GroupMember>, list_id: &str) -> Contact {
     let now = Utc::now();
     Contact {
+        urls: Vec::new(),
+        anniversary: None,
+        job_title: None,
+        department: None,
         id: group.resource_name,
         list_id: list_id.to_string(),
         display_name: group.name.unwrap_or_else(|| "(Unnamed group)".into()),
@@ -1009,6 +1082,10 @@ fn new_contact_to_person_body(new: &NewContact) -> serde_json::Value {
         new.birthday,
         new.notes.as_deref(),
         &new.addresses,
+        &new.urls,
+        new.anniversary,
+        new.job_title.as_deref(),
+        new.department.as_deref(),
         None,
     )
 }
@@ -1024,6 +1101,10 @@ fn contact_to_person_body(contact: &Contact) -> serde_json::Value {
         contact.birthday,
         contact.notes.as_deref(),
         &contact.addresses,
+        &contact.urls,
+        contact.anniversary,
+        contact.job_title.as_deref(),
+        contact.department.as_deref(),
         contact.etag.as_deref(),
     )
 }
@@ -1036,11 +1117,15 @@ fn person_body_from_fields(
     given_name: Option<&str>,
     family_name: Option<&str>,
     organization: Option<&str>,
-    emails: &[String],
-    phone_numbers: &[String],
+    emails: &[cal_core::ContactValue],
+    phone_numbers: &[cal_core::ContactValue],
     birthday: Option<NaiveDate>,
     notes: Option<&str>,
     addresses: &[cal_core::ContactAddress],
+    urls: &[cal_core::ContactValue],
+    anniversary: Option<NaiveDate>,
+    job_title: Option<&str>,
+    department: Option<&str>,
     etag: Option<&str>,
 ) -> serde_json::Value {
     let mut body = serde_json::Map::new();
@@ -1058,41 +1143,51 @@ fn person_body_from_fields(
             "familyName": family_name.unwrap_or(""),
         }]),
     );
-    if let Some(org) = organization {
-        body.insert("organizations".into(), serde_json::json!([{ "name": org }]));
+    // Company, job title and department are one `organizations` entry on
+    // Google's side, so any of the three present means the entry gets written.
+    if organization.is_some() || job_title.is_some() || department.is_some() {
+        let mut org = serde_json::Map::new();
+        for (key, value) in [
+            ("name", organization),
+            ("title", job_title),
+            ("department", department),
+        ] {
+            if let Some(value) = value.map(str::trim).filter(|s| !s.is_empty()) {
+                org.insert(key.into(), serde_json::Value::String(value.to_string()));
+            }
+        }
+        body.insert(
+            "organizations".into(),
+            serde_json::Value::Array(vec![serde_json::Value::Object(org)]),
+        );
     }
     if !emails.is_empty() {
-        body.insert(
-            "emailAddresses".into(),
-            serde_json::Value::Array(
-                emails
-                    .iter()
-                    .map(|e| serde_json::json!({ "value": e }))
-                    .collect(),
-            ),
-        );
+        body.insert("emailAddresses".into(), typed_channels(emails, "value"));
     }
     if !phone_numbers.is_empty() {
         body.insert(
             "phoneNumbers".into(),
-            serde_json::Value::Array(
-                phone_numbers
-                    .iter()
-                    .map(|p| serde_json::json!({ "value": p }))
-                    .collect(),
-            ),
+            typed_channels(phone_numbers, "value"),
+        );
+    }
+    if !urls.is_empty() {
+        body.insert("urls".into(), typed_channels(urls, "value"));
+    }
+    if let Some(anniversary) = anniversary {
+        // Google keeps the anniversary as a typed entry in `events`, beside
+        // whatever other dates the user has recorded.
+        body.insert(
+            "events".into(),
+            serde_json::json!([{
+                "type": "anniversary",
+                "date": google_date(anniversary),
+            }]),
         );
     }
     if let Some(bd) = birthday {
         body.insert(
             "birthdays".into(),
-            serde_json::json!([{
-                "date": {
-                    "year": bd.format("%Y").to_string().parse::<u32>().unwrap_or(0),
-                    "month": bd.format("%m").to_string().parse::<u32>().unwrap_or(0),
-                    "day": bd.format("%d").to_string().parse::<u32>().unwrap_or(0),
-                }
-            }]),
+            serde_json::json!([{ "date": google_date(bd) }]),
         );
     }
     if let Some(notes) = notes {
@@ -1275,6 +1370,10 @@ struct Person {
     /// country. We round-trip the `type` string verbatim onto our
     /// `ContactAddress.label`.
     addresses: Option<Vec<PersonAddress>>,
+    urls: Option<Vec<PersonUrl>>,
+    /// Dated entries other than the birthday; Aperio reads the
+    /// `anniversary`-typed one and leaves the rest alone.
+    events: Option<Vec<PersonEvent>>,
     /// Present on sync responses — `metadata.deleted = true` marks a row
     /// the People API delta is telling us was removed.
     #[serde(default)]
@@ -1313,14 +1412,37 @@ struct PersonName {
     family_name: Option<String>,
 }
 
+/// Google types every channel — `home`, `work`, `mobile`, and any free
+/// string the user typed in Contacts. Aperio round-trips that verbatim as
+/// the channel's label; it used to be read and dropped.
 #[derive(Debug, Deserialize, Clone)]
 struct PersonEmail {
     value: Option<String>,
+    #[serde(rename = "type", default)]
+    type_: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 struct PersonPhone {
     value: Option<String>,
+    #[serde(rename = "type", default)]
+    type_: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct PersonUrl {
+    value: Option<String>,
+    #[serde(rename = "type", default)]
+    type_: Option<String>,
+}
+
+/// A dated entry other than the birthday. Google Contacts files the
+/// anniversary here, under `type = "anniversary"`.
+#[derive(Debug, Deserialize, Clone)]
+struct PersonEvent {
+    date: Option<PersonDate>,
+    #[serde(rename = "type", default)]
+    type_: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -1339,6 +1461,8 @@ struct PersonDate {
 #[derive(Debug, Deserialize, Clone)]
 struct PersonOrg {
     name: Option<String>,
+    title: Option<String>,
+    department: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -1408,8 +1532,88 @@ fn urlencoding(s: &str) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_typed_channel_keeps_its_type_in_both_directions() {
+        // Google types every channel; the type used to be read and thrown
+        // away, so a work number came back unlabelled and went out that way.
+        let mut person = person_fixture();
+        person.phone_numbers = Some(vec![
+            PersonPhone {
+                value: Some("+49 30 111".into()),
+                type_: Some("work".into()),
+            },
+            PersonPhone {
+                value: Some("+49 170 222".into()),
+                // A word the user typed themselves — Google stores it as
+                // written, so Aperio must not squeeze it into a fixed set.
+                type_: Some("Ferienhaus".into()),
+            },
+        ]);
+        person.urls = Some(vec![PersonUrl {
+            value: Some("https://beispiel.example".into()),
+            type_: Some("work".into()),
+        }]);
+        person.events = Some(vec![
+            PersonEvent {
+                date: Some(PersonDate {
+                    year: Some(2000),
+                    month: Some(1),
+                    day: Some(2),
+                }),
+                type_: Some("other".into()),
+            },
+            PersonEvent {
+                date: Some(PersonDate {
+                    year: Some(2014),
+                    month: Some(6),
+                    day: Some(21),
+                }),
+                type_: Some("anniversary".into()),
+            },
+        ]);
+        person.organizations = Some(vec![PersonOrg {
+            name: Some("Example GmbH".into()),
+            title: Some("Werkstattleiterin".into()),
+            department: Some("Technik".into()),
+        }]);
+
+        let contact = person_to_contact(person, "list-1");
+        assert_eq!(contact.phone_numbers[0].label.as_deref(), Some("work"));
+        assert_eq!(
+            contact.phone_numbers[1].label.as_deref(),
+            Some("Ferienhaus")
+        );
+        assert_eq!(contact.urls[0].label.as_deref(), Some("work"));
+        // The anniversary is picked out of `events` by its type, not by
+        // position — Google files other dates in the same collection.
+        assert_eq!(contact.anniversary, NaiveDate::from_ymd_opt(2014, 6, 21),);
+        assert_eq!(contact.job_title.as_deref(), Some("Werkstattleiterin"));
+        assert_eq!(contact.department.as_deref(), Some("Technik"));
+
+        let body = contact_to_person_body(&contact);
+        assert_eq!(body["phoneNumbers"][0]["type"], "work");
+        assert_eq!(body["phoneNumbers"][1]["type"], "Ferienhaus");
+        assert_eq!(body["urls"][0]["value"], "https://beispiel.example");
+        assert_eq!(body["events"][0]["type"], "anniversary");
+        assert_eq!(body["events"][0]["date"]["year"], 2014);
+        assert_eq!(body["organizations"][0]["title"], "Werkstattleiterin");
+        assert_eq!(body["organizations"][0]["department"], "Technik");
+    }
+
+    #[test]
+    fn an_unlabelled_channel_sends_no_type_at_all() {
+        // An empty `type` comes back from Google verbatim and then reads as a
+        // label with no name; absence is the honest wire shape.
+        let contact = person_to_contact(person_fixture(), "list-1");
+        let body = contact_to_person_body(&contact);
+        assert_eq!(body["emailAddresses"][0]["value"], "anna@example.com");
+        assert!(body["emailAddresses"][0].get("type").is_none());
+    }
+
     fn person_fixture() -> Person {
         Person {
+            urls: None,
+            events: None,
             resource_name: "people/c123".into(),
             etag: Some("etag-1".into()),
             names: Some(vec![PersonName {
@@ -1418,9 +1622,11 @@ mod tests {
                 family_name: Some("Beispiel".into()),
             }]),
             email_addresses: Some(vec![PersonEmail {
+                type_: None,
                 value: Some("anna@example.com".into()),
             }]),
             phone_numbers: Some(vec![PersonPhone {
+                type_: None,
                 value: Some("+49 30 1234567".into()),
             }]),
             birthdays: Some(vec![PersonBirthday {
@@ -1431,6 +1637,8 @@ mod tests {
                 }),
             }]),
             organizations: Some(vec![PersonOrg {
+                title: None,
+                department: None,
                 name: Some("Example GmbH".into()),
             }]),
             biographies: Some(vec![PersonBiography {
@@ -1492,6 +1700,8 @@ mod tests {
     #[test]
     fn person_to_contact_yields_unnamed_when_everything_missing() {
         let p = Person {
+            urls: None,
+            events: None,
             resource_name: "people/c999".into(),
             etag: None,
             names: None,
@@ -1573,6 +1783,10 @@ mod tests {
     #[test]
     fn person_body_for_create_emits_names_emails_phones() {
         let body = new_contact_to_person_body(&NewContact {
+            urls: Vec::new(),
+            anniversary: None,
+            job_title: None,
+            department: None,
             display_name: "Max Mustermann".into(),
             given_name: Some("Max".into()),
             family_name: Some("Mustermann".into()),
@@ -1604,6 +1818,10 @@ mod tests {
     fn person_body_for_update_includes_etag() {
         let now = Utc::now();
         let body = contact_to_person_body(&Contact {
+            urls: Vec::new(),
+            anniversary: None,
+            job_title: None,
+            department: None,
             id: "people/c123".into(),
             list_id: GOOGLE_CONTACT_LIST_ID.into(),
             display_name: "Max".into(),
@@ -1721,6 +1939,10 @@ mod tests {
             .await;
         let state = fixture_state(&server.url());
         let body = new_contact_to_person_body(&NewContact {
+            urls: Vec::new(),
+            anniversary: None,
+            job_title: None,
+            department: None,
             display_name: "Max Mustermann".into(),
             given_name: Some("Max".into()),
             family_name: Some("Mustermann".into()),

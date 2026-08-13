@@ -1493,6 +1493,10 @@ mod tests {
             .create_contact(
                 &list.id,
                 NewContact {
+                    urls: Vec::new(),
+                    anniversary: None,
+                    job_title: None,
+                    department: None,
                     display_name: "Alex".into(),
                     given_name: None,
                     family_name: None,

@@ -613,9 +613,28 @@ pub struct Contact {
     /// providers like Google but Aperio keeps it scalar for now —
     /// the autocomplete picker only needs the primary value.
     pub organization: Option<String>,
-    pub emails: Vec<String>,
-    pub phone_numbers: Vec<String>,
+    pub emails: Vec<ContactValue>,
+    pub phone_numbers: Vec<ContactValue>,
+    /// Websites. Same labelled shape as the other channels; maps to vCard
+    /// `URL`, Google People `urls[]`, EWS `BusinessHomePage` (one slot) and
+    /// Graph `businessHomePage` / `personalWebsite`.
+    #[serde(default)]
+    pub urls: Vec<ContactValue>,
     pub birthday: Option<NaiveDate>,
+    /// Wedding / partnership anniversary. vCard `ANNIVERSARY` (4.0) or
+    /// `X-ANNIVERSARY` (3.0), EWS `WeddingAnniversary`, Graph
+    /// `weddingAnniversary`, Google People `events[]` with type
+    /// `"anniversary"`.
+    #[serde(default)]
+    pub anniversary: Option<NaiveDate>,
+    /// Job title. vCard `TITLE`, EWS `JobTitle`, Graph `jobTitle`, Google
+    /// People `organizations[].title`.
+    #[serde(default)]
+    pub job_title: Option<String>,
+    /// Department within the organisation. vCard folds it into `ORG`'s second
+    /// component; EWS, Graph and Google all have a field of their own.
+    #[serde(default)]
+    pub department: Option<String>,
     /// Free-form notes the user (or the provider's UI) attached to
     /// the contact. Surfaced verbatim in the contact dialog; not
     /// indexed for autocomplete.
@@ -667,6 +686,116 @@ pub struct Contact {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub etag: Option<String>,
+}
+
+/// One labelled value on a contact — an email address, a phone number, a
+/// website.
+///
+/// The label is free-form for the same reason `ContactAddress::label` is:
+/// vCard lets a TYPE parameter say anything, and a fixed enum would throw away
+/// whatever the user actually wrote in another client. The common slots
+/// (`"home"`, `"work"`, `"mobile"`, `"fax"`, `"other"`) round-trip everywhere;
+/// each adapter normalises its own vocabulary into them.
+///
+/// What each wire format calls the same thing:
+///   - **vCard** puts it in a `TYPE` parameter (`TEL;TYPE=HOME,VOICE:…`), and
+///     Apple adds an `X-ABLabel` group for anything outside the standard set.
+///   - **Google People** has a `type` string per entry, plus `formattedType`.
+///   - **EWS** has no label field: it has KEYED SLOTS (`MobilePhone`,
+///     `HomePhone`, `BusinessPhone`, `OtherTelephone`; `EmailAddress1..3`).
+///     The key IS the label, which is why labelling the model fits Exchange
+///     rather than fighting it — the adapter used to read those keys and throw
+///     them away, filling the slots positionally on write.
+///   - **MS Graph** is the same idea with named collections
+///     (`businessPhones[]`, `homePhones[]`, `mobilePhone`).
+///
+/// A label the target cannot express falls into its "other" slot, and where
+/// there is no such slot the value still travels — the label is the part that
+/// is lost, never the address or the number.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+pub struct ContactValue {
+    pub value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+impl ContactValue {
+    /// A value with no label — what a plain string used to mean.
+    pub fn bare(value: impl Into<String>) -> Self {
+        Self {
+            value: value.into(),
+            label: None,
+        }
+    }
+}
+
+impl PartialEq<str> for ContactValue {
+    /// Compares the VALUE. A label is how the user filed the number, not what
+    /// the number is, so "does this contact have this address" is a question
+    /// about the value alone.
+    fn eq(&self, other: &str) -> bool {
+        self.value == other
+    }
+}
+
+impl PartialEq<&str> for ContactValue {
+    fn eq(&self, other: &&str) -> bool {
+        self.value == *other
+    }
+}
+
+impl PartialEq<String> for ContactValue {
+    fn eq(&self, other: &String) -> bool {
+        &self.value == other
+    }
+}
+
+impl From<String> for ContactValue {
+    /// A bare value carries no label — the same meaning the wire's bare-string
+    /// form has, and what most fixtures and quick constructions mean.
+    fn from(value: String) -> Self {
+        Self { value, label: None }
+    }
+}
+
+impl From<&str> for ContactValue {
+    fn from(value: &str) -> Self {
+        Self::bare(value)
+    }
+}
+
+impl<'de> Deserialize<'de> for ContactValue {
+    /// Accepts BOTH shapes: the object this type serialises to, and the bare
+    /// string every contact was stored and synced as before labels existed.
+    ///
+    /// Not a nicety — sync payloads and the local store are full of the old
+    /// shape, and a device still running the older build keeps sending it. A
+    /// strict decoder would drop those contacts' emails and phone numbers on
+    /// the floor and call it a schema change.
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Wire {
+            Bare(String),
+            Labelled {
+                value: String,
+                #[serde(default)]
+                label: Option<String>,
+            },
+        }
+        Ok(match Wire::deserialize(deserializer)? {
+            Wire::Bare(value) => ContactValue { value, label: None },
+            Wire::Labelled { value, label } => ContactValue {
+                value,
+                // An empty label is no label; it would otherwise render as a
+                // nameless chip and travel to providers as an empty TYPE.
+                label: label.filter(|l| !l.trim().is_empty()),
+            },
+        })
+    }
 }
 
 /// One postal address attached to a contact. The shape is the
@@ -759,9 +888,28 @@ pub struct NewContact {
     pub given_name: Option<String>,
     pub family_name: Option<String>,
     pub organization: Option<String>,
-    pub emails: Vec<String>,
-    pub phone_numbers: Vec<String>,
+    pub emails: Vec<ContactValue>,
+    pub phone_numbers: Vec<ContactValue>,
+    /// Websites. Same labelled shape as the other channels; maps to vCard
+    /// `URL`, Google People `urls[]`, EWS `BusinessHomePage` (one slot) and
+    /// Graph `businessHomePage` / `personalWebsite`.
+    #[serde(default)]
+    pub urls: Vec<ContactValue>,
     pub birthday: Option<NaiveDate>,
+    /// Wedding / partnership anniversary. vCard `ANNIVERSARY` (4.0) or
+    /// `X-ANNIVERSARY` (3.0), EWS `WeddingAnniversary`, Graph
+    /// `weddingAnniversary`, Google People `events[]` with type
+    /// `"anniversary"`.
+    #[serde(default)]
+    pub anniversary: Option<NaiveDate>,
+    /// Job title. vCard `TITLE`, EWS `JobTitle`, Graph `jobTitle`, Google
+    /// People `organizations[].title`.
+    #[serde(default)]
+    pub job_title: Option<String>,
+    /// Department within the organisation. vCard folds it into `ORG`'s second
+    /// component; EWS, Graph and Google all have a field of their own.
+    #[serde(default)]
+    pub department: Option<String>,
     pub notes: Option<String>,
     /// Postal addresses, same shape as `Contact::addresses`.
     /// Defaults to empty so the existing call sites that build

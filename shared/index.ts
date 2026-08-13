@@ -21,6 +21,7 @@ export * from './dayStart';
 export * from './links';
 export * from './planTaskDates';
 export * from './formatAttendee';
+export * from './contactChannels';
 export * from './calendarSelection';
 export * from './eventKey';
 export * from './eventDateTime';

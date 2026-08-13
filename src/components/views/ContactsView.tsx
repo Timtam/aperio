@@ -15,6 +15,7 @@ import {
   showContextMenu,
   type ContextMenuItemRequest,
 } from '../../api/client';
+import { primaryChannelValue } from '@aperio/shared';
 import { useAnnouncer } from '../../a11y/announcerContext';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
@@ -533,9 +534,9 @@ export function ContactsView() {
                               ` +${entry.contact.members.length - 1}`}
                           </span>
                         )
-                      : entry.contact.emails[0] && (
+                      : primaryChannelValue(entry.contact.emails) && (
                           <span className="contacts-list__email">
-                            {entry.contact.emails[0]}
+                            {primaryChannelValue(entry.contact.emails)}
                           </span>
                         )}
                   </span>
@@ -698,7 +699,8 @@ function buildAriaLabel(
   // commas.
   const parts: string[] = [c.display_name];
   if (c.organization) parts.push(c.organization);
-  if (c.emails[0]) parts.push(c.emails[0]);
+  const email = primaryChannelValue(c.emails);
+  if (email) parts.push(email);
   if (list)
     parts.push(
       t('views.contacts.fromList', { list: getContactListDisplayName(list, t) }),

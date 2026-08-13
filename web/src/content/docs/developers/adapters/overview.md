@@ -105,6 +105,37 @@ when caching:
 > isn't respondable. The shim maps a null `current_user_email` slot to
 > `Ok(None)` so read-only adapters hide RSVP rather than erroring.
 
+## Contact channels carry a label
+
+`Contact.emails`, `Contact.phone_numbers` and `Contact.urls` are lists of
+`ContactValue { value, label }` — the label being free text, because two of
+the five contact providers store whatever word the user typed. Each provider
+records the same idea in its own way, and the adapter translates at its edge:
+
+| Provider | Where the label lives | Free labels? |
+|---|---|---|
+| CardDAV | `TYPE` parameter; Apple's grouped property + `X-ABLabel` for custom ones | yes |
+| Google People | `type` on each `emailAddresses`/`phoneNumbers`/`urls` entry | yes |
+| Exchange (EWS) | the entry `Key` (`MobilePhone`, `HomePhone`, …) | no — four phone slots, three email slots |
+| Microsoft Graph | the collection the value sits in (`mobilePhone`, `homePhones`, `businessPhones`) | no — and `mobilePhone` holds exactly one |
+| Local store | stored verbatim as JSON | yes |
+
+Two rules follow from that asymmetry:
+
+- **The value always travels, the word may not.** On a fixed-slot provider,
+  a label with no slot of its own (or one already taken) falls back to the
+  next free slot rather than dropping the value. What can't be written at
+  all is logged, never discarded silently.
+- **A bare string is still a legal channel.** Everything stored before
+  labels existed is a plain `"max@example.com"` on the wire and in the
+  cache, so `ContactValue` deserialises both shapes and the frontends
+  normalise via `toContactValues` from `@aperio/shared`.
+
+Alongside the channels, a contact carries `anniversary`, `job_title` and
+`department`. Every provider has all three except **Microsoft Graph, which
+has no anniversary property on `contact` in v1.0** — only `birthday`. It
+stays null on Outlook accounts rather than being faked onto another field.
+
 ## The adapters
 
 | Adapter | Crate | Capabilities | Protocol |

@@ -290,6 +290,10 @@ mod tests {
 
     fn make_contact(name: &str, bday: Option<NaiveDate>) -> Contact {
         Contact {
+            urls: Vec::new(),
+            anniversary: None,
+            job_title: None,
+            department: None,
             id: format!("c-{name}"),
             list_id: "list-x".into(),
             display_name: name.into(),

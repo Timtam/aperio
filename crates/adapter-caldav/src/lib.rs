@@ -1591,7 +1591,7 @@ fn contact_matches(c: &Contact, needle_lower: &str) -> bool {
     }
     c.emails
         .iter()
-        .any(|e| e.to_lowercase().contains(needle_lower))
+        .any(|e| e.value.to_lowercase().contains(needle_lower))
 }
 
 #[cfg(test)]

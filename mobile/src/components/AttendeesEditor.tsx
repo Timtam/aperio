@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 
-import { formatAttendee } from '@aperio/shared';
+import { formatAttendee, primaryChannelValue } from '@aperio/shared';
 
 import { useListFocusManager } from '../a11y/useListFocusManager';
 import { parseAttendee } from '../api/calendar';
@@ -136,7 +136,7 @@ export function AttendeesEditor({
           const taken = new Set(value.map((a) => emailOf(a).toLowerCase()));
           const filtered = rows
             .filter((c) => {
-              const email = c.emails[0]?.trim().toLowerCase();
+              const email = primaryChannelValue(c.emails)?.toLowerCase();
               return !email || !taken.has(email);
             })
             .slice(0, MAX_SUGGESTIONS);
@@ -238,7 +238,7 @@ export function AttendeesEditor({
           style={styles.suggestions}
         >
           {suggestions.map((c) => {
-            const email = c.emails[0]?.trim();
+            const email = primaryChannelValue(c.emails);
             return (
               <Pressable
                 key={c.id}

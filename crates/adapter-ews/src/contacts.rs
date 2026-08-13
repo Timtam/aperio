@@ -286,7 +286,7 @@ async fn get_gal_contacts(client: &EwsClient) -> EwsResult<Vec<Contact>> {
     let mut no_email: HashMap<String, Contact> = HashMap::new();
     for p in personas {
         let contact = persona_to_contact(p, GAL_LIST_ID);
-        match contact.emails.first().map(|e| e.to_lowercase()) {
+        match contact.emails.first().map(|e| e.value.to_lowercase()) {
             Some(email) => {
                 by_email.entry(email).or_insert(contact);
             }
@@ -631,6 +631,10 @@ pub fn find_contacts_in_folder(folder_id: &str, change_key: Option<&str>) -> Str
           <t:FieldURI FieldURI="contacts:EmailAddresses"/>
           <t:FieldURI FieldURI="contacts:PhoneNumbers"/>
           <t:FieldURI FieldURI="contacts:Birthday"/>
+          <t:FieldURI FieldURI="contacts:WeddingAnniversary"/>
+          <t:FieldURI FieldURI="contacts:BusinessHomePage"/>
+          <t:FieldURI FieldURI="contacts:Department"/>
+          <t:FieldURI FieldURI="contacts:JobTitle"/>
           <t:FieldURI FieldURI="contacts:HasPicture"/>
           <t:FieldURI FieldURI="distributionlist:Members"/>
         </t:AdditionalProperties>
@@ -838,12 +842,22 @@ pub struct ParsedContact {
     pub company_name: Option<String>,
     pub body: Option<String>,
     pub birthday: Option<DateTime<Utc>>,
+    /// EWS `contacts:WeddingAnniversary` — an `xs:dateTime` like
+    /// the birthday, read back as a plain day.
+    pub wedding_anniversary: Option<DateTime<Utc>>,
+    /// EWS `contacts:BusinessHomePage`. Exchange keeps exactly one
+    /// website per contact, which becomes a `work`-labelled URL.
+    pub business_home_page: Option<String>,
+    pub department: Option<String>,
+    pub job_title: Option<String>,
     /// Email addresses in ascending key order (`EmailAddress1`,
     /// `EmailAddress2`, `EmailAddress3`).
-    pub emails: Vec<String>,
+    pub emails: Vec<cal_core::ContactValue>,
     /// Phone numbers, deduplicated (same number may appear under
-    /// multiple keys) and in EWS's natural iteration order.
-    pub phone_numbers: Vec<String>,
+    /// multiple keys) and in EWS's natural iteration order. The
+    /// entry's `Key` becomes the label — it is the only place
+    /// Exchange records what kind of number this is.
+    pub phone_numbers: Vec<cal_core::ContactValue>,
     /// Distribution-list members. `None` ⇒ this row is a person
     /// (`<t:Contact>`); `Some` ⇒ this row is a group
     /// (`<t:DistributionList>`), where the empty vec is the
@@ -880,6 +894,7 @@ pub fn parse_find_contact_item_response(xml: &str) -> EwsResult<Vec<ParsedContac
     // `phone_key_for_slot` picks a sensible default).
     let mut in_collection: Option<&'static str> = None;
     let mut current_entry_value = String::new();
+    let mut current_entry_key: Option<String> = None;
     // Distribution-list parsing state. EWS emits `<t:DistributionList>`
     // rows in the same `<m:Items>` collection as `<t:Contact>` rows;
     // we flag the in-flight ParsedContact as a group when we open one,
@@ -931,6 +946,10 @@ pub fn parse_find_contact_item_response(xml: &str) -> EwsResult<Vec<ParsedContac
                     b"companyname" => text_target = Some("company_name"),
                     b"body" => text_target = Some("body"),
                     b"birthday" => text_target = Some("birthday"),
+                    b"weddinganniversary" => text_target = Some("anniversary"),
+                    b"businesshomepage" => text_target = Some("home_page"),
+                    b"department" => text_target = Some("department"),
+                    b"jobtitle" => text_target = Some("job_title"),
                     b"haspicture" => text_target = Some("has_picture"),
                     b"datetimecreated" => text_target = Some("created"),
                     b"lastmodifiedtime" => text_target = Some("modified"),
@@ -958,6 +977,17 @@ pub fn parse_find_contact_item_response(xml: &str) -> EwsResult<Vec<ParsedContac
                     }
                     b"entry" if in_collection.is_some() => {
                         current_entry_value.clear();
+                        // The Key names the slot — `MobilePhone`, `HomePhone`,
+                        // `EmailAddress2`. For phones that IS the label the
+                        // user chose in Outlook, and it used to be read and
+                        // dropped: every number came back unlabelled and was
+                        // written back into whichever slot its position
+                        // happened to land on.
+                        current_entry_key = e
+                            .attributes()
+                            .flatten()
+                            .find(|a| a.key.local_name().as_ref().eq_ignore_ascii_case(b"Key"))
+                            .and_then(|a| String::from_utf8(a.value.to_vec()).ok());
                         text_target = Some("entry");
                     }
                     _ => {}
@@ -982,15 +1012,24 @@ pub fn parse_find_contact_item_response(xml: &str) -> EwsResult<Vec<ParsedContac
                                 // then 2, then 3. Servers emit them
                                 // in declared order but the spec
                                 // doesn't promise it, so we re-sort
-                                // below.
-                                current.emails.push(value);
+                                // below. The key is a bare position
+                                // here ("EmailAddress2"), which says
+                                // nothing about the address, so it
+                                // becomes no label rather than a
+                                // meaningless one.
+                                current.emails.push(cal_core::ContactValue::bare(value));
                             }
                             Some("phone")
                                 // Dedup: the same number can be
                                 // filed under multiple keys (rare
                                 // but legal). We keep first-seen.
-                                if !current.phone_numbers.contains(&value) => {
-                                    current.phone_numbers.push(value);
+                                if !current.phone_numbers.iter().any(|p| p.value == value) => {
+                                    let label = current_entry_key
+                                        .as_deref()
+                                        .and_then(phone_key_to_label);
+                                    current
+                                        .phone_numbers
+                                        .push(cal_core::ContactValue { value, label });
                                 }
                             _ => {}
                         }
@@ -1054,6 +1093,27 @@ pub fn parse_find_contact_item_response(xml: &str) -> EwsResult<Vec<ParsedContac
                         current.body.get_or_insert_with(String::new).push_str(s);
                     }
                     Some("birthday") => current.birthday = parse_ews_datetime(s),
+                    Some("anniversary") => {
+                        current.wedding_anniversary = parse_ews_datetime(s);
+                    }
+                    Some("home_page") => {
+                        current
+                            .business_home_page
+                            .get_or_insert_with(String::new)
+                            .push_str(s);
+                    }
+                    Some("department") => {
+                        current
+                            .department
+                            .get_or_insert_with(String::new)
+                            .push_str(s);
+                    }
+                    Some("job_title") => {
+                        current
+                            .job_title
+                            .get_or_insert_with(String::new)
+                            .push_str(s);
+                    }
                     Some("has_picture") => {
                         // EWS emits `true` / `false`; tolerate
                         // `True` / case mismatches just in case.
@@ -1145,7 +1205,7 @@ pub fn to_contact(item: ParsedContact, list_id: &str) -> Contact {
         .trim()
         .to_string()
     } else if let Some(email) = item.emails.first() {
-        email.clone()
+        email.value.clone()
     } else {
         "(unnamed)".to_string()
     };
@@ -1153,6 +1213,20 @@ pub fn to_contact(item: ParsedContact, list_id: &str) -> Contact {
     let birthday = item.birthday.map(|d| d.naive_utc().date());
 
     Contact {
+        // Exchange's one website slot is a work address by definition, so it
+        // arrives labelled — the editor shows it as a row like any other.
+        urls: item
+            .business_home_page
+            .filter(|s| !s.trim().is_empty())
+            .map(|value| cal_core::ContactValue {
+                value,
+                label: Some("work".into()),
+            })
+            .into_iter()
+            .collect(),
+        anniversary: item.wedding_anniversary.map(|d| d.naive_utc().date()),
+        job_title: item.job_title,
+        department: item.department,
         id,
         list_id: list_id.to_string(),
         display_name,
@@ -1193,7 +1267,8 @@ pub fn to_contact(item: ParsedContact, list_id: &str) -> Contact {
 /// `ErrorSchemaValidation` if the elements are out of order — they
 /// have to follow the WSDL sequence: FileAs → DisplayName →
 /// GivenName → CompanyName → Body → EmailAddresses →
-/// PhoneNumbers → … → Surname → … → Birthday.
+/// PhoneNumbers → … → Surname → … → Birthday →
+/// BusinessHomePage → Department → JobTitle → WeddingAnniversary.
 pub fn new_contact_to_contact_item_xml(contact: &NewContact) -> String {
     // Distribution lists ride a different item element: EWS rejects
     // a `<t:Contact>` payload that carries `<t:Members>` with
@@ -1246,24 +1321,17 @@ pub fn new_contact_to_contact_item_xml(contact: &NewContact) -> String {
             let slot = idx + 1;
             out.push_str(&format!(
                 "            <t:Entry Key=\"EmailAddress{slot}\">{}</t:Entry>\n",
-                escape_xml(email),
+                escape_xml(&email.value),
             ));
         }
         out.push_str("          </t:EmailAddresses>\n");
     }
     if !contact.phone_numbers.is_empty() {
         out.push_str("          <t:PhoneNumbers>\n");
-        for (idx, phone) in contact.phone_numbers.iter().enumerate() {
-            // Assign phones to a sensible default key sequence:
-            // mobile → home → business → other. Anything after the
-            // fourth lands in a generic OtherTelephone slot too —
-            // EWS supports many phone keys but Aperio doesn't
-            // currently differentiate them in the model, so the
-            // choice of key is purely aesthetic on Outlook's side.
-            let key = phone_key_for_slot(idx);
+        for (key, phone) in assign_phone_keys(&contact.phone_numbers) {
             out.push_str(&format!(
                 "            <t:Entry Key=\"{key}\">{}</t:Entry>\n",
-                escape_xml(phone),
+                escape_xml(&phone.value),
             ));
         }
         out.push_str("          </t:PhoneNumbers>\n");
@@ -1285,6 +1353,34 @@ pub fn new_contact_to_contact_item_xml(contact: &NewContact) -> String {
         out.push_str(&format!(
             "          <t:Birthday>{}</t:Birthday>\n",
             format_ews_date_only(bd),
+        ));
+    }
+    // Everything below follows Birthday in the WSDL sequence, in this
+    // order — BusinessHomePage → Department → JobTitle →
+    // WeddingAnniversary. Same rule as Surname above: out of order and
+    // Exchange rejects the whole create with ErrorSchemaValidation.
+    if let Some(url) = pick_website(&contact.urls) {
+        out.push_str(&format!(
+            "          <t:BusinessHomePage>{}</t:BusinessHomePage>\n",
+            escape_xml(url),
+        ));
+    }
+    if let Some(dept) = contact.department.as_deref().filter(|s| !s.is_empty()) {
+        out.push_str(&format!(
+            "          <t:Department>{}</t:Department>\n",
+            escape_xml(dept),
+        ));
+    }
+    if let Some(title) = contact.job_title.as_deref().filter(|s| !s.is_empty()) {
+        out.push_str(&format!(
+            "          <t:JobTitle>{}</t:JobTitle>\n",
+            escape_xml(title),
+        ));
+    }
+    if let Some(anniversary) = contact.anniversary {
+        out.push_str(&format!(
+            "          <t:WeddingAnniversary>{}</t:WeddingAnniversary>\n",
+            format_ews_date_only(anniversary),
         ));
     }
 
@@ -1427,13 +1523,13 @@ pub fn contact_to_update_field_xml(contact: &Contact) -> (String, String) {
     // entries on the server.
     for slot in 1..=3u32 {
         match contact.emails.get((slot as usize) - 1) {
-            Some(email) if !email.is_empty() => {
+            Some(email) if !email.value.is_empty() => {
                 push_set_indexed(
                     &mut set,
                     "contacts:EmailAddress",
                     "EmailAddresses",
                     &format!("EmailAddress{slot}"),
-                    email,
+                    &email.value,
                 );
             }
             _ => {
@@ -1447,19 +1543,26 @@ pub fn contact_to_update_field_xml(contact: &Contact) -> (String, String) {
 
     // Phone numbers: we cover the four default slots
     // (Mobile / Home / Business / Other). Any phone beyond the
-    // fourth gets dropped silently — phones-as-Vec<String> doesn't
-    // promise key fidelity. Like emails, we delete the trailing
-    // unused slots to keep the round-trip lossless.
-    let phone_keys = [
+    // The LABEL decides which key a number occupies, not its position — see
+    // `assign_phone_keys`. Every key that ends up unused is deleted, so a user
+    // who removed a number (or re-labelled one) does not leave a stale entry
+    // behind on the server.
+    let assigned = assign_phone_keys(&contact.phone_numbers);
+    for key in [
         "MobilePhone",
         "HomePhone",
         "BusinessPhone",
         "OtherTelephone",
-    ];
-    for (idx, key) in phone_keys.iter().enumerate() {
-        match contact.phone_numbers.get(idx) {
-            Some(phone) if !phone.is_empty() => {
-                push_set_indexed(&mut set, "contacts:PhoneNumber", "PhoneNumbers", key, phone);
+    ] {
+        match assigned.iter().find(|(k, _)| *k == key) {
+            Some((_, phone)) if !phone.value.is_empty() => {
+                push_set_indexed(
+                    &mut set,
+                    "contacts:PhoneNumber",
+                    "PhoneNumbers",
+                    key,
+                    &phone.value,
+                );
             }
             _ => {
                 del.push_str(&delete_indexed_xml("contacts:PhoneNumber", key));
@@ -1476,6 +1579,32 @@ pub fn contact_to_update_field_xml(contact: &Contact) -> (String, String) {
         ),
         None => del.push_str(&delete_field_xml("contacts:Birthday")),
     }
+    match contact.anniversary {
+        Some(anniversary) => push_set_contact_string(
+            &mut set,
+            "contacts:WeddingAnniversary",
+            "WeddingAnniversary",
+            &format_ews_date_only(anniversary),
+        ),
+        None => del.push_str(&delete_field_xml("contacts:WeddingAnniversary")),
+    }
+    match pick_website(&contact.urls) {
+        Some(url) => push_set_contact_string(
+            &mut set,
+            "contacts:BusinessHomePage",
+            "BusinessHomePage",
+            url,
+        ),
+        None => del.push_str(&delete_field_xml("contacts:BusinessHomePage")),
+    }
+    match contact.department.as_deref().filter(|s| !s.is_empty()) {
+        Some(dept) => push_set_contact_string(&mut set, "contacts:Department", "Department", dept),
+        None => del.push_str(&delete_field_xml("contacts:Department")),
+    }
+    match contact.job_title.as_deref().filter(|s| !s.is_empty()) {
+        Some(title) => push_set_contact_string(&mut set, "contacts:JobTitle", "JobTitle", title),
+        None => del.push_str(&delete_field_xml("contacts:JobTitle")),
+    }
 
     (set, del)
 }
@@ -1491,18 +1620,123 @@ fn encode_contact_id(item_id: &str, change_key: Option<&str>) -> String {
     }
 }
 
-/// Default phone-key sequence used when writing a Contact's flat
-/// `phone_numbers` vec back to EWS. Anything past the fourth slot
-/// shares the OtherTelephone key — Outlook accepts repeated keys
-/// (the last write wins) but Aperio's flat model has nowhere to
-/// put a fifth value anyway.
-fn phone_key_for_slot(idx: usize) -> &'static str {
-    match idx {
-        0 => "MobilePhone",
-        1 => "HomePhone",
-        2 => "BusinessPhone",
-        _ => "OtherTelephone",
+/// An EWS phone key as the label Aperio speaks. Exchange's vocabulary is
+/// fixed and small; these four are the ones every Outlook shows, and anything
+/// else (`AssistantPhone`, `CarPhone`, …) keeps its own name lower-cased so a
+/// number filed under it is not silently relabelled.
+fn phone_key_to_label(key: &str) -> Option<String> {
+    let label = match key {
+        "MobilePhone" => "mobile",
+        "HomePhone" | "HomePhone2" => "home",
+        "BusinessPhone" | "BusinessPhone2" => "work",
+        "BusinessFax" | "HomeFax" => "fax",
+        "OtherTelephone" => "other",
+        other => return Some(other.to_ascii_lowercase()),
+    };
+    Some(label.to_string())
+}
+
+/// The EWS key for a label, when Exchange has one. `None` for a label with no
+/// slot of its own — the caller falls back to the next free position, so the
+/// NUMBER always travels even when the word for it cannot.
+fn label_to_phone_key(label: &str) -> Option<&'static str> {
+    match label.trim().to_ascii_lowercase().as_str() {
+        "mobile" | "cell" => Some("MobilePhone"),
+        "home" | "privat" => Some("HomePhone"),
+        "work" | "business" => Some("BusinessPhone"),
+        "fax" => Some("BusinessFax"),
+        "other" => Some("OtherTelephone"),
+        _ => None,
     }
+}
+
+/// Pair each phone with the Exchange key it should occupy.
+///
+/// The LABEL chooses the slot — a number the user filed as "mobile" belongs in
+/// `MobilePhone`, wherever it happens to sit in the list. That is the whole
+/// point of labelling the model: before this, the key came from the position,
+/// so re-ordering two numbers in Aperio silently swapped "home" and "mobile"
+/// in Outlook.
+///
+/// Where the wanted key is already taken (two numbers both filed as "home") or
+/// the label has no Exchange key at all ("Ferienhaus"), the number takes the
+/// next free slot. Exchange has a fixed, small vocabulary, so the WORD is what
+/// gets lost — never the number, as long as a slot remains.
+///
+/// Numbers past the last free slot cannot be written at all. Those are logged
+/// rather than dropped in silence, and the list's declared
+/// `contact_phone_slots` is what lets the editor say so before the user saves.
+fn assign_phone_keys(
+    phones: &[cal_core::ContactValue],
+) -> Vec<(&'static str, &cal_core::ContactValue)> {
+    const KEYS: [&str; 4] = [
+        "MobilePhone",
+        "HomePhone",
+        "BusinessPhone",
+        "OtherTelephone",
+    ];
+    let mut taken = [false; KEYS.len()];
+    let mut out: Vec<(&'static str, &cal_core::ContactValue)> = Vec::new();
+
+    // First pass: everyone who names a slot Exchange has gets it.
+    let mut unplaced: Vec<&cal_core::ContactValue> = Vec::new();
+    for phone in phones {
+        let wanted = phone
+            .label
+            .as_deref()
+            .and_then(label_to_phone_key)
+            .and_then(|key| KEYS.iter().position(|k| *k == key));
+        match wanted {
+            Some(idx) if !taken[idx] => {
+                taken[idx] = true;
+                out.push((KEYS[idx], phone));
+            }
+            // Wanted a slot that is gone, or wanted none — try again below,
+            // after everyone with an unambiguous claim has been seated.
+            _ => unplaced.push(phone),
+        }
+    }
+
+    // Second pass: fill the gaps in Exchange's own order.
+    for phone in unplaced {
+        match taken.iter().position(|t| !t) {
+            Some(idx) => {
+                taken[idx] = true;
+                out.push((KEYS[idx], phone));
+            }
+            None => {
+                tracing::warn!(
+                    "Exchange holds {} phone numbers per contact; \"{}\" has no slot left and was not written",
+                    KEYS.len(),
+                    phone.value,
+                );
+            }
+        }
+    }
+    out
+}
+
+/// The single website Exchange stores for a contact. A `work`-labelled URL is
+/// the natural occupant of a field called `BusinessHomePage`; failing that the
+/// first one goes, so a contact with only a personal site keeps it. Anything
+/// beyond the first has nowhere to live on this provider.
+fn pick_website(urls: &[cal_core::ContactValue]) -> Option<&str> {
+    let usable = || urls.iter().filter(|u| !u.value.trim().is_empty());
+    if urls.len() > 1 {
+        tracing::warn!(
+            "Exchange keeps one website per contact; {} further URL(s) were not written",
+            urls.len() - 1,
+        );
+    }
+    usable()
+        .find(|u| {
+            matches!(
+                u.label.as_deref().map(str::trim),
+                Some("work") | Some("business")
+            )
+        })
+        .or_else(|| usable().next())
+        .map(|u| u.value.as_str())
 }
 
 /// EWS serialises timestamps as `YYYY-MM-DDTHH:MM:SSZ`. Same parser
@@ -1852,6 +2086,10 @@ fn build_contact_from_new(
 ) -> Contact {
     let now = Utc::now();
     Contact {
+        urls: Vec::new(),
+        anniversary: None,
+        job_title: None,
+        department: None,
         id: encode_contact_id(item_id, change_key.as_deref()),
         list_id: list_id.to_string(),
         display_name: new.display_name.clone(),
@@ -2116,6 +2354,12 @@ fn persona_to_contact(p: ParsedPersona, list_id: &str) -> Contact {
         "(unnamed)".to_string()
     };
     Contact {
+        urls: Vec::new(),
+        anniversary: None,
+        job_title: None,
+        // The directory row carries a department, and until now the model had
+        // nowhere to put it.
+        department: p.department.clone(),
         // PersonaId is opaque and not stable across mailbox
         // moves, but it's good enough for in-session round-trips
         // (the dialog can pass it to a "view full details" route
@@ -2137,8 +2381,10 @@ fn persona_to_contact(p: ParsedPersona, list_id: &str) -> Contact {
         given_name: p.given_name,
         family_name: p.surname,
         organization: p.company_name.or(p.department),
-        emails: p.email_addresses,
-        phone_numbers: p.phone_numbers,
+        // A directory row carries no labels — the GAL has no place for them,
+        // so these arrive bare rather than guessed at.
+        emails: p.email_addresses.into_iter().map(Into::into).collect(),
+        phone_numbers: p.phone_numbers.into_iter().map(Into::into).collect(),
         birthday: None,
         notes: None,
         members: None,
@@ -2183,7 +2429,7 @@ pub fn contact_matches(contact: &Contact, needle_lower: &str) -> bool {
     contact
         .emails
         .iter()
-        .any(|e| e.to_lowercase().contains(needle_lower))
+        .any(|e| e.value.to_lowercase().contains(needle_lower))
 }
 
 #[cfg(test)]
@@ -2234,15 +2480,61 @@ mod tests {
     // ── Mapping helpers ─────────────────────────────────────────────
 
     #[test]
-    fn phone_key_sequence_starts_with_mobile() {
-        // Aperio puts the most common slot first so a contact with
-        // a single phone surfaces as MobilePhone in Outlook —
-        // matches the user expectation from a typeahead-only UI.
-        assert_eq!(phone_key_for_slot(0), "MobilePhone");
-        assert_eq!(phone_key_for_slot(1), "HomePhone");
-        assert_eq!(phone_key_for_slot(2), "BusinessPhone");
-        assert_eq!(phone_key_for_slot(3), "OtherTelephone");
-        assert_eq!(phone_key_for_slot(99), "OtherTelephone");
+    fn the_label_picks_the_key_not_the_position() {
+        // The number the user filed as "home" belongs in HomePhone even when
+        // it is listed second. Assigning by position swapped the two silently.
+        let phones = vec![
+            cal_core::ContactValue {
+                value: "+49 30 111".into(),
+                label: Some("work".into()),
+            },
+            cal_core::ContactValue {
+                value: "+49 170 222".into(),
+                label: Some("home".into()),
+            },
+        ];
+        let assigned = assign_phone_keys(&phones);
+        assert_eq!(assigned[0].0, "BusinessPhone");
+        assert_eq!(assigned[0].1.value, "+49 30 111");
+        assert_eq!(assigned[1].0, "HomePhone");
+    }
+
+    #[test]
+    fn a_label_exchange_has_no_word_for_still_keeps_its_number() {
+        // Two numbers both filed "home", plus one the user called
+        // "Ferienhaus": Exchange's vocabulary is fixed, so the WORD is what
+        // gets lost. Every number still lands in a slot.
+        let phones = vec![
+            cal_core::ContactValue {
+                value: "+49 30 111".into(),
+                label: Some("home".into()),
+            },
+            cal_core::ContactValue {
+                value: "+49 30 222".into(),
+                label: Some("home".into()),
+            },
+            cal_core::ContactValue {
+                value: "+49 170 333".into(),
+                label: Some("Ferienhaus".into()),
+            },
+        ];
+        let assigned = assign_phone_keys(&phones);
+        assert_eq!(assigned.len(), 3);
+        let values: Vec<&str> = assigned.iter().map(|(_, p)| p.value.as_str()).collect();
+        assert!(values.contains(&"+49 30 222"));
+        assert!(values.contains(&"+49 170 333"));
+        // The unambiguous claim wins the slot it asked for.
+        assert_eq!(assigned[0], ("HomePhone", &phones[0]));
+    }
+
+    #[test]
+    fn a_fifth_number_has_nowhere_to_go() {
+        // Exchange holds four. The fifth is not written — but it is logged
+        // rather than dropped in silence, and the other four still travel.
+        let phones: Vec<cal_core::ContactValue> = (0..5)
+            .map(|i| cal_core::ContactValue::bare(format!("+49 30 {i}")))
+            .collect();
+        assert_eq!(assign_phone_keys(&phones).len(), 4);
     }
 
     #[test]
@@ -2362,8 +2654,8 @@ mod tests {
         assert_eq!(p.body.as_deref(), Some("Met at conference."));
         assert_eq!(p.emails, vec!["max@example.com", "max.alt@example.com"]);
         assert_eq!(p.phone_numbers.len(), 2);
-        assert!(p.phone_numbers.contains(&"+49 170 1234567".to_string()));
-        assert!(p.phone_numbers.contains(&"+49 30 555 0100".to_string()));
+        assert!(p.phone_numbers.iter().any(|p| p.value == "+49 170 1234567"));
+        assert!(p.phone_numbers.iter().any(|p| p.value == "+49 30 555 0100"));
         assert!(p.birthday.is_some());
 
         let contact = to_contact(parsed.into_iter().next().unwrap(), "LIST-1");
@@ -2446,6 +2738,10 @@ mod tests {
     #[test]
     fn new_contact_xml_writes_displayname_and_fileas() {
         let nc = NewContact {
+            urls: Vec::new(),
+            anniversary: None,
+            job_title: None,
+            department: None,
             display_name: "Anna Beispiel".into(),
             given_name: Some("Anna".into()),
             family_name: Some("Beispiel".into()),
@@ -2478,6 +2774,10 @@ mod tests {
         // PhoneNumbers → Surname → Birthday. EWS rejects with
         // ErrorSchemaValidation if we shuffle.
         let nc = NewContact {
+            urls: Vec::new(),
+            anniversary: None,
+            job_title: None,
+            department: None,
             display_name: "Test".into(),
             given_name: Some("T".into()),
             family_name: Some("Person".into()),
@@ -2516,6 +2816,10 @@ mod tests {
     #[test]
     fn new_contact_xml_caps_emails_at_three_slots() {
         let nc = NewContact {
+            urls: Vec::new(),
+            anniversary: None,
+            job_title: None,
+            department: None,
             display_name: "X".into(),
             given_name: None,
             family_name: None,
@@ -2544,6 +2848,10 @@ mod tests {
         // trailing two slots cleared on the server or the round-trip
         // shows stale values.
         let contact = Contact {
+            urls: Vec::new(),
+            anniversary: None,
+            job_title: None,
+            department: None,
             id: "ITEM|CK".into(),
             list_id: "LIST".into(),
             display_name: "X".into(),
@@ -2572,6 +2880,10 @@ mod tests {
     #[test]
     fn update_contact_clears_birthday_when_unset() {
         let contact = Contact {
+            urls: Vec::new(),
+            anniversary: None,
+            job_title: None,
+            department: None,
             id: "ITEM|CK".into(),
             list_id: "LIST".into(),
             display_name: "X".into(),
@@ -2597,6 +2909,10 @@ mod tests {
 
     fn sample_contact() -> Contact {
         Contact {
+            urls: Vec::new(),
+            anniversary: None,
+            job_title: None,
+            department: None,
             id: "X".into(),
             list_id: "L".into(),
             display_name: "Max Mustermann".into(),

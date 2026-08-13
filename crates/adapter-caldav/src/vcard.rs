@@ -74,8 +74,7 @@ pub fn parse_vcard(
     let mut family_name: Option<String> = None;
     let mut given_name: Option<String> = None;
     let mut organization: Option<String> = None;
-    let mut emails: Vec<String> = Vec::new();
-    let mut phone_numbers: Vec<String> = Vec::new();
+
     let mut birthday: Option<NaiveDate> = None;
     let mut notes: Option<String> = None;
     let mut updated_at: Option<DateTime<Utc>> = None;
@@ -103,6 +102,17 @@ pub fn parse_vcard(
     // one-string-per-field. Multiple ADR properties become
     // multiple `ContactAddress` entries.
     let mut addresses: Vec<cal_core::ContactAddress> = Vec::new();
+    // Labelled channels are collected WITH the group they belong to, because
+    // Apple's custom label rides a separate property that can appear after the
+    // one it labels (`item1.TEL:…` … `item1.X-ABLabel:Ferienhaus`). Resolved
+    // once the whole card has been read.
+    let mut groups: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut pending_emails: Vec<(Option<String>, cal_core::ContactValue)> = Vec::new();
+    let mut pending_phones: Vec<(Option<String>, cal_core::ContactValue)> = Vec::new();
+    let mut pending_urls: Vec<(Option<String>, cal_core::ContactValue)> = Vec::new();
+    let mut anniversary: Option<NaiveDate> = None;
+    let mut job_title: Option<String> = None;
+    let mut department: Option<String> = None;
 
     for raw_line in unfolded.lines() {
         let line = raw_line.trim_end_matches('\r');
@@ -121,7 +131,16 @@ pub fn parse_vcard(
         let Some((head, value)) = split_property(line) else {
             continue;
         };
-        let name = head.split(';').next().unwrap_or("").to_ascii_uppercase();
+        let full_name = head.split(';').next().unwrap_or("");
+        // `item1.EMAIL` is one property, not a property called "ITEM1.EMAIL".
+        // Apple writes that shape for every value carrying a custom label, and
+        // matching on the raw name dropped those emails and numbers entirely —
+        // the contact simply had none in Aperio.
+        let (group, bare_name) = match full_name.split_once('.') {
+            Some((g, rest)) => (Some(g.to_ascii_lowercase()), rest),
+            None => (None, full_name),
+        };
+        let name = bare_name.to_ascii_uppercase();
         match name.as_str() {
             "VERSION" => { /* discard */ }
             "FN" => display_name = Some(unescape(value)),
@@ -151,21 +170,71 @@ pub fn parse_vcard(
                         organization = Some(p.clone());
                     }
                 }
+                // vCard has no department property: it is ORG's second
+                // component, which is where every other provider's own field
+                // has to land.
+                if let Some(p) = parts.get(1) {
+                    if !p.is_empty() {
+                        department = Some(p.clone());
+                    }
+                }
             }
             "EMAIL" => {
                 let trimmed = unescape(value);
                 if !trimmed.is_empty() {
-                    emails.push(trimmed);
+                    pending_emails.push((
+                        group.clone(),
+                        cal_core::ContactValue {
+                            value: trimmed,
+                            label: channel_label(head),
+                        },
+                    ));
                 }
             }
             "TEL" => {
                 let trimmed = unescape(value);
                 if !trimmed.is_empty() {
-                    phone_numbers.push(trimmed);
+                    pending_phones.push((
+                        group.clone(),
+                        cal_core::ContactValue {
+                            value: trimmed,
+                            label: channel_label(head),
+                        },
+                    ));
+                }
+            }
+            "URL" => {
+                let trimmed = unescape(value);
+                if !trimmed.is_empty() {
+                    pending_urls.push((
+                        group.clone(),
+                        cal_core::ContactValue {
+                            value: trimmed,
+                            label: channel_label(head),
+                        },
+                    ));
+                }
+            }
+            "X-ABLABEL" => {
+                // Apple's free label for the property sharing its group.
+                if let Some(g) = group.clone() {
+                    let decoded = decode_ab_label(&unescape(value));
+                    if !decoded.is_empty() {
+                        groups.insert(g, decoded);
+                    }
+                }
+            }
+            "TITLE" => {
+                let t = unescape(value);
+                if !t.is_empty() {
+                    job_title = Some(t);
                 }
             }
             "BDAY" => {
                 birthday = parse_bday(value);
+            }
+            "ANNIVERSARY" | "X-ANNIVERSARY" => {
+                anniversary = parse_bday(value);
             }
             "NOTE" => notes = Some(unescape(value)),
             "REV" => {
@@ -281,6 +350,26 @@ pub fn parse_vcard(
         .or_else(|| assemble_display_name(given_name.as_deref(), family_name.as_deref()))
         .unwrap_or_else(|| "Unnamed contact".to_string());
 
+    // Apple's custom label is a property of its own, so it can only be matched
+    // to the value it names once the whole card has been read. A group label
+    // WINS over the TYPE parameter: `item1.TEL;TYPE=HOME` + `item1.X-ABLabel:
+    // Ferienhaus` means the user renamed that number, and "home" is the
+    // leftover Apple keeps for compatibility.
+    let resolve = |pending: Vec<(Option<String>, cal_core::ContactValue)>| {
+        pending
+            .into_iter()
+            .map(|(group, mut entry)| {
+                if let Some(custom) = group.and_then(|g| groups.get(&g)) {
+                    entry.label = Some(custom.clone());
+                }
+                entry
+            })
+            .collect::<Vec<_>>()
+    };
+    let emails = resolve(pending_emails);
+    let phone_numbers = resolve(pending_phones);
+    let urls = resolve(pending_urls);
+
     let now = Utc::now();
     Ok(Contact {
         id,
@@ -291,7 +380,11 @@ pub fn parse_vcard(
         organization,
         emails,
         phone_numbers,
+        urls,
         birthday,
+        anniversary,
+        job_title,
+        department,
         notes,
         addresses,
         members: if is_group { Some(members) } else { None },
@@ -319,6 +412,120 @@ fn extract_type_param(head: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Emit one labelled channel property.
+///
+/// `extra_types` are the modality tokens the property needs regardless of the
+/// user's label (`INTERNET` on EMAIL). A KNOWN label joins them in the TYPE
+/// parameter; an unknown one — whatever the user typed — becomes a grouped
+/// property plus `X-ABLabel`, which is how Apple Contacts stores a custom
+/// label and how every client that supports custom labels reads one back.
+/// `group_seq` numbers the groups across the whole card, since `item1` must
+/// mean one thing per vCard.
+fn write_channel(
+    out: &mut String,
+    property: &str,
+    extra_types: &[&str],
+    entry: &cal_core::ContactValue,
+    group_seq: &mut usize,
+) {
+    let label = entry
+        .label
+        .as_deref()
+        .map(str::trim)
+        .filter(|l| !l.is_empty());
+    let standard = label.filter(|l| is_standard_label(l));
+    let custom = label.filter(|l| !is_standard_label(l));
+
+    let mut types: Vec<String> = extra_types.iter().map(|t| (*t).to_string()).collect();
+    if let Some(known) = standard {
+        // CELL is what the TYPE vocabulary calls a mobile; the model uses the
+        // word every other provider uses.
+        types.push(match known {
+            "mobile" => "CELL".to_string(),
+            other => other.to_ascii_uppercase(),
+        });
+    }
+    let type_param = if types.is_empty() {
+        String::new()
+    } else {
+        format!(";TYPE={}", types.join(","))
+    };
+
+    match custom {
+        Some(custom) => {
+            *group_seq += 1;
+            let group = format!("item{group_seq}");
+            out.push_str(&format!(
+                "{group}.{property}{type_param}:{}\r\n",
+                escape(&entry.value)
+            ));
+            out.push_str(&format!("{group}.X-ABLabel:{}\r\n", escape(custom)));
+        }
+        None => {
+            out.push_str(&format!(
+                "{property}{type_param}:{}\r\n",
+                escape(&entry.value)
+            ));
+        }
+    }
+}
+
+/// Whether a label is one the TYPE parameter can carry on its own. Anything
+/// else is the user's own word and needs X-ABLabel to survive.
+fn is_standard_label(label: &str) -> bool {
+    matches!(
+        label,
+        "home" | "work" | "mobile" | "fax" | "pager" | "other"
+    )
+}
+
+/// The label of an EMAIL / TEL / URL property, from its `TYPE` parameter.
+///
+/// Unlike the address reader this scans EVERY TYPE value and skips the ones
+/// that describe the MEDIUM rather than the place: `INTERNET`, `VOICE`, `PREF`
+/// and friends say what kind of channel it is, which the property name already
+/// said. `TEL;TYPE=VOICE,HOME` means a home number, and taking the first value
+/// blindly would have labelled it "voice".
+///
+/// `CELL` is normalised to `mobile` — every other provider calls it that, and
+/// a label that reads differently depending on where the contact came from is
+/// worse than no label.
+fn channel_label(head: &str) -> Option<String> {
+    for part in head.split(';').skip(1) {
+        let Some((k, v)) = part.split_once('=') else {
+            continue;
+        };
+        if !k.eq_ignore_ascii_case("TYPE") {
+            continue;
+        }
+        for candidate in v.split(',') {
+            let candidate = candidate.trim().trim_matches('"').to_ascii_lowercase();
+            let label = match candidate.as_str() {
+                // Modality, not place — the property name says this already.
+                "internet" | "voice" | "pref" | "text" | "textphone" | "video" | "x400" => continue,
+                "" => continue,
+                "cell" => "mobile".to_string(),
+                "business" => "work".to_string(),
+                other => other.to_string(),
+            };
+            return Some(label);
+        }
+    }
+    None
+}
+
+/// Apple wraps the standard labels it writes into `X-ABLabel` in a marker
+/// sandwich — `_$!<Home>!$_`. A label the user typed themselves arrives bare.
+/// Both come out as the plain word.
+fn decode_ab_label(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let inner = trimmed
+        .strip_prefix("_$!<")
+        .and_then(|r| r.strip_suffix(">!$_"))
+        .unwrap_or(trimmed);
+    inner.trim().to_ascii_lowercase()
 }
 
 /// Fold a vCard TYPE value onto one of the canonical labels
@@ -530,23 +737,64 @@ pub fn build_vcard(uid: &str, contact: &NewContact) -> String {
         escape(contact.family_name.as_deref().unwrap_or("")),
         escape(contact.given_name.as_deref().unwrap_or(""))
     ));
-    if let Some(org) = contact.organization.as_deref().filter(|s| !s.is_empty()) {
-        out.push_str(&format!("ORG:{}\r\n", escape(org)));
+    // ORG is `organisation;unit;…`. The department has no property of its own
+    // in vCard, so it travels as the second component — which is where every
+    // other client reads it from too. Emitted when either half is set, so a
+    // department on a contact with no company still survives.
+    if contact
+        .organization
+        .as_deref()
+        .is_some_and(|s| !s.is_empty())
+        || contact.department.as_deref().is_some_and(|s| !s.is_empty())
+    {
+        out.push_str(&format!(
+            "ORG:{};{}\r\n",
+            escape(contact.organization.as_deref().unwrap_or("")),
+            escape(contact.department.as_deref().unwrap_or(""))
+        ));
     }
+    // Labelled channels. A label the standard knows rides the TYPE parameter,
+    // where every client understands it. Anything else — "Ferienhaus", "Oma" —
+    // goes out the way Apple stores it: a grouped property plus X-ABLabel, so
+    // the user's own word survives instead of being flattened to "other".
+    let mut group_seq = 0usize;
     for email in &contact.emails {
-        if !email.is_empty() {
-            // TYPE=INTERNET is the historical baseline; some
-            // servers (older Radicale) reject EMAIL without a TYPE.
-            out.push_str(&format!("EMAIL;TYPE=INTERNET:{}\r\n", escape(email)));
+        if email.value.is_empty() {
+            continue;
         }
+        // TYPE=INTERNET is the historical baseline; some servers (older
+        // Radicale) reject EMAIL without a TYPE.
+        write_channel(&mut out, "EMAIL", &["INTERNET"], email, &mut group_seq);
     }
     for phone in &contact.phone_numbers {
-        if !phone.is_empty() {
-            out.push_str(&format!("TEL:{}\r\n", escape(phone)));
+        if phone.value.is_empty() {
+            continue;
         }
+        write_channel(&mut out, "TEL", &[], phone, &mut group_seq);
+    }
+    for url in &contact.urls {
+        if url.value.is_empty() {
+            continue;
+        }
+        write_channel(&mut out, "URL", &[], url, &mut group_seq);
+    }
+    if let Some(title) = contact.job_title.as_deref().filter(|s| !s.is_empty()) {
+        out.push_str(&format!("TITLE:{}\r\n", escape(title)));
     }
     if let Some(bday) = contact.birthday {
         out.push_str(&format!("BDAY:{}\r\n", bday.format("%Y-%m-%d")));
+    }
+    if let Some(anniversary) = contact.anniversary {
+        // 4.0 spells it ANNIVERSARY; 3.0 servers and Apple read the X- form,
+        // and both are cheap, so both go out.
+        out.push_str(&format!(
+            "ANNIVERSARY:{}\r\n",
+            anniversary.format("%Y-%m-%d")
+        ));
+        out.push_str(&format!(
+            "X-ANNIVERSARY:{}\r\n",
+            anniversary.format("%Y-%m-%d")
+        ));
     }
     if let Some(note) = contact.notes.as_deref().filter(|s| !s.is_empty()) {
         out.push_str(&format!("NOTE:{}\r\n", escape(note)));
@@ -678,7 +926,11 @@ pub fn rebuild_vcard(
         organization: contact.organization.clone(),
         emails: contact.emails.clone(),
         phone_numbers: contact.phone_numbers.clone(),
+        urls: contact.urls.clone(),
         birthday: contact.birthday,
+        anniversary: contact.anniversary,
+        job_title: contact.job_title.clone(),
+        department: contact.department.clone(),
         notes: contact.notes.clone(),
         addresses: contact.addresses.clone(),
         members: contact.members.clone(),
@@ -869,9 +1121,35 @@ mod tests {
         parse_vcard(body, "list-x", "id-x".into(), Some("etag-x".into())).unwrap()
     }
 
+    /// The smallest contact the writer accepts — every labelled-channel test
+    /// fills in only the field it is about.
+    fn sample_new_contact() -> NewContact {
+        NewContact {
+            display_name: "Max Mustermann".into(),
+            given_name: Some("Max".into()),
+            family_name: Some("Mustermann".into()),
+            organization: None,
+            emails: Vec::new(),
+            phone_numbers: Vec::new(),
+            urls: Vec::new(),
+            birthday: None,
+            anniversary: None,
+            job_title: None,
+            department: None,
+            notes: None,
+            addresses: Vec::new(),
+            members: None,
+            photo: None,
+        }
+    }
+
     #[test]
     fn round_trips_basic_fields() {
         let nc = NewContact {
+            urls: Vec::new(),
+            anniversary: None,
+            job_title: None,
+            department: None,
             display_name: "Max Mustermann".into(),
             given_name: Some("Max".into()),
             family_name: Some("Mustermann".into()),
@@ -1025,6 +1303,10 @@ mod tests {
     #[test]
     fn build_escapes_commas_and_semicolons() {
         let nc = NewContact {
+            urls: Vec::new(),
+            anniversary: None,
+            job_title: None,
+            department: None,
             display_name: "Smith, Inc.; LTD".into(),
             given_name: None,
             family_name: None,
@@ -1047,6 +1329,10 @@ mod tests {
     #[test]
     fn build_escapes_newlines_in_notes() {
         let nc = NewContact {
+            urls: Vec::new(),
+            anniversary: None,
+            job_title: None,
+            department: None,
             display_name: "T".into(),
             given_name: None,
             family_name: None,
@@ -1068,6 +1354,10 @@ mod tests {
     #[test]
     fn rebuild_round_trips_contact() {
         let original = Contact {
+            urls: Vec::new(),
+            anniversary: None,
+            job_title: None,
+            department: None,
             id: "id-x".into(),
             list_id: "list".into(),
             display_name: "Jane Doe".into(),
@@ -1114,6 +1404,10 @@ mod tests {
             data: PNG_1X1.to_vec(),
         };
         let nc = NewContact {
+            urls: Vec::new(),
+            anniversary: None,
+            job_title: None,
+            department: None,
             display_name: "Pic Person".into(),
             given_name: None,
             family_name: None,
@@ -1171,6 +1465,10 @@ mod tests {
     #[test]
     fn rebuild_carries_preserved_photo_back_into_vcard() {
         let contact = Contact {
+            urls: Vec::new(),
+            anniversary: None,
+            job_title: None,
+            department: None,
             id: "id".into(),
             list_id: "list".into(),
             display_name: "Has Photo".into(),
@@ -1209,5 +1507,89 @@ mod tests {
         let parsed = parse(body);
         assert!(parsed.has_photo);
         assert!(parse_vcard_photo(body).is_none());
+    }
+    // ── labelled channels ─────────────────────────────────────
+
+    #[test]
+    fn an_apple_grouped_property_is_not_a_property_called_item1_email() {
+        // Apple Contacts writes EVERY value that carries a custom label as a
+        // grouped property. Matching on the raw name meant `item1.EMAIL` hit
+        // no branch at all — the address did not lose its label, it never
+        // arrived, and the contact showed up in Aperio with no email.
+        let card = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Max Mustermann\r\nitem1.EMAIL;TYPE=INTERNET:ferien@example.com\r\nitem1.X-ABLabel:_$!<Home>!$_\r\nitem2.TEL:+49 170 1234567\r\nitem2.X-ABLabel:Ferienhaus\r\nEND:VCARD\r\n";
+        let parsed = parse(card);
+        assert_eq!(parsed.emails.len(), 1, "the address must arrive at all");
+        assert_eq!(parsed.emails[0].value, "ferien@example.com");
+        // Apple's marker sandwich decodes to the plain word …
+        assert_eq!(parsed.emails[0].label.as_deref(), Some("home"));
+        // … and a label the user typed themselves survives verbatim.
+        assert_eq!(parsed.phone_numbers[0].value, "+49 170 1234567");
+        assert_eq!(parsed.phone_numbers[0].label.as_deref(), Some("ferienhaus"));
+    }
+
+    #[test]
+    fn a_type_parameter_names_the_place_not_the_medium() {
+        // TYPE carries both, in no guaranteed order. Taking the first value
+        // blindly labelled a home number "voice".
+        let card = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Max\r\nTEL;TYPE=VOICE,HOME:+49 30 111\r\nTEL;TYPE=CELL:+49 170 222\r\nEMAIL;TYPE=INTERNET,WORK:max@firma.example\r\nEND:VCARD\r\n";
+        let parsed = parse(card);
+        assert_eq!(parsed.phone_numbers[0].label.as_deref(), Some("home"));
+        // CELL is what vCard calls it; every other provider says mobile, and a
+        // label that reads differently by origin is worse than none.
+        assert_eq!(parsed.phone_numbers[1].label.as_deref(), Some("mobile"));
+        assert_eq!(parsed.emails[0].label.as_deref(), Some("work"));
+    }
+
+    #[test]
+    fn a_custom_label_goes_back_out_the_way_apple_stores_it() {
+        let mut contact = sample_new_contact();
+        contact.emails = vec![
+            cal_core::ContactValue {
+                value: "max@firma.example".into(),
+                label: Some("work".into()),
+            },
+            cal_core::ContactValue {
+                value: "ferien@example.com".into(),
+                label: Some("Ferienhaus".into()),
+            },
+        ];
+        let card = build_vcard("uid-1", &contact);
+        // A standard label rides the TYPE parameter, where every client reads
+        // it …
+        assert!(
+            card.contains("EMAIL;TYPE=INTERNET,WORK:max@firma.example"),
+            "got:\n{card}",
+        );
+        // … and the user's own word gets a group of its own.
+        assert!(
+            card.contains(".EMAIL;TYPE=INTERNET:ferien@example.com"),
+            "got:\n{card}"
+        );
+        assert!(card.contains(".X-ABLabel:Ferienhaus"), "got:\n{card}");
+    }
+
+    #[test]
+    fn labels_survive_a_full_round_trip() {
+        let mut contact = sample_new_contact();
+        contact.phone_numbers = vec![
+            cal_core::ContactValue {
+                value: "+49 170 1234567".into(),
+                label: Some("mobile".into()),
+            },
+            cal_core::ContactValue {
+                value: "+49 30 111".into(),
+                label: Some("Werkstatt".into()),
+            },
+        ];
+        contact.anniversary = Some(NaiveDate::from_ymd_opt(2014, 6, 21).unwrap());
+        contact.job_title = Some("Werkstattleiter".into());
+        contact.department = Some("Technik".into());
+        let card = build_vcard("uid-2", &contact);
+        let back = parse(&card);
+        assert_eq!(back.phone_numbers[0].label.as_deref(), Some("mobile"));
+        assert_eq!(back.phone_numbers[1].label.as_deref(), Some("werkstatt"));
+        assert_eq!(back.anniversary, contact.anniversary);
+        assert_eq!(back.job_title.as_deref(), Some("Werkstattleiter"));
+        assert_eq!(back.department.as_deref(), Some("Technik"));
     }
 }

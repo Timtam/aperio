@@ -23,6 +23,8 @@ import {
   listContactLists,
   searchContacts,
 } from '../api/contacts';
+import { primaryChannelValue } from '@aperio/shared';
+
 import { expandedA11y } from '../a11y/roles';
 import { useTabBarInset } from '../hooks/useTabBarInset';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -292,7 +294,12 @@ export default function ContactsScreen({
     if (c.members != null) {
       return t('dialogs.contact.memberCount', { count: c.members.length });
     }
-    return c.organization ?? c.emails[0] ?? c.phone_numbers[0] ?? '';
+    return (
+      c.organization ??
+      primaryChannelValue(c.emails) ??
+      primaryChannelValue(c.phone_numbers) ??
+      ''
+    );
   };
 
   const total = displayGroups.reduce((n, g) => n + g.contacts.length, 0);

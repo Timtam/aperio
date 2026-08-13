@@ -25,6 +25,13 @@ import {
   setContactPhoto,
   updateContact,
 } from '../api/contacts';
+import {
+  fromContactValues,
+  toContactValues,
+  type ContactValue,
+} from '@aperio/shared';
+
+import { ContactLabelButton } from '../components/ContactLabelButton';
 import { DateTimeFieldButton } from '../components/DateTimeFieldButton';
 import { FormScrollView } from '../components/FormScrollView';
 import { RadioGroup } from '../components/RadioGroup';
@@ -35,10 +42,12 @@ import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
 // Create / edit a contact OR a distribution list (group). Screen-reader-first:
 // every field is a labelled stop; the address book is a radio group (no native
-// select); emails + phone numbers are comma-separated single fields (matching
-// the desktop ContactDialog), far less fiddly for a keyboard/SR user than
-// per-value rows. Postal addresses ARE editable (a dynamic list of structured
-// rows; empty rows drop on save) + birthday. A "distribution list" switch turns
+// select); emails, phone numbers and websites are LABELLED rows — one value
+// per row with its label on a button that opens the choice in a dialog, so a
+// screen reader announces "mobile" before the digits and a contact with four
+// numbers still takes four swipes, not two dozen. Postal addresses are the
+// same dynamic-row shape (empty rows drop on save), plus birthday and
+// anniversary, job title and department. A "distribution list" switch turns
 // the person fields into a members editor (one "Name <email>" / bare email per
 // line), exactly like the desktop. The avatar is shown (a real image for sighted
 // users + an accessible alt), can be set from the device photo library (the
@@ -52,14 +61,6 @@ const ALLOWED_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/gif'];
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-/** Split a comma-separated field into trimmed, non-empty values. */
-function splitList(raw: string): string[] {
-  return raw
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
 }
 
 /** One member of a distribution list (the cal_core GroupMember shape). */
@@ -169,9 +170,13 @@ export default function ContactEditorModal({
   const [givenName, setGivenName] = useState('');
   const [familyName, setFamilyName] = useState('');
   const [organization, setOrganization] = useState('');
-  const [emailsText, setEmailsText] = useState('');
-  const [phonesText, setPhonesText] = useState('');
+  const [jobTitle, setJobTitle] = useState('');
+  const [department, setDepartment] = useState('');
+  const [emails, setEmails] = useState<ContactValue[]>([]);
+  const [phones, setPhones] = useState<ContactValue[]>([]);
+  const [urls, setUrls] = useState<ContactValue[]>([]);
   const [birthday, setBirthday] = useState('');
+  const [anniversary, setAnniversary] = useState('');
   const [addresses, setAddresses] = useState<AddressRow[]>([]);
   const [notes, setNotes] = useState('');
   // A distribution list (group) vs a person; when on, the person fields give way
@@ -216,9 +221,13 @@ export default function ContactEditorModal({
           setGivenName(found.given_name ?? '');
           setFamilyName(found.family_name ?? '');
           setOrganization(found.organization ?? '');
-          setEmailsText(found.emails.join(', '));
-          setPhonesText(found.phone_numbers.join(', '));
+          setJobTitle(found.job_title ?? '');
+          setDepartment(found.department ?? '');
+          setEmails(toContactValues(found.emails));
+          setPhones(toContactValues(found.phone_numbers));
+          setUrls(toContactValues(found.urls));
           setBirthday(found.birthday ?? '');
+          setAnniversary(found.anniversary ?? '');
           setAddresses((found.addresses ?? []).map(toRow));
           setNotes(found.notes ?? '');
           setIsGroup(found.members !== null);
@@ -273,13 +282,20 @@ export default function ContactEditorModal({
     // A group carries members (and no person fields); a person carries the
     // person fields and members: null. `members != null` is the wire marker.
     const members = isGroup ? parseMembers(membersText) : null;
-    const emails = isGroup ? [] : splitList(emailsText);
-    const phones = isGroup ? [] : splitList(phonesText);
+    // A group carries none of the person-only channels. Emails DO travel on a
+    // group in the desktop editor's model too — but a distribution list's
+    // addresses are its members, so the channel lists go empty here.
+    const cleanEmails = isGroup ? [] : fromContactValues(emails);
+    const cleanPhones = isGroup ? [] : fromContactValues(phones);
+    const cleanUrls = isGroup ? [] : fromContactValues(urls);
     const cleanedAddresses = isGroup ? [] : sanitiseAddresses(addresses);
     const personGiven = isGroup ? null : given;
     const personFamily = isGroup ? null : family;
     const personOrg = isGroup ? null : org;
     const personBirthday = isGroup ? null : birthdayValue;
+    const personAnniversary = isGroup ? null : anniversary.trim() || null;
+    const personJobTitle = isGroup ? null : jobTitle.trim() || null;
+    const personDepartment = isGroup ? null : department.trim() || null;
     try {
       if (editing) {
         if (original == null) {
@@ -295,9 +311,13 @@ export default function ContactEditorModal({
           given_name: personGiven,
           family_name: personFamily,
           organization: personOrg,
-          emails,
-          phone_numbers: phones,
+          job_title: personJobTitle,
+          department: personDepartment,
+          emails: cleanEmails,
+          phone_numbers: cleanPhones,
+          urls: cleanUrls,
           birthday: personBirthday,
+          anniversary: personAnniversary,
           addresses: cleanedAddresses,
           notes: note,
           members,
@@ -308,9 +328,13 @@ export default function ContactEditorModal({
           given_name: personGiven,
           family_name: personFamily,
           organization: personOrg,
-          emails,
-          phone_numbers: phones,
+          job_title: personJobTitle,
+          department: personDepartment,
+          emails: cleanEmails,
+          phone_numbers: cleanPhones,
+          urls: cleanUrls,
           birthday: personBirthday,
+          anniversary: personAnniversary,
           notes: note,
           addresses: cleanedAddresses,
           members,
@@ -330,23 +354,27 @@ export default function ContactEditorModal({
     }
   }, [
     addresses,
+    anniversary,
     announce,
     birthday,
+    department,
     displayName,
     editing,
-    emailsText,
+    emails,
     familyName,
     givenName,
     isGroup,
+    jobTitle,
     membersText,
     navigation,
     notes,
     organization,
     original,
-    phonesText,
+    phones,
     photo,
     selectedListId,
     t,
+    urls,
   ]);
 
   const removePhoto = useCallback(async () => {
@@ -617,34 +645,49 @@ export default function ContactEditorModal({
         />
       </Field>
 
-      <Field label={t('dialogs.contact.emailsLabel')} hint={t('dialogs.contact.emailsHint')}>
-        <TextInput
-          style={styles.input}
-          value={emailsText}
-          onChangeText={setEmailsText}
-          placeholder={t('dialogs.contact.emailsPlaceholder')}
-          accessibilityLabel={t('dialogs.contact.emailsLabel')}
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="email-address"
-        />
-      </Field>
+      {!isGroup && (
+        <>
+          <Field label={t('dialogs.contact.jobTitleLabel')}>
+            <TextInput
+              style={styles.input}
+              value={jobTitle}
+              onChangeText={setJobTitle}
+              accessibilityLabel={t('dialogs.contact.jobTitleLabel')}
+            />
+          </Field>
 
-      <Field
-        label={t('dialogs.contact.phoneNumbersLabel')}
-        hint={t('dialogs.contact.phoneNumbersHint')}
-      >
-        <TextInput
-          style={styles.input}
-          value={phonesText}
-          onChangeText={setPhonesText}
-          placeholder={t('dialogs.contact.phoneNumbersPlaceholder')}
-          accessibilityLabel={t('dialogs.contact.phoneNumbersLabel')}
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="phone-pad"
-        />
-      </Field>
+          <Field label={t('dialogs.contact.departmentLabel')}>
+            <TextInput
+              style={styles.input}
+              value={department}
+              onChangeText={setDepartment}
+              accessibilityLabel={t('dialogs.contact.departmentLabel')}
+            />
+          </Field>
+        </>
+      )}
+
+      <ChannelSection
+        kind="email"
+        values={emails}
+        onChange={setEmails}
+      />
+
+      {!isGroup && (
+        <>
+          <ChannelSection
+            kind="phone"
+            values={phones}
+            onChange={setPhones}
+          />
+
+          <ChannelSection
+            kind="url"
+            values={urls}
+            onChange={setUrls}
+          />
+        </>
+      )}
 
       <Field
         label={t('dialogs.contact.birthdayLabel')}
@@ -683,6 +726,42 @@ export default function ContactEditorModal({
           </View>
         )}
       </Field>
+
+      {!isGroup && (
+        <Field label={t('dialogs.contact.anniversaryLabel')}>
+          {anniversary.trim() === '' ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('dialogs.contact.anniversaryAdd')}
+              onPress={() => setAnniversary(formatLocalDate(new Date()))}
+              style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+            >
+              <Text style={styles.ghostButtonText}>
+                {t('dialogs.contact.anniversaryAdd')}
+              </Text>
+            </Pressable>
+          ) : (
+            <View style={styles.pickerRow}>
+              <DateTimeFieldButton
+                label={t('dialogs.contact.anniversaryLabel')}
+                mode="date"
+                value={anniversary}
+                onChange={setAnniversary}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('dialogs.contact.anniversaryClear')}
+                onPress={() => setAnniversary('')}
+                style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.ghostButtonText}>
+                  {t('dialogs.contact.anniversaryClear')}
+                </Text>
+              </Pressable>
+            </View>
+          )}
+        </Field>
+      )}
 
       {/* Postal addresses — a dynamic list of structured rows. */}
       <View style={styles.field}>
@@ -830,6 +909,130 @@ export default function ContactEditorModal({
         </Pressable>
       )}
     </FormScrollView>
+  );
+}
+
+/** The three labelled channel kinds and the i18n keys / keyboard hints that
+ *  differ between them. Everything else about a row is identical, so one
+ *  component serves all three instead of three near-copies. */
+const CHANNEL_KINDS = {
+  email: {
+    legend: 'dialogs.contact.emailsLabel',
+    empty: 'dialogs.contact.emailsEmpty',
+    add: 'dialogs.contact.emailAdd',
+    value: 'dialogs.contact.emailValue',
+    remove: 'dialogs.contact.emailRemove',
+    removeAria: 'dialogs.contact.emailRemoveAria',
+    keyboard: 'email-address',
+    defaultLabel: 'home',
+  },
+  phone: {
+    legend: 'dialogs.contact.phoneNumbersLabel',
+    empty: 'dialogs.contact.phonesEmpty',
+    add: 'dialogs.contact.phoneAdd',
+    value: 'dialogs.contact.phoneValue',
+    remove: 'dialogs.contact.phoneRemove',
+    removeAria: 'dialogs.contact.phoneRemoveAria',
+    keyboard: 'phone-pad',
+    defaultLabel: 'mobile',
+  },
+  url: {
+    legend: 'dialogs.contact.urlsLabel',
+    empty: 'dialogs.contact.urlsEmpty',
+    add: 'dialogs.contact.urlAdd',
+    value: 'dialogs.contact.urlValue',
+    remove: 'dialogs.contact.urlRemove',
+    removeAria: 'dialogs.contact.urlRemoveAria',
+    keyboard: 'url',
+    defaultLabel: 'home',
+  },
+} as const;
+
+type ChannelKind = keyof typeof CHANNEL_KINDS;
+
+/** One list of labelled values with an Add button below — the same
+ *  repeating-row shape as the postal addresses further down the form, so the
+ *  editor has one idiom rather than two.
+ *
+ *  Each row is three stops: the label button, the value, Remove. The label
+ *  lives on a button rather than an inline radio group precisely so a contact
+ *  with four numbers doesn't cost two dozen swipes to walk past. */
+function ChannelSection({
+  kind,
+  values,
+  onChange,
+}: {
+  kind: ChannelKind;
+  values: ContactValue[];
+  onChange: (next: ContactValue[]) => void;
+}) {
+  const { t } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
+  const spec = CHANNEL_KINDS[kind];
+  const focus = useListFocusManager(values.length);
+  return (
+    <View style={styles.field}>
+      <Text style={styles.label} accessibilityRole="header">
+        {t(spec.legend)}
+      </Text>
+      {values.length === 0 ? (
+        <Text style={styles.hint} accessibilityRole="text">
+          {t(spec.empty)}
+        </Text>
+      ) : (
+        values.map((entry, i) => {
+          const rowName = `${t(spec.value)} ${i + 1}`;
+          return (
+            <View key={i} style={styles.addressRow}>
+              <ContactLabelButton
+                label={entry.label}
+                fieldLabel={rowName}
+                onChange={(label) =>
+                  onChange(values.map((v, j) => (j === i ? { ...v, label } : v)))
+                }
+              />
+              <TextInput
+                ref={focus.registerRow(i)}
+                style={styles.input}
+                value={entry.value}
+                onChangeText={(value) =>
+                  onChange(values.map((v, j) => (j === i ? { ...v, value } : v)))
+                }
+                accessibilityLabel={rowName}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType={spec.keyboard}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t(spec.removeAria, { index: i + 1 })}
+                onPress={() => {
+                  focus.onRemove(i);
+                  onChange(values.filter((_, j) => j !== i));
+                }}
+                style={({ pressed }) => [
+                  styles.removeButton,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={styles.removeButtonText}>{t(spec.remove)}</Text>
+              </Pressable>
+            </View>
+          );
+        })
+      )}
+      <Pressable
+        ref={focus.registerAdd}
+        accessibilityRole="button"
+        accessibilityLabel={t(spec.add)}
+        onPress={() =>
+          onChange([...values, { value: '', label: spec.defaultLabel }])
+        }
+        style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}
+      >
+        <Text style={styles.addButtonText}>{t(spec.add)}</Text>
+      </Pressable>
+    </View>
   );
 }
 

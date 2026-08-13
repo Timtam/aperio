@@ -61,8 +61,15 @@ pub const GRAPH_SUGGESTED_PEOPLE_LIST_ID: &str = "graph-suggested-people";
 /// + phone schema — a couple dozen fields the Aperio Contact model
 /// has nowhere to put. Pruning here keeps the response small even
 /// on accounts with thousands of rows.
+///
+/// Graph returns ONLY what is selected, so anything missing from this list is
+/// permanently absent from the model — `homeAddress` and friends were mapped in
+/// `map_contact` but never requested, which left every Outlook contact
+/// address-less no matter what the server held.
 const CONTACT_SELECT: &str = "id,displayName,givenName,surname,companyName,\
 emailAddresses,businessPhones,homePhones,mobilePhone,birthday,personalNotes,\
+homeAddress,businessAddress,otherAddress,parentFolderId,\
+jobTitle,department,businessHomePage,\
 createdDateTime,lastModifiedDateTime";
 
 /// Field selector for `/me/people` reads. Person resources are a
@@ -463,30 +470,56 @@ pub async fn delete_contact_photo(state: &ApiState, contact_id: &str) -> GraphRe
 // ── Mappers ────────────────────────────────────────────────────────────
 
 fn map_contact(entry: ContactEntry, list_id: &str) -> Contact {
-    let emails: Vec<String> = entry
+    // Graph's `emailAddress` carries a display `name`, not a kind — there is
+    // no home/work distinction for addresses on this provider, so they stay
+    // unlabelled rather than being given an invented one.
+    let emails: Vec<cal_core::ContactValue> = entry
         .email_addresses
         .unwrap_or_default()
         .into_iter()
         .filter_map(|e| e.address)
         .filter(|s| !s.is_empty())
+        .map(cal_core::ContactValue::bare)
         .collect();
-    let mut phones: Vec<String> = Vec::new();
-    if let Some(business) = entry.business_phones {
-        phones.extend(business.into_iter().filter(|s| !s.is_empty()));
-    }
-    if let Some(home) = entry.home_phones {
-        phones.extend(home.into_iter().filter(|s| !s.is_empty()));
+    // Which collection a number arrives in is the only record Graph keeps of
+    // what KIND of number it is, and it used to be flattened away. Everything
+    // came back unlabelled, and the write path then re-filed by position — so
+    // a business number could return home as the mobile one.
+    let mut phones: Vec<cal_core::ContactValue> = Vec::new();
+    for (numbers, label) in [(entry.business_phones, "work"), (entry.home_phones, "home")] {
+        for number in numbers
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|s| !s.is_empty())
+        {
+            phones.push(cal_core::ContactValue {
+                value: number,
+                label: Some(label.into()),
+            });
+        }
     }
     if let Some(mobile) = entry.mobile_phone.filter(|s| !s.is_empty()) {
-        phones.push(mobile);
+        phones.push(cal_core::ContactValue {
+            value: mobile,
+            label: Some("mobile".into()),
+        });
     }
+    let urls: Vec<cal_core::ContactValue> = entry
+        .business_home_page
+        .filter(|s| !s.trim().is_empty())
+        .map(|url| cal_core::ContactValue {
+            value: url,
+            label: Some("work".into()),
+        })
+        .into_iter()
+        .collect();
     let birthday = entry.birthday.as_deref().and_then(parse_graph_birthday);
 
     let display = best_contact_display_name(
         entry.display_name.as_deref(),
         entry.given_name.as_deref(),
         entry.surname.as_deref(),
-        emails.first().map(String::as_str),
+        emails.first().map(|e| e.value.as_str()),
     );
 
     let created = entry.created_date_time.unwrap_or_else(Utc::now);
@@ -507,6 +540,12 @@ fn map_contact(entry: ContactEntry, list_id: &str) -> Contact {
     }
 
     Contact {
+        urls,
+        // Graph v1.0 has no anniversary property on `contact` — only
+        // `birthday`. Nothing to read, and nothing to write either.
+        anniversary: None,
+        job_title: entry.job_title.filter(|s| !s.is_empty()),
+        department: entry.department.filter(|s| !s.is_empty()),
         id: entry.id,
         list_id: list_id.to_string(),
         display_name: display,
@@ -567,28 +606,40 @@ fn graph_address_to_core(
 }
 
 fn map_person(entry: PersonEntry, list_id: &str) -> Contact {
-    let emails: Vec<String> = entry
+    let emails: Vec<cal_core::ContactValue> = entry
         .scored_email_addresses
         .unwrap_or_default()
         .into_iter()
         .filter_map(|e| e.address)
         .filter(|s| !s.is_empty())
+        .map(cal_core::ContactValue::bare)
         .collect();
-    let phones: Vec<String> = entry
+    // Person phones are typed, unlike a contact's — the enum names its own
+    // kind, so pass it through instead of guessing.
+    let phones: Vec<cal_core::ContactValue> = entry
         .phones
         .unwrap_or_default()
         .into_iter()
-        .filter_map(|p| p.number)
-        .filter(|s| !s.is_empty())
+        .filter_map(|p| {
+            let number = p.number.filter(|s| !s.is_empty())?;
+            Some(cal_core::ContactValue {
+                value: number,
+                label: person_phone_label(p.kind.as_deref()),
+            })
+        })
         .collect();
     let display = best_contact_display_name(
         entry.display_name.as_deref(),
         entry.given_name.as_deref(),
         entry.surname.as_deref(),
-        emails.first().map(String::as_str),
+        emails.first().map(|e| e.value.as_str()),
     );
     let now = Utc::now();
     Contact {
+        urls: Vec::new(),
+        anniversary: None,
+        job_title: None,
+        department: None,
         id: entry.id,
         list_id: list_id.to_string(),
         display_name: display,
@@ -658,6 +709,9 @@ fn new_contact_to_body(new: &NewContact) -> serde_json::Value {
         new.birthday,
         new.notes.as_deref(),
         &new.addresses,
+        &new.urls,
+        new.job_title.as_deref(),
+        new.department.as_deref(),
     )
 }
 
@@ -672,6 +726,9 @@ fn contact_to_body(contact: &Contact) -> serde_json::Value {
         contact.birthday,
         contact.notes.as_deref(),
         &contact.addresses,
+        &contact.urls,
+        contact.job_title.as_deref(),
+        contact.department.as_deref(),
     )
 }
 
@@ -680,11 +737,14 @@ fn contact_body(
     given_name: Option<&str>,
     family_name: Option<&str>,
     organization: Option<&str>,
-    emails: &[String],
-    phones: &[String],
+    emails: &[cal_core::ContactValue],
+    phones: &[cal_core::ContactValue],
     birthday: Option<NaiveDate>,
     notes: Option<&str>,
     addresses: &[cal_core::ContactAddress],
+    urls: &[cal_core::ContactValue],
+    job_title: Option<&str>,
+    department: Option<&str>,
 ) -> serde_json::Value {
     let mut body = serde_json::Map::new();
     body.insert(
@@ -703,41 +763,65 @@ fn contact_body(
             serde_json::Value::String(org.to_string()),
         );
     }
-    if !emails.is_empty() {
-        body.insert(
-            "emailAddresses".into(),
-            serde_json::Value::Array(
-                emails
-                    .iter()
-                    .map(|e| serde_json::json!({ "address": e }))
-                    .collect(),
-            ),
-        );
-    }
+    // Written even when empty. This body is also the PATCH body, and a field
+    // left out of a PATCH is a field left alone — so an address the user
+    // deleted has to be sent as an absence, or it survives on the server and
+    // comes straight back on the next read.
+    body.insert(
+        "emailAddresses".into(),
+        serde_json::Value::Array(
+            emails
+                .iter()
+                .filter(|e| !e.value.is_empty())
+                .map(|e| serde_json::json!({ "address": e.value }))
+                .collect(),
+        ),
+    );
     // Outlook splits phone numbers across three slots —
     // businessPhones (array), homePhones (array), mobilePhone
-    // (scalar). cal-core keeps them in one flat list, so we
-    // stuff the first into mobilePhone and the remainder into
-    // businessPhones. That matches the most common usage
-    // pattern and round-trips on read because `map_contact`
-    // flattens them all back together.
-    if !phones.is_empty() {
-        body.insert(
-            "mobilePhone".into(),
-            serde_json::Value::String(phones[0].clone()),
-        );
-        if phones.len() > 1 {
-            body.insert(
-                "businessPhones".into(),
-                serde_json::Value::Array(
-                    phones[1..]
-                        .iter()
-                        .map(|p| serde_json::Value::String(p.clone()))
-                        .collect(),
-                ),
-            );
+    // (scalar) — and the LABEL picks which one, the same way it
+    // picks the address slot further down. Before this the first
+    // number became the mobile one and every other became a
+    // business number whatever the user had called it, and
+    // `homePhones` was never written at all: a private number
+    // moved to the business list the first time Aperio saved.
+    //
+    // `mobilePhone` holds exactly one. A second number labelled
+    // mobile joins the business list instead of evicting the
+    // first — Outlook shows it either way, under a heading the
+    // user did not choose, so the log says which one moved.
+    let mut mobile: Option<&str> = None;
+    let mut home_phones: Vec<serde_json::Value> = Vec::new();
+    let mut business_phones: Vec<serde_json::Value> = Vec::new();
+    for phone in phones.iter().filter(|p| !p.value.is_empty()) {
+        let number = || serde_json::Value::String(phone.value.clone());
+        match phone.label.as_deref().map(str::trim) {
+            Some("mobile") | Some("cell") if mobile.is_none() => {
+                mobile = Some(phone.value.as_str());
+            }
+            Some("mobile") | Some("cell") => {
+                tracing::warn!(
+                    "Outlook keeps one mobile number per contact; a second one was written to the business list instead"
+                );
+                business_phones.push(number());
+            }
+            Some("home") | Some("private") => home_phones.push(number()),
+            _ => business_phones.push(number()),
         }
     }
+    if let Some(mobile) = mobile {
+        body.insert(
+            "mobilePhone".into(),
+            serde_json::Value::String(mobile.to_string()),
+        );
+    }
+    // Written even when empty: a cleared collection has to reach the server,
+    // or a number the user deleted lives on in Outlook forever.
+    body.insert("homePhones".into(), serde_json::Value::Array(home_phones));
+    body.insert(
+        "businessPhones".into(),
+        serde_json::Value::Array(business_phones),
+    );
     if let Some(bd) = birthday {
         // Graph wants ISO-8601 with timezone — date-only strings
         // are rejected.
@@ -786,7 +870,44 @@ fn contact_body(
     if let Some(addr) = other {
         body.insert("otherAddress".into(), address_to_json(addr));
     }
+    // `null` rather than omission, for the same reason the collections above
+    // are written empty: on a PATCH, an omitted field keeps its old value, so
+    // a title the user cleared would quietly come back.
+    body.insert("jobTitle".into(), string_or_null(job_title));
+    body.insert("department".into(), string_or_null(department));
+    // Graph gives a contact ONE website. A work-labelled one is the natural
+    // occupant of a field called `businessHomePage`; failing that the first
+    // URL goes, so a contact with a single personal site still has it stored.
+    let website = urls
+        .iter()
+        .filter(|u| !u.value.is_empty())
+        .find(|u| {
+            matches!(
+                u.label.as_deref().map(str::trim),
+                Some("work") | Some("business")
+            )
+        })
+        .or_else(|| urls.iter().find(|u| !u.value.is_empty()));
+    if urls.len() > 1 {
+        tracing::warn!(
+            "Outlook keeps one website per contact; {} further URL(s) were not written",
+            urls.len() - 1,
+        );
+    }
+    body.insert(
+        "businessHomePage".into(),
+        string_or_null(website.map(|u| u.value.as_str())),
+    );
     serde_json::Value::Object(body)
+}
+
+/// A present value as a JSON string, an absent one as JSON `null` — the
+/// difference between "leave this field alone" and "clear it" on a PATCH.
+fn string_or_null(value: Option<&str>) -> serde_json::Value {
+    match value.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(text) => serde_json::Value::String(text.to_string()),
+        None => serde_json::Value::Null,
+    }
 }
 
 /// Serialise a single cal-core `ContactAddress` into Graph's
@@ -888,6 +1009,15 @@ pub struct ContactEntry {
     pub birthday: Option<String>,
     #[serde(default, rename = "personalNotes")]
     pub personal_notes: Option<String>,
+    #[serde(default, rename = "jobTitle")]
+    pub job_title: Option<String>,
+    #[serde(default)]
+    pub department: Option<String>,
+    /// Outlook's single website slot. Graph has no general URL
+    /// collection, so this is the one web address a contact can
+    /// carry — Aperio surfaces it as a `work`-labelled URL.
+    #[serde(default, rename = "businessHomePage")]
+    pub business_home_page: Option<String>,
     /// Present when the row was returned by `/me/contacts` rather
     /// than a folder-scoped endpoint — lets us route the result
     /// back into the right `list_id` on the cal-core side.
@@ -974,6 +1104,27 @@ pub struct ScoredEmailAddress {
 pub struct PersonPhone {
     #[serde(default)]
     pub number: Option<String>,
+    /// Graph's `phoneType`: `home`, `business`, `mobile`, `other`,
+    /// `assistant`, `homeFax`, `businessFax`, `otherFax`, `pager`,
+    /// `radio`. Named `kind` here because `type` is a keyword.
+    #[serde(default, rename = "type")]
+    pub kind: Option<String>,
+}
+
+/// A Graph `phoneType` as the label Aperio speaks. Unknown members of the
+/// enum keep their own name rather than becoming nothing — a number filed
+/// under `pager` says "pager", not silence.
+fn person_phone_label(kind: Option<&str>) -> Option<String> {
+    let kind = kind?.trim();
+    if kind.is_empty() {
+        return None;
+    }
+    let label = match kind {
+        "business" => "work",
+        "homeFax" | "businessFax" | "otherFax" => "fax",
+        other => other,
+    };
+    Some(label.to_ascii_lowercase())
 }
 
 #[cfg(test)]
@@ -983,6 +1134,9 @@ mod tests {
     #[test]
     fn map_contact_collects_every_phone_slot() {
         let entry = ContactEntry {
+            job_title: None,
+            department: None,
+            business_home_page: None,
             id: "AAA".into(),
             display_name: Some("Anna Beispiel".into()),
             given_name: Some("Anna".into()),
@@ -1045,6 +1199,9 @@ mod tests {
     #[test]
     fn map_contact_falls_back_to_email_when_names_empty() {
         let entry = ContactEntry {
+            job_title: None,
+            department: None,
+            business_home_page: None,
             id: "BBB".into(),
             display_name: Some("".into()),
             given_name: None,
@@ -1096,6 +1253,7 @@ mod tests {
                 address: Some("bob@contoso.com".into()),
             }]),
             phones: Some(vec![PersonPhone {
+                kind: None,
                 number: Some("+49 30 7777".into()),
             }]),
         };
@@ -1109,17 +1267,33 @@ mod tests {
     }
 
     #[test]
-    fn new_contact_to_body_splits_phones_across_outlook_slots() {
+    fn the_label_picks_the_outlook_collection_not_the_position() {
         let new = NewContact {
+            urls: vec![cal_core::ContactValue {
+                value: "https://beispiel.example".into(),
+                label: None,
+            }],
+            anniversary: None,
+            job_title: Some("Werkstattleiterin".into()),
+            department: Some("Technik".into()),
             display_name: "Anna".into(),
             given_name: Some("Anna".into()),
             family_name: Some("Beispiel".into()),
             organization: None,
             emails: vec!["anna@example.com".into()],
             phone_numbers: vec![
-                "+49 30 1111".into(),
-                "+49 30 2222".into(),
-                "+49 170 3333".into(),
+                cal_core::ContactValue {
+                    value: "+49 30 1111".into(),
+                    label: Some("work".into()),
+                },
+                cal_core::ContactValue {
+                    value: "+49 30 2222".into(),
+                    label: Some("home".into()),
+                },
+                cal_core::ContactValue {
+                    value: "+49 170 3333".into(),
+                    label: Some("mobile".into()),
+                },
             ],
             birthday: NaiveDate::from_ymd_opt(1990, 6, 15),
             notes: None,
@@ -1136,10 +1310,16 @@ mod tests {
         };
         let body = new_contact_to_body(&new);
         assert_eq!(body["displayName"], "Anna");
-        assert_eq!(body["mobilePhone"], "+49 30 1111");
-        assert_eq!(body["businessPhones"][0], "+49 30 2222");
-        assert_eq!(body["businessPhones"][1], "+49 170 3333");
+        // Each number lands in the collection its label names, wherever it sat
+        // in the list. Positionally, the work number would have become the
+        // mobile one and the private number a business number.
+        assert_eq!(body["mobilePhone"], "+49 170 3333");
+        assert_eq!(body["homePhones"][0], "+49 30 2222");
+        assert_eq!(body["businessPhones"][0], "+49 30 1111");
         assert_eq!(body["emailAddresses"][0]["address"], "anna@example.com");
+        assert_eq!(body["jobTitle"], "Werkstattleiterin");
+        assert_eq!(body["department"], "Technik");
+        assert_eq!(body["businessHomePage"], "https://beispiel.example");
         assert_eq!(body["birthday"], "1990-06-15T00:00:00Z");
         assert_eq!(body["homeAddress"]["street"], "Hauptstraße 1");
         assert_eq!(body["homeAddress"]["postalCode"], "10115");
