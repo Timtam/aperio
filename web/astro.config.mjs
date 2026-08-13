@@ -90,6 +90,7 @@ export default defineConfig({
               translations: { de: 'Referenz' },
               items: [
                 { label: 'Mobile app', translations: { de: 'Mobile App' }, slug: 'guides/mobile' },
+                { label: 'Contacts', translations: { de: 'Kontakte' }, slug: 'guides/kontakte' },
                 { label: 'Keyboard Shortcuts', translations: { de: 'Tastaturkürzel' }, slug: 'guides/tastaturkuerzel' },
                 { label: 'Accessibility', translations: { de: 'Barrierefreiheit' }, slug: 'guides/barrierefreiheit' },
                 { label: 'Troubleshooting & Logs', translations: { de: 'Fehlersuche & Protokolle' }, slug: 'guides/troubleshooting' },

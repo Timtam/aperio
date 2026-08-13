@@ -37,10 +37,11 @@ The **Tutorial** builds on itself – it is best read in order:
 8. [Synchronization](/guides/tutorial/08-synchronisation/)
 9. [Keyboard Shortcuts](/guides/tutorial/09-tastaturkuerzel/)
 
-In the **Reference** section you will find the
-[full shortcut overview](/guides/tastaturkuerzel/) and a dedicated page on
-[accessibility](/guides/barrierefreiheit/) with tips for NVDA, JAWS, VoiceOver and
-Narrator.
+In the **Reference** section you will find [Contacts](/guides/kontakte/) —
+address books, labelled phone numbers and email addresses, and the birthday
+calendars — the [full shortcut overview](/guides/tastaturkuerzel/), and a
+dedicated page on [accessibility](/guides/barrierefreiheit/) with tips for
+NVDA, JAWS, VoiceOver and Narrator.
 
 > **Screen-reader note:** Every chapter contains a box like this one. It
 > describes how Aperio behaves with a screen reader and what to look out
