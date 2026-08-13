@@ -100,16 +100,3 @@ export function knownLabel(label: string | null | undefined): KnownContactLabel 
   }
   return LABEL_ALIASES[key] ?? null;
 }
-
-/** How a channel reads out: the label first, then the value, because a screen
- *  reader user navigating a list of four numbers needs to know which one this
- *  is before hearing the digits. `translate` supplies the localised word for a
- *  known label; a custom label is spoken as the user wrote it. */
-export function describeContactValue(
-  entry: ContactValue,
-  translate: (label: KnownContactLabel) => string,
-): string {
-  const known = knownLabel(entry.label);
-  const word = known ? translate(known) : entry.label?.trim();
-  return word ? `${word}: ${entry.value}` : entry.value;
-}

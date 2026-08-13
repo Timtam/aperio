@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  describeContactValue,
   fromContactValues,
   knownLabel,
   primaryChannelValue,
@@ -60,21 +59,5 @@ describe('contact channels', () => {
     );
     expect(primaryChannelValue([])).toBeNull();
     expect(primaryChannelValue(undefined)).toBeNull();
-  });
-
-  it('reads the label out before the value', () => {
-    // Which of four numbers this is has to arrive before the digits do.
-    const translate = (label: string) => ({ mobile: 'Mobil' })[label] ?? label;
-    expect(
-      describeContactValue({ value: '+49 170 1', label: 'mobile' }, translate),
-    ).toBe('Mobil: +49 170 1');
-    // A custom label is spoken as the user wrote it …
-    expect(
-      describeContactValue({ value: '+49 30 1', label: 'Ferienhaus' }, translate),
-    ).toBe('Ferienhaus: +49 30 1');
-    // … and an unlabelled value is just the value, not a dangling colon.
-    expect(describeContactValue({ value: 'a@b.example', label: null }, translate)).toBe(
-      'a@b.example',
-    );
   });
 });
