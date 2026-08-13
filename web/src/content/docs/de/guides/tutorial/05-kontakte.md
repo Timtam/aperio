@@ -96,11 +96,11 @@ Konto übersetzt es beim Hinausschreiben:
 - **CardDAV / iCloud / Nextcloud** und **Google** behalten, was du getippt
   hast. Eine eigene Bezeichnung wie *Ferienhaus* übersteht den Umlauf
   unverändert.
-- **Exchange** hat ein festes Vokabular und feste Plätze – vier Telefonnummern
-  und drei E-Mail-Adressen pro Kontakt. Eine Bezeichnung, für die es kein Wort
-  hat, rutscht auf den nächsten freien Platz: **die Nummer reist immer mit, nur
-  das Wort kann ersetzt werden.** Eine fünfte Nummer lässt sich gar nicht
-  ablegen.
+- **Exchange** hat ein festes Vokabular und feste Plätze: vier Sprechnummern,
+  eine Faxnummer und drei E-Mail-Adressen pro Kontakt. Eine Bezeichnung, für
+  die es kein Wort hat, rutscht auf den nächsten freien Sprech-Platz – **die
+  Nummer reist immer mit, nur das Wort kann ersetzt werden.** Eine fünfte
+  Sprechnummer lässt sich gar nicht ablegen.
 - **Outlook / Microsoft 365** hat drei Telefon-Sammlungen – eine Mobilnummer,
   private Nummern, geschäftliche Nummern. Eine zweite Nummer mit der
   Bezeichnung *mobil* landet bei den geschäftlichen, statt die erste zu

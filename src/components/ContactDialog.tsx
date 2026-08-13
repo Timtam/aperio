@@ -1069,9 +1069,11 @@ const CHANNEL_KINDS = {
     empty: 'dialogs.contact.emailsEmpty',
     add: 'dialogs.contact.emailAdd',
     value: 'dialogs.contact.emailValue',
+    valueFor: 'dialogs.contact.emailValueFor',
+    removed: 'dialogs.contact.emailRemoved',
     remove: 'dialogs.contact.emailRemove',
     removeAria: 'dialogs.contact.emailRemoveAria',
-    inputType: 'email',
+    inputMode: 'email',
     autoComplete: 'off',
     defaultLabel: 'home',
   },
@@ -1080,9 +1082,11 @@ const CHANNEL_KINDS = {
     empty: 'dialogs.contact.phonesEmpty',
     add: 'dialogs.contact.phoneAdd',
     value: 'dialogs.contact.phoneValue',
+    valueFor: 'dialogs.contact.phoneValueFor',
+    removed: 'dialogs.contact.phoneRemoved',
     remove: 'dialogs.contact.phoneRemove',
     removeAria: 'dialogs.contact.phoneRemoveAria',
-    inputType: 'tel',
+    inputMode: 'tel',
     autoComplete: 'off',
     defaultLabel: 'mobile',
   },
@@ -1091,9 +1095,11 @@ const CHANNEL_KINDS = {
     empty: 'dialogs.contact.urlsEmpty',
     add: 'dialogs.contact.urlAdd',
     value: 'dialogs.contact.urlValue',
+    valueFor: 'dialogs.contact.urlValueFor',
+    removed: 'dialogs.contact.urlRemoved',
     remove: 'dialogs.contact.urlRemove',
     removeAria: 'dialogs.contact.urlRemoveAria',
-    inputType: 'url',
+    inputMode: 'url',
     autoComplete: 'off',
     defaultLabel: 'home',
   },
@@ -1121,7 +1127,30 @@ function ChannelFieldset({
   onChange: (next: ContactValue[]) => void;
 }) {
   const { t } = useTranslation();
+  const announce = useAnnouncer();
   const spec = CHANNEL_KINDS[kind];
+  const addRef = useRef<HTMLButtonElement | null>(null);
+
+  /**
+   * Take a row out, then put focus somewhere real.
+   *
+   * Remove lives inside the row it deletes, so activating it unmounts the
+   * element focus is standing on. Focus falls to `<body>`, NVDA drops out of
+   * the dialog's application mode, and Escape and Tab go dead while the dialog
+   * is still open — the failure `Modal`'s own comment says its last-resort
+   * recovery frame cannot fix, and that call sites must handle. The rAF runs
+   * after the removal commits and before that frame, so this informed repark
+   * wins. Add is always mounted, which makes it the one safe landing spot.
+   *
+   * The announcement is the other half: nothing else tells a screen-reader
+   * user the row is gone.
+   */
+  const removeAt = (idx: number) => {
+    onChange(values.filter((_, i) => i !== idx));
+    announce(t(spec.removed, { index: idx + 1 }));
+    requestAnimationFrame(() => addRef.current?.focus({ preventScroll: true }));
+  };
+
   return (
     <fieldset className="form__field">
       <legend className="form__label">{t(spec.legend)}</legend>
@@ -1139,13 +1168,14 @@ function ChannelFieldset({
               onChange={(next) =>
                 onChange(values.map((v, i) => (i === idx ? next : v)))
               }
-              onRemove={() => onChange(values.filter((_, i) => i !== idx))}
+              onRemove={() => removeAt(idx)}
             />
           ))}
         </ul>
       )}
       {!viewOnly && (
         <button
+          ref={addRef}
           type="button"
           className="form__action"
           onClick={() =>
@@ -1183,7 +1213,25 @@ function ChannelRow({
   const { t } = useTranslation();
   const spec = CHANNEL_KINDS[kind];
   const known = knownLabel(entry.label);
-  const isCustom = entry.label !== null && known === null;
+
+  /**
+   * Whether the free-text field is showing, held as STATE rather than derived
+   * from the label.
+   *
+   * Derived, it had two failures. Typing "Faxgerät" into it flipped `known` to
+   * `fax` after three keystrokes: the input the caret was in unmounted
+   * mid-word, the rest of the typing went nowhere, focus fell to `<body>`, and
+   * the label silently became the picker entry "Fax". And on any row that
+   * already carried a known label, picking "Custom…" seeded the field with
+   * that same known word, so the mode never engaged — the option was inert.
+   *
+   * The mobile picker never had either bug because it gates on its own draft
+   * choice; this is the same arrangement.
+   */
+  const [customMode, setCustomMode] = useState(
+    entry.label !== null && known === null,
+  );
+  const isCustom = customMode;
   return (
     <li className="form__address-row">
       <div className="form__address-row-header">
@@ -1195,12 +1243,14 @@ function ChannelRow({
             value={isCustom ? '__custom__' : (known ?? '__none__')}
             onChange={(e) => {
               const next = e.target.value;
+              setCustomMode(next === '__custom__');
               if (next === '__none__') {
                 onChange({ ...entry, label: null });
               } else if (next === '__custom__') {
-                // Seed the free-text field with the word already shown, so
-                // switching to custom doesn't blank what the user can see.
-                onChange({ ...entry, label: entry.label ?? '' });
+                // Start from the word already on the row when it is the user's
+                // own; a known label is a slot name, not something to seed a
+                // free-text field with.
+                onChange({ ...entry, label: known ? '' : (entry.label ?? '') });
               } else {
                 onChange({ ...entry, label: next });
               }
@@ -1246,9 +1296,22 @@ function ChannelRow({
         </label>
       )}
       <label className="form__field">
-        <span className="form__label">{t(spec.value)}</span>
+        {/* The row number belongs in the name: three phone fields all called
+            "Phone number" leave a screen-reader user with no way to tell
+            which one they have tabbed back into. Same shape the mobile
+            editor uses. */}
+        <span className="form__label">
+          {t(spec.valueFor, { index: index + 1 })}
+        </span>
         <input
-          type={spec.inputType}
+          // Deliberately `text` with an inputMode hint rather than
+          // type="url"/"email". Those types make the browser refuse to submit
+          // the whole form for a website typed without a scheme — with no
+          // error the dialog controls, so a screen-reader user hears Save do
+          // nothing and cannot find out why. The mobile editor accepts the
+          // same input, and the two must agree on what is savable.
+          type="text"
+          inputMode={spec.inputMode}
           value={entry.value}
           onChange={(e) => onChange({ ...entry, value: e.target.value })}
           readOnly={viewOnly}

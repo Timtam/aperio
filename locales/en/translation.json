@@ -409,6 +409,12 @@
       "finish": "Finish"
     },
     "contact": {
+      "emailValueFor": "Email address {{index}}",
+      "phoneValueFor": "Phone number {{index}}",
+      "urlValueFor": "Website {{index}}",
+      "emailRemoved": "Email address {{index}} removed.",
+      "phoneRemoved": "Phone number {{index}} removed.",
+      "urlRemoved": "Website {{index}} removed.",
       "anniversaryAdd": "Add anniversary",
       "channelLabelField": "Label",
       "emailsEmpty": "No email addresses on file.",

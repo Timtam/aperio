@@ -116,16 +116,23 @@ records the same idea in its own way, and the adapter translates at its edge:
 |---|---|---|
 | CardDAV | `TYPE` parameter; Apple's grouped property + `X-ABLabel` for custom ones | yes |
 | Google People | `type` on each `emailAddresses`/`phoneNumbers`/`urls` entry | yes |
-| Exchange (EWS) | the entry `Key` (`MobilePhone`, `HomePhone`, …) | no — four phone slots, three email slots |
+| Exchange (EWS) | the entry `Key` (`MobilePhone`, `HomePhone`, …) | no — four voice slots + fax, three email slots |
 | Microsoft Graph | the collection the value sits in (`mobilePhone`, `homePhones`, `businessPhones`) | no — and `mobilePhone` holds exactly one |
 | Local store | stored verbatim as JSON | yes |
 
-Two rules follow from that asymmetry:
+Three rules follow from that asymmetry:
 
 - **The value always travels, the word may not.** On a fixed-slot provider,
   a label with no slot of its own (or one already taken) falls back to the
   next free slot rather than dropping the value. What can't be written at
-  all is logged, never discarded silently.
+  all is logged, never discarded silently. The fallback deliberately skips
+  Exchange's fax keys: a voice number filed under `HomeFax` would be dialled
+  as a fax by every other client.
+- **A masked write replaces, so read before you write.** Google's
+  `updatePersonFields` clears any listed field the body omits. Aperio models
+  one dated entry (the anniversary) but Google lets a contact carry several,
+  so `update_person` re-reads `events` and passes the others back through —
+  without that, renaming a contact deleted every custom date on it.
 - **A bare string is still a legal channel.** Everything stored before
   labels existed is a plain `"max@example.com"` on the wire and in the
   cache, so `ContactValue` deserialises both shapes and the frontends

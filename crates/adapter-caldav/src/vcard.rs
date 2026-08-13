@@ -518,14 +518,22 @@ fn channel_label(head: &str) -> Option<String> {
 
 /// Apple wraps the standard labels it writes into `X-ABLabel` in a marker
 /// sandwich — `_$!<Home>!$_`. A label the user typed themselves arrives bare.
-/// Both come out as the plain word.
+///
+/// A word out of Apple's own vocabulary comes back lower-cased, because that
+/// is the spelling every adapter matches on. Anything else is returned exactly
+/// as written: it is the user's own noun, and "Ferienhaus" read back as
+/// "ferienhaus" is their capitalisation quietly deleted — on the next save it
+/// would go to the server that way too, and Google (which keeps the same word
+/// verbatim) would disagree with CardDAV about the same contact.
 fn decode_ab_label(raw: &str) -> String {
     let trimmed = raw.trim();
-    let inner = trimmed
+    match trimmed
         .strip_prefix("_$!<")
         .and_then(|r| r.strip_suffix(">!$_"))
-        .unwrap_or(trimmed);
-    inner.trim().to_ascii_lowercase()
+    {
+        Some(marked) => marked.trim().to_ascii_lowercase(),
+        None => trimmed.to_string(),
+    }
 }
 
 /// Fold a vCard TYPE value onto one of the canonical labels
@@ -1524,7 +1532,7 @@ mod tests {
         assert_eq!(parsed.emails[0].label.as_deref(), Some("home"));
         // … and a label the user typed themselves survives verbatim.
         assert_eq!(parsed.phone_numbers[0].value, "+49 170 1234567");
-        assert_eq!(parsed.phone_numbers[0].label.as_deref(), Some("ferienhaus"));
+        assert_eq!(parsed.phone_numbers[0].label.as_deref(), Some("Ferienhaus"));
     }
 
     #[test]
@@ -1587,7 +1595,9 @@ mod tests {
         let card = build_vcard("uid-2", &contact);
         let back = parse(&card);
         assert_eq!(back.phone_numbers[0].label.as_deref(), Some("mobile"));
-        assert_eq!(back.phone_numbers[1].label.as_deref(), Some("werkstatt"));
+        // The user's own word survives with its capitalisation: it is a noun
+        // they typed, not a slot name Aperio matches on.
+        assert_eq!(back.phone_numbers[1].label.as_deref(), Some("Werkstatt"));
         assert_eq!(back.anniversary, contact.anniversary);
         assert_eq!(back.job_title.as_deref(), Some("Werkstattleiter"));
         assert_eq!(back.department.as_deref(), Some("Technik"));

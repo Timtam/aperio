@@ -1025,9 +1025,15 @@ function ChannelSection({
         ref={focus.registerAdd}
         accessibilityRole="button"
         accessibilityLabel={t(spec.add)}
-        onPress={() =>
-          onChange([...values, { value: '', label: spec.defaultLabel }])
-        }
+        onPress={() => {
+          // `onAdd` is what arms the hook's pending target; without it the
+          // count-keyed effect is a no-op, the cursor stays on the button and
+          // nothing is spoken — while "Add address" right below this list does
+          // move into its new row. Two lists in one screen behaving
+          // differently is the bug.
+          focus.onAdd();
+          onChange([...values, { value: '', label: spec.defaultLabel }]);
+        }}
         style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}
       >
         <Text style={styles.addButtonText}>{t(spec.add)}</Text>

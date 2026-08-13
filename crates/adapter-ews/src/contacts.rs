@@ -1548,12 +1548,7 @@ pub fn contact_to_update_field_xml(contact: &Contact) -> (String, String) {
     // who removed a number (or re-labelled one) does not leave a stale entry
     // behind on the server.
     let assigned = assign_phone_keys(&contact.phone_numbers);
-    for key in [
-        "MobilePhone",
-        "HomePhone",
-        "BusinessPhone",
-        "OtherTelephone",
-    ] {
+    for key in PHONE_KEYS {
         match assigned.iter().find(|(k, _)| *k == key) {
             Some((_, phone)) if !phone.value.is_empty() => {
                 push_set_indexed(
@@ -1652,6 +1647,25 @@ fn label_to_phone_key(label: &str) -> Option<&'static str> {
 
 /// Pair each phone with the Exchange key it should occupy.
 ///
+/// Every phone key Aperio writes, in the order it hands out free slots.
+///
+/// This is deliberately ONE list rather than a constant inside the assignment
+/// plus a literal at each write site: a key that can be assigned but is not
+/// swept leaves a stale number on the server, and a key that is swept but
+/// never assigned quietly drops one. The fax keys are here because the read
+/// side already surfaces `BusinessFax` / `HomeFax` as a `fax` label — without
+/// them a fax number resolved to a key the assignment could not find, fell
+/// through to the first free voice slot, and became the contact's MOBILE
+/// number while the original entry stayed put on Exchange.
+const PHONE_KEYS: [&str; 6] = [
+    "MobilePhone",
+    "HomePhone",
+    "BusinessPhone",
+    "OtherTelephone",
+    "BusinessFax",
+    "HomeFax",
+];
+
 /// The LABEL chooses the slot — a number the user filed as "mobile" belongs in
 /// `MobilePhone`, wherever it happens to sit in the list. That is the whole
 /// point of labelling the model: before this, the key came from the position,
@@ -1660,8 +1674,10 @@ fn label_to_phone_key(label: &str) -> Option<&'static str> {
 ///
 /// Where the wanted key is already taken (two numbers both filed as "home") or
 /// the label has no Exchange key at all ("Ferienhaus"), the number takes the
-/// next free slot. Exchange has a fixed, small vocabulary, so the WORD is what
-/// gets lost — never the number, as long as a slot remains.
+/// next free VOICE slot. Exchange has a fixed, small vocabulary, so the WORD
+/// is what gets lost — never the number, as long as a slot remains. A fax slot
+/// is never handed out as a fallback: a voice number filed under `HomeFax`
+/// would be dialled as a fax by every other client.
 ///
 /// Numbers past the last free slot cannot be written at all. Those are logged
 /// rather than dropped in silence, and the list's declared
@@ -1669,12 +1685,9 @@ fn label_to_phone_key(label: &str) -> Option<&'static str> {
 fn assign_phone_keys(
     phones: &[cal_core::ContactValue],
 ) -> Vec<(&'static str, &cal_core::ContactValue)> {
-    const KEYS: [&str; 4] = [
-        "MobilePhone",
-        "HomePhone",
-        "BusinessPhone",
-        "OtherTelephone",
-    ];
+    const KEYS: [&str; 6] = PHONE_KEYS;
+    // The fax keys sit at the end and are claimed by name only.
+    const VOICE_SLOTS: usize = 4;
     let mut taken = [false; KEYS.len()];
     let mut out: Vec<(&'static str, &cal_core::ContactValue)> = Vec::new();
 
@@ -1697,17 +1710,17 @@ fn assign_phone_keys(
         }
     }
 
-    // Second pass: fill the gaps in Exchange's own order.
+    // Second pass: fill the gaps in Exchange's own order, voice slots only.
     for phone in unplaced {
-        match taken.iter().position(|t| !t) {
+        match taken[..VOICE_SLOTS].iter().position(|t| !t) {
             Some(idx) => {
                 taken[idx] = true;
                 out.push((KEYS[idx], phone));
             }
             None => {
                 tracing::warn!(
-                    "Exchange holds {} phone numbers per contact; \"{}\" has no slot left and was not written",
-                    KEYS.len(),
+                    "Exchange holds {} voice numbers per contact; \"{}\" has no slot left and was not written",
+                    VOICE_SLOTS,
                     phone.value,
                 );
             }
@@ -2525,6 +2538,39 @@ mod tests {
         assert!(values.contains(&"+49 170 333"));
         // The unambiguous claim wins the slot it asked for.
         assert_eq!(assigned[0], ("HomePhone", &phones[0]));
+    }
+
+    #[test]
+    fn a_fax_number_lands_in_a_fax_slot() {
+        // `BusinessFax` used to be a key the assignment could not find, so a
+        // fax number fell through to the first free VOICE slot and became the
+        // contact's mobile number — while the original fax entry stayed on
+        // the server, because the delete sweep never covered that key either.
+        let phones = vec![
+            cal_core::ContactValue {
+                value: "+49 30 111".into(),
+                label: Some("work".into()),
+            },
+            cal_core::ContactValue {
+                value: "+49 30 999".into(),
+                label: Some("fax".into()),
+            },
+        ];
+        let assigned = assign_phone_keys(&phones);
+        assert_eq!(assigned[0], ("BusinessPhone", &phones[0]));
+        assert_eq!(assigned[1], ("BusinessFax", &phones[1]));
+    }
+
+    #[test]
+    fn an_unplaceable_number_never_takes_a_fax_slot() {
+        // A voice number filed under HomeFax would be dialled as a fax by
+        // every other client, so the fallback pass stops at the voice slots.
+        let phones: Vec<cal_core::ContactValue> = (0..6)
+            .map(|i| cal_core::ContactValue::bare(format!("+49 30 {i}")))
+            .collect();
+        let assigned = assign_phone_keys(&phones);
+        assert_eq!(assigned.len(), 4);
+        assert!(assigned.iter().all(|(key, _)| !key.contains("Fax")));
     }
 
     #[test]

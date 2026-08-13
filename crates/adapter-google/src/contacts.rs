@@ -723,9 +723,72 @@ async fn update_person(state: &ApiState, contact: Contact) -> GoogleResult<Conta
         urlencoding(UPDATE_PERSON_FIELDS),
         urlencoding(PERSON_FIELDS),
     );
-    let body = contact_to_person_body(&contact);
+    // `events` is in the update mask, and a masked field is REPLACED whole.
+    // Aperio models one dated entry — the anniversary — but Google Contacts
+    // lets a person carry any number of them, and those others have nowhere
+    // in the model to survive a round-trip. So they are fetched back right
+    // before the write and passed through untouched; without this, renaming a
+    // contact would delete every custom date they had.
+    let keep = other_events(state, &contact.id).await;
+    let body = contact_to_person_body(&contact, &keep);
     let person: Person = patch_absolute(state, &url, &body).await?;
     Ok(person_to_contact(person, GOOGLE_CONTACT_LIST_ID))
+}
+
+/// The contact's dated entries OTHER than the anniversary, as raw JSON ready
+/// to go back out. A failed read yields an empty list and a log line rather
+/// than an error: losing a secondary date is bad, refusing to save the edit
+/// the user actually made is worse.
+async fn other_events(state: &ApiState, contact_id: &str) -> Vec<serde_json::Value> {
+    let url = format!("{PEOPLE_API_BASE}/{contact_id}?personFields=events");
+    let person: Person = match get_absolute(state, &url).await {
+        Ok(person) => person,
+        Err(err) => {
+            tracing::warn!(
+                %contact_id,
+                ?err,
+                "could not re-read google events before update; other dated \
+                 entries on this contact may be dropped",
+            );
+            return Vec::new();
+        }
+    };
+    person
+        .events
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|e| {
+            !e.type_
+                .as_deref()
+                .is_some_and(|t| t.eq_ignore_ascii_case("anniversary"))
+        })
+        .filter_map(|e| {
+            let date = e.date?;
+            let mut entry = serde_json::Map::new();
+            entry.insert("date".into(), google_date_parts(&date));
+            if let Some(kind) = e.type_.filter(|t| !t.is_empty()) {
+                entry.insert("type".into(), serde_json::Value::String(kind));
+            }
+            Some(serde_json::Value::Object(entry))
+        })
+        .collect()
+}
+
+/// A `PersonDate` back in the shape it arrived in. Missing components stay
+/// missing — Google allows a date with no year (a recurring day), and
+/// inventing one would change what the entry means.
+fn google_date_parts(date: &PersonDate) -> serde_json::Value {
+    let mut out = serde_json::Map::new();
+    for (key, value) in [
+        ("year", date.year),
+        ("month", date.month),
+        ("day", date.day),
+    ] {
+        if let Some(value) = value {
+            out.insert(key.into(), serde_json::Value::from(value));
+        }
+    }
+    serde_json::Value::Object(out)
 }
 
 // ── Internal: contact group CRUD ───────────────────────────────────────
@@ -1072,6 +1135,7 @@ fn group_to_contact(group: ContactGroup, members: Vec<GroupMember>, list_id: &st
 }
 
 fn new_contact_to_person_body(new: &NewContact) -> serde_json::Value {
+    // A contact being created has no other dated entries yet.
     person_body_from_fields(
         &new.display_name,
         new.given_name.as_deref(),
@@ -1086,11 +1150,15 @@ fn new_contact_to_person_body(new: &NewContact) -> serde_json::Value {
         new.anniversary,
         new.job_title.as_deref(),
         new.department.as_deref(),
+        &[],
         None,
     )
 }
 
-fn contact_to_person_body(contact: &Contact) -> serde_json::Value {
+fn contact_to_person_body(
+    contact: &Contact,
+    other_events: &[serde_json::Value],
+) -> serde_json::Value {
     person_body_from_fields(
         &contact.display_name,
         contact.given_name.as_deref(),
@@ -1105,6 +1173,7 @@ fn contact_to_person_body(contact: &Contact) -> serde_json::Value {
         contact.anniversary,
         contact.job_title.as_deref(),
         contact.department.as_deref(),
+        other_events,
         contact.etag.as_deref(),
     )
 }
@@ -1126,6 +1195,9 @@ fn person_body_from_fields(
     anniversary: Option<NaiveDate>,
     job_title: Option<&str>,
     department: Option<&str>,
+    // Dated entries Aperio does not model, read back from the server so the
+    // masked `events` replacement does not delete them.
+    other_events: &[serde_json::Value],
     etag: Option<&str>,
 ) -> serde_json::Value {
     let mut body = serde_json::Map::new();
@@ -1173,17 +1245,18 @@ fn person_body_from_fields(
     if !urls.is_empty() {
         body.insert("urls".into(), typed_channels(urls, "value"));
     }
+    // `events` is written even when there is no anniversary: it sits in the
+    // update mask, so leaving the key out clears the whole collection — and
+    // that is also how an anniversary the user deleted actually goes away.
+    // The entries Aperio does not model ride along unchanged.
+    let mut events: Vec<serde_json::Value> = other_events.to_vec();
     if let Some(anniversary) = anniversary {
-        // Google keeps the anniversary as a typed entry in `events`, beside
-        // whatever other dates the user has recorded.
-        body.insert(
-            "events".into(),
-            serde_json::json!([{
-                "type": "anniversary",
-                "date": google_date(anniversary),
-            }]),
-        );
+        events.push(serde_json::json!({
+            "type": "anniversary",
+            "date": google_date(anniversary),
+        }));
     }
+    body.insert("events".into(), serde_json::Value::Array(events));
     if let Some(bd) = birthday {
         body.insert(
             "birthdays".into(),
@@ -1590,7 +1663,7 @@ mod tests {
         assert_eq!(contact.job_title.as_deref(), Some("Werkstattleiterin"));
         assert_eq!(contact.department.as_deref(), Some("Technik"));
 
-        let body = contact_to_person_body(&contact);
+        let body = contact_to_person_body(&contact, &[]);
         assert_eq!(body["phoneNumbers"][0]["type"], "work");
         assert_eq!(body["phoneNumbers"][1]["type"], "Ferienhaus");
         assert_eq!(body["urls"][0]["value"], "https://beispiel.example");
@@ -1601,11 +1674,43 @@ mod tests {
     }
 
     #[test]
+    fn writing_an_anniversary_keeps_the_contact_s_other_dates() {
+        // `events` sits in the update mask, and a masked field is REPLACED
+        // whole — so a body carrying only the anniversary would delete every
+        // other dated entry the moment the user renamed the contact.
+        let mut contact = person_to_contact(person_fixture(), "list-1");
+        contact.anniversary = NaiveDate::from_ymd_opt(2014, 6, 21);
+        let keep = vec![serde_json::json!({
+            "type": "other",
+            "date": { "year": 2000, "month": 1, "day": 2 },
+        })];
+        let body = contact_to_person_body(&contact, &keep);
+        assert_eq!(body["events"].as_array().unwrap().len(), 2);
+        assert_eq!(body["events"][0]["type"], "other");
+        assert_eq!(body["events"][1]["type"], "anniversary");
+    }
+
+    #[test]
+    fn clearing_an_anniversary_still_reaches_google() {
+        // The other half: no anniversary must send an `events` key anyway,
+        // or the mask clears the collection and the passengers go with it.
+        let contact = person_to_contact(person_fixture(), "list-1");
+        assert!(contact.anniversary.is_none());
+        let keep = vec![serde_json::json!({
+            "type": "other",
+            "date": { "year": 2000, "month": 1, "day": 2 },
+        })];
+        let body = contact_to_person_body(&contact, &keep);
+        assert_eq!(body["events"].as_array().unwrap().len(), 1);
+        assert_eq!(body["events"][0]["type"], "other");
+    }
+
+    #[test]
     fn an_unlabelled_channel_sends_no_type_at_all() {
         // An empty `type` comes back from Google verbatim and then reads as a
         // label with no name; absence is the honest wire shape.
         let contact = person_to_contact(person_fixture(), "list-1");
-        let body = contact_to_person_body(&contact);
+        let body = contact_to_person_body(&contact, &[]);
         assert_eq!(body["emailAddresses"][0]["value"], "anna@example.com");
         assert!(body["emailAddresses"][0].get("type").is_none());
     }
@@ -1817,28 +1922,31 @@ mod tests {
     #[test]
     fn person_body_for_update_includes_etag() {
         let now = Utc::now();
-        let body = contact_to_person_body(&Contact {
-            urls: Vec::new(),
-            anniversary: None,
-            job_title: None,
-            department: None,
-            id: "people/c123".into(),
-            list_id: GOOGLE_CONTACT_LIST_ID.into(),
-            display_name: "Max".into(),
-            given_name: Some("Max".into()),
-            family_name: None,
-            organization: None,
-            emails: vec!["max@example.com".into()],
-            phone_numbers: Vec::new(),
-            birthday: None,
-            notes: None,
-            members: None,
-            has_photo: false,
-            addresses: Vec::new(),
-            created_at: now,
-            updated_at: now,
-            etag: Some("etag-1".into()),
-        });
+        let body = contact_to_person_body(
+            &Contact {
+                urls: Vec::new(),
+                anniversary: None,
+                job_title: None,
+                department: None,
+                id: "people/c123".into(),
+                list_id: GOOGLE_CONTACT_LIST_ID.into(),
+                display_name: "Max".into(),
+                given_name: Some("Max".into()),
+                family_name: None,
+                organization: None,
+                emails: vec!["max@example.com".into()],
+                phone_numbers: Vec::new(),
+                birthday: None,
+                notes: None,
+                members: None,
+                has_photo: false,
+                addresses: Vec::new(),
+                created_at: now,
+                updated_at: now,
+                etag: Some("etag-1".into()),
+            },
+            &[],
+        );
         let s = serde_json::to_string(&body).unwrap();
         assert!(s.contains("\"etag\":\"etag-1\""));
     }

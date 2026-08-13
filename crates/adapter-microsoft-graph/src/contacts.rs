@@ -809,12 +809,11 @@ fn contact_body(
             _ => business_phones.push(number()),
         }
     }
-    if let Some(mobile) = mobile {
-        body.insert(
-            "mobilePhone".into(),
-            serde_json::Value::String(mobile.to_string()),
-        );
-    }
+    // `null` rather than omission when there is none, for the same reason the
+    // collections below are written empty: on a PATCH an absent property keeps
+    // its stored value, so a mobile number the user deleted would come back on
+    // the very next read.
+    body.insert("mobilePhone".into(), string_or_null(mobile));
     // Written even when empty: a cleared collection has to reach the server,
     // or a number the user deleted lives on in Outlook forever.
     body.insert("homePhones".into(), serde_json::Value::Array(home_phones));
@@ -861,14 +860,22 @@ fn contact_body(
             _ => other.get_or_insert(addr),
         };
     }
-    if let Some(addr) = home {
-        body.insert("homeAddress".into(), address_to_json(addr));
-    }
-    if let Some(addr) = business {
-        body.insert("businessAddress".into(), address_to_json(addr));
-    }
-    if let Some(addr) = other {
-        body.insert("otherAddress".into(), address_to_json(addr));
+    // Written even when empty — an address the user deleted has to reach the
+    // server. This became reachable with this change: before it, the read side
+    // never asked for the address properties, so a Graph contact always
+    // arrived with none and there was nothing to delete.
+    for (key, slot) in [
+        ("homeAddress", home),
+        ("businessAddress", business),
+        ("otherAddress", other),
+    ] {
+        body.insert(
+            key.into(),
+            match slot {
+                Some(addr) => address_to_json(addr),
+                None => serde_json::Value::Null,
+            },
+        );
     }
     // `null` rather than omission, for the same reason the collections above
     // are written empty: on a PATCH, an omitted field keeps its old value, so
@@ -1267,6 +1274,42 @@ mod tests {
     }
 
     #[test]
+    fn a_cleared_field_travels_as_null_not_as_silence() {
+        // This body is also the PATCH body, and Graph's PATCH is a merge: a
+        // property left out keeps its stored value. A mobile number or a
+        // postal address the user deleted would come straight back on the
+        // next read — and there would be no way to remove either at all.
+        let new = NewContact {
+            urls: Vec::new(),
+            anniversary: None,
+            job_title: None,
+            department: None,
+            display_name: "Anna".into(),
+            given_name: None,
+            family_name: None,
+            organization: None,
+            emails: Vec::new(),
+            phone_numbers: vec![cal_core::ContactValue {
+                value: "+49 30 1111".into(),
+                label: Some("work".into()),
+            }],
+            birthday: None,
+            notes: None,
+            addresses: Vec::new(),
+            members: None,
+            photo: None,
+        };
+        let body = new_contact_to_body(&new);
+        assert!(body["mobilePhone"].is_null());
+        assert!(body["homeAddress"].is_null());
+        assert!(body["businessAddress"].is_null());
+        assert!(body["otherAddress"].is_null());
+        assert!(body["businessHomePage"].is_null());
+        // The number that IS set still travels.
+        assert_eq!(body["businessPhones"][0], "+49 30 1111");
+    }
+
+    #[test]
     fn the_label_picks_the_outlook_collection_not_the_position() {
         let new = NewContact {
             urls: vec![cal_core::ContactValue {
@@ -1323,10 +1366,12 @@ mod tests {
         assert_eq!(body["birthday"], "1990-06-15T00:00:00Z");
         assert_eq!(body["homeAddress"]["street"], "Hauptstraße 1");
         assert_eq!(body["homeAddress"]["postalCode"], "10115");
-        // No work / other addresses on this fixture; serde
-        // `skip_serializing_if` keeps the keys out entirely.
-        assert!(body.get("businessAddress").is_none());
-        assert!(body.get("otherAddress").is_none());
+        // No work / other address on this fixture. The keys are still sent,
+        // as JSON null: this body is also the PATCH body, and an omitted
+        // property keeps whatever the server already holds — so silence would
+        // mean an address the user deleted could never be removed.
+        assert!(body["businessAddress"].is_null());
+        assert!(body["otherAddress"].is_null());
     }
 
     #[test]

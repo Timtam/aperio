@@ -409,6 +409,12 @@
       "finish": "Fertig"
     },
     "contact": {
+      "emailValueFor": "E-Mail-Adresse {{index}}",
+      "phoneValueFor": "Telefonnummer {{index}}",
+      "urlValueFor": "Webseite {{index}}",
+      "emailRemoved": "E-Mail-Adresse {{index}} entfernt.",
+      "phoneRemoved": "Telefonnummer {{index}} entfernt.",
+      "urlRemoved": "Webseite {{index}} entfernt.",
       "anniversaryAdd": "Jahrestag hinzufügen",
       "channelLabelField": "Bezeichnung",
       "emailsEmpty": "Noch keine E-Mail-Adressen hinterlegt.",

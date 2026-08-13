@@ -88,10 +88,11 @@ way out:
 
 - **CardDAV / iCloud / Nextcloud** and **Google** keep whatever you typed.
   A custom label like *Holiday home* survives a round trip unchanged.
-- **Exchange** has a fixed vocabulary and a fixed number of slots — four phone
-  numbers and three email addresses per contact. A label it has no word for
-  takes the next free slot: **the number always travels, only the word may be
-  replaced**. A fifth number cannot be stored at all.
+- **Exchange** has a fixed vocabulary and a fixed number of slots: four voice
+  numbers, a fax number, and three email addresses per contact. A label it has
+  no word for takes the next free voice slot — **the number always travels,
+  only the word may be replaced**. A fifth voice number cannot be stored at
+  all.
 - **Outlook / Microsoft 365** has three phone collections — one mobile number,
   home numbers, business numbers. A second number labelled *mobile* joins the
   business list rather than pushing the first one out.

@@ -811,6 +811,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_search_index_holds_addresses_not_the_json_around_them() {
+        // The labelled shape puts the literal words `value` and `label` in
+        // every stored row, and `search_contacts` appends `*` to every token —
+        // so before the trigger was fixed, typing "v" matched the entire
+        // address book and buried the real hits under the 50-row cap.
+        let adapter = fixture_adapter();
+        let mut labelled = sample_new_contact();
+        labelled.display_name = "Vanessa Beispiel".into();
+        labelled.given_name = Some("Vanessa".into());
+        labelled.family_name = Some("Beispiel".into());
+        labelled.organization = None;
+        labelled.emails = vec![cal_core::ContactValue {
+            value: "vanessa@example.com".into(),
+            label: Some("home".into()),
+        }];
+        adapter
+            .create_contact(LOCAL_DEFAULT_CONTACT_LIST_ID, labelled)
+            .await
+            .unwrap();
+
+        let mut other = sample_new_contact();
+        other.display_name = "Max Mustermann".into();
+        other.organization = None;
+        other.emails = vec![cal_core::ContactValue {
+            value: "max@example.com".into(),
+            label: Some("work".into()),
+        }];
+        adapter
+            .create_contact(LOCAL_DEFAULT_CONTACT_LIST_ID, other)
+            .await
+            .unwrap();
+
+        // The JSON keys are not words anyone searched for.
+        assert!(adapter.search_contacts("value").await.unwrap().is_empty());
+        assert!(adapter.search_contacts("label").await.unwrap().is_empty());
+        // A one-letter prefix still finds the one contact it should.
+        let hits = adapter.search_contacts("v").await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].display_name, "Vanessa Beispiel");
+        // And the address itself is still indexed.
+        let by_address = adapter.search_contacts("max@example").await.unwrap();
+        assert_eq!(by_address.len(), 1);
+        assert_eq!(by_address[0].display_name, "Max Mustermann");
+    }
+
+    #[tokio::test]
     async fn migration_does_not_seed_a_contact_list() {
         // A fresh install starts with NO local contacts list — the user
         // creates one on demand. (Migration 0007 used to seed a default
