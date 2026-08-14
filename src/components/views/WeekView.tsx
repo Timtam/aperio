@@ -34,7 +34,11 @@ import {
   TASK_DND_TYPE,
   type MoveCopyScope,
 } from '../../state/moveActions';
-import { isSeriesOccurrence, seriesIdOf } from '../../intl/recurrence';
+import {
+  isSeriesOccurrence,
+  occurrenceIsoOf,
+  seriesIdOf,
+} from '../../intl/recurrence';
 import { MoveEventScopeDialog } from '../MoveEventScopeDialog';
 import { useDialogState } from '../../state/dialogStateContext';
 import { useEvents } from '../../state/useEvents';
@@ -935,12 +939,19 @@ export function WeekView() {
       sendCancellations = false,
     ) => {
       try {
-        if (scope === 'occurrence' && ev.id.includes('@')) {
+        // `occurrenceIsoOf` / `seriesIdOf` rather than splitting the id on
+        // `@`: an id only carries a synthetic occurrence suffix when the
+        // expansion engine put one there, and a RECURRENCE-ID override marks
+        // itself with `::rid::`. Splitting on `@` mistook the domain part of a
+        // perfectly ordinary UID — `abc@aperio`, or whatever iCloud minted —
+        // for an occurrence instant, which is what made a single event ask
+        // the occurrence-or-series question and then delete a truncated id.
+        const occIso = occurrenceIsoOf(ev);
+        if (scope === 'occurrence' && occIso) {
           // Mark just this date with an EXDATE on the master so the
           // expansion engine skips it. The master row stays alive
           // and every other occurrence keeps appearing.
-          const [seriesId, occIso] = ev.id.split('@');
-          await addEventExdate(seriesId, occIso, ev.calendar_id, sendCancellations);
+          await addEventExdate(seriesIdOf(ev), occIso, ev.calendar_id, sendCancellations);
           announce(
             t(
               sendCancellations
@@ -949,9 +960,8 @@ export function WeekView() {
               { title: ev.title },
             ),
           );
-        } else if (scope === 'this_and_future' && ev.id.includes('@')) {
+        } else if (scope === 'this_and_future' && occIso) {
           // Truncate the series so it ends just before this occurrence.
-          const occIso = ev.id.split('@')[1];
           await deleteThisAndFuture(ev, occIso, sendCancellations);
           announce(
             t(
@@ -962,10 +972,8 @@ export function WeekView() {
             ),
           );
         } else {
-          // Strip the synthetic occurrence suffix — series deletes
-          // always target the master row.
-          const id = ev.id.includes('@') ? ev.id.split('@')[0] : ev.id;
-          await deleteEventById(id, ev.calendar_id, sendCancellations);
+          // Series deletes always target the master row.
+          await deleteEventById(seriesIdOf(ev), ev.calendar_id, sendCancellations);
           announce(
             t(
               sendCancellations
@@ -990,12 +998,12 @@ export function WeekView() {
   );
 
   const requestDelete = useCallback((ev: CalendarEvent) => {
-    // Only an expanded occurrence (its synthetic id carries `@`) has a single
-    // instance to delete, so only it gets the occurrence-vs-series choice. A bare
-    // recurring master row (unexpandable RRULE, no `@`) has none — offering "this
-    // occurrence" there would fall through to a full-series delete — so it takes
-    // the plain confirm (which deletes the series).
-    if (ev.id.includes('@')) {
+    // Only an EXPANDED occurrence has a specific instance to delete, so only it
+    // gets the occurrence-vs-series choice. A recurring MASTER row (e.g. an
+    // unparseable RRULE that couldn't be expanded) has no single occurrence —
+    // offering "this occurrence" there would fall through to a full-series
+    // delete — so it takes the plain confirm (which deletes the series).
+    if (isSeriesOccurrence(ev)) {
       setScopeTarget(ev);
     } else {
       setConfirmTarget(ev);
