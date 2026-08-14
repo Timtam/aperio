@@ -230,6 +230,7 @@ export default function TaskEditorModal({
     initialTitle,
     initialScheduledDate,
     prefillFrom,
+    targetPinned,
   } = route.params;
   const {
     taskLists,
@@ -516,7 +517,7 @@ export default function TaskEditorModal({
    * filling a one-line capture form the user then has to expand anyway.
    */
   const applyTaskPrefill = useCallback(
-    (source: Task) => {
+    (source: Task, opts: { keepList?: boolean } = {}) => {
       const fill = taskPrefillFrom(source);
       setForm((prev) => ({
         ...prev,
@@ -532,7 +533,12 @@ export default function TaskEditorModal({
         // when it is due, and that came from wherever the editor was opened.
         // The list travels, though — a task called this belongs where the last
         // one did, unless it is a subtask glued to its parent's list.
-        listId: parentId != null ? prev.listId : fill.list_id || prev.listId,
+        // …unless it is a subtask, glued to its parent's list, or the caller
+        // pinned one: the quick-add does that when its picker was moved.
+        listId:
+          parentId != null || opts.keepList
+            ? prev.listId
+            : fill.list_id || prev.listId,
       }));
     },
     [parentId],
@@ -553,8 +559,8 @@ export default function TaskEditorModal({
   useEffect(() => {
     if (taskId != null || !prefillFrom || prefillApplied.current || loading) return;
     prefillApplied.current = true;
-    applyTaskPrefill(prefillFrom);
-  }, [taskId, prefillFrom, loading, applyTaskPrefill]);
+    applyTaskPrefill(prefillFrom, { keepList: targetPinned === true });
+  }, [taskId, prefillFrom, loading, targetPinned, applyTaskPrefill]);
 
   const sectionOptions = useMemo(
     () => [

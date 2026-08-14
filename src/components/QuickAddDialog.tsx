@@ -236,6 +236,10 @@ export function QuickAddDialog({
               defaultTime: time,
               defaultTitle: source.title,
               prefillFrom: source,
+              // A calendar the user actually moved this dialog's picker to
+              // outranks the one the earlier appointment lived on; an
+              // untouched default does not.
+              targetPinned: calendarId !== initial.calendarId,
               replace: true,
             });
           }}

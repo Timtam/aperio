@@ -104,6 +104,10 @@ export default function QuickAddTaskModal({
         initialTitle: source.title,
         initialScheduledDate: date.trim() || undefined,
         prefillFrom: source,
+        // A list the user actually moved this picker to outranks the one the
+        // earlier task lived on; an untouched default does not. `userPicked`
+        // already tracks exactly that, for the late last-used adoption above.
+        targetPinned: userPicked.current,
       });
     },
     [titleMatches, navigation, listId, date],

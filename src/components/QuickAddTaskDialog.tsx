@@ -220,6 +220,10 @@ export function QuickAddTaskDialog({
               defaultDate: date || undefined,
               defaultTitle: source.title,
               prefillFrom: source,
+              // A list the user actually moved this dialog's picker to
+              // outranks the one the earlier task lived on; an untouched
+              // default does not.
+              targetPinned: listId !== initial.listId,
               replace: true,
             });
           }}

@@ -14,8 +14,12 @@ your day or week, and work through them.
 3. Enter a **title**. As you type, Aperio offers **earlier entries with that
    name** (arrow keys, `Enter` accepts; on the phone as a list under the
    field). Accept one and the rest of the editor fills from it — the length or
-   the priority and effort, the repetition, the description, the reminders.
-   **The day stays as it was:** that is what makes this a new entry.
+   the priority and effort, the repetition, the description, the reminders, and
+   the **task list** (for an event, the **calendar**) it was filed under.
+   **The day stays as it was:** that is what makes this a new entry. And if you
+   picked a list or calendar yourself in the quick-add before accepting the
+   offer, **your pick stays** — an older entry does not overrule a choice you
+   just made.
    Optionally:
    - the **task list** it is stored in,
    - a **due date** (and optionally a time), each removable on its own:

@@ -39,6 +39,9 @@ export type RootStackParamList = {
     // the user picks one of its offers. Everything but the dates travels; see
     // `taskPrefillFrom`. Create only.
     prefillFrom?: Task;
+    // The caller chose `listId` deliberately, so `prefillFrom` must leave it
+    // alone. The quick-add sets it only when its own picker was moved.
+    targetPinned?: boolean;
   };
   // One-tap task capture (title + optional day + list); "More details …" hands
   // off to TaskEditor. The mobile twin of the desktop QuickAddTaskDialog.
@@ -125,6 +128,9 @@ export type RootStackParamList = {
     // when the user picks one of its offers. Everything but the day travels;
     // see `eventPrefillFrom`. Create only.
     prefillFrom?: CalendarEvent;
+    // The caller chose `calendarId` deliberately, so `prefillFrom` must leave
+    // it alone. The quick-add sets it only when its own picker was moved.
+    targetPinned?: boolean;
   };
   Calendars: undefined;
   CalendarEditor: { calendarId: string };

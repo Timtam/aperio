@@ -44,6 +44,7 @@ export function DialogHost() {
           defaultTitle={mode.defaultTitle}
           initialScope={mode.initialScope}
           prefillFrom={mode.prefillFrom}
+          targetPinned={mode.targetPinned}
         />
       );
     case 'eventEditScope':
@@ -67,6 +68,7 @@ export function DialogHost() {
           defaultDate={mode.defaultDate}
           defaultTitle={mode.defaultTitle}
           prefillFrom={mode.prefillFrom}
+          targetPinned={mode.targetPinned}
         />
       );
     case 'quickAdd':

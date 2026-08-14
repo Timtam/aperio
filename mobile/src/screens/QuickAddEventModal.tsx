@@ -99,6 +99,11 @@ export default function QuickAddEventModal({
         initialTitle: source.title,
         initialTime: time.trim() || undefined,
         prefillFrom: source,
+        // A calendar the user actually moved this picker to outranks the one
+        // the earlier appointment lived on; an untouched default does not.
+        // `calIdTouchedRef` already tracks exactly that, for the late
+        // last-used adoption below.
+        targetPinned: calIdTouchedRef.current,
       });
     },
     [titleMatches, navigation, calId, date, time],

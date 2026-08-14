@@ -121,6 +121,10 @@ export interface TaskDialogProps {
    *  user picked one of its offers. Everything but the dates travels; see
    *  `taskPrefillFrom`. Create only. */
   prefillFrom?: Task | null;
+  /** The caller chose `defaultListId` deliberately, so `prefillFrom` must
+   *  leave it alone. The quick-add sets it only when its own picker was moved
+   *  off the default. */
+  targetPinned?: boolean;
 }
 
 
@@ -164,6 +168,7 @@ export function TaskDialog({
   defaultDate,
   defaultTitle,
   prefillFrom,
+  targetPinned,
 }: TaskDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
@@ -327,7 +332,7 @@ export function TaskDialog({
    * filling a one-line capture form the user then has to expand anyway.
    */
   const applyTaskPrefill = useCallback(
-    (source: Task) => {
+    (source: Task, opts: { keepList?: boolean } = {}) => {
       const fill = taskPrefillFrom(source);
       setForm((prev) => ({
         ...prev,
@@ -344,7 +349,13 @@ export function TaskDialog({
         // editor. The list travels, though — a task called this belongs where
         // the last one did — unless it is a subtask, which is glued to its
         // parent's list.
-        listId: isSubtask ? prev.listId : (fill.list_id ?? prev.listId),
+        // …unless it is a subtask, glued to its parent's list, or the caller
+        // pinned one: the quick-add does that when the user picked a list
+        // there instead of leaving its default.
+        listId:
+          isSubtask || opts.keepList
+            ? prev.listId
+            : (fill.list_id ?? prev.listId),
       }));
     },
     [isSubtask],
@@ -358,19 +369,6 @@ export function TaskDialog({
     [titleMatches, applyTaskPrefill],
   );
 
-  // A prefill handed in by the quick-add. Applied once per opening, after the
-  // form has its initial state: the day and the list the user picked over
-  // there are already in it, and the prefill leaves the day alone.
-  const prefillApplied = useRef<string | null>(null);
-  useEffect(() => {
-    if (!isOpen || isEdit || !prefillFrom) {
-      if (!isOpen) prefillApplied.current = null;
-      return;
-    }
-    if (prefillApplied.current === prefillFrom.id) return;
-    prefillApplied.current = prefillFrom.id;
-    applyTaskPrefill(prefillFrom);
-  }, [isOpen, isEdit, prefillFrom, applyTaskPrefill]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // Create mode only: subtask titles staged on the form. A brand-new
@@ -449,6 +447,28 @@ export function TaskDialog({
     setDraftSubtasks([]);
     setNewSubtaskTitle('');
   }, [isOpen, initialState]);
+
+  /**
+   * A prefill handed in by the quick-add, applied once per opening.
+   *
+   * Declared AFTER the reset effect on purpose — see the twin comment in
+   * EventDialog. Above it, the reset's `firstHydrate` shortcut wiped the whole
+   * prefill in the same commit and left only the title, which arrives
+   * separately as `defaultTitle`.
+   *
+   * `targetPinned` is the quick-add saying it does not want its list touched,
+   * because the user chose one there rather than leaving the default.
+   */
+  const prefillApplied = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isOpen || isEdit || !prefillFrom) {
+      if (!isOpen) prefillApplied.current = null;
+      return;
+    }
+    if (prefillApplied.current === prefillFrom.id) return;
+    prefillApplied.current = prefillFrom.id;
+    applyTaskPrefill(prefillFrom, { keepList: targetPinned === true });
+  }, [isOpen, isEdit, prefillFrom, targetPinned, applyTaskPrefill]);
 
   // Mirror a subtask-cascade-updated status into the Status field while the
   // editor is open — the DISPLAY half of the fix (the persistence half is in

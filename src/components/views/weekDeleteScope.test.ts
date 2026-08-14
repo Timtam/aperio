@@ -9,6 +9,8 @@ import {
 /** The shape the recurrence helpers read off an event row. */
 const event = (id: string, rrule?: string) => ({
   id,
+  start: '2026-06-14T13:00:00Z',
+  end: '2026-06-14T14:00:00Z',
   recurrence: rrule ? { rrule, exceptions: [] } : null,
 });
 

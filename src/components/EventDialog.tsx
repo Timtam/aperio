@@ -140,6 +140,10 @@ export interface EventDialogProps {
    *  when the user picked one of its offers. Everything but the day travels;
    *  see `eventPrefillFrom`. Create only. */
   prefillFrom?: CalendarEvent | null;
+  /** The caller chose `defaultCalendarId` deliberately, so `prefillFrom` must
+   *  leave it alone. The quick-add sets it only when its own picker was moved
+   *  off the default. */
+  targetPinned?: boolean;
 }
 
 interface FormState {
@@ -187,6 +191,7 @@ export function EventDialog({
   defaultTitle,
   initialScope,
   prefillFrom,
+  targetPinned,
 }: EventDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
@@ -373,7 +378,7 @@ export function EventDialog({
    * filling a one-line capture form the user then has to expand anyway.
    */
   const applyEventPrefill = useCallback(
-    (source: CalendarEvent) => {
+    (source: CalendarEvent, opts: { keepCalendar?: boolean } = {}) => {
       const fill = eventPrefillFrom(source);
       setForm((prev) => {
         // The DAY stays exactly as it was — it is what makes this a new
@@ -393,7 +398,13 @@ export function EventDialog({
           colorLabel: fill.color_label,
           reminders: fill.reminders as Reminder[],
           attendees: fill.attendees,
+          // The calendar the earlier appointment lived on — unless the caller
+          // pinned one. Accepting an offer in this editor's own title field
+          // never pins, so there the old calendar travels; the quick-add pins
+          // only when the user actually picked something there instead of
+          // leaving its default.
           calendarId:
+            !opts.keepCalendar &&
             calendars.some((c) => c.id === fill.calendar_id && !c.read_only)
               ? fill.calendar_id
               : prev.calendarId,
@@ -420,19 +431,6 @@ export function EventDialog({
     [titleMatches, applyEventPrefill],
   );
 
-  // A prefill handed in by the quick-add. Applied once per opening, after the
-  // form has its initial state: the day and the calendar the user picked over
-  // there are already in it, and the prefill deliberately leaves those alone.
-  const prefillApplied = useRef<string | null>(null);
-  useEffect(() => {
-    if (!isOpen || isEdit || !prefillFrom) {
-      if (!isOpen) prefillApplied.current = null;
-      return;
-    }
-    if (prefillApplied.current === prefillFrom.id) return;
-    prefillApplied.current = prefillFrom.id;
-    applyEventPrefill(prefillFrom);
-  }, [isOpen, isEdit, prefillFrom, applyEventPrefill]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // Flips to `false` the moment the user touches the reminders editor.
@@ -524,6 +522,34 @@ export function EventDialog({
     setAvailabilityWindow(null);
     setAvailabilityError(null);
   }, [isOpen, initialState, remindersWereFromDefault, initialScope]);
+
+  /**
+   * A prefill handed in by the quick-add, applied once per opening.
+   *
+   * Declared AFTER the reset effect on purpose. Effects run in declaration
+   * order, and the reset's first run takes the `firstHydrate` shortcut — it
+   * treats the form as pristine without comparing anything, because there is
+   * no baseline yet. Applying the prefill above it meant the reset overwrote
+   * everything a moment later, in the same commit: only the title survived,
+   * because that one rides `defaultTitle` into `initialState` instead. From
+   * here the reset has already run, so the prefill lands on top — and every
+   * LATER pristine re-run (a background calendar-catalog refresh re-deriving
+   * `initialState`) now sees a form that differs from the baseline and leaves
+   * it alone.
+   *
+   * `targetPinned` is the quick-add saying it does not want its calendar
+   * touched, because the user chose one there rather than leaving the default.
+   */
+  const prefillApplied = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isOpen || isEdit || !prefillFrom) {
+      if (!isOpen) prefillApplied.current = null;
+      return;
+    }
+    if (prefillApplied.current === prefillFrom.id) return;
+    prefillApplied.current = prefillFrom.id;
+    applyEventPrefill(prefillFrom, { keepCalendar: targetPinned === true });
+  }, [isOpen, isEdit, prefillFrom, targetPinned, applyEventPrefill]);
 
   // Any change to the attendee set, the start/end window, the all-day
   // flag, or the target calendar invalidates a previous availability

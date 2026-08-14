@@ -120,6 +120,7 @@ export default function EventEditorModal({
     initialTime,
     initialScope,
     prefillFrom,
+    targetPinned,
   } = route.params;
   const editing = eventId != null;
   // A single occurrence of a recurring series was opened (occurrence = its
@@ -186,7 +187,7 @@ export default function EventEditorModal({
    * filling a one-line capture form the user then has to expand anyway.
    */
   const applyEventPrefill = useCallback(
-    (source: CalendarEvent) => {
+    (source: CalendarEvent, opts: { keepCalendar?: boolean } = {}) => {
       const fill = eventPrefillFrom(source);
       setTitle(fill.title);
       setDescription(fill.description ?? '');
@@ -201,7 +202,11 @@ export default function EventEditorModal({
       if (fill.attendees.length > 0) setNotifyAttendees(false);
       // The reminders are the user's own now, not the calendar's default.
       setKeepRemindersAsDefault(false);
+      // The calendar the earlier appointment lived on — unless the caller
+      // pinned one. Accepting an offer in this screen's own title field never
+      // pins; the quick-add pins only when its picker was actually moved.
       if (
+        !opts.keepCalendar &&
         calendars.some((c) => c.id === fill.calendar_id && !c.read_only)
       ) {
         setCalId(fill.calendar_id);
@@ -239,8 +244,8 @@ export default function EventEditorModal({
   useEffect(() => {
     if (editing || !prefillFrom || prefillApplied.current || loading) return;
     prefillApplied.current = true;
-    applyEventPrefill(prefillFrom);
-  }, [editing, prefillFrom, loading, applyEventPrefill]);
+    applyEventPrefill(prefillFrom, { keepCalendar: targetPinned === true });
+  }, [editing, prefillFrom, loading, targetPinned, applyEventPrefill]);
   const [description, setDescription] = useState('');
   // The bound colour-label id ('' = none). Only LOCAL events carry it on their
   // own row; on an external calendar the colour is a host-local override (the

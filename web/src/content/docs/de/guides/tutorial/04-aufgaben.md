@@ -16,8 +16,12 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
    diesem Namen** an (Pfeiltasten, `Eingabe` übernimmt; am Telefon als Liste
    unter dem Feld). Übernimmst du einen, füllt sich der Rest des Editors aus
    ihm — Dauer bzw. Priorität und Aufwand, Wiederholung, Beschreibung,
-   Erinnerungen. **Der Tag bleibt, wie er war:** Das ist es ja, was den neuen
-   Eintrag ausmacht. Optional:
+   Erinnerungen, und die **Aufgabenliste** (bei einem Termin der **Kalender**),
+   in der er lag. **Der Tag bleibt, wie er war:** Das ist es ja, was den neuen
+   Eintrag ausmacht. Und wenn du im Schnell-Dialog vorher selbst eine Liste
+   oder einen Kalender gewählt hast, **bleibt deine Wahl stehen** — ein alter
+   Eintrag überstimmt keine Entscheidung, die du gerade getroffen hast.
+   Optional:
    - **Aufgabenliste**, in der sie gespeichert wird,
    - **Fälligkeitsdatum** (und optional Uhrzeit),
      jeweils einzeln wieder entfernbar: **Uhrzeit entfernen** streicht nur die

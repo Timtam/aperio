@@ -64,6 +64,10 @@ export type DialogMode =
       /** An earlier item to fill the editor from — the quick-add hands one in
        *  when the user picks one of its offers. Create only. */
       prefillFrom?: CalendarEvent | null;
+      /** The caller chose this calendar deliberately, so a `prefillFrom`
+       *  must not replace it with the older appointment's. The quick-add
+       *  sets it only when its own picker was moved off the default. */
+      targetPinned?: boolean;
     }
   | {
       // Outlook-style "this occurrence vs the whole series?" prompt shown
@@ -83,6 +87,10 @@ export type DialogMode =
       /** An earlier item to fill the editor from — the quick-add hands one in
        *  when the user picks one of its offers. Create only. */
       prefillFrom?: Task | null;
+      /** The caller chose this list deliberately, so a `prefillFrom` must
+       *  not replace it with the older task's. The quick-add sets it only
+       *  when its own picker was moved off the default. */
+      targetPinned?: boolean;
     }
   | { kind: 'quickAdd'; defaultDate?: string }
   | { kind: 'quickAddTask'; defaultDate?: string }
@@ -175,6 +183,10 @@ export interface OpenEventOptions {
   /** An earlier item to fill the editor from — the quick-add's hand-off when
    *  the user picked one of its offers. Everything but the day travels. */
   prefillFrom?: CalendarEvent | null;
+  /** The caller chose `calendarId` deliberately, so a `prefillFrom` must not
+   *  replace it with the older appointment's. The quick-add sets it only when
+   *  its own picker was moved off the default. */
+  targetPinned?: boolean;
   /** Replace the current top dialog frame instead of stacking on top — used by
    *  the quick-add's "weitere Details" hand-off so the editor inherits the
    *  quick-add's trigger and focus returns to the original opener (the
@@ -190,6 +202,10 @@ export interface OpenTaskOptions {
   /** An earlier item to fill the editor from — the quick-add's hand-off when
    *  the user picked one of its offers. Everything but the day travels. */
   prefillFrom?: Task | null;
+  /** The caller chose `listId` deliberately, so a `prefillFrom` must not
+   *  replace it with the older task's. The quick-add sets it only when its own
+   *  picker was moved off the default. */
+  targetPinned?: boolean;
   /** Replace the current top frame instead of stacking — the quick-add-task
    *  "weitere Details" hand-off, so focus returns to the original opener when
    *  the editor closes. Create hand-off only. */
@@ -418,6 +434,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
         defaultTime: options?.defaultTime,
         defaultTitle: options?.defaultTitle,
         prefillFrom: options?.prefillFrom,
+        targetPinned: options?.targetPinned,
       };
       // The quick-add "weitere Details" hand-off swaps its own frame for the
       // editor (no new trigger capture, no close()) so the editor inherits the
@@ -450,6 +467,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
         defaultDate: options?.defaultDate,
         defaultTitle: options?.defaultTitle,
         prefillFrom: options?.prefillFrom,
+        targetPinned: options?.targetPinned,
       };
       // Quick-add-task "weitere Details" hand-off — replace the frame in place
       // (see openEventDialog) so focus returns to the original opener on close.
