@@ -138,6 +138,14 @@ The task-view header has a **Group by** selector:
   day, plus deferred tasks waiting to resurface — soonest first), **Done**, and
   **Cancelled** (tasks you've cancelled — kept out of the active groups, at the
   very end). Done, Upcoming and Cancelled start collapsed.
+> **Overdue and the day-start review.** A task lands in **Overdue** on its
+> **planned day** alone — the deadline does not put it there. The review at the
+> start of the day asks about the two separately: missed **deadlines** first,
+> then plans that **slipped**. A task shows up in one section, never both. When
+> both of its dates lapsed on the same day, it is the **deadline** section that
+> asks — and answering *Deadline today* there moves the planned day up as well,
+> so the task really is settled and does not stay behind in Overdue.
+
 - **List**: every open / in-progress task is grouped under **its own list** (and
   sections), regardless of whether it's scheduled, in the backlog, or deferred —
   one place per list. **Done** still sits separately at the bottom, exactly as in

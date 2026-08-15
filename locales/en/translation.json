@@ -1168,6 +1168,7 @@
         },
         "announceBackToBacklog": "\"{{title}}\" sent back to backlog.",
         "announceDeadlineToday": "\"{{title}}\" is now due today.",
+        "announceDeadlineAndPlanToday": "\"{{title}}\" is now due today, and planned for today.",
         "announceAllCompleted_one": "Marked 1 task as done.",
         "announceAllCompleted_other": "Marked {{count}} tasks as done."
       },

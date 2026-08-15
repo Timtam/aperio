@@ -32,7 +32,9 @@ export function filterOverdue(
 /**
  * Tasks with a `scheduled_date` strictly before today, still actionable (`open`
  * / `in_progress`), and NOT already in the overdue list (the deadline is the
- * bigger lever, shown in that section). When `cascadeEnabledFor` is given, a
+ * bigger lever, shown in that section — and because that section's own "today"
+ * answer, {@link movedToToday}, carries a lapsed plan along, the task is fully
+ * settled there rather than half-answered in two places). When `cascadeEnabledFor` is given, a
  * slipped task in a cascading list is hidden if a same-list ancestor is also
  * slipped (the user decides at the subtree root); omitted ⇒ cascade off for all.
  */
@@ -104,21 +106,38 @@ export function actionableDescendants(rootId: string, tasks: Task[]): Task[] {
  * own write, and a rule that lives in two places is a rule that ends up
  * applied in one.
  *
- * Two things it does NOT touch, and both are deliberate:
- *
  * The TIME stays. A deadline of 14:00 that slipped is still a 14:00 deadline;
  * clearing it would silently turn a commitment into "sometime today", which is
  * not what the user wrote and not what they asked for.
  *
- * The SCHEDULING stays. What lapsed is the deadline, not the plan. The day
- * this is due and the day it was meant to be worked on are separate answers,
- * and the review offers them separately — the carry-over section is where a
- * slipped PLAN is moved.
+ * A PLAN that also lapsed comes along. This used to leave the scheduling
+ * alone, on the reasoning that a lapsed deadline and a slipped plan are
+ * separate answers and the carry-over section is where a plan gets moved.
+ * That reasoning had a hole: `filterCarriedOver` deliberately skips anything
+ * the deadline section already shows, so a task whose deadline AND plan lapsed
+ * on the SAME day never reached the carry-over section at all. Answering
+ * "today" settled the deadline and left the plan stranded in the past — where
+ * the task list goes on calling the task overdue, because its "Überfällig"
+ * group keys on `scheduled_date` alone, and nothing was left to say otherwise.
+ *
+ * So a plan strictly BEFORE today is lifted onto today, keeping its time of
+ * day. Saying the work is due today while leaving it planned for yesterday
+ * describes nothing anybody can act on. A plan that is already today, or still
+ * ahead, is the user's own arrangement and stays untouched.
  */
-export function deadlineMovedToToday<T extends { deadline_date?: string | null }>(
-  task: T,
-): T {
-  return { ...task, deadline_date: todayIsoKey() };
+export function movedToToday<
+  T extends {
+    deadline_date?: string | null;
+    scheduled_date?: string | null;
+  },
+>(task: T): T {
+  const today = todayIsoKey();
+  const planLapsed = !!task.scheduled_date && task.scheduled_date < today;
+  return {
+    ...task,
+    deadline_date: today,
+    ...(planLapsed ? { scheduled_date: today } : {}),
+  };
 }
 
 /**

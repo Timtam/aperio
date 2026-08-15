@@ -1165,6 +1165,7 @@
         },
         "announceBackToBacklog": "„{{title}}\" zurück in Backlog.",
         "announceDeadlineToday": "„{{title}}\" ist jetzt heute fällig.",
+        "announceDeadlineAndPlanToday": "„{{title}}\" ist jetzt heute fällig und für heute eingeplant.",
         "announceAllCompleted_one": "1 Aufgabe als erledigt markiert.",
         "announceAllCompleted_other": "{{count}} Aufgaben als erledigt markiert."
       },

@@ -153,6 +153,15 @@ Im Kopf der Aufgabenansicht gibt es einen **Gruppieren nach**-Schalter:
   **Erledigt** und **Abgebrochen** (abgebrochene Aufgaben — aus den aktiven
   Gruppen heraus, ganz am Ende). Erledigt, Zukünftig und Abgebrochen starten
   zugeklappt.
+> **Überfällig und der Tagesrückblick.** In **Überfällig** landet eine Aufgabe
+> allein über ihren **geplanten Tag** — die Frist bringt sie nicht dorthin. Der
+> Rückblick zu Tagesbeginn fragt beides getrennt ab: zuerst verpasste
+> **Fristen**, dann **verrutschte** Planungen. Eine Aufgabe erscheint in genau
+> einem der beiden Abschnitte, nie in beiden. Sind beide Daten am selben Tag
+> verstrichen, fragt der **Fristen**-Abschnitt — und *Frist auf heute* zieht
+> dort den geplanten Tag gleich mit, damit die Aufgabe wirklich erledigt ist
+> und nicht in Überfällig zurückbleibt.
+
 - **Liste**: jede offene / begonnene Aufgabe wird unter **ihrer Liste** (samt
   Abschnitten) gruppiert — egal ob geplant, im Backlog oder aufgeschoben, alles an
   einer Stelle pro Liste. **Erledigt** bleibt unten separat, genau wie in der

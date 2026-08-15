@@ -10,7 +10,7 @@ export {
   filterOverdue,
   filterCarriedOver,
   actionableDescendants,
-  deadlineMovedToToday,
+  movedToToday,
 } from '@aperio/shared';
 
 // ── Snooze plumbing ────────────────────────────────────────────────────

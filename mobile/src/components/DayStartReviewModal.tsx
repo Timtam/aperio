@@ -24,7 +24,7 @@ import {
   priorityMarker,
   prioritySuffix,
   reminderCount,
-  deadlineMovedToToday,
+  movedToToday,
   todayIsoKey,
 } from '@aperio/shared';
 import type { Task } from '@aperio/shared';
@@ -368,8 +368,12 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
    *
    * The TIME is kept on purpose: a deadline of 14:00 that slipped is still a
    * 14:00 deadline, and dropping it to "sometime today" would quietly discard
-   * what the user wrote. The SCHEDULING is left alone for the same reason —
-   * what lapsed is the deadline, not the plan.
+   * what the user wrote.
+   *
+   * The PLAN moves only when it is also in the past — see `movedToToday` for
+   * why leaving it behind stranded the task in the list's overdue group with
+   * no way left to answer for it. The announcement says so when it happens:
+   * one press changing two dates has to be audible.
    *
    * One task, no cascade over subtasks, matching `backToBacklog` right beside
    * it. Twin of the desktop dialog's action of the same name.
@@ -379,12 +383,17 @@ export default function DayStartReviewModal({ visible, onClose }: DayStartReview
       setBusy(true);
       queueFocusAfter([task.id]);
       try {
-        await updateTask(deadlineMovedToToday(task));
+        const moved = movedToToday(task);
+        const planMoved = moved.scheduled_date !== task.scheduled_date;
+        await updateTask(moved);
         setResolvedIds((s) => new Set(s).add(task.id));
         announce(
-          t('dialogs.dayStartReview.deadlines.announceDeadlineToday', {
-            title: task.title,
-          }),
+          t(
+            planMoved
+              ? 'dialogs.dayStartReview.deadlines.announceDeadlineAndPlanToday'
+              : 'dialogs.dayStartReview.deadlines.announceDeadlineToday',
+            { title: task.title },
+          ),
         );
         invalidateData();
       } finally {

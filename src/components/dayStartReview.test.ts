@@ -3,7 +3,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import type { Task, TaskUser } from '../api/types';
 import {
   actionableDescendants,
-  deadlineMovedToToday,
+  movedToToday,
   filterCarriedOver,
   filterOverdue,
   isDayStartReviewSnoozed,
@@ -113,11 +113,11 @@ describe('filterOverdue', () => {
   });
 });
 
-describe('deadlineMovedToToday', () => {
+describe('movedToToday', () => {
   it('moves the day and keeps the time', () => {
     // A deadline of 14:00 that slipped is still a 14:00 deadline. Clearing the
     // time would turn a commitment into "sometime today" without being asked.
-    const moved = deadlineMovedToToday({
+    const moved = movedToToday({
       ...baseTask,
       deadline_date: '2020-01-02',
       deadline_time: '14:00',
@@ -126,20 +126,67 @@ describe('deadlineMovedToToday', () => {
     expect(moved.deadline_time).toBe('14:00');
   });
 
-  it('leaves the scheduling alone', () => {
-    // What lapsed is the deadline, not the plan — the carry-over section is
-    // where a slipped PLAN is moved. Backlog is the button that clears both,
-    // and it stays the only one that does.
-    const moved = deadlineMovedToToday({
+  it('lifts a plan that also lapsed, keeping its time', () => {
+    // The case Toni hit: deadline AND plan on the same past day. Such a task
+    // never reaches the carry-over section — `filterCarriedOver` skips
+    // anything the deadline section already shows — so if the plan stayed
+    // behind, the list went on calling the task overdue with nothing left to
+    // answer. The TIME of day is the user's own and rides along.
+    const moved = movedToToday({
       ...baseTask,
       deadline_date: '2020-01-02',
-      scheduled_date: '2020-01-05',
+      scheduled_date: '2020-01-02',
       scheduled_time: '09:00',
       status: 'in_progress' as const,
     });
-    expect(moved.scheduled_date).toBe('2020-01-05');
+    expect(moved.deadline_date).toBe(todayIsoKey());
+    expect(moved.scheduled_date).toBe(todayIsoKey());
     expect(moved.scheduled_time).toBe('09:00');
     expect(moved.status).toBe('in_progress');
+  });
+
+  it('leaves a plan that is today or still ahead alone', () => {
+    // Only a plan in the PAST is unusable. One the user set for today, or for
+    // a day still to come, is their own arrangement — even when it sits after
+    // the deadline they just moved.
+    const ahead = movedToToday({
+      ...baseTask,
+      deadline_date: '2020-01-02',
+      scheduled_date: '2099-01-05',
+      scheduled_time: '09:00',
+    });
+    expect(ahead.scheduled_date).toBe('2099-01-05');
+
+    const untouchedToday = movedToToday({
+      ...baseTask,
+      deadline_date: '2020-01-02',
+      scheduled_date: todayIsoKey(),
+    });
+    expect(untouchedToday.scheduled_date).toBe(todayIsoKey());
+  });
+
+  it('leaves a task with no plan without one', () => {
+    // A deadline-only task (the classic term paper) gains no scheduling from
+    // this button — that would invent a plan the user never made.
+    const moved = movedToToday({
+      ...baseTask,
+      deadline_date: '2020-01-02',
+      scheduled_date: null,
+    });
+    expect(moved.scheduled_date).toBeNull();
+  });
+
+  it('is the only answer that settles a task lapsed on both dates', () => {
+    // The interaction that made this a bug: the two selectors are disjoint by
+    // design, so the deadline section is the ONLY place such a task appears.
+    const task = {
+      ...baseTask,
+      id: 'both',
+      deadline_date: '2020-01-02',
+      scheduled_date: '2020-01-02',
+    };
+    expect(filterOverdue([task]).map((x) => x.id)).toEqual(['both']);
+    expect(filterCarriedOver([task])).toEqual([]);
   });
 });
 
