@@ -2038,6 +2038,22 @@ impl Host {
     }
 }
 
+/// A `YYYY-MM-DD` day key from the foreign side.
+///
+/// A free function rather than an associated one: the `#[uniffi::export]` impl
+/// block cannot hold associated functions, and UniFFI would have tried to
+/// expose it.
+///
+/// The frontends speak local day keys everywhere (`shared/dateKey.ts`), so
+/// this is the one place the string becomes a date. A malformed one is the
+/// caller's bug, reported as such rather than silently becoming today.
+fn parse_day_key(day: &str) -> Result<chrono::NaiveDate, StoreError> {
+    chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").map_err(|_| StoreError::InvalidField {
+        field: "day".to_string(),
+        detail: format!("not a YYYY-MM-DD day: {day}"),
+    })
+}
+
 #[uniffi::export]
 impl Host {
     /// Open the on-device database at `db_path`, register every bundled
@@ -6661,6 +6677,105 @@ impl Host {
                 }));
         }
         Ok(())
+    }
+
+    // ── Day markers (what a day was like; local-only, always synced) ─────────
+    //
+    // Same shape as the colour labels below: no external provider models "how
+    // was Tuesday", so every mutation is LOCAL and unconditionally appends a
+    // sync event. Mirrors the desktop day_markers commands one for one.
+
+    /// The marker vocabulary as a JSON `DayMarker[]`, in the user's order.
+    pub fn list_day_markers_json(&self) -> Result<String, StoreError> {
+        let markers = self.adapter.list_day_markers().map_err(map_store_err)?;
+        to_json(&markers)
+    }
+
+    /// Add a marker; returns the created `DayMarker` as JSON.
+    pub fn create_day_marker_json(
+        &self,
+        name: String,
+        symbol: Option<String>,
+        color_label: Option<String>,
+    ) -> Result<String, StoreError> {
+        let color = color_label.map(cal_core::ColorLabelId::new);
+        let marker = self
+            .adapter
+            .create_day_marker(&name, symbol.as_deref(), color.as_ref())
+            .map_err(map_store_err)?;
+        if let Ok(fields) = serde_json::to_value(&marker) {
+            self.writer
+                .append(SyncEvent::DayMarkerWritten(EventPayload {
+                    id: marker.id.clone(),
+                    fields,
+                }));
+        }
+        to_json(&marker)
+    }
+
+    /// Write a marker back whole — rename, re-symbol, recolour, reorder are
+    /// one call, so the frontend needs one code path for all four.
+    pub fn update_day_marker_json(&self, marker_json: String) -> Result<String, StoreError> {
+        let marker: cal_core::DayMarker = from_json("marker", &marker_json)?;
+        let stamped = cal_core::DayMarker {
+            updated_at: chrono::Utc::now(),
+            ..marker
+        };
+        self.adapter
+            .write_day_marker(&stamped)
+            .map_err(map_store_err)?;
+        if let Ok(fields) = serde_json::to_value(&stamped) {
+            self.writer
+                .append(SyncEvent::DayMarkerWritten(EventPayload {
+                    id: stamped.id.clone(),
+                    fields,
+                }));
+        }
+        to_json(&stamped)
+    }
+
+    pub fn delete_day_marker(&self, id: String) -> Result<(), StoreError> {
+        self.adapter.delete_day_marker(&id).map_err(map_store_err)?;
+        self.writer
+            .append(SyncEvent::DayMarkerDeleted(IdPayload { id }));
+        Ok(())
+    }
+
+    /// One day's log as JSON. An untouched day comes back as an empty log,
+    /// never null — the callers render the same thing either way.
+    pub fn day_log_json(&self, day: String) -> Result<String, StoreError> {
+        let parsed = parse_day_key(&day)?;
+        let log = self.adapter.day_log(parsed).map_err(map_store_err)?;
+        to_json(&log)
+    }
+
+    /// Every logged day in an inclusive range — what a week or month view asks
+    /// for once, instead of one call per day.
+    pub fn day_logs_in_range_json(&self, from: String, to: String) -> Result<String, StoreError> {
+        let logs = self
+            .adapter
+            .day_logs_in_range(parse_day_key(&from)?, parse_day_key(&to)?)
+            .map_err(map_store_err)?;
+        to_json(&logs)
+    }
+
+    /// Set a day's log. Emitted even when it empties the day: the receiving
+    /// side deletes the row for an empty log, which is how "I unticked the
+    /// last one" reaches the other device.
+    pub fn set_day_log_json(&self, log_json: String) -> Result<String, StoreError> {
+        let log: cal_core::DayLog = from_json("log", &log_json)?;
+        let stamped = cal_core::DayLog {
+            updated_at: chrono::Utc::now(),
+            ..log
+        };
+        self.adapter.set_day_log(&stamped).map_err(map_store_err)?;
+        if let Ok(fields) = serde_json::to_value(&stamped) {
+            self.writer.append(SyncEvent::DayLogSet(EventPayload {
+                id: stamped.day.format("%Y-%m-%d").to_string(),
+                fields,
+            }));
+        }
+        to_json(&stamped)
     }
 
     // ── Colour labels (app-wide palette; local-only, always synced) ───────────
