@@ -17,6 +17,7 @@
 mod calendars;
 mod color_labels;
 mod contacts;
+mod day_markers;
 mod mapping;
 /// Mirroring the dataset into a filesystem directory — the store's sync half.
 pub mod mirror;

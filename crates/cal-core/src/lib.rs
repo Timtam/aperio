@@ -7,6 +7,7 @@ pub mod adapter;
 pub mod attendee;
 pub mod color;
 pub mod conferencing;
+pub mod day_marker;
 pub mod error;
 pub mod event_group;
 pub mod extras;
@@ -21,6 +22,7 @@ pub use adapter::{
     Container, Credentials, Reminderable, TasksFeature,
 };
 pub use color::{ColorLabel, ColorLabelId, ColorSource, ContainerColor};
+pub use day_marker::{DayLog, DayMarker};
 pub use error::{Error, Result};
 pub use event_group::{EventGroup, EventGroupMember};
 pub use extras::{
