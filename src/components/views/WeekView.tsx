@@ -20,6 +20,7 @@ import {
   eventDayTimes,
   multiDayInfo,
 } from '../../intl/multiDay';
+import { useDayLogSummaries } from '../../state/useDayLogSummaries';
 import { useCalendarStore } from '../../state/calendarStoreContext';
 import { canSetTaskTime } from '../../state/taskMoves';
 import {
@@ -346,6 +347,16 @@ export function WeekView() {
     () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
     [weekStart],
   );
+
+  // What each day in the window was marked with. ONE range read for the whole
+  // window, hung on the cells' own accessible names — the overview costs no
+  // extra focus stop, which is the entire point of putting it there.
+  const dayMarkerKeys = useMemo(() => days.map((d) => keyOf(d)), [days]);
+  const { symbolsFor, spokenFor } = useDayLogSummaries(
+    dayMarkerKeys,
+    t('dialogs.dayLog.summaryLead'),
+  );
+
 
   // The range as well as the events: with both in hand the hook can also
   // repair members whose provider id changed, and group a videoconference
@@ -1276,6 +1287,14 @@ export function WeekView() {
               >
                 <span className="week-grid__dow">{fmt.format(day, 'EEE')}</span>
                 <span className="week-grid__date">{fmt.format(day, 'd')}</span>
+                {/* Decoration only — see the month twin. The day CELL's
+                    accessible name carries the marker names; this column
+                    header is not where a screen reader reads them. */}
+                {symbolsFor(keyOf(day)) && (
+                  <span className="week-grid__markers" aria-hidden="true">
+                    {symbolsFor(keyOf(day))}
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -1462,11 +1481,16 @@ export function WeekView() {
                   role="gridcell"
                   aria-selected={focused}
                   aria-current={isSameDay(day, today) ? 'date' : undefined}
-                  aria-label={t('views.week.dayAnnounce', {
-                    day: fmt.format(day, 'PPPP'),
-                    // Events + tasks (timed + untimed) — every chip in the cell.
-                    count: timedItems.length + untimedTasks.length,
-                  })}
+                  aria-label={[
+                    t('views.week.dayAnnounce', {
+                      day: fmt.format(day, 'PPPP'),
+                      // Events + tasks (timed + untimed) — every chip in the cell.
+                      count: timedItems.length + untimedTasks.length,
+                    }),
+                    spokenFor(dayKey),
+                  ]
+                    .filter(Boolean)
+                    .join('. ')}
                   className={
                     'week-grid__cell' +
                     (focused ? ' week-grid__cell--focused' : '') +

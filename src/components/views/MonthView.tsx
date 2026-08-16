@@ -65,6 +65,7 @@ import {
   subtaskProgressSuffix,
 } from '../../intl/taskStatus';
 import { useTaskCascadeEnabled } from '../../state/taskCascadeContext';
+import { useDayLogSummaries } from '../../state/useDayLogSummaries';
 import { useCalendarStore } from '../../state/calendarStoreContext';
 import { useChipContextMenu } from '../../state/useChipContextMenu';
 import { useDialogState } from '../../state/dialogStateContext';
@@ -151,6 +152,16 @@ export function MonthView() {
   const { colorLabels, sectionColorById, sectionsByList, loadSections } =
     useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
+
+  // What each day in the window was marked with. ONE range read for the whole
+  // window, hung on the cells' own accessible names — the overview costs no
+  // extra focus stop, which is the entire point of putting it there.
+  const dayMarkerKeys = useMemo(() => cells.map((c) => keyOf(c)), [cells]);
+  const { symbolsFor, spokenFor } = useDayLogSummaries(
+    dayMarkerKeys,
+    t('dialogs.dayLog.summaryLead'),
+  );
+
 
   // Load sections for the lists with tasks so a colored section cascades to
   // its tasks here too (cached + cheap; empty for section-less backends).
@@ -861,6 +872,7 @@ export function MonthView() {
                 {cells.slice(row * 7, row * 7 + 7).map((day, col) => {
                   const flatIndex = row * 7 + col;
                   const dayItems = itemsByDay.get(keyOf(day)) ?? [];
+                  const daySymbols = symbolsFor(keyOf(day));
                   const focused = flatIndex === focusIndex;
                   const outside = !isSameMonth(day, anchor);
                   // When there are more chips (events + tasks) than fit,
@@ -878,10 +890,15 @@ export function MonthView() {
                       role="gridcell"
                       aria-selected={focused}
                       aria-current={isSameDay(day, today) ? 'date' : undefined}
-                      aria-label={t('views.month.dayAnnounce', {
-                        day: fmt.format(day, 'PPPP'),
-                        count: dayItems.length,
-                      })}
+                      aria-label={[
+                        t('views.month.dayAnnounce', {
+                          day: fmt.format(day, 'PPPP'),
+                          count: dayItems.length,
+                        }),
+                        spokenFor(keyOf(day)),
+                      ]
+                        .filter(Boolean)
+                        .join('. ')}
                       className={
                         'month-grid__cell' +
                         (focused ? ' month-grid__cell--focused' : '') +
@@ -918,6 +935,15 @@ export function MonthView() {
                       <span className="month-grid__date">
                         {fmt.format(day, 'd')}
                       </span>
+                      {/* Decoration only — the cell's own accessible name
+                          already carries the marker NAMES, and a screen
+                          reader announcing an emoji's own name in their
+                          place would be worse than silence. */}
+                      {daySymbols && (
+                        <span className="month-grid__markers" aria-hidden="true">
+                          {daySymbols}
+                        </span>
+                      )}
                       {/*
                          Render *every* event, not just the first three.
                          The visible cell shows the first three plus a

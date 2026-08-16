@@ -3100,6 +3100,28 @@ button[aria-disabled='true'] {
   color: var(--color-accent);
 }
 
+/* Day markers on a day: the compact symbol row. Decoration only — every
+   surface that renders it hides it from the accessibility tree and puts the
+   marker NAMES on the surrounding element's accessible name instead. Small and
+   quiet: it sits beside a date and must not out-shout it. */
+.view__day-markers,
+.week-grid__markers,
+.month-grid__markers {
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  opacity: 0.9;
+}
+
+.week-grid__markers,
+.month-grid__markers {
+  display: block;
+  margin-top: 2px;
+  /* Never let a long row of symbols push the grid around — the calendar's
+     geometry is not theirs to change. */
+  overflow: hidden;
+  white-space: nowrap;
+}
+
 .week-grid__body {
   /* Grow to fill the week-grid, but NEVER shrink below the cells' content
      (flex-shrink 0): a compressed body capped the day cells — and their
