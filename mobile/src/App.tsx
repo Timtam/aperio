@@ -45,6 +45,7 @@ import { useSyncStatus } from './state/useSyncStatus';
 import AccountsScreen from './screens/AccountsScreen';
 import ContactEditorModal from './screens/ContactEditorModal';
 import ColorLabelsScreen from './screens/ColorLabelsScreen';
+import DayMarkersScreen from './screens/DayMarkersScreen';
 import ConflictsScreen from './screens/ConflictsScreen';
 import ContactListsScreen from './screens/ContactListsScreen';
 import ContactsScreen from './screens/ContactsScreen';
@@ -411,6 +412,11 @@ function SettingsStackNav() {
         name="ColorLabels"
         component={ColorLabelsScreen}
         options={{ title: t('dialogs.colorLabels.title') }}
+      />
+      <SettingsStack.Screen
+        name="DayMarkers"
+        component={DayMarkersScreen}
+        options={{ title: t('dialogs.settings.dayMarkers.heading') }}
       />
       <SettingsStack.Screen
         name="Logs"

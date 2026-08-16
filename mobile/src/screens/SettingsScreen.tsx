@@ -104,6 +104,16 @@ export default function SettingsScreen({
         </Pressable>
         <Pressable
           accessibilityRole="button"
+          accessibilityLabel={t('dialogs.settings.dayMarkers.heading')}
+          onPress={() => navigation.navigate('DayMarkers')}
+          style={({ pressed }) => [styles.link, pressed && styles.pressed]}
+        >
+          <Text style={styles.linkText}>
+            {t('dialogs.settings.dayMarkers.heading')}
+          </Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
           accessibilityLabel={t('dialogs.settings.tabs.logs')}
           onPress={() => navigation.navigate('Logs')}
           style={({ pressed }) => [styles.link, pressed && styles.pressed]}

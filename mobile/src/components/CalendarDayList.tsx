@@ -40,6 +40,12 @@ import {
   seriesIdOf,
   type CollapsedRow,
   type EventGroup,
+  compactDaySummary,
+  dayLogsByDay,
+  sortDayMarkers,
+  spokenDaySummary,
+  type DayLog,
+  type DayMarker,
 } from '@aperio/shared';
 import {
   assigneeSuffix,
@@ -108,6 +114,8 @@ import { editEventWithScope } from '../state/eventEditScope';
 import { priorityScaleFor, readTaskBehaviour } from '../state/taskBehaviour';
 import { applyTaskToggle, statusAnnounce } from '../state/taskToggle';
 import { useTaskListShowCompleted } from '../state/useTaskListShowCompleted';
+import { getDayLogsInRange, listDayMarkers } from '../api/dayMarkers';
+import { DayLogDialog } from './DayLogDialog';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { chrome } from '../theme/uiScale';
 
@@ -388,6 +396,34 @@ export function CalendarDayList({
   );
 
   const dayKeys = useMemo(() => days.map(localDateKey), [days]);
+
+  // What these days were marked with. One range read per window rather than
+  // one per day, and re-read whenever the window moves or a tick lands.
+  const [dayMarkerVocabulary, setDayMarkerVocabulary] = useState<DayMarker[]>([]);
+  const [dayLogsByKey, setDayLogsByKey] = useState<Map<string, DayLog>>(new Map());
+  const [dayLogTarget, setDayLogTarget] = useState<{ day: string; label: string } | null>(
+    null,
+  );
+  const refreshDayLogs = useCallback(async () => {
+    if (dayKeys.length === 0) return;
+    try {
+      const [vocabulary, logs] = await Promise.all([
+        listDayMarkers(),
+        getDayLogsInRange(
+          dayKeys.reduce((a, b) => (b < a ? b : a)),
+          dayKeys.reduce((a, b) => (b > a ? b : a)),
+        ),
+      ]);
+      setDayMarkerVocabulary(sortDayMarkers(vocabulary));
+      setDayLogsByKey(dayLogsByDay(logs));
+    } catch {
+      // An annotation that cannot be read simply says nothing — it must not
+      // take the day list down with it.
+    }
+  }, [dayKeys]);
+  useEffect(() => {
+    void refreshDayLogs();
+  }, [refreshDayLogs]);
 
   // Re-arm the grid auto-scroll whenever the visible day window changes (the
   // single-day grid caller swaps `days` on prev/next/jump) OR the visible-hours
@@ -1931,10 +1967,17 @@ export function CalendarDayList({
                 ...(firstWritableTaskListId != null
                   ? [{ name: 'newTask', label: t('toolbar.newTask') }]
                   : []),
+                // Riding the day header's existing action set rather than
+                // adding a button per day: the ask was an overview from every
+                // view, and a stop per day would be the opposite of that.
+                { name: 'logDay', label: t('dialogs.dayLog.openButton') },
               ];
               const runHeaderAction = (name: string) => {
                 if (name === 'newEvent') addEventOnDay(b.key);
                 else if (name === 'newTask') addTaskOnDay(b.key);
+                else if (name === 'logDay') {
+                  setDayLogTarget({ day: b.key, label: fmtFullDate(b.date) });
+                }
               };
               // Hosted in a Pressable (not a bare Text): every device-proven
               // accessibilityActions site in this app sits on a View/Pressable,
@@ -1946,10 +1989,21 @@ export function CalendarDayList({
                   key={`h-${b.key}`}
                   accessible
                   accessibilityRole="header"
-                  accessibilityLabel={t(dayAnnounceKey, {
-                    day: fmtFullDate(b.date),
-                    count: b.count,
-                  })}
+                  accessibilityLabel={[
+                    t(dayAnnounceKey, {
+                      day: fmtFullDate(b.date),
+                      count: b.count,
+                    }),
+                    // Appended to the heading's own name rather than standing
+                    // as its own element — see the desktop twin.
+                    spokenDaySummary(
+                      dayLogsByKey.get(b.key),
+                      dayMarkerVocabulary,
+                      t('dialogs.dayLog.summaryLead'),
+                    ),
+                  ]
+                    .filter(Boolean)
+                    .join('. ')}
                   accessibilityActions={headerActions}
                   onAccessibilityAction={(e) => runHeaderAction(e.nativeEvent.actionName)}
                   onLongPress={
@@ -1965,6 +2019,13 @@ export function CalendarDayList({
                 >
                   <Text style={styles.dayHeader} importantForAccessibility="no">
                     {fmtFullDate(b.date)}
+                    {(() => {
+                      const symbols = compactDaySummary(
+                        dayLogsByKey.get(b.key),
+                        dayMarkerVocabulary,
+                      );
+                      return symbols ? `  ${symbols}` : '';
+                    })()}
                   </Text>
                 </Pressable>,
               );
@@ -2003,6 +2064,18 @@ export function CalendarDayList({
         actions={menu?.actions ?? []}
         onAction={menu?.onAction ?? (() => undefined)}
         onClose={() => setMenu(null)}
+      />
+
+      {/* Ticking a day. One instance for the whole list — whichever header
+          asked for it names the day. */}
+      <DayLogDialog
+        visible={dayLogTarget != null}
+        day={dayLogTarget?.day ?? ''}
+        dayLabel={dayLogTarget?.label ?? ''}
+        onClose={() => {
+          setDayLogTarget(null);
+          void refreshDayLogs();
+        }}
       />
     </>
   );

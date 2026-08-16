@@ -408,6 +408,34 @@ class CalFfiModule : Module() {
 
     // ─── Colour labels (app-wide palette; local-only, always synced) ──────────
 
+    AsyncFunction("listDayMarkersJson") { ->
+      host.listDayMarkersJson()
+    }
+
+    AsyncFunction("createDayMarkerJson") { name: String, symbol: String?, colorLabel: String? ->
+      host.createDayMarkerJson(name, symbol, colorLabel)
+    }
+
+    AsyncFunction("updateDayMarkerJson") { markerJson: String ->
+      host.updateDayMarkerJson(markerJson)
+    }
+
+    AsyncFunction("deleteDayMarker") { id: String ->
+      host.deleteDayMarker(id)
+    }
+
+    AsyncFunction("dayLogJson") { day: String ->
+      host.dayLogJson(day)
+    }
+
+    AsyncFunction("dayLogsInRangeJson") { from: String, to: String ->
+      host.dayLogsInRangeJson(from, to)
+    }
+
+    AsyncFunction("setDayLogJson") { logJson: String ->
+      host.setDayLogJson(logJson)
+    }
+
     AsyncFunction("listColorLabelsJson") { ->
       host.listColorLabelsJson()
     }

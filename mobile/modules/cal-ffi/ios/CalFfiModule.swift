@@ -488,6 +488,36 @@ public class CalFfiModule: Module {
       try self.host.deleteUserPref(key: key)
     }
 
+    // ─── Day markers (what a day was like; local-only, always synced) ───
+
+    AsyncFunction("listDayMarkersJson") { () -> String in
+      try self.host.listDayMarkersJson()
+    }
+
+    AsyncFunction("createDayMarkerJson") { (name: String, symbol: String?, colorLabel: String?) -> String in
+      try self.host.createDayMarkerJson(name: name, symbol: symbol, colorLabel: colorLabel)
+    }
+
+    AsyncFunction("updateDayMarkerJson") { (markerJson: String) -> String in
+      try self.host.updateDayMarkerJson(markerJson: markerJson)
+    }
+
+    AsyncFunction("deleteDayMarker") { (id: String) in
+      try self.host.deleteDayMarker(id: id)
+    }
+
+    AsyncFunction("dayLogJson") { (day: String) -> String in
+      try self.host.dayLogJson(day: day)
+    }
+
+    AsyncFunction("dayLogsInRangeJson") { (from: String, to: String) -> String in
+      try self.host.dayLogsInRangeJson(from: from, to: to)
+    }
+
+    AsyncFunction("setDayLogJson") { (logJson: String) -> String in
+      try self.host.setDayLogJson(logJson: logJson)
+    }
+
     // ─── Colour labels (app-wide palette; local-only, always synced) ───
 
     AsyncFunction("listColorLabelsJson") { () -> String in

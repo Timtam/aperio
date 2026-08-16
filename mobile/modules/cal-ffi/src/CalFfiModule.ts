@@ -310,6 +310,26 @@ declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /** Delete a user preference (a whitelisted key also syncs the deletion). */
   deleteUserPref(key: string): Promise<void>;
 
+  // ── Day markers (what a day was like; local-only, always synced) ──
+  /** The marker vocabulary as a JSON `DayMarker[]`, in the user's order. */
+  listDayMarkersJson(): Promise<string>;
+  /** Add a marker; returns the created `DayMarker` JSON. */
+  createDayMarkerJson(
+    name: string,
+    symbol: string | null,
+    colorLabel: string | null,
+  ): Promise<string>;
+  /** Write a marker back whole (rename / re-symbol / recolour / reorder). */
+  updateDayMarkerJson(markerJson: string): Promise<string>;
+  /** Remove a marker. Logged days keep their record; it stops resolving. */
+  deleteDayMarker(id: string): Promise<void>;
+  /** One day's log as JSON. An untouched day comes back empty, never null. */
+  dayLogJson(day: string): Promise<string>;
+  /** Every logged day in an inclusive range, as a JSON `DayLog[]`. */
+  dayLogsInRangeJson(from: string, to: string): Promise<string>;
+  /** Set a day's log; returns it as stored. */
+  setDayLogJson(logJson: string): Promise<string>;
+
   // ── Colour labels (app-wide palette; local-only, always synced) ──
   /** All colour labels (named + ad-hoc) as a JSON `ColorLabel[]`. */
   listColorLabelsJson(): Promise<string>;
