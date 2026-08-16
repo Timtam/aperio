@@ -9,6 +9,7 @@ import {
 
 import { getDayLogsInRange } from '../api/client';
 import { useDayMarkers } from './useDayMarkers';
+import { useDayMarkersChanged } from './dayMarkersChanged';
 
 /**
  * What a window of days was marked with, ready to hang on their headings.
@@ -56,6 +57,13 @@ export function useDayLogSummaries(
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // A day ticked here or on another device changes what this window says. The
+  // vocabulary half is already covered — `useDayMarkers` listens too — but the
+  // LOGS are this hook's own copy and nothing else would refresh them.
+  useDayMarkersChanged(() => {
+    void refresh();
+  });
 
   const symbolsFor = useCallback(
     (day: string) => compactDaySummary(logs.get(day), markers),

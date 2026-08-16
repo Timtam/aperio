@@ -148,6 +148,16 @@ pub struct ApplyReport {
     /// would otherwise show a value another device has already changed until
     /// the next launch. Empty for the overwhelming majority of rounds.
     pub settings_keys: Vec<String>,
+    /// Whether this pass wrote anything day-marker shaped — the vocabulary or
+    /// a day's log. A flag rather than a list of ids because every reader of
+    /// this data reads all of it: the vocabulary is a handful of rows and a
+    /// view's summaries come from one range query, so "something moved" is the
+    /// whole of what a frontend needs to act.
+    ///
+    /// Same reason as `settings_keys`: both frontends hold this in memory, and
+    /// without the signal a day ticked on the phone would sit in SQLite while
+    /// the desktop went on showing an unmarked day until the next launch.
+    pub day_markers_touched: bool,
     /// Field-level conflicts the applier wrote into
     /// `sync_conflicts` during this pass (DESIGN.md §19.3).
     /// Surfaced through `SyncRoundReport` so the scheduler can
@@ -312,6 +322,14 @@ impl EventLogApplier {
                         // skipped or failed changed nothing to re-read.
                         if let SyncEvent::SettingsUpdated(payload) = &env.event {
                             report.settings_keys.push(payload.key.clone());
+                        }
+                        if matches!(
+                            &env.event,
+                            SyncEvent::DayMarkerWritten(_)
+                                | SyncEvent::DayMarkerDeleted(_)
+                                | SyncEvent::DayLogSet(_)
+                        ) {
+                            report.day_markers_touched = true;
                         }
                     }
                 }

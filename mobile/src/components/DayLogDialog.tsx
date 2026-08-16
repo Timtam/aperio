@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -12,6 +12,7 @@ import {
 
 import { getDayLog, listDayMarkers, setDayLog } from '../api/dayMarkers';
 import { selectableRole } from '../a11y/roles';
+import { useDayMarkersChanged } from '../state/dayMarkersChanged';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { AppDialog } from './AppDialog';
 
@@ -41,6 +42,9 @@ export function DayLogDialog({
   const [log, setLog] = useState<DayLog>(() => emptyDayLog(day));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // See the desktop twin: a tick's own write raises the same signal a foreign
+  // one does, and re-reading mid-burst would paint the state we just left.
+  const writesInFlight = useRef(0);
 
   // Load each time it opens, not once per mount: the same dialog serves
   // whichever day the user is standing on.
@@ -76,6 +80,7 @@ export function DayLogDialog({
       // Optimistic: the checkbox answers the tap, not the disk. A failed
       // write puts the old state back and says which one did not land.
       setLog(next);
+      writesInFlight.current += 1;
       try {
         setLog(await setDayLog(next));
       } catch (err) {
@@ -84,10 +89,27 @@ export function DayLogDialog({
         AccessibilityInfo.announceForAccessibility(
           t('dialogs.dayLog.writeFailed', { name: marker.name }),
         );
+      } finally {
+        writesInFlight.current -= 1;
       }
     },
     [log, t],
   );
+
+  // A day ticked on another device while this dialog stands open. Adopting it
+  // is not just cosmetic: every tick writes the log WHOLE, so a dialog holding
+  // a stale copy would erase the other device's marker with the next one.
+  useDayMarkersChanged(() => {
+    if (!visible || writesInFlight.current > 0) return;
+    void (async () => {
+      try {
+        setLog(await getDayLog(day));
+      } catch {
+        // Keep what is on screen — a failed re-read is not a reason to drop
+        // ticks the user can see.
+      }
+    })();
+  });
 
   if (!visible) return null;
 

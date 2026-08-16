@@ -104,6 +104,7 @@ import {
 import { ActionsMenu, type MenuAction } from './ActionsMenu';
 import { GroupSuggestionNotice } from './GroupSuggestionNotice';
 import { useCacheReload } from '../state/cacheObserver';
+import { useDayMarkersChanged } from '../state/dayMarkersChanged';
 import { hapticLoadBegin, hapticLoadEnd } from '../state/haptics';
 import { useCalendarVisibility } from '../state/calendarVisibility';
 import { useCurrentUserByList } from '../state/currentUser';
@@ -424,6 +425,11 @@ export function CalendarDayList({
   useEffect(() => {
     void refreshDayLogs();
   }, [refreshDayLogs]);
+  // A tick from another device, or a marker renamed in settings. Its own
+  // dialog already re-reads on close; this is for everything else.
+  useDayMarkersChanged(() => {
+    void refreshDayLogs();
+  });
 
   // Re-arm the grid auto-scroll whenever the visible day window changes (the
   // single-day grid caller swaps `days` on prev/next/jump) OR the visible-hours

@@ -449,6 +449,90 @@ fn a_settings_event_that_did_not_land_is_not_reported() {
 }
 
 #[test]
+fn a_day_marker_round_says_so_and_writes_both_halves() {
+    // The whole point of markers being synced: a day ticked on another device
+    // has to reach this one. The rows landing is half of it — the running app
+    // holds them in memory, so the round also has to SAY it carried them, or
+    // the desktop shows an unmarked day until the next launch.
+    let (adapter, db) = fixture();
+    let other = DeviceId::from_string("dev-other".into());
+    let me = DeviceId::from_string("dev-me".into());
+    let applier = make_applier(&db, &adapter, me);
+
+    let marker = cal_core::DayMarker {
+        id: "mrk-sport".into(),
+        name: "Sport".into(),
+        symbol: Some("S".into()),
+        color_label: None,
+        position: 0,
+        created_at: Utc.timestamp_opt(1000, 0).unwrap(),
+        updated_at: Utc.timestamp_opt(1000, 0).unwrap(),
+    };
+    let log = cal_core::DayLog {
+        day: chrono::NaiveDate::from_ymd_opt(2026, 8, 17).unwrap(),
+        markers: vec!["mrk-sport".into()],
+        rating: None,
+        updated_at: Utc.timestamp_opt(2000, 0).unwrap(),
+    };
+
+    let report = applier
+        .apply_envelopes(vec![
+            fixture_envelope(
+                other.clone(),
+                SyncEvent::DayMarkerWritten(EventPayload {
+                    id: marker.id.clone(),
+                    fields: serde_json::to_value(&marker).unwrap(),
+                }),
+                1000,
+            ),
+            fixture_envelope(
+                other,
+                SyncEvent::DayLogSet(EventPayload {
+                    id: log.day.to_string(),
+                    fields: serde_json::to_value(&log).unwrap(),
+                }),
+                2000,
+            ),
+        ])
+        .unwrap();
+
+    assert_eq!(report.applied, 2);
+    assert!(report.day_markers_touched);
+
+    // Both halves are really on disk — a flag with nothing behind it would
+    // just make every device re-read the same empty day.
+    let stored = adapter.list_day_markers().unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].name, "Sport");
+    let stored_log = adapter.day_log(log.day).unwrap();
+    assert_eq!(stored_log.markers, vec!["mrk-sport".to_string()]);
+}
+
+#[test]
+fn a_round_without_day_markers_stays_quiet() {
+    // Almost every round. The flag has to be false so a frontend does not
+    // re-read the vocabulary after every quiet sync.
+    let (adapter, db) = fixture();
+    let other = DeviceId::from_string("dev-other".into());
+    let me = DeviceId::from_string("dev-me".into());
+    let applier = make_applier(&db, &adapter, me);
+
+    let report = applier
+        .apply_envelopes(vec![fixture_envelope(
+            other,
+            SyncEvent::SettingsUpdated(SettingsPayload {
+                key: "appearance.darkMode".into(),
+                value: serde_json::json!(true),
+            }),
+            1000,
+        )])
+        .unwrap();
+
+    assert_eq!(report.applied, 1);
+    assert!(!report.day_markers_touched);
+}
+
+#[test]
 fn unsupported_variants_count_as_skipped_not_failed() {
     let (adapter, db) = fixture();
     let other = DeviceId::from_string("dev-other".into());

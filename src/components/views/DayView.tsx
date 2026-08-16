@@ -64,6 +64,7 @@ import { duplicateEvent } from '../duplicateActions';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { getDayLog } from '../../api/client';
 import { useDayMarkers } from '../../state/useDayMarkers';
+import { useDayMarkersChanged } from '../../state/dayMarkersChanged';
 import { DayLogDialog } from '../DayLogDialog';
 import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
 import { GroupSuggestionNotice } from '../GroupSuggestionNotice';
@@ -635,6 +636,12 @@ export function DayView() {
   useEffect(() => {
     void refreshDayLog();
   }, [refreshDayLog]);
+  // The dialog's own close already re-reads; this covers the other two ways
+  // this day can change under the view — a marker renamed in settings, and a
+  // tick that arrived from another device on the last sync round.
+  useDayMarkersChanged(() => {
+    void refreshDayLog();
+  });
   const daySymbols = useMemo(
     () => compactDaySummary(dayLog, dayMarkerVocabulary),
     [dayLog, dayMarkerVocabulary],

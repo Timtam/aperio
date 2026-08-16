@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { sortDayMarkers, type DayMarker } from '@aperio/shared';
 
 import { listDayMarkers } from '../api/client';
+import { useDayMarkersChanged } from './dayMarkersChanged';
 
 /**
  * The day-marker vocabulary, loaded once per consumer.
@@ -47,6 +48,13 @@ export function useDayMarkers(): {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Any write, from this app or from another device, means re-read. The
+  // vocabulary is a handful of rows, so re-reading all of it beats keeping a
+  // second copy in step.
+  useDayMarkersChanged(() => {
+    void refresh();
+  });
 
   const replace = useCallback((next: DayMarker[]) => {
     setMarkers(sortDayMarkers(next));

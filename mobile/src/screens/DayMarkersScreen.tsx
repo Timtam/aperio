@@ -19,6 +19,10 @@ import {
 } from '../api/dayMarkers';
 import { FormScrollView } from '../components/FormScrollView';
 import { useListFocusManager } from '../a11y/useListFocusManager';
+import {
+  duringDayMarkerBurst,
+  useDayMarkersChanged,
+} from '../state/dayMarkersChanged';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 // The day-marker vocabulary, managed on the phone. Twin of the desktop
@@ -61,6 +65,12 @@ export default function DayMarkersScreen() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // A marker added or renamed on another device, arriving on a sync round while
+  // this screen stands open.
+  useDayMarkersChanged(() => {
+    void refresh();
+  });
 
   const onAdd = useCallback(async () => {
     const name = newName.trim();
@@ -120,9 +130,12 @@ export default function DayMarkersScreen() {
         // Only the rows that actually shifted — a move near the top of a long
         // list must not rewrite the whole vocabulary.
         const before = new Map(markers.map((m) => [m.id, m.position ?? 0]));
-        for (const m of reordered) {
-          if (before.get(m.id) !== m.position) await updateDayMarker(m);
-        }
+        // One burst — see the desktop twin.
+        await duringDayMarkerBurst(async () => {
+          for (const m of reordered) {
+            if (before.get(m.id) !== m.position) await updateDayMarker(m);
+          }
+        });
         announce(
           t('dialogs.settings.dayMarkers.moved', {
             name: marker.name,

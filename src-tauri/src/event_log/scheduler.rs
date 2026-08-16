@@ -294,6 +294,7 @@ impl SyncScheduler {
                     }
                 }
                 Self::emit_settings_changed(app, report);
+                Self::emit_day_markers_changed(app, report);
                 // The round may have created external ACCOUNTS (a restore
                 // into a fresh install, or an account added on another
                 // device). Same reasoning as the conflicts emit above: the
@@ -470,6 +471,23 @@ impl SyncScheduler {
         }
     }
 
+    /// Tell the frontend that a day marker or a day's log arrived.
+    ///
+    /// Payload-free, unlike `user-prefs-changed`: the vocabulary is a handful
+    /// of rows and a view's summaries come from one range query, so every
+    /// listener re-reads all of its own data anyway and naming what moved
+    /// would buy nothing.
+    ///
+    /// Silent when the round carried none, which is almost every round.
+    fn emit_day_markers_changed<R: Runtime>(app: &AppHandle<R>, report: &SyncRoundReport) {
+        if !report.day_markers_touched {
+            return;
+        }
+        if let Err(err) = app.emit("day-markers-changed", ()) {
+            warn!(?err, "failed to emit day-markers-changed");
+        }
+    }
+
     /// Public counterpart of [`Self::write_sync_log`] for the
     /// manual `sync_now` Tauri command + the app-exit push path.
     /// The scheduler loop uses `write_sync_log` directly; callers
@@ -494,6 +512,7 @@ impl SyncScheduler {
             Ok(report) => {
                 self.emit_status(app, Some(report.clone()), None);
                 Self::emit_settings_changed(app, report);
+                Self::emit_day_markers_changed(app, report);
             }
             Err(err) => self.emit_status(app, None, Some(err.to_string())),
         }

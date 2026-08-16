@@ -12,6 +12,7 @@ import {
 } from '../api/client';
 import { useAutoFocus } from '../hooks/useAutoFocus';
 import { useCalendarStore } from '../state/calendarStoreContext';
+import { duringDayMarkerBurst } from '../state/dayMarkersChanged';
 import { useDayMarkers } from '../state/useDayMarkers';
 
 /**
@@ -147,9 +148,13 @@ export function DayMarkersPanel() {
         // Only the rows whose position actually changed — a reorder near the
         // top of a long list must not rewrite the whole vocabulary.
         const before = new Map(markers.map((m) => [m.id, m.position ?? 0]));
-        for (const m of reordered) {
-          if (before.get(m.id) !== m.position) await updateDayMarker(m);
-        }
+        // One burst: the rows shift together, so the readers hear about it
+        // once, at the end, rather than between each pair.
+        await duringDayMarkerBurst(async () => {
+          for (const m of reordered) {
+            if (before.get(m.id) !== m.position) await updateDayMarker(m);
+          }
+        });
         announce(
           t('dialogs.settings.dayMarkers.moved', {
             name: marker.name,

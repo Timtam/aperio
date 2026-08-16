@@ -6,6 +6,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { withCreatedRecurrenceZone } from '../intl/recurrence';
+import { notifyDayMarkersChanged } from '../state/dayMarkersChanged';
 import type {
   Account,
   AdapterKind,
@@ -374,16 +375,16 @@ export interface CreateDayMarkerRequest {
   color_label: string | null;
 }
 
-export const createDayMarker = (request: CreateDayMarkerRequest) =>
-  invoke<DayMarker>('create_day_marker', { request });
+export const createDayMarker = async (request: CreateDayMarkerRequest) =>
+  announceDayMarkerWrite(invoke<DayMarker>('create_day_marker', { request }));
 
 /** Write a marker back whole — rename, re-symbol, recolour and reorder are
  *  all this one call. */
-export const updateDayMarker = (marker: DayMarker) =>
-  invoke<DayMarker>('update_day_marker', { marker });
+export const updateDayMarker = async (marker: DayMarker) =>
+  announceDayMarkerWrite(invoke<DayMarker>('update_day_marker', { marker }));
 
-export const deleteDayMarker = (id: string) =>
-  invoke<void>('delete_day_marker', { id });
+export const deleteDayMarker = async (id: string) =>
+  announceDayMarkerWrite(invoke<void>('delete_day_marker', { id }));
 
 /** One day. An untouched day comes back as an empty log, never null. */
 export const getDayLog = (day: string) => invoke<DayLog>('day_log', { day });
@@ -392,7 +393,22 @@ export const getDayLog = (day: string) => invoke<DayLog>('day_log', { day });
 export const getDayLogsInRange = (from: string, to: string) =>
   invoke<DayLog[]>('day_logs_in_range', { from, to });
 
-export const setDayLog = (log: DayLog) => invoke<DayLog>('set_day_log', { log });
+export const setDayLog = async (log: DayLog) =>
+  announceDayMarkerWrite(invoke<DayLog>('set_day_log', { log }));
+
+/** Every day-marker write goes through here so no caller can forget it.
+ *
+ *  Renaming a marker in settings has to reach the day view's summary, which is
+ *  a different component tree holding its own copy — and the same signal is
+ *  what a sync round raises, so both directions land on one path.
+ *
+ *  Only on SUCCESS: a failed write changed nothing, and telling everyone to
+ *  re-read would make them all repaint the state they already had. */
+async function announceDayMarkerWrite<T>(call: Promise<T>): Promise<T> {
+  const result = await call;
+  notifyDayMarkersChanged();
+  return result;
+}
 
 // ── Color labels ───────────────────────────────────────────────────────────
 

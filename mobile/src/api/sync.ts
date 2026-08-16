@@ -12,6 +12,7 @@ import Constants from 'expo-constants';
 
 import CalFfi from '../../modules/cal-ffi';
 import { notifyDataReload } from '../state/cacheObserver';
+import { notifyDayMarkersChanged } from '../state/dayMarkersChanged';
 import { withSyncActivity } from '../state/syncActivity';
 
 /** The active sync target. Mirrors the desktop `SyncAdapterConfig` enum; the
@@ -121,6 +122,9 @@ export interface SyncRoundReport {
   push_failures: number;
   fetch_failures: number;
   conflicts: number;
+  /** Whether the round carried a day marker or a day's log. Optional so a
+   *  report minted by an older core still parses. */
+  day_markers_touched?: boolean;
 }
 
 /** Set the active sync target (persists + probes the connection). */
@@ -246,6 +250,11 @@ export const syncNow = async (
   // doesn't go through the Host's external onCacheUpdated push, so nudge the open
   // screens to reload, else the data only shows after a restart.
   if (report.applied > 0) notifyDataReload();
+  // Day markers ride their own signal rather than `notifyDataReload`'s three
+  // categories: nothing in the calendar/tasks/contacts reload path re-reads
+  // them, so without this a day ticked on the desktop stayed invisible here
+  // until the app was restarted.
+  if (report.day_markers_touched === true) notifyDayMarkersChanged();
   return report;
 };
 
@@ -386,7 +395,13 @@ export const resumeStaleDevice = async (): Promise<OnboardingReport> => {
   const report = await withSyncActivity(
     async () => JSON.parse(await CalFfi.resumeStaleDeviceJson()) as OnboardingReport,
   );
-  if ((report.applied ?? 0) > 0) notifyDataReload();
+  if ((report.applied ?? 0) > 0) {
+    notifyDataReload();
+    // A join/resume applies a whole SNAPSHOT, which carries the day-marker
+    // vocabulary and every logged day — there is no per-event flag to read
+    // on this path, and a snapshot that applied anything applied those too.
+    notifyDayMarkersChanged();
+  }
   return report;
 };
 
@@ -573,7 +588,13 @@ export const acceptRemoteDataset = async (
   );
   // Joining pulls + applies the peer dataset to the local store; reload the open
   // screens so it shows without a restart.
-  if ((report.applied ?? 0) > 0) notifyDataReload();
+  if ((report.applied ?? 0) > 0) {
+    notifyDataReload();
+    // A join/resume applies a whole SNAPSHOT, which carries the day-marker
+    // vocabulary and every logged day — there is no per-event flag to read
+    // on this path, and a snapshot that applied anything applied those too.
+    notifyDayMarkersChanged();
+  }
   return report;
 };
 
@@ -643,7 +664,13 @@ export const acceptRemoteDatasetValues = async (
   );
   // Joining applied the peer dataset to the local store; reload the open screens
   // so it shows without a restart.
-  if ((report.applied ?? 0) > 0) notifyDataReload();
+  if ((report.applied ?? 0) > 0) {
+    notifyDataReload();
+    // A join/resume applies a whole SNAPSHOT, which carries the day-marker
+    // vocabulary and every logged day — there is no per-event flag to read
+    // on this path, and a snapshot that applied anything applied those too.
+    notifyDayMarkersChanged();
+  }
   return report;
 };
 

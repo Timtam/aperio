@@ -9,6 +9,7 @@ import {
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import { getDayLog, isCommandError, setDayLog } from '../api/client';
+import { useDayMarkersChanged } from '../state/dayMarkersChanged';
 import { useDayMarkers } from '../state/useDayMarkers';
 import { Modal } from './Modal';
 
@@ -42,6 +43,10 @@ export function DayLogDialog({
   const { markers, loading: loadingMarkers } = useDayMarkers();
   const [log, setLog] = useState<DayLog>(() => emptyDayLog(day));
   const [error, setError] = useState<string | null>(null);
+  // Writes this dialog started and has not seen land yet. A tick's own write
+  // raises the same signal a foreign one does, and re-reading in the middle of
+  // our own burst would paint the state we just left behind.
+  const writesInFlight = useRef(0);
   const introId = useId();
   const introRef = useRef<HTMLParagraphElement | null>(null);
 
@@ -73,6 +78,7 @@ export function DayLogDialog({
       // Optimistic: the checkbox must answer the keystroke, not the disk. A
       // failed write puts the old state back and says so.
       setLog(next);
+      writesInFlight.current += 1;
       try {
         const saved = await setDayLog(next);
         setLog(saved);
@@ -80,10 +86,27 @@ export function DayLogDialog({
         setLog(log);
         setError(isCommandError(err) ? `${err.code}: ${err.message}` : String(err));
         announce(t('dialogs.dayLog.writeFailed', { name }));
+      } finally {
+        writesInFlight.current -= 1;
       }
     },
     [log, announce, t],
   );
+
+  // A day ticked on another device while this dialog stands open. Adopting it
+  // is not just cosmetic: every tick writes the log WHOLE, so a dialog holding
+  // a stale copy would erase the other device's marker with the next one.
+  useDayMarkersChanged(() => {
+    if (!isOpen || writesInFlight.current > 0) return;
+    void (async () => {
+      try {
+        setLog(await getDayLog(day));
+      } catch {
+        // Keep what is on screen — a failed re-read is not a reason to drop
+        // ticks the user can see.
+      }
+    })();
+  });
 
   return (
     <Modal

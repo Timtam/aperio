@@ -106,6 +106,12 @@ pub struct SyncRoundReport {
     /// re-reads exactly those settings instead of showing a value another
     /// device already changed until the next launch.
     pub settings_keys: Vec<String>,
+    /// Whether this round brought in a day marker or a day's log from another
+    /// device. Both frontends turn it into their own "reload the day markers"
+    /// signal, so a day ticked on the phone shows up on the desktop within the
+    /// round instead of at the next launch.
+    #[serde(default)]
+    pub day_markers_touched: bool,
 }
 
 /// Read-only snapshot of the engine's state, surfaced by `get_sync_status`.

@@ -158,6 +158,9 @@ impl SyncRoundReport {
                 self.settings_keys.push(key);
             }
         }
+        // Sticky across the round's several logs: one log that moved a marker
+        // is enough, and a later quiet log must not unset it.
+        self.day_markers_touched |= report.day_markers_touched;
     }
 }
 
