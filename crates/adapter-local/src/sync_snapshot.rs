@@ -86,6 +86,15 @@ pub struct SnapshotDump {
     pub tasks: Vec<Task>,
     #[serde(default)]
     pub color_labels: Vec<ColorLabel>,
+    /// The day-marker vocabulary, and every day that says something.
+    ///
+    /// `default` so a snapshot written before day markers existed still
+    /// deserialises — a joining device on an older build must not choke on a
+    /// newer dump, and vice versa.
+    #[serde(default)]
+    pub day_markers: Vec<cal_core::DayMarker>,
+    #[serde(default)]
+    pub day_logs: Vec<cal_core::DayLog>,
     /// Which events mean the same appointment (migration 0035).
     ///
     /// In the snapshot and not only in the log, because the log does not
@@ -139,6 +148,8 @@ impl LocalAdapter {
             sections: self.dump_sections_for_snapshot()?,
             tasks: self.dump_tasks_for_snapshot()?,
             color_labels: self.dump_color_labels_for_snapshot()?,
+            day_markers: self.list_day_markers()?,
+            day_logs: self.dump_day_logs_for_snapshot()?,
             event_groups: self.dump_event_groups_for_snapshot()?,
             event_group_tombstones: self.dump_event_group_tombstones_for_snapshot()?,
             suggestion_declines: self.dump_suggestion_declines_for_snapshot()?,
@@ -289,6 +300,15 @@ impl LocalAdapter {
             out.push(r.map_err(map_sql_err)??);
         }
         Ok(out)
+    }
+
+    /// Every logged day, oldest first. A whole-history dump: the table holds
+    /// one small row per day the user marked, so even years of daily use is a
+    /// few thousand rows — cheap next to the events and tasks beside it.
+    pub fn dump_day_logs_for_snapshot(&self) -> cal_core::Result<Vec<cal_core::DayLog>> {
+        // A window wide enough to be "everything" without a second code path:
+        // the store cannot hold a day outside it.
+        self.day_logs_in_range(chrono::NaiveDate::MIN, chrono::NaiveDate::MAX)
     }
 
     /// Read every color-label row. Mirrors the `list_color_labels`
@@ -451,6 +471,22 @@ impl LocalAdapter {
         // inserted before its label would FK-fail and be dropped.
         for label in &dump.color_labels {
             match self.upsert_color_label_from_sync(label) {
+                Ok(()) => report.applied += 1,
+                Err(_) => report.failed += 1,
+            }
+        }
+        // The vocabulary before the days that reference it. No FK forces the
+        // order (SQLite cannot express one into a JSON array), but a device
+        // that applied the logs first would render a month of unresolvable
+        // ids until the markers landed.
+        for marker in &dump.day_markers {
+            match self.write_day_marker(marker) {
+                Ok(()) => report.applied += 1,
+                Err(_) => report.failed += 1,
+            }
+        }
+        for log in &dump.day_logs {
+            match self.set_day_log(log) {
                 Ok(()) => report.applied += 1,
                 Err(_) => report.failed += 1,
             }
@@ -749,6 +785,8 @@ mod tests {
         // Fully reversed: every list precedes its parent — the FK-hostile
         // order the unsorted dump could produce.
         let dump = SnapshotDump {
+            day_markers: vec![],
+            day_logs: vec![],
             task_lists: vec![child, parent, grandparent],
             ..SnapshotDump::default()
         };
@@ -785,6 +823,8 @@ mod tests {
         list.color_label = Some(ColorLabelId::new("lbl-work".to_string()));
 
         let dump = SnapshotDump {
+            day_markers: vec![],
+            day_logs: vec![],
             task_lists: vec![list],
             color_labels: vec![label],
             ..SnapshotDump::default()
@@ -963,6 +1003,8 @@ mod tests {
         child.parent_id = Some("T-parent".into());
 
         let dump = SnapshotDump {
+            day_markers: vec![],
+            day_logs: vec![],
             task_lists: vec![list],
             // Child BEFORE parent — the FK-hostile order.
             tasks: vec![child, parent],
@@ -1050,6 +1092,8 @@ mod tests {
     #[tokio::test]
     async fn apply_is_idempotent_on_reapply() {
         let dump = SnapshotDump {
+            day_markers: vec![],
+            day_logs: vec![],
             calendars: vec![fake_calendar("cal-1", "Once")],
             events: vec![fake_event("ev-1", "cal-1")],
             task_lists: vec![],

@@ -241,6 +241,29 @@ pub enum SyncEvent {
     #[serde(rename = "color_label.deleted")]
     ColorLabelDeleted(IdPayload),
 
+    /// A day-marker vocabulary entry was added or edited.
+    ///
+    /// One event for both: the vocabulary is small and a marker is written
+    /// whole, so a create and an edit are the same upsert on the receiving
+    /// side. Splitting them would buy a distinction nothing reads.
+    #[serde(rename = "day_marker.written")]
+    DayMarkerWritten(EventPayload),
+
+    /// A day-marker vocabulary entry was removed. The day rows keep the id —
+    /// readers resolve against the vocabulary and drop what is gone.
+    #[serde(rename = "day_marker.deleted")]
+    DayMarkerDeleted(IdPayload),
+
+    /// One day's log was set. Carries the whole row, keyed by the day.
+    ///
+    /// Last-write-wins on the day, like the rest of the store: two devices
+    /// editing the SAME day between two rounds keep the later edit, not the
+    /// union. Deliberate — a union would make REMOVING a marker impossible to
+    /// propagate, which is the worse failure. An emptied day arrives as a log
+    /// with nothing on it, and the applier deletes the row.
+    #[serde(rename = "day_log.set")]
+    DayLogSet(EventPayload),
+
     /// Community plugin was installed locally — sync the metadata
     /// (not the binary) so other devices can offer the user the
     /// matching install.

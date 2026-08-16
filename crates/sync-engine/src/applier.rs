@@ -440,6 +440,18 @@ impl EventLogApplier {
                 self.apply_color_label_delete(payload)?;
                 Ok(true)
             }
+            SyncEvent::DayMarkerWritten(payload) => {
+                self.apply_day_marker_written(payload)?;
+                Ok(true)
+            }
+            SyncEvent::DayMarkerDeleted(payload) => {
+                self.apply_day_marker_deleted(payload)?;
+                Ok(true)
+            }
+            SyncEvent::DayLogSet(payload) => {
+                self.apply_day_log_set(payload)?;
+                Ok(true)
+            }
             SyncEvent::SettingsUpdated(payload) => {
                 self.apply_settings_updated(payload)?;
                 Ok(true)
@@ -608,6 +620,39 @@ impl EventLogApplier {
         self.adapter
             .delete_color_label_from_sync(&payload.id)
             .map_err(core_to_sync)
+    }
+
+    /// A day-marker vocabulary entry, written whole.
+    ///
+    /// Whole-row rather than a field merge: a marker is four small fields the
+    /// user edits together in one dialog, and the merge machinery next door
+    /// exists for rows several devices touch different parts of. This is not
+    /// one of those.
+    fn apply_day_marker_written(&self, payload: &EventPayload) -> SyncResult<()> {
+        let marker: cal_core::DayMarker =
+            serde_json::from_value(payload.fields.clone()).map_err(|err| {
+                SyncError::protocol(format!("day_marker payload not a valid DayMarker: {err}",))
+            })?;
+        self.adapter.write_day_marker(&marker).map_err(core_to_sync)
+    }
+
+    fn apply_day_marker_deleted(&self, payload: &IdPayload) -> SyncResult<()> {
+        self.adapter
+            .delete_day_marker(&payload.id)
+            .map_err(core_to_sync)
+    }
+
+    /// One day's log, written whole and keyed by the day.
+    ///
+    /// A log that arrives with nothing on it means the day was emptied — the
+    /// store's own `set_day_log` deletes the row for exactly that case, so no
+    /// separate deletion event is needed.
+    fn apply_day_log_set(&self, payload: &EventPayload) -> SyncResult<()> {
+        let log: cal_core::DayLog =
+            serde_json::from_value(payload.fields.clone()).map_err(|err| {
+                SyncError::protocol(format!("day_log payload not a valid DayLog: {err}"))
+            })?;
+        self.adapter.set_day_log(&log).map_err(core_to_sync)
     }
 
     // -----------------------------------------------------------------
